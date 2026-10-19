@@ -57,9 +57,10 @@ pub struct PaymentEvent {
 }
 
 /// Whether `ctx` may report on `payment`. An app calling with its own OAuth token
-/// (`Actor::App`, design note 0029, §15) only on the payments it collects: their
-/// provider is the app (`app_<name>`, the app with that key and this ID). Staff, API
-/// keys and the system may report on any payment with `payments:write`.
+/// (`Actor::App`, design note 0029, §15), or a spore acting as its app (design note
+/// 0030, §3), only on the payments it collects: their provider belongs to it
+/// (`ProviderKey::belongs_to`). Staff, API keys and the system may report on any payment
+/// with `payments:write`.
 async fn check_reporter<S: HasApps>(
     ctx: &Ctx,
     ports: &S,
@@ -68,11 +69,9 @@ async fn check_reporter<S: HasApps>(
     let Actor::App(caller) = ctx.actor() else {
         return Ok(());
     };
-    let collector = match payment.provider().app() {
-        Some(key) => ports.apps().get(&key).await?,
-        None => None,
-    };
-    if collector.is_some_and(|app| app.id() == caller) {
+    // An app collects under its key, a spore under its key or its key and `_…`.
+    let caller_app = ports.apps().get_by_id(caller).await?;
+    if caller_app.is_some_and(|app| payment.provider().belongs_to(app.key())) {
         return Ok(());
     }
     Err(CommandError::PaymentNotYours {

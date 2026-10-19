@@ -58,6 +58,24 @@ impl ProviderKey {
             .filter(|key| key.kind() == AppKind::App)
     }
 
+    /// Whether the app or spore `owner` collects for this provider: an app's provider is
+    /// its key; a spore's is its key or its key and `_…` (`spore_stripe_link` is
+    /// `spore_stripe`'s), which the hosts check at startup along with no spore name
+    /// extending another's (design note 0030, §4). Never `manual`.
+    pub fn belongs_to(&self, owner: &AppKey) -> bool {
+        let key = owner.as_str();
+        match owner.kind() {
+            AppKind::App => self.0 == key,
+            AppKind::Spore => {
+                self.0 == key
+                    || self
+                        .0
+                        .strip_prefix(key)
+                        .is_some_and(|rest| rest.starts_with('_'))
+            }
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -239,6 +257,11 @@ pub trait PaymentProviders {
     /// The keys of the providers this build has, in order (apps aren't listed: they're
     /// found when asked). Each must be unique; the hosts check at startup.
     fn keys(&self) -> Vec<ProviderKey>;
+    /// Whether this build has the provider `key`: what a union routes by, without
+    /// collecting every key.
+    fn has_key(&self, key: &ProviderKey) -> bool {
+        self.keys().contains(key)
+    }
     /// Whether `key` can collect payments now: a provider this build has, or an
     /// installed, enabled app that implements `payments.start`.
     async fn available(&self, key: &ProviderKey) -> Result<bool, RepoError>;
@@ -266,6 +289,10 @@ pub trait PaymentProviders {
 impl<T: PaymentProviders + ?Sized> PaymentProviders for &T {
     fn keys(&self) -> Vec<ProviderKey> {
         (**self).keys()
+    }
+
+    fn has_key(&self, key: &ProviderKey) -> bool {
+        (**self).has_key(key)
     }
 
     async fn available(&self, key: &ProviderKey) -> Result<bool, RepoError> {
@@ -306,6 +333,11 @@ macro_rules! tuple_providers {
             fn keys(&self) -> Vec<ProviderKey> {
                 let ($($p,)+) = self;
                 vec![$($p.key()),+]
+            }
+
+            fn has_key(&self, key: &ProviderKey) -> bool {
+                let ($($p,)+) = self;
+                false $(|| &$p.key() == key)+
             }
 
             async fn available(&self, key: &ProviderKey) -> Result<bool, RepoError> {
@@ -373,6 +405,10 @@ impl PaymentProviders for () {
         Vec::new()
     }
 
+    fn has_key(&self, _: &ProviderKey) -> bool {
+        false
+    }
+
     async fn available(&self, _: &ProviderKey) -> Result<bool, RepoError> {
         Ok(false)
     }
@@ -408,10 +444,15 @@ macro_rules! union_providers {
                 keys
             }
 
+            fn has_key(&self, key: &ProviderKey) -> bool {
+                let Union(($($s,)+)) = self;
+                false $(|| $s.has_key(key))+
+            }
+
             async fn available(&self, key: &ProviderKey) -> Result<bool, RepoError> {
                 let Union(($($s,)+)) = self;
                 $(
-                    if $s.keys().contains(key) {
+                    if $s.has_key(key) {
                         return $s.available(key).await;
                     }
                 )+
@@ -425,7 +466,7 @@ macro_rules! union_providers {
             ) -> Result<(), PaymentError> {
                 let Union(($($s,)+)) = self;
                 $(
-                    if $s.keys().contains(key) {
+                    if $s.has_key(key) {
                         return $s.check_settings(key, settings);
                     }
                 )+
@@ -439,7 +480,7 @@ macro_rules! union_providers {
             ) -> Result<Started, PaymentError> {
                 let Union(($($s,)+)) = self;
                 $(
-                    if $s.keys().contains(key) {
+                    if $s.has_key(key) {
                         return $s.start(key, payment).await;
                     }
                 )+
@@ -453,7 +494,7 @@ macro_rules! union_providers {
             ) -> Result<ActionAnswer, PaymentError> {
                 let Union(($($s,)+)) = self;
                 $(
-                    if $s.keys().contains(key) {
+                    if $s.has_key(key) {
                         return $s.act(key, request).await;
                     }
                 )+
@@ -622,6 +663,19 @@ mod tests {
     }
 
     #[test]
+    fn a_provider_belongs_to_its_app_or_its_spore() {
+        let key = |k: &str| ProviderKey::new(k).unwrap();
+        let owner = |k: &str| AppKey::new(k).unwrap();
+        assert!(key("app_stripe").belongs_to(&owner("app_stripe")));
+        assert!(!key("app_stripe_link").belongs_to(&owner("app_stripe")));
+        assert!(key("spore_stripe").belongs_to(&owner("spore_stripe")));
+        assert!(key("spore_stripe_link").belongs_to(&owner("spore_stripe")));
+        assert!(!key("spore_stripes").belongs_to(&owner("spore_stripe")));
+        assert!(!key("spore_stripe").belongs_to(&owner("app_stripe")));
+        assert!(!ProviderKey::manual().belongs_to(&owner("app_manual")));
+    }
+
+    #[test]
     fn nothing_has_no_providers() {
         assert_eq!(().keys(), []);
         assert_eq!(
@@ -639,6 +693,9 @@ mod tests {
         let spore = Spore.key();
         let providers = Union(((ManualProvider,), (), Union(((Spore,),))));
         assert_eq!(providers.keys(), [ProviderKey::manual(), spore.clone()]);
+        assert!(providers.has_key(&spore));
+        assert!(providers.has_key(&ProviderKey::manual()));
+        assert!(!providers.has_key(&ProviderKey::new("app_stripe").unwrap()));
         assert_eq!(pollster::block_on(providers.available(&spore)), Ok(true));
         assert_eq!(
             pollster::block_on(providers.start(&spore, &request(Some("x")))),

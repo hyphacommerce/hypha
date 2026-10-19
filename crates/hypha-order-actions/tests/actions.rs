@@ -1443,9 +1443,14 @@ fn app_id(n: u128) -> hypha_core::AppId {
 
 /// App `key` (ID `id`), and the order's pending payment collected by it.
 fn app_payment(world: &World, key: &str, id: hypha_core::AppId) {
+    owned_payment(world, key, key, id);
+}
+
+/// A payment whose provider is `provider`, and the app `owner` (an app or a spore).
+fn owned_payment(world: &World, owner: &str, provider: &str, id: hypha_core::AppId) {
     use hypha_apps::AppRepo;
     let mut app = hypha_apps::App::new(hypha_apps::NewApp {
-        key: hypha_core::AppKey::new(key).unwrap(),
+        key: hypha_core::AppKey::new(owner).unwrap(),
         id,
         name: "Pay".to_string(),
         secret: hypha_core::Sealed::from_bytes(vec![1]),
@@ -1459,7 +1464,7 @@ fn app_payment(world: &World, key: &str, id: hypha_core::AppId) {
         order: order_id(),
         method: None,
         method_name: Some("Card".to_string()),
-        provider: ProviderKey::new(key).unwrap(),
+        provider: ProviderKey::new(provider).unwrap(),
         amount: eur(2000),
         instructions: None,
     })
@@ -1513,6 +1518,34 @@ fn an_app_cant_report_on_another_providers_payment() {
         Err(CommandError::PaymentNotYours {
             payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
             app: app_id(72),
+        })
+    );
+}
+
+#[test]
+fn a_spore_reports_on_the_payments_its_providers_collect() {
+    use hypha_order_actions::PaymentEventKind as K;
+    for provider in ["spore_pay", "spore_pay_link"] {
+        let world = World::new();
+        owned_payment(&world, "spore_pay", provider, app_id(71));
+        assert_eq!(
+            world.report_as(Actor::App(app_id(71)), K::Paid),
+            Ok(PaymentStatus::Paid),
+            "{provider}"
+        );
+    }
+}
+
+#[test]
+fn a_spore_cant_report_on_a_payment_under_a_longer_name() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    owned_payment(&world, "spore_pay", "spore_payx", app_id(71));
+    assert_eq!(
+        world.report_as(Actor::App(app_id(71)), K::Paid),
+        Err(CommandError::PaymentNotYours {
+            payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+            app: app_id(71),
         })
     );
 }
