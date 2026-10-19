@@ -980,17 +980,31 @@ async fn forward<S: Storage>(
     Ok(response)
 }
 
-async fn admin_proxy<S: Storage>(
-    state: SharedState<S>,
+/// A request for an app's proxy, as its handler took it apart.
+struct ProxyRequest {
+    /// The API's public base URL, for staff's session tokens.
     issuer: String,
-    caller: Caller,
     key: String,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
     body: Body,
+}
+
+async fn admin_proxy<S: Storage>(
+    state: SharedState<S>,
+    caller: Caller,
+    req: ProxyRequest,
 ) -> Result<Response, ApiError> {
     use hypha_apps::HasApps;
+    let ProxyRequest {
+        issuer,
+        key,
+        method,
+        uri,
+        headers,
+        body,
+    } = req;
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (app, base) = find_proxy(&ctx, ports.apps(), &key, Surface::Admin).await?;
     drop(ports);
@@ -1011,16 +1025,19 @@ pub const CART_HEADER: &str = "x-hypha-cart";
 
 async fn storefront_proxy<S: Storage>(
     state: SharedState<S>,
-    // Shoppers get no session token: nothing to issue.
-    _issuer: String,
     caller: Caller<Storefront>,
-    key: String,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Body,
+    req: ProxyRequest,
 ) -> Result<Response, ApiError> {
     use hypha_apps::HasApps;
+    // Shoppers get no session token: the issuer isn't needed.
+    let ProxyRequest {
+        key,
+        method,
+        uri,
+        headers,
+        body,
+        ..
+    } = req;
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (app, base) = find_proxy(&ctx, ports.apps(), &key, Surface::Storefront).await?;
     let mut context = vec![("Hypha-Store".to_string(), state.store.to_string())];
@@ -1074,7 +1091,8 @@ macro_rules! proxy_handlers {
             headers: HeaderMap,
             body: Body,
         ) -> Result<Response, ApiError> {
-            $proxy(state, issuer, caller, key, Method::$method, uri, headers, body).await
+            let req = ProxyRequest { issuer, key, method: Method::$method, uri, headers, body };
+            $proxy(state, caller, req).await
         }
     )*};
 }
