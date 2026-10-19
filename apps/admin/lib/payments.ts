@@ -37,6 +37,10 @@ export const PAYMENT_PRESETS: PaymentPreset[] = [
   },
 ];
 
+/** An installed app that takes payments: it registers `payments.start` (design note
+ * 0029, §3.1), so a method can name it as its provider. */
+export type PaymentApp = { key: string; name: string };
+
 /** What a provider key reads as: "Manual", or the app's name from its key (`app_stripe`). */
 export function providerLabel(provider: string): string {
   if (provider === "manual") return "Manual";

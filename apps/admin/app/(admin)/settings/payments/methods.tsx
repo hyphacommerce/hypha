@@ -35,7 +35,12 @@ import {
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { useState, useTransition } from "react";
 
-import { PAYMENT_PRESETS, type PaymentPreset, providerLabel } from "@/lib/payments";
+import {
+  PAYMENT_PRESETS,
+  type PaymentApp,
+  type PaymentPreset,
+  providerLabel,
+} from "@/lib/payments";
 
 import {
   createPaymentMethod,
@@ -60,12 +65,14 @@ export function PaymentMethodsCard({
   methods,
   markets,
   channels,
+  paymentApps,
   canWrite,
 }: {
   /** By position, then ID: as the API lists them. */
   methods: Method[];
   markets: Option[];
   channels: Option[];
+  paymentApps: PaymentApp[];
   canWrite: boolean;
 }) {
   const [editing, setEditing] = useState<Method | "new">();
@@ -207,6 +214,7 @@ export function PaymentMethodsCard({
           method={editing === "new" ? undefined : editing}
           markets={markets}
           channels={channels}
+          paymentApps={paymentApps}
           onClose={() => setEditing(undefined)}
         />
       )}
@@ -215,19 +223,40 @@ export function PaymentMethodsCard({
   );
 }
 
-/** Adds a manual method from a preset, or edits one (`method`): its provider can't change. */
+/** What a new method can be: a manual preset, or an installed payment app (`app:<key>`). */
+type Kind = { preset: PaymentPreset; app?: undefined } | { app: PaymentApp; preset?: undefined };
+
+/** The preset or app a kind's value names. */
+function kindOf(value: string, paymentApps: PaymentApp[]): Kind {
+  const app = value.startsWith("app:")
+    ? paymentApps.find((a) => `app:${a.key}` === value)
+    : undefined;
+  if (app) return { app };
+  return { preset: PAYMENT_PRESETS.find((p) => p.value === value) ?? PAYMENT_PRESETS[0] };
+}
+
+/**
+ * Adds a method, manual from a preset or taken by an installed payment app, or edits one
+ * (`method`): its provider can't change.
+ */
 function MethodDialog({
   method,
   markets,
   channels,
+  paymentApps,
   onClose,
 }: {
   method?: Method;
   markets: Option[];
   channels: Option[];
+  paymentApps: PaymentApp[];
   onClose: () => void;
 }) {
-  const [preset, setPreset] = useState<PaymentPreset>(PAYMENT_PRESETS[0]);
+  const [kind, setKind] = useState<Kind>({ preset: PAYMENT_PRESETS[0] });
+  const kindName = kind.app ? kind.app.name : kind.preset.name;
+  const kindValue = kind.app ? `app:${kind.app.key}` : kind.preset.value;
+  // An app's method collects the money itself: no instructions to show the shopper.
+  const isApp = method ? method.provider.startsWith("app_") : Boolean(kind.app);
   const [form, setForm] = useState<MethodInput>({
     name: method?.name ?? PAYMENT_PRESETS[0].name,
     instructions: method?.instructions ?? "",
@@ -240,11 +269,11 @@ function MethodDialog({
   const set = (change: Partial<MethodInput>) => setForm((f) => ({ ...f, ...change }));
   const isComplete = form.name.trim() !== "" && form.instructions.length <= 2000;
 
-  const choosePreset = (value: string) => {
-    const next = PAYMENT_PRESETS.find((p) => p.value === value) ?? PAYMENT_PRESETS[0];
-    // The name follows the preset unless staff typed their own.
-    if (form.name === preset.name) set({ name: next.name });
-    setPreset(next);
+  const chooseKind = (value: string) => {
+    const next = kindOf(value, paymentApps);
+    // The name follows the kind unless staff typed their own.
+    if (form.name === kindName) set({ name: next.app ? next.app.name : next.preset.name });
+    setKind(next);
   };
 
   const submit = () => {
@@ -252,7 +281,11 @@ function MethodDialog({
     startTransition(async () => {
       const result = method
         ? await updatePaymentMethod(method.id, form)
-        : await createPaymentMethod(form);
+        : await createPaymentMethod({
+            ...form,
+            provider: kind.app ? kind.app.key : "manual",
+            instructions: kind.app ? "" : form.instructions,
+          });
       if (result.error) setError(result.error);
       else onClose();
     });
@@ -265,7 +298,9 @@ function MethodDialog({
         subtitle={
           method
             ? "Orders already placed keep the name and instructions they were placed with."
-            : "A manual method: the shopper pays you directly, and you mark the order paid."
+            : kind.app
+              ? `The shopper pays at checkout through ${kind.app.name}; the app reports the payment.`
+              : "A manual method: the shopper pays you directly, and you mark the order paid."
         }
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
@@ -276,13 +311,20 @@ function MethodDialog({
           {!method && (
             <Selector
               label="Kind"
-              options={PAYMENT_PRESETS.map(({ value, label, description }) => ({
-                value,
-                label,
-                description,
-              }))}
-              value={preset.value}
-              onChange={choosePreset}
+              options={[
+                ...PAYMENT_PRESETS.map(({ value, label, description }) => ({
+                  value,
+                  label,
+                  description,
+                })),
+                ...paymentApps.map((app) => ({
+                  value: `app:${app.key}`,
+                  label: app.name,
+                  description: `Taken by the ${app.name} app: the shopper pays at checkout.`,
+                })),
+              ]}
+              value={kindValue}
+              onChange={chooseKind}
             />
           )}
           <TextInput
@@ -292,16 +334,18 @@ function MethodDialog({
             value={form.name}
             onChange={(name) => set({ name })}
           />
-          <TextArea
-            label="Instructions"
-            description="Shown to the shopper after checkout and on their order: bank details, what to pay the courier."
-            placeholder={method ? undefined : preset.instructionsPlaceholder}
-            isOptional
-            maxLength={2000}
-            rows={4}
-            value={form.instructions}
-            onChange={(instructions) => set({ instructions })}
-          />
+          {!isApp && (
+            <TextArea
+              label="Instructions"
+              description="Shown to the shopper after checkout and on their order: bank details, what to pay the courier."
+              placeholder={method || kind.app ? undefined : kind.preset.instructionsPlaceholder}
+              isOptional
+              maxLength={2000}
+              rows={4}
+              value={form.instructions}
+              onChange={(instructions) => set({ instructions })}
+            />
+          )}
           <MultiSelector
             label="Markets"
             description="None chosen: offered in every market."

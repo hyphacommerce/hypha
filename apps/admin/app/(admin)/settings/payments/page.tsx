@@ -5,6 +5,7 @@ import { Section } from "@astryxdesign/core/Section";
 import { PageHeader } from "@/components/page-header";
 import { SETTINGS_CRUMB } from "@/lib/navigation";
 import { channelNames, loadPaymentMethods, requireStaff, sessionClient } from "@/lib/hypha";
+import type { PaymentApp } from "@/lib/payments";
 
 import { PaymentMethodsCard } from "./methods";
 
@@ -12,11 +13,12 @@ import { PaymentMethodsCard } from "./methods";
  * see the methods at checkout. */
 export default async function PaymentsSettingsPage() {
   const client = await sessionClient();
-  const [me, methods, markets, channelName] = await Promise.all([
+  const [me, methods, markets, channelName, paymentApps] = await Promise.all([
     requireStaff(),
     loadPaymentMethods(),
     client.GET("/admin/markets"),
     channelNames(client),
+    loadPaymentApps(client),
   ]);
 
   return (
@@ -48,6 +50,7 @@ export default async function PaymentsSettingsPage() {
               // table shows IDs; the API still checks nothing it doesn't know.
               markets={(markets.data?.items ?? []).map((m) => ({ value: m.id, label: m.name }))}
               channels={[...channelName].map(([value, label]) => ({ value, label }))}
+              paymentApps={paymentApps}
               canWrite={me.scopes.includes("payments:write")}
             />
           </>
@@ -55,4 +58,26 @@ export default async function PaymentsSettingsPage() {
       </VStack>
     </Section>
   );
+}
+
+/**
+ * The installed, enabled apps a method can name as its provider: those whose
+ * registrations include `payments.start`. Without `apps:read` there are none to offer;
+ * the manual kinds still are.
+ */
+async function loadPaymentApps(client: Awaited<ReturnType<typeof sessionClient>>) {
+  const { data } = await client.GET("/admin/apps");
+  const candidates = (data?.items ?? []).filter((app) => app.enabled && app.installed);
+  const registered = await Promise.all(
+    candidates.map(async (app): Promise<PaymentApp | null> => {
+      const { data: points } = await client.GET("/admin/apps/{key}/extension-points", {
+        params: { path: { key: app.key } },
+      });
+      const takesPayments = (points?.extension_points ?? []).some(
+        (p) => p.point === "payments.start",
+      );
+      return takesPayments ? { key: app.key, name: app.name } : null;
+    }),
+  );
+  return registered.filter((app) => app !== null);
 }

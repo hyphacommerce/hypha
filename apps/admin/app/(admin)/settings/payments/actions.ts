@@ -9,6 +9,9 @@ export type Result = { error?: string };
 
 /** A method as the form gives it. Empty markets or channels: every one. */
 export type MethodInput = {
+  /** `manual`, or an installed payment app's key (`app_stripe`): set when the method is
+   * made, never changed after. */
+  provider?: string;
   name: string;
   instructions: string;
   markets: string[];
@@ -26,13 +29,13 @@ function instructions(text: string): string | null {
   return text.trim() === "" ? null : text.trim();
 }
 
-/** A manual method (staff record the money), after the others. */
+/** A method, after the others: manual (staff record the money) or a payment app's. */
 export async function createPaymentMethod(input: MethodInput): Promise<Result> {
   if (input.name.trim() === "") return { error: "The method needs a name." };
   const client = await sessionClient();
   const { error } = await client.POST("/admin/payment-methods", {
     body: {
-      provider: "manual",
+      provider: input.provider ?? "manual",
       name: input.name.trim(),
       instructions: instructions(input.instructions),
       markets: input.markets,
