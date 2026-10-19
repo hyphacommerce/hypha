@@ -64,11 +64,17 @@ trap stop INT TERM EXIT
 # so `$!` is the server's process rather than the labeller's).
 label() { sed -u "s/^/[$1] /"; }
 
+# First-party spores to build the API with (design note 0030, §9): HYPHA_SPORES=stripe
+# (comma-separated) turns on each one's `spore-<name>` feature.
+SPORE_FEATURES=""
+for spore in ${HYPHA_SPORES//,/ }; do SPORE_FEATURES+="spore-$spore,"; done
+SPORE_FEATURES="${SPORE_FEATURES%,}"
+
 echo "Building and starting the API on :${API_PORT}…"
 HYPHA_BIND="127.0.0.1:$API_PORT" \
   HYPHA_SECRET_KEY="$(cat .dev-secret-key)" \
   HYPHA_ALLOW_PRIVATE_CALLBACKS=true \
-  cargo run -q -p hypha-host-axum > >(label api) 2>&1 &
+  cargo run -q -p hypha-host-axum ${SPORE_FEATURES:+--features "$SPORE_FEATURES"} > >(label api) 2>&1 &
 pids+=($!)
 
 until curl -sf "http://127.0.0.1:$API_PORT/health" >/dev/null; do

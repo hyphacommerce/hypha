@@ -43,6 +43,7 @@ mod app_extensions;
 mod oauth;
 // A host built with a spore (design note 0030).
 mod spores;
+mod stripe;
 
 const OWNER_EMAIL: &str = "owner@example.com";
 const OWNER_PASSWORD: &str = "owner password";
@@ -2083,7 +2084,7 @@ async fn publishable<D: crate::Deployment>(app: &TestApp<D>) -> String {
 }
 
 /// Publishes the products to the Online Store (new products aren't sold anywhere, CH9).
-async fn publish(app: &TestApp, products: &[&str]) {
+async fn publish<D: crate::Deployment>(app: &TestApp<D>, products: &[&str]) {
     let path = format!("/admin/channels/{}/products", online_store(app).await);
     let body = json!({ "products": products }).to_string();
     let (status, json) = send(app, "POST", &path, Some(&body)).await;
@@ -3064,7 +3065,7 @@ async fn shop_selling_a_mug(app: &TestApp) -> String {
 }
 
 /// `shop_selling_a_mug`, with the market's ID too.
-async fn market_selling_a_mug(app: &TestApp) -> (String, String) {
+async fn market_selling_a_mug<D: crate::Deployment>(app: &TestApp<D>) -> (String, String) {
     let (_, market) = send(
         app,
         "POST",
@@ -3895,7 +3896,7 @@ async fn every_route_refuses_the_other_surfaces_credentials() {
 /// A shop selling mugs that need no shipping, 10 at the warehouse, and a storefront
 /// cart for 3 with an email, before choosing how to pay. Returns (the publishable key,
 /// the cart's path, the warehouse's ID).
-async fn cart_for_three_mugs(app: &TestApp) -> (String, String, String) {
+async fn cart_for_three_mugs<D: crate::Deployment>(app: &TestApp<D>) -> (String, String, String) {
     let (market, mug) = market_selling_a_mug(app).await;
     let (_, mugs) = send(app, "GET", "/admin/products?limit=1", None).await;
     let product = mugs["items"][0]["id"].as_str().unwrap().to_string();

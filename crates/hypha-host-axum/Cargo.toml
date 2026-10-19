@@ -6,6 +6,9 @@ license.workspace = true
 publish = false
 
 [dependencies]
+# First-party spores, built in by a feature (design note 0030, §9): `--features
+# spore-stripe`. The stock binary has none.
+hypha-spore-stripe = { path = "../../spores/stripe", optional = true }
 # The routes, the state and everything but the runtime (design note 0026, W3).
 hypha-http = { path = "../hypha-http" }
 hypha-dispatch = { path = "../hypha-dispatch" }
@@ -54,7 +57,14 @@ serde_json.workspace = true
 # Spores' configuration sections (`[spores.<name>]`).
 toml = "0.9"
 
+[features]
+# The Stripe spore (design note 0030, SP9).
+spore-stripe = ["dep:hypha-spore-stripe"]
+
 [dev-dependencies]
+# The first-party Stripe spore, for route tests of a host built with it (design note
+# 0030, SP9); the stock binary has no spores.
+hypha-spore-stripe = { path = "../../spores/stripe" }
 url = "2.5"
 # A test host for building spores (`hypha_spore_core::env::testing`).
 hypha-spore-core = { path = "../hypha-spore-core", features = ["testing"] }

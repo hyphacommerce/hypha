@@ -20,6 +20,8 @@ const generated = [
   "target/**",
   "spikes/**",
   "hypha-deploy*/**",
+  // A spore's element as bundled (`spores/*/element/*.js`, built from its `.ts` beside).
+  "spores/*/element/*.js",
 ];
 
 export default defineConfig({

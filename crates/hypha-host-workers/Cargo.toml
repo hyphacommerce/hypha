@@ -26,6 +26,7 @@ hypha-apps = { path = "../hypha-apps" }
 hypha-payments = { path = "../hypha-payments" }
 # The spores a deployment is built with (design note 0030, `worker!`).
 hypha-spore-core = { path = "../hypha-spore-core" }
+hypha-spore-stripe = { path = "../../spores/stripe", optional = true }
 # Spores' configuration sections (`[spores.<name>]`).
 toml = "0.9"
 hypha-merchandising = { path = "../hypha-merchandising" }
@@ -53,6 +54,8 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 [features]
 default = ["stock"]
 stock = []
+# The first-party Stripe spore in this crate's own Worker (design note 0030, §9).
+spore-stripe = ["dep:hypha-spore-stripe"]
 
 [dev-dependencies]
 toml = "0.9"
