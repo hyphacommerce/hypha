@@ -5857,24 +5857,20 @@ async fn an_app_collects_a_payment_from_checkout_to_its_reports() {
         assert!(body.get("customer_email").is_none(), "no grant, no email");
     }
 
-    // A pending payment can't be captured; once the app reports it authorized, it can.
+    // A pending payment can be captured too: its authorization may not have been
+    // reported yet, and the provider refuses when there's nothing to take.
     let capture = format!("/admin/payments/{payment}/capture");
     let (status, json) = send(&app, "POST", &capture, Some("{}")).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{json}");
+    assert_eq!(json["reference"], "ch_1");
     assert_eq!(
-        (status, code(&json)),
-        (StatusCode::CONFLICT, "invalid_payment_transition")
+        json["payment"]["status"], "pending",
+        "until the app reports"
     );
     let (status, json) = report(&app, &payment, "evt_1", json!({"type": "authorized"})).await;
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(json["financial_status"], "authorized");
     assert_eq!(json["payment"]["status"], "authorized");
-    let (status, json) = send(&app, "POST", &capture, Some("{}")).await;
-    assert_eq!(status, StatusCode::ACCEPTED, "{json}");
-    assert_eq!(json["reference"], "ch_1");
-    assert_eq!(
-        json["payment"]["status"], "authorized",
-        "until the app reports"
-    );
     let sent_key = saw.lock().unwrap()[1].2.clone();
     assert!(
         sent_key.starts_with(&format!("{payment}:capture:")),

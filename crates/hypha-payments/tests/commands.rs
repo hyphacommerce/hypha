@@ -414,15 +414,28 @@ fn an_action_must_fit_the_payments_status() {
     let ports = InMemoryPorts::default();
     let gateway = Gateway::default();
     let id = gateway_payment(&ports, |_| {});
+    // Nothing collected yet: nothing to refund, and the provider isn't asked.
     assert_eq!(
-        act(&ports, &gateway, id, PaymentAction::Capture, None),
+        act(&ports, &gateway, id, PaymentAction::Refund, None),
         Err(CommandError::Payment(PaymentError::InvalidTransition {
             payment: id,
             from: PaymentStatus::Pending,
-            to: PaymentStatus::Paid,
+            to: PaymentStatus::Refunded,
         }))
     );
     assert!(gateway.asked.borrow().is_empty());
+}
+
+/// A pending payment's authorization may not have been reported yet (a late or lost
+/// provider webhook): capture asks the provider, which knows whether there's money held.
+#[test]
+fn a_pending_payment_can_be_captured_the_provider_decides() {
+    use hypha_payments::PaymentAction;
+    let ports = InMemoryPorts::default();
+    let gateway = Gateway::default();
+    let id = gateway_payment(&ports, |_| {});
+    assert!(act(&ports, &gateway, id, PaymentAction::Capture, None).is_ok());
+    assert_eq!(gateway.asked.borrow().len(), 1);
 }
 
 #[test]

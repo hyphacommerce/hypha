@@ -298,10 +298,10 @@ pub async fn act_on_payment<S: HasPayments, P: PaymentProviders>(
             (to, Some(amount))
         }
     };
-    // Only held money can be captured: a pending payment's provider collects it itself.
-    let capturable =
-        input.action != PaymentAction::Capture || payment.status() == PaymentStatus::Authorized;
-    if !(capturable && payment.status().can_become(to)) {
+    // Capture asks the provider for money it holds: `authorized`, or `pending` when the
+    // authorization hasn't been reported yet (a provider's webhook that was late or lost:
+    // the provider knows better than our copy, and refuses when there's nothing to take).
+    if !payment.status().can_become(to) {
         return Err(PaymentError::InvalidTransition {
             payment: payment.id(),
             from: payment.status(),

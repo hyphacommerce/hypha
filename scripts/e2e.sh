@@ -826,8 +826,9 @@ PY
     step "without the right token" 404 order_not_found -X POST \
         "$BASE/storefront/orders/$CARD_ORDER/payment?token=hypha_ord_00" -H "$JSON" -d '{}'
     PAYMENTS="$BASE/admin/payments/$CARD_PAYMENT"
-    step "capture before it's authorized" 409 invalid_payment_transition -X POST "$PAYMENTS/capture" \
-        -H "$JSON" -d '{}'
+    step "capture before the authorization is reported: the provider decides" 202 - -X POST \
+        "$PAYMENTS/capture" -H "$JSON" -d '{}'
+    contains "still pending until the app reports" '"status":"pending"'
     step "the app reports it authorized" 200 - -X POST "$PAYMENTS/events" -H "$JSON" \
         -H 'idempotency-key: evt_e2e_1' -d '{"type":"authorized","reference":"pi_e2e"}'
     contains "the order is authorized" '"financial_status":"authorized"'
