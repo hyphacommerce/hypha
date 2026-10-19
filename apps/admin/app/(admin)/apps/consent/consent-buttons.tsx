@@ -7,11 +7,12 @@
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { type ReactNode, useState, useTransition } from "react";
 
 import {
   type ConsentResult,
@@ -24,14 +25,20 @@ export function ConsentButtons({
   id,
   appKey,
   appName,
+  isPending,
   canApprove,
   canDeny,
+  intro,
 }: {
   id: string;
   appKey: string;
   appName: string;
+  /** Whether the request can still be answered. */
+  isPending: boolean;
   canApprove: boolean;
   canDeny: boolean;
+  /** What approving does, or why this staff member can't. */
+  intro: ReactNode;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string>();
@@ -52,27 +59,37 @@ export function ConsentButtons({
       } else router.push(`/apps/${appKey}`);
     });
 
-  if (credentials) return <CredentialsShown name={appName} credentials={credentials} />;
+  if (credentials) {
+    return (
+      <Card>
+        <CredentialsShown name={appName} credentials={credentials} />
+      </Card>
+    );
+  }
   if (leaving) return <Text color="secondary">Taking you back to {appName}…</Text>;
+  if (!isPending) return null;
   return (
-    <VStack gap={3}>
-      {error && <Banner status="error" title={error} />}
-      <HStack gap={2}>
-        <Button
-          label="Approve"
-          variant="primary"
-          isDisabled={!canApprove}
-          isLoading={pending}
-          onClick={() => answer(approveConsent)}
-        />
-        <Button
-          label="Deny"
-          variant="secondary"
-          isDisabled={!canDeny || pending}
-          onClick={() => answer(denyConsent)}
-        />
-      </HStack>
-    </VStack>
+    <Card>
+      <VStack gap={3}>
+        {intro}
+        {error && <Banner status="error" title={error} />}
+        <HStack gap={2}>
+          <Button
+            label="Approve"
+            variant="primary"
+            isDisabled={!canApprove}
+            isLoading={pending}
+            onClick={() => answer(approveConsent)}
+          />
+          <Button
+            label="Deny"
+            variant="secondary"
+            isDisabled={!canDeny || pending}
+            onClick={() => answer(denyConsent)}
+          />
+        </HStack>
+      </VStack>
+    </Card>
   );
 }
 

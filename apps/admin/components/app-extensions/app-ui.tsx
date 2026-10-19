@@ -192,7 +192,11 @@ function ActionForm({
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
-  const set = (name: string, value: FormValue) => setValues((v) => ({ ...v, [name]: value }));
+  const set = (name: string, value: FormValue) => {
+    setValues((v) => ({ ...v, [name]: value }));
+    // A field's problem goes once it's edited; the others stay until the next submit.
+    setProblems((found) => Object.fromEntries(Object.entries(found).filter(([n]) => n !== name)));
+  };
 
   const submit = async () => {
     const found = checkValues(fields, values);

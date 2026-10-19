@@ -143,7 +143,7 @@ function PrivateAppDialog({ onClose }: { onClose: () => void }) {
       />
       <VStack gap={4} padding={4}>
         {error && (
-          <Banner status="error" title={error}>
+          <Banner status="error" title={error} collapsible={false}>
             {problems.length > 0 && (
               <List>
                 {problems.map((p) => (

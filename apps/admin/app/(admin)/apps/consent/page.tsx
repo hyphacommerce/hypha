@@ -172,29 +172,28 @@ export default async function ConsentPage({
           </VStack>
         </Card>
 
-        {request.status === "pending" && (
-          <Card>
-            <VStack gap={3}>
-              {blocked ? (
-                <Banner status="warning" title="You can't approve this" description={blocked} />
-              ) : (
-                <Text color="secondary">
-                  {request.app.private
-                    ? "Approving installs the app and shows its credentials once."
-                    : `Approving sends you back to ${hostOf(request.redirect_uri)}.`}{" "}
-                  The request waits until <DateTime value={request.expires_at} short />.
-                </Text>
-              )}
-              <ConsentButtons
-                id={request.id}
-                appKey={request.app.key}
-                appName={request.app.name}
-                canApprove={!blocked}
-                canDeny={canWrite}
-              />
-            </VStack>
-          </Card>
-        )}
+        {/* Always here, so a private app's credentials stay shown once the page re-renders
+            with the request approved. */}
+        <ConsentButtons
+          id={request.id}
+          appKey={request.app.key}
+          appName={request.app.name}
+          isPending={request.status === "pending"}
+          canApprove={!blocked}
+          canDeny={canWrite}
+          intro={
+            blocked ? (
+              <Banner status="warning" title="You can't approve this" description={blocked} />
+            ) : (
+              <Text color="secondary">
+                {request.app.private
+                  ? "Approving installs the app and shows its credentials once."
+                  : `Approving sends you back to ${hostOf(request.redirect_uri)}.`}{" "}
+                The request waits until <DateTime value={request.expires_at} short />.
+              </Text>
+            )
+          }
+        />
       </VStack>
     </Section>
   );
