@@ -52,7 +52,7 @@ async fn a_spore_reads_its_section_and_one_it_refuses_stops_the_host() {
     let storage = storage_from("[spores.test]\ngreeting = \"hi\"")
         .await
         .unwrap();
-    let (spore,) = storage.spores();
+    let (spore,) = storage.spores().spores();
     assert_eq!(spore.greeting, "hi");
     let refused = storage_from("[spores.test]\ngreting = \"hi\"").await.err();
     let refused = refused.unwrap_or_default();
@@ -164,9 +164,34 @@ async fn a_spores_routes_serve_each_surface_and_answer_403_while_it_is_disabled(
             "{path}"
         );
     }
+    // Credentials come first, as on core's routes: a stranger gets the 401 and learns
+    // nothing of the spore.
+    for path in [
+        "/admin/spores/test/settings",
+        "/storefront/spores/test/greeting",
+    ] {
+        let (status, body) = send_with(&app, &[], "GET", path, None).await;
+        assert_eq!(
+            (status, code(&body)),
+            (StatusCode::UNAUTHORIZED, "unauthenticated"),
+            "{path}"
+        );
+        let (status, body) = send_as(&app, "hypha_sk_not_a_key", "GET", path, None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}: {body}");
+    }
     set_enabled(&app, true).await;
     let (status, _) = send_with(&app, &[], "GET", "/spores/test/hello", None).await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_spore_route_called_with_another_method_answers_like_core() {
+    let app = app_with_spores::<WithTestSpore>(Config::defaults()).await;
+    let (status, body) = send_with(&app, &[], "POST", "/spores/test/hello", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::METHOD_NOT_ALLOWED, "method_not_allowed")
+    );
 }
 
 #[tokio::test]

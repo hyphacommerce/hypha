@@ -62,6 +62,15 @@ pub enum UiError {
     Failed(String),
 }
 
+impl hypha_core::ErrorCode for UiError {
+    fn code(&self) -> &'static str {
+        match self {
+            UiError::NotFound => "app_extension_not_found",
+            UiError::Failed(_) => "app_unavailable",
+        }
+    }
+}
+
 /// A spore's admin UI, implemented next to `Spore`: an empty
 /// `impl<P> SporeUi<P> for MySpore {}` for a spore with none. `P` is the host's
 /// ports; bound it on what the blocks read (`P: HasOrders + HasPayments`), as event

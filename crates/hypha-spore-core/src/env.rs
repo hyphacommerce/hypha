@@ -13,8 +13,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use hypha_apps::{HasSporeSettings, read_spore_settings};
-use hypha_core::{AppKey, Clock, IdGenerator, Random, SealError, Sealed, SecretBox, Timestamp};
+use hypha_apps::{HasSporeSettings, SettingsReadError, read_spore_settings};
+use hypha_core::{
+    AppKey, AppKeyError, Clock, IdGenerator, Random, SealError, Sealed, SecretBox, Timestamp,
+};
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 use uuid::Uuid;
@@ -213,10 +215,8 @@ impl SporeEnv {
         &self,
         ports: &P,
     ) -> Result<Option<T>, SettingsError> {
-        let key = AppKey::of_spore(self.name).map_err(|e| SettingsError::Read(e.to_string()))?;
-        let values = read_spore_settings(ports, self, &key)
-            .await
-            .map_err(|e| SettingsError::Read(e.to_string()))?;
+        let key = AppKey::of_spore(self.name)?;
+        let values = read_spore_settings(ports, self, &key).await?;
         values
             .map(|v| serde_json::from_value(serde_json::Value::Object(v)))
             .transpose()
@@ -227,12 +227,36 @@ impl SporeEnv {
 /// Why a spore couldn't read its settings.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum SettingsError {
+    /// The spore's name isn't a key (the host refuses such a build first).
+    #[error(transparent)]
+    Key(#[from] AppKeyError),
     /// Storage failed, or a secret didn't open (another `HYPHA_SECRET_KEY`).
-    #[error("cannot read the settings: {0}")]
-    Read(String),
-    /// They don't fit the spore's type (its schema changed since they were saved).
+    #[error(transparent)]
+    Read(#[from] SettingsReadError),
+    /// They don't fit the spore's type (its schema changed since they were saved):
+    /// serde's message.
     #[error("the settings don't fit: {0}")]
     Shape(String),
+}
+
+impl hypha_core::ErrorCode for SettingsError {
+    fn code(&self) -> &'static str {
+        match self {
+            SettingsError::Key(e) => e.code(),
+            SettingsError::Read(e) => e.code(),
+            SettingsError::Shape(_) => "spore_settings_mismatch",
+        }
+    }
+}
+
+impl hypha_core::ErrorCode for HttpError {
+    fn code(&self) -> &'static str {
+        match self {
+            HttpError::Timeout => "http_timeout",
+            HttpError::TooLarge => "http_answer_too_large",
+            HttpError::Failed(_) => "http_failed",
+        }
+    }
 }
 
 impl fmt::Debug for SporeEnv {

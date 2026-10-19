@@ -183,7 +183,7 @@ pub struct PgStorage<D: Deployment> {
     handlers: HandlersOf<D>,
     payments: ProvidersOf<D>,
     /// The spores themselves, built at startup.
-    spores: D::Spores,
+    spores: hypha_spore_core::BuiltSpores<D::Spores>,
 }
 
 impl<D: Deployment> PgStorage<D> {
@@ -216,7 +216,7 @@ impl<D: Deployment> Storage for PgStorage<D> {
     type Search<'p> = &'p PgPorts;
     type Handlers = HandlersOf<D>;
     type Payments = ProvidersOf<D>;
-    type Spores = D::Spores;
+    type Spores = hypha_spore_core::BuiltSpores<D::Spores>;
 
     async fn ports(&self, _store: StoreId) -> Result<PgPorts, ApiError> {
         self.store().await
@@ -243,7 +243,7 @@ impl<D: Deployment> Storage for PgStorage<D> {
         &self.payments
     }
 
-    fn spores(&self) -> &D::Spores {
+    fn spores(&self) -> &hypha_spore_core::BuiltSpores<D::Spores> {
         &self.spores
     }
 

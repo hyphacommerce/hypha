@@ -40,15 +40,10 @@ where
     /// 0030, §3): it then reports unavailable and collects nothing, as a disabled app's.
     /// The spore is the one the key belongs to (`spore_stripe` or `spore_stripe_…`).
     async fn spore_disabled(&self, key: &ProviderKey) -> Result<bool, RepoError> {
-        use hypha_apps::AppRepo;
         if key.is_manual() || key.app().is_some() {
             return Ok(false);
         }
-        let apps = self.ports.apps().list().await?;
-        let owner = apps
-            .iter()
-            .find(|app| app.kind() == hypha_core::AppKind::Spore && key.belongs_to(app.key()));
-        Ok(!owner.is_some_and(|app| app.enabled()))
+        Ok(!hypha_apps::spore_enabled(self.ports.apps(), key.as_str()).await?)
     }
 
     /// `spore_disabled` for start and act, as a provider failure when it can't tell.

@@ -10,7 +10,7 @@
 use std::any::Any;
 use std::collections::BTreeMap;
 
-use hypha_apps::{AppRepo, HasApps, SettingsProblem, SettingsSchema, SporeRegistration};
+use hypha_apps::{HasApps, SettingsProblem, SettingsSchema, SporeRegistration};
 use hypha_core::{AppKey, EventHandlers, Scope, StoredEvent, Union};
 use hypha_payments::{PaymentProviders, ProviderKey};
 use hypha_store_postgres::MigrationSet;
@@ -299,18 +299,89 @@ impl<P: HasApps + ?Sized, H: EventHandlers<P>> EventHandlers<P> for Gated<H> {
             Ok(key) => key,
             Err(e) => return Some(Err(e.to_string())),
         };
-        match ports.apps().get(&key).await {
-            Ok(Some(app)) if app.enabled() => self.handlers.run(name, ports, event).await,
-            Ok(_) => Some(Err(format!("{key} is disabled"))),
+        match hypha_apps::spore_enabled(ports.apps(), key.as_str()).await {
+            Ok(true) => self.handlers.run(name, ports, event).await,
+            Ok(false) => Some(Err(format!("{key} is disabled"))),
             Err(e) => Some(Err(e.to_string())),
         }
+    }
+}
+
+/// The spores a host built (a `SporeSet`'s tuple), with each one's settings schema
+/// parsed once, when they were built: what a host keeps (`Storage::spores`). It answers
+/// as the tuple does, except that schemas come from what was parsed.
+pub struct BuiltSpores<S> {
+    spores: S,
+    schemas: Vec<(&'static str, SettingsSchema)>,
+}
+
+impl<S: SporeSet> BuiltSpores<S> {
+    fn new(spores: S) -> Self {
+        // `check` (before the build, at startup) refuses a schema that doesn't parse.
+        let schemas = S::settings_schemas()
+            .into_iter()
+            .filter_map(|(name, schema)| Some((name, SettingsSchema::parse(schema?).ok()?)))
+            .collect();
+        Self { spores, schemas }
+    }
+
+    /// The spores themselves.
+    pub fn spores(&self) -> &S {
+        &self.spores
+    }
+}
+
+impl<P, S: SporeRuntime<P>> SporeRuntime<P> for BuiltSpores<S> {
+    fn contributions(&self) -> Vec<SporeContributions> {
+        self.spores.contributions()
+    }
+
+    async fn block(
+        &self,
+        key: &AppKey,
+        id: &str,
+        call: UiCall<'_>,
+        ports: &P,
+    ) -> Option<Result<serde_json::Value, UiError>> {
+        self.spores.block(key, id, call, ports).await
+    }
+
+    async fn action(
+        &self,
+        key: &AppKey,
+        id: &str,
+        call: UiCall<'_>,
+        input: Option<serde_json::Value>,
+        ports: &P,
+    ) -> Option<Result<UiAnswer, UiError>> {
+        self.spores.action(key, id, call, input, ports).await
+    }
+
+    fn find(&self, name: &str) -> Option<&dyn Any> {
+        self.spores.find(name)
+    }
+
+    fn settings_schema(&self, key: &AppKey) -> Option<SettingsSchema> {
+        let name = key.as_str().strip_prefix("spore_")?;
+        self.schemas
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, schema)| schema.clone())
+    }
+
+    fn check_settings(
+        &self,
+        key: &AppKey,
+        settings: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), Vec<SettingsProblem>> {
+        self.spores.check_settings(key, settings)
     }
 }
 
 /// What `SporeSet::build` makes: the spores themselves (the set's own type, a tuple of
 /// built spores), and what they contribute, each one set.
 pub struct Built<S: SporeSet> {
-    pub spores: S,
+    pub spores: BuiltSpores<S>,
     pub handlers: S::Handlers,
     pub payment_providers: S::PaymentProviders,
 }
@@ -376,7 +447,7 @@ impl SporeSet for () {
         _: &BTreeMap<String, toml::Table>,
     ) -> Result<Built<()>, SporeStartError> {
         Ok(Built {
-            spores: (),
+            spores: BuiltSpores::new(()),
             handlers: (),
             payment_providers: (),
         })
@@ -420,7 +491,7 @@ macro_rules! tuple_spores {
                 Ok(Built {
                     handlers: Union(($(Gated::new($s::NAME, $s.handlers()),)+)),
                     payment_providers: Union(($($s.payment_providers(),)+)),
-                    spores: ($($s,)+),
+                    spores: BuiltSpores::new(($($s,)+)),
                 })
             }
 

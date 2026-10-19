@@ -296,3 +296,30 @@ fn a_spore_is_registered_only_as_its_build_declares_it() {
     };
     assert_eq!(block_on(spore_registered(&ports.apps, other)), Ok(false));
 }
+
+#[test]
+fn a_key_belongs_to_the_spore_it_names_or_extends() {
+    let (ports, _) = registered();
+    let owner = |key: &str| {
+        block_on(hypha_apps::spore_of(&ports.apps, key))
+            .unwrap()
+            .map(|app| app.key().to_string())
+    };
+    assert_eq!(owner("spore_stripe"), Some("spore_stripe".to_string()));
+    assert_eq!(owner("spore_stripe_link"), Some("spore_stripe".to_string()));
+    assert_eq!(
+        owner("spore_stripe_link_eu"),
+        Some("spore_stripe".to_string())
+    );
+    assert_eq!(owner("spore_stripes"), None);
+    assert_eq!(owner("spore_paypal"), None);
+    assert_eq!(owner("app_stripe"), None);
+    assert_eq!(
+        block_on(hypha_apps::spore_enabled(&ports.apps, "spore_stripe_link")),
+        Ok(true)
+    );
+    assert_eq!(
+        block_on(hypha_apps::spore_enabled(&ports.apps, "spore_paypal")),
+        Ok(false)
+    );
+}

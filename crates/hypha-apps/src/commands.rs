@@ -1,7 +1,7 @@
 use hypha_core::{
-    AppId, AuthError, Clock, Ctx, DeliveryId, DeliveryRecord, DeliveryStatus, ErrorCode, EventId,
-    HasOutbox, IdGenerator, OutboxRepo, Page, PageRequest, Random, RepoError, Scope, SealError,
-    Sealed, SecretBox, StoredEvent,
+    AppId, AppKind, AuthError, Clock, Ctx, DeliveryId, DeliveryRecord, DeliveryStatus, ErrorCode,
+    EventId, HasOutbox, IdGenerator, OutboxRepo, Page, PageRequest, Random, RepoError, Scope,
+    SealError, Sealed, SecretBox, StoredEvent,
 };
 use thiserror::Error;
 
@@ -226,6 +226,34 @@ pub struct SporeRegistration {
     pub name: &'static str,
     pub title: &'static str,
     pub scopes: &'static [Scope],
+}
+
+/// The spore a key belongs to: the app of kind spore whose key is `key`, or a prefix of it
+/// ending before an `_` (`spore_stripe` for the provider `spore_stripe_link`). Spore
+/// names never extend one another (the hosts check), so at most one matches; the
+/// longest is tried first. `None` when none is stored.
+pub async fn spore_of<R: AppRepo>(apps: &R, key: &str) -> Result<Option<App>, RepoError> {
+    let mut end = key.len();
+    loop {
+        if let Ok(candidate) = AppKey::new(&key[..end])
+            && candidate.kind() == AppKind::Spore
+            && let Some(app) = apps.get(&candidate).await?
+        {
+            return Ok(Some(app));
+        }
+        match key[..end].rfind('_') {
+            // Not the `_` of `spore_` itself.
+            Some(i) if i > "spore_".len() => end = i,
+            _ => return Ok(None),
+        }
+    }
+}
+
+/// Whether the spore `key` belongs to is on (design note 0030, §3): the one rule routes,
+/// event handlers, payment providers and UI discovery ask. A spore without its app
+/// (not set up, or another build's) is off.
+pub async fn spore_enabled<R: AppRepo>(apps: &R, key: &str) -> Result<bool, RepoError> {
+    Ok(spore_of(apps, key).await?.is_some_and(|app| app.enabled()))
 }
 
 /// Whether a spore's app is set up as this build declares it (a spore's, with its title

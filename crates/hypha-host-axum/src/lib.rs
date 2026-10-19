@@ -136,6 +136,11 @@ macro_rules! deployment {
             > {
                 $crate::__private::hypha_http::router!($crate::PgStorage<$name>)
                     $($(.merge($($routes)::+!(router $crate::PgStorage<$name>)))*)?
+                    // Again after the spores' routes: axum gives the fallback only to routes
+                    // already there, and every error is `{code, error, details}`.
+                    .method_not_allowed_fallback(|| async {
+                        $crate::__private::hypha_http::error::ApiError::method_not_allowed()
+                    })
             }
 
             fn spore_rows() -> ::std::vec::Vec<$crate::__private::hypha_http::routes::openapi::Row> {

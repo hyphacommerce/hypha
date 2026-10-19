@@ -16,6 +16,7 @@ use hypha_spore_core::{HttpError, HttpMethod, HttpRequest, HttpResponse, SporeHo
 use crate::{
     client_ip::ClientIp,
     error::ApiError,
+    extract::{Admin, Caller, Storefront},
     host::HostCalls,
     outbound::{CallError, Method, OutboundCall, OutboundPolicy, check_literal},
     rate_limit::Rule,
@@ -133,8 +134,10 @@ pub const fn route_fits(surface: SporeSurface, path: &str, name: &str) -> bool {
 
 /// Runs a spore's handler behind what every spore route gets (`spore_routes!` wraps
 /// each in this): a public route's rate limit by client address (`Rule::SporePublic`,
-/// before anything is read), then `403 app_disabled` while staff have the spore turned
-/// off.
+/// before anything is read); an admin or storefront route's credentials, checked first
+/// like core's (a stranger gets the 401, and learns nothing of the spore); then
+/// `403 app_disabled` while staff have the spore turned off. The handler authenticates
+/// again for its own ports.
 pub async fn gate<S, H, T>(
     state: SharedState<S>,
     request: Request,
@@ -160,15 +163,33 @@ async fn admit<S: Storage>(
     surface: SporeSurface,
     name: &'static str,
 ) -> Result<(), ApiError> {
-    if surface == SporeSurface::Public {
-        let ClientIp(ip) = ClientIp::from_request_parts(parts, state).await?;
-        crate::rate_limit::enforce(&state.limiter, Rule::SporePublic, &ip).await?;
-    }
+    use hypha_apps::HasApps;
     let key = AppKey::of_spore(name).map_err(ApiError::internal)?;
-    if !spore_enabled(state, &key).await? {
-        return Err(ApiError::app_disabled(&key));
+    let enabled = match surface {
+        SporeSurface::Public => {
+            let ClientIp(ip) = ClientIp::from_request_parts(parts, state).await?;
+            crate::rate_limit::enforce(&state.limiter, Rule::SporePublic, &ip).await?;
+            spore_enabled(state, &key).await?
+        }
+        SporeSurface::Admin => {
+            let caller = Caller::<Admin>::from_request_parts(parts, state).await?;
+            let (ports, _) = caller.authenticate(state).await?;
+            hypha_apps::spore_enabled(ports.apps(), key.as_str())
+                .await
+                .map_err(ApiError::internal)?
+        }
+        SporeSurface::Storefront => {
+            let caller = Caller::<Storefront>::from_request_parts(parts, state).await?;
+            let (ports, _) = caller.authenticate(state).await?;
+            hypha_apps::spore_enabled(ports.apps(), key.as_str())
+                .await
+                .map_err(ApiError::internal)?
+        }
+    };
+    match enabled {
+        true => Ok(()),
+        false => Err(ApiError::app_disabled(&key)),
     }
-    Ok(())
 }
 
 /// The built spore `T` this host runs, for its route handlers (design note 0030, §7):
@@ -184,10 +205,11 @@ pub async fn spore_enabled<S: Storage>(
     state: &AppState<S>,
     key: &AppKey,
 ) -> Result<bool, ApiError> {
-    use hypha_apps::{AppRepo, HasApps};
+    use hypha_apps::HasApps;
     let ports = state.public_ports().await?;
-    let app = ports.apps().get(key).await.map_err(ApiError::internal)?;
-    Ok(app.is_some_and(|a| a.enabled()))
+    hypha_apps::spore_enabled(ports.apps(), key.as_str())
+        .await
+        .map_err(ApiError::internal)
 }
 
 /// `public`, `admin` or `storefront` as a `SporeSurface` (`spore_routes!`'s rows).

@@ -48,7 +48,7 @@ pub struct WorkersStorage<D: Deployment> {
     handlers: HandlersOf<D>,
     payments: ProvidersOf<D>,
     /// The spores themselves, built at setup.
-    spores: D::Spores,
+    spores: hypha_spore_core::BuiltSpores<D::Spores>,
 }
 
 impl<D: Deployment> WorkersStorage<D> {
@@ -119,7 +119,7 @@ impl<D: Deployment> Storage for WorkersStorage<D> {
     type Search<'p> = &'p PgStore<Client>;
     type Handlers = HandlersOf<D>;
     type Payments = ProvidersOf<D>;
-    type Spores = D::Spores;
+    type Spores = hypha_spore_core::BuiltSpores<D::Spores>;
 
     /// Each `ports()` is a new connection: a dispatch step opens one, not one per
     /// delivery.
@@ -150,7 +150,7 @@ impl<D: Deployment> Storage for WorkersStorage<D> {
         &self.payments
     }
 
-    fn spores(&self) -> &D::Spores {
+    fn spores(&self) -> &hypha_spore_core::BuiltSpores<D::Spores> {
         &self.spores
     }
 
