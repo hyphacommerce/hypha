@@ -17,7 +17,7 @@ import { LockClosedIcon, PuzzlePieceIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
 import { PageHeader } from "@/components/page-header";
-import { appState, isPersonalDataScope } from "@/lib/apps";
+import { appState, isBuiltIn, isPersonalDataScope } from "@/lib/apps";
 import { loaded, publicApiUrl, requireStaff, sessionClient } from "@/lib/hypha";
 
 import { InstallButtons } from "./install";
@@ -87,9 +87,12 @@ function AppsTable({ apps }: { apps: AdminSchemas["AppResponse"][] }) {
             <TableRow key={app.key}>
               <TableCell>
                 <VStack gap={0}>
-                  <Link href={`/apps/${app.key}`} weight="medium">
-                    {app.name}
-                  </Link>
+                  <HStack gap={2} vAlign="center">
+                    <Link href={`/apps/${app.key}`} weight="medium">
+                      {app.name}
+                    </Link>
+                    {isBuiltIn(app) && <Badge label="Built in" />}
+                  </HStack>
                   <Text type="supporting" color="secondary">
                     {app.key}
                   </Text>
@@ -100,7 +103,13 @@ function AppsTable({ apps }: { apps: AdminSchemas["AppResponse"][] }) {
               </TableCell>
               <TableCell>
                 <HStack gap={1} wrap="wrap">
-                  {app.grant ? (
+                  {isBuiltIn(app) ? (
+                    <Text type="supporting" color="secondary">
+                      {scopes.length === 1
+                        ? "1 scope, built in"
+                        : `${scopes.length} scopes, built in`}
+                    </Text>
+                  ) : app.grant ? (
                     <Text type="supporting" color="secondary">
                       {scopes.length === 1 ? "1 scope" : `${scopes.length} scopes`}
                     </Text>

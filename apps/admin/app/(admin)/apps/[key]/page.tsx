@@ -17,13 +17,21 @@ import type { ReactNode } from "react";
 
 import { DateTime } from "@/components/date-time";
 import { PageHeader } from "@/components/page-header";
-import { actorLabel, appState, isPersonalDataScope, personalDataLabel } from "@/lib/apps";
+import {
+  actorLabel,
+  appState,
+  isBuiltIn,
+  isPersonalDataScope,
+  personalDataLabel,
+} from "@/lib/apps";
 import { loadExtensions } from "@/lib/app-extensions";
 import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
 
 import { AppActions } from "./app-actions";
 import { AppPageTabs } from "./app-pages";
 import { ReduceAccess } from "./reduce-access";
+import { SporeSettingsForm } from "./spore-settings";
+import { SporeSwitch } from "./spore-switch";
 
 const HISTORY_STATUS: Record<string, { label: string; variant: "success" | "warning" | "error" }> =
   {
@@ -67,7 +75,8 @@ function Panel({
 
 /**
  * One app (design note 0029): what it may do, which personal data it sees, where its
- * events go, and how it was authorized. The app's own pages (`apps.page`,
+ * events go, and how it was authorized. A spore built into the API (design note 0030)
+ * shows its switch and its settings form instead of uninstalling and webhooks. The app's own pages (`apps.page`,
  * `settings.app`, §5) are linked above, each at `/apps/{key}/pages/{id}`.
  */
 export default async function AppPage({ params }: { params: Promise<{ key: string }> }) {
@@ -78,6 +87,11 @@ export default async function AppPage({ params }: { params: Promise<{ key: strin
     loadExtensions(),
   ]);
   const app = loaded(await client.GET("/admin/apps/{key}", { params: { path: { key } } }));
+  const builtIn = isBuiltIn(app);
+  // A spore's settings (design note 0030, §8); one that takes none answers 404.
+  const settings = builtIn
+    ? (await client.GET("/admin/apps/{key}/settings", { params: { path: { key } } })).data
+    : undefined;
   const state = appState(app);
   const scopes = app.grant?.scopes ?? [];
   const personal = scopes.filter(isPersonalDataScope);
@@ -93,7 +107,10 @@ export default async function AppPage({ params }: { params: Promise<{ key: strin
           badges={<Badge label={state.label} variant={state.variant} />}
           description={`${app.key} · ${state.description}`}
           actions={
-            canWrite && (
+            canWrite &&
+            (builtIn ? (
+              <SporeSwitch appKey={app.key} isEnabled={app.enabled} />
+            ) : (
               <AppActions
                 appKey={app.key}
                 name={app.name}
@@ -101,21 +118,38 @@ export default async function AppPage({ params }: { params: Promise<{ key: strin
                 isInstalled={app.installed}
                 isUninstalled={Boolean(app.uninstalled_at)}
               />
-            )
+            ))
           }
         />
 
         <AppPageTabs appKey={app.key} pages={extensions.pages.filter((p) => p.app === app.key)} />
 
+        {settings && (
+          <Panel
+            title="Settings"
+            description="What this store sets for it. Secret fields are kept sealed and never shown again."
+          >
+            <SporeSettingsForm
+              appKey={app.key}
+              schema={settings.schema}
+              settings={settings.settings}
+              canWrite={canWrite}
+            />
+          </Panel>
+        )}
+
         <Panel
           title="Access"
           description={
-            app.grant
-              ? "What the app's tokens may do, at most: approved by staff when it was installed."
-              : "This app has no OAuth grant: it can't call the API, only receive webhooks."
+            builtIn
+              ? "What it acts with, as declared in the build. Turn it off to stop it; its access can't be narrowed."
+              : app.grant
+                ? "What the app's tokens may do, at most: approved by staff when it was installed."
+                : "This app has no OAuth grant: it can't call the API, only receive webhooks."
           }
           action={
             canWrite &&
+            !builtIn &&
             app.grant &&
             app.installed &&
             !app.uninstalled_at &&
@@ -161,32 +195,34 @@ export default async function AppPage({ params }: { params: Promise<{ key: strin
           )}
         </Panel>
 
-        <Panel
-          title="Webhooks"
-          description={
-            app.webhook ? `Events go to ${app.webhook.url}.` : "This app takes no webhooks."
-          }
-          action={
-            app.webhook && (
-              <Button
-                label="See deliveries"
-                variant="secondary"
-                href={`/apps/${app.key}/deliveries`}
-              />
-            )
-          }
-        >
-          {app.webhook &&
-            (app.subscriptions.length === 0 ? (
-              <Badge label="No events" variant="warning" />
-            ) : (
-              <HStack gap={1} wrap="wrap">
-                {app.subscriptions.map((pattern) => (
-                  <Badge key={pattern} label={pattern} />
-                ))}
-              </HStack>
-            ))}
-        </Panel>
+        {!builtIn && (
+          <Panel
+            title="Webhooks"
+            description={
+              app.webhook ? `Events go to ${app.webhook.url}.` : "This app takes no webhooks."
+            }
+            action={
+              app.webhook && (
+                <Button
+                  label="See deliveries"
+                  variant="secondary"
+                  href={`/apps/${app.key}/deliveries`}
+                />
+              )
+            }
+          >
+            {app.webhook &&
+              (app.subscriptions.length === 0 ? (
+                <Badge label="No events" variant="warning" />
+              ) : (
+                <HStack gap={1} wrap="wrap">
+                  {app.subscriptions.map((pattern) => (
+                    <Badge key={pattern} label={pattern} />
+                  ))}
+                </HStack>
+              ))}
+          </Panel>
+        )}
 
         {app.manifest && (
           <MetadataList title="Installed from">

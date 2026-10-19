@@ -838,11 +838,11 @@ pub struct SporeSettingsResponse {
     /// The spore's JSON Schema for the form: scalar fields only (`string`, `integer`,
     /// `number`, `boolean`, with `enum`, lengths and bounds); a secret one is marked
     /// `"x-hypha-secret": true`.
-    #[schema(value_type = Object)]
+    #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     schema: serde_json::Value,
     /// The values as set. A secret field is never shown: it's `{"set": true}` once set,
     /// `{"set": false}` before.
-    #[schema(value_type = Object)]
+    #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     settings: serde_json::Map<String, serde_json::Value>,
     /// When they were last saved; `null` before the first save.
     updated_at: Option<String>,
@@ -900,7 +900,7 @@ pub async fn settings<S: Storage>(
 #[serde(deny_unknown_fields)]
 pub struct SaveSporeSettingsRequest {
     /// The whole form. A secret field left out keeps its value, `null` clears it.
-    #[schema(value_type = Object)]
+    #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     settings: serde_json::Value,
 }
 

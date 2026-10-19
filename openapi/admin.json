@@ -6618,7 +6618,11 @@
         "additionalProperties": false,
         "properties": {
           "settings": {
+            "additionalProperties": {},
             "description": "The whole form. A secret field left out keeps its value, `null` clears it.",
+            "propertyNames": {
+              "type": "string"
+            },
             "type": "object"
           }
         },
@@ -7394,11 +7398,19 @@
             "type": "string"
           },
           "schema": {
+            "additionalProperties": {},
             "description": "The spore's JSON Schema for the form: scalar fields only (`string`, `integer`,\n`number`, `boolean`, with `enum`, lengths and bounds); a secret one is marked\n`\"x-hypha-secret\": true`.",
+            "propertyNames": {
+              "type": "string"
+            },
             "type": "object"
           },
           "settings": {
+            "additionalProperties": {},
             "description": "The values as set. A secret field is never shown: it's `{\"set\": true}` once set,\n`{\"set\": false}` before.",
+            "propertyNames": {
+              "type": "string"
+            },
             "type": "object"
           },
           "updated_at": {

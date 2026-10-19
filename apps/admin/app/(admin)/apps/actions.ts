@@ -50,6 +50,44 @@ export async function narrowGrant(key: string, scopes: AdminSchemas["Scope"][]):
   return {};
 }
 
+/** `settings_invalid`'s `details.errors` (`[{path, message}]`) as messages by field. */
+function fieldProblems(details: unknown): Record<string, string> {
+  const fields: Record<string, string> = {};
+  if (typeof details !== "object" || details === null || !("errors" in details)) return fields;
+  const { errors } = details;
+  if (!Array.isArray(errors)) return fields;
+  for (const problem of errors) {
+    if (typeof problem !== "object" || problem === null) continue;
+    const path: unknown = "path" in problem ? problem.path : undefined;
+    const message: unknown = "message" in problem ? problem.message : undefined;
+    if (typeof path === "string" && path && typeof message === "string") fields[path] = message;
+  }
+  return fields;
+}
+
+/** What saving a spore's settings gave: the form's problems by field, if any. */
+export type SettingsResult = Result & { fields?: Record<string, string> };
+
+/**
+ * Saves a built-in spore's settings (design note 0030, §8). A secret field left out keeps
+ * what's stored; the API seals it and never answers it.
+ */
+export async function saveSporeSettings(
+  key: string,
+  settings: Record<string, unknown>,
+): Promise<SettingsResult> {
+  const client = await sessionClient();
+  const { error } = await client.PUT("/admin/apps/{key}/settings", {
+    params: { path: { key } },
+    body: { settings },
+  });
+  if (error) {
+    return { error: describe(error), fields: fieldProblems(error.details) };
+  }
+  revalidatePath(`/apps/${key}`);
+  return {};
+}
+
 /** Turns an app's webhooks and rate quotes on or off. */
 export async function setAppEnabled(key: string, enabled: boolean): Promise<Result> {
   const client = await sessionClient();

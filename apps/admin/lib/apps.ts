@@ -11,8 +11,26 @@ export type AppState = {
   description: string;
 };
 
-/** Where an app stands: installed through OAuth, made by hand, uninstalled, or off. */
+/** Whether an app is a spore: built into the API rather than a service (design note 0030). */
+export function isBuiltIn(app: Pick<App, "kind">): boolean {
+  return app.kind === "spore";
+}
+
+/** Where an app stands: installed through OAuth, made by hand, built in, uninstalled, or off. */
 export function appState(app: App & { manifest?: { url: string } | null }): AppState {
+  if (isBuiltIn(app)) {
+    return app.enabled
+      ? {
+          label: "Built in",
+          variant: "success",
+          description: "Built into this store's API by its operator.",
+        }
+      : {
+          label: "Off",
+          variant: "neutral",
+          description: "Built in, and turned off: it collects nothing and adds nothing.",
+        };
+  }
   if (app.uninstalled_at) {
     return {
       label: "Uninstalled",

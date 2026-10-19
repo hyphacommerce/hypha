@@ -4904,7 +4904,9 @@ export interface components {
         };
         SaveSporeSettingsRequest: {
             /** @description The whole form. A secret field left out keeps its value, `null` clears it. */
-            settings: Record<string, never>;
+            settings: {
+                [key: string]: unknown;
+            };
         };
         /**
          * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
@@ -5187,12 +5189,16 @@ export interface components {
              *     `number`, `boolean`, with `enum`, lengths and bounds); a secret one is marked
              *     `"x-hypha-secret": true`.
              */
-            schema: Record<string, never>;
+            schema: {
+                [key: string]: unknown;
+            };
             /**
              * @description The values as set. A secret field is never shown: it's `{"set": true}` once set,
              *     `{"set": false}` before.
              */
-            settings: Record<string, never>;
+            settings: {
+                [key: string]: unknown;
+            };
             /** @description When they were last saved; `null` before the first save. */
             updated_at?: string | null;
         };
