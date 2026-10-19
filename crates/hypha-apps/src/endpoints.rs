@@ -140,6 +140,7 @@ pub async fn set_extension_endpoints<S: HasApps + HasExtensionEndpoints>(
 ) -> Result<Vec<ExtensionEndpoint>, CommandError> {
     ctx.require(Scope::AppsWrite)?;
     let found = existing(ports, key).await?;
+    found.require_external()?;
     if found.manifest().is_some() {
         return Err(AppError::EndpointsFromManifest(found.key().clone()).into());
     }

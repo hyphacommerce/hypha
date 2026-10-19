@@ -609,6 +609,15 @@
         "pattern": "^appid_[0-9a-f]{32}$",
         "type": "string"
       },
+      "AppKind": {
+        "description": "Which kind of app: an external service, or a spore built into the API.\n\nKnown values: `app`, `spore`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "app",
+          "spore"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "AppList": {
         "properties": {
           "items": {
@@ -699,8 +708,12 @@
             "type": "boolean"
           },
           "key": {
-            "description": "`app_<name>`.",
+            "description": "`app_<name>`, or `spore_<name>` for a spore.",
             "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AppKind",
+            "description": "An external `app`, or a `spore` built into the API (design note 0030): staff\nonly enable or disable a spore."
           },
           "name": {
             "type": "string"
@@ -736,6 +749,7 @@
         },
         "required": [
           "key",
+          "kind",
           "name",
           "enabled",
           "id",

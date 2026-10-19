@@ -2772,6 +2772,13 @@ export interface components {
          * @example appid_0190f1a2b3c47d8e9f00112233445566
          */
         AppId: string;
+        /**
+         * @description Which kind of app: an external service, or a spore built into the API.
+         *
+         *     Known values: `app`, `spore`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        AppKind: string;
         AppList: {
             /** @description By key. */
             items: components["schemas"]["AppResponse"][];
@@ -2802,8 +2809,13 @@ export interface components {
             id: components["schemas"]["AppId"];
             /** @description Installed through OAuth, with a grant in force. */
             installed: boolean;
-            /** @description `app_<name>`. */
+            /** @description `app_<name>`, or `spore_<name>` for a spore. */
             key: string;
+            /**
+             * @description An external `app`, or a `spore` built into the API (design note 0030): staff
+             *     only enable or disable a spore.
+             */
+            kind: components["schemas"]["AppKind"];
             name: string;
             /** @description Event types it gets: exact (`order.placed`), a kind (`product.*`) or `*`. */
             subscriptions: string[];

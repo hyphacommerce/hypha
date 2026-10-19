@@ -1,7 +1,9 @@
 //! External apps (design note 0016, section 8): every field round trips, the key is
 //! unique, versions hold.
 
-use hypha_apps::{App, AppKey, AppRepo, Grant, HasApps, InstalledManifest, NewApp, Webhook, keys};
+use hypha_apps::{
+    App, AppKey, AppRepo, Grant, HasApps, InstalledManifest, NewApp, NewSpore, Webhook, keys,
+};
 use hypha_core::{
     Actor, AppId, EventRoute, HasBatch, HasOutbox, OutboxRepo, PageRequest, PendingEvent,
     RepoError, Scope, Sealed, StageEvents, Subject, Timestamp, UserId, Version, Versioned,
@@ -18,6 +20,25 @@ pub async fn app_repo<R: AppRepo>(make: impl AsyncFn() -> R) {
     updates(&make().await).await;
     scenario("app: an installed app's manifest, grant and uninstall round trip; by ID");
     installed(&make().await).await;
+    scenario("app: a spore's app round trips, its grant approved by the host");
+    spore(&make().await).await;
+}
+
+async fn spore<R: AppRepo>(repo: &R) {
+    let mut app = App::spore(NewSpore {
+        name: "stripe",
+        id: id_of("spore_stripe"),
+        title: "Stripe",
+        secret: Sealed::from_bytes(vec![6; 40]),
+        scopes: &[Scope::PaymentsWrite, Scope::OrdersWrite],
+        at: Timestamp::from_unix_micros(1_800_000_000_000_000),
+    })
+    .unwrap();
+    repo.insert(&mut app).await.unwrap();
+    let stored = repo.get(&key("spore_stripe")).await.unwrap().unwrap();
+    assert_eq!(stored, app);
+    assert_eq!(stored.grant().map(|g| g.approved_by()), Some(Actor::System));
+    assert_eq!(repo.get_by_id(app.id()).await, Ok(Some(app)));
 }
 
 /// A stable ID per key, so two apps never share one by accident.

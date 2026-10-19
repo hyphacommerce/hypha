@@ -40,6 +40,13 @@ pub enum AppError {
     /// staff set endpoints only for apps made by hand.
     #[error("app {0} registers its extension points in its manifest")]
     EndpointsFromManifest(AppKey),
+    /// A spore is built into the API (design note 0030, SP2): staff enable or disable
+    /// it; its name, scopes and what it implements are the build's.
+    #[error("{0} is built into the API: only enabling or disabling it is staff's")]
+    BuiltIn(AppKey),
+    /// Syncing a spore's registration onto an app that isn't one (a host bug).
+    #[error("{0} is not a spore")]
+    NotASpore(AppKey),
 }
 
 impl ErrorCode for AppError {
@@ -59,6 +66,8 @@ impl ErrorCode for AppError {
             AppError::UnknownExtensionPoint { .. } => "unknown_extension_point",
             AppError::DuplicateExtensionPoint(_) => "duplicate_extension_point",
             AppError::EndpointsFromManifest(_) => "endpoints_from_manifest",
+            AppError::BuiltIn(_) => "app_built_in",
+            AppError::NotASpore(_) => "internal_error",
         }
     }
 }

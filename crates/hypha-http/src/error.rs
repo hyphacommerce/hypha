@@ -1114,13 +1114,14 @@ impl From<hypha_apps::CommandError> for ApiError {
 impl ApiError {
     /// An app's own rules (design notes 0016, 0029): bad input is 422, with every
     /// manifest problem in `details.errors` (`[{"path", "message"}]`); an app that isn't
-    /// installed through OAuth, for uninstalling or narrowing, and staff setting the
-    /// endpoints of one whose manifest registers them, 409.
+    /// installed through OAuth, for uninstalling or narrowing, staff setting the
+    /// endpoints of one whose manifest registers them, and changing a spore beyond
+    /// enabling it (design note 0030), 409.
     fn from_app(e: hypha_apps::AppError) -> Self {
         use hypha_apps::AppError as E;
         let status = match &e {
-            E::NotInstalled | E::EndpointsFromManifest(_) => StatusCode::CONFLICT,
-            E::IncompleteManifest => return Self::internal(e),
+            E::NotInstalled | E::EndpointsFromManifest(_) | E::BuiltIn(_) => StatusCode::CONFLICT,
+            E::IncompleteManifest | E::NotASpore(_) => return Self::internal(e),
             _ => StatusCode::UNPROCESSABLE_ENTITY,
         };
         let details = match &e {
@@ -1537,6 +1538,21 @@ mod tests {
         let e = ApiError::from(hypha_cart::CommandError::Repo(RepoError::StaleVersion));
         assert_eq!(e.status, StatusCode::CONFLICT);
         assert_eq!(e.code, "concurrent_modification");
+    }
+
+    #[test]
+    fn changing_a_spore_beyond_its_switch_is_a_conflict_and_a_spore_key_invalid_input() {
+        let spore = hypha_core::AppKey::of_spore("stripe").unwrap();
+        let e = ApiError::from(hypha_apps::CommandError::App(
+            hypha_apps::AppError::BuiltIn(spore.clone()),
+        ));
+        assert_eq!(e.status, StatusCode::CONFLICT);
+        assert_eq!(e.code, "app_built_in");
+        let e = ApiError::from(hypha_apps::CommandError::App(hypha_apps::AppError::Key(
+            hypha_core::AppKeyError::SporeKey(spore),
+        )));
+        assert_eq!(e.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(e.code, "spore_key_reserved");
     }
 
     #[test]

@@ -3,8 +3,8 @@
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_apps::{
-    App, CreateApp, Grant, HasApps, UpdateApp, WebhookInput, create_app, get_app, get_event,
-    list_apps, list_deliveries, retry_delivery, rotate_app_secret, update_app,
+    App, AppKind, CreateApp, Grant, HasApps, UpdateApp, WebhookInput, create_app, get_app,
+    get_event, list_apps, list_deliveries, retry_delivery, rotate_app_secret, update_app,
 };
 use hypha_core::{
     AppId, DeliveryId, DeliveryRecord, DeliveryStatus, EventId, HasOutbox, OAuthRequestId, Scope,
@@ -66,10 +66,31 @@ impl GrantResponse {
     }
 }
 
+/// Which kind of app: an external service, or a spore built into the API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[schema(as = AppKind)]
+#[serde(rename_all = "snake_case")]
+pub enum AppKindDto {
+    App,
+    Spore,
+}
+
+impl From<AppKind> for AppKindDto {
+    fn from(kind: AppKind) -> Self {
+        match kind {
+            AppKind::App => AppKindDto::App,
+            AppKind::Spore => AppKindDto::Spore,
+        }
+    }
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct AppResponse {
-    /// `app_<name>`.
+    /// `app_<name>`, or `spore_<name>` for a spore.
     key: String,
+    /// An external `app`, or a `spore` built into the API (design note 0030): staff
+    /// only enable or disable a spore.
+    kind: AppKindDto,
     name: String,
     /// A disabled app gets no webhooks and quotes no rates.
     enabled: bool,
@@ -95,6 +116,7 @@ impl AppResponse {
         let (created_at, updated_at) = stamp_times(app.stamps())?;
         Ok(Self {
             key: app.key().to_string(),
+            kind: app.kind().into(),
             name: app.name().to_string(),
             enabled: app.enabled(),
             id: app.id(),

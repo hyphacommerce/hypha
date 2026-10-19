@@ -1,6 +1,7 @@
 use hypha_core::{
-    Actor, AppId, AppKey, CallbackUrl, Event, EventRoute, PendingEvent, Recorded, Recorder, Scope,
-    Sealed, Stamped, Stamps, Subject, Timestamp, Version, Versioned, required_text,
+    Actor, AppId, AppKey, AppKind, CallbackUrl, Event, EventRoute, PendingEvent, Recorded,
+    Recorder, Scope, Sealed, Stamped, Stamps, Subject, Timestamp, Version, Versioned,
+    required_text,
 };
 
 use crate::endpoints::ExtensionEndpoint;
@@ -150,7 +151,9 @@ pub fn event_scope(subject_kind: &str) -> Option<Scope> {
 
 /// An external app (design note 0016, EV11). Made by hand (`create_app`, webhooks
 /// only) or installed through OAuth from its manifest (design note 0029), which gives
-/// it a grant.
+/// it a grant. Or a spore (design note 0030, SP3): Rust built into the API, registered
+/// by the host at startup with the scopes it declares as its grant; staff may enable
+/// or disable it, nothing else (`AppError::BuiltIn`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct App {
     key: AppKey,
@@ -202,6 +205,22 @@ impl Recorded for App {
     }
 }
 
+/// A spore as the host registers it at startup (design note 0030, §3): what the build
+/// says about it.
+pub struct NewSpore<'a> {
+    /// `stripe`, for `spore_stripe`.
+    pub name: &'a str,
+    pub id: AppId,
+    /// Its title in the admin.
+    pub title: &'a str,
+    /// Never handed out: a spore takes no webhooks and signs nothing. Kept so every
+    /// app has one (the column, and a later use such as session tokens).
+    pub secret: Sealed,
+    /// What it acts with (SP2).
+    pub scopes: &'a [Scope],
+    pub at: Timestamp,
+}
+
 /// A new app, checked by `App::new`.
 pub struct NewApp {
     pub key: AppKey,
@@ -234,6 +253,59 @@ impl App {
         };
         app.set_subscriptions(new.subscriptions)?;
         Ok(app)
+    }
+
+    /// A spore, with its declared scopes as its grant (approved by the host: the
+    /// operator chose it by building it in, SP2), recording `app.installed`.
+    pub fn spore(new: NewSpore<'_>) -> Result<Self, AppError> {
+        let mut app = App::new(NewApp {
+            key: AppKey::of_spore(new.name)?,
+            id: new.id,
+            name: new.title.to_string(),
+            secret: new.secret,
+            webhook: None,
+            subscriptions: Vec::new(),
+        })?;
+        app.grant = Some(Grant::new(new.scopes, Actor::System, new.at));
+        app.installed()?;
+        Ok(app)
+    }
+
+    /// Takes a spore's title and scopes as this build declares them, at startup: a
+    /// change of scopes records `app.grant_changed`. Whether it's enabled stays staff's.
+    pub fn sync_spore(
+        &mut self,
+        title: &str,
+        scopes: &[Scope],
+        at: Timestamp,
+    ) -> Result<(), AppError> {
+        self.require_spore()?;
+        self.name = required_text("name", title)?;
+        let current = self.grant.as_ref().map(|g| g.scopes().to_vec());
+        if current.as_deref() != Some(&normalize(scopes)[..]) {
+            self.set_grant(Grant::new(scopes, Actor::System, at));
+        }
+        Ok(())
+    }
+
+    /// `BuiltIn` for a spore: what staff change on apps (name, webhook, secret,
+    /// endpoints, grant) is the build's for a spore.
+    pub fn require_external(&self) -> Result<(), AppError> {
+        match self.kind() {
+            AppKind::App => Ok(()),
+            AppKind::Spore => Err(AppError::BuiltIn(self.key.clone())),
+        }
+    }
+
+    fn require_spore(&self) -> Result<(), AppError> {
+        match self.kind() {
+            AppKind::Spore => Ok(()),
+            AppKind::App => Err(AppError::NotASpore(self.key.clone())),
+        }
+    }
+
+    pub fn kind(&self) -> AppKind {
+        self.key.kind()
     }
 
     /// An app installed from its manifest with the scopes staff approved: its name,
@@ -334,6 +406,7 @@ impl App {
         by: Actor,
         at: Timestamp,
     ) -> Result<(), AppError> {
+        self.require_external()?;
         let current = self.grant.as_ref().ok_or(AppError::NotInstalled)?;
         if let Some(extra) = scopes.iter().find(|s| !current.scopes().contains(s)) {
             return Err(AppError::GrantNotNarrower(*extra));
@@ -364,6 +437,7 @@ impl App {
     /// but `app.uninstalled`, which it's sent last. Its webhook and secret stay for that
     /// delivery; deleting it afterwards removes it for good.
     pub fn uninstall(&mut self, at: Timestamp) -> Result<(), AppError> {
+        self.require_external()?;
         if self.grant.is_none() || self.uninstalled_at.is_some() {
             return Err(AppError::NotInstalled);
         }

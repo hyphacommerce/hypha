@@ -294,6 +294,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "payment_refund_references",
             sql: include_str!("../migrations/0054_payment_refund_references.sql"),
         },
+        Migration {
+            version: 55,
+            name: "spore_keys",
+            sql: include_str!("../migrations/0055_spore_keys.sql"),
+        },
     ],
 };
 

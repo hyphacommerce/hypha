@@ -5,7 +5,7 @@ use hypha_core::{
 };
 use thiserror::Error;
 
-use crate::{App, AppError, AppKey, AppRepo, HasApps, NewApp, Webhook, repo::keys};
+use crate::{App, AppError, AppKey, AppRepo, HasApps, NewApp, NewSpore, Webhook, repo::keys};
 
 /// The prefix of app signing secrets: recognisable in logs and secret scanners. Apps
 /// that came from shipping's rate providers keep the `hypha_shs_` secret they had.
@@ -147,6 +147,12 @@ pub async fn update_app<R: AppRepo>(
 ) -> Result<App, CommandError> {
     ctx.require(Scope::AppsWrite)?;
     let mut app = load(apps, key).await?;
+    // A spore's registrations are the build's: staff only enable or disable it.
+    let changes_registrations =
+        input.name.is_some() || input.webhook.is_some() || input.subscriptions.is_some();
+    if changes_registrations {
+        app.require_external()?;
+    }
     if let Some(name) = &input.name {
         app.rename(name)?;
     }
@@ -177,6 +183,7 @@ pub async fn rotate_app_secret<R: AppRepo>(
 ) -> Result<(App, String), CommandError> {
     ctx.require(Scope::AppsWrite)?;
     let mut app = load(apps, key).await?;
+    app.require_external()?;
     let (secret, sealed) = new_secret(app.key(), random, secrets);
     app.set_secret(sealed);
     apps.update(&mut app).await?;
@@ -188,7 +195,60 @@ pub async fn rotate_app_secret<R: AppRepo>(
 pub async fn delete_app<R: AppRepo>(ctx: &Ctx, apps: &R, key: &str) -> Result<(), CommandError> {
     ctx.require(Scope::AppsWrite)?;
     let app = load(apps, key).await?;
+    app.require_external()?;
     Ok(apps.delete(app.key()).await?)
+}
+
+/// A spore as this build declares it (design note 0030, §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SporeRegistration {
+    /// `stripe`, for `spore_stripe`.
+    pub name: &'static str,
+    pub title: &'static str,
+    pub scopes: &'static [Scope],
+}
+
+/// Makes sure a spore built into this host has its app (at startup, as the host's
+/// `Ctx::system()`): created enabled with its scopes as its grant the first time
+/// (`app.installed`), its title and scopes brought up to date after (`app.grant_changed`
+/// when they changed). Whether it's enabled stays as staff left it. Two hosts starting
+/// at once both end with the one app.
+pub async fn register_spore<R: AppRepo>(
+    ctx: &Ctx,
+    apps: &R,
+    env: &(impl Random + IdGenerator + Clock),
+    secrets: &impl SecretBox,
+    spore: SporeRegistration,
+) -> Result<App, CommandError> {
+    ctx.require(Scope::AppsWrite)?;
+    let key = AppKey::of_spore(spore.name).map_err(AppError::from)?;
+    if apps.get(&key).await?.is_none() {
+        let (_, sealed) = new_secret(&key, env, secrets);
+        let mut app = App::spore(NewSpore {
+            name: spore.name,
+            id: AppId::from_uuid(env.new_uuid()),
+            title: spore.title,
+            secret: sealed,
+            scopes: spore.scopes,
+            at: env.now(),
+        })?;
+        match apps.insert(&mut app).await {
+            Ok(()) => return Ok(app),
+            // Another host registered it first: bring that one up to date below.
+            Err(RepoError::Duplicate(k)) if k == keys::APP_KEY => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    let mut app = apps
+        .get(&key)
+        .await?
+        .ok_or_else(|| CommandError::AppNotFound(key.to_string()))?;
+    let before = app.clone();
+    app.sync_spore(spore.title, spore.scopes, env.now())?;
+    if app != before {
+        apps.update(&mut app).await?;
+    }
+    Ok(app)
 }
 
 /// An app's webhook deliveries, newest event first, only those in `status` when given.

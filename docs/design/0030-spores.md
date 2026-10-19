@@ -119,8 +119,12 @@ actions, the admin's UI targets, the event log) is shared.
 (0029's as-built note removed the `spore_` form).
 
 At startup, after migrations, the host makes sure each built-in spore has its `apps`
-row (`App::spore(key, title, scopes)`, kind `spore`, no manifest URL, no secret, no
-OAuth grant: its grant is the declared scopes), the way it makes the Default location.
+row (`register_spore`: `App::spore`, no manifest, no webhook, no OAuth tokens; its grant
+is the declared scopes, approved by `Actor::System`), the way it makes the Default
+location. The kind is the key's prefix, so `apps` gains no column. The row has a sealed
+secret like every app's, never handed out (nothing of a spore's is signed today). A
+later start with another title or other scopes updates the row (`app.grant_changed`);
+whether it's enabled stays staff's.
 A spore removed from the build keeps its row, marked `missing` and shown as such in
 the admin, so its data and history stay readable and reinstalling it picks them up
 again (Q7).
@@ -529,8 +533,11 @@ app), email senders (already compiled in: they become spores' to add), tax engin
 
 ## 14. Build order
 
-1. `AppKey`/`ProviderKey` take `spore_` keys; `apps.kind`; the startup that creates a
-   spore's row; enable/disable honoured by providers, handlers and UI discovery.
+1. `AppKey`/`ProviderKey` take `spore_` keys; `kind` on apps (from the key);
+   `register_spore`, the command the host's startup calls; staff limited to enabling
+   and disabling a spore (`app_built_in`). *Done.* Left for step 2, where a host first
+   has spores: calling it at startup, the `missing` mark (Q7), and enable/disable
+   honoured by providers, handlers and UI discovery.
 2. Hosts as libraries: `host!` (and `worker!`) with an empty spore list producing
    today's binaries, nested provider and handler tuples, the migration list.
 3. `hypha-spore` facade, the migration check (§5), `spore_routes!`, `SporeUi` and the
