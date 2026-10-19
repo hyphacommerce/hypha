@@ -5,10 +5,12 @@ import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
+import { AppSlot } from "@/components/app-extensions/app-slot";
 import { DateTime } from "@/components/date-time";
 import { PageHeader } from "@/components/page-header";
 import { ProductStatusBadge } from "@/components/status";
 import { type Currencies, formatMoney } from "@/lib/format";
+import { loadExtensions } from "@/lib/app-extensions";
 import { loadCurrencies, loaded, sessionClient } from "@/lib/hypha";
 
 import type { Stock } from "../actions";
@@ -30,18 +32,21 @@ const STOCK_PRELOAD = 500;
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = await sessionClient();
-  const [product, channels, categories, locations, inventory, currencies] = await Promise.all([
-    client.GET("/admin/products/{id}", { params: { path: { id } } }).then(loaded),
-    // Without `channels:read` the page shows no Publishing card.
-    client.GET("/admin/channels"),
-    client.GET("/admin/categories"),
-    // Without `inventory:read`, no Stock column.
-    client.GET("/admin/locations"),
-    // Alongside the product rather than after it: one round trip less, at the price of
-    // a read that goes unused for the rare product with more variants than we preload.
-    client.GET("/admin/products/{id}/inventory", { params: { path: { id } } }),
-    loadCurrencies(),
-  ]);
+  const [product, channels, categories, locations, inventory, currencies, extensions] =
+    await Promise.all([
+      client.GET("/admin/products/{id}", { params: { path: { id } } }).then(loaded),
+      // Without `channels:read` the page shows no Publishing card.
+      client.GET("/admin/channels"),
+      client.GET("/admin/categories"),
+      // Without `inventory:read`, no Stock column.
+      client.GET("/admin/locations"),
+      // Alongside the product rather than after it: one round trip less, at the price of
+      // a read that goes unused for the rare product with more variants than we preload.
+      client.GET("/admin/products/{id}/inventory", { params: { path: { id } } }),
+      loadCurrencies(),
+      // What installed apps add to a product (design note 0029, §5).
+      loadExtensions(),
+    ]);
   const stock = locations.data ? stockOf(product, inventory.data?.items ?? []) : undefined;
 
   return (
@@ -83,6 +88,12 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           categoryTree={categories.data?.items}
           stock={stock}
           locations={locations.data?.items ?? []}
+        />
+
+        <AppSlot
+          extensions={extensions}
+          target="product.details"
+          context={{ product_id: product.id }}
         />
       </VStack>
     </Section>

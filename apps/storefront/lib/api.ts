@@ -170,6 +170,14 @@ export function describe(error: { code: string; error: string }): string {
     case "payment_method_unavailable":
     case "payment_method_not_found":
       return "That payment method can't be used for this order now. Choose another.";
+    case "app_unavailable":
+      return "The payment service didn't answer. Try again in a moment.";
+    case "order_not_payable":
+      return "There's nothing left to pay for this order.";
+    case "order_cancelled":
+      return "This order was cancelled.";
+    case "order_not_found":
+      return "We can't find this order. Open it from its email.";
     default:
       return error.error;
   }

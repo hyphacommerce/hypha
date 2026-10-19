@@ -648,3 +648,67 @@ events, `docs/apps/elements.md`).
   make an authorization request without a PKCE challenge (migration 0052): approving it
   widens the grant and sends the browser to the app's `app_url` (no code: the app then
   gets tokens with the new scopes from `/oauth/authorize`, approved at once).
+
+## As built: the admin's app UI, the storefront's elements, and private apps (§4.1, §5-§7, §10 item 8)
+
+- **Private apps** (§4.1's last bullet): `POST /admin/apps/private` with `{manifest}`
+  (staff sessions only, `apps:write`) checks the manifest as a served one except that
+  `redirect_uris` may be empty (`ManifestSource::Uploaded`), and stores a pending
+  authorization request; it answers `{request, consent_url}`. The app's client ID is
+  `urn:hypha:private:<key>` (`hypha_apps::private_client_id`), kept in the request and
+  as the installed manifest's URL, so no migration: restoring a manifest re-runs its
+  rules for the source its client ID names. Not a URL, so `/oauth/authorize` can't
+  fetch it and `POST /admin/apps/{key}/refresh` refuses it (`409 app_is_private`: upload
+  it again instead). An upload can't take the key of an app installed from a served
+  manifest (`409 app_installed_from_url`); a hand-made app (0016) with the key becomes
+  the private app on approval.
+- **Their credentials:** a private app has no redirect to take a code, so approving its
+  request (`hypha_oauth::approve` → `Approval::Credentials`) issues a token pair at once
+  and `POST /admin/oauth/requests/{id}/approve` answers `{redirect_to: null,
+  credentials: {app, access_token, expires_in, refresh_token, token_endpoint, scopes,
+  app_secret}}` (`Cache-Control: no-store`), shown once like an API key. `app_secret`
+  comes only when a secret was sealed (a new app, or one installed again); an update
+  (the manifest uploaded again, approved) issues a new pair and keeps the secret. The
+  pair is an ordinary OAuth pair: an hour's access token, a 30-day rotating refresh
+  token at `/oauth/token`. Denying a private request answers `redirect_to: null`.
+- **The consent page** is our admin's `/apps/consent?request=` (`apps/admin`): signed
+  out, `proxy.ts` sends it through the login and back (an expired session too: the page
+  names itself in `x-hypha-admin-page`, since a navigation from an app has no referer
+  of ours). It shows the app (icon, publisher, `app_url`, privacy policy), the scopes by
+  area in plain words, personal data apart with the manifest's reasons, the diff against
+  the grant for an installed app, why the staff member can't approve (no `apps:write`,
+  or a scope their role lacks), and expired or answered requests as states. A public
+  app's answer navigates the browser to `redirect_to`; a private app's shows its
+  credentials. `ConsentApp` gained `private`.
+- **Installing from the admin:** the app owns the OAuth flow, so "Install app" opens the
+  app's install route, **`GET <app_url>/install?api=<the API's public base URL>`** (the
+  Stripe and Meilisearch apps serve it), from the address staff type (an app's URL, or
+  its manifest's, whose folder is taken). The admin's `HYPHA_PUBLIC_API_URL` (else
+  `HYPHA_API_URL`) is `api`. "Create private app" uploads a manifest (a file or pasted)
+  and goes to the consent page.
+- **App pages:** `/apps/{key}` links the app's pages; `/apps/{key}/pages/{id}` loads the
+  page's URL with `?origin=<the admin's origin>` (and, after the app navigated, its path
+  appended) in the sandboxed iframe, answered by `@hypha/app-bridge-host`: session
+  tokens through a server action, `navigate` within the app's page, the admin's toasts,
+  the admin's product picker (orders and customers: `unsupported`), the frame's height.
+- **Blocks and actions in place:** one discovery read per page (`GET
+  /admin/app-extensions`, every target, in the page's `Promise.all`); `order.details`,
+  `order.payment` (per payment), `order.fulfillment` (per fulfilment), `product.details`
+  and `customer.details` blocks are fetched by the admin's server (never cached; an app
+  that fails is a one-line note) and rendered by `@hypha/app-blocks/react`; `payment`
+  actions are buttons on each payment. Point actions use the payment routes; the others
+  the actions route; an `input_schema` opens a flat form (string, number, boolean, enum).
+  `RunActionRequest.input` and `PrivateAppRequest.manifest` are typed as free-form
+  objects in the OpenAPI documents.
+- **Storefront:** checkout's `client_widget` or `payment_error` lands on the order's
+  confirmation page (the answer kept in a ten-minute httpOnly cookie), which mounts the
+  app's element (`<HyphaElement>`, its module from `GET
+  /storefront/app-extensions?target=checkout.payment` by tag), shows "Payment received"
+  on `hypha:payment-confirmed`, and on `hypha:error` or a failed start the message with
+  a retry (`POST /storefront/orders/{id}/payment`). A payment still unfinished when the
+  page is opened again offers "Complete payment". `product.block` elements render below
+  the product (static page: elements load in the browser) with `{productId}`, and
+  `order.confirmation` elements on the confirmation with `{orderId}`.
+- **For custom admins:** `docs/apps/admin-integration.md` (discovery, blocks, pages and
+  the bridge, actions, the consent page's contract, the install convention, private
+  apps).

@@ -18,7 +18,9 @@ import type { AdminSchemas } from "@hypha/sdk/admin";
 
 import { PageHeader } from "@/components/page-header";
 import { appState, isPersonalDataScope } from "@/lib/apps";
-import { loaded, sessionClient } from "@/lib/hypha";
+import { loaded, publicApiUrl, requireStaff, sessionClient } from "@/lib/hypha";
+
+import { InstallButtons } from "./install";
 
 /**
  * Apps: everything connected to the store (design note 0029), installed through OAuth or
@@ -26,7 +28,7 @@ import { loaded, sessionClient } from "@/lib/hypha";
  * live too.
  */
 export default async function AppsPage() {
-  const client = await sessionClient();
+  const [client, me] = await Promise.all([sessionClient(), requireStaff()]);
   const result = await client.GET("/admin/apps");
 
   return (
@@ -36,7 +38,10 @@ export default async function AppsPage() {
           title="Apps"
           description="Services connected to your store: what each may do, and what it was sent."
           actions={
-            <Button label="Webhooks and custom apps" variant="secondary" href="/settings/apps" />
+            <>
+              <Button label="Webhooks and custom apps" variant="secondary" href="/settings/apps" />
+              <InstallButtons api={publicApiUrl()} canWrite={me.scopes.includes("apps:write")} />
+            </>
           }
         />
         {result.response.status === 403 ? (
@@ -59,7 +64,7 @@ function AppsTable({ apps }: { apps: AdminSchemas["AppResponse"][] }) {
       <EmptyState
         icon={<PuzzlePieceIcon width={32} />}
         title="No apps yet"
-        description="An app installs from its own install link, where you approve what it may do. To connect your own code, add a custom app."
+        description="Install an app from its address, where you approve what it may do. To connect your own code, create a private app."
         actions={<Button label="Add a custom app" variant="primary" href="/settings/apps" />}
       />
     );

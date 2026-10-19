@@ -5861,7 +5861,11 @@
         "description": "`POST /admin/apps/private`'s body: a private app's manifest, as the JSON its\n`hypha-app.json` would hold.",
         "properties": {
           "manifest": {
+            "additionalProperties": {},
             "description": "The manifest (design note 0029, §4). Checked like a served one, except that\n`redirect_uris` may be empty.",
+            "propertyNames": {
+              "type": "string"
+            },
             "type": "object"
           }
         },
@@ -6545,7 +6549,11 @@
             "description": "The objects it was pressed on."
           },
           "input": {
+            "additionalProperties": {},
             "description": "The form's values when the action has an `input_schema`: an object, passed to\nthe app as is (the app checks it).",
+            "propertyNames": {
+              "type": "string"
+            },
             "type": [
               "object",
               "null"

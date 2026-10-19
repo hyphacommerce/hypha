@@ -4579,7 +4579,9 @@ export interface components {
              * @description The manifest (design note 0029, §4). Checked like a served one, except that
              *     `redirect_uris` may be empty.
              */
-            manifest: Record<string, never>;
+            manifest: {
+                [key: string]: unknown;
+            };
         };
         /** @description A private app waiting for approval. */
         PrivateAppResponse: {
@@ -4814,7 +4816,9 @@ export interface components {
              * @description The form's values when the action has an `input_schema`: an object, passed to
              *     the app as is (the app checks it).
              */
-            input?: Record<string, never> | null;
+            input?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** @description A template's sources (all of them: this replaces the stored ones). */
         SaveNotificationTemplateRequest: {

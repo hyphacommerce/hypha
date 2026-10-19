@@ -17,6 +17,8 @@ const SESSION_COOKIE = "hypha_admin_session";
 const CHALLENGE_COOKIE = "hypha_admin_challenge";
 /** Where to go after signing in again, set when a session expired. */
 const NEXT_COOKIE = "hypha_admin_next";
+/** The request's own path and query, set by `proxy.ts` on the pages it matches. */
+export const PAGE_HEADER = "x-hypha-admin-page";
 
 function apiUrl(): string {
   const url = process.env.HYPHA_API_URL;
@@ -24,6 +26,15 @@ function apiUrl(): string {
     throw new Error("HYPHA_API_URL is not set (see apps/admin/.env.example)");
   }
   return url;
+}
+
+/**
+ * The API's address as apps and browsers reach it (an app's install route takes it,
+ * design note 0029): `HYPHA_PUBLIC_API_URL`, else `HYPHA_API_URL` when the admin calls
+ * the API at its public address anyway.
+ */
+export function publicApiUrl(): string {
+  return (process.env.HYPHA_PUBLIC_API_URL ?? apiUrl()).replace(/\/+$/, "");
 }
 
 /**
@@ -121,7 +132,7 @@ async function readsOfRequest(): Promise<object> {
  * two or three times per page. The request's headers object (one per request, in Next.js
  * and vinext alike) keys the memo instead, so nothing outlives the request.
  */
-function perRequest<T>(load: () => Promise<T>): () => Promise<T> {
+export function perRequest<T>(load: () => Promise<T>): () => Promise<T> {
   // Each loader keeps its own answers, so each map holds one type.
   const answers = new WeakMap<object, Promise<T>>();
   return async () => {
@@ -147,8 +158,14 @@ async function forgetRequestReads() {
  */
 async function sessionExpired(): Promise<never> {
   let back = "/";
-  const referer = (await headers()).get("referer");
-  if (referer) {
+  const h = await headers();
+  // The page itself, where `proxy.ts` names it (pages reached from another site, like
+  // the consent page an app sends the browser to, have no referer of ours).
+  const page = h.get(PAGE_HEADER);
+  const referer = h.get("referer");
+  if (page) {
+    back = page;
+  } else if (referer) {
     try {
       const url = new URL(referer);
       back = url.pathname + url.search;
@@ -324,6 +341,39 @@ export function describe(error: ApiError): string {
       return "Access can only be reduced here. To add a scope, the app asks again and staff approve it.";
     case "app_not_installed":
       return "This app isn't installed, so it has no access to reduce.";
+    case "app_unavailable":
+      return "The app didn't answer. Try again in a moment.";
+    case "app_action_has_point":
+      return "This action runs through its payment route, not as an app action.";
+    case "invalid_extension_context":
+      return "The app's action doesn't fit here. Reload the page.";
+    case "oauth_request_not_found":
+      return "That authorization request doesn't exist. Start the installation again from the app.";
+    case "oauth_request_expired":
+      return "This request expired: requests wait ten minutes. Start again from the app.";
+    case "oauth_request_decided":
+      return "This request was already answered.";
+    case "manifest_invalid":
+      return "The manifest isn't valid.";
+    case "manifest_unreachable":
+      return "The app's manifest couldn't be read.";
+    case "app_installed_from_url":
+      return "An app with this key is installed from its own site; a private app needs another key.";
+    case "app_is_private":
+      return "A private app changes by uploading its manifest again.";
+    case "payment_refused": {
+      const reason =
+        typeof error.details === "object" && error.details !== null
+          ? Reflect.get(error.details, "reason")
+          : undefined;
+      return typeof reason === "string"
+        ? `The provider refused: ${reason}`
+        : "The provider refused.";
+    }
+    case "payment_action_unsupported":
+      return "This payment's provider can't do that.";
+    case "invalid_refund_amount":
+      return "That's more than is left to refund.";
     case "role_name_taken":
       return "Another role already has that name.";
     case "role_scopes_required":

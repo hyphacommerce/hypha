@@ -699,7 +699,7 @@ pub async fn approve_request<S: Storage>(
 pub struct PrivateAppRequest {
     /// The manifest (design note 0029, §4). Checked like a served one, except that
     /// `redirect_uris` may be empty.
-    #[schema(value_type = Object)]
+    #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     manifest: serde_json::Value,
 }
 

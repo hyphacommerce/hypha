@@ -12,7 +12,7 @@ export type AppState = {
 };
 
 /** Where an app stands: installed through OAuth, made by hand, uninstalled, or off. */
-export function appState(app: App): AppState {
+export function appState(app: App & { manifest?: { url: string } | null }): AppState {
   if (app.uninstalled_at) {
     return {
       label: "Uninstalled",
@@ -25,6 +25,13 @@ export function appState(app: App): AppState {
       label: "Off",
       variant: "neutral",
       description: "It gets no webhooks and quotes no rates.",
+    };
+  }
+  if (app.installed && app.manifest?.url.startsWith("urn:hypha:private:")) {
+    return {
+      label: "Private",
+      variant: "success",
+      description: "A private app: its manifest was uploaded to this store.",
     };
   }
   if (app.installed) {
@@ -56,6 +63,49 @@ export function personalDataLabel(scope: string): string {
     default:
       return scope;
   }
+}
+
+/** An area of scopes (`orders`), as people say it. */
+const AREAS: Record<string, string> = {
+  apps: "apps",
+  carts: "carts",
+  catalogs: "catalogs and price lists",
+  categories: "categories",
+  channels: "sales channels",
+  checkout: "checkout",
+  customers: "customers",
+  inventory: "inventory",
+  keys: "API keys",
+  markets: "markets",
+  media: "media files",
+  notifications: "emails",
+  orders: "orders",
+  payments: "payments",
+  pricing: "prices",
+  products: "products",
+  search: "search",
+  shipping: "shipping",
+  staff: "staff",
+  stores: "store details",
+  tax: "taxes",
+  taxes: "taxes",
+  users: "staff",
+};
+
+/** An area's name for a heading: "Orders", "Sales channels". */
+export function areaLabel(area: string): string {
+  const name = AREAS[area] ?? area.replaceAll("_", " ");
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+/** What a scope lets an app do, in plain words: "See orders", "Change products". */
+export function scopeLabel(scope: string): string {
+  if (isPersonalDataScope(scope)) return personalDataLabel(scope);
+  const [area = scope, action = ""] = scope.split(":");
+  const what = AREAS[area] ?? area.replaceAll("_", " ");
+  if (action === "read") return `See ${what}`;
+  if (action === "write") return `See and change ${what}`;
+  return `${action.charAt(0).toUpperCase()}${action.slice(1)} ${what}`;
 }
 
 /** Who did something, for a line of history: "a staff member", "the app itself", … */
