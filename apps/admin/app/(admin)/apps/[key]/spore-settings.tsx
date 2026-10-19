@@ -24,12 +24,26 @@ type Schema = { properties?: Record<string, Property>; required?: string[] };
 
 type Value = string | number | boolean | null;
 
+/** Whether a schema's option (or a saved setting) is a value the form holds. */
+function isValue(value: unknown): value is Value {
+  return (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  );
+}
+
 /** The form's start: each plain field as saved; secrets start empty (typing one replaces it). */
 function initial(schema: Schema, settings: Record<string, unknown>): Record<string, Value> {
   const values: Record<string, Value> = {};
   for (const [name, property] of Object.entries(schema.properties ?? {})) {
     const saved = settings[name];
     if (property["x-hypha-secret"]) values[name] = "";
+    // A choice keeps its option's own type (a number stays a number).
+    else if (property.enum)
+      values[name] =
+        isValue(saved) && property.enum.some((option) => option === saved) ? saved : null;
     else if (property.type === "boolean") values[name] = saved === true;
     else if (property.type === "integer" || property.type === "number")
       values[name] = typeof saved === "number" ? saved : null;
@@ -60,6 +74,8 @@ export function SporeSettingsForm({
   canWrite: boolean;
 }) {
   const [values, setValues] = useState(() => initial(schema, settings));
+  // Secrets the merchant asked to clear: sent as `null` on the next save.
+  const [cleared, setCleared] = useState<ReadonlySet<string>>(new Set());
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
   const [isSaved, setIsSaved] = useState(false);
@@ -72,20 +88,28 @@ export function SporeSettingsForm({
     setIsSaved(false);
   };
 
+  const clear = (name: string) => {
+    setCleared(new Set([...cleared, name]));
+    set(name, "");
+  };
+
   const save = () =>
     startTransition(async () => {
       const body: Record<string, unknown> = {};
       for (const [name] of properties) {
         const value = values[name];
-        // A secret left empty keeps what's saved; a plain field left empty is unset.
-        if (value === "" || value === null) continue;
-        body[name] = value;
+        // A secret asked to be cleared is `null`; one left empty keeps what's saved; a
+        // plain field left empty is unset.
+        if (cleared.has(name) && (value === "" || value === null)) body[name] = null;
+        else if (value === "" || value === null) continue;
+        else body[name] = value;
       }
       const result = await saveSporeSettings(appKey, body);
       setError(result.error);
       setFields(result.fields ?? {});
       if (!result.error) {
         setIsSaved(true);
+        setCleared(new Set());
         setValues(initial(schema, { ...body }));
       }
     });
@@ -98,34 +122,51 @@ export function SporeSettingsForm({
         const isDisabled = !canWrite;
         const value = values[name];
         if (property["x-hypha-secret"]) {
-          const wasSet = isSet(settings[name]);
+          const isClearing = cleared.has(name);
+          const wasSet = isSet(settings[name]) && !isClearing;
+          const description = isClearing
+            ? "Cleared when you save."
+            : wasSet
+              ? "Set. Type a new value to replace it."
+              : "Not set yet.";
           return (
-            <TextInput
-              key={name}
-              label={label}
-              type="password"
-              description={
-                property.description ??
-                (wasSet ? "Set. Type a new value to replace it." : "Not set yet.")
-              }
-              placeholder={wasSet ? "••••••••" : undefined}
-              isRequired={required.has(name) && !wasSet}
-              isDisabled={isDisabled}
-              status={status}
-              value={typeof value === "string" ? value : ""}
-              onChange={(text) => set(name, text)}
-            />
+            <VStack key={name} gap={1}>
+              <TextInput
+                label={label}
+                type="password"
+                description={property.description ?? description}
+                placeholder={wasSet ? "••••••••" : undefined}
+                isRequired={required.has(name) && !wasSet}
+                isDisabled={isDisabled}
+                status={status}
+                value={typeof value === "string" ? value : ""}
+                onChange={(text) => {
+                  if (isClearing) setCleared(new Set([...cleared].filter((n) => n !== name)));
+                  set(name, text);
+                }}
+              />
+              {wasSet && !required.has(name) && canWrite && (
+                <HStack hAlign="end">
+                  <Button label={`Clear ${label}`} size="sm" onClick={() => clear(name)} />
+                </HStack>
+              )}
+            </VStack>
           );
         }
         if (property.enum) {
+          const options = property.enum;
           return (
             <Selector
               key={name}
               label={label}
-              options={property.enum.map((option) => String(option))}
-              value={typeof value === "string" ? value : undefined}
+              options={options.map((option) => String(option))}
+              value={value === null ? undefined : String(value)}
               isDisabled={isDisabled}
-              onChange={(option) => set(name, option)}
+              // Back to the option itself: `2`, not `"2"`.
+              onChange={(text) => {
+                const option = options.find((o) => String(o) === text);
+                set(name, isValue(option) ? option : null);
+              }}
             />
           );
         }
