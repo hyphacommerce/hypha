@@ -49,5 +49,6 @@ mod users;
 
 pub use batch::PgBatch;
 pub use config::{DEFAULT_CONNECT_TIMEOUT, database_config};
+pub use error::spore_repo_error;
 pub use migrate::{CORE, MigrateError, Migration, MigrationSet, migrate};
 pub use store::{Db, PgConnection, PgStore, Queries, StatementCache};

@@ -13,7 +13,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use hypha_core::{Clock, IdGenerator, Random, SealError, Sealed, SecretBox, Timestamp};
+use hypha_apps::{HasSporeSettings, read_spore_settings};
+use hypha_core::{AppKey, Clock, IdGenerator, Random, SealError, Sealed, SecretBox, Timestamp};
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 use uuid::Uuid;
@@ -202,6 +203,36 @@ impl SporeEnv {
                 message: e.message().to_string(),
             })
     }
+}
+
+impl SporeEnv {
+    /// Its settings as the merchant saved them (design note 0030, §8), secret fields
+    /// opened, read into `T` through `ports` (any with `HasSporeSettings`: a request's,
+    /// a handler's). `None` before they're first saved.
+    pub async fn settings<T: DeserializeOwned, P: HasSporeSettings + ?Sized>(
+        &self,
+        ports: &P,
+    ) -> Result<Option<T>, SettingsError> {
+        let key = AppKey::of_spore(self.name).map_err(|e| SettingsError::Read(e.to_string()))?;
+        let values = read_spore_settings(ports, self, &key)
+            .await
+            .map_err(|e| SettingsError::Read(e.to_string()))?;
+        values
+            .map(|v| serde_json::from_value(serde_json::Value::Object(v)))
+            .transpose()
+            .map_err(|e| SettingsError::Shape(e.to_string()))
+    }
+}
+
+/// Why a spore couldn't read its settings.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum SettingsError {
+    /// Storage failed, or a secret didn't open (another `HYPHA_SECRET_KEY`).
+    #[error("cannot read the settings: {0}")]
+    Read(String),
+    /// They don't fit the spore's type (its schema changed since they were saved).
+    #[error("the settings don't fit: {0}")]
+    Shape(String),
 }
 
 impl fmt::Debug for SporeEnv {

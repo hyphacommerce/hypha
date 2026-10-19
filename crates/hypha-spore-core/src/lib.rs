@@ -17,8 +17,8 @@ use hypha_store_postgres::MigrationSet;
 pub mod env;
 
 pub use env::{
-    BoxFuture, HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse, SporeEnv, SporeError,
-    SporeHost, SporeHttp, SporeStartError,
+    BoxFuture, HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse, SettingsError,
+    SporeEnv, SporeError, SporeHost, SporeHttp, SporeStartError,
 };
 
 /// One spore. Built once at startup and kept for the host's life, shared by every

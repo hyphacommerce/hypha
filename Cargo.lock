@@ -1483,6 +1483,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-spore"
+version = "0.1.0"
+dependencies = [
+ "hypha-apps",
+ "hypha-core",
+ "hypha-http",
+ "hypha-order-actions",
+ "hypha-orders",
+ "hypha-payments",
+ "hypha-spore-core",
+ "hypha-store-postgres",
+ "hypha-testkit",
+]
+
+[[package]]
 name = "hypha-spore-core"
 version = "0.1.0"
 dependencies = [

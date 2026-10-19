@@ -256,11 +256,15 @@ impl<C: PgConnection> PgStore<C> {
     }
 
     /// The time writes are stamped with.
-    pub(crate) fn now(&self) -> Timestamp {
+    pub fn now(&self) -> Timestamp {
         self.clock.now()
     }
 
-    pub(crate) async fn conn(&self) -> MutexGuard<'_, C> {
+    /// The request's connection, for a query: `conn.db()` (`PgConnection::db`) queries
+    /// outside a transaction through its statement cache. Public for spores' own
+    /// repositories over their own tables (design note 0030, §5), which implement their
+    /// accessor traits for `PgStore`.
+    pub async fn conn(&self) -> MutexGuard<'_, C> {
         self.conn.lock().await
     }
 

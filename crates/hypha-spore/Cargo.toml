@@ -1,0 +1,32 @@
+[package]
+name = "hypha-spore"
+edition.workspace = true
+# Its own semver (design note 0030, SP6): 0.x, a breaking change on a minor version
+# until 1.0, a changelog entry per release.
+version = "0.1.0"
+license.workspace = true
+description = "Everything a Hypha spore may use (design note 0030, §4): the Spore trait, its environment, settings and UI, the domain ports and commands it calls, and kits for Postgres, routes and tests."
+
+# The facade spores depend on instead of Hypha's internal crates, so internal refactors
+# break spores only when this crate changes. Builds for wasm, like every spore (SP8).
+[dependencies]
+hypha-spore-core = { path = "../hypha-spore-core" }
+hypha-core.workspace = true
+hypha-apps = { path = "../hypha-apps" }
+hypha-payments = { path = "../hypha-payments" }
+hypha-orders = { path = "../hypha-orders" }
+hypha-order-actions = { path = "../hypha-order-actions" }
+hypha-store-postgres = { path = "../hypha-store-postgres" }
+hypha-http = { path = "../hypha-http", optional = true }
+hypha-testkit = { path = "../hypha-testkit", optional = true }
+
+[features]
+# The storage kit: `hypha_spore::postgres`.
+postgres = []
+# The HTTP kit for spore routes: `hypha_spore::http`.
+http = ["dep:hypha-http"]
+# The test kit: `hypha_spore::testing`.
+testing = ["dep:hypha-testkit", "hypha-spore-core/testing"]
+
+[lints]
+workspace = true
