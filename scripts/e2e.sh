@@ -638,6 +638,8 @@ contains "and ready" '"shipping_ready":true'
 echo "## payment methods (design note 0027)"
 METHODS="$BASE/admin/payment-methods"
 step "a provider key that isn't one" 422 invalid_payment_provider -X POST "$METHODS" -H "$JSON" \
+    -d '{"provider":"stripe","name":"Card"}'
+step "a spore this build doesn't have (design note 0030)" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \
     -d '{"provider":"spore_stripe","name":"Card"}'
 step "settings the manual provider doesn't take" 422 invalid_payment_settings -X POST "$METHODS" -H "$JSON" \
     -d '{"provider":"manual","name":"Bank transfer","settings":{"iban":"HR12"}}'
@@ -1346,7 +1348,7 @@ step "an event type that can't be" 422 invalid_subscription -X POST "$BASE/admin
 step "a webhook timeout out of range" 422 invalid_timeout -X POST "$BASE/admin/apps" -H "$JSON" \
     -d '{"key":"app_bad","name":"Bad","webhook":{"url":"https://bad.example.com","timeout_ms":50}}'
 step "list apps" 200 - "$BASE/admin/apps"
-contains "the courier from shipping is one" '"key":"app_courier","name":"Courier","enabled":true'
+contains "the courier from shipping is one" '"key":"app_courier","kind":"app","name":"Courier","enabled":true'
 step "get the app" 200 - "$BASE/admin/apps/app_erp"
 contains "with its webhook, without its secret" "\"webhook\":{\"url\":\"$HOOK_URL\",\"timeout_ms\":2000}"
 step "an unknown app" 404 app_not_found "$BASE/admin/apps/app_none"
