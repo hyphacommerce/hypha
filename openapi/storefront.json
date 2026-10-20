@@ -520,14 +520,14 @@
             "type": "integer"
           },
           "label": {
-            "description": "What to show for it: a `choice` field's label (design note 0033, §9); `null`\nfor every other facet, whose value is its own label.",
+            "description": "What to show for it: a `choice` field's label, \"Yes\" or \"No\" for a `boolean` field\n(design note 0033, §9); `null` for every other facet, whose value is its own label.",
             "type": [
               "string",
               "null"
             ]
           },
           "value": {
-            "description": "As `filter` takes it: a `choice` field's value is its key.",
+            "description": "As `filter` takes it: a `choice` field's value is its key, a `boolean` field's\n`true` or `false`.",
             "type": "string"
           }
         },

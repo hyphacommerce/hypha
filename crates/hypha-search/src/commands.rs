@@ -83,8 +83,8 @@ pub struct Found {
     pub results: SearchResults,
     /// The labels of the facets in `results`, where the merchant set one.
     pub labels: BTreeMap<FacetKey, String>,
-    /// The value labels of `choice` field facets in `results`, by choice key (design
-    /// note 0033, §9: filters use keys).
+    /// The value labels of `choice` and `boolean` field facets in `results`, by stored
+    /// value: a choice's label, "Yes"/"No" (design note 0033, §9: filters use values).
     pub value_labels: BTreeMap<FacetKey, BTreeMap<String, String>>,
 }
 

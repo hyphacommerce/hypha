@@ -143,8 +143,9 @@ pub async fn load_facet_fields<S: HasCustomFieldDefinitions + HasCustomFieldValu
     Ok(fields)
 }
 
-/// The labels of the `choice` field facets among `facets`, by choice key, from their
-/// definitions (filters and documents use keys; labels are for display).
+/// The value labels of the `choice` and `boolean` field facets among `facets`: a choice's
+/// label by its key, from its definition, and "Yes"/"No" for `true`/`false` (filters and
+/// documents use the stored values; labels are for display).
 pub async fn choice_labels<S: HasCustomFieldDefinitions>(
     ports: &S,
     facets: &[FacetKey],
@@ -162,14 +163,24 @@ pub async fn choice_labels<S: HasCustomFieldDefinitions>(
         let FacetKey::Field(field) = key else {
             continue;
         };
-        for definition in definitions.iter().filter(|d| {
-            facet_field(d)
-                && d.field_type().base() == BaseType::Choice
-                && d.field_key().to_string() == *field
-        }) {
-            let entry = labels.entry(key.clone()).or_default();
-            for choice in definition.validations().choices() {
-                entry.insert(choice.key.clone(), choice.label.clone());
+        for definition in definitions
+            .iter()
+            .filter(|d| facet_field(d) && d.field_key().to_string() == *field)
+        {
+            match definition.field_type().base() {
+                BaseType::Choice => {
+                    let entry = labels.entry(key.clone()).or_default();
+                    for choice in definition.validations().choices() {
+                        entry.insert(choice.key.clone(), choice.label.clone());
+                    }
+                }
+                // Documents hold `true`/`false`; shoppers read a yes or no.
+                BaseType::Boolean => {
+                    let entry = labels.entry(key.clone()).or_default();
+                    entry.insert("true".to_string(), "Yes".to_string());
+                    entry.insert("false".to_string(), "No".to_string());
+                }
+                _ => {}
             }
         }
     }

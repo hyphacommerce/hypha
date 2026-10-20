@@ -17,6 +17,13 @@ export type SearchCatalog = {
   vendors: Counted[];
   productTypes: Counted[];
   tags: Counted[];
+  /**
+   * Custom fields search can filter by (design note 0033, §9): product and variant
+   * fields that are filterable, readable by storefronts, and text, choice, true/false or
+   * integer (or a list of those). `key` is the facet's (`field.custom.material`); values
+   * are those in use, a choice's by its label.
+   */
+  fields: { key: string; name: string; count: number; values: Counted[] }[];
   /** How many products the choices come from, and whether the store has more. */
   scanned: number;
   hasMore: boolean;
@@ -44,6 +51,51 @@ class Tally {
       (a, b) => b.count - a.count || a.value.localeCompare(b.value),
     );
   }
+}
+
+/** Field types search builds facets from (`hypha_search::facet_field`). */
+const FACET_TYPES = new Set(["text", "choice", "boolean", "integer"]);
+/** Values in use read per field: enough for the preview's sample. */
+const FIELD_VALUES = 50;
+
+async function facetFields(client: Client): Promise<SearchCatalog["fields"]> {
+  const { data } = await client.GET("/admin/custom-field-definitions");
+  const eligible = (data?.items ?? []).filter(
+    (d) =>
+      (d.owner_type === "product" || d.owner_type === "variant") &&
+      d.capabilities.filterable &&
+      d.access.storefront === "read" &&
+      FACET_TYPES.has(d.type.replace(/^list\./, "")),
+  );
+  return Promise.all(
+    eligible.map(async (d) => {
+      const { data: used } = await client.GET(
+        "/admin/custom-field-definitions/{id}/values-in-use",
+        {
+          params: { path: { id: d.id }, query: { limit: FIELD_VALUES } },
+        },
+      );
+      // What shoppers see: a choice's label, a yes or no (as search labels them).
+      const labels = new Map<string, string>(
+        d.type === "boolean"
+          ? [
+              ["true", "Yes"],
+              ["false", "No"],
+            ]
+          : (d.validations.choices ?? []).map((c) => [c.key, c.label]),
+      );
+      const values = (used?.items ?? []).map(({ value, owners }) => {
+        const text = typeof value === "string" ? value : JSON.stringify(value);
+        return { value: labels.get(text) ?? text, count: owners };
+      });
+      return {
+        key: `field.${d.field}`,
+        name: d.name,
+        count: values.reduce((n, v) => n + v.count, 0),
+        values,
+      };
+    }),
+  );
 }
 
 export async function loadSearchCatalog(client: Client): Promise<SearchCatalog> {
@@ -90,6 +142,7 @@ export async function loadSearchCatalog(client: Client): Promise<SearchCatalog> 
   }
 
   return {
+    fields: await facetFields(client),
     options: optionNames.sorted().map(({ value, count }) => ({
       name: value,
       count,

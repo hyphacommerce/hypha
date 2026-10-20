@@ -1230,7 +1230,15 @@ mod fields {
     #[test]
     fn field_facets_count_filter_and_label_choices() {
         let w = world();
-        set_facets(&w, &["field.custom.material", "field.custom.fit"]).unwrap();
+        set_facets(
+            &w,
+            &[
+                "field.custom.material",
+                "field.custom.fit",
+                "field.custom.organic",
+            ],
+        )
+        .unwrap();
         let material = FacetKey::Field("custom.material".to_string());
         let fit = FacetKey::Field("custom.fit".to_string());
         let found = w
@@ -1258,6 +1266,11 @@ mod fields {
             Some(&"Slim fit".to_string())
         );
         assert!(!found.value_labels.contains_key(&material));
+        let organic = FacetKey::Field("custom.organic".to_string());
+        assert_eq!(
+            found.value_labels.get(&organic).and_then(|l| l.get("true")),
+            Some(&"Yes".to_string())
+        );
     }
 
     #[test]

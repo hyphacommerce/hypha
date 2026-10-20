@@ -21,7 +21,10 @@ import type { Counted, SearchCatalog } from "./catalog";
 
 type Settings = AdminSchemas["SearchSettingsResponse"];
 
-/** A facet as saved: `option.<name>`, `vendor`, `product_type` or `tag`, and its label. */
+/**
+ * A facet as saved: `option.<name>`, `field.<namespace>.<key>`, `vendor`,
+ * `product_type` or `tag`, and its label.
+ */
 type Facet = { key: string; label: string };
 
 /** Split listings by at most this many options (the API's limit). */
@@ -30,10 +33,13 @@ const MAX_SPLIT = 3;
 const MAX_FACETS = 20;
 
 const OPTION = "option.";
+/** A custom field's facet: `field.<namespace>.<key>` (design note 0033, §9). */
+const FIELD = "field.";
 
 /** What a facet filters by, in the merchant's words. */
 function kindOf(key: string): string {
-  return key.startsWith(OPTION) ? "Option" : "Product field";
+  if (key.startsWith(OPTION)) return "Option";
+  return key.startsWith(FIELD) ? "Custom field" : "Product field";
 }
 
 /**
@@ -49,6 +55,7 @@ function candidates(catalog: SearchCatalog, saved: Facet[]) {
       count: o.count,
       values: o.values,
     })),
+    ...catalog.fields,
     { key: "vendor", name: "Vendor", count: sum(catalog.vendors), values: catalog.vendors },
     {
       key: "product_type",
@@ -62,7 +69,11 @@ function candidates(catalog: SearchCatalog, saved: Facet[]) {
     if (!list.some((c) => same(c.key, facet.key))) {
       list.push({
         key: facet.key,
-        name: facet.key.startsWith(OPTION) ? facet.key.slice(OPTION.length) : facet.key,
+        name: facet.key.startsWith(OPTION)
+          ? facet.key.slice(OPTION.length)
+          : facet.key.startsWith(FIELD)
+            ? facet.key.slice(FIELD.length)
+            : facet.key,
         count: 0,
         values: [],
       });

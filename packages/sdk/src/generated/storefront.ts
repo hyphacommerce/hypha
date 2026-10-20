@@ -637,11 +637,14 @@ export interface components {
              */
             count: number;
             /**
-             * @description What to show for it: a `choice` field's label (design note 0033, §9); `null`
-             *     for every other facet, whose value is its own label.
+             * @description What to show for it: a `choice` field's label, "Yes" or "No" for a `boolean` field
+             *     (design note 0033, §9); `null` for every other facet, whose value is its own label.
              */
             label?: string | null;
-            /** @description As `filter` takes it: a `choice` field's value is its key. */
+            /**
+             * @description As `filter` takes it: a `choice` field's value is its key, a `boolean` field's
+             *     `true` or `false`.
+             */
             value: string;
         };
         /**

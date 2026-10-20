@@ -403,7 +403,17 @@ export function valueOf(definition: Definition, input: FieldInput, currencies: C
   }
 }
 
-const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+/** `value` as JSON with every object's keys sorted: the API stores values as jsonb,
+ *  which hands objects back in its own key order (`{unit, value}` for `{value, unit}`). */
+function canonical(value: unknown): string {
+  return JSON.stringify(value ?? null, (_key, v: unknown) =>
+    v !== null && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v,
+  );
+}
+
+const same = (a: unknown, b: unknown) => canonical(a) === canonical(b);
 
 /**
  * What saving `inputs` sends (§4): the merge patch of the fields that changed from
