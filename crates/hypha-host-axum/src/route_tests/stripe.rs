@@ -268,9 +268,8 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
         let (_, path, key, form) = &fake.seen[0];
         assert_eq!(path, "/v1/payment_intents");
         assert_eq!(
-            key,
-            &format!("{payment}:manual"),
-            "Hypha's payment ID (and the capture mode) is Stripe's idempotency key"
+            key, &payment,
+            "Hypha's payment ID is Stripe's idempotency key"
         );
         assert!(
             form.contains("capture_method=manual") && form.contains("amount="),
@@ -471,6 +470,26 @@ async fn an_order_cancelled_cancels_its_intent_at_stripe() {
             .iter()
             .all(|(_, _, key, form)| key.ends_with(":refund-after-void")
                 && form.contains("payment_intent=pi_1"))
+    );
+    drop(fake);
+
+    // A late authorization (manual capture) for the voided payment: the hold is released.
+    let capturable = json!({ "id": "pi_1", "amount_capturable": 3000, "metadata": metadata });
+    let (status, outcome) = deliver(
+        &app,
+        "evt_late_auth",
+        "payment_intent.amount_capturable_updated",
+        capturable,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    let fake = fake_state.lock().unwrap();
+    assert!(
+        fake.seen.iter().any(|(m, p, key, _)| m == "POST"
+            && p == "/v1/payment_intents/pi_1/cancel"
+            && key.ends_with(":cancel-after-void")),
+        "{:?}",
+        fake.seen
     );
 }
 

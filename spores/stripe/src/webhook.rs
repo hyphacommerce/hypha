@@ -263,10 +263,13 @@ pub async fn receive<S: Storage>(
         }
         .await;
         match found {
-            // No such intent at Stripe: not one of this store's.
-            Err(e) if e.status == 404 => Err(e.message),
-            // Anything else (Stripe down, a key rotated or without refunds:read) may
-            // pass: answering 500 has Stripe deliver it again, so the refund isn't lost.
+            // No such intent at Stripe (not one of this store's), or a request Stripe
+            // will never take: retrying can't help. A later refund of the charge reports
+            // every refund again, each counted once.
+            Err(e) if e.status == 404 || e.status == 400 => Err(e.message),
+            // What can pass (Stripe down or rate limited, a key rotated or without
+            // refunds:read until the merchant saves the new one): 500, so Stripe delivers
+            // it again and the refund isn't lost.
             Err(e) => {
                 hypha_spore::tracing::warn!(event = %event.id, "reading a refund at Stripe failed: {}", e.message);
                 return answer(
@@ -330,21 +333,32 @@ pub async fn receive<S: Storage>(
                     WebhookOutcome::rejected("couldn't record it; try again"),
                 );
             }
-            // Paid at Stripe after Hypha voided it (the order was cancelled while the
-            // shopper confirmed, and the cancel came too late at Stripe): the buyer was
-            // charged for an order that's gone, so the money goes back.
+            // Taken or held at Stripe after Hypha voided it (the order was cancelled while
+            // the shopper confirmed, and the cancel came too late at Stripe): the money
+            // goes back (a payment refunded, an authorization released). Not done (Stripe
+            // down, no key): 500, so Stripe delivers it again and it's tried again.
             Err(CommandError::Payment(PaymentError::InvalidTransition { from, .. }))
-                if report.kind == PaymentEventKind::Paid
-                    && matches!(from, PaymentStatus::Voided | PaymentStatus::Failed) =>
+                if matches!(
+                    report.kind,
+                    PaymentEventKind::Paid | PaymentEventKind::Authorized
+                ) && matches!(from, PaymentStatus::Voided | PaymentStatus::Failed) =>
             {
-                let refunded = refund_unwanted(stripe, &settings, &report).await;
+                let undone = undo_unwanted(stripe, &settings, &report).await;
                 hypha_spore::tracing::warn!(
                     event = %event.id,
                     payment = %report.payment,
-                    refunded,
-                    "a payment succeeded at Stripe after Hypha {from} it: refunded at Stripe"
+                    undone,
+                    "Stripe took or held money for a payment Hypha {from}: given back at Stripe"
                 );
-                refused.get_or_insert_with(|| format!("payment {from}: refunded at Stripe"));
+                if !undone {
+                    return answer(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        WebhookOutcome::rejected(
+                            "couldn't give the money back at Stripe; try again",
+                        ),
+                    );
+                }
+                refused.get_or_insert_with(|| format!("payment {from}: given back at Stripe"));
             }
             // A move the payment can't make (voided already, …): retrying won't help.
             Err(e) => {
@@ -367,10 +381,11 @@ pub async fn receive<S: Storage>(
     }
 }
 
-/// Gives back a payment Stripe took for a Hypha payment that's voided or failed (an
-/// order cancelled while the shopper confirmed), once (keyed by the payment): whether
-/// Stripe took the refund.
-async fn refund_unwanted(stripe: &Stripe, settings: &Settings, report: &Report) -> bool {
+/// Gives back what Stripe took or holds for a Hypha payment that's voided or failed (an
+/// order cancelled while the shopper confirmed): a payment refunded, an authorization's
+/// intent cancelled, once each (keyed by the payment). Whether Stripe did it (an intent
+/// already canceled or refunded counts).
+async fn undo_unwanted(stripe: &Stripe, settings: &Settings, report: &Report) -> bool {
     let Some(secret_key) = settings.secret_key.as_deref() else {
         return false;
     };
@@ -379,12 +394,31 @@ async fn refund_unwanted(stripe: &Stripe, settings: &Settings, report: &Report) 
         base: &stripe.api_base,
         key: secret_key,
     };
-    let params = [
-        ("payment_intent", report.reference.as_str().into()),
-        ("reason", "requested_by_customer".into()),
-    ];
-    let key = format!("{}:refund-after-void", report.payment);
-    client.create_refund(&params, &key).await.is_ok()
+    let done = match report.kind {
+        PaymentEventKind::Authorized => {
+            let key = format!("{}:cancel-after-void", report.payment);
+            client
+                .cancel_payment_intent(&report.reference, &key)
+                .await
+                .map(|_| ())
+        }
+        _ => {
+            let params = [
+                ("payment_intent", report.reference.as_str().into()),
+                ("reason", "requested_by_customer".into()),
+            ];
+            let key = format!("{}:refund-after-void", report.payment);
+            client.create_refund(&params, &key).await.map(|_| ())
+        }
+    };
+    match done {
+        Ok(()) => true,
+        // Canceled or refunded already (a retry after Stripe did it): done.
+        Err(e) => {
+            e.code.as_deref() == Some("charge_already_refunded")
+                || e.message.contains("status of canceled")
+        }
+    }
 }
 
 /// What a report says, hashed: a key reused for another report is refused, as an

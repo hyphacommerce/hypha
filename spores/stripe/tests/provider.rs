@@ -137,7 +137,7 @@ fn a_start_creates_one_intent_keyed_by_the_payment_and_answers_the_element() {
     assert_eq!(header(create, "authorization"), Some("Bearer sk_test_key"));
     assert_eq!(
         header(create, "idempotency-key"),
-        Some(format!("{}:manual", payment_id()).as_str())
+        Some(payment_id().to_string().as_str())
     );
     let body = String::from_utf8(create.body.clone()).unwrap();
     for part in [
@@ -275,4 +275,34 @@ fn a_payment_without_an_intent_is_refused_without_calling_stripe() {
     ));
     assert!(fake.requests().is_empty());
     assert_eq!(key().to_string(), "spore_stripe");
+}
+
+#[test]
+fn a_start_after_the_capture_mode_changed_finds_the_payments_intent() {
+    // Stripe refuses the payment's key with other parameters; the intent is found by its
+    // metadata instead of a second one being made.
+    let (fake, http) = Fake::new(|request| {
+        if request.url.contains("/search") {
+            (
+                200,
+                json!({ "object": "search_result", "data": [
+                { "id": "pi_first", "amount": 1250, "currency": "eur", "status": "requires_payment_method", "client_secret": "pi_first_secret" }
+            ], "has_more": false }),
+            )
+        } else {
+            (
+                400,
+                json!({ "error": { "type": "idempotency_error", "message": "Keys for idempotent requests can only be used with the same parameters" } }),
+            )
+        }
+    });
+    let started = block_on(provider(http).start(&request(configured()))).unwrap();
+    assert_eq!(started.reference.as_deref(), Some("pi_first"));
+    let sent = fake.requests();
+    assert_eq!(sent.len(), 2);
+    assert!(
+        sent[1].url.contains("/v1/payment_intents/search?query="),
+        "{}",
+        sent[1].url
+    );
 }

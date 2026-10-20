@@ -49,8 +49,8 @@ impl StripeProvider {
     }
 
     /// The PaymentIntent for a payment: Stripe answers a create with the same
-    /// idempotency key (Hypha's payment ID and the capture mode) with the intent it made
-    /// the first time, so a start asked again (the shopper reloading) charges once.
+    /// idempotency key (Hypha's payment ID) with the intent it made the first time, so a
+    /// start asked again (the shopper reloading) charges once.
     async fn intent_for(
         &self,
         payment: &PaymentRequest,
@@ -86,16 +86,23 @@ impl StripeProvider {
                 ]),
             ),
         ];
-        // Stripe answers a key reused with other parameters with a refusal for 24 hours:
-        // the capture mode (the merchant may switch it while a shopper pays) is in the
-        // key, so a start after a switch makes a new intent rather than failing. The
-        // amount and the buyer's email don't change for a payment.
-        let key = format!("{}:{capture}", payment.payment);
-        let intent = self
-            .client(secret_key)
-            .create_payment_intent(&params, &key)
+        // One intent per payment, whatever happens: the key is the payment's ID. A start
+        // after the merchant switched the capture mode sends other parameters under it,
+        // which Stripe refuses (`idempotency_error`): the payment's intent is then found by
+        // its metadata, and keeps the mode it was made with.
+        let client = self.client(secret_key);
+        let intent = match client
+            .create_payment_intent(&params, &payment.payment.to_string())
             .await
-            .map_err(|e| Self::failed(stripe_reason(&e)))?;
+        {
+            Ok(intent) => intent,
+            Err(e) if e.kind == "idempotency_error" => client
+                .find_payment_intent(&payment.payment.to_string())
+                .await
+                .map_err(|e| Self::failed(stripe_reason(&e)))?
+                .ok_or_else(|| Self::failed(stripe_reason(&e)))?,
+            Err(e) => return Err(Self::failed(stripe_reason(&e))),
+        };
         if intent.status == "canceled" {
             return Err(Self::failed(
                 "this payment's PaymentIntent was canceled: start a new payment",

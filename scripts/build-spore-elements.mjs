@@ -7,11 +7,15 @@ import { join } from "node:path";
 
 import { build } from "vite-plus";
 
-const root = join(import.meta.dirname, "..", "spores");
+const repo = join(import.meta.dirname, "..");
+const root = join(repo, "spores");
 const check = process.argv.includes("--check");
 
 async function bundle(entry) {
   const result = await build({
+    // The checkout's root, whatever the working directory: the output names paths
+    // relative to it, so a build from anywhere gives the same bytes.
+    root: repo,
     configFile: false,
     logLevel: "silent",
     build: {
@@ -19,6 +23,8 @@ async function bundle(entry) {
       minify: true,
       target: "es2022",
       lib: { entry, formats: ["es"], fileName: "element" },
+      // A library's ES output keeps its whitespace unless told: this one is served.
+      rolldownOptions: { output: { minify: true, comments: false } },
     },
   });
   const outputs = (Array.isArray(result) ? result : [result]).flatMap((r) => r.output);

@@ -258,7 +258,7 @@ export class StripePayment extends HTMLElement {
     this.#error.textContent = "";
     // Whether the shopper may press again on this intent. A declined card leaves it
     // waiting for another (Hypha's payment stays pending until the intent is over), so
-    // the shopper tries another card right here.
+    // the shopper tries another card right here; other refusals end it.
     let retry = true;
     try {
       const submitted = await elements.submit();
@@ -270,7 +270,17 @@ export class StripePayment extends HTMLElement {
         confirmParams: { return_url: this.#props.return_url ?? location.href },
         redirect: "if_required",
       });
-      if (result.error) return this.#fail(result.error.message ?? "The payment didn't go through.");
+      if (result.error) {
+        // A declined card or a field to fix: the shopper tries again here. Anything else
+        // (the intent canceled with its order, paid in another tab) can't succeed here.
+        const type = result.error.type;
+        retry = type === "card_error" || type === "validation_error";
+        return this.#fail(
+          retry
+            ? (result.error.message ?? "The payment didn't go through.")
+            : "This payment can't go on here: reload the page to start again.",
+        );
+      }
       const status = result.paymentIntent?.status;
       if (status === "succeeded" || status === "processing" || status === "requires_capture") {
         retry = false;
