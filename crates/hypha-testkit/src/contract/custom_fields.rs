@@ -10,9 +10,9 @@ use hypha_core::{
     StoredEvent, VariantId, Version, Versioned,
 };
 use hypha_custom_fields::{
-    Access, Capabilities, CustomFieldDefinition, DefinitionRepo, DefinitionSpec, FieldChange,
-    FieldType, FieldValue, HasCustomFieldDefinitions, HasCustomFieldValues, ItemsChange,
-    ItemsProblem, ItemsResult, Namespace, Owner, OwnerType, RawValidations,
+    Access, Capabilities, CustomFieldDefinition, DefinitionChange, DefinitionRepo, DefinitionSpec,
+    FieldChange, FieldType, FieldValue, HasCustomFieldDefinitions, HasCustomFieldValues,
+    ItemsChange, ItemsProblem, ItemsResult, Namespace, Owner, OwnerType, RawValidations,
     StageCustomFieldDefinitions, StageCustomFieldValues, ValueCount, ValueRepo, ValueRow,
     fields_updated, keys,
 };
@@ -102,6 +102,8 @@ where
     definition_batch(&make().await).await;
     scenario("custom field definition: removing an app removes its namespace's, with values");
     app_removal(&make().await).await;
+    scenario("custom field definition: values reindexed in its batch when unique turns on/off");
+    unique_reindex(&make().await).await;
 }
 
 /// Stores the app `key`, whose namespace definitions then use.
@@ -396,6 +398,107 @@ where
     );
 }
 
+/// `definition` with `unique` set as given (`definition` makes text unique).
+fn with_unique(mut definition: CustomFieldDefinition, unique: bool) -> CustomFieldDefinition {
+    let capabilities = Capabilities {
+        unique,
+        ..definition.capabilities()
+    };
+    definition
+        .change(DefinitionChange {
+            capabilities: Some(capabilities),
+            ..Default::default()
+        })
+        .unwrap();
+    definition
+}
+
+/// Stages `definition` changed to `unique` and every stored value of it reindexed
+/// under the change, as `update_definition` does.
+async fn stage_unique<S>(
+    ports: &S,
+    definition: &mut CustomFieldDefinition,
+    unique: bool,
+) -> S::Batch
+where
+    S: HasCustomFieldValues + HasBatch<Batch: StageCustomFieldDefinitions + StageCustomFieldValues>,
+{
+    let mut changed = with_unique(definition.clone(), unique);
+    let stored = ports
+        .custom_field_values()
+        .page(definition.id(), None, PageLimit::new(100).unwrap())
+        .await
+        .unwrap();
+    let mut batch = ports.batch();
+    batch.update_custom_field_definition(&mut changed);
+    for value in stored.items {
+        let parsed = FieldValue::from_stored(changed.field_type(), &value.value).unwrap();
+        let owner = Owner::from_parts(changed.owner_type(), value.owner, value.owner_parent);
+        batch.reindex_custom_field_value(ValueRow::new(&changed, &owner, &parsed), value.version);
+    }
+    *definition = changed;
+    batch
+}
+
+async fn unique_reindex<S>(ports: &S)
+where
+    S: HasCustomFieldDefinitions
+        + HasCustomFieldValues
+        + HasBatch<Batch: StageCustomFieldDefinitions + StageCustomFieldValues>,
+{
+    let repo = ports.custom_field_definitions();
+    let values = ports.custom_field_values();
+    let mut erp = with_unique(
+        definition(1, OwnerType::Customer, "custom", "erp", "text"),
+        false,
+    );
+    repo.insert(&mut erp).await.unwrap();
+    let write = async |d: &CustomFieldDefinition, owner: Owner, json: Value| {
+        let mut batch = ports.batch();
+        batch.set_custom_field_value(row(d, &owner, json), None);
+        ports.commit(batch).await
+    };
+    write(&erp, customer(1), json!("A-1")).await.unwrap();
+    write(&erp, customer(2), json!("B-2")).await.unwrap();
+    assert_eq!(values.find_unique(erp.id(), "a-1").await, Ok(None));
+
+    let batch = stage_unique(ports, &mut erp, true).await;
+    ports.commit(batch).await.unwrap();
+    assert_eq!(repo.get(erp.id()).await, Ok(Some(erp.clone())));
+    let found = values.find_unique(erp.id(), "a-1").await.unwrap().unwrap();
+    assert_eq!(
+        (found.owner, found.value, found.version),
+        (customer(1).id(), json!("A-1"), Version::new(1)),
+        "the value and its version stay"
+    );
+    assert_eq!(
+        write(&erp, customer(3), json!("a-1")).await,
+        Err(RepoError::Duplicate(keys::CUSTOM_FIELD_UNIQUE_VALUE)),
+        "a value held before unique turned on clashes"
+    );
+
+    // A value changed since it was read: the reindex is stale, nothing is written.
+    write(&erp, customer(2), json!("C-3")).await.unwrap();
+    let mut batch = ports.batch();
+    batch.reindex_custom_field_value(row(&erp, &customer(2), json!("C-3")), Version::new(1));
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+
+    // Turning it off clears what unique compares.
+    let batch = stage_unique(ports, &mut erp, false).await;
+    ports.commit(batch).await.unwrap();
+    assert_eq!(values.find_unique(erp.id(), "a-1").await, Ok(None));
+    write(&erp, customer(3), json!("a-1")).await.unwrap();
+
+    // Owners sharing a value: turning unique on fails as a whole.
+    let batch = stage_unique(ports, &mut erp.clone(), true).await;
+    assert_eq!(
+        ports.commit(batch).await,
+        Err(RepoError::Duplicate(keys::CUSTOM_FIELD_UNIQUE_VALUE))
+    );
+    assert_eq!(repo.get(erp.id()).await, Ok(Some(erp.clone())));
+    assert_eq!(values.find_unique(erp.id(), "c-3").await, Ok(None));
+}
+
 /// Runs every value scenario, each on fresh ports from `make`.
 pub async fn custom_field_values<S>(make: impl AsyncFn() -> S)
 where
@@ -410,6 +513,8 @@ where
     value_versions(&make().await).await;
     scenario("custom field value: a unique value is held by one owner per definition");
     unique_values(&make().await).await;
+    scenario("custom field value: one batch may move or swap unique values between owners");
+    unique_values_move(&make().await).await;
     scenario("custom field value: a batch commits values and events together, or not at all");
     value_batch(&make().await).await;
     scenario("custom field value: list deltas are idempotent and record what changed");
@@ -560,6 +665,55 @@ where
         ports.custom_field_values().find_unique(erp.id(), "b").await,
         Ok(None)
     );
+}
+
+async fn unique_values_move<S>(ports: &S)
+where
+    S: HasCustomFieldDefinitions + HasCustomFieldValues + HasBatch<Batch: StageCustomFieldValues>,
+{
+    let erp = setup(
+        ports,
+        definition(1, OwnerType::Customer, "custom", "erp_id", "text"),
+    )
+    .await;
+    let values = ports.custom_field_values();
+    let holder = async |unique: &str| {
+        values
+            .find_unique(erp.id(), unique)
+            .await
+            .unwrap()
+            .map(|v| v.owner)
+    };
+    let mut batch = ports.batch();
+    batch.set_custom_field_value(row(&erp, &customer(2), json!("M-1")), None);
+    batch.set_custom_field_value(row(&erp, &customer(3), json!("X-1")), None);
+    ports.commit(batch).await.unwrap();
+
+    // Customer 1's write runs before customer 2's removal, whatever the adapter's order.
+    let mut batch = ports.batch();
+    batch.set_custom_field_value(row(&erp, &customer(1), json!("M-1")), None);
+    batch.remove_custom_field_value(erp.id(), customer(2).id(), None);
+    ports.commit(batch).await.unwrap();
+    assert_eq!(holder("m-1").await, Some(customer(1).id()));
+
+    let mut batch = ports.batch();
+    batch.set_custom_field_value(row(&erp, &customer(1), json!("X-1")), None);
+    batch.set_custom_field_value(row(&erp, &customer(3), json!("M-1")), None);
+    ports.commit(batch).await.unwrap();
+    assert_eq!(
+        (holder("x-1").await, holder("m-1").await),
+        (Some(customer(1).id()), Some(customer(3).id())),
+        "swapped"
+    );
+
+    let mut batch = ports.batch();
+    batch.set_custom_field_value(row(&erp, &customer(4), json!("Z-1")), None);
+    batch.set_custom_field_value(row(&erp, &customer(5), json!("z-1")), None);
+    assert_eq!(
+        ports.commit(batch).await,
+        Err(RepoError::Duplicate(keys::CUSTOM_FIELD_UNIQUE_VALUE))
+    );
+    assert_eq!(holder("z-1").await, None);
 }
 
 async fn value_batch<S>(ports: &S)
@@ -883,7 +1037,7 @@ where
     );
 
     let mut found: Vec<Uuid> = values
-        .referencing(&[refs.id(), one.id()], &product(11))
+        .referencing(&[refs.id(), one.id()], &[product(11)])
         .await
         .unwrap()
         .into_iter()
@@ -895,9 +1049,23 @@ where
         [customer(1).id(), customer(2).id(), customer(3).id()]
     );
     assert_eq!(
-        values.referencing(&[one.id()], &product(10)).await,
+        values.referencing(&[one.id()], &[product(10)]).await,
         Ok(vec![])
     );
+    // Several targets in one query, each value once (customer 1 holds both).
+    let mut found: Vec<Uuid> = values
+        .referencing(&[refs.id(), one.id()], &[product(10), product(11)])
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|v| v.owner)
+        .collect();
+    found.sort();
+    assert_eq!(
+        found,
+        [customer(1).id(), customer(2).id(), customer(3).id()]
+    );
+    assert_eq!(values.referencing(&[refs.id()], &[]).await, Ok(vec![]));
 
     assert_eq!(values.delete_for_owners(&[customer(1).id()]).await, Ok(2));
     assert_eq!(values.delete_for_owners(&[customer(1).id()]).await, Ok(0));
@@ -913,6 +1081,7 @@ where
         + HasCustomers
         + HasOrders
         + HasCategories
+        + HasCustomFieldValues
         + HasBatch<Batch: StageCustomFieldValues>,
 {
     scenario("custom field filter: any of, list contains, ranges, exists, combined");
@@ -939,7 +1108,10 @@ fn number(n: &str) -> FilterScalar {
 
 async fn product_filters<S>(ports: &S)
 where
-    S: HasCustomFieldDefinitions + HasProducts + HasBatch<Batch: StageCustomFieldValues>,
+    S: HasCustomFieldDefinitions
+        + HasCustomFieldValues
+        + HasProducts
+        + HasBatch<Batch: StageCustomFieldValues>,
 {
     let products = ports.products();
     for n in 1..=4 {
@@ -967,7 +1139,7 @@ where
     let mut batch = ports.batch();
     batch.set_custom_field_value(row(&material, &product(1), json!("Wool")), None);
     batch.set_custom_field_value(row(&weight, &product(1), json!("1.50")), None);
-    batch.set_custom_field_value(row(&tags, &product(1), json!(["vip", "new"])), None);
+    batch.set_custom_field_value(row(&tags, &product(1), json!(["VIP", "new"])), None);
     batch.set_custom_field_value(row(&material, &product(2), json!("Cotton")), None);
     batch.set_custom_field_value(row(&weight, &product(2), json!("3")), None);
     batch.set_custom_field_value(row(&tags, &product(2), json!(["sale"])), None);
@@ -1000,7 +1172,30 @@ where
     );
     let contains =
         |items: &[&str]| FieldFilterOp::ContainsAny(items.iter().map(|i| json!(i)).collect());
-    assert_eq!(found(vec![on(&tags, contains(&["vip"]))]).await, [1]);
+    assert_eq!(
+        found(vec![on(&tags, contains(&["vip"]))]).await,
+        [1],
+        "list items compare ignoring case"
+    );
+    assert_eq!(found(vec![on(&tags, contains(&["VIP"]))]).await, [1]);
+    let added = ports
+        .custom_field_values()
+        .change_items(&tags_change(
+            &tags,
+            vec![product(2)],
+            json!(["Gift"]),
+            json!([]),
+            false,
+            10,
+        ))
+        .await
+        .unwrap();
+    assert!(matches!(added, ItemsResult::Applied(_)));
+    assert_eq!(
+        found(vec![on(&tags, contains(&["gift"]))]).await,
+        [2],
+        "a delta's items are indexed too"
+    );
     assert_eq!(
         found(vec![on(&tags, contains(&["sale", "new"]))]).await,
         [1, 2]

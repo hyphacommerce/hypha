@@ -329,6 +329,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "custom_fields",
             sql: include_str!("../migrations/0061_custom_fields.sql"),
         },
+        Migration {
+            version: 62,
+            name: "custom_field_list_items",
+            sql: include_str!("../migrations/0062_custom_field_list_items.sql"),
+        },
     ],
 };
 

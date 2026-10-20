@@ -23,6 +23,11 @@ type Received = Arc<Mutex<Vec<Value>>>;
 /// A local app: serves its manifest at `/hypha-app.json` (asking for `scopes`) and
 /// takes webhooks at `/hooks`. Returns its base URL and what it received.
 async fn local_app(scopes: &[&str]) -> (String, Received) {
+    local_app_with_events(scopes, &["order.*"]).await
+}
+
+/// `local_app`, its webhook subscribed to `events`.
+async fn local_app_with_events(scopes: &[&str], events: &[&str]) -> (String, Received) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let reasons = if scopes.contains(&"customer_data:email") {
@@ -40,7 +45,7 @@ async fn local_app(scopes: &[&str]) -> (String, Received) {
         "scopes": scopes,
         "scope_reasons": reasons,
         "privacy_url": "/privacy",
-        "webhooks": { "url": "/hooks", "events": ["order.*"] }
+        "webhooks": { "url": "/hooks", "events": events }
     })
     .to_string();
     let received: Received = Arc::default();
@@ -167,6 +172,29 @@ pub(super) async fn install(app: &TestApp, base: &str, scope: Option<&str>) -> V
     let (status, _, tokens) = raw(app, "POST", "/oauth/token", Some(form)).await;
     assert_eq!(status, StatusCode::OK, "{tokens}");
     tokens
+}
+
+#[tokio::test]
+async fn an_installed_app_gets_custom_field_definition_events_with_custom_fields_read() {
+    let app = oauth_app().await;
+    let (base, received) =
+        local_app_with_events(&["custom_fields:read"], &["custom_field_definition.*"]).await;
+    install(&app, &base, None).await;
+    let body = json!({"owner_type": "product", "key": "material", "type": "text",
+                      "name": "Material"})
+    .to_string();
+    let (status, created) =
+        send(&app, "POST", "/admin/custom-field-definitions", Some(&body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let types: Vec<Value> = received
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|e| e["type"].clone())
+        .filter(|t| t != "app.installed")
+        .collect();
+    assert_eq!(types, [json!("custom_field_definition.created")]);
 }
 
 #[tokio::test]

@@ -58,18 +58,24 @@ pub struct ValueRow {
     /// Exact numbers, dates as microseconds. For range filters.
     pub scalar_num: Option<Decimal>,
     /// What `unique` compares, only when the definition is unique: adapters index
-    /// `(definition, unique_text)` uniquely (`keys::CUSTOM_FIELD_UNIQUE_VALUE`); `None`
+    /// `(definition, unique_text)` uniquely (`keys::CUSTOM_FIELD_UNIQUE_VALUE`, checked
+    /// when the batch commits, so one batch may move a value between owners); `None`
     /// never clashes.
     pub unique_text: Option<String>,
+    /// A list's items as `contains` filters compare them (`list_items`): strings
+    /// lowercased. `None` for a single value.
+    pub list_items: Option<Value>,
 }
 
 impl ValueRow {
     pub fn new(definition: &CustomFieldDefinition, owner: &Owner, value: &FieldValue) -> Self {
+        let json = value.to_json();
         Self {
             definition: definition.id(),
             owner: owner.id(),
             owner_parent: owner.product_of_variant().map(|p| p.as_uuid()),
-            value: value.to_json(),
+            list_items: value.items().and_then(|_| list_items(&json)),
+            value: json,
             scalar_text: value.scalar_text(),
             scalar_num: value.scalar_num(),
             unique_text: definition
@@ -79,6 +85,24 @@ impl ValueRow {
                 .flatten(),
         }
     }
+}
+
+/// An item as list filters compare it (`FieldFilterOp::ContainsAny`): a string
+/// lowercased (as `scalar_text` lowercases single values), anything else as is.
+pub fn list_item(item: &Value) -> Value {
+    match item {
+        Value::String(s) => Value::String(s.to_lowercase()),
+        other => other.clone(),
+    }
+}
+
+/// The `list_items` column of a stored list: each item as `list_item`; `None` for a
+/// value that isn't a list. What adapters write with every list, including after a
+/// delta (`ValueRepo::change_items`).
+pub fn list_items(value: &Value) -> Option<Value> {
+    value
+        .as_array()
+        .map(|items| Value::Array(items.iter().map(list_item).collect()))
 }
 
 /// A distinct value (or list item) of a definition and how many owners hold it, for
@@ -306,12 +330,13 @@ pub trait ValueRepo {
         definition: CustomFieldDefinitionId,
         limit: u32,
     ) -> Result<Vec<ValueCount>, RepoError>;
-    /// Values of `definitions` that are `target` or hold it as an item (a reference's
-    /// prefixed ID): what the cleanup clears when a target is deleted (§6.3).
+    /// Values of `definitions` that are one of `targets` or hold one as an item (a
+    /// reference's prefixed ID), each value once, in one query: what the cleanup clears
+    /// when targets are deleted (§6.3).
     async fn referencing(
         &self,
         definitions: &[CustomFieldDefinitionId],
-        target: &str,
+        targets: &[String],
     ) -> Result<Vec<StoredValue>, RepoError>;
     /// Applies a list delta to each owner's row (CF6) in one transaction, under the rows'
     /// locks, so concurrent changes both land: `ItemsChange::apply` per owner, then, if
@@ -342,6 +367,12 @@ pub trait StageCustomFieldValues {
         owner: Uuid,
         expected: Option<Version>,
     );
+    /// Rewrites the derived columns of `(row.definition, row.owner)` from `row` (its
+    /// value is what's stored; the version and `updated_at` stay: the value didn't
+    /// change, only how its definition indexes it, e.g. `unique` turned on or off), if
+    /// the row is still at `at`; else the commit fails with `StaleVersion`. The commit
+    /// enforces `CUSTOM_FIELD_UNIQUE_VALUE`. Precondition: the definition exists.
+    fn reindex_custom_field_value(&mut self, row: ValueRow, at: Version);
 }
 
 /// Definition writes as a batch stages them: a move renumbers siblings in one commit.

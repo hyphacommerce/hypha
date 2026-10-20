@@ -90,10 +90,14 @@ fn predicate(filter: &FieldFilter, owner: &str, params: &mut Params) -> String {
             value(&format!(" AND ({})", any.join(" OR ")))
         }
         FieldFilterOp::ContainsAny(items) => {
-            let items: Vec<String> = items.iter().map(|i| i.to_string()).collect();
+            // Against `list_items` (strings lowercased), the operands compared alike.
+            let items: Vec<String> = items
+                .iter()
+                .map(|i| hypha_custom_fields::list_item(i).to_string())
+                .collect();
             value(&format!(
-                " AND cfv.value @> ANY (SELECT jsonb_build_array(i::jsonb)
-                                         FROM unnest({}::text[]) AS i)",
+                " AND cfv.list_items @> ANY (SELECT jsonb_build_array(i::jsonb)
+                                              FROM unnest({}::text[]) AS i)",
                 params.add(items, Type::TEXT_ARRAY)
             ))
         }

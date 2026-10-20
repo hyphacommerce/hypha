@@ -24,8 +24,10 @@ pub struct FieldFilter {
 pub enum FieldFilterOp {
     /// A single value is one of these (`field[custom.material]=wool,cotton`).
     AnyOf(Vec<FilterScalar>),
-    /// A list (`list.<t>`) holds any of these items, each as stored (canonical JSON), so
-    /// adapters match with the value's GIN index (`value @> '["vip"]'`).
+    /// A list (`list.<t>`) holds any of these items, each as stored (canonical JSON)
+    /// with strings lowercased (`hypha_custom_fields::list_item`): adapters match them
+    /// against the value's derived `list_items` (`list_items @> '["vip"]'`), so text
+    /// items match ignoring case, as single values do.
     ContainsAny(Vec<serde_json::Value>),
     Gt(FilterScalar),
     Gte(FilterScalar),

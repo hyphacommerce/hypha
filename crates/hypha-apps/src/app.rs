@@ -146,6 +146,10 @@ pub fn event_scope(subject_kind: &str) -> Option<Scope> {
         "fulfillment" => Scope::FulfillmentsRead,
         "shipping_zone" => Scope::ShippingRead,
         "asset" => Scope::MediaRead,
+        // Definitions (design note 0033); `<owner>.custom_fields_updated` events are
+        // about their owner (`product`, `category`, `customer`, `order`) and go by its
+        // read scope.
+        "custom_field_definition" => Scope::CustomFieldsRead,
         _ => return None,
     })
 }
@@ -706,6 +710,26 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_field_definition_events_need_custom_fields_read() {
+        assert_eq!(
+            event_scope("custom_field_definition"),
+            Some(Scope::CustomFieldsRead)
+        );
+    }
+
+    #[test]
+    fn custom_fields_updated_events_go_by_their_owners_read_scope() {
+        for (kind, scope) in [
+            ("product", Scope::ProductsRead),
+            ("category", Scope::ProductsRead),
+            ("customer", Scope::CustomersRead),
+            ("order", Scope::OrdersRead),
+        ] {
+            assert_eq!(event_scope(kind), Some(scope), "{kind}");
+        }
+    }
 
     #[test]
     fn patterns_match_a_type_a_kind_or_everything() {

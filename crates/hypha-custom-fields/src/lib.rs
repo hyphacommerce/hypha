@@ -48,6 +48,7 @@ pub use repo::{
     DefinitionRepo, HasCustomFieldDefinitions, HasCustomFieldValues, ItemsApplied, ItemsChange,
     ItemsProblem, ItemsResult, OwnerItems, ReferenceTargets, StageCustomFieldDefinitions,
     StageCustomFieldValues, StoredValue, ValueCount, ValueRepo, ValueRow, item_key, keys,
+    list_item, list_items,
 };
 pub use types::{
     BaseType, Bound, Choice, Dimension, FieldType, FieldTypeError, Measurement, Pattern,

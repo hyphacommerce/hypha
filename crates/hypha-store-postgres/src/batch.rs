@@ -145,6 +145,8 @@ enum Staged {
     /// A value written over what's stored (`None`), only as new (`Version::NEW`) or only
     /// over that version.
     CustomFieldValue(ValueRow, Option<Version>),
+    /// A value's derived columns rewritten over that version.
+    ReindexedCustomFieldValue(ValueRow, Version),
     RemovedCustomFieldValue(CustomFieldDefinitionId, uuid::Uuid, Option<Version>),
 }
 
@@ -212,7 +214,9 @@ impl Staged {
             Staged::NewCustomFieldDefinition(_) => 46,
             Staged::CustomFieldDefinition(_) => 47,
             Staged::DeletedCustomFieldDefinition(..) => 48,
-            Staged::CustomFieldValue(..) | Staged::RemovedCustomFieldValue(..) => 49,
+            Staged::CustomFieldValue(..)
+            | Staged::ReindexedCustomFieldValue(..)
+            | Staged::RemovedCustomFieldValue(..) => 49,
         }
     }
 
@@ -275,8 +279,12 @@ impl Staged {
                     Staged::DeletedCustomFieldDefinition(b, _),
                 ) => a.cmp(b),
                 (
-                    Staged::CustomFieldValue(..) | Staged::RemovedCustomFieldValue(..),
-                    Staged::CustomFieldValue(..) | Staged::RemovedCustomFieldValue(..),
+                    Staged::CustomFieldValue(..)
+                    | Staged::ReindexedCustomFieldValue(..)
+                    | Staged::RemovedCustomFieldValue(..),
+                    Staged::CustomFieldValue(..)
+                    | Staged::ReindexedCustomFieldValue(..)
+                    | Staged::RemovedCustomFieldValue(..),
                 ) => value_key(self).cmp(&value_key(other)),
                 _ => Ordering::Equal,
             })
@@ -286,7 +294,9 @@ impl Staged {
 /// A value write's row: (definition, owner).
 fn value_key(write: &Staged) -> Option<(CustomFieldDefinitionId, uuid::Uuid)> {
     match write {
-        Staged::CustomFieldValue(row, _) => Some((row.definition, row.owner)),
+        Staged::CustomFieldValue(row, _) | Staged::ReindexedCustomFieldValue(row, _) => {
+            Some((row.definition, row.owner))
+        }
         Staged::RemovedCustomFieldValue(definition, owner, _) => Some((*definition, *owner)),
         _ => None,
     }
@@ -677,6 +687,9 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     Staged::CustomFieldValue(row, expected) => {
                         crate::custom_fields::set_value(&db, &row, expected, now).await?
                     }
+                    Staged::ReindexedCustomFieldValue(row, at) => {
+                        crate::custom_fields::reindex_value(&db, &row, at).await?
+                    }
                     Staged::RemovedCustomFieldValue(definition, owner, expected) => {
                         crate::custom_fields::remove_value(&db, definition, owner, expected).await?
                     }
@@ -876,5 +889,9 @@ impl StageCustomFieldValues for PgBatch {
         expected: Option<Version>,
     ) {
         self.stage(Staged::RemovedCustomFieldValue(definition, owner, expected));
+    }
+
+    fn reindex_custom_field_value(&mut self, row: ValueRow, at: Version) {
+        self.stage(Staged::ReindexedCustomFieldValue(row, at));
     }
 }

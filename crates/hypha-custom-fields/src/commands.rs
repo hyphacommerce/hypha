@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use hypha_core::{
     AuthError, Ctx, CustomFieldDefinitionId, ErrorCode, FieldFilter, FieldFilterOp, FilterScalar,
-    HasBatch, IdGenerator, PageLimit, RepoError, Scope, StageEvents, Version, Versioned,
+    HasBatch, IdGenerator, PageLimit, RepoError, Scope, StageEvents, Version,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -28,7 +28,7 @@ use crate::{
     repo::{
         DefinitionRepo, HasCustomFieldDefinitions, HasCustomFieldValues, ItemsChange, ItemsProblem,
         ItemsResult, OwnerItems, ReferenceTargets, StageCustomFieldDefinitions,
-        StageCustomFieldValues, StoredValue, ValueCount, ValueRepo, ValueRow, keys,
+        StageCustomFieldValues, StoredValue, ValueCount, ValueRepo, ValueRow, keys, list_item,
     },
     types::{BaseType, FieldType, Reference},
     value::{FieldValue, ValueProblem, codes},
@@ -141,11 +141,11 @@ pub enum CommandError {
     TypeChanged(String),
     #[error("{0} is read-only for this caller")]
     ReadOnly(String),
-    #[error("no custom field {0}")]
+    #[error("no custom field {0:?}")]
     Unknown(String),
     #[error("{0} isn't filterable")]
     NotFilterable(String),
-    #[error("{0}: {1}")]
+    #[error("{0:?}: {1}")]
     InvalidFilter(String, String),
     #[error("at most {max} custom fields in a list")]
     TooManyListedKeys { max: usize },
@@ -352,14 +352,70 @@ pub async fn definitions_for<S: HasCustomFieldDefinitions>(
         .await
 }
 
+/// Stages every stored value of `definition` re-derived under it (`ValueRow::new`), at
+/// the version it was read at: for a change to how values are indexed (`unique` turned
+/// on fills `unique_text`, turned off clears it), in the batch that changes the
+/// definition.
+async fn stage_reindex<S, B>(
+    ports: &S,
+    batch: &mut B,
+    definition: &CustomFieldDefinition,
+) -> Result<(), CommandError>
+where
+    S: HasCustomFieldValues,
+    B: StageCustomFieldValues,
+{
+    let mut after = None;
+    loop {
+        let page = ports
+            .custom_field_values()
+            .page(definition.id(), after, max_page())
+            .await?;
+        for stored in &page.items {
+            let value = FieldValue::from_stored(definition.field_type(), &stored.value).map_err(
+                |problems| {
+                    RepoError::Backend(format!(
+                        "stored value of {} for {} doesn't load: {problems:?}",
+                        definition.field_key(),
+                        stored.owner
+                    ))
+                },
+            )?;
+            let owner =
+                Owner::from_parts(definition.owner_type(), stored.owner, stored.owner_parent);
+            batch.reindex_custom_field_value(
+                ValueRow::new(definition, &owner, &value),
+                stored.version,
+            );
+        }
+        after = page.items.last().map(|v| v.owner);
+        if !page.has_more {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// Whether changing `current` into `next` changes its values' derived columns.
+fn reindexes(current: &CustomFieldDefinition, next: &CustomFieldDefinition) -> bool {
+    current.capabilities().unique != next.capabilities().unique
+}
+
 /// Changes a `custom` definition. A change that tightens its validations (or turns
-/// `unique` on) is checked against the stored values first (`ValuesInvalid`).
-pub async fn update_definition<S: HasCustomFieldDefinitions + HasCustomFieldValues>(
+/// `unique` on) is checked against the stored values first (`ValuesInvalid`); turning
+/// `unique` on or off re-derives every stored value's `unique_text` in the same batch
+/// (a value that clashes meanwhile is `ValuesInvalid` too).
+pub async fn update_definition<S>(
     ctx: &Ctx,
     ports: &S,
     id: CustomFieldDefinitionId,
     change: DefinitionChange,
-) -> Result<CustomFieldDefinition, CommandError> {
+) -> Result<CustomFieldDefinition, CommandError>
+where
+    S: HasCustomFieldDefinitions
+        + HasCustomFieldValues
+        + HasBatch<Batch: StageCustomFieldDefinitions + StageCustomFieldValues>,
+{
     ctx.require(Scope::CustomFieldsWrite)?;
     let mut definition = load(ports, id).await?;
     if definition.is_managed() {
@@ -379,12 +435,22 @@ pub async fn update_definition<S: HasCustomFieldDefinitions + HasCustomFieldValu
     if definition.tightened_by(&next) {
         check_stored_values(ports, &definition, &next).await?;
     }
+    let previous = definition.clone();
     definition.change(change)?;
-    ports
-        .custom_field_definitions()
-        .update(&mut definition)
-        .await?;
-    Ok(definition)
+    let mut batch = ports.batch();
+    batch.update_custom_field_definition(&mut definition);
+    if reindexes(&previous, &next) {
+        stage_reindex(ports, &mut batch, &next).await?;
+    }
+    match ports.commit(batch).await {
+        Ok(()) => Ok(definition),
+        Err(RepoError::Duplicate(keys::CUSTOM_FIELD_UNIQUE_VALUE)) => {
+            // Owners came to share a value since the check: checking again names them.
+            check_stored_values(ports, &previous, &next).await?;
+            Err(RepoError::Duplicate(keys::CUSTOM_FIELD_UNIQUE_VALUE).into())
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Moves a `custom` definition to `position` on its owner type's form (clamped to the
@@ -593,18 +659,25 @@ pub async fn sync_managed_definitions<S>(
 where
     S: HasCustomFieldDefinitions
         + HasCustomFieldValues
-        + HasBatch<Batch: StageCustomFieldDefinitions>,
+        + HasBatch<Batch: StageCustomFieldDefinitions + StageCustomFieldValues>,
 {
     let mut batch = ports.batch();
-    let plan = stage_managed_definitions(ctx, ports, ids, namespace, specs, &mut batch).await?;
+    let plan =
+        stage_managed_definitions(ctx, ports, ids, namespace, specs.clone(), &mut batch).await?;
     if plan.is_empty() {
         return Ok(plan);
     }
-    ports
-        .commit(batch)
-        .await
-        .map_err(|e| sync_commit_error(namespace, &plan, e))?;
-    Ok(plan)
+    match ports.commit(batch).await {
+        Ok(()) => Ok(plan),
+        Err(RepoError::Duplicate(keys::CUSTOM_FIELD_UNIQUE_VALUE)) => {
+            // Owners came to share a value of a field this sync makes unique since the
+            // check: checking again names them.
+            let mut again = ports.batch();
+            stage_managed_definitions(ctx, ports, ids, namespace, specs, &mut again).await?;
+            Err(RepoError::Duplicate(keys::CUSTOM_FIELD_UNIQUE_VALUE).into())
+        }
+        Err(e) => Err(sync_commit_error(ports, namespace, &plan, e).await),
+    }
 }
 
 /// `sync_managed_definitions`' reads and checks, its writes staged in `batch` rather
@@ -622,7 +695,7 @@ pub async fn stage_managed_definitions<S>(
 where
     S: HasCustomFieldDefinitions
         + HasCustomFieldValues
-        + HasBatch<Batch: StageCustomFieldDefinitions>,
+        + HasBatch<Batch: StageCustomFieldDefinitions + StageCustomFieldValues>,
 {
     ctx.require(Scope::AppsWrite)?;
     let repo = ports.custom_field_definitions();
@@ -642,11 +715,17 @@ where
         .cloned()
         .collect();
     let gone_ids: HashSet<CustomFieldDefinitionId> = gone.iter().map(|d| d.id()).collect();
-    // What each owner type holds after the sync, for positions and limits.
-    let mut kept: HashMap<OwnerType, Vec<CustomFieldDefinition>> = HashMap::new();
+    // Each owner type's form after the sync, in order: what stays (every namespace's,
+    // with this sync's changes), then what it creates. Renumbered densely below.
+    let mut forms: HashMap<OwnerType, Vec<CustomFieldDefinition>> = HashMap::new();
     for d in all.iter().filter(|d| !gone_ids.contains(&d.id())) {
-        kept.entry(d.owner_type()).or_default().push(d.clone());
+        forms.entry(d.owner_type()).or_default().push(d.clone());
     }
+    for form in forms.values_mut() {
+        form.sort_by_key(|d| (d.position(), d.id()));
+    }
+    let mut changed: HashSet<CustomFieldDefinitionId> = HashSet::new();
+    let mut created: HashSet<CustomFieldDefinitionId> = HashSet::new();
     for spec in specs {
         let current = existing
             .iter()
@@ -657,57 +736,54 @@ where
                 if fields.is_empty() {
                     continue;
                 }
-                let siblings = kept.get(&spec.owner_type).cloned().unwrap_or_default();
-                check_limits(&siblings, &next, false)?;
+                let form = forms.entry(spec.owner_type).or_default();
+                check_limits(form, &next, false)?;
                 if current.tightened_by(&next) {
                     check_stored_values(ports, current, &next).await?;
                 }
+                if reindexes(current, &next) {
+                    stage_reindex(ports, batch, &next).await?;
+                }
                 let mut updated = current.clone();
                 updated.change(change_to(&spec))?;
-                batch.update_custom_field_definition(&mut updated);
-                if let Some(list) = kept.get_mut(&spec.owner_type)
-                    && let Some(slot) = list.iter_mut().find(|d| d.id() == updated.id())
+                changed.insert(updated.id());
+                if let Some(slot) = forms
+                    .get_mut(&spec.owner_type)
+                    .and_then(|form| form.iter_mut().find(|d| d.id() == updated.id()))
                 {
                     *slot = updated;
                 }
             }
             None => {
-                let siblings = kept.entry(spec.owner_type).or_default();
-                let mut created = CustomFieldDefinition::new(
+                let form = forms.entry(spec.owner_type).or_default();
+                let definition = CustomFieldDefinition::new(
                     CustomFieldDefinitionId::from_uuid(ids.new_uuid()),
                     namespace.clone(),
                     spec,
-                    siblings.len() as u32,
+                    form.len() as u32,
                 )?;
-                check_limits(siblings, &created, true)?;
-                batch.insert_custom_field_definition(&mut created);
-                siblings.push(created);
+                check_limits(form, &definition, true)?;
+                created.insert(definition.id());
+                form.push(definition);
             }
         }
     }
-    if !gone.is_empty() {
-        for definition in &gone {
-            let mut definition = definition.clone();
-            definition.mark_deleted();
-            batch.delete_custom_field_definition(&mut definition);
-        }
-        // Renumber what's left of the owner types that lost fields; definitions this
-        // sync updates were staged already, so only untouched ones shift.
-        let touched: HashSet<CustomFieldDefinitionId> = existing.iter().map(|d| d.id()).collect();
-        for owner_type in gone.iter().map(|d| d.owner_type()).collect::<HashSet<_>>() {
-            let mut left: Vec<CustomFieldDefinition> = kept
-                .get(&owner_type)
-                .cloned()
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|d| d.version() != Version::NEW)
-                .collect();
-            left.sort_by_key(|d| (d.position(), d.id()));
-            for (i, sibling) in left.iter_mut().enumerate() {
-                if sibling.position() != i as u32 && !touched.contains(&sibling.id()) {
-                    sibling.shift_to(i as u32);
-                    batch.update_custom_field_definition(sibling);
-                }
+    for definition in &gone {
+        let mut definition = definition.clone();
+        definition.mark_deleted();
+        batch.delete_custom_field_definition(&mut definition);
+    }
+    // Every form densely numbered: created definitions inserted at their place, changed
+    // ones updated, and any other one whose position moved (after a deletion) shifted.
+    for form in forms.values_mut() {
+        for (i, definition) in form.iter_mut().enumerate() {
+            let position = i as u32;
+            if created.contains(&definition.id()) {
+                definition.shift_to(position);
+                batch.insert_custom_field_definition(definition);
+            } else if changed.contains(&definition.id()) || definition.position() != position {
+                definition.shift_to(position);
+                batch.update_custom_field_definition(definition);
             }
         }
     }
@@ -715,18 +791,33 @@ where
 }
 
 /// A commit's error for a batch `stage_managed_definitions` staged `plan` into: a key
-/// another sync created meanwhile reads as `KeyTaken`, like any duplicate.
-pub fn sync_commit_error(namespace: &Namespace, plan: &SyncPlan, error: RepoError) -> CommandError {
-    match error {
-        RepoError::Duplicate(keys::CUSTOM_FIELD_KEY) => CommandError::KeyTaken {
-            owner_type: plan
-                .create
-                .first()
-                .map_or(OwnerType::Product, |f| f.owner_type),
-            key: format!("{namespace}.{}", plan.create.first().map_or("", |f| &f.key)),
-        },
-        other => other.into(),
+/// another sync created meanwhile reads as `KeyTaken`, naming the first key the plan
+/// creates that now exists (read again: the commit doesn't say which).
+pub async fn sync_commit_error<S: HasCustomFieldDefinitions>(
+    ports: &S,
+    namespace: &Namespace,
+    plan: &SyncPlan,
+    error: RepoError,
+) -> CommandError {
+    if error != RepoError::Duplicate(keys::CUSTOM_FIELD_KEY) {
+        return error.into();
     }
+    for field in &plan.create {
+        let Ok(key) = Key::new(&field.key) else {
+            continue;
+        };
+        if let Ok(Some(_)) = ports
+            .custom_field_definitions()
+            .get_by_key(field.owner_type, namespace, &key)
+            .await
+        {
+            return CommandError::KeyTaken {
+                owner_type: field.owner_type,
+                key: format!("{namespace}.{}", field.key),
+            };
+        }
+    }
+    error.into()
 }
 
 // ---------------------------------------------------------------------------------
@@ -852,44 +943,6 @@ where
         entries: Vec::new(),
         redacted: Vec::new(),
     }))
-}
-
-/// A page of owners' values for a list (`?custom_fields=…`, §6.2): only `keys` (at most
-/// 10), one read for the page. Every owner of `owners` is in the result.
-pub async fn custom_fields_of<S>(
-    caller: &FieldCaller<'_>,
-    ports: &S,
-    owner_type: OwnerType,
-    owners: &[Uuid],
-    keys: &[FieldKey],
-) -> Result<HashMap<Uuid, OwnerFields>, CommandError>
-where
-    S: HasCustomFieldDefinitions + HasCustomFieldValues,
-{
-    caller.ctx().require(owner_type.read_scope())?;
-    if keys.len() > MAX_LISTED_KEYS {
-        return Err(CommandError::TooManyListedKeys {
-            max: MAX_LISTED_KEYS,
-        });
-    }
-    let definitions = definitions_for(ports, owner_type).await?;
-    let mut wanted = Vec::new();
-    for key in keys {
-        let found = definitions
-            .iter()
-            .find(|d| &d.field_key() == key && read_access(d, caller) != ReadAccess::Hidden)
-            .ok_or_else(|| CommandError::Unknown(key.to_string()))?;
-        wanted.push(found.id());
-    }
-    let stored = if owners.is_empty() || wanted.is_empty() {
-        Vec::new()
-    } else {
-        ports
-            .custom_field_values()
-            .get_many(owners, Some(&wanted))
-            .await?
-    };
-    assemble(caller, &definitions, owners, stored)
 }
 
 /// What a response shows of some owners' fields (§6.2): each owner's values the caller
@@ -1060,7 +1113,9 @@ async fn missing_references<P: ReferenceTargets>(
     Ok(problems)
 }
 
-/// `unique` values another owner holds already, as problems.
+/// `unique` values another owner holds already, as problems: one the holder keeps
+/// after this call, or that another write of the call takes first. A value whose holder
+/// this call clears or changes is free to take (a value moved between owners).
 async fn taken_values<S: HasCustomFieldValues>(
     ports: &S,
     writes: &[(Owner, &Write<'_>)],
@@ -1068,6 +1123,19 @@ async fn taken_values<S: HasCustomFieldValues>(
 ) -> Result<Vec<FieldProblem>, RepoError> {
     let mut problems = Vec::new();
     let mut in_call: HashMap<(CustomFieldDefinitionId, String), Uuid> = HashMap::new();
+    // What each (definition, owner) the call writes holds after it.
+    let after: HashMap<(CustomFieldDefinitionId, Uuid), Option<String>> = writes
+        .iter()
+        .map(|(owner, write)| {
+            let unique = write.value.as_ref().and_then(FieldValue::unique_key);
+            ((write.definition.id(), owner.id()), unique)
+        })
+        .collect();
+    let keeps = |definition: CustomFieldDefinitionId, holder: Uuid, unique: &str| {
+        after
+            .get(&(definition, holder))
+            .is_none_or(|held| held.as_deref() == Some(unique))
+    };
     for (owner, write) in writes {
         let (Some(value), true) = (&write.value, write.definition.capabilities().unique) else {
             continue;
@@ -1081,7 +1149,9 @@ async fn taken_values<S: HasCustomFieldValues>(
                 .custom_field_values()
                 .find_unique(write.definition.id(), &unique)
                 .await?
-                .is_some_and(|v| v.owner != owner.id()),
+                .is_some_and(|v| {
+                    v.owner != owner.id() && keeps(write.definition.id(), v.owner, &unique)
+                }),
         };
         in_call.insert((write.definition.id(), unique), owner.id());
         if taken {
@@ -1235,13 +1305,39 @@ where
                 });
             }
             Err(RepoError::StaleVersion) if !input.if_versions.is_empty() => {
-                let key = input.if_versions.keys().next().cloned().unwrap_or_default();
-                return Err(CommandError::Stale(key));
+                return Err(stale_key(ports, owner, &writes, &input.if_versions).await?);
             }
             Err(e) => return Err(e.into()),
         }
     }
     get_custom_fields(caller, ports, owner).await
+}
+
+/// Which `if_versions` key lost a race the commit reported (`StaleVersion`, which
+/// doesn't say): the first whose version is no longer the one expected, read again.
+/// Without one (it changed and was restored by now), the stale write as it is.
+async fn stale_key<S: HasCustomFieldValues>(
+    ports: &S,
+    owner: &Owner,
+    writes: &[Write<'_>],
+    if_versions: &BTreeMap<String, u64>,
+) -> Result<CommandError, RepoError> {
+    let now: HashMap<CustomFieldDefinitionId, u64> = ports
+        .custom_field_values()
+        .get_many(&[owner.id()], None)
+        .await?
+        .into_iter()
+        .map(|v| (v.definition, v.version.value()))
+        .collect();
+    for (key, expected) in if_versions {
+        let Some(write) = writes.iter().find(|w| &w.key == key) else {
+            continue;
+        };
+        if now.get(&write.definition.id()).copied().unwrap_or(0) != *expected {
+            return Ok(CommandError::Stale(key.clone()));
+        }
+    }
+    Ok(RepoError::StaleVersion.into())
 }
 
 /// The definition `key` names among `definitions`, or a problem.
@@ -1263,7 +1359,7 @@ fn find_definition<'d>(
         problems.push(FieldProblem::new(
             key,
             problem_codes::UNKNOWN,
-            format!("no custom field {key}"),
+            format!("no custom field {key:?}"),
         ));
     }
     found
@@ -1617,7 +1713,7 @@ pub fn field_filter(
             if field_type.is_list() {
                 let items = operands
                     .iter()
-                    .map(|o| operand_value(base, definition, o).map(|v| v.to_json()))
+                    .map(|o| operand_value(base, definition, o).map(|v| list_item(&v.to_json())))
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|why| invalid(&why))?;
                 FieldFilterOp::ContainsAny(items)

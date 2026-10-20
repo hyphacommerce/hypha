@@ -11,7 +11,7 @@ use hypha_core::{
 use hypha_custom_fields::{
     Access, AdminAccess, Capabilities, CustomFieldDefinition, DefinitionRepo, DefinitionSnapshot,
     ItemsChange, ItemsResult, Key, Namespace, OwnerItems, OwnerType, Reference, ReferenceKind,
-    ReferenceTargets, StoredValue, StorefrontAccess, ValueCount, ValueRepo, ValueRow,
+    ReferenceTargets, StoredValue, StorefrontAccess, ValueCount, ValueRepo, ValueRow, list_items,
 };
 use tokio_postgres::{Row, error::SqlState, types::Type};
 use uuid::Uuid;
@@ -382,9 +382,10 @@ pub(crate) async fn set_value(
 ) -> Result<(), RepoError> {
     let value = row.value.to_string();
     let num = row.scalar_num.map(|n| n.to_string());
+    let items = row.list_items.as_ref().map(|i| i.to_string());
     let now = now.unix_micros();
     let definition = row.definition.as_uuid();
-    let params: [(&(dyn tokio_postgres::types::ToSql + Sync), Type); 8] = [
+    let params: [(&(dyn tokio_postgres::types::ToSql + Sync), Type); 9] = [
         (&definition, Type::UUID),
         (&row.owner, Type::UUID),
         (&row.owner_parent, Type::UUID),
@@ -393,11 +394,14 @@ pub(crate) async fn set_value(
         (&num, Type::TEXT),
         (&row.unique_text, Type::TEXT),
         (&now, Type::INT8),
+        (&items, Type::TEXT),
     ];
     let insert = format!(
         "INSERT INTO custom_field_values (definition_id, owner_id, owner_parent_id, value,
-             scalar_text, scalar_num, unique_text, version, created_at, updated_at)
-         VALUES ($1, $2, $3, $4::text::jsonb, $5, $6::text::numeric, $7, 1, {now}, {now})",
+             scalar_text, scalar_num, unique_text, list_items, version, created_at,
+             updated_at)
+         VALUES ($1, $2, $3, $4::text::jsonb, $5, $6::text::numeric, $7, $9::text::jsonb, 1,
+                 {now}, {now})",
         now = ts(8)
     );
     match expected {
@@ -409,6 +413,7 @@ pub(crate) async fn set_value(
                          owner_parent_id = EXCLUDED.owner_parent_id, value = EXCLUDED.value,
                          scalar_text = EXCLUDED.scalar_text, scalar_num = EXCLUDED.scalar_num,
                          unique_text = EXCLUDED.unique_text,
+                         list_items = EXCLUDED.list_items,
                          version = custom_field_values.version + 1,
                          updated_at = EXCLUDED.updated_at"
                 ),
@@ -432,8 +437,9 @@ pub(crate) async fn set_value(
                         "UPDATE custom_field_values SET owner_parent_id = $3,
                              value = $4::text::jsonb, scalar_text = $5,
                              scalar_num = $6::text::numeric, unique_text = $7,
+                             list_items = $9::text::jsonb,
                              version = version + 1, updated_at = {}
-                         WHERE definition_id = $1 AND owner_id = $2 AND version = $9",
+                         WHERE definition_id = $1 AND owner_id = $2 AND version = $10",
                         ts(8)
                     ),
                     &with_version,
@@ -444,6 +450,39 @@ pub(crate) async fn set_value(
                 return Err(RepoError::StaleVersion);
             }
         }
+    }
+    Ok(())
+}
+
+/// `StageCustomFieldValues::reindex_custom_field_value` inside a batch's transaction:
+/// the derived columns rewritten, the value, version and `updated_at` kept, only over
+/// version `at`.
+pub(crate) async fn reindex_value(
+    tx: &impl Queries,
+    row: &ValueRow,
+    at: Version,
+) -> Result<(), RepoError> {
+    let num = row.scalar_num.map(|n| n.to_string());
+    let items = row.list_items.as_ref().map(|i| i.to_string());
+    let updated = tx
+        .execute_typed(
+            "UPDATE custom_field_values SET scalar_text = $3, scalar_num = $4::text::numeric,
+                 unique_text = $5, list_items = $6::text::jsonb
+             WHERE definition_id = $1 AND owner_id = $2 AND version = $7",
+            &[
+                (&row.definition.as_uuid(), Type::UUID),
+                (&row.owner, Type::UUID),
+                (&row.scalar_text, Type::TEXT),
+                (&num, Type::TEXT),
+                (&row.unique_text, Type::TEXT),
+                (&items, Type::TEXT),
+                (&version_to_db(at)?, Type::INT8),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    if updated == 0 {
+        return Err(RepoError::StaleVersion);
     }
     Ok(())
 }
@@ -626,9 +665,9 @@ impl<C: PgConnection> ValueRepo for PgStore<C> {
     async fn referencing(
         &self,
         definitions: &[CustomFieldDefinitionId],
-        target: &str,
+        targets: &[String],
     ) -> Result<Vec<StoredValue>, RepoError> {
-        if definitions.is_empty() {
+        if definitions.is_empty() || targets.is_empty() {
             return Ok(Vec::new());
         }
         let definitions: Vec<Uuid> = definitions.iter().map(|d| d.as_uuid()).collect();
@@ -638,11 +677,15 @@ impl<C: PgConnection> ValueRepo for PgStore<C> {
                 &format!(
                     "SELECT {} FROM custom_field_values
                      WHERE definition_id = ANY($1)
-                       AND (value = to_jsonb($2::text)
-                            OR value @> jsonb_build_array($2::text))",
+                       AND EXISTS (SELECT 1 FROM unnest($2::text[]) AS t(target)
+                                   WHERE value = to_jsonb(t.target)
+                                      OR value @> jsonb_build_array(t.target))",
                     value_columns()
                 ),
-                &[(&definitions, Type::UUID_ARRAY), (&target, Type::TEXT)],
+                &[
+                    (&definitions, Type::UUID_ARRAY),
+                    (&targets, Type::TEXT_ARRAY),
+                ],
             )
             .await
             .map_err(repo_error)?
@@ -723,11 +766,13 @@ impl<C: PgConnection> ValueRepo for PgStore<C> {
                                 .query_typed_one(
                                     &format!(
                                         "INSERT INTO custom_field_values (definition_id,
-                                             owner_id, owner_parent_id, value, version,
-                                             created_at, updated_at)
-                                         VALUES ($1, $2, $3, $4::text::jsonb, 1, {now}, {now})
+                                             owner_id, owner_parent_id, value, list_items,
+                                             version, created_at, updated_at)
+                                         VALUES ($1, $2, $3, $4::text::jsonb,
+                                                 $6::text::jsonb, 1, {now}, {now})
                                          ON CONFLICT (definition_id, owner_id) DO UPDATE SET
                                              value = EXCLUDED.value,
+                                             list_items = EXCLUDED.list_items,
                                              version = custom_field_values.version + 1,
                                              updated_at = EXCLUDED.updated_at
                                          RETURNING version",
@@ -739,6 +784,7 @@ impl<C: PgConnection> ValueRepo for PgStore<C> {
                                         (&parent, Type::UUID),
                                         (&list.to_string(), Type::TEXT),
                                         (&now, Type::INT8),
+                                        (&list_items(list).map(|i| i.to_string()), Type::TEXT),
                                     ],
                                 )
                                 .await

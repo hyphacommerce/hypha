@@ -1,20 +1,24 @@
 //! Custom field commands (design note 0033) over a store in memory.
 
-use std::collections::BTreeMap;
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashSet},
+};
 
 use hypha_core::{
     Actor, ApiKeyId, AppId, AppKey, AuthError, Ctx, CustomFieldDefinitionId, CustomerId, ErrorCode,
-    EventHandler, FieldFilterOp, FilterScalar, HasBatch, PageLimit, ProductId, Scope, StoredEvent,
-    Timestamp, UserId, VariantId, Versioned,
+    EventHandler, FieldFilterOp, FilterScalar, HasBatch, PageLimit, ProductId, RepoError, Scope,
+    StoredEvent, Timestamp, UserId, VariantId, Versioned,
 };
 use hypha_custom_fields::{
     Access, AdminAccess, CallerKind, Capabilities, CommandError, CustomFieldCleanup,
     DefinitionChange, DefinitionRepo, DefinitionSpec, FieldCaller, FieldKey, FieldType, FieldValue,
-    Namespace, Owner, OwnerType, RawFilterOp, SetCustomFields, StageCustomFieldValues,
-    StorefrontAccess, ValueRepo, ValueRow, change_list_items, create_definition, delete_definition,
-    field_filter, get_custom_fields, limits::MAX_LISTED_KEYS, move_definition, plan_sync,
-    read_custom_fields, set_custom_fields, set_field_values, stage_managed_definitions,
-    sync_managed_definitions, update_definition, values_in_use,
+    HasCustomFieldDefinitions, HasCustomFieldValues, Namespace, Owner, OwnerType, RawFilterOp,
+    Reference, ReferenceTargets, SetCustomFields, StageCustomFieldValues, StorefrontAccess,
+    ValueRepo, ValueRow, change_list_items, create_definition, delete_definition, field_filter,
+    get_custom_fields, limits::MAX_LISTED_KEYS, move_definition, plan_sync, read_custom_fields,
+    set_custom_fields, set_field_values, stage_managed_definitions, sync_managed_definitions,
+    update_definition, values_in_use,
 };
 use hypha_testkit::{InMemoryPorts, SequentialIds};
 use pollster::block_on;
@@ -1042,5 +1046,417 @@ fn reading_needs_the_owners_read_scope() {
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::CustomersRead
         )))
+    );
+}
+
+#[test]
+fn the_cleanup_clears_every_target_of_a_deletion_together() {
+    let w = World::new();
+    let liked = w.define(spec(
+        OwnerType::Customer,
+        "liked",
+        "list.reference",
+        json!({"kind": "variant"}),
+    ));
+    let favourite = w.define(spec(
+        OwnerType::Customer,
+        "favourite",
+        "reference",
+        json!({"kind": "product"}),
+    ));
+    let p = ProductId::from_uuid(Uuid::from_u128(5));
+    let (a, b, kept) = (
+        VariantId::from_uuid(Uuid::from_u128(50)),
+        VariantId::from_uuid(Uuid::from_u128(51)),
+        VariantId::from_uuid(Uuid::from_u128(52)),
+    );
+    let defs = block_on(w.ports.custom_fields.list(None)).unwrap();
+    let row = |id: CustomFieldDefinitionId, json: Value| {
+        let d = defs.iter().find(|d| d.id() == id).unwrap();
+        ValueRow::new(
+            d,
+            &customer(1),
+            &FieldValue::parse(d.field_type(), d.validations(), &json).unwrap(),
+        )
+    };
+    let mut batch = w.ports.batch();
+    batch.set_custom_field_value(
+        row(
+            liked,
+            json!([a.to_string(), kept.to_string(), b.to_string()]),
+        ),
+        None,
+    );
+    batch.set_custom_field_value(row(favourite, json!(p.to_string())), None);
+    block_on(w.ports.commit(batch)).unwrap();
+    let deleted = event(
+        "product.deleted",
+        json!({"product": p.to_string(), "handle": "mug",
+               "variants": [a.to_string(), b.to_string()]}),
+    );
+    block_on(CustomFieldCleanup.handle(&w.ports, &deleted)).unwrap();
+    let left = block_on(w.ports.custom_fields.get_many(&[customer(1).id()], None)).unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].value, json!([kept.to_string()]));
+    // One event for the owner, with both fields' changes.
+    let events = w.data("customer.custom_fields_updated");
+    assert_eq!(events.len(), 1);
+    let mut changes = events[0]["changes"].as_array().unwrap().clone();
+    changes.sort_by_key(|c| c["key"].as_str().unwrap().to_string());
+    assert_eq!(
+        changes,
+        vec![
+            json!({"key": "custom.favourite", "value": null}),
+            json!({"key": "custom.liked", "added": [], "removed": [a.to_string(), b.to_string()]}),
+        ]
+    );
+}
+
+fn unique_change(unique: bool) -> DefinitionChange {
+    DefinitionChange {
+        capabilities: Some(Capabilities {
+            filterable: false,
+            unique,
+        }),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn turning_unique_on_indexes_the_values_stored_before() {
+    let w = World::new();
+    let erp = w.define(spec(OwnerType::Customer, "erp", "text", json!({})));
+    w.set(&customer(1), json!({"custom.erp": "A-1"})).unwrap();
+    block_on(update_definition(
+        &w.ctx,
+        &w.ports,
+        erp,
+        unique_change(true),
+    ))
+    .unwrap();
+    assert_eq!(
+        block_on(w.ports.custom_fields.find_unique(erp, "a-1"))
+            .unwrap()
+            .map(|v| (v.owner, v.version.value())),
+        Some((customer(1).id(), 1)),
+        "indexed, its version kept"
+    );
+    assert_eq!(
+        problem_codes(
+            w.set(&customer(2), json!({"custom.erp": "a-1"}))
+                .unwrap_err()
+        ),
+        vec![("custom.erp".to_string(), "custom_field_value_taken")]
+    );
+
+    block_on(update_definition(
+        &w.ctx,
+        &w.ports,
+        erp,
+        unique_change(false),
+    ))
+    .unwrap();
+    assert_eq!(
+        block_on(w.ports.custom_fields.find_unique(erp, "a-1")),
+        Ok(None)
+    );
+    w.set(&customer(2), json!({"custom.erp": "a-1"})).unwrap();
+}
+
+#[test]
+fn syncing_unique_on_indexes_the_values_stored_before() {
+    let w = World::new();
+    let namespace = Namespace::of_app(AppKey::new("app_erp").unwrap());
+    let member = |unique: bool| {
+        let mut member = spec(OwnerType::Customer, "member_id", "text", json!({}));
+        member.capabilities.unique = unique;
+        member
+    };
+    let sync = |specs| {
+        block_on(sync_managed_definitions(
+            &w.ctx, &w.ports, &w.ids, &namespace, specs,
+        ))
+    };
+    sync(vec![member(false)]).unwrap();
+    let id = block_on(w.ports.custom_fields.list(None)).unwrap()[0].id();
+    let definition = block_on(w.ports.custom_fields.get(id)).unwrap().unwrap();
+    let mut batch = w.ports.batch();
+    batch.set_custom_field_value(
+        ValueRow::new(
+            &definition,
+            &customer(1),
+            &FieldValue::Text("M-7".to_string()),
+        ),
+        None,
+    );
+    block_on(w.ports.commit(batch)).unwrap();
+    sync(vec![member(true)]).unwrap();
+    assert_eq!(
+        block_on(w.ports.custom_fields.find_unique(id, "m-7"))
+            .unwrap()
+            .map(|v| v.owner),
+        Some(customer(1).id())
+    );
+}
+
+#[test]
+fn list_filters_compare_items_ignoring_case() {
+    let w = World::new();
+    let mut tags = spec(OwnerType::Customer, "tags", "list.text", json!({}));
+    tags.capabilities.filterable = true;
+    w.define(tags);
+    let definitions = block_on(w.ports.custom_fields.list(Some(OwnerType::Customer))).unwrap();
+    let filter = field_filter(
+        &w.caller(),
+        &definitions,
+        "custom.tags",
+        RawFilterOp::Eq,
+        &["VIP".to_string(), "Sale".to_string()],
+    )
+    .unwrap();
+    assert_eq!(
+        filter.op,
+        FieldFilterOp::ContainsAny(vec![json!("vip"), json!("sale")])
+    );
+}
+
+#[test]
+fn syncing_after_a_deletion_numbers_each_form_densely() {
+    let w = World::new();
+    w.define(spec(OwnerType::Customer, "m_zero", "text", json!({})));
+    w.define(spec(OwnerType::Customer, "m_one", "text", json!({})));
+    let namespace = Namespace::of_app(AppKey::new("app_erp").unwrap());
+    let sync = |keys: &[&str]| {
+        block_on(sync_managed_definitions(
+            &w.ctx,
+            &w.ports,
+            &w.ids,
+            &namespace,
+            keys.iter()
+                .map(|k| spec(OwnerType::Customer, k, "text", json!({})))
+                .collect(),
+        ))
+    };
+    sync(&["a_field", "b_field"]).unwrap();
+    sync(&["b_field", "c_field"]).unwrap();
+    let form: Vec<(String, u32)> = block_on(w.ports.custom_fields.list(Some(OwnerType::Customer)))
+        .unwrap()
+        .iter()
+        .map(|d| (d.key().to_string(), d.position()))
+        .collect();
+    assert_eq!(
+        form,
+        [
+            ("m_zero".to_string(), 0),
+            ("m_one".to_string(), 1),
+            ("b_field".to_string(), 2),
+            ("c_field".to_string(), 3),
+        ]
+    );
+}
+
+#[test]
+fn a_unique_value_may_move_between_owners_in_one_call() {
+    let w = World::new();
+    let mut erp = spec(OwnerType::Customer, "erp", "text", json!({}));
+    erp.capabilities.unique = true;
+    let erp = w.define(erp);
+    let set = |values: Vec<(Owner, Option<Value>)>| {
+        block_on(set_field_values(&w.caller(), &w.ports, erp, values))
+    };
+    set(vec![
+        (customer(1), Some(json!("A-1"))),
+        (customer(2), Some(json!("B-2"))),
+    ])
+    .unwrap();
+    set(vec![(customer(3), Some(json!("A-1"))), (customer(1), None)]).unwrap();
+    set(vec![
+        (customer(2), Some(json!("A-1"))),
+        (customer(3), Some(json!("B-2"))),
+    ])
+    .unwrap();
+    let holder = |unique: &str| {
+        block_on(w.ports.custom_fields.find_unique(erp, unique))
+            .unwrap()
+            .map(|v| v.owner)
+    };
+    assert_eq!(
+        (holder("a-1"), holder("b-2")),
+        (Some(customer(2).id()), Some(customer(3).id()))
+    );
+    // Still refused: a holder that keeps it, or two owners of the call taking one.
+    assert_eq!(
+        problem_codes(set(vec![(customer(4), Some(json!("a-1")))]).unwrap_err()),
+        vec![("custom.erp".to_string(), "custom_field_value_taken")]
+    );
+    assert_eq!(
+        problem_codes(
+            set(vec![
+                (customer(4), Some(json!("C-3"))),
+                (customer(5), Some(json!("c-3"))),
+            ])
+            .unwrap_err()
+        ),
+        vec![("custom.erp".to_string(), "custom_field_value_taken")]
+    );
+    assert_eq!(
+        problem_codes(
+            set(vec![
+                (customer(4), Some(json!("A-1"))),
+                (customer(2), Some(json!("A-1"))),
+            ])
+            .unwrap_err()
+        ),
+        vec![
+            ("custom.erp".to_string(), "custom_field_value_taken"),
+            ("custom.erp".to_string(), "custom_field_value_taken"),
+        ]
+    );
+}
+
+/// A write another caller makes, on the same ports.
+type Race<'a> = Box<dyn FnOnce(&InMemoryPorts) + 'a>;
+
+/// Ports whose next commit first lets `race` write: another writer getting there
+/// between a command's reads and its commit.
+struct Racing<'a> {
+    ports: &'a InMemoryPorts,
+    race: RefCell<Option<Race<'a>>>,
+}
+
+impl<'a> Racing<'a> {
+    fn new(ports: &'a InMemoryPorts, race: impl FnOnce(&InMemoryPorts) + 'a) -> Self {
+        Self {
+            ports,
+            race: RefCell::new(Some(Box::new(race))),
+        }
+    }
+}
+
+impl HasCustomFieldDefinitions for Racing<'_> {
+    type CustomFieldDefinitions =
+        <InMemoryPorts as HasCustomFieldDefinitions>::CustomFieldDefinitions;
+    fn custom_field_definitions(&self) -> &Self::CustomFieldDefinitions {
+        self.ports.custom_field_definitions()
+    }
+}
+
+impl HasCustomFieldValues for Racing<'_> {
+    type CustomFieldValues = <InMemoryPorts as HasCustomFieldValues>::CustomFieldValues;
+    fn custom_field_values(&self) -> &Self::CustomFieldValues {
+        self.ports.custom_field_values()
+    }
+}
+
+impl ReferenceTargets for Racing<'_> {
+    async fn existing(&self, references: &[Reference]) -> Result<HashSet<Reference>, RepoError> {
+        self.ports.existing(references).await
+    }
+}
+
+impl HasBatch for Racing<'_> {
+    type Batch = <InMemoryPorts as HasBatch>::Batch;
+    fn batch(&self) -> Self::Batch {
+        self.ports.batch()
+    }
+    async fn commit(&self, batch: Self::Batch) -> Result<(), RepoError> {
+        let race = self.race.borrow_mut().take();
+        if let Some(race) = race {
+            race(self.ports);
+        }
+        self.ports.commit(batch).await
+    }
+}
+
+#[test]
+fn a_lost_race_names_the_key_whose_version_moved() {
+    let w = World::new();
+    w.define(spec(OwnerType::Product, "a_field", "text", json!({})));
+    let b = w.define(spec(OwnerType::Product, "b_field", "text", json!({})));
+    w.set(
+        &product(1),
+        json!({"custom.a_field": "x", "custom.b_field": "y"}),
+    )
+    .unwrap();
+    let racing = Racing::new(&w.ports, |ports| {
+        let definition = block_on(ports.custom_fields.get(b)).unwrap().unwrap();
+        let mut batch = ports.batch();
+        batch.set_custom_field_value(
+            ValueRow::new(&definition, &product(1), &FieldValue::Text("z".to_string())),
+            None,
+        );
+        block_on(ports.commit(batch)).unwrap();
+    });
+    let result = block_on(set_custom_fields(
+        &w.caller(),
+        &racing,
+        &product(1),
+        SetCustomFields {
+            values: BTreeMap::from([
+                ("custom.a_field".to_string(), json!("x2")),
+                ("custom.b_field".to_string(), json!("y2")),
+            ]),
+            if_versions: BTreeMap::from([
+                ("custom.a_field".to_string(), 1),
+                ("custom.b_field".to_string(), 1),
+            ]),
+        },
+    ));
+    assert_eq!(
+        result,
+        Err(CommandError::Stale("custom.b_field".to_string()))
+    );
+}
+
+#[test]
+fn a_lost_sync_race_names_the_key_created_meanwhile() {
+    let w = World::new();
+    let namespace = Namespace::of_app(AppKey::new("app_erp").unwrap());
+    let racing = Racing::new(&w.ports, |ports| {
+        let mut zeta = hypha_custom_fields::CustomFieldDefinition::new(
+            CustomFieldDefinitionId::from_uuid(Uuid::from_u128(500)),
+            Namespace::of_app(AppKey::new("app_erp").unwrap()),
+            spec(OwnerType::Customer, "zeta", "text", json!({})),
+            0,
+        )
+        .unwrap();
+        block_on(ports.custom_fields.insert(&mut zeta)).unwrap();
+    });
+    let result = block_on(sync_managed_definitions(
+        &w.ctx,
+        &racing,
+        &w.ids,
+        &namespace,
+        vec![
+            spec(OwnerType::Customer, "alpha", "text", json!({})),
+            spec(OwnerType::Customer, "zeta", "text", json!({})),
+        ],
+    ));
+    assert_eq!(
+        result,
+        Err(CommandError::KeyTaken {
+            owner_type: OwnerType::Customer,
+            key: "app_erp.zeta".to_string(),
+        })
+    );
+}
+
+#[test]
+fn raw_keys_are_quoted_in_messages() {
+    let w = World::new();
+    let definitions = block_on(w.ports.custom_fields.list(None)).unwrap();
+    let unknown = field_filter(
+        &w.caller(),
+        &definitions,
+        "custom.nope ",
+        RawFilterOp::Eq,
+        &["x".to_string()],
+    )
+    .unwrap_err();
+    assert_eq!(unknown.to_string(), "no custom field \"custom.nope \"");
+    assert_eq!(
+        CommandError::InvalidFilter("custom.w\n".to_string(), "give a value".to_string())
+            .to_string(),
+        "\"custom.w\\n\": give a value"
     );
 }

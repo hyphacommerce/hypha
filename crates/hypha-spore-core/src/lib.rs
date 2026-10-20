@@ -14,6 +14,7 @@ use hypha_apps::{HasApps, SettingsProblem, SettingsSchema, SporeRegistration};
 use hypha_core::{AppKey, Ctx, EventHandlers, HasBatch, IdGenerator, Scope, StoredEvent, Union};
 use hypha_custom_fields::{
     HasCustomFieldDefinitions, HasCustomFieldValues, Namespace, StageCustomFieldDefinitions,
+    StageCustomFieldValues,
 };
 use hypha_payments::{PaymentProviders, ProviderKey};
 use hypha_store_postgres::MigrationSet;
@@ -573,7 +574,7 @@ where
     S: SporeSet,
     P: HasCustomFieldDefinitions
         + HasCustomFieldValues
-        + HasBatch<Batch: StageCustomFieldDefinitions>,
+        + HasBatch<Batch: StageCustomFieldDefinitions + StageCustomFieldValues>,
 {
     for (name, specs) in S::custom_fields() {
         let key = AppKey::of_spore(name).map_err(|e| format!("spore {name:?}: {e}"))?;

@@ -539,8 +539,7 @@ pub trait Storage: Send + Sync + 'static {
                        + hypha_custom_fields::StageCustomFieldValues
                        + hypha_notifications::StageNotificationSettings
                        + hypha_apps::StageApps
-                       + hypha_oauth::StageOAuth
-                       + hypha_custom_fields::StageCustomFieldDefinitions,
+                       + hypha_oauth::StageOAuth,
         >
     where
         Self: 'a;

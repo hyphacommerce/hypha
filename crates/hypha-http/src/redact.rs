@@ -24,7 +24,7 @@ use std::fmt;
 use hypha_apps::App;
 use hypha_core::{Actor, Ctx, Scope};
 use hypha_custom_fields::{
-    CallerKind, CustomFieldDefinition, FieldCaller, FieldKey, ReadAccess, read_access,
+    CallerKind, CustomFieldDefinition, FieldCaller, FieldKey, OwnerType, ReadAccess, read_access,
 };
 use hypha_extensions::PostalAddress;
 use serde::{
@@ -467,6 +467,7 @@ pub fn is_custom_fields_event(event_type: &str) -> bool {
 pub fn custom_field_changes(
     app: &App,
     definitions: &[CustomFieldDefinition],
+    event_type: &str,
     data: &Value,
 ) -> Option<Value> {
     let key = app.key().clone();
@@ -479,7 +480,28 @@ pub fn custom_field_changes(
         None => vec![Scope::ProductsRead, Scope::CustomersRead, Scope::OrdersRead],
     };
     let ctx = Ctx::new(Actor::App(app.id()), scopes);
-    changes_visible_to(&FieldCaller::new(&ctx, &kind), definitions, data)
+    changes_visible_to(
+        &FieldCaller::new(&ctx, &kind),
+        definitions,
+        event_type,
+        data,
+    )
+}
+
+/// The owner type a `<owner>.custom_fields_updated` event's entries belong to: a
+/// `product.custom_fields_updated` with a `variant` is about the variant's fields.
+/// Keys are unique per (owner type, namespace, key), so an entry is judged by the
+/// definition of its own owner type, never by another type's field of the same key.
+fn owner_type_of(event_type: &str, data: &Value) -> Option<OwnerType> {
+    let variant = data.get("variant").is_some_and(|v| !v.is_null());
+    OwnerType::ALL
+        .into_iter()
+        .filter(|t| t.event_type() == event_type)
+        .find(|t| match t {
+            OwnerType::Variant => variant,
+            OwnerType::Product => !variant,
+            _ => true,
+        })
 }
 
 /// `custom_field_changes` for any caller (`GET /admin/events/{id}` for an app or a key,
@@ -487,11 +509,13 @@ pub fn custom_field_changes(
 pub fn changes_visible_to(
     caller: &FieldCaller<'_>,
     definitions: &[CustomFieldDefinition],
+    event_type: &str,
     data: &Value,
 ) -> Option<Value> {
     let Some(changes) = data.get("changes").and_then(Value::as_array) else {
         return Some(data.clone());
     };
+    let owner_type = owner_type_of(event_type, data);
     let own = caller.namespace_owner().map(|k| k.as_str().to_string());
     let kept: Vec<Value> = changes
         .iter()
@@ -501,7 +525,7 @@ pub fn changes_visible_to(
             };
             match definitions
                 .iter()
-                .find(|d| d.field_key().to_string() == name)
+                .find(|d| Some(d.owner_type()) == owner_type && d.field_key().to_string() == name)
             {
                 Some(definition) => read_access(definition, caller) == ReadAccess::Visible,
                 None => {
@@ -805,23 +829,35 @@ mod tests {
         }
     }
 
+    const CUSTOMER_EVENT: &str = "customer.custom_fields_updated";
+
     fn definition(namespace: &str, key: &str, personal: bool) -> CustomFieldDefinition {
+        definition_for(OwnerType::Customer, namespace, key, personal, false)
+    }
+
+    fn definition_for(
+        owner_type: OwnerType,
+        namespace: &str,
+        key: &str,
+        personal: bool,
+        private: bool,
+    ) -> CustomFieldDefinition {
         use hypha_core::CustomFieldDefinitionId;
         use hypha_custom_fields::{
-            Access, Capabilities, DefinitionSpec, FieldType, Namespace, OwnerType, RawValidations,
+            Access, Capabilities, DefinitionSpec, FieldType, Namespace, RawValidations,
         };
         CustomFieldDefinition::new(
             CustomFieldDefinitionId::from_uuid(Uuid::from_u128(1)),
             Namespace::parse(namespace).unwrap(),
             DefinitionSpec {
-                owner_type: OwnerType::Customer,
+                owner_type,
                 key: key.to_string(),
                 field_type: FieldType::parse("text").unwrap(),
                 name: key.to_string(),
                 description: None,
                 validations: RawValidations::default(),
                 access: Access::default(),
-                private: false,
+                private,
                 personal,
                 capabilities: Capabilities::default(),
             },
@@ -855,7 +891,7 @@ mod tests {
         let kind = CallerKind::App(AppKey::new("app_crm").unwrap());
         let caller = FieldCaller::new(&ctx, &kind);
         let data = changes(&["custom.tier", "custom.birthday"]);
-        let seen = changes_visible_to(&caller, &definitions, &data).unwrap();
+        let seen = changes_visible_to(&caller, &definitions, CUSTOMER_EVENT, &data).unwrap();
         assert_eq!(keys_of(&seen), ["custom.tier"]);
         assert_eq!(seen["customer"], "cus_1");
     }
@@ -867,7 +903,7 @@ mod tests {
         let kind = CallerKind::App(AppKey::new("app_crm").unwrap());
         let caller = FieldCaller::new(&ctx, &kind);
         let data = changes(&["custom.gone", "app_crm.gone", "app_other.gone"]);
-        let seen = changes_visible_to(&caller, &[], &data).unwrap();
+        let seen = changes_visible_to(&caller, &[], CUSTOMER_EVENT, &data).unwrap();
         assert_eq!(keys_of(&seen), ["custom.gone", "app_crm.gone"]);
     }
 
@@ -878,10 +914,66 @@ mod tests {
         let kind = CallerKind::Merchant;
         let caller = FieldCaller::new(&ctx, &kind);
         assert_eq!(
-            changes_visible_to(&caller, &definitions, &changes(&["custom.birthday"])),
+            changes_visible_to(
+                &caller,
+                &definitions,
+                CUSTOMER_EVENT,
+                &changes(&["custom.birthday"])
+            ),
             None
         );
     }
+
+    fn other_app() -> (Ctx, CallerKind) {
+        use hypha_core::AppKey;
+        (
+            app(vec![Scope::ProductsRead]),
+            CallerKind::App(AppKey::new("app_other").unwrap()),
+        )
+    }
+
+    fn product_changes(variant: Option<&str>, keys: &[&str]) -> Value {
+        let changes: Vec<Value> = keys.iter().map(|k| json!({"key": k})).collect();
+        json!({"product": "prod_1", "variant": variant, "changes": changes})
+    }
+
+    #[test]
+    fn a_variants_change_is_judged_by_the_variants_definition() {
+        // The same key on products is public, on variants another app's private field.
+        let definitions = [
+            definition_for(OwnerType::Product, "app_erp", "cost", false, false),
+            definition_for(OwnerType::Variant, "app_erp", "cost", false, true),
+        ];
+        let (ctx, kind) = other_app();
+        let caller = FieldCaller::new(&ctx, &kind);
+        let data = product_changes(Some("var_1"), &["app_erp.cost"]);
+        assert_eq!(
+            changes_visible_to(&caller, &definitions, PRODUCT_EVENT, &data),
+            None
+        );
+    }
+
+    #[test]
+    fn a_products_change_is_judged_by_the_products_definition() {
+        // The same key on variants is public, on products another app's private field.
+        let definitions = [
+            definition_for(OwnerType::Variant, "app_erp", "cost", false, false),
+            definition_for(OwnerType::Product, "app_erp", "cost", false, true),
+        ];
+        let (ctx, kind) = other_app();
+        let caller = FieldCaller::new(&ctx, &kind);
+        let data = product_changes(None, &["app_erp.cost"]);
+        assert_eq!(
+            changes_visible_to(&caller, &definitions, PRODUCT_EVENT, &data),
+            None
+        );
+        // And a public variant field stays in a variant's event.
+        let data = product_changes(Some("var_1"), &["app_erp.cost"]);
+        let seen = changes_visible_to(&caller, &definitions, PRODUCT_EVENT, &data).unwrap();
+        assert_eq!(keys_of(&seen), ["app_erp.cost"]);
+    }
+
+    const PRODUCT_EVENT: &str = "product.custom_fields_updated";
 
     #[test]
     fn custom_fields_events_are_named_by_their_suffix() {

@@ -10,7 +10,8 @@ use hypha_core::{
 };
 use hypha_custom_fields::{
     CustomFieldDefinition, Decimal, DefinitionRepo, ItemsChange, ItemsResult, Key, Namespace,
-    OwnerItems, OwnerType, StoredValue, ValueCount, ValueRepo, ValueRow, keys,
+    OwnerItems, OwnerType, StoredValue, ValueCount, ValueRepo, ValueRow, keys, list_item,
+    list_items,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -65,29 +66,56 @@ pub(crate) fn unique_definition(
     .then_some(keys::CUSTOM_FIELD_KEY)
 }
 
-/// What the values table's keys enforce for `row`, against the other stored rows: its
-/// definition exists, and a unique value is held once per definition.
-pub(crate) fn check_value(
+/// What the values table's foreign key enforces for `row`: its definition exists.
+fn check_definition(
     definitions: &HashMap<CustomFieldDefinitionId, CustomFieldDefinition>,
-    values: &Values,
     row: &ValueRow,
 ) -> Result<(), RepoError> {
     if !definitions.contains_key(&row.definition) {
         return Err(missing("custom field definition", row.definition));
     }
-    if let Some(unique) = &row.unique_text
-        && values.iter().any(|((definition, owner), other)| {
-            *definition == row.definition
-                && *owner != row.owner
-                && other.row.unique_text.as_ref() == Some(unique)
-        })
-    {
-        return Err(RepoError::Duplicate(keys::CUSTOM_FIELD_UNIQUE_VALUE));
+    Ok(())
+}
+
+/// What the values' unique key enforces, checked when a batch commits (as the
+/// database's deferred constraint is, so one batch may move a value between owners): a
+/// unique value is held once per definition.
+pub(crate) fn check_unique_values(values: &Values) -> Result<(), RepoError> {
+    let mut seen = std::collections::HashSet::new();
+    for ((definition, _), record) in values {
+        if let Some(unique) = &record.row.unique_text
+            && !seen.insert((*definition, unique.as_str()))
+        {
+            return Err(RepoError::Duplicate(keys::CUSTOM_FIELD_UNIQUE_VALUE));
+        }
     }
     Ok(())
 }
 
-/// Writes `row` if `expected` matches what's stored (`None`: anything).
+/// Rewrites the derived columns of `row`'s (definition, owner) if it's at `at`, keeping
+/// its value, version and stamps (`StageCustomFieldValues::reindex_custom_field_value`).
+pub(crate) fn reindex_value(
+    definitions: &HashMap<CustomFieldDefinitionId, CustomFieldDefinition>,
+    values: &mut Values,
+    row: ValueRow,
+    at: Version,
+) -> Result<(), RepoError> {
+    check_definition(definitions, &row)?;
+    let Some(stored) = values.get_mut(&(row.definition, row.owner)) else {
+        return Err(RepoError::StaleVersion);
+    };
+    if stored.version != at {
+        return Err(RepoError::StaleVersion);
+    }
+    stored.row.scalar_text = row.scalar_text;
+    stored.row.scalar_num = row.scalar_num;
+    stored.row.unique_text = row.unique_text;
+    stored.row.list_items = row.list_items;
+    Ok(())
+}
+
+/// Writes `row` if `expected` matches what's stored (`None`: anything). Unique values
+/// are the caller's to check, once its writes are done (`check_unique_values`).
 pub(crate) fn set_value(
     definitions: &HashMap<CustomFieldDefinitionId, CustomFieldDefinition>,
     values: &mut Values,
@@ -101,7 +129,7 @@ pub(crate) fn set_value(
     if expected.is_some_and(|e| e != current) {
         return Err(RepoError::StaleVersion);
     }
-    check_value(definitions, values, &row)?;
+    check_definition(definitions, &row)?;
     let stamps = stored.map_or_else(|| Stamps::new(now), |r| r.stamps.touched(now));
     values.insert(
         id,
@@ -343,16 +371,16 @@ impl ValueRepo for InMemoryCustomFields {
     async fn referencing(
         &self,
         definitions: &[CustomFieldDefinitionId],
-        target: &str,
+        targets: &[String],
     ) -> Result<Vec<StoredValue>, RepoError> {
-        let target = Value::String(target.to_string());
+        let is_target = |v: &Value| v.as_str().is_some_and(|t| targets.iter().any(|x| x == t));
         Ok(self
             .lock_values()
             .values()
             .filter(|r| definitions.contains(&r.row.definition))
             .filter(|r| match &r.row.value {
-                Value::Array(items) => items.contains(&target),
-                single => *single == target,
+                Value::Array(items) => items.iter().any(is_target),
+                single => is_target(single),
             })
             .map(ValueRecord::stored)
             .collect())
@@ -393,6 +421,7 @@ impl ValueRepo for InMemoryCustomFields {
                             scalar_text: None,
                             scalar_num: None,
                             unique_text: None,
+                            list_items: list_items(list),
                         };
                         set_value(&definitions, &mut values, row, None, now)?;
                         version = values.get(&id).map(|r| r.version);
@@ -444,7 +473,7 @@ pub(crate) fn values_for(values: &SharedValues, filters: &[FieldFilter]) -> Opti
 
 /// Whether `owner`'s values match every filter, as the Postgres adapter's predicates
 /// do: equality and ranges on the derived `scalar_text` / `scalar_num` columns, list
-/// containment on the value.
+/// containment on `list_items` (items compared as `list_item`, ignoring case).
 pub(crate) fn fields_match(values: Option<&Values>, owner: Uuid, filters: &[FieldFilter]) -> bool {
     let Some(values) = values else {
         return true;
@@ -456,8 +485,10 @@ pub(crate) fn fields_match(values: Option<&Values>, owner: Uuid, filters: &[Fiel
             FieldFilterOp::AnyOf(scalars) => {
                 row.is_some_and(|row| scalars.iter().any(|s| compares(row, s, Ordering::is_eq)))
             }
-            FieldFilterOp::ContainsAny(items) => row.is_some_and(|row| match &row.value {
-                Value::Array(held) => items.iter().any(|item| held.contains(item)),
+            FieldFilterOp::ContainsAny(items) => row.is_some_and(|row| match &row.list_items {
+                Some(Value::Array(held)) => {
+                    items.iter().any(|item| held.contains(&list_item(item)))
+                }
                 _ => false,
             }),
             FieldFilterOp::Gt(s) => row.is_some_and(|row| compares(row, s, Ordering::is_gt)),

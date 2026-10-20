@@ -13,8 +13,8 @@ use hypha_core::{AppKey, Ctx, HasBatch, IdGenerator, RepoError};
 use hypha_custom_fields::{
     Access, AdminAccess, Capabilities, CommandError, CustomFieldDefinition, DefinitionRepo,
     DefinitionSpec, FieldType, HasCustomFieldDefinitions, HasCustomFieldValues, Namespace,
-    OwnerType, RawValidations, StageCustomFieldDefinitions, StorefrontAccess, SyncPlan, keys,
-    plan_sync, stage_managed_definitions,
+    OwnerType, RawValidations, StageCustomFieldDefinitions, StageCustomFieldValues,
+    StorefrontAccess, SyncPlan, keys, plan_sync, stage_managed_definitions,
 };
 use hypha_oauth::Prepared;
 
@@ -22,14 +22,16 @@ use crate::error::ApiError;
 
 /// The ports a sync needs.
 pub trait FieldSyncPorts:
-    HasCustomFieldDefinitions + HasCustomFieldValues + HasBatch<Batch: StageCustomFieldDefinitions>
+    HasCustomFieldDefinitions
+    + HasCustomFieldValues
+    + HasBatch<Batch: StageCustomFieldDefinitions + StageCustomFieldValues>
 {
 }
 
 impl<T> FieldSyncPorts for T where
     T: HasCustomFieldDefinitions
         + HasCustomFieldValues
-        + HasBatch<Batch: StageCustomFieldDefinitions>
+        + HasBatch<Batch: StageCustomFieldDefinitions + StageCustomFieldValues>
 {
 }
 
@@ -188,7 +190,9 @@ pub async fn commit_applying<P: FieldSyncPorts, T>(
         Ok(()) => Ok(answer),
         Err(e @ RepoError::Duplicate(keys::CUSTOM_FIELD_KEY)) => Err(match &synced {
             Some((namespace, plan)) => {
-                hypha_custom_fields::sync_commit_error(namespace, plan, e).into()
+                hypha_custom_fields::sync_commit_error(ports, namespace, plan, e)
+                    .await
+                    .into()
             }
             None => e.into(),
         }),

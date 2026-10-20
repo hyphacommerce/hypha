@@ -189,25 +189,49 @@ where
         // Every value hit, once, with the targets it holds: a list may hold several.
         let mut hits: BTreeMap<(CustomFieldDefinitionId, Uuid), (StoredValue, Vec<Value>)> =
             BTreeMap::new();
-        for target in targets {
-            let ids: Vec<_> = definitions
+        // One query for every target: the definitions of the targets' kinds, then each
+        // value keeps the targets of its own definition's kind that it holds.
+        let ids: Vec<_> = definitions
+            .iter()
+            .filter(|d| {
+                targets
+                    .iter()
+                    .any(|t| d.validations().kind() == Some(t.kind))
+            })
+            .map(|d| d.id())
+            .collect();
+        let names: Vec<String> = targets.iter().map(|t| t.to_string()).collect();
+        let found = match ids.is_empty() {
+            true => Vec::new(),
+            false => {
+                ports
+                    .custom_field_values()
+                    .referencing(&ids, &names)
+                    .await?
+            }
+        };
+        for stored in found {
+            let Some(kind) = definitions
                 .iter()
-                .filter(|d| d.validations().kind() == Some(target.kind))
-                .map(|d| d.id())
+                .find(|d| d.id() == stored.definition)
+                .and_then(|d| d.validations().kind())
+            else {
+                continue;
+            };
+            let holds = |name: &str| match &stored.value {
+                Value::Array(items) => items.iter().any(|i| i.as_str() == Some(name)),
+                single => single.as_str() == Some(name),
+            };
+            let gone: Vec<Value> = targets
+                .iter()
+                .zip(&names)
+                .filter(|(t, name)| t.kind == kind && holds(name))
+                .map(|(_, name)| Value::String(name.clone()))
                 .collect();
-            if ids.is_empty() {
+            if gone.is_empty() {
                 continue;
             }
-            for stored in ports
-                .custom_field_values()
-                .referencing(&ids, &target.to_string())
-                .await?
-            {
-                hits.entry((stored.definition, stored.owner))
-                    .or_insert_with(|| (stored, Vec::new()))
-                    .1
-                    .push(Value::String(target.to_string()));
-            }
+            hits.insert((stored.definition, stored.owner), (stored, gone));
         }
         // Changes per owner, so each owner gets one event.
         let mut changes: BTreeMap<Uuid, (Owner, Vec<FieldChange>)> = BTreeMap::new();

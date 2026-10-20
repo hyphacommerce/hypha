@@ -750,13 +750,13 @@ pub async fn event<S: Storage>(
             )
             .await?;
             let caller = hypha_custom_fields::FieldCaller::new(&ctx, &kind);
-            data = crate::redact::changes_visible_to(&caller, &definitions, &data).unwrap_or_else(
-                || {
-                    let mut empty = data.clone();
-                    empty["changes"] = serde_json::Value::Array(Vec::new());
-                    empty
-                },
-            );
+            data =
+                crate::redact::changes_visible_to(&caller, &definitions, &event.event_type, &data)
+                    .unwrap_or_else(|| {
+                        let mut empty = data.clone();
+                        empty["changes"] = serde_json::Value::Array(Vec::new());
+                        empty
+                    });
         }
         envelope.data = crate::redact::event_data(|s| ctx.has_scope(s), &data);
     }

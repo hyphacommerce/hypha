@@ -96,6 +96,8 @@ async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Times
         (fanned, leased)
     };
     let mut outcomes = Vec::with_capacity(leased.len());
+    // Custom field definitions, loaded once for the run when a delivery needs them.
+    let mut definitions = None;
     for delivery in leased
         .iter()
         .take_while(|d| has_time(d, &state.clock) && fits(Duration::ZERO))
@@ -126,7 +128,7 @@ async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Times
                 Prepared::Webhook(app)
                     if crate::redact::is_custom_fields_event(&delivery.event.event_type) =>
                 {
-                    match custom_field_entries(ports, &app, delivery).await {
+                    match custom_field_entries(ports, &mut definitions, &app, delivery).await {
                         Ok(Some(filtered)) => (Prepared::Webhook(app), Some(filtered)),
                         // Nothing in it the app may read: not sent (design note 0033, §6.4).
                         Ok(None) => (Prepared::Done(hypha_core::DeliveryOutcome::Succeeded), None),
@@ -203,21 +205,42 @@ async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Times
 
 /// `delivery` as `app` may receive it when it's a `<owner>.custom_fields_updated` event
 /// (`redact::custom_field_changes`, with the definitions as they are now); `None` when
-/// nothing in it is for the app.
+/// nothing in it is for the app. `definitions` is the run's: loaded by the first
+/// delivery that needs them, then kept for the others.
 async fn custom_field_entries<P: hypha_custom_fields::HasCustomFieldDefinitions>(
     ports: &P,
+    definitions: &mut Option<Vec<hypha_custom_fields::CustomFieldDefinition>>,
     app: &hypha_apps::App,
     delivery: &hypha_core::Delivery,
 ) -> Result<Option<hypha_core::Delivery>, hypha_core::RepoError> {
     use hypha_custom_fields::DefinitionRepo;
-    let definitions = ports.custom_field_definitions().list(None).await?;
+    let definitions =
+        loaded_once(definitions, || ports.custom_field_definitions().list(None)).await?;
+    let event = &delivery.event;
     Ok(
-        crate::redact::custom_field_changes(app, &definitions, &delivery.event.data).map(|data| {
-            let mut filtered = delivery.clone();
-            filtered.event.data = data;
-            filtered
-        }),
+        crate::redact::custom_field_changes(app, definitions, &event.event_type, &event.data).map(
+            |data| {
+                let mut filtered = delivery.clone();
+                filtered.event.data = data;
+                filtered
+            },
+        ),
     )
+}
+
+/// `cache`'s items, loaded by `load` the first time (a failed load is tried again next
+/// time).
+async fn loaded_once<T, F>(
+    cache: &mut Option<Vec<T>>,
+    load: impl FnOnce() -> F,
+) -> Result<&[T], hypha_core::RepoError>
+where
+    F: std::future::Future<Output = Result<Vec<T>, hypha_core::RepoError>>,
+{
+    if cache.is_none() {
+        *cache = Some(load().await?);
+    }
+    Ok(cache.as_deref().unwrap_or_default())
 }
 
 /// A delivery that couldn't be prepared, tried again on the retry schedule.
@@ -485,4 +508,37 @@ pub async fn search_queued<S: Storage>(state: &AppState<S>) -> Result<u64, Strin
         .queued()
         .await
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    #[test]
+    fn a_runs_definitions_are_loaded_once() {
+        let loads = Cell::new(0);
+        let load = || {
+            loads.set(loads.get() + 1);
+            async { Ok(vec![1, 2]) }
+        };
+        let mut cache = None;
+        for _ in 0..3 {
+            let items = pollster::block_on(loaded_once(&mut cache, load)).unwrap();
+            assert_eq!(items, [1, 2]);
+        }
+        assert_eq!(loads.get(), 1);
+    }
+
+    #[test]
+    fn a_failed_load_is_tried_again() {
+        let mut cache: Option<Vec<i32>> = None;
+        let failed = pollster::block_on(loaded_once(&mut cache, || async {
+            Err(hypha_core::RepoError::StaleVersion)
+        }));
+        assert!(failed.is_err());
+        let items = pollster::block_on(loaded_once(&mut cache, || async { Ok(vec![3]) })).unwrap();
+        assert_eq!(items, [3]);
+    }
 }

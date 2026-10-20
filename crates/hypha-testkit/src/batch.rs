@@ -109,6 +109,7 @@ enum Staged {
     CustomFieldDefinition(CustomFieldDefinition),
     DeletedCustomFieldDefinition(CustomFieldDefinition),
     CustomFieldValue(ValueRow, Option<Version>),
+    ReindexedCustomFieldValue(ValueRow, Version),
     RemovedCustomFieldValue(
         hypha_core::CustomFieldDefinitionId,
         uuid::Uuid,
@@ -814,6 +815,14 @@ impl HasBatch for InMemoryPorts {
                         expected,
                         now,
                     )?,
+                    Staged::ReindexedCustomFieldValue(row, at) => {
+                        crate::custom_fields::reindex_value(
+                            &field_definitions,
+                            &mut field_values,
+                            row,
+                            at,
+                        )?
+                    }
                     Staged::RemovedCustomFieldValue(definition, owner, expected) => {
                         crate::custom_fields::remove_value(
                             &mut field_values,
@@ -828,6 +837,7 @@ impl HasBatch for InMemoryPorts {
             for (app, at) in revocations {
                 crate::oauth::revoke_where(&mut oauth, at, |t| t.app() == &app);
             }
+            crate::custom_fields::check_unique_values(&field_values)?;
             Ok(())
         })();
         if written.is_ok() {
@@ -980,5 +990,9 @@ impl StageCustomFieldValues for InMemoryBatch {
         expected: Option<Version>,
     ) {
         self.stage(Staged::RemovedCustomFieldValue(definition, owner, expected));
+    }
+
+    fn reindex_custom_field_value(&mut self, row: ValueRow, at: Version) {
+        self.stage(Staged::ReindexedCustomFieldValue(row, at));
     }
 }
