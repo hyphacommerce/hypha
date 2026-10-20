@@ -280,6 +280,12 @@ export interface components {
         /** @description What Hypha sends to capture, void or refund a payment. */
         PaymentActionRequest: {
             amount?: components["schemas"]["Money"] | null;
+            /**
+             * @description The attempt the payment collects through, when the app's reports named one
+             *     (`attempt` on `POST /admin/payments/{id}/events`): what to act on, where a
+             *     capture's own ID may have replaced `reference`.
+             */
+            attempt?: string | null;
             order: components["schemas"]["OrderId"];
             /** @description The payment (`pay_…`). */
             payment: components["schemas"]["PaymentId"];

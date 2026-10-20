@@ -109,6 +109,7 @@ where
             order: request.order,
             amount: request.amount,
             reference: request.reference.clone(),
+            attempt: request.attempt.clone(),
         };
         let correlation = request.payment.to_string();
         let answer = call::<Pt>(

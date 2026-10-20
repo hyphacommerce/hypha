@@ -309,6 +309,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "payment_attempt",
             sql: include_str!("../migrations/0057_payment_attempt.sql"),
         },
+        Migration {
+            version: 58,
+            name: "payment_attempt_backfill",
+            sql: include_str!("../migrations/0058_payment_attempt_backfill.sql"),
+        },
     ],
 };
 

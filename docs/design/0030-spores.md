@@ -717,9 +717,11 @@ them, not in this list.
   transaction that writes (two deliveries racing can't both pass), for a provider whose
   IDs name attempts. The payment keeps the attempt it collects through apart from
   its `reference` (which staff's text or an operation's own ID may replace): `attempt`,
-  migration 0057 (Stripe's payments backfilled from a `pi_…` reference), shown in payment
-  responses, set by the start (`Started::attempt`, a start made again replacing it while
-  the payment is pending) or by a report naming one (`PaymentEvent::attempt`; the Stripe
+  migration 0057 (0058 backfills Stripe's open payments from a `pi_…` reference), shown
+  in payment responses, set by the start (`Started::attempt`, a start made again
+  replacing it while the payment is pending; past pending the start writes nothing) or
+  by a report naming one (past pending, only the payment's own reference becomes a first
+  attempt) (`PaymentEvent::attempt`; the Stripe
   spore gives the PaymentIntent, apps may through the events route). A report naming
   another attempt is refused (`payment_reference_mismatch`, 409, `details: {status,
   held, reported}`) unless it pays or authorizes a pending payment (started again). So
@@ -727,8 +729,10 @@ them, not in this list.
   decline, cancel or refund changes nothing. Reports naming no attempt, and payments
   with none, aren't checked, as before this branch (a capture or void may carry an ID of
   its own: PayPal's capture ID, Adyen's pspReference; re-reviews caught three rules
-  keyed on references refusing those or letting a second attempt through). Capture,
-  void and refund act on the attempt (`ActionRequest::attempt`), else the reference. Giving money back is keyed per intent
+  keyed on references refusing those or letting a second attempt through). Starts,
+  captures, voids and refunds act on the attempt (`PaymentRequest::attempt`,
+  `ActionRequest::attempt`, and `attempt` in the `payments.*` action points' requests
+  to apps), else the reference. Giving money back is keyed per intent
   (`<payment>:<intent>:refund-after-void`). A stored intent Stripe no longer knows (404
   `resource_missing`: other keys) is replaced by a new one (money paid on the old
   account's intent is for staff to reconcile there). A payment

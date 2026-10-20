@@ -106,6 +106,10 @@ pub struct PaymentRequest {
     pub customer_email: Email,
     /// Where the storefront wants the buyer back after a redirect, when it said.
     pub return_url: Option<String>,
+    /// The attempt the payment collects through, when its start or a report kept one
+    /// (`Payment::attempt`): what a provider resumes, where staff's text or an
+    /// operation's own ID may have replaced `reference`.
+    pub attempt: Option<String>,
     /// The provider's reference already kept on the payment, when it was started before
     /// (a shopper back on the order page): a provider resumes what it made then rather
     /// than making another, since its own idempotency may not outlive the gap.
@@ -608,6 +612,7 @@ mod tests {
             country: CountryCode::new("HR").unwrap(),
             customer_email: Email::new("buyer@example.com").unwrap(),
             return_url: None,
+            attempt: None,
             reference: None,
             instructions: instructions.map(str::to_string),
             settings: serde_json::json!({}),

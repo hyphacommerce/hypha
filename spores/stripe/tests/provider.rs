@@ -90,6 +90,7 @@ fn request(store_settings: Map<String, Value>) -> PaymentRequest {
         country: CountryCode::new("HR").unwrap(),
         customer_email: Email::new("buyer@example.com").unwrap(),
         return_url: Some("https://shop.example/order/1".to_string()),
+        attempt: None,
         reference: None,
         instructions: None,
         settings: json!({}),
@@ -454,6 +455,29 @@ fn an_action_acts_on_the_payments_attempt_when_its_reference_was_replaced() {
     });
     let mut request = action(PaymentAction::Void, None, Some("bank 1234"));
     request.attempt = Some("pi_1".to_string());
+    assert_eq!(
+        block_on(provider(http).act(&request)),
+        Ok(ActionAnswer::Completed {
+            reference: Some("pi_1".to_string())
+        })
+    );
+    assert!(
+        fake.requests()[0]
+            .url
+            .ends_with("/v1/payment_intents/pi_1/cancel")
+    );
+}
+
+#[test]
+fn an_attempt_that_isnt_an_intent_leaves_the_reference_to_act_on() {
+    let (fake, http) = Fake::new(|_| {
+        (
+            200,
+            json!({ "id": "pi_1", "amount": 1250, "currency": "eur", "status": "canceled", "client_secret": "pi_1_secret" }),
+        )
+    });
+    let mut request = action(PaymentAction::Void, None, Some("pi_1"));
+    request.attempt = Some("manual-1".to_string());
     assert_eq!(
         block_on(provider(http).act(&request)),
         Ok(ActionAnswer::Completed {

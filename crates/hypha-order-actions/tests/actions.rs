@@ -1500,6 +1500,26 @@ fn a_report_naming_an_attempt_first_keeps_it_though_nothing_moves() {
 }
 
 #[test]
+fn a_paid_payment_without_an_attempt_takes_only_its_own_reference_as_one() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    world.report_ref(K::Paid, None, Some("pi_1"), None).unwrap();
+    // A second intent's money names pi_2: not made the payment's attempt.
+    world
+        .report_attempt(K::Paid, None, Some("pi_2"), Some("pi_2"), None)
+        .unwrap();
+    let stored = block_on(
+        world
+            .payments
+            .get(hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001))),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(stored.attempt(), None);
+}
+
+#[test]
 fn an_operations_own_id_doesnt_change_the_attempt() {
     use hypha_order_actions::PaymentEventKind as K;
     let world = World::new();

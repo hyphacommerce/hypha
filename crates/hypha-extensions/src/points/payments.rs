@@ -163,6 +163,12 @@ pub struct PaymentActionRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "openapi", schema(required = false))]
     pub reference: Option<String>,
+    /// The attempt the payment collects through, when the app's reports named one
+    /// (`attempt` on `POST /admin/payments/{id}/events`): what to act on, where a
+    /// capture's own ID may have replaced `reference`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(required = false))]
+    pub attempt: Option<String>,
 }
 
 /// Whether the provider took the action. Accepted isn't done: the payment moves when

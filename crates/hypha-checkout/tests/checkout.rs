@@ -1119,7 +1119,8 @@ impl hypha_payments::PaymentProvider for &CardApp {
             } else {
                 format!("pi_{}", payment.order_number)
             }),
-            attempt: None,
+            // Its IDs name attempts: the start's is kept as the payment's.
+            attempt: (!self.bad_reference.get()).then(|| format!("pi_{}", payment.order_number)),
         })
     }
 }
@@ -1236,6 +1237,7 @@ fn an_app_method_starts_its_payment_and_keeps_the_reference() {
     let stored = block_on(world.payments.get(payment.id())).unwrap().unwrap();
     let number = placed.order.number().value();
     assert_eq!(stored.reference(), Some(format!("pi_{number}").as_str()));
+    assert_eq!(stored.attempt(), Some(format!("pi_{number}").as_str()));
     assert_eq!(stored.status(), PaymentStatus::Pending);
 }
 

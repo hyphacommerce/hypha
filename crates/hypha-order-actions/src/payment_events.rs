@@ -210,17 +210,21 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
     };
     let attempt = other_attempt(payment, input)?;
     Ok(match input.kind {
-        // Whether the status moved or the attempt was named for the first time (a payment
-        // from before attempts were kept, reported again): either is stored.
+        // Whether the status moved or the attempt was named for the first time: either is
+        // stored. Past pending, a payment from before attempts were kept takes only its own
+        // reference as its attempt (Stripe delivering its intent's report again): another
+        // is a second attempt's money, and must not become the one it collects through.
         PaymentEventKind::Authorized => {
             whole(payment)?;
+            let own = names_own(payment, attempt.as_deref());
             let changed = payment.authorize(reference)?;
-            payment.note_attempt(attempt)? || changed
+            (own && payment.note_attempt(attempt)?) || changed
         }
         PaymentEventKind::Paid => {
             whole(payment)?;
+            let own = names_own(payment, attempt.as_deref());
             let changed = payment.pay(at, reference)?;
-            payment.note_attempt(attempt)? || changed
+            (own && payment.note_attempt(attempt)?) || changed
         }
         PaymentEventKind::Failed => payment.fail(reference)?,
         PaymentEventKind::Voided => {
@@ -275,6 +279,12 @@ fn other_attempt(payment: &Payment, input: &PaymentEvent) -> Result<Option<Strin
         held: held.to_string(),
         reported: named.clone(),
     })
+}
+
+/// Whether `attempt` may become the payment's: a pending payment's start or report names
+/// it, or it's the payment's own reference.
+fn names_own(payment: &Payment, attempt: Option<&str>) -> bool {
+    payment.status() == PaymentStatus::Pending || payment.reference() == attempt
 }
 
 /// The payment an earlier request with this key reported on, if this caller sent it.

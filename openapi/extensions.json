@@ -333,6 +333,13 @@
               }
             ]
           },
+          "attempt": {
+            "description": "The attempt the payment collects through, when the app's reports named one\n(`attempt` on `POST /admin/payments/{id}/events`): what to act on, where a\ncapture's own ID may have replaced `reference`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "order": {
             "$ref": "#/components/schemas/OrderId"
           },

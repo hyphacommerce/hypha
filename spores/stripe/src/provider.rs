@@ -60,10 +60,7 @@ impl StripeProvider {
         secret_key: &str,
     ) -> Result<PaymentIntent, PaymentError> {
         let client = self.client(secret_key);
-        if let Some(reference) = payment
-            .reference
-            .as_deref()
-            .filter(|r| r.starts_with("pi_"))
+        if let Some(reference) = intent_of(payment.attempt.as_deref(), payment.reference.as_deref())
         {
             match client.retrieve_payment_intent(reference).await {
                 Ok(intent) => return usable(intent),
@@ -113,6 +110,14 @@ async fn create(
         }
         answer => answer,
     }
+}
+
+/// The payment's PaymentIntent: its attempt, else its reference (a payment from before
+/// attempts were kept), whichever names one (staff may have reported another attempt;
+/// staff's text or an operation's own ID may have replaced the reference).
+fn intent_of<'a>(attempt: Option<&'a str>, reference: Option<&'a str>) -> Option<&'a str> {
+    let intent = |id: &&str| id.starts_with("pi_");
+    attempt.filter(intent).or(reference.filter(intent))
 }
 
 /// An intent the shopper can still pay, or why not.
@@ -216,11 +221,7 @@ impl PaymentProvider for StripeProvider {
         // The attempt the payment collects through, else its reference (a payment from
         // before attempts were kept): staff's text or an operation's own ID may have
         // replaced the reference.
-        let Some(reference) = request
-            .attempt
-            .as_deref()
-            .or(request.reference.as_deref())
-            .filter(|r| r.starts_with("pi_"))
+        let Some(reference) = intent_of(request.attempt.as_deref(), request.reference.as_deref())
         else {
             return Ok(ActionAnswer::Refused {
                 reason: "This payment has no Stripe PaymentIntent.".to_string(),

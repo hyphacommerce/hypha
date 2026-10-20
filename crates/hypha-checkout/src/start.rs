@@ -52,6 +52,7 @@ pub(crate) async fn start<S: HasPayments, Q: PaymentProviders>(
         customer_email: order.email().clone(),
         return_url: return_url.map(str::to_string),
         reference: payment.reference().map(str::to_string),
+        attempt: payment.attempt().map(str::to_string),
         instructions: payment.instructions().map(str::to_string),
         settings,
         // The host fills a spore provider's (design note 0030, §8).
@@ -74,9 +75,9 @@ pub(crate) async fn start<S: HasPayments, Q: PaymentProviders>(
 }
 
 /// Stores the provider's `reference` on `payment`, and the `attempt` it started (made
-/// again, the one reports are checked against from now) while the payment is still
-/// pending, reloading it when the provider's own report (its events) changed it
-/// meanwhile.
+/// again, the one reports are checked against from now), while the payment is still
+/// pending: reloaded when the provider's own report (its events) changed it meanwhile,
+/// and left as that report set it once it's moved on.
 async fn keep_reference<S: HasPayments>(
     ports: &S,
     payment: &mut Payment,
@@ -85,9 +86,12 @@ async fn keep_reference<S: HasPayments>(
 ) -> Result<(), CommandError> {
     let mut attempts = Attempts::first();
     loop {
+        // Moved on meanwhile (its provider reported it): the report said where it stands.
+        if payment.status() != PaymentStatus::Pending {
+            return Ok(());
+        }
         let referenced = payment.set_reference(reference.clone())?;
-        let started = payment.status() == hypha_payments::PaymentStatus::Pending
-            && payment.note_attempt(attempt.clone())?;
+        let started = payment.note_attempt(attempt.clone())?;
         if !(referenced || started) {
             return Ok(());
         }
