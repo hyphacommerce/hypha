@@ -749,3 +749,73 @@ async fn core_creates_nothing_in_the_spores_namespace() {
     let names: Vec<String> = rows.iter().map(|r| r.get(0)).collect();
     assert!(names.is_empty(), "core objects named spore_*: {names:?}");
 }
+
+/// Core's migrations before payments kept their attempt (0058, 0059 backfill it).
+const BEFORE_ATTEMPT_BACKFILLS: MigrationSet = MigrationSet {
+    module: "core",
+    migrations: CORE.migrations.split_at(57).0,
+};
+
+#[tokio::test]
+async fn backfills_give_stripe_payments_their_intent_as_their_attempt() {
+    let Some(mut client) = fresh_schema("migrate_attempts").await else {
+        return;
+    };
+    assert_eq!(
+        BEFORE_ATTEMPT_BACKFILLS.migrations.last().map(|m| m.name),
+        Some("payment_attempt")
+    );
+    migrate(&mut client, &[BEFORE_ATTEMPT_BACKFILLS])
+        .await
+        .unwrap();
+    // (n, provider, status, reference): what each row looked like before the backfills.
+    let rows = [
+        (1, "spore_stripe", "pending", Some("pi_1")),
+        (2, "spore_stripe", "paid", Some("pi_2")),
+        (3, "spore_stripe", "paid", Some("bank 1234")),
+        (4, "app_pay", "paid", Some("pi_4")),
+        (5, "spore_stripe", "paid", Some("pix5")),
+        (6, "spore_stripe", "paid", None),
+    ];
+    for (n, provider, status, reference) in rows {
+        let paid = (status == "paid").then_some("2026-10-20T00:00:00Z");
+        client
+            .execute(
+                "INSERT INTO payments (id, version, order_id, provider, currency, amount, status,
+                     reference, paid_at)
+                 VALUES ($1::text::uuid, 1, gen_random_uuid(), $2, 'EUR', 100, $3, $4,
+                     $5::text::timestamptz)",
+                &[
+                    &format!("00000000-0000-0000-0000-{n:012}"),
+                    &provider,
+                    &status,
+                    &reference,
+                    &paid,
+                ],
+            )
+            .await
+            .unwrap();
+    }
+    migrate(&mut client, &[CORE]).await.unwrap();
+    let attempts: Vec<(String, Option<String>)> = client
+        .query("SELECT id::text, attempt FROM payments ORDER BY id", &[])
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| (r.get(0), r.get(1)))
+        .collect();
+    let id = |n: u32| format!("00000000-0000-0000-0000-{n:012}");
+    assert_eq!(
+        attempts,
+        vec![
+            // Open (0058) and collected (0059) Stripe payments take their intent.
+            (id(1), Some("pi_1".to_string())),
+            (id(2), Some("pi_2".to_string())),
+            // Staff's text, another provider's, a `pi` without its `_`, none: untouched.
+            (id(3), None),
+            (id(4), None),
+            (id(5), None),
+            (id(6), None),
+        ]
+    );
+}

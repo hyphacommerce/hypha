@@ -736,8 +736,8 @@ them, not in this list.
   before this branch; an app authorized without naming an attempt and then reported paid
   naming one takes that attempt, which can't be told from a capture (Danilo: open).
   The backfills are in core's set: `attempt` is core's column, and a spore's migrations
-  may change only its own tables (Q1). No test pins them (one needs rows inserted
-  before a migration runs; the harness can't yet). A report naming
+  may change only its own tables (Q1). A migration test pins them (rows written before
+  0058, then which ones take an attempt: `backfills_give_stripe_payments_…`). A report naming
   another attempt is refused (`payment_reference_mismatch`, 409, `details: {status,
   held, reported}`) unless it pays or authorizes a pending payment (started again). So
   money another intent took for a payment past pending goes back, and another intent's
