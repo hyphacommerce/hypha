@@ -45,7 +45,11 @@ function moduleUrl(module: string): string {
   } catch {
     throw new ElementLoadError("invalid_module", `not an absolute URL: ${JSON.stringify(module)}`);
   }
-  const local = url.protocol === "http:" && LOCAL_HOSTS.has(url.hostname);
+  // `*.localhost` is this machine too (RFC 6761; browsers treat it as a secure origin):
+  // `hypha deploy --target local` serves the API at `api.hypha.localhost` over http.
+  const local =
+    url.protocol === "http:" &&
+    (LOCAL_HOSTS.has(url.hostname) || url.hostname.endsWith(".localhost"));
   if (url.protocol !== "https:" && !local)
     throw new ElementLoadError(
       "invalid_module",

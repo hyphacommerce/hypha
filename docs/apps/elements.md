@@ -75,7 +75,7 @@ The rules:
 - **Tag**: lowercase with a hyphen, prefixed with the app's name (`stripe-payment`,
   `reviews-summary`) so two apps never collide. The module defines it once (guard with
   `customElements.get`), and only the tags the manifest lists.
-- **Module**: an ES module served over HTTPS (`http://localhost` in development) with
+- **Module**: an ES module served over HTTPS (`http://localhost` or a `*.localhost` name on this machine in development) with
   CORS allowing any origin (`Access-Control-Allow-Origin: *`; it's a public script) and a
   long-lived cache under a versioned URL. No side effects beyond `customElements.define`:
   no global CSS, no globals, no listeners on `window` or `document` until connected.

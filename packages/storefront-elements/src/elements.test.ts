@@ -110,6 +110,7 @@ test("refuses bad tags and modules that aren't https (localhost aside)", async (
   for (const module of [
     "/elements/payment.js",
     "http://app.example/x.js",
+    "http://localhost.example/x.js",
     "data:text/javascript,1",
   ]) {
     await assert.rejects(
@@ -119,6 +120,18 @@ test("refuses bad tags and modules that aren't https (localhost aside)", async (
   }
   assert.equal(
     await loadElement({ module: "http://localhost:4000/x.js", tag: "dev-element" }),
+    Payment,
+  );
+});
+
+test("a *.localhost module loads over http (a deployment on this machine)", async () => {
+  const registry = fakeRegistry();
+  const { loadElement } = createElementLoader({
+    registry,
+    importModule: async () => registry.define("dev-element", Payment),
+  });
+  assert.equal(
+    await loadElement({ module: "http://api.hypha.localhost/x.js", tag: "dev-element" }),
     Payment,
   );
 });
