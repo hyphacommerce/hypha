@@ -148,6 +148,19 @@ export const loadProduct = cache((handle: string, country: string) =>
   )(),
 );
 
+/**
+ * The custom fields storefronts are given (design note 0033, §6.2), to name, order and
+ * label values: once per request, cached and tagged `custom-fields` (the webhook expires
+ * it when a definition changes).
+ */
+export const loadFieldDefinitions = cache(
+  unstable_cache(
+    async () => loaded(await api().GET("/storefront/custom-field-definitions")).items,
+    ["custom-field-definitions"],
+    { tags: [TAGS.fields], revalidate: FRESH_SECONDS },
+  ),
+);
+
 /** References resolved one by one on a page; more aren't shown as links. */
 const MAX_REFERENCES = 10;
 
@@ -187,9 +200,10 @@ export async function fieldContext(
   const ids = referenceIds(...values.filter((v) => v !== undefined));
   const code = country.country;
   const refs: Record<string, FieldPart> = {};
-  const [store, categories] = await Promise.all([
+  const [store, categories, definitions] = await Promise.all([
     loadStore(),
     ids.some((id) => id.startsWith("pcat_")) ? loadCategories() : Promise.resolve([]),
+    loadFieldDefinitions(),
   ]);
   for (const c of flatten(categories)) {
     if (ids.includes(c.id)) refs[c.id] = { text: c.name, href: link(code, `/c/${c.handle}`) };
@@ -207,6 +221,17 @@ export async function fieldContext(
     currency: country.currency,
     digits: country.minor_units,
     refs,
+    definitions: Object.fromEntries(
+      definitions.map((d) => [
+        `${d.owner_type}:${d.field}`,
+        {
+          name: d.name,
+          position: d.position,
+          type: d.type,
+          choices: Object.fromEntries((d.choices ?? []).map((c) => [c.key, c.label])),
+        },
+      ]),
+    ),
   };
 }
 

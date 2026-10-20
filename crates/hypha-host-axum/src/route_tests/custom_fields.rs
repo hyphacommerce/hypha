@@ -962,6 +962,70 @@ async fn storefronts_see_only_the_fields_they_are_given() {
 }
 
 #[tokio::test]
+async fn storefronts_read_the_definitions_of_the_fields_they_are_given() {
+    let app = app().await;
+    define(
+        &app,
+        json!({"owner_type": "product", "key": "cost", "type": "integer", "name": "Cost"}),
+    )
+    .await;
+    define(
+        &app,
+        json!({"owner_type": "product", "key": "fit", "type": "choice", "name": "Fit",
+               "validations": {"choices": [{"key": "slim", "label": "Slim fit"}]},
+               "access": {"admin": "read_write", "storefront": "read"}}),
+    )
+    .await;
+    define(
+        &app,
+        json!({"owner_type": "category", "key": "banner", "type": "text", "name": "Banner",
+               "description": "Shown above the products.",
+               "access": {"admin": "read_write", "storefront": "read"}}),
+    )
+    .await;
+    define(
+        &app,
+        json!({"owner_type": "customer", "key": "tier", "type": "text", "name": "Tier",
+               "access": {"admin": "read_write", "storefront": "read"}}),
+    )
+    .await;
+    let pk = publishable(&app).await;
+    let (status, json) = send_as(
+        &app,
+        &pk,
+        "GET",
+        "/storefront/custom-field-definitions",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    // The hidden cost and the customer's tier (storefronts don't read customers) are left out.
+    assert_eq!(
+        json["items"],
+        json!([
+            {"owner_type": "product", "field": "custom.fit", "name": "Fit", "description": null,
+             "type": "choice", "position": 1,
+             "choices": [{"key": "slim", "label": "Slim fit"}]},
+            {"owner_type": "category", "field": "custom.banner", "name": "Banner",
+             "description": "Shown above the products.", "type": "text", "position": 0,
+             "choices": null},
+        ])
+    );
+    let (_, json) = send_as(
+        &app,
+        &pk,
+        "GET",
+        "/storefront/custom-field-definitions?owner_type=category",
+        None,
+    )
+    .await;
+    assert_eq!(json["items"].as_array().map(Vec::len), Some(1));
+    // A secret key is the wrong kind of credential for the storefront surface.
+    let (status, _) = send(&app, "GET", "/storefront/custom-field-definitions", None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn orders_carry_their_fields_and_filter_by_them() {
     let app = app().await;
     define(

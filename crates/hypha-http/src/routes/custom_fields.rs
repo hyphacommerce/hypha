@@ -17,13 +17,13 @@ use hypha_core::{
     ProductId, Stamped, VariantId,
 };
 use hypha_custom_fields::{
-    Access, AdminAccess, CallerKind, Capabilities, Choice, CustomFieldDefinition, DefinitionChange,
-    DefinitionRepo, DefinitionSpec, FieldCaller, FieldKey, FieldType, FieldsRead,
+    Access, AdminAccess, BaseType, CallerKind, Capabilities, Choice, CustomFieldDefinition,
+    DefinitionChange, DefinitionRepo, DefinitionSpec, FieldCaller, FieldKey, FieldType, FieldsRead,
     HasCustomFieldDefinitions, HasCustomFieldValues, Owner, OwnerType, RawValidations, Reference,
     ReferenceKind, ReferenceTargets, SetCustomFields, StorefrontAccess, change_list_items,
     create_definition, definitions_for, delete_definition, field_filter, get_definition,
     list_definitions, move_definition, read_custom_fields, set_custom_fields, set_field_values,
-    update_definition, values_in_use,
+    storefront_definitions, update_definition, values_in_use,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -39,7 +39,7 @@ use super::{
 };
 use crate::{
     error::ApiError,
-    extract::{Caller, JsonBody, PathId, Query},
+    extract::{Caller, JsonBody, PathId, Query, Storefront},
     patch,
     state::{SharedState, Storage},
 };
@@ -549,6 +549,76 @@ pub async fn list<S: Storage>(
             .iter()
             .map(CustomFieldDefinitionResponse::new)
             .collect::<Result<_, _>>()?,
+    }))
+}
+
+/// A field a storefront reads values of: what to call it, where it goes and how to show
+/// its values (design note 0033, §6.2). Values arrive on products', variants' and
+/// categories' `custom_fields`, keyed by `field`.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct StorefrontCustomFieldDefinitionResponse {
+    owner_type: OwnerTypeDto,
+    /// `namespace.key`, as `custom_fields` keys values.
+    field: String,
+    /// What to call it.
+    name: String,
+    description: Option<String>,
+    /// `text`, `integer`, `choice`, `list.text`, … (design note 0033, §3).
+    #[serde(rename = "type")]
+    field_type: String,
+    /// On its owner type's form, from 0: the merchant's order.
+    position: u32,
+    /// A `choice` field's (or list of choices') labels, by the key values hold; `null`
+    /// for other types.
+    choices: Option<Vec<ChoiceDto>>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct StorefrontCustomFieldDefinitionList {
+    /// By owner type, then position.
+    items: Vec<StorefrontCustomFieldDefinitionResponse>,
+}
+
+/// The custom fields storefronts read (`access.storefront: read`) on products, variants
+/// and categories, to name, order and label their values.
+#[utoipa::path(
+    get,
+    path = "/storefront/custom-field-definitions",
+    params(DefinitionFilters),
+    responses((status = 200, description = "OK", body = StorefrontCustomFieldDefinitionList)),
+    extensions(("x-hypha-scopes" = json!(["products:read"]))),
+)]
+pub async fn list_storefront<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller<Storefront>,
+    query: Query<DefinitionFilters>,
+) -> Result<Json<StorefrontCustomFieldDefinitionList>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let filters = query.parse()?;
+    let definitions =
+        storefront_definitions(&ctx, &ports, filters.owner_type.map(Into::into)).await?;
+    Ok(Json(StorefrontCustomFieldDefinitionList {
+        items: definitions
+            .iter()
+            .map(|d| StorefrontCustomFieldDefinitionResponse {
+                owner_type: d.owner_type().into(),
+                field: d.field_key().to_string(),
+                name: d.name().to_string(),
+                description: d.description().map(str::to_string),
+                field_type: d.field_type().to_string(),
+                position: d.position(),
+                choices: (d.field_type().base() == BaseType::Choice).then(|| {
+                    d.validations()
+                        .choices()
+                        .iter()
+                        .map(|c| ChoiceDto {
+                            key: c.key.clone(),
+                            label: c.label.clone(),
+                        })
+                        .collect()
+                }),
+            })
+            .collect(),
     }))
 }
 

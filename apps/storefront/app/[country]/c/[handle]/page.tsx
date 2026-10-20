@@ -57,7 +57,7 @@ export default async function CategoryPage({ params }: Props) {
     fieldContext(country, category.custom_fields),
   ]);
   // The merchant's custom fields shown to storefronts (design note 0033, §6.2).
-  const fields = presentFields(category.custom_fields, context);
+  const fields = presentFields("category", category.custom_fields, context);
   const productBase = link(code, "/p");
 
   return (

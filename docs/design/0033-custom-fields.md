@@ -428,10 +428,16 @@ which field.
 - `StorefrontProductResponse` and its variants carry `custom_fields` with only the
   `storefront: read` definitions.
 - Storefront category responses carry their `storefront: read` fields the same way.
+- `GET /storefront/custom-field-definitions` (`?owner_type=`; added after the browser
+  test showed names guessed from keys) lists those definitions: field, owner type, name,
+  description, type, position, and a choice's labels. Storefronts name, order and label
+  values by them. Customers' and orders' fields never appear, since storefronts don't
+  read those owners.
 - The storefront's revalidation route expires `product:<handle>` on
   `product.custom_fields_updated`, `category:<handle>` on
-  `category.custom_fields_updated`, and on definition changes that touch storefront
-  access.
+  `category.custom_fields_updated`, and the definitions (tag `custom-fields`) with the
+  pages of their owner type on definition changes a shopper can see (name, description,
+  access, validations, capabilities, position).
 
 ### 6.3 Owner deletion and references
 

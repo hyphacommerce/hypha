@@ -14,6 +14,8 @@ export const TAGS = {
   product: (handle: string) => `product:${handle}`,
   /** Search results: home's shelves, category listings, search. */
   listings: "listings",
+  /** The custom field definitions pages name, order and label values by. */
+  fields: "custom-fields",
   /** Everything priced: product pages and listings (a market or price list changed). */
   prices: "prices",
 } as const;

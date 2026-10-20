@@ -152,6 +152,46 @@ fn definitions_are_appended_to_their_owner_types_form() {
 }
 
 #[test]
+fn a_storefront_gets_the_definitions_of_what_it_reads() {
+    let w = World::new();
+    let shown = |mut s: DefinitionSpec| {
+        s.access = Access {
+            admin: AdminAccess::ReadWrite,
+            storefront: StorefrontAccess::Read,
+        };
+        s
+    };
+    let material = w.define(shown(spec(
+        OwnerType::Product,
+        "material",
+        "text",
+        json!({}),
+    )));
+    w.define(spec(OwnerType::Product, "cost", "text", json!({})));
+    let weave = w.define(shown(spec(OwnerType::Variant, "weave", "text", json!({}))));
+    // Storefronts don't read customers: never theirs, whatever the access says.
+    w.define(shown(spec(OwnerType::Customer, "tier", "text", json!({}))));
+    let storefront = Ctx::new(
+        Actor::ApiKey(ApiKeyId::from_uuid(Uuid::from_u128(9))),
+        Scope::STOREFRONT.to_vec(),
+    );
+    let ids = |owner_type| {
+        block_on(hypha_custom_fields::storefront_definitions(
+            &storefront,
+            &w.ports,
+            owner_type,
+        ))
+        .unwrap()
+        .iter()
+        .map(|d| d.id())
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(ids(None), vec![material, weave]);
+    assert_eq!(ids(Some(OwnerType::Variant)), vec![weave]);
+    assert_eq!(ids(Some(OwnerType::Customer)), vec![]);
+}
+
+#[test]
 fn a_key_is_taken_per_owner_type() {
     let w = World::new();
     w.define(spec(OwnerType::Product, "material", "text", json!({})));

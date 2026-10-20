@@ -1222,6 +1222,8 @@ contains "brass" '"custom.material":"brass"'
 LAMP_VARIANT=$(variant)
 step "the storefront sees fields given to it" 200 - "$BASE/storefront/products/$LAMP"
 contains "brass" '"custom.material":"brass"'
+step "and their definitions, to name them" 200 - "$BASE/storefront/custom-field-definitions?owner_type=product"
+contains "by name" '"field":"custom.material","name":"Material"'
 step "the lamp's variant fields" 200 - "$BASE/admin/variants/$LAMP_VARIANT/custom-fields"
 step "Home's banner" 200 - -X PATCH "$BASE/admin/categories/$HOME_CAT/custom-fields" -H "$JSON" \
     -d '{"custom_fields":{"custom.banner":"Make it cosy"}}'

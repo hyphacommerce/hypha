@@ -395,6 +395,24 @@
         "pattern": "^[A-Z]{3}$",
         "type": "string"
       },
+      "CustomFieldChoice": {
+        "additionalProperties": false,
+        "description": "A `choice` field's choice: the key is what's stored, filtered and faceted (it can't\nchange); the label is for people.",
+        "properties": {
+          "key": {
+            "description": "`[a-z0-9_-]{1,64}`.",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "type": "object"
+      },
       "CustomerId": {
         "description": "A CustomerId: `cus_` and 32 hex digits.",
         "examples": [
@@ -1251,6 +1269,18 @@
         ],
         "type": "object"
       },
+      "OwnerTypeDto": {
+        "description": "The kinds of record fields belong to.\n\nKnown values: `product`, `variant`, `category`, `customer`, `order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "product",
+          "variant",
+          "category",
+          "customer",
+          "order"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "PaymentId": {
         "description": "A PaymentId: `pay_` and 32 hex digits.",
         "examples": [
@@ -2100,6 +2130,71 @@
           "currency",
           "minor_units",
           "prices_include_tax"
+        ],
+        "type": "object"
+      },
+      "StorefrontCustomFieldDefinitionList": {
+        "properties": {
+          "items": {
+            "description": "By owner type, then position.",
+            "items": {
+              "$ref": "#/components/schemas/StorefrontCustomFieldDefinitionResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "StorefrontCustomFieldDefinitionResponse": {
+        "description": "A field a storefront reads values of: what to call it, where it goes and how to show\nits values (design note 0033, §6.2). Values arrive on products', variants' and\ncategories' `custom_fields`, keyed by `field`.",
+        "properties": {
+          "choices": {
+            "description": "A `choice` field's (or list of choices') labels, by the key values hold; `null`\nfor other types.",
+            "items": {
+              "$ref": "#/components/schemas/CustomFieldChoice"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "field": {
+            "description": "`namespace.key`, as `custom_fields` keys values.",
+            "type": "string"
+          },
+          "name": {
+            "description": "What to call it.",
+            "type": "string"
+          },
+          "owner_type": {
+            "$ref": "#/components/schemas/OwnerTypeDto"
+          },
+          "position": {
+            "description": "On its owner type's form, from 0: the merchant's order.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": {
+            "description": "`text`, `integer`, `choice`, `list.text`, … (design note 0033, §3).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_type",
+          "field",
+          "name",
+          "type",
+          "position"
         ],
         "type": "object"
       },
@@ -5007,6 +5102,95 @@
         ],
         "x-hypha-scopes": [
           "markets:read"
+        ]
+      }
+    },
+    "/storefront/custom-field-definitions": {
+      "get": {
+        "operationId": "storefront.custom_fields.list",
+        "parameters": [
+          {
+            "description": "Only this owner type's.",
+            "in": "query",
+            "name": "owner_type",
+            "required": false,
+            "schema": {
+              "description": "The kinds of record fields belong to.\n\nKnown values: `product`, `variant`, `category`, `customer`, `order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "product",
+                "variant",
+                "category",
+                "customer",
+                "order"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorefrontCustomFieldDefinitionList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "The custom fields storefronts read (`access.storefront: read`) on products, variants\nand categories, to name, order and label their values.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": [
+          "products:read"
         ]
       }
     },

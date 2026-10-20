@@ -330,6 +330,7 @@ macro_rules! route_table {
             [storefront, GET, "/storefront/products/by-handle/{handle}", products::fetch_by_handle_storefront],
             [storefront, GET, "/storefront/countries", markets::storefront_countries],
             [storefront, GET, "/storefront/categories", categories::list_storefront],
+            [storefront, GET, "/storefront/custom-field-definitions", custom_fields::list_storefront],
             [storefront, GET, "/storefront/categories/by-handle/{handle}", categories::fetch_by_handle_storefront],
             [storefront, GET, "/storefront/search", search::storefront_search],
             [storefront, POST, "/storefront/carts", carts::create],

@@ -124,9 +124,11 @@ async function categoryTags(id: string | undefined): Promise<string[]> {
 }
 
 /** The definition changes a storefront can see (design note 0033, §6.2): who may read
- * the field, its choices' labels (facets), whether it's a facet, and its place. Its name
- * and description aren't shown. */
+ * the field, its name and description, its choices' labels, whether it's a facet, and
+ * its place. */
 const SHOWN_DEFINITION_FIELDS = new Set([
+  "name",
+  "description",
   "access",
   "validations",
   "capabilities",
@@ -197,12 +199,13 @@ async function affected(event: Envelope): Promise<{ tags: string[]; paths: strin
       ) {
         return { tags: [], paths: [] };
       }
+      // The definitions themselves too: pages name and order values by them.
       switch (data.owner_type) {
         case "product":
         case "variant":
-          return { tags: [TAGS.products, TAGS.listings], paths: [] };
+          return { tags: [TAGS.fields, TAGS.products, TAGS.listings], paths: [] };
         case "category":
-          return { tags: [TAGS.categories], paths: [] };
+          return { tags: [TAGS.fields, TAGS.categories], paths: [] };
         default:
           return { tags: [], paths: [] };
       }

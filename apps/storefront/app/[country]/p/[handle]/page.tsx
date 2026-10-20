@@ -61,9 +61,9 @@ export default async function ProductPage({ params }: Props) {
     ...product.variants.map((v) => v.custom_fields),
   );
   const fields = {
-    product: presentFields(product.custom_fields, context),
+    product: presentFields("product", product.custom_fields, context),
     variants: Object.fromEntries(
-      product.variants.map((v) => [v.id, presentFields(v.custom_fields, context)]),
+      product.variants.map((v) => [v.id, presentFields("variant", v.custom_fields, context)]),
     ),
   };
 

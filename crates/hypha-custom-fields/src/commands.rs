@@ -14,7 +14,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    access::{FieldCaller, ReadAccess, WriteDenied, read_access, write_access},
+    access::{CallerKind, FieldCaller, ReadAccess, WriteDenied, read_access, write_access},
     decimal::Decimal,
     definition::{CustomFieldDefinition, DefinitionChange, DefinitionSpec},
     error::DefinitionError,
@@ -338,6 +338,24 @@ pub async fn list_definitions<S: HasCustomFieldDefinitions>(
 ) -> Result<Vec<CustomFieldDefinition>, CommandError> {
     ctx.require(Scope::CustomFieldsRead)?;
     Ok(ports.custom_field_definitions().list(owner_type).await?)
+}
+
+/// The definitions a storefront reads values of (`access.storefront: read`, of an owner
+/// type the caller may read: products, variants and categories with `products:read`), so
+/// it can name, order and label them. `owner_type` narrows them; customers' and orders'
+/// fields never show, since storefronts don't read those owners.
+pub async fn storefront_definitions<S: HasCustomFieldDefinitions>(
+    ctx: &Ctx,
+    ports: &S,
+    owner_type: Option<OwnerType>,
+) -> Result<Vec<CustomFieldDefinition>, CommandError> {
+    let storefront = CallerKind::Storefront;
+    let caller = FieldCaller::new(ctx, &storefront);
+    let all = ports.custom_field_definitions().list(owner_type).await?;
+    Ok(all
+        .into_iter()
+        .filter(|d| read_access(d, &caller) == ReadAccess::Visible)
+        .collect())
 }
 
 /// The definitions of `owner_type`, without a scope check: for routes that read or

@@ -338,6 +338,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/custom-field-definitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The custom fields storefronts read (`access.storefront: read`) on products, variants
+         *     and categories, to name, order and label their values.
+         */
+        get: operations["storefront.custom_fields.list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/orders/{id}": {
         parameters: {
             query?: never;
@@ -576,6 +596,15 @@ export interface components {
          * @example EUR
          */
         Currency: string;
+        /**
+         * @description A `choice` field's choice: the key is what's stored, filtered and faceted (it can't
+         *     change); the label is for people.
+         */
+        CustomFieldChoice: {
+            /** @description `[a-z0-9_-]{1,64}`. */
+            key: string;
+            label: string;
+        };
         /**
          * @description A CustomerId: `cus_` and 32 hex digits.
          * @example cus_0190f1a2b3c47d8e9f00112233445566
@@ -882,6 +911,13 @@ export interface components {
             tax_class?: components["schemas"]["TaxClassId"] | null;
         };
         /**
+         * @description The kinds of record fields belong to.
+         *
+         *     Known values: `product`, `variant`, `category`, `customer`, `order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        OwnerTypeDto: string;
+        /**
          * @description A PaymentId: `pay_` and 32 hex digits.
          * @example pay_0190f1a2b3c47d8e9f00112233445566
          */
@@ -1174,6 +1210,35 @@ export interface components {
             /** @description The English name; UIs show local names (`Intl.DisplayNames`). */
             name: string;
             prices_include_tax: boolean;
+        };
+        StorefrontCustomFieldDefinitionList: {
+            /** @description By owner type, then position. */
+            items: components["schemas"]["StorefrontCustomFieldDefinitionResponse"][];
+        };
+        /**
+         * @description A field a storefront reads values of: what to call it, where it goes and how to show
+         *     its values (design note 0033, §6.2). Values arrive on products', variants' and
+         *     categories' `custom_fields`, keyed by `field`.
+         */
+        StorefrontCustomFieldDefinitionResponse: {
+            /**
+             * @description A `choice` field's (or list of choices') labels, by the key values hold; `null`
+             *     for other types.
+             */
+            choices?: components["schemas"]["CustomFieldChoice"][] | null;
+            description?: string | null;
+            /** @description `namespace.key`, as `custom_fields` keys values. */
+            field: string;
+            /** @description What to call it. */
+            name: string;
+            owner_type: components["schemas"]["OwnerTypeDto"];
+            /**
+             * Format: int32
+             * @description On its owner type's form, from 0: the merchant's order.
+             */
+            position: number;
+            /** @description `text`, `integer`, `choice`, `list.text`, … (design note 0033, §3). */
+            type: string;
         };
         StorefrontExtensionsResponse: {
             elements: components["schemas"]["ElementExtension"][];
@@ -3225,6 +3290,65 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StorefrontCountryListResponse"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.custom_fields.list": {
+        parameters: {
+            query?: {
+                /** @description Only this owner type's. */
+                owner_type?: "product" | "variant" | "category" | "customer" | "order";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorefrontCustomFieldDefinitionList"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
