@@ -1477,46 +1477,39 @@ fn a_restarted_pending_payment_refuses_its_old_attempts_cancel() {
 }
 
 #[test]
-fn a_paid_payment_without_an_attempt_refuses_a_second_collection() {
+fn a_paid_payment_without_an_attempt_doesnt_take_a_second_collections() {
     use hypha_order_actions::PaymentEventKind as K;
     let world = World::new();
     pending_payment(&world);
     world.report_ref(K::Paid, None, Some("pi_1"), None).unwrap();
-    // A second intent's money: held to the reference, refused, so it goes back.
-    assert_eq!(
+    // A second intent's money names pi_2: not made the payment's attempt.
+    world
+        .report_attempt(K::Paid, None, Some("pi_2"), Some("pi_2"), None)
+        .unwrap();
+    let stored = block_on(
         world
-            .report_attempt(K::Paid, None, Some("pi_2"), Some("pi_2"), None)
-            .map(|_| ()),
-        Err(CommandError::Payment(PaymentError::ReferenceMismatch {
-            payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
-            status: PaymentStatus::Paid,
-            held: "pi_1".to_string(),
-            reported: "pi_2".to_string(),
-        }))
-    );
+            .payments
+            .get(hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001))),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(stored.attempt(), None);
 }
 
 #[test]
-fn a_capture_naming_an_attempt_is_held_to_an_authorization_that_named_none() {
+fn a_capture_report_names_the_attempt_of_an_authorization_that_named_none() {
     use hypha_order_actions::PaymentEventKind as K;
     let world = World::new();
     pending_payment(&world);
     world
         .report_ref(K::Authorized, None, Some("AUTH-1"), None)
         .unwrap();
-    // Its first report named no attempt: one naming ORDER-9 is held to AUTH-1 (a provider
-    // naming attempts names them from the first report).
-    assert_eq!(
-        world
-            .report_attempt(K::Paid, None, Some("CAP-1"), Some("ORDER-9"), None)
-            .map(|_| ()),
-        Err(CommandError::Payment(PaymentError::ReferenceMismatch {
-            payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
-            status: PaymentStatus::Authorized,
-            held: "AUTH-1".to_string(),
-            reported: "ORDER-9".to_string(),
-        }))
-    );
+    // Captured under its own ID, the app's report naming the attempt: it's the payment's.
+    let paid = world
+        .report_attempt(K::Paid, None, Some("CAP-1"), Some("ORDER-9"), None)
+        .unwrap()
+        .value;
+    assert_eq!(paid.payments[0].attempt(), Some("ORDER-9"));
 }
 
 #[test]

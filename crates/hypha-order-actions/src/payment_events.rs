@@ -56,8 +56,7 @@ pub struct PaymentEvent {
     /// report that moves the payment, or names its own reference, keeps it as the
     /// payment's `attempt`; a report naming another is refused (`other_attempt`).
     /// Absent, nothing is checked (a provider whose capture or void carries an ID of
-    /// its own leaves it out); named on a payment past pending without an attempt yet,
-    /// a paid or authorized report is held to the payment's reference.
+    /// its own leaves it out), and neither is a payment without an attempt yet.
     /// Up to 255 characters.
     pub attempt: Option<String>,
     /// When it happened at the provider; absent is now. When it was paid or voided.
@@ -252,53 +251,51 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
 /// money for a payment past pending (paid in an old tab: the payment collects once, and
 /// its provider gives that money back), or another attempt's decline, cancel or refund.
 /// A pending payment may be paid or authorized through another attempt (it was started
-/// again). A payment past pending without an attempt (its reports named none, or it's
-/// from before they were kept) holds a collecting report to its reference; its
-/// declines, cancels and refunds aren't checked. In the transaction that writes, so two
+/// again). A payment with no attempt (its provider's IDs don't name attempts, or it's
+/// from before they were kept) isn't checked. In the transaction that writes, so two
 /// attempts' reports racing can't both pass. Returns the report's attempt, checked.
 fn other_attempt(payment: &Payment, input: &PaymentEvent) -> Result<Option<String>, PaymentError> {
     let attempt = optional_text("attempt", input.attempt.clone())?;
-    let Some(named) = &attempt else {
+    let (Some(named), Some(held)) = (&attempt, payment.attempt()) else {
         return Ok(attempt);
     };
-    let collecting = matches!(
-        input.kind,
-        PaymentEventKind::Authorized | PaymentEventKind::Paid
-    );
-    let pending = payment.status() == PaymentStatus::Pending;
-    // A collecting report on a payment past pending without an attempt (its reports
-    // named none, or it's from before they were kept) is held to its reference: another
-    // attempt's money is a second collection.
-    let held = payment.attempt().or_else(|| {
-        (collecting && !pending)
-            .then(|| payment.reference())
-            .flatten()
-    });
-    match held {
-        Some(held) if held != named && !(pending && collecting) => {
-            Err(PaymentError::ReferenceMismatch {
-                payment: payment.id(),
-                status: payment.status(),
-                held: held.to_string(),
-                reported: named.clone(),
-            })
-        }
-        _ => Ok(attempt),
+    let restarted = payment.status() == PaymentStatus::Pending
+        && matches!(
+            input.kind,
+            PaymentEventKind::Authorized | PaymentEventKind::Paid
+        );
+    if held == named || restarted {
+        return Ok(attempt);
     }
+    Err(PaymentError::ReferenceMismatch {
+        payment: payment.id(),
+        status: payment.status(),
+        held: held.to_string(),
+        reported: named.clone(),
+    })
 }
 
-/// Moves `payment` with `report` (an authorization or a payment) and keeps the report's
-/// `attempt`, which `other_attempt` let through, as the one it collects through: the
-/// one a pending payment was paid or authorized through, or the one it held already.
-/// Whether that changed anything.
+/// Whether a collecting report that changes nothing names the payment's own attempt: its
+/// reference (Stripe delivering the intent's report again), so a payment paid before
+/// attempts were kept takes it. A collecting report that moves the payment (from
+/// pending, or a capture of its authorization) is about its own collection anyway;
+/// one that changes nothing under another ID may be a second attempt's money, whose
+/// attempt isn't taken.
+fn names_own(payment: &Payment, attempt: Option<&str>) -> bool {
+    attempt.is_some() && payment.reference() == attempt
+}
+
+/// Moves `payment` with `report` (an authorization or a payment), keeping the report's
+/// `attempt` as the payment's when the report moved it or names its own reference
+/// (`names_own`): the one rule for both. Whether that changed anything.
 fn collect(
     payment: &mut Payment,
     attempt: Option<String>,
     report: impl FnOnce(&mut Payment) -> Result<bool, PaymentError>,
 ) -> Result<bool, PaymentError> {
+    let own = names_own(payment, attempt.as_deref());
     let changed = report(payment)?;
-    let noted = payment.note_attempt(attempt)?;
-    Ok(changed || noted)
+    Ok(((changed || own) && payment.note_attempt(attempt)?) || changed)
 }
 
 /// The payment an earlier request with this key reported on, if this caller sent it.
