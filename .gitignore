@@ -19,3 +19,6 @@ next-env.d.ts
 
 # Worktrees Claude Code creates for parallel agents.
 /.claude/worktrees/
+
+# macOS Finder metadata
+.DS_Store

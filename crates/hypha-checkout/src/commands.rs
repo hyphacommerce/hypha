@@ -285,6 +285,17 @@ pub async fn complete_paid_checkout<
         return_url: None,
     };
     let placed = run_checkout(ctx, ports, ids, clock, rates, payments, input).await?;
+    // The cart was checked out with another payment (another method, another tab): this
+    // one's money is a second collection, and goes back.
+    if placed.value.payment.as_ref().map(Payment::id) != Some(payment) {
+        if let Some(stray) = ports.payments().get(payment).await?
+            && stray.order().is_none()
+            && stray.status().committed()
+        {
+            release(ports, payments, clock, stray).await;
+        }
+        return Ok(None);
+    }
     Ok(Some(placed.value))
 }
 
@@ -326,7 +337,13 @@ async fn run_checkout<
         {
             Err(e) => e,
             Ok(placed) => {
-                let (order, mut payment, settings) = placed.value;
+                let (order, mut payment, settings, replaced) = placed.value;
+                // The cart's other payments, voided with the order: their providers are
+                // asked to release them (best effort: money one takes anyway is a
+                // second collection, given back by the provider's report).
+                for old in replaced {
+                    crate::start::release_pending(payments, old).await;
+                }
                 let next_action = match &mut payment {
                     // After the commit: nothing here may fail the checkout. Only a
                     // manual method starts now; an online one was paid before.
@@ -351,17 +368,36 @@ async fn run_checkout<
             return replay(ports, payments, order).await;
         }
         if !(lost_a_race(&e) && attempts.another()) {
-            if gives_back(&e) {
-                give_back(ports, payments, clock, input.cart).await?;
+            // A checkout racing this one (the provider's webhook, another tab) may have
+            // placed the order after this one read the cart, and then this one fails on
+            // what that order took (the last of the stock): its order is the answer.
+            if let Some(order) = completed_order(ports, input.cart).await {
+                return replay(ports, payments, order).await;
+            }
+            if e.gives_money_back() {
+                give_back(ports, payments, clock, input.cart).await;
             }
             return Err(e);
         }
     }
 }
 
-/// What one attempt placed: the order, its payment, and the payment method's provider
-/// settings (for a manual method's `start`).
-type Attempted = (Order, Option<Payment>, serde_json::Value);
+/// The order `cart` became, if it's checked out now. A storage failure reads as not
+/// checked out (the caller answers its own error).
+async fn completed_order<S: CartPorts>(ports: &S, cart: CartId) -> Option<OrderId> {
+    match ports.carts().get(cart).await {
+        Ok(Some(cart)) => match cart.status() {
+            CartStatus::Completed { order } => Some(order),
+            CartStatus::Open => None,
+        },
+        _ => None,
+    }
+}
+
+/// What one attempt placed: the order, its payment, the payment method's provider
+/// settings (for a manual method's `start`), and the cart's other pending payments it
+/// voided (for their providers to release).
+type Attempted = (Order, Option<Payment>, serde_json::Value, Vec<Payment>);
 
 /// Errors that mean another request committed first, so a fresh attempt can succeed:
 /// a changed cart, item or payment, a guest's customer created meanwhile, or the same
@@ -377,59 +413,77 @@ fn lost_a_race(e: &CommandError) -> bool {
     )
 }
 
-/// Whether an error means the order can't be placed as the shopper paid for it, so money
-/// the cart's payment committed goes back (design note 0031, §3). Not for errors that
-/// pass (storage, a race) or that are about the payment itself.
-fn gives_back(e: &CommandError) -> bool {
-    match e {
-        CommandError::Cart(_)
-        | CommandError::Inventory(_)
-        | CommandError::Order(_)
-        | CommandError::EmptyCart(_)
-        | CommandError::MissingEmail(_)
-        | CommandError::Unavailable { .. }
-        | CommandError::TotalChanged { .. }
-        | CommandError::ShippingAddressRequired(_)
-        | CommandError::ShippingOptionRequired(_)
-        | CommandError::ShippingUnavailable(_)
-        | CommandError::PaymentMethodRequired(_)
-        | CommandError::PaymentMethodUnavailable(_) => true,
-        CommandError::Auth(_)
-        | CommandError::Repo(_)
-        | CommandError::Idempotency(_)
-        | CommandError::Payment(_)
-        | CommandError::CartNotFound(_)
-        | CommandError::CartCompleted { .. }
-        | CommandError::PaymentMethodNotFound(_)
-        | CommandError::PaymentMethodOffline(_)
-        | CommandError::NothingToPay(_)
-        | CommandError::CartPaymentCommitted { .. }
-        | CommandError::PaymentRequired(_)
-        | CommandError::PaymentPending { .. }
-        | CommandError::PaymentFailed { .. } => false,
+impl CommandError {
+    /// Whether this error means the order can't be placed as the shopper paid for it,
+    /// so money the cart's payment committed goes back (design note 0031, §3): a line
+    /// sold out, the total changed, the cart can't be checked out as it is. Not for
+    /// errors that may pass (storage, a race, a shipping option whose provider is down:
+    /// the provider's report delivered again, or the shopper choosing again, completes
+    /// it) or that are about the payment itself.
+    pub fn gives_money_back(&self) -> bool {
+        match self {
+            CommandError::Cart(hypha_cart::CommandError::Repo(_))
+            | CommandError::Inventory(hypha_inventory::CommandError::Repo(_))
+            | CommandError::ShippingUnavailable(_) => false,
+            CommandError::Cart(_)
+            | CommandError::Inventory(_)
+            | CommandError::Order(_)
+            | CommandError::EmptyCart(_)
+            | CommandError::MissingEmail(_)
+            | CommandError::Unavailable { .. }
+            | CommandError::TotalChanged { .. }
+            | CommandError::ShippingAddressRequired(_)
+            | CommandError::ShippingOptionRequired(_)
+            | CommandError::PaymentMethodRequired(_)
+            | CommandError::PaymentMethodUnavailable(_) => true,
+            CommandError::Auth(_)
+            | CommandError::Repo(_)
+            | CommandError::Idempotency(_)
+            | CommandError::Payment(_)
+            | CommandError::CartNotFound(_)
+            | CommandError::CartCompleted { .. }
+            | CommandError::PaymentMethodNotFound(_)
+            | CommandError::PaymentMethodOffline(_)
+            | CommandError::NothingToPay(_)
+            | CommandError::CartPaymentCommitted { .. }
+            | CommandError::PaymentRequired(_)
+            | CommandError::PaymentPending { .. }
+            | CommandError::PaymentFailed { .. } => false,
+        }
     }
 }
 
 /// Gives back what the cart's committed payments without an order hold (`release`). A
 /// pending one's provider is asked first: the shopper may have paid before its report.
+/// Never fails: the shopper's error is what the caller answers; what couldn't be done is
+/// logged, and the provider's report gives it back then.
 async fn give_back<S: HasPayments, Q: PaymentProviders>(
     ports: &S,
     providers: &Q,
     clock: &impl Clock,
     cart: CartId,
-) -> Result<(), CommandError> {
-    for mut payment in ports.payments().list_for_cart(cart).await? {
+) {
+    let payments = match ports.payments().list_for_cart(cart).await {
+        Ok(payments) => payments,
+        Err(e) => {
+            tracing::warn!(%cart, error = %e, "checkout: couldn't read the cart's payments to give their money back");
+            return;
+        }
+    };
+    for mut payment in payments {
         if payment.order().is_some() {
             continue;
         }
-        if payment.status() == PaymentStatus::Pending {
-            refresh(ports, providers, clock, &mut payment).await?;
+        if payment.status() == PaymentStatus::Pending
+            && let Err(e) = refresh(ports, providers, clock, &mut payment).await
+        {
+            tracing::warn!(payment = %payment.id(), error = %e, "checkout: couldn't ask where a payment is before giving money back");
+            continue;
         }
         if payment.status().committed() {
             release(ports, providers, clock, payment).await;
         }
     }
-    Ok(())
 }
 
 /// Who pays for `order`, for its provider.
@@ -719,6 +773,23 @@ async fn attempt<
                 .transpose()?;
         }
     }
+    // The cart's other pending payments (another method started, another tab): voided
+    // with the order, so money one of them takes later is a second collection, given
+    // back.
+    let kept = paid.as_ref().map(Payment::id);
+    let now = clock.now();
+    let mut replaced: Vec<Payment> = ports
+        .payments()
+        .list_for_cart(cart.id())
+        .await?
+        .into_iter()
+        .filter(|p| {
+            p.order().is_none() && p.status() == PaymentStatus::Pending && Some(p.id()) != kept
+        })
+        .collect();
+    for old in &mut replaced {
+        old.void(now)?;
+    }
     let payment_status: Vec<Payment> = paid.iter().chain(created.iter()).cloned().collect();
     order.set_financial_status(financial_status(order.total(), &payment_status)?);
 
@@ -729,6 +800,9 @@ async fn attempt<
     }
     if let Some(payment) = &mut created {
         batch.insert_payment(payment);
+    }
+    for old in &mut replaced {
+        batch.update_payment(old);
     }
     batch.update_cart(&mut cart);
     let mut reserved: Vec<&mut InventoryItem> = stock_items
@@ -757,7 +831,12 @@ async fn attempt<
     let settings = method
         .map(|m| m.settings().clone())
         .unwrap_or(serde_json::Value::Null);
-    Ok(Idempotent::fresh((order, paid.or(created), settings)))
+    Ok(Idempotent::fresh((
+        order,
+        paid.or(created),
+        settings,
+        replaced,
+    )))
 }
 
 /// Lines that need shipping need an address and, in every group, an option priced now.

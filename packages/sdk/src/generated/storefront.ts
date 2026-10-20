@@ -96,8 +96,8 @@ export interface paths {
          *     (its provider was asked; try again shortly, or it completes when the provider
          *     reports), declined or released `payment_failed` (start paying again). If the order
          *     can't be placed once the money is committed (a line sold out meanwhile), the money is
-         *     given back. A cart checked out already answers with its order (the provider's
-         *     report may have completed it).
+         *     given back. A cart checked out already answers with its order for an hour after it
+         *     was placed (the provider's report may have completed it), then `409 cart_completed`.
          */
         post: operations["storefront.orders.checkout"];
         delete?: never;

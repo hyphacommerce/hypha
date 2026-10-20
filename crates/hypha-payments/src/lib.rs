@@ -35,5 +35,5 @@ pub use provider::{
 };
 pub use repo::{
     HasPaymentMethods, HasPayments, PaymentMethodRepo, PaymentRepo, StagePayments, keys,
-    newest_cart_payment, newest_payment,
+    newest_payment,
 };

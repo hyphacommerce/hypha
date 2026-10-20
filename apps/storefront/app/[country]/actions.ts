@@ -18,7 +18,8 @@ import { type ListingPage, readListingPage } from "@/lib/listing-data";
 import { formatRange } from "@/lib/money";
 import { COUNTRY_COOKIE } from "@/lib/routing";
 import { paymentElementModule } from "@/lib/app-elements";
-import { cartId, forgetCart, link, mode, rememberCart, rememberOrder } from "@/lib/site";
+import { checkOutCart } from "@/lib/checkout";
+import { cartId, forgetCart, link, mode, rememberCart } from "@/lib/site";
 
 /** What a refused action tells its form. */
 export type ActionResult = { error: string } | undefined;
@@ -214,32 +215,23 @@ export async function placeOrder(input: {
   total?: { amount: number; currency: string };
   attempt: string;
 }): Promise<PlaceOrderResult> {
-  const id = await currentCart(input.country);
-  const { data, error } = await api().POST("/storefront/carts/{id}/checkout", {
-    params: { path: { id }, header: { "Idempotency-Key": input.attempt } },
-    body: input.total ? { expected_total: input.total } : {},
-  });
-  if (error) {
-    if (error.code === "payment_method_required" || error.code === "payment_method_unavailable") {
+  await currentCart(input.country);
+  const result = await checkOutCart(input);
+  if ("error" in result) {
+    if (result.code === "payment_method_required" || result.code === "payment_method_unavailable") {
       // Back to the payment step, re-rendered with the methods offered now.
       refresh();
-      return { error: describe(error), step: "payment" };
+      return { error: result.error, step: "payment" };
     }
-    if (error.code === "payment_pending") {
-      return { error: describe(error), pending: true };
+    if (result.code === "payment_pending") return { error: result.error, pending: true };
+    if (result.code === "payment_failed" || result.code === "payment_required") {
+      return { error: result.error, step: "payment" };
     }
-    if (error.code === "payment_failed" || error.code === "payment_required") {
-      return { error: describe(error), step: "payment" };
-    }
-    return refused(error);
+    return { error: result.error };
   }
-  // The confirmation reads the order with its access token, kept here for this buyer:
-  // the order's ID alone reads nothing (design note 0024, §7).
-  await rememberOrder(data.id, data.access_token);
-  await forgetCart(input.country);
   // Instructions (cash on delivery, bank transfer) are on the confirmation, read from
   // the order's payment; an online payment was made before the order.
-  redirect(link(input.country, `/order/${data.id}/confirmed`));
+  redirect(link(input.country, `/order/${result.order}/confirmed`));
 }
 
 /** What starting the cart's payment answered (design note 0031). */

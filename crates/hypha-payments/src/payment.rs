@@ -102,9 +102,13 @@ impl PaymentStatus {
     }
 
     /// The shopper's money is committed (design note 0031): held, on its way or
-    /// collected. What lets checkout place an order paid online.
+    /// collected, and none of it given back. What lets checkout place an order paid
+    /// online; a payment refunded (by checkout giving it back, or by staff) isn't.
     pub fn committed(self) -> bool {
-        matches!(self, PaymentStatus::Authorized | PaymentStatus::Processing) || self.captured()
+        matches!(
+            self,
+            PaymentStatus::Authorized | PaymentStatus::Processing | PaymentStatus::Paid
+        )
     }
 }
 
@@ -800,16 +804,8 @@ mod tests {
     fn committed_is_held_on_its_way_or_collected() {
         use PaymentStatus as S;
         let committed: Vec<S> = S::ALL.into_iter().filter(|s| s.committed()).collect();
-        assert_eq!(
-            committed,
-            [
-                S::Authorized,
-                S::Processing,
-                S::Paid,
-                S::PartiallyRefunded,
-                S::Refunded
-            ]
-        );
+        // Money given back, even partly, isn't committed to an order any more.
+        assert_eq!(committed, [S::Authorized, S::Processing, S::Paid]);
     }
 
     #[test]

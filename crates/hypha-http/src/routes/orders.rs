@@ -409,6 +409,9 @@ fn next_step(
     }
 }
 
+/// How long checkout answers a checked-out cart with its order: an hour.
+const REPLAY_WINDOW_MICROS: i64 = 60 * 60 * 1_000_000;
+
 /// Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns
 /// the order the first request placed. The body is `{}` or `{"expected_total": …}`.
 /// Something to pay needs a payment method chosen (`PUT …/payment-method`; 409
@@ -418,8 +421,8 @@ fn next_step(
 /// (its provider was asked; try again shortly, or it completes when the provider
 /// reports), declined or released `payment_failed` (start paying again). If the order
 /// can't be placed once the money is committed (a line sold out meanwhile), the money is
-/// given back. A cart checked out already answers with its order (the provider's
-/// report may have completed it).
+/// given back. A cart checked out already answers with its order for an hour after it
+/// was placed (the provider's report may have completed it), then `409 cart_completed`.
 #[utoipa::path(
     post,
     path = "/storefront/carts/{id}/checkout",
@@ -457,6 +460,17 @@ pub async fn checkout_handler<S: Storage>(
     )
     .await?;
     let order = &placed.value.order;
+    // A cart checked out already answers with its order and access token for an hour
+    // (the shopper's browser after the provider's webhook placed it; a retry), then only
+    // says so: an old cart ID isn't a key to the order (design note 0031).
+    let age = hypha_core::Clock::now(&state.clock).unix_micros() - order.placed_at().unix_micros();
+    if placed.replayed && age > REPLAY_WINDOW_MICROS {
+        return Err(hypha_checkout::CommandError::CartCompleted {
+            cart,
+            order: order.id(),
+        }
+        .into());
+    }
     let (next_action, payment_error) = next_step(order.id(), &placed.value.next_action);
     Ok(idempotent_response(
         StatusCode::CREATED,

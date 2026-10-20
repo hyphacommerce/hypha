@@ -10,7 +10,7 @@ use hypha_payments::{
 use hypha_shipping::RateProvider;
 
 use crate::commands::{Ready, ready};
-use crate::start::{Payer, start};
+use crate::start::{Payer, refresh, start};
 use crate::{CheckoutPorts, CommandError};
 
 /// The shopper starting to pay for their cart.
@@ -199,10 +199,46 @@ async fn start_once<
     )
     .await;
     if reused && matches!(next_action, Err(PaymentError::ProviderFailed { .. })) {
-        return Ok(Started::Again);
+        // Before replacing it, where is it? Paid meanwhile (its report still on the
+        // way): check out instead. Unknown (the provider is down): try it again later
+        // rather than replace a payment the shopper may have paid.
+        let moved = refresh(ports, providers, clock, &mut payment).await?;
+        if payment.status().committed() {
+            return Err(CommandError::CartPaymentCommitted {
+                cart: cart.id(),
+                payment: payment.id(),
+            });
+        }
+        let gone = moved
+            || matches!(
+                payment.status(),
+                PaymentStatus::Failed | PaymentStatus::Voided
+            );
+        if gone || provider_says_open(providers, &payment).await {
+            return Ok(Started::Again);
+        }
     }
     Ok(Started::Done(Box::new(CartPaymentStarted {
         payment,
         next_action,
     })))
+}
+
+/// Whether the provider says `payment` waits for the shopper: it answered, so its failed
+/// start was about the attempt itself (cancelled there), not the provider being down.
+async fn provider_says_open<Q: PaymentProviders>(providers: &Q, payment: &Payment) -> bool {
+    let request = hypha_payments::StatusRequest {
+        payment: payment.id(),
+        cart: payment.cart(),
+        reference: payment.reference().map(str::to_string),
+        attempt: payment.attempt().map(str::to_string),
+        store_settings: serde_json::Map::new(),
+    };
+    matches!(
+        providers.status(payment.provider(), &request).await,
+        Ok(hypha_payments::ProviderStatus {
+            state: hypha_payments::ProviderState::Open | hypha_payments::ProviderState::Canceled,
+            ..
+        })
+    )
 }

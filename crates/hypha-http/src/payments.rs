@@ -294,7 +294,13 @@ where
             attempt: request.attempt.clone(),
         };
         let correlation = request.payment.to_string();
-        let idempotency_key = format!("{}:status", request.payment);
+        // A question, not an action: a key per question, so an app that answers a key
+        // once (as it does a start) is asked anew each time.
+        let idempotency_key = format!(
+            "{}:status:{}",
+            request.payment,
+            hypha_core::IdGenerator::new_uuid(self.env)
+        );
         let answer = call::<PaymentsStatus>(
             &self.caller,
             self.ports.extension_calls(),

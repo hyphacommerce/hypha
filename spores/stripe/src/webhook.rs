@@ -349,8 +349,18 @@ pub async fn receive<S: Storage>(
                     .await
                 {
                     Ok(_) => {}
-                    Err(CheckoutError::Repo(e)) => {
-                        hypha_spore::tracing::warn!(event = %event.id, "completing the checkout failed: {e}");
+                    // Gave the money back (a line sold out, the total changed): done.
+                    Err(e) if e.gives_money_back() => {
+                        let code = hypha_spore::core::ErrorCode::code(&e);
+                        hypha_spore::tracing::warn!(event = %event.id, payment = %report.payment, "the paid checkout couldn't complete, so its money went back: {code}");
+                        refused
+                            .get_or_insert_with(|| format!("checkout couldn't complete: {code}"));
+                    }
+                    // Anything that may pass (storage, a shipping provider down, a race):
+                    // Stripe delivers the event again, and the checkout is tried again.
+                    Err(CheckoutError::Repo(_) | CheckoutError::ShippingUnavailable(_))
+                    | Err(CheckoutError::Cart(_) | CheckoutError::Inventory(_)) => {
+                        hypha_spore::tracing::warn!(event = %event.id, payment = %report.payment, "completing the checkout failed for now; Stripe will deliver it again");
                         return answer(
                             StatusCode::INTERNAL_SERVER_ERROR,
                             WebhookOutcome::rejected("couldn't complete the checkout; try again"),

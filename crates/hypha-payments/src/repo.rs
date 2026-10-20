@@ -59,19 +59,6 @@ pub async fn newest_payment<S: HasPayments>(
         .next())
 }
 
-/// The newest payment started for `cart`: the one checkout completes with.
-pub async fn newest_cart_payment<S: HasPayments>(
-    ports: &S,
-    cart: CartId,
-) -> Result<Option<Payment>, RepoError> {
-    Ok(ports
-        .payments()
-        .list_for_cart(cart)
-        .await?
-        .into_iter()
-        .next())
-}
-
 /// Stages payment writes in a `hypha_core::HasBatch` batch; the adapter's batch type
 /// implements it.
 pub trait StagePayments {
