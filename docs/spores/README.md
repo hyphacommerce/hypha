@@ -115,8 +115,10 @@ unavailable, its handlers' deliveries wait on the retry schedule, its routes ans
   `hypha spores add stripe` (or `hypha init --spores stripe`).
 - Any other: `hypha spores add reviews --crate acme-hypha-reviews --type
   acme_hypha_reviews::Reviews --routes acme_hypha_reviews::reviews_routes --git <url>
-  --rev <commit>` (or `--version`, `--path`). `hypha deploy` writes the deployment's own
-  host crate (`hypha_host_axum::host! { spores: [...], routes: [...] }`) and builds the
-  API from it. Not on Cloudflare yet.
+  --rev <commit>` (or `--version`, or `--path` to a folder under this checkout's
+  `spores/`). `hypha deploy` writes the deployment's own host crate
+  (`hypha_host_axum::host! { spores: [...], routes: [...] }`) and builds the API from
+  it; on Cloudflare also its own Worker crate (`hypha_host_workers::worker! { … }`),
+  under `.hypha-build/<deployment>/`.
 - Its app (`spore_<name>`) is registered when the API starts: enabled, its scopes as its
   grant. Taken out of the build, it's listed as missing; its settings and tables stay.

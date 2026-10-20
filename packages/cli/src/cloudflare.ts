@@ -343,8 +343,9 @@ export async function deployCloudflare(
   // Spores from outside this repository: the deployment's own crates, the native one for
   // `setup` (it migrates and registers them) and the Worker (design note 0030, §9).
   const spores = d.spores ?? [];
-  const hostCrate = needsHostCrate(spores) ? await writeHostCrate(dir, spores) : undefined;
-  const workerCrate = needsHostCrate(spores) ? await writeWorkerCrate(dir, spores) : undefined;
+  const outside = needsHostCrate(spores);
+  const hostCrate = outside ? await writeHostCrate(dir, spores) : undefined;
+  const workerCrate = outside ? await writeWorkerCrate(dir, spores) : undefined;
   const keyId = env.get("R2_ACCESS_KEY_ID");
   const keySecret = env.get("R2_SECRET_ACCESS_KEY");
   const media = Boolean(keyId && keySecret);

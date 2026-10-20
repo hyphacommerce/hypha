@@ -6,6 +6,7 @@
 // the native host (`writeHostCrate`: a server's API, and Cloudflare's `setup` tool) and
 // the Worker (`writeWorkerCrate`).
 
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
 
@@ -154,12 +155,14 @@ export function hostCargoToml(dir: string, spores: SporeEntry[], deploymentDir =
 }
 
 /** A path spore's folder: resolved against the deployment's folder, and inside this
- * checkout, which is Docker's build context (one outside couldn't be built there). */
+ * checkout's `spores/`, the one folder of it besides the crates that goes into Docker's
+ * build context (`docker/api.Dockerfile.dockerignore`). */
 export function sporePath(name: string, deploymentDir: string, path: string): string {
   const full = resolve(deploymentDir, path);
-  if (!full.startsWith(`${REPO}${sep}`))
+  const spores = join(REPO, "spores");
+  if (!full.startsWith(`${spores}${sep}`))
     throw new Error(
-      `spore ${name}: \`path\` ${full} is outside this checkout (${REPO}), which the API is built from: put the crate inside it, or give \`git\` or \`version\``,
+      `spore ${name}: \`path\` ${full} is outside ${spores}, which the API is built from: put the crate there, or give \`git\` or \`version\``,
     );
   return full;
 }
@@ -209,7 +212,12 @@ function sporeDependencies(dir: string, spores: SporeEntry[], deploymentDir: str
 
 /** The Worker crate's `Cargo.toml` (design note 0030, §9): `hypha-host-workers` without
  * its stock Worker, `worker` (its `#[event]`s expand to `::worker`), every spore. */
-export function workerCargoToml(dir: string, spores: SporeEntry[], deploymentDir = "."): string {
+export function workerCargoToml(
+  dir: string,
+  spores: SporeEntry[],
+  worker: string,
+  deploymentDir = ".",
+): string {
   return [
     "# Written by `hypha deploy` from hypha.json's `spores` (design note 0030, §9): change",
     "# those, not this file.",
@@ -227,7 +235,7 @@ export function workerCargoToml(dir: string, spores: SporeEntry[], deploymentDir
     "",
     "[dependencies]",
     `hypha-host-workers = { path = ${JSON.stringify(relative(dir, join(REPO, "crates", "hypha-host-workers")))}, default-features = false }`,
-    `worker = { version = "=0.8.7", features = ["http", "axum", "tokio-postgres"] }`,
+    worker,
     ...sporeDependencies(dir, spores, deploymentDir),
     "",
   ].join("\n");
@@ -240,34 +248,47 @@ export function workerLib(spores: SporeEntry[]): string {
     .replace("`hypha deploy`", "`hypha deploy` (the Worker)");
 }
 
-/** Writes the deployment's Worker crate (its lock seeded like the host crate's) and
- * returns its folder (absolute: wrangler builds there). */
+/** `hypha-host-workers`' own `worker = …` line: the Worker crate needs the very same
+ * `worker` (its `#[event]`s expand to `::worker`), pinned exactly as the host is. */
+export async function workerDependency(): Promise<string> {
+  const toml = await readFile(join(REPO, "crates", "hypha-host-workers", "Cargo.toml"), "utf8");
+  const line = toml.split("\n").find((l) => /^worker\s*=/.test(l));
+  if (!line) throw new Error("crates/hypha-host-workers/Cargo.toml names no `worker` dependency");
+  return line.trim();
+}
+
+/** Writes the deployment's Worker crate and returns its folder (absolute: wrangler
+ * builds there). */
 export async function writeWorkerCrate(
   deploymentDir: string,
   spores: SporeEntry[],
 ): Promise<string> {
   const dir = workerCrateDir(deploymentDir);
-  await mkdir(join(dir, "src"), { recursive: true });
-  await writeFile(join(dir, "Cargo.toml"), workerCargoToml(dir, spores, deploymentDir));
-  await writeFile(join(dir, "src", "lib.rs"), workerLib(spores));
-  const lock = join(dir, "Cargo.lock");
-  const existing = await readFile(lock, "utf8").catch(() => undefined);
-  if (existing === undefined)
-    await writeFile(lock, await readFile(join(REPO, "Cargo.lock"), "utf8"));
+  const toml = workerCargoToml(dir, spores, await workerDependency(), deploymentDir);
+  await writeCrate(dir, { "Cargo.toml": toml, "src/lib.rs": workerLib(spores) });
   return dir;
 }
 
-/** Writes the deployment's host crate (seeding its `Cargo.lock` from the checkout's, so
- * Hypha's own dependencies resolve as they're tested), and returns its folder relative
- * to the checkout (what the API's Dockerfile builds: `HOST_CRATE`). */
+/** Writes the deployment's host crate and returns its folder relative to the checkout
+ * (what the API's Dockerfile builds: `HOST_CRATE`). */
 export async function writeHostCrate(deploymentDir: string, spores: SporeEntry[]): Promise<string> {
   const dir = hostCrateDir(deploymentDir);
-  await mkdir(join(dir, "src"), { recursive: true });
-  await writeFile(join(dir, "Cargo.toml"), hostCargoToml(dir, spores, deploymentDir));
-  await writeFile(join(dir, "src", "main.rs"), hostMain(spores));
-  const lock = join(dir, "Cargo.lock");
-  const existing = await readFile(lock, "utf8").catch(() => undefined);
-  if (existing === undefined)
-    await writeFile(lock, await readFile(join(REPO, "Cargo.lock"), "utf8"));
+  const toml = hostCargoToml(dir, spores, deploymentDir);
+  await writeCrate(dir, { "Cargo.toml": toml, "src/main.rs": hostMain(spores) });
   return relative(REPO, dir);
+}
+
+/** Writes a generated crate's files, and its `Cargo.lock` from the checkout's, so
+ * Hypha's own dependencies resolve as they're tested. The lock is written again only
+ * when the checkout's changed since (`Cargo.lock.seed` holds its hash): until then the
+ * crate keeps its own, with what Cargo resolved for the spores. */
+async function writeCrate(dir: string, files: Record<string, string>): Promise<void> {
+  await mkdir(join(dir, "src"), { recursive: true });
+  for (const [path, text] of Object.entries(files)) await writeFile(join(dir, path), text);
+  const checkout = await readFile(join(REPO, "Cargo.lock"), "utf8");
+  const hash = createHash("sha256").update(checkout).digest("hex");
+  const seed = join(dir, "Cargo.lock.seed");
+  if ((await readFile(seed, "utf8").catch(() => undefined)) === hash) return;
+  await writeFile(join(dir, "Cargo.lock"), checkout);
+  await writeFile(seed, hash);
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -15,7 +15,10 @@ import {
   needsHostCrate,
   normalizeSpores,
   sporeFeatures,
+  workerCargoToml,
+  workerDependency,
   writeHostCrate,
+  writeWorkerCrate,
 } from "./spores.ts";
 import { REPO } from "./templates.ts";
 
@@ -105,15 +108,42 @@ test("the host crate names the native host and each spore, its own workspace", (
   );
 });
 
-test("writing the host crate seeds its lock from the checkout's, once", async () => {
+test("a generated crate's lock follows the checkout's only when that changed", async () => {
   const deployment = await mkdtemp(join(tmpdir(), "hypha-spores-"));
   const relative = await writeHostCrate(deployment, ["stripe"]);
   assert.ok(relative.startsWith(".hypha-build/"), relative);
-  const lock = await readFile(join(REPO, relative, "Cargo.lock"), "utf8");
-  assert.equal(lock, await readFile(join(REPO, "Cargo.lock"), "utf8"));
+  const lockPath = join(REPO, relative, "Cargo.lock");
+  const checkout = await readFile(join(REPO, "Cargo.lock"), "utf8");
+  assert.equal(await readFile(lockPath, "utf8"), checkout);
   const main = await readFile(join(REPO, relative, "src", "main.rs"), "utf8");
   assert.ok(main.includes("hypha_spore_stripe::Stripe"));
+  // What Cargo resolved for the spores stays while the checkout's lock is the same…
+  await writeFile(lockPath, `${checkout}# resolved\n`);
+  await writeHostCrate(deployment, ["stripe"]);
+  assert.ok((await readFile(lockPath, "utf8")).endsWith("# resolved\n"));
+  // …and a lock seeded from another checkout lock is replaced.
+  await writeFile(join(REPO, relative, "Cargo.lock.seed"), "stale");
+  await writeHostCrate(deployment, ["stripe"]);
+  assert.equal(await readFile(lockPath, "utf8"), checkout);
   await rm(dirname(join(REPO, relative)), { recursive: true });
+});
+
+test("the Worker crate depends on the very `worker` the host does", async () => {
+  const line = await workerDependency();
+  const host = await readFile(join(REPO, "crates", "hypha-host-workers", "Cargo.toml"), "utf8");
+  assert.ok(host.split("\n").includes(line), line);
+  const dir = join(REPO, ".hypha-build", "x", "worker");
+  const toml = workerCargoToml(dir, ["stripe", reviews], line);
+  assert.ok(toml.split("\n").includes(line), toml);
+  assert.match(
+    toml,
+    /^hypha-host-workers = \{ path = "\.\.\/\.\.\/\.\.\/crates\/hypha-host-workers", default-features = false \}$/m,
+  );
+  const deployment = await mkdtemp(join(tmpdir(), "hypha-spores-"));
+  const written = await writeWorkerCrate(deployment, ["stripe", reviews]);
+  const lib = await readFile(join(written, "src", "lib.rs"), "utf8");
+  assert.ok(lib.includes("hypha_host_workers::worker!"), lib);
+  await rm(dirname(written), { recursive: true });
 });
 
 test("the Worker builds with the first-party spores' features", () => {
@@ -139,7 +169,7 @@ test("list says where each spore comes from", () => {
   );
 });
 
-test("a path spore must be inside the checkout, and is written relative to the host crate", () => {
+test("a path spore must be in the checkout's spores/, and is written relative to the host crate", () => {
   const dir = join(REPO, ".hypha-build", "x", "host");
   const local = {
     ...reviews,
@@ -153,6 +183,10 @@ test("a path spore must be inside the checkout, and is written relative to the h
   assert.ok(toml.includes('acme-hypha-reviews = { path = "../../../spores/stripe" }'), toml);
   assert.throws(
     () => hostCargoToml(dir, [{ ...local, path: "/elsewhere/reviews" }]),
-    /outside this checkout/,
+    /outside .*spores, which the API is built from/,
+  );
+  assert.throws(
+    () => hostCargoToml(dir, [{ ...local, path: join(REPO, "apps", "reviews") }]),
+    /outside .*spores/,
   );
 });
