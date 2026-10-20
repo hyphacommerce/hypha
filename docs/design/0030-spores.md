@@ -725,11 +725,13 @@ them, not in this list.
   payment paid before, its report delivered again) (`PaymentEvent::attempt`; the Stripe
   spore gives the PaymentIntent, apps may through the events route). The `payments.*`
   action points' requests gained an optional `attempt` (sent only for a payment whose
-  app named attempts); kept at version 1 as an additive field (Danilo to confirm). Left
-  open, as trade-offs for Danilo: a Stripe payment paid before this branch is guarded
-  only once Stripe delivers its own intent's report again (a backfill could give a
-  wrong attempt to one a start raced); an app payment authorized under one ID and
-  reported paid under another, naming no attempt before, can't be told from a capture. A report naming
+  app named attempts); kept at version 1 as an additive field (Danilo to confirm). Every
+  Stripe payment from before this branch gets its attempt from its `pi_…` reference
+  (0058 the open ones, 0059 the rest), so all of Stripe's are checked: decided over the
+  rare payment whose reference a racing start replaced before this branch (it takes
+  that intent; staff reconcile it at Stripe), since a second charge kept is the likelier
+  harm. Payments with no attempt (an app's whose reports named none) stay unchecked, as
+  before this branch: an app naming attempts names them from its first report. A report naming
   another attempt is refused (`payment_reference_mismatch`, 409, `details: {status,
   held, reported}`) unless it pays or authorizes a pending payment (started again). So
   money another intent took for a payment past pending goes back, and another intent's
