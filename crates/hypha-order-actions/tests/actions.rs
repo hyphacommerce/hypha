@@ -1477,30 +1477,7 @@ fn a_restarted_pending_payment_refuses_its_old_attempts_cancel() {
 }
 
 #[test]
-fn a_report_naming_an_attempt_first_keeps_it_though_nothing_moves() {
-    use hypha_order_actions::PaymentEventKind as K;
-    let world = World::new();
-    pending_payment(&world);
-    // Paid before attempts were kept (none named).
-    world.report_ref(K::Paid, None, Some("pi_1"), None).unwrap();
-    // Stripe delivers it again, naming its intent: kept, though the status is the same.
-    let again = world
-        .report_attempt(K::Paid, None, Some("pi_1"), Some("pi_1"), None)
-        .unwrap()
-        .value;
-    assert_eq!(again.payments[0].attempt(), Some("pi_1"));
-    let stored = block_on(
-        world
-            .payments
-            .get(hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001))),
-    )
-    .unwrap()
-    .unwrap();
-    assert_eq!(stored.attempt(), Some("pi_1"));
-}
-
-#[test]
-fn a_paid_payment_without_an_attempt_takes_only_its_own_reference_as_one() {
+fn a_paid_payment_without_an_attempt_doesnt_take_a_second_collections() {
     use hypha_order_actions::PaymentEventKind as K;
     let world = World::new();
     pending_payment(&world);
@@ -1517,6 +1494,22 @@ fn a_paid_payment_without_an_attempt_takes_only_its_own_reference_as_one() {
     .unwrap()
     .unwrap();
     assert_eq!(stored.attempt(), None);
+}
+
+#[test]
+fn a_capture_report_names_the_attempt_of_an_authorization_that_named_none() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    world
+        .report_ref(K::Authorized, None, Some("AUTH-1"), None)
+        .unwrap();
+    // Captured under its own ID, the app's report naming the attempt: it's the payment's.
+    let paid = world
+        .report_attempt(K::Paid, None, Some("CAP-1"), Some("ORDER-9"), None)
+        .unwrap()
+        .value;
+    assert_eq!(paid.payments[0].attempt(), Some("ORDER-9"));
 }
 
 #[test]

@@ -210,21 +210,17 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
     };
     let attempt = other_attempt(payment, input)?;
     Ok(match input.kind {
-        // Whether the status moved or the attempt was named for the first time: either is
-        // stored. Past pending, a payment from before attempts were kept takes only its own
-        // reference as its attempt (Stripe delivering its intent's report again): another
-        // is a second attempt's money, and must not become the one it collects through.
         PaymentEventKind::Authorized => {
             whole(payment)?;
-            let own = names_own(payment, attempt.as_deref());
+            let pending = payment.status() == PaymentStatus::Pending;
             let changed = payment.authorize(reference)?;
-            (own && payment.note_attempt(attempt)?) || changed
+            adopt(payment, attempt, pending || changed)? || changed
         }
         PaymentEventKind::Paid => {
             whole(payment)?;
-            let own = names_own(payment, attempt.as_deref());
+            let pending = payment.status() == PaymentStatus::Pending;
             let changed = payment.pay(at, reference)?;
-            (own && payment.note_attempt(attempt)?) || changed
+            adopt(payment, attempt, pending || changed)? || changed
         }
         PaymentEventKind::Failed => payment.fail(reference)?,
         PaymentEventKind::Voided => {
@@ -281,10 +277,13 @@ fn other_attempt(payment: &Payment, input: &PaymentEvent) -> Result<Option<Strin
     })
 }
 
-/// Whether `attempt` may become the payment's: a pending payment's start or report names
-/// it, or it's the payment's own reference.
-fn names_own(payment: &Payment, attempt: Option<&str>) -> bool {
-    payment.status() == PaymentStatus::Pending || payment.reference() == attempt
+/// Keeps a collecting report's `attempt` as the payment's when the report is about the
+/// payment's own collection (`own`: it was pending, or the report moved it: a capture of
+/// its authorization), so a payment without one (its provider's reports named none
+/// before) takes it. A report that changes nothing on a payment collected already may be
+/// a second attempt's money: its attempt isn't taken. Whether that changed anything.
+fn adopt(payment: &mut Payment, attempt: Option<String>, own: bool) -> Result<bool, PaymentError> {
+    Ok(own && payment.note_attempt(attempt)?)
 }
 
 /// The payment an earlier request with this key reported on, if this caller sent it.

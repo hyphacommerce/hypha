@@ -717,12 +717,14 @@ them, not in this list.
   transaction that writes (two deliveries racing can't both pass), for a provider whose
   IDs name attempts. The payment keeps the attempt it collects through apart from
   its `reference` (which staff's text or an operation's own ID may replace): `attempt`,
-  migration 0057 (0058 backfills Stripe's open payments from a `pi_…` reference), shown
-  in payment responses, set by the start (`Started::attempt`, a start made again
-  replacing it while the payment is pending; past pending the start writes nothing) or
-  by a report naming one (past pending, only the payment's own reference becomes a first
-  attempt) (`PaymentEvent::attempt`; the Stripe
-  spore gives the PaymentIntent, apps may through the events route). A report naming
+  migration 0057 (0058 backfills Stripe's payments from a `pi_…` reference), shown in
+  payment responses, set by the start (`Started::attempt`, a start made again replacing
+  it while the payment is pending; past pending a start only fills a missing reference)
+  or by a collecting report naming one that's about the payment's own collection (it
+  was pending, or the report moved it: a capture) (`PaymentEvent::attempt`; the Stripe
+  spore gives the PaymentIntent, apps may through the events route). The `payments.*`
+  action points' requests gained an optional `attempt` (sent only for a payment whose
+  app named attempts); kept at version 1 as an additive field (Danilo to confirm). A report naming
   another attempt is refused (`payment_reference_mismatch`, 409, `details: {status,
   held, reported}`) unless it pays or authorizes a pending payment (started again). So
   money another intent took for a payment past pending goes back, and another intent's
