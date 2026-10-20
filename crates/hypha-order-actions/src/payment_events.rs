@@ -53,8 +53,8 @@ pub struct PaymentEvent {
     /// The provider's ID for the attempt this report is about (a Stripe PaymentIntent;
     /// for a refund, the attempt it refunds), from a provider whose IDs name attempts:
     /// the Stripe spore, or an app through the events route. A paid or authorized
-    /// report keeps it as the payment's `attempt`; a report naming another is refused
-    /// (`other_attempt`). Absent, nothing is checked (a provider whose capture or void
+    /// report that moves the payment, or names its own reference, keeps it as the
+    /// payment's `attempt`; a report naming another is refused (`other_attempt`). Absent, nothing is checked (a provider whose capture or void
     /// carries an ID of its own leaves it out). Up to 255 characters.
     pub attempt: Option<String>,
     /// When it happened at the provider; absent is now. When it was paid or voided.
@@ -212,15 +212,15 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
     Ok(match input.kind {
         PaymentEventKind::Authorized => {
             whole(payment)?;
-            let pending = payment.status() == PaymentStatus::Pending;
+            let own = names_own(payment, attempt.as_deref());
             let changed = payment.authorize(reference)?;
-            adopt(payment, attempt, pending || changed)? || changed
+            ((changed || own) && payment.note_attempt(attempt)?) || changed
         }
         PaymentEventKind::Paid => {
             whole(payment)?;
-            let pending = payment.status() == PaymentStatus::Pending;
+            let own = names_own(payment, attempt.as_deref());
             let changed = payment.pay(at, reference)?;
-            adopt(payment, attempt, pending || changed)? || changed
+            ((changed || own) && payment.note_attempt(attempt)?) || changed
         }
         PaymentEventKind::Failed => payment.fail(reference)?,
         PaymentEventKind::Voided => {
@@ -277,13 +277,14 @@ fn other_attempt(payment: &Payment, input: &PaymentEvent) -> Result<Option<Strin
     })
 }
 
-/// Keeps a collecting report's `attempt` as the payment's when the report is about the
-/// payment's own collection (`own`: it was pending, or the report moved it: a capture of
-/// its authorization), so a payment without one (its provider's reports named none
-/// before) takes it. A report that changes nothing on a payment collected already may be
-/// a second attempt's money: its attempt isn't taken. Whether that changed anything.
-fn adopt(payment: &mut Payment, attempt: Option<String>, own: bool) -> Result<bool, PaymentError> {
-    Ok(own && payment.note_attempt(attempt)?)
+/// Whether a collecting report that changes nothing names the payment's own attempt: its
+/// reference (Stripe delivering the intent's report again), so a payment paid before
+/// attempts were kept takes it. A collecting report that moves the payment (from
+/// pending, or a capture of its authorization) is about its own collection anyway;
+/// one that changes nothing under another ID may be a second attempt's money, whose
+/// attempt isn't taken.
+fn names_own(payment: &Payment, attempt: Option<&str>) -> bool {
+    attempt.is_some() && payment.reference() == attempt
 }
 
 /// The payment an earlier request with this key reported on, if this caller sent it.

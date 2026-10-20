@@ -717,14 +717,19 @@ them, not in this list.
   transaction that writes (two deliveries racing can't both pass), for a provider whose
   IDs name attempts. The payment keeps the attempt it collects through apart from
   its `reference` (which staff's text or an operation's own ID may replace): `attempt`,
-  migration 0057 (0058 backfills Stripe's payments from a `pi_…` reference), shown in
-  payment responses, set by the start (`Started::attempt`, a start made again replacing
-  it while the payment is pending; past pending a start only fills a missing reference)
-  or by a collecting report naming one that's about the payment's own collection (it
-  was pending, or the report moved it: a capture) (`PaymentEvent::attempt`; the Stripe
+  migration 0057 (0058 backfills Stripe's open payments from a `pi_…` reference: a paid
+  one's reference may be a racing start's intent), shown in payment responses, set by
+  the start (`Started::attempt`, a start made again replacing it while the payment is
+  pending; past pending a start writes nothing) or by a collecting report naming one
+  that moves the payment (from pending, or a capture) or names its own reference (a
+  payment paid before, its report delivered again) (`PaymentEvent::attempt`; the Stripe
   spore gives the PaymentIntent, apps may through the events route). The `payments.*`
   action points' requests gained an optional `attempt` (sent only for a payment whose
-  app named attempts); kept at version 1 as an additive field (Danilo to confirm). A report naming
+  app named attempts); kept at version 1 as an additive field (Danilo to confirm). Left
+  open, as trade-offs for Danilo: a Stripe payment paid before this branch is guarded
+  only once Stripe delivers its own intent's report again (a backfill could give a
+  wrong attempt to one a start raced); an app payment authorized under one ID and
+  reported paid under another, naming no attempt before, can't be told from a capture. A report naming
   another attempt is refused (`payment_reference_mismatch`, 409, `details: {status,
   held, reported}`) unless it pays or authorizes a pending payment (started again). So
   money another intent took for a payment past pending goes back, and another intent's

@@ -1513,6 +1513,27 @@ fn a_capture_report_names_the_attempt_of_an_authorization_that_named_none() {
 }
 
 #[test]
+fn a_paid_payment_takes_its_own_reference_as_its_attempt_when_named_again() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    // Paid before attempts were kept (none named).
+    world.report_ref(K::Paid, None, Some("pi_1"), None).unwrap();
+    // Stripe delivers it again, naming its intent: kept, though the status is the same.
+    world
+        .report_attempt(K::Paid, None, Some("pi_1"), Some("pi_1"), None)
+        .unwrap();
+    let stored = block_on(
+        world
+            .payments
+            .get(hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001))),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(stored.attempt(), Some("pi_1"));
+}
+
+#[test]
 fn an_operations_own_id_doesnt_change_the_attempt() {
     use hypha_order_actions::PaymentEventKind as K;
     let world = World::new();

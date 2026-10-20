@@ -591,7 +591,8 @@ pub struct PaymentEventRequest {
     reference: Option<String>,
     /// The provider's ID for the attempt this report is about, for a provider whose IDs
     /// name attempts (a Stripe PaymentIntent's `pi_…`; for a refund, the intent it
-    /// refunds). A paid or authorized report keeps it as the payment's attempt; then
+    /// refunds). A paid or authorized report that moves the payment, or names its own
+    /// `reference`, keeps it as the payment's attempt; then
     /// Hypha collects the payment once: a report naming another attempt is `409
     /// payment_reference_mismatch` (`details: {status, held, reported}`) unless it pays
     /// or authorizes a pending payment (started again); give back what that attempt

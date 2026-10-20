@@ -77,8 +77,7 @@ pub(crate) async fn start<S: HasPayments, Q: PaymentProviders>(
 /// Stores the provider's `reference` on `payment`, and the `attempt` it started (made
 /// again, the one reports are checked against from now), while the payment is still
 /// pending: reloaded when the provider's own report (its events) changed it meanwhile.
-/// Once it's moved on, the attempt is the report's, and the reference only fills one
-/// the report left out.
+/// Once it's moved on, the report's IDs stand.
 async fn keep_reference<S: HasPayments>(
     ports: &S,
     payment: &mut Payment,
@@ -87,12 +86,13 @@ async fn keep_reference<S: HasPayments>(
 ) -> Result<(), CommandError> {
     let mut attempts = Attempts::first();
     loop {
-        // Moved on meanwhile (its provider reported it): the report said where it stands,
-        // and which attempt; the start's reference only fills one the report left out.
-        let pending = payment.status() == PaymentStatus::Pending;
-        let referenced = (pending || payment.reference().is_none())
-            && payment.set_reference(reference.clone())?;
-        let started = pending && payment.note_attempt(attempt.clone())?;
+        // Moved on meanwhile (its provider reported it): the report said where it stands.
+        // The start's IDs may name an attempt that collected nothing: not written.
+        if payment.status() != PaymentStatus::Pending {
+            return Ok(());
+        }
+        let referenced = payment.set_reference(reference.clone())?;
+        let started = payment.note_attempt(attempt.clone())?;
         if !(referenced || started) {
             return Ok(());
         }
