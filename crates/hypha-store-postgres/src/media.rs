@@ -1,6 +1,6 @@
 use hypha_core::{
-    AssetId, Direction, Keyset, Page, PageRequest, RepoError, SortKey, Timestamp, Version,
-    Versioned,
+    AssetId, Direction, Keyset, Page, PageRequest, Recorded, RepoError, SortKey, Timestamp,
+    Version, Versioned,
 };
 use hypha_media::{
     Asset, AssetFilter, AssetRepo, AssetSnapshot, AssetSort, AssetUsage, AssetUsageRepo, BlobKey,
@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::{
     columns::{col, micros, ts, version_from_db, version_to_db},
     error::{corrupt, repo_error},
+    outbox::insert_events,
     store::Queries,
     store::{PgConnection, PgStore, in_transaction},
 };
@@ -167,8 +168,16 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
         Ok(())
     }
 
-    async fn delete(&self, id: AssetId) -> Result<(), RepoError> {
-        in_transaction!(self, |tx| delete_asset(tx, id).await)
+    async fn delete(&self, asset: &mut Asset) -> Result<(), RepoError> {
+        let id = asset.id();
+        let events = asset.take_events();
+        let stamp = self.event_stamp();
+        in_transaction!(self, |tx| {
+            if delete_asset(tx, id).await? {
+                insert_events(tx, &events, None, stamp).await?;
+            }
+            Ok(())
+        })
     }
 }
 
@@ -221,14 +230,16 @@ pub(crate) async fn update_asset(
 
 /// `AssetRepo::delete` inside the caller's transaction. An asset in use is refused by
 /// the usage reference (`RepoError::Reference`).
-pub(crate) async fn delete_asset(tx: &impl Queries, id: AssetId) -> Result<(), RepoError> {
-    tx.query_typed(
-        "DELETE FROM assets WHERE id = $1",
-        &[(&id.as_uuid(), Type::UUID)],
-    )
-    .await
-    .map_err(repo_error)?;
-    Ok(())
+/// Whether there was a row to delete.
+pub(crate) async fn delete_asset(tx: &impl Queries, id: AssetId) -> Result<bool, RepoError> {
+    let gone = tx
+        .query_typed_opt(
+            "DELETE FROM assets WHERE id = $1 RETURNING id",
+            &[(&id.as_uuid(), Type::UUID)],
+        )
+        .await
+        .map_err(repo_error)?;
+    Ok(gone.is_some())
 }
 
 impl<C: PgConnection> AssetUsageRepo for PgStore<C> {

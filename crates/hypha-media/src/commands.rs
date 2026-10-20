@@ -240,7 +240,7 @@ pub async fn update_asset<R: AssetRepo>(
 /// 0014, E10). The row goes first: the repository refuses it while usages exist, even
 /// ones attached after the check here, and a file must never disappear from under an
 /// asset that is still in use. If deleting the file then fails, it stays in storage
-/// with nothing pointing at it.
+/// with nothing pointing at it. Records `asset.deleted` with the row.
 pub async fn delete_asset<S: HasAssets + HasAssetUsages, B: BlobStore>(
     ctx: &Ctx,
     ports: &S,
@@ -248,9 +248,10 @@ pub async fn delete_asset<S: HasAssets + HasAssetUsages, B: BlobStore>(
     id: AssetId,
 ) -> Result<(), CommandError> {
     ctx.require(Scope::MediaWrite)?;
-    let asset = load(ports.assets(), id).await?;
+    let mut asset = load(ports.assets(), id).await?;
     refuse_if_used(ports.asset_usages(), id).await?;
-    match ports.assets().delete(id).await {
+    asset.delete();
+    match ports.assets().delete(&mut asset).await {
         Err(RepoError::Reference(key)) if key == keys::USAGE_ASSET => {
             // Attached since the check: report it like the check would have.
             refuse_if_used(ports.asset_usages(), id).await?;
@@ -310,11 +311,12 @@ pub async fn sweep_abandoned_uploads<R: AssetRepo, B: BlobStore>(
     let mut deleted = 0;
     loop {
         let batch = assets.abandoned(before, BATCH).await?;
-        for asset in &batch {
+        for mut asset in batch.iter().cloned() {
             // Files first, as in `delete_asset`: a failure leaves a row to retry.
             blobs.delete(&asset.upload_key()).await?;
             blobs.delete(asset.key()).await?;
-            assets.delete(asset.id()).await?;
+            asset.delete();
+            assets.delete(&mut asset).await?;
         }
         deleted += batch.len();
         if batch.len() < BATCH as usize {

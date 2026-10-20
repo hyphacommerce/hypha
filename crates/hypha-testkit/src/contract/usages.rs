@@ -239,14 +239,15 @@ where
     replace(ports, &owner(1), &[(aid(1), UsageRole::featured())])
         .await
         .unwrap();
+    let mut asset = ports.assets().get(aid(1)).await.unwrap().unwrap();
     assert_eq!(
-        ports.assets().delete(aid(1)).await,
+        ports.assets().delete(&mut asset.clone()).await,
         Err(RepoError::Reference(keys::USAGE_ASSET))
     );
     assert!(ports.assets().get(aid(1)).await.unwrap().is_some());
 
     replace(ports, &owner(1), &[]).await.unwrap();
-    assert_eq!(ports.assets().delete(aid(1)).await, Ok(()));
+    assert_eq!(ports.assets().delete(&mut asset).await, Ok(()));
     assert_eq!(ports.assets().get(aid(1)).await, Ok(None));
 }
 

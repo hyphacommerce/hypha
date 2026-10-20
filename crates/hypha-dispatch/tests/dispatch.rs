@@ -179,6 +179,36 @@ fn a_removed_variant_loses_its_prices_and_stock_record() {
 }
 
 #[test]
+fn a_deleted_products_variants_lose_their_prices_and_stock_records() {
+    use hypha_core::HasBatch;
+    use hypha_products::StageProducts;
+    let ports = world();
+    let clock = FixedClock::default();
+    let mut shirt = block_on(ports.products.get(product_id())).unwrap().unwrap();
+    shirt.delete();
+    let mut batch = ports.batch();
+    batch.delete_product(&mut shirt);
+    block_on(ports.commit(batch)).unwrap();
+    assert_eq!(dispatch(&ports, &clock).done, 1);
+
+    for n in [1, 2] {
+        let prices =
+            block_on(ports.price_lists.fixed_prices(list(n), &[small(), large()])).unwrap();
+        assert!(prices.is_empty(), "list {n}");
+    }
+    for variant in [small(), large()] {
+        assert_eq!(
+            block_on(ports.inventory_items.get_by_variant(variant)),
+            Ok(None)
+        );
+    }
+    assert_eq!(
+        cleanup_deliveries(&ports),
+        [("handler:variant_cleanup".to_string(), "succeeded", 1, None)]
+    );
+}
+
+#[test]
 fn an_item_with_reservations_is_retired_until_its_orders_are_done() {
     let ports = world();
     let clock = FixedClock::default();

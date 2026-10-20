@@ -256,6 +256,14 @@ impl Product {
             }),
         }
     }
+
+    /// Records that the product is being deleted, in any status (design note 0033,
+    /// section 6.3): its only event is then `product.deleted`, listing its variants.
+    /// Stage it with `StageProducts::delete_product`, which takes that event.
+    pub fn delete(&mut self) {
+        let variants = self.variants.iter().map(|v| v.id()).collect();
+        self.changes.deleted(variants);
+    }
     pub fn id(&self) -> ProductId {
         self.id
     }
@@ -640,6 +648,25 @@ mod tests {
             price(),
         )
         .unwrap()
+    }
+
+    // ---- delete ----
+
+    #[test]
+    fn deleting_records_only_product_deleted_with_every_variant() {
+        let mut p = shirt();
+        p.take_events();
+        p.add_variant(new_var(2, vec![val(12), val(22)])).unwrap();
+        p.set_status(ProductStatus::Active).unwrap();
+        p.delete();
+        let events = p.take_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "product.deleted");
+        assert_eq!(events[0].data["handle"], "shirt");
+        assert_eq!(
+            events[0].data["variants"],
+            serde_json::json!([var(1).to_string(), var(2).to_string()])
+        );
     }
 
     // ---- new_simple ----

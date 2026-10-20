@@ -479,6 +479,28 @@ fn a_line_that_went_stale_is_refused_and_nothing_is_written() {
 }
 
 #[test]
+fn a_deleted_products_line_is_refused_until_it_is_removed() {
+    use hypha_core::HasBatch;
+    use hypha_products::StageProducts;
+    let world = World::new();
+    let cart = world.cart();
+    let mut mug = block_on(world.products.get(pid("mug"))).unwrap().unwrap();
+    mug.delete();
+    let mut batch = world.ports.batch();
+    batch.delete_product(&mut mug);
+    block_on(world.ports.commit(batch)).unwrap();
+
+    assert_eq!(
+        world.checkout(cart),
+        Err(CommandError::Unavailable {
+            lines: vec![vid("mug")]
+        })
+    );
+    let stored = block_on(world.carts.get(cart)).unwrap().unwrap();
+    assert_eq!(stored.status(), CartStatus::Open);
+}
+
+#[test]
 fn a_changed_total_is_refused() {
     let world = World::new();
     let cart = world.cart();

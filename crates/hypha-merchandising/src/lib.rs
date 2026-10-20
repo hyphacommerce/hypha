@@ -9,8 +9,9 @@ pub mod handlers;
 pub mod view;
 
 pub use commands::{
-    CommandError, MerchandisingPorts, category_image, get_product_view, get_product_view_by_handle,
-    list_product_views, set_category_image, set_product_media, set_variant_media,
+    CommandError, MerchandisingPorts, category_image, delete_product, get_product_view,
+    get_product_view_by_handle, list_product_views, set_category_image, set_product_media,
+    set_variant_media,
 };
 pub use handlers::CategoryImageCleanup;
 pub use view::{ProductSummaryView, ProductView};

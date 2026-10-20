@@ -1,12 +1,13 @@
 "use client";
 
+import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { useState, useTransition } from "react";
 
-import { setProductStatus } from "../actions";
+import { deleteProduct, setProductStatus } from "../actions";
 
 type Status = AdminSchemas["ProductStatus"];
 
@@ -24,9 +25,18 @@ const MOVES: Record<Status, { to: Status; label: string; primary?: boolean }[]> 
   archived: [{ to: "draft", label: "Restore as draft" }],
 };
 
-export function StatusActions({ id, status }: { id: string; status: Status }) {
+export function StatusActions({
+  id,
+  title,
+  status,
+}: {
+  id: string;
+  title: string;
+  status: Status;
+}) {
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState<Status>();
+  const [confirming, setConfirming] = useState(false);
   const [, startTransition] = useTransition();
 
   const move = (to: Status) => {
@@ -51,8 +61,40 @@ export function StatusActions({ id, status }: { id: string; status: Status }) {
             onClick={() => move(m.to)}
           />
         ))}
+        <Button
+          label="Delete"
+          variant="secondary"
+          isDisabled={pending !== undefined}
+          onClick={() => setConfirming(true)}
+        />
       </HStack>
       {error && <Banner status="error" title={error} />}
+      {confirming && <DeleteDialog id={id} title={title} onClose={() => setConfirming(false)} />}
     </VStack>
+  );
+}
+
+function DeleteDialog({ id, title, onClose }: { id: string; title: string; onClose: () => void }) {
+  const [error, setError] = useState<string>();
+  const [isPending, startTransition] = useTransition();
+  return (
+    <AlertDialog
+      isOpen
+      onOpenChange={(isOpen) => !isOpen && onClose()}
+      title={`Delete ${title}?`}
+      description={
+        error ??
+        "It's removed with its variants, prices and stock records, and leaves every sales channel. Its media stay in the library and orders keep their lines. Archive it instead to keep it."
+      }
+      actionLabel="Delete product"
+      isActionLoading={isPending}
+      onAction={() =>
+        startTransition(async () => {
+          // On success the action redirects to the list.
+          const result = await deleteProduct(id);
+          if (result.error) setError(result.error);
+        })
+      }
+    />
   );
 }

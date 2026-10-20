@@ -78,6 +78,21 @@ impl Event for VariantRemoved {
     const VERSION: u16 = 1;
 }
 
+/// `product.deleted`: the product is gone, with its variants (listed, so other domains
+/// clean up what they keep for each, as for `product.variant_removed`) and its options.
+/// Orders keep their lines: they hold copies (design note 0033, section 6.3).
+#[derive(Debug, Serialize)]
+pub struct ProductDeleted {
+    pub product: ProductId,
+    pub handle: String,
+    pub variants: Vec<VariantId>,
+}
+
+impl Event for ProductDeleted {
+    const TYPE: &'static str = "product.deleted";
+    const VERSION: u16 = 1;
+}
+
 /// What changed in a product since it was loaded, coalesced: one `product.updated` per
 /// write listing every field, one `product.variant_updated` per variant. Compares as
 /// always equal, so it never makes two products unequal.
@@ -88,6 +103,8 @@ pub(crate) struct Changes {
     added: Vec<VariantId>,
     removed: Vec<VariantId>,
     updated: BTreeMap<VariantId, BTreeSet<&'static str>>,
+    /// Deleted, with these variants: the deletion is the whole story.
+    deleted: Option<Vec<VariantId>>,
 }
 
 impl PartialEq for Changes {
@@ -127,6 +144,10 @@ impl Changes {
         self.updated.remove(&variant);
     }
 
+    pub(crate) fn deleted(&mut self, variants: Vec<VariantId>) {
+        self.deleted = Some(variants);
+    }
+
     pub(crate) fn variant_field(&mut self, variant: VariantId, field: &'static str) {
         if !self.added.contains(&variant) {
             self.updated.entry(variant).or_default().insert(field);
@@ -142,6 +163,14 @@ impl Changes {
     ) -> Vec<PendingEvent> {
         let changes = std::mem::take(self);
         let subject = Subject::new(PRODUCT, product.as_uuid());
+        if let Some(variants) = changes.deleted {
+            let deleted = ProductDeleted {
+                product,
+                handle: handle.to_string(),
+                variants,
+            };
+            return vec![PendingEvent::new(subject, &deleted)];
+        }
         if changes.created {
             let created = ProductCreated {
                 product,
@@ -212,6 +241,25 @@ mod tests {
         let events = take(&mut changes);
         assert_eq!(types(&events), ["product.created"]);
         assert_eq!(events[0].data["status"], "draft");
+    }
+
+    #[test]
+    fn a_deleted_product_is_only_deleted() {
+        let mut changes = Changes::default();
+        changes.field("title");
+        changes.variant_removed(variant(3));
+        changes.deleted(vec![variant(2)]);
+        let events = take(&mut changes);
+        assert_eq!(types(&events), ["product.deleted"]);
+        assert_eq!(
+            events[0].data,
+            serde_json::json!({
+                "product": product().to_string(),
+                "handle": "mug",
+                "variants": [variant(2).to_string()],
+            })
+        );
+        assert!(take(&mut changes).is_empty());
     }
 
     #[test]

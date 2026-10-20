@@ -142,6 +142,35 @@ pub async fn set_product_media<S: MerchandisingPorts>(
     .await
 }
 
+/// Deletes a product (design note 0033, section 6.3), in any status: in one batch, the
+/// product with its variants and options, its asset usages, and its `product.deleted`
+/// event. The assets stay. Storage removes its catalog, channel and category membership
+/// and its tax class with it; fixed prices, stock and search documents are cleaned up by
+/// the handlers that want the event. Orders keep their lines (copies), and carts report
+/// lines of it unavailable until they're removed.
+///
+/// A product changed by someone else meanwhile is loaded again and deleted, up to
+/// `MAX_ATTEMPTS` times in total: the event then lists its variants as they were.
+pub async fn delete_product<S: MerchandisingPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: ProductId,
+) -> Result<(), CommandError> {
+    ctx.require(Scope::ProductsWrite)?;
+    retry_on_conflict(
+        move || async move {
+            let mut product = load(ports, id).await?;
+            product.delete();
+            let mut batch = ports.batch();
+            batch.delete_product(&mut product);
+            batch.replace_asset_usages(&UsageOwner::product(id), &[]);
+            Ok(ports.commit(batch).await?)
+        },
+        |e| matches!(e, CommandError::Repo(RepoError::StaleVersion)),
+    )
+    .await
+}
+
 /// Sets a category's image, or clears it with `None` (design note 0022, CA9, Q5): the
 /// category and its asset usage in one batch, so an image in use can't be deleted from
 /// the library. The asset must exist, be ready and public, and be an image. Retried on a

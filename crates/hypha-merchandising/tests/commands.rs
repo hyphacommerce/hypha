@@ -503,3 +503,76 @@ fn a_deleted_categorys_image_is_released() {
     block_on(cleanup.handle(&ports, &deleted)).unwrap();
     assert_eq!(usages(&ports, 1), []);
 }
+
+// ---------- deleting a product (design note 0033, section 6.3) ----------
+
+#[test]
+fn deleting_a_product_removes_it_and_its_usages_and_records_the_event() {
+    let ports = world();
+    attach(&ports, 1, &[1, 2]).unwrap();
+    attach(&ports, 2, &[1]).unwrap();
+    assert_eq!(
+        block_on(hypha_merchandising::delete_product(
+            &Ctx::system(),
+            &ports,
+            pid(1)
+        )),
+        Ok(())
+    );
+    assert_eq!(block_on(ports.products.get(pid(1))), Ok(None));
+    assert_eq!(
+        usages(&ports, 1),
+        [usage(1, 2, UsageRole::featured())],
+        "only the other product's usage is left"
+    );
+    assert_eq!(usages(&ports, 2), []);
+    assert!(
+        block_on(ports.assets.get(aid(2))).unwrap().is_some(),
+        "the assets stay"
+    );
+    let events = ports.outbox.events();
+    let deleted = events.last().unwrap();
+    assert_eq!(deleted.event_type, "product.deleted");
+    assert_eq!(
+        (deleted.subject_kind.as_str(), deleted.subject_id),
+        ("product", pid(1).as_uuid())
+    );
+    assert_eq!(
+        deleted.data,
+        serde_json::json!({
+            "product": pid(1).to_string(),
+            "handle": "shirt",
+            "variants": [vid(11).to_string(), vid(12).to_string()],
+        })
+    );
+}
+
+#[test]
+fn deleting_an_unknown_product_is_not_found() {
+    let ports = world();
+    let delete = || {
+        block_on(hypha_merchandising::delete_product(
+            &Ctx::system(),
+            &ports,
+            pid(1),
+        ))
+    };
+    assert_eq!(delete(), Ok(()));
+    assert_eq!(delete(), Err(CommandError::ProductNotFound(pid(1))));
+}
+
+#[test]
+fn deleting_needs_products_write() {
+    let ports = world();
+    assert_eq!(
+        block_on(hypha_merchandising::delete_product(
+            &user_with(vec![Scope::ProductsRead]),
+            &ports,
+            pid(1)
+        )),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::ProductsWrite
+        )))
+    );
+    assert!(block_on(ports.products.get(pid(1))).unwrap().is_some());
+}

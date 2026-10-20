@@ -343,10 +343,11 @@ async fn asset_abandoned<R: AssetRepo>(repo: &R) {
 async fn asset_deletes<R: AssetRepo>(repo: &R) {
     repo.insert(&mut pending(1, MimeType::Png)).await.unwrap();
     repo.insert(&mut pending(2, MimeType::Png)).await.unwrap();
-    repo.delete(aid(1)).await.unwrap();
+    let mut first = repo.get(aid(1)).await.unwrap().unwrap();
+    repo.delete(&mut first.clone()).await.unwrap();
     assert_eq!(repo.get(aid(1)).await, Ok(None));
     assert!(repo.get(aid(2)).await.unwrap().is_some());
-    assert_eq!(repo.delete(aid(1)).await, Ok(()));
+    assert_eq!(repo.delete(&mut first).await, Ok(()));
 }
 
 async fn asset_get_many<R: AssetRepo>(repo: &R) {

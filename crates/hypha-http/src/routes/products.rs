@@ -14,7 +14,7 @@ use hypha_inventory::{HasInventoryItems, HasLocations};
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
 use hypha_media::{Asset, HasAssets};
 use hypha_merchandising::{
-    ProductSummaryView, ProductView, get_product_view, get_product_view_by_handle,
+    ProductSummaryView, ProductView, delete_product, get_product_view, get_product_view_by_handle,
     list_product_views, set_product_media, set_variant_media,
 };
 use hypha_products::{
@@ -1064,6 +1064,28 @@ pub async fn remove_variant<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let product = remove_product_variant(&ctx, ports.products(), id, variant).await?;
     respond(&state, &ports, &ctx, product).await
+}
+
+/// Deletes a product with its variants and options, whatever its status (design note
+/// 0033, section 6.3). Its media stay in the library; its catalog, channel and category
+/// membership go with it, and its fixed prices, stock records and search listings
+/// shortly after (`product.deleted`). Orders keep their lines; carts show its lines as
+/// unavailable until they're removed. Archive instead to keep it.
+#[utoipa::path(
+    delete,
+    path = "/admin/products/{id}",
+    params(("id" = ProductId, Path)),
+    responses((status = 204, description = "No content")),
+    extensions(("x-hypha-scopes" = json!(["products:write"]))),
+)]
+pub async fn remove<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<ProductId>,
+) -> Result<StatusCode, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    delete_product(&ctx, &ports, id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]

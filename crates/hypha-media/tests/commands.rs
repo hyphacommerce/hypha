@@ -8,7 +8,9 @@ use hypha_media::{
     Visibility, complete_upload, create_upload, delete_asset, get_asset, list_asset_usages,
     list_assets, sweep_abandoned_uploads, update_asset,
 };
-use hypha_testkit::{FixedClock, InMemoryAssetRepo, InMemoryBlobStore, SequentialIds};
+use hypha_testkit::{
+    FixedClock, InMemoryAssetRepo, InMemoryBlobStore, InMemoryOutbox, SequentialIds,
+};
 use pollster::block_on;
 use uuid::Uuid;
 
@@ -37,12 +39,15 @@ struct World {
     blobs: InMemoryBlobStore,
     ids: SequentialIds,
     clock: FixedClock,
+    outbox: InMemoryOutbox,
 }
 
 impl World {
     fn new() -> Self {
+        let outbox = InMemoryOutbox::default();
         Self {
-            assets: InMemoryAssetRepo::default(),
+            assets: InMemoryAssetRepo::sharing(&outbox),
+            outbox,
             blobs: InMemoryBlobStore::default(),
             ids: SequentialIds::default(),
             clock: FixedClock::default(),
@@ -348,6 +353,16 @@ fn delete_asset_removes_the_asset_and_its_file() {
     .unwrap();
     assert_eq!(block_on(world.assets.get(id)), Ok(None));
     assert_eq!(block_on(world.blobs.head(&key)), Ok(None));
+    let events = world.outbox.events();
+    assert_eq!(world.outbox.types(), ["asset.deleted"]);
+    assert_eq!(
+        (events[0].subject_kind.as_str(), events[0].subject_id),
+        ("asset", id.as_uuid())
+    );
+    assert_eq!(
+        events[0].data,
+        serde_json::json!({ "asset": id.to_string() })
+    );
     assert_eq!(
         block_on(get_asset(&Ctx::system(), &world.assets, id)),
         Err(CommandError::AssetNotFound(id))
@@ -430,8 +445,8 @@ impl AssetRepo for LoadedBeforeTheRaceWasLost {
     async fn update(&self, asset: &mut hypha_media::Asset) -> Result<(), RepoError> {
         self.repo.update(asset).await
     }
-    async fn delete(&self, id: AssetId) -> Result<(), RepoError> {
-        self.repo.delete(id).await
+    async fn delete(&self, asset: &mut hypha_media::Asset) -> Result<(), RepoError> {
+        self.repo.delete(asset).await
     }
 }
 
@@ -519,6 +534,7 @@ fn the_sweep_deletes_uploads_abandoned_for_a_day() {
         Ok(None)
     );
     assert!(block_on(world.assets.get(ready)).unwrap().is_some());
+    assert_eq!(world.outbox.types(), ["asset.deleted"]);
 }
 
 // ---- usages (design note 0014, section 6) ----
@@ -604,6 +620,16 @@ fn an_asset_in_use_isnt_deleted() {
         })
     );
     assert!(block_on(world.ports.assets.get(aid(1))).unwrap().is_some());
+    let deleted = || {
+        world
+            .ports
+            .outbox
+            .types()
+            .into_iter()
+            .filter(|t| t == "asset.deleted")
+            .count()
+    };
+    assert_eq!(deleted(), 0, "a refused delete records nothing");
 
     world.use_asset(7, &[]);
     world.use_asset(8, &[]);
@@ -616,6 +642,7 @@ fn an_asset_in_use_isnt_deleted() {
         )),
         Ok(())
     );
+    assert_eq!(deleted(), 1);
 }
 
 #[test]

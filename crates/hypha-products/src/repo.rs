@@ -69,6 +69,14 @@ pub trait StageProducts {
     /// it has once the batch commits. Enforces `keys` on commit. If the commit fails,
     /// `product` is stale: load it again.
     fn update_product(&mut self, product: &mut Product);
+    /// Stages removing `product` at the version it was loaded at, with its options and
+    /// variants (it owns them) and the events it recorded (`Product::delete`'s
+    /// `product.deleted`). Storage also removes what only names the product: its
+    /// catalog, channel and category membership and its tax class (design note 0033,
+    /// section 6.3). Its asset usages are the caller's to stage (`hypha-media`). The
+    /// commit fails with `StaleVersion` if the stored product has another version or is
+    /// gone.
+    fn delete_product(&mut self, product: &mut Product);
 }
 
 /// Whatever holds the `ProductRepo`: a host's per-request ports, a test world. Commands

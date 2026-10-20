@@ -1,8 +1,14 @@
 use std::{fmt, str::FromStr};
 
-use hypha_core::{AssetId, Timestamp, Version, Versioned, optional_text, required_text};
+use hypha_core::{
+    AssetId, PendingEvent, Recorded, Recorder, Subject, Timestamp, Version, Versioned,
+    optional_text, required_text,
+};
 
-use crate::{AssetKind, BlobKey, MediaError, MimeType, UploadMismatch};
+use crate::{
+    AssetKind, BlobKey, MediaError, MimeType, UploadMismatch,
+    events::{ASSET, AssetDeleted},
+};
 
 /// Where an asset is in its upload (design note 0013, section 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -166,6 +172,14 @@ pub struct Asset {
     visibility: Visibility,
     created_at: Timestamp,
     updated_at: Timestamp,
+    /// What happened since it was loaded, for its events (design note 0016).
+    events: Recorder,
+}
+
+impl Recorded for Asset {
+    fn take_events(&mut self) -> Vec<PendingEvent> {
+        self.events.take()
+    }
 }
 
 impl Versioned for Asset {
@@ -179,6 +193,14 @@ impl Versioned for Asset {
 }
 
 impl Asset {
+    /// Records that the asset is being deleted (`asset.deleted`, design note 0033,
+    /// section 6.3), for `AssetRepo::delete` to write with the row.
+    pub fn delete(&mut self) {
+        let event = AssetDeleted { asset: self.id };
+        self.events
+            .record(Subject::new(ASSET, self.id.as_uuid()), &event);
+    }
+
     pub fn new_upload(new: NewUpload) -> Result<Self, MediaError> {
         let kind = new.mime_type.kind();
         if new.byte_size == 0 {
@@ -209,6 +231,7 @@ impl Asset {
             visibility: new.visibility,
             created_at: new.now,
             updated_at: new.now,
+            events: Recorder::default(),
         })
     }
 
@@ -490,6 +513,7 @@ impl Asset {
             visibility: s.visibility,
             created_at: s.created_at,
             updated_at: s.updated_at,
+            events: Recorder::default(),
         })
     }
 }

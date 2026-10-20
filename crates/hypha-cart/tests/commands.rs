@@ -261,6 +261,18 @@ impl World {
         block_on(self.products.update(&mut product)).unwrap();
     }
 
+    /// Deletes the product as `hypha_merchandising::delete_product` does (design note
+    /// 0033, section 6.3).
+    fn delete_product(&self, name: &str) {
+        use hypha_core::HasBatch;
+        use hypha_products::StageProducts;
+        let mut product = block_on(self.products.get(pid(name))).unwrap().unwrap();
+        product.delete();
+        let mut batch = self.batch();
+        batch.delete_product(&mut product);
+        block_on(self.commit(batch)).unwrap();
+    }
+
     fn stored_quantity(&self, cart: CartId, name: &str) -> u32 {
         block_on(self.carts.get(cart))
             .unwrap()
@@ -498,6 +510,35 @@ fn get_cart_marks_stale_line_unavailable_and_keeps_the_rest() {
     assert!(priced.lines[1].is_available());
     assert_eq!(priced.total, eur(1000));
     assert!(!priced.is_fully_available());
+}
+
+#[test]
+fn a_deleted_products_line_is_unavailable_until_it_is_removed() {
+    let world = World::new();
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 2).unwrap();
+    world.add(&Ctx::system(), cart, "cup", 1).unwrap();
+
+    world.delete_product("mug");
+    let priced = world.get(cart).unwrap();
+    assert_eq!(
+        priced.lines[0].status,
+        LineStatus::Unavailable(LineError::ProductNotFound(pid("mug")))
+    );
+    assert!(priced.lines[1].is_available());
+    assert_eq!(priced.total, eur(1000));
+
+    // Other lines still change, and the buyer can take it out.
+    world.add(&Ctx::system(), cart, "cup", 1).unwrap();
+    let priced = block_on(remove_cart_line(
+        &Ctx::system(),
+        &world.ports,
+        cart,
+        vid("mug"),
+    ))
+    .unwrap();
+    assert_eq!(priced.lines.len(), 1);
+    assert!(priced.is_fully_available());
 }
 
 #[test]

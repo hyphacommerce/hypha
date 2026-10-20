@@ -118,6 +118,11 @@ async function affected(event: Envelope): Promise<{ tags: string[]; paths: strin
         paths: countries.map((c) => link(c.country, `/p/${handle}`)),
       };
     }
+    case "product.deleted": {
+      // Gone: its page by the handle the event carries (it can't be looked up any more).
+      const handle = typeof data.handle === "string" ? data.handle : undefined;
+      return { tags: [TAGS.listings, handle ? TAGS.product(handle) : TAGS.products], paths: [] };
+    }
     case "product.updated":
     case "product.variant_added":
     case "product.variant_removed":

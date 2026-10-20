@@ -45,6 +45,17 @@ export async function setProductStatus(
   return {};
 }
 
+/** Deletes the product (its media stay in the library) and goes back to the list. */
+export async function deleteProduct(id: string): Promise<FormState> {
+  const client = await sessionClient();
+  const { error } = await client.DELETE("/admin/products/{id}", {
+    params: { path: { id } },
+  });
+  if (error) return { error: describe(error) };
+  revalidatePath("/products");
+  redirect("/products");
+}
+
 /** The outcome of an edit: a message to show, and the API's code and details for the
  * cases a form handles itself (removing variants with an option value). */
 export type EditResult = { error?: string; code?: string; details?: unknown };

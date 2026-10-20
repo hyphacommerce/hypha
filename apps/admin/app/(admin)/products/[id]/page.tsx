@@ -56,7 +56,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           title={product.title}
           back={{ label: "Products", href: "/products" }}
           badges={<ProductStatusBadge status={product.status} />}
-          actions={<StatusActions id={product.id} status={product.status} />}
+          actions={<StatusActions id={product.id} title={product.title} status={product.status} />}
         />
 
         <ProductEditor

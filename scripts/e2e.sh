@@ -293,6 +293,17 @@ step "that cursor under another sort" 400 invalid_cursor "$BASE/admin/products?s
 step "products of any of two statuses, by title" 200 - "$BASE/admin/products?status=active&status=draft&sort=title_desc"
 step "a cursor from another list" 400 invalid_cursor "$BASE/admin/products?cursor=ord_00000000000000000000000000000000"
 
+# deleting a product (design note 0033, section 6.3)
+step "create a product to delete" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
+    -d '{"handle":"doomed","title":"Doomed","price":{"amount":500,"currency":"EUR"}}'
+DOOMED=$(id)
+step "delete it" 204 - -X DELETE "$BASE/admin/products/$DOOMED"
+step "it is gone" 404 product_not_found "$BASE/admin/products/$DOOMED"
+step "deleting it again" 404 product_not_found -X DELETE "$BASE/admin/products/$DOOMED"
+step "its handle is free again" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
+    -d '{"handle":"doomed","title":"Doomed","price":{"amount":500,"currency":"EUR"}}'
+step "and goes again" 204 - -X DELETE "$BASE/admin/products/$(id)"
+
 # product editing (design note 0014), on a product of its own
 step "create shirt" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"shirt","title":"Shirt","price":{"amount":1500,"currency":"EUR"}}'
@@ -1698,7 +1709,7 @@ step "delete the private app" 204 - -X DELETE "$BASE/admin/apps/app_e2e_private"
 echo
 echo "## errors"
 step "unknown route" 404 route_not_found "$BASE/nope"
-step "wrong method" 405 method_not_allowed -X DELETE "$BASE/admin/products/$MUG"
+step "wrong method" 405 method_not_allowed -X PUT "$BASE/admin/products/$MUG"
 step "malformed json" 400 malformed_json -X POST "$BASE/admin/markets" -H "$JSON" -d '{"name":'
 step "missing field" 422 invalid_body -X POST "$BASE/admin/markets" -H "$JSON" -d '{"name":"X"}'
 step "withdrawn currency" 422 invalid_body -X POST "$BASE/admin/markets" -H "$JSON" \

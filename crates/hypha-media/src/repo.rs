@@ -33,9 +33,11 @@ pub trait AssetRepo {
     async fn insert(&self, asset: &mut Asset) -> Result<(), RepoError>;
     /// Stores changes and bumps the version, or fails with `StaleVersion`.
     async fn update(&self, asset: &mut Asset) -> Result<(), RepoError>;
-    /// Removes the asset; one that doesn't exist is fine. Fails with
-    /// `Reference(keys::USAGE_ASSET)` while usages point at it.
-    async fn delete(&self, id: AssetId) -> Result<(), RepoError>;
+    /// Removes the asset, with the events it recorded (`Asset::delete`'s
+    /// `asset.deleted`) in the same write, as `insert` and `update` write theirs. One that
+    /// doesn't exist is fine, and writes no events. Fails with
+    /// `Reference(keys::USAGE_ASSET)` while usages point at it, writing nothing.
+    async fn delete(&self, asset: &mut Asset) -> Result<(), RepoError>;
 }
 
 /// Where assets are used. Written only through `StageAssetUsages`, in the batch that

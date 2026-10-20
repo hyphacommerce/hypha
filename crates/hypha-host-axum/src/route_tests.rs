@@ -2337,6 +2337,119 @@ async fn a_cart_sells_only_what_its_channel_publishes() {
 }
 
 #[tokio::test]
+async fn a_deleted_product_is_gone_and_its_cart_lines_are_unavailable() {
+    let app = app().await;
+    let mug = shop_selling_a_mug(&app).await;
+    let (_, mugs) = send(&app, "GET", "/admin/products?limit=1", None).await;
+    let product = mugs["items"][0]["id"].as_str().unwrap().to_string();
+    let pk = publishable(&app).await;
+    let (_, cart) = send_as(
+        &app,
+        &pk,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    let cart_path = format!("/storefront/carts/{}", cart["id"].as_str().unwrap());
+    let line = json!({"variant": mug, "quantity": 1}).to_string();
+    let (status, json) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/lines"),
+        Some(&line),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+
+    let uri = format!("/admin/products/{product}");
+    let reader = key(
+        &app,
+        json!({ "kind": "secret", "name": "Reader", "scopes": ["products:read"] }),
+    )
+    .await;
+    let (status, body) = send_as(&app, &reader, "DELETE", &uri, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "missing_scope")
+    );
+    let (status, body) = send(&app, "DELETE", &uri, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    for method in ["GET", "DELETE"] {
+        let (status, body) = send(&app, method, &uri, None).await;
+        assert_eq!(
+            (status, code(&body)),
+            (StatusCode::NOT_FOUND, "product_not_found"),
+            "{method}"
+        );
+    }
+    let deleted = outbox_events(&app)
+        .await
+        .into_iter()
+        .find(|e| e.event_type == "product.deleted")
+        .expect("product.deleted recorded");
+    assert_eq!(
+        deleted.data,
+        json!({ "product": product, "handle": "mug", "variants": [mug] })
+    );
+
+    // The line stays, unavailable, until the buyer removes it; checkout refuses it.
+    let (status, json) = send_as(&app, &pk, "GET", &cart_path, None).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        (
+            &json["lines"][0]["status"],
+            &json["lines"][0]["reason_code"]
+        ),
+        (&json!("unavailable"), &json!("product_not_found"))
+    );
+    let (status, json) = send_as(
+        &app,
+        &pk,
+        "DELETE",
+        &format!("{cart_path}/lines/{mug}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["lines"], json!([]));
+
+    // The cleanup handlers take the event without failing.
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let ports = app.state.public_ports().await.unwrap();
+    use hypha_core::{HasOutbox, OutboxRepo};
+    use hypha_inventory::{HasInventoryItems, InventoryItemRepo};
+    let variant: hypha_core::VariantId = mug.parse().unwrap();
+    assert_eq!(
+        ports.inventory_items().get_by_variant(variant).await,
+        Ok(None)
+    );
+    for destination in ["handler:variant_cleanup", "handler:search_index"] {
+        let first = hypha_core::PageRequest {
+            after: None,
+            limit: hypha_core::PageLimit::new(100).unwrap(),
+        };
+        let page = ports
+            .outbox()
+            .deliveries_to(destination, None, first)
+            .await
+            .unwrap();
+        let statuses: Vec<_> = page
+            .items
+            .iter()
+            .filter(|d| d.event_type == "product.deleted")
+            .map(|d| d.status)
+            .collect();
+        assert_eq!(
+            statuses,
+            [hypha_core::DeliveryStatus::Succeeded],
+            "{destination}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn linking_a_cart_to_a_customer_is_admin_only() {
     let app = app().await;
     let pk = publishable(&app).await;

@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use hypha_apps::{App, open_secret};
 use hypha_core::{
-    Actor, AppId, CatalogId, CategoryId, ChannelId, Clock, CustomerId, Delivery, DeliveryId,
-    EventId, FulfillmentId, InventoryItemId, LocationId, MarketId, OrderId, PaymentId, PriceListId,
-    ProductId, ShippingZoneId, StoreId, StoredEvent, TaxClassId, TaxRegionId,
+    Actor, AppId, AssetId, CatalogId, CategoryId, ChannelId, Clock, CustomerId, Delivery,
+    DeliveryId, EventId, FulfillmentId, InventoryItemId, LocationId, MarketId, OrderId, PaymentId,
+    PriceListId, ProductId, ShippingZoneId, StoreId, StoredEvent, TaxClassId, TaxRegionId,
 };
 use hypha_dispatch::WebhookSender;
 use serde::Serialize;
@@ -112,6 +112,7 @@ fn subject_id(kind: &str, id: Uuid) -> String {
         "location" => LocationId::PREFIX,
         "fulfillment" => FulfillmentId::PREFIX,
         "payment" => PaymentId::PREFIX,
+        "asset" => AssetId::PREFIX,
         _ => return id.to_string(),
     };
     format!("{prefix}_{}", id.simple())

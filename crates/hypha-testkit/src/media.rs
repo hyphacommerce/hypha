@@ -3,7 +3,7 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use hypha_core::{AssetId, Keyset, Page, PageRequest, RepoError, Timestamp};
+use hypha_core::{AssetId, Keyset, Page, PageRequest, Recorded, RepoError, Timestamp};
 use hypha_media::{
     Asset, AssetFilter, AssetRepo, AssetSort, AssetStatus, AssetUsage, AssetUsageRepo, BlobError,
     BlobHead, BlobKey, BlobStore, HasAssetUsages, HasAssets, PresignedUpload, UploadTerms,
@@ -11,7 +11,10 @@ use hypha_media::{
 };
 use sha2::{Digest, Sha256};
 
-use crate::table::{Table, no_unique_keys};
+use crate::{
+    InMemoryOutbox,
+    table::{Table, no_unique_keys},
+};
 
 /// Assets and their usages together, like one database: the usages' reference to their
 /// asset is checked under both locks (always assets first, then usages).
@@ -19,6 +22,7 @@ use crate::table::{Table, no_unique_keys};
 pub struct InMemoryAssetRepo {
     pub(crate) assets: Table<AssetId, Asset>,
     pub(crate) usages: Mutex<Usages>,
+    pub(crate) outbox: InMemoryOutbox,
 }
 
 /// Every usage, by owner and asset.
@@ -40,6 +44,14 @@ impl HasAssetUsages for InMemoryAssetRepo {
 }
 
 impl InMemoryAssetRepo {
+    /// A repo writing its events to `outbox` (`InMemoryPorts` shares one).
+    pub fn sharing(outbox: &InMemoryOutbox) -> Self {
+        Self {
+            outbox: outbox.clone(),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn lock_usages(&self) -> MutexGuard<'_, Usages> {
         self.usages.lock().unwrap()
     }
@@ -128,12 +140,16 @@ impl AssetRepo for InMemoryAssetRepo {
         self.assets.update(asset.id(), asset, &no_unique_keys)
     }
 
-    async fn delete(&self, id: AssetId) -> Result<(), RepoError> {
+    async fn delete(&self, asset: &mut Asset) -> Result<(), RepoError> {
+        let id = asset.id();
         let mut assets = self.assets.lock();
-        if self.lock_usages().keys().any(|(_, asset)| *asset == id) {
+        if self.lock_usages().keys().any(|(_, a)| *a == id) {
             return Err(RepoError::Reference(keys::USAGE_ASSET));
         }
-        assets.remove(&id);
+        let events = asset.take_events();
+        if assets.remove(&id).is_some() {
+            self.outbox.write(events, None);
+        }
         Ok(())
     }
 }

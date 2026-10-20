@@ -120,6 +120,7 @@ macro_rules! route_table {
             [admin, POST, "/admin/products", products::create],
             [admin, GET, "/admin/products/{id}", products::fetch],
             [admin, PATCH, "/admin/products/{id}", products::update],
+            [admin, DELETE, "/admin/products/{id}", products::remove],
             [admin, PATCH, "/admin/products/{id}/status", products::set_status],
             [admin, PUT, "/admin/products/{id}/options", products::set_options],
             [admin, PUT, "/admin/products/{id}/variants", products::set_variants],

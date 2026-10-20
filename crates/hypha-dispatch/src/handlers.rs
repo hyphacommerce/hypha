@@ -8,9 +8,10 @@
 use hypha_core::{Ctx, Event, EventHandler, HasBatch, StageEvents, StoredEvent, VariantId};
 use hypha_inventory::{HasInventoryItems, InventoryError, InventoryItemRepo};
 use hypha_markets::{HasPriceLists, PriceListRepo, StageFixedPrices, remove_fixed_prices};
-use hypha_products::VariantRemoved;
+use hypha_products::{ProductDeleted, VariantRemoved};
 
-/// Cleans up what other domains keep for a removed variant (design note 0014, §4).
+/// Cleans up what other domains keep for a removed variant (design note 0014, §4), and
+/// for each variant of a deleted product (design note 0033, §6.3).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct VariantCleanup;
 
@@ -23,7 +24,7 @@ where
     }
 
     fn wants(&self, event_type: &str) -> bool {
-        event_type == VariantRemoved::TYPE
+        event_type == VariantRemoved::TYPE || event_type == ProductDeleted::TYPE
     }
 
     async fn handle(&self, ports: &P, event: &StoredEvent) -> Result<(), String> {
@@ -31,20 +32,38 @@ where
     }
 }
 
-/// `product.variant_removed`: removes the variant's fixed prices from every price list,
+/// `product.variant_removed` cleans up its variant, `product.deleted` each listed one.
+async fn variant_cleanup<P>(ports: &P, event: &StoredEvent) -> Result<(), String>
+where
+    P: HasPriceLists + HasInventoryItems + HasBatch<Batch: StageFixedPrices + StageEvents>,
+{
+    let named = || format!("event {} names no variant", event.id);
+    let variants: Vec<VariantId> = if event.event_type == ProductDeleted::TYPE {
+        let listed = event.data["variants"].as_array().ok_or_else(named)?;
+        listed
+            .iter()
+            .map(|v| v.as_str().and_then(|v| v.parse().ok()).ok_or_else(named))
+            .collect::<Result<_, _>>()?
+    } else {
+        let variant = event.data["variant"].as_str().and_then(|v| v.parse().ok());
+        vec![variant.ok_or_else(named)?]
+    };
+    for variant in variants {
+        clean_variant(ports, variant).await?;
+    }
+    Ok(())
+}
+
+/// Removes the variant's fixed prices from every price list,
 /// and deletes its inventory item. While units are still reserved on it (open orders
 /// count on them) the item is retired instead, and goes with its last reservation when
 /// the orders are fulfilled or cancelled (design note 0016, Q5; 0018). Each write
 /// records its own events. Running again finds nothing left to do; a write that lost a
 /// race fails the run, and the retry sees the item as it is then.
-async fn variant_cleanup<P>(ports: &P, event: &StoredEvent) -> Result<(), String>
+async fn clean_variant<P>(ports: &P, variant: VariantId) -> Result<(), String>
 where
     P: HasPriceLists + HasInventoryItems + HasBatch<Batch: StageFixedPrices + StageEvents>,
 {
-    let variant: VariantId = event.data["variant"]
-        .as_str()
-        .and_then(|v| v.parse().ok())
-        .ok_or_else(|| format!("event {} names no variant", event.id))?;
     let ctx = Ctx::system();
     let lists = ports
         .price_lists()
