@@ -1477,11 +1477,12 @@ fn a_restarted_pending_payment_refuses_its_old_attempts_cancel() {
 }
 
 #[test]
-fn an_apps_paid_payment_without_an_attempt_doesnt_take_another_attempt() {
+fn a_paid_payment_without_an_attempt_doesnt_take_another_attempt() {
     use hypha_order_actions::PaymentEventKind as K;
     let world = World::new();
     pending_payment(&world);
-    // An app's payment whose first report named no attempt (Stripe's all have one).
+    // A payment whose first report named no attempt (any provider's: Stripe's own whose
+    // reference is staff's text or empty have none after the backfills either).
     world.report_ref(K::Paid, None, Some("TX-1"), None).unwrap();
     // A report naming another attempt: not made the payment's (it isn't checked).
     world

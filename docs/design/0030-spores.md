@@ -729,9 +729,12 @@ them, not in this list.
   Stripe payment from before this branch gets its attempt from its `pi_…` reference
   (0058 the open ones, 0059 the rest), so Stripe's whose reference names their intent are
   checked: decided over the rare payment whose reference a racing start replaced
-  before this branch (it takes that intent, and refunds of its real one are then
-  refused: staff reconcile it at Stripe), or that staff reported under another intent,
-  since a second charge kept is the likelier harm. Stripe payments whose reference is
+  before this branch, or that staff reported under another intent: it takes that
+  intent, so Stripe's reports about its real one are refused, and a paid or authorized
+  one of those (Stripe redelivering the real collection) has the spore give that money
+  back at Stripe automatically, while the order stays paid: the order's only
+  collection refunded, for staff to notice and reconcile. Decided so, since a second
+  charge kept is the likelier harm. Stripe payments whose reference is
   staff's text or empty, and an app's whose reports named no attempt, stay unchecked, as
   before this branch; an app authorized without naming an attempt and then reported paid
   naming one takes that attempt, which can't be told from a capture (Danilo: open).
