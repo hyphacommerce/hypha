@@ -5553,6 +5553,13 @@
           "amount": {
             "$ref": "#/components/schemas/Money"
           },
+          "attempt": {
+            "description": "The provider's attempt the payment collects through (a Stripe PaymentIntent), for a\nprovider whose IDs name attempts: what reports naming another are refused for\n(`payment_reference_mismatch`). Unlike `reference`, staff's text or a capture's\nown ID never replace it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "created_at": {
             "description": "When it was created, RFC 3339 in UTC.",
             "type": "string"

@@ -1450,6 +1450,56 @@ fn a_pending_payment_is_paid_through_whichever_attempt_and_keeps_it() {
 }
 
 #[test]
+fn a_restarted_pending_payment_refuses_its_old_attempts_cancel() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    // Its start made pi_1, then a start made again pi_9 (`Started::attempt`).
+    let mut payment = pending_payment(&world);
+    payment.note_attempt(Some("pi_9".to_string())).unwrap();
+    block_on(world.payments.update(&mut payment)).unwrap();
+    assert_eq!(
+        world
+            .report_attempt(K::Voided, None, Some("pi_1"), Some("pi_1"), None)
+            .map(|_| ()),
+        Err(CommandError::Payment(PaymentError::ReferenceMismatch {
+            payment: payment.id(),
+            status: PaymentStatus::Pending,
+            held: "pi_9".to_string(),
+            reported: "pi_1".to_string(),
+        }))
+    );
+    // pi_9 is the one that's paid.
+    let paid = world
+        .report_attempt(K::Paid, None, Some("pi_9"), Some("pi_9"), None)
+        .unwrap()
+        .value;
+    assert_eq!(paid.payments[0].status(), PaymentStatus::Paid);
+}
+
+#[test]
+fn a_report_naming_an_attempt_first_keeps_it_though_nothing_moves() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    // Paid before attempts were kept (none named).
+    world.report_ref(K::Paid, None, Some("pi_1"), None).unwrap();
+    // Stripe delivers it again, naming its intent: kept, though the status is the same.
+    let again = world
+        .report_attempt(K::Paid, None, Some("pi_1"), Some("pi_1"), None)
+        .unwrap()
+        .value;
+    assert_eq!(again.payments[0].attempt(), Some("pi_1"));
+    let stored = block_on(
+        world
+            .payments
+            .get(hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001))),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(stored.attempt(), Some("pi_1"));
+}
+
+#[test]
 fn an_operations_own_id_doesnt_change_the_attempt() {
     use hypha_order_actions::PaymentEventKind as K;
     let world = World::new();

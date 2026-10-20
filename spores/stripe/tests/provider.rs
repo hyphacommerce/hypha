@@ -184,6 +184,7 @@ fn action(kind: PaymentAction, amount: Option<i64>, reference: Option<&str>) -> 
         order: "ord_01a15646d13071e4b9168f3555dd4cd4".parse().unwrap(),
         amount: amount.map(|a| Money::new(a, Currency::EUR).unwrap()),
         reference: reference.map(str::to_string),
+        attempt: None,
         idempotency_key: "attempt-1".to_string(),
         store_settings: configured(),
     }
@@ -439,4 +440,29 @@ fn a_kept_intent_stripe_cant_read_for_now_fails_the_start() {
         })
     );
     assert_eq!(fake.requests().len(), 1);
+}
+
+#[test]
+fn an_action_acts_on_the_payments_attempt_when_its_reference_was_replaced() {
+    // Staff marked it with their own text, or a capture's own ID replaced it: the
+    // attempt still names the PaymentIntent.
+    let (fake, http) = Fake::new(|_| {
+        (
+            200,
+            json!({ "id": "pi_1", "amount": 1250, "currency": "eur", "status": "canceled", "client_secret": "pi_1_secret" }),
+        )
+    });
+    let mut request = action(PaymentAction::Void, None, Some("bank 1234"));
+    request.attempt = Some("pi_1".to_string());
+    assert_eq!(
+        block_on(provider(http).act(&request)),
+        Ok(ActionAnswer::Completed {
+            reference: Some("pi_1".to_string())
+        })
+    );
+    assert!(
+        fake.requests()[0]
+            .url
+            .ends_with("/v1/payment_intents/pi_1/cancel")
+    );
 }

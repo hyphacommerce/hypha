@@ -281,6 +281,8 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
     let order = placed["id"].as_str().unwrap().to_string();
     let (_, admin) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
     let payment = admin["payments"][0]["id"].as_str().unwrap().to_string();
+    // Its start kept the PaymentIntent as the attempt it collects through.
+    assert_eq!(admin["payments"][0]["attempt"], "pi_1", "{admin}");
     {
         let fake = fake.lock().unwrap();
         let (_, path, key, form) = &fake.seen[0];

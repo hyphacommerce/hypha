@@ -336,6 +336,7 @@ pub async fn act_on_payment<S: HasPayments, P: PaymentProviders>(
             .transpose()
             .map_err(PaymentError::from)?,
         reference: payment.reference().map(str::to_string),
+        attempt: payment.attempt().map(str::to_string),
         idempotency_key,
         // The host fills a spore provider's (design note 0030, §8).
         store_settings: serde_json::Map::new(),

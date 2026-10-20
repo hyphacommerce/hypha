@@ -208,19 +208,19 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
             .map_err(PaymentError::from)?;
         Ok(payment.refund(amount, status, reference.clone())?)
     };
-    other_attempt(payment, input)?;
+    let attempt = other_attempt(payment, input)?;
     Ok(match input.kind {
+        // Whether the status moved or the attempt was named for the first time (a payment
+        // from before attempts were kept, reported again): either is stored.
         PaymentEventKind::Authorized => {
             whole(payment)?;
             let changed = payment.authorize(reference)?;
-            payment.note_attempt(input.attempt.clone())?;
-            changed
+            payment.note_attempt(attempt)? || changed
         }
         PaymentEventKind::Paid => {
             whole(payment)?;
             let changed = payment.pay(at, reference)?;
-            payment.note_attempt(input.attempt.clone())?;
-            changed
+            payment.note_attempt(attempt)? || changed
         }
         PaymentEventKind::Failed => payment.fail(reference)?,
         PaymentEventKind::Voided => {
@@ -248,31 +248,32 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
 }
 
 /// Refuses a report naming another attempt than the one the payment collects through
-/// (`payment_reference_mismatch`; the payment's `attempt`, which only reports naming one
-/// set): a second attempt's money for a payment past pending (paid in an old tab: the
-/// payment collects once, and its provider gives that money back), or another attempt's
-/// decline, cancel or refund. A pending payment may be paid or authorized through
-/// another attempt (it was started again). A payment no report named an attempt for
-/// isn't checked. In the transaction that writes, so two attempts' reports racing can't
-/// both pass.
-fn other_attempt(payment: &Payment, input: &PaymentEvent) -> Result<(), PaymentError> {
+/// (`payment_reference_mismatch`; the payment's `attempt`, set by its start for a
+/// provider whose IDs name attempts, or by a report naming one): a second attempt's
+/// money for a payment past pending (paid in an old tab: the payment collects once, and
+/// its provider gives that money back), or another attempt's decline, cancel or refund.
+/// A pending payment may be paid or authorized through another attempt (it was started
+/// again). A payment with no attempt (its provider's IDs don't name attempts, or it's
+/// from before they were kept) isn't checked. In the transaction that writes, so two
+/// attempts' reports racing can't both pass. Returns the report's attempt, checked.
+fn other_attempt(payment: &Payment, input: &PaymentEvent) -> Result<Option<String>, PaymentError> {
     let attempt = optional_text("attempt", input.attempt.clone())?;
-    let (Some(attempt), Some(held)) = (attempt, payment.attempt()) else {
-        return Ok(());
+    let (Some(named), Some(held)) = (&attempt, payment.attempt()) else {
+        return Ok(attempt);
     };
     let restarted = payment.status() == PaymentStatus::Pending
         && matches!(
             input.kind,
             PaymentEventKind::Authorized | PaymentEventKind::Paid
         );
-    if held == attempt || restarted {
-        return Ok(());
+    if held == named || restarted {
+        return Ok(attempt);
     }
     Err(PaymentError::ReferenceMismatch {
         payment: payment.id(),
         status: payment.status(),
         held: held.to_string(),
-        reported: attempt,
+        reported: named.clone(),
     })
 }
 

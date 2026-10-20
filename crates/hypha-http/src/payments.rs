@@ -226,6 +226,8 @@ where
                 }
             },
             reference: checked_reference(&app, PaymentsStart::NAME, answer.reference)?,
+            // An app's reports name their attempt themselves, when they do.
+            attempt: None,
         })
     }
 

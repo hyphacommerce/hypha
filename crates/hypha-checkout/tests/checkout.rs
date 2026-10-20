@@ -1119,6 +1119,7 @@ impl hypha_payments::PaymentProvider for &CardApp {
             } else {
                 format!("pi_{}", payment.order_number)
             }),
+            attempt: None,
         })
     }
 }

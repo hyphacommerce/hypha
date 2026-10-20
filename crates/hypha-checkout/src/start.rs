@@ -58,10 +58,10 @@ pub(crate) async fn start<S: HasPayments, Q: PaymentProviders>(
         store_settings: serde_json::Map::new(),
     };
     let started = providers.start(payment.provider(), &request).await?;
-    if started.reference.is_some() {
+    if started.reference.is_some() || started.attempt.is_some() {
         // As stored: the answer mustn't show a reference that wasn't kept.
         let before = payment.clone();
-        if let Err(e) = keep_reference(ports, payment, started.reference).await {
+        if let Err(e) = keep_reference(ports, payment, started.reference, started.attempt).await {
             tracing::warn!(
                 payment = %payment.id(),
                 error = %e,
@@ -73,16 +73,22 @@ pub(crate) async fn start<S: HasPayments, Q: PaymentProviders>(
     Ok(started.next_action)
 }
 
-/// Stores the provider's `reference` on `payment`, reloading it when the provider's own
-/// report (its events) changed it meanwhile.
+/// Stores the provider's `reference` on `payment`, and the `attempt` it started (made
+/// again, the one reports are checked against from now) while the payment is still
+/// pending, reloading it when the provider's own report (its events) changed it
+/// meanwhile.
 async fn keep_reference<S: HasPayments>(
     ports: &S,
     payment: &mut Payment,
     reference: Option<String>,
+    attempt: Option<String>,
 ) -> Result<(), CommandError> {
     let mut attempts = Attempts::first();
     loop {
-        if !payment.set_reference(reference.clone())? {
+        let referenced = payment.set_reference(reference.clone())?;
+        let started = payment.status() == hypha_payments::PaymentStatus::Pending
+            && payment.note_attempt(attempt.clone())?;
+        if !(referenced || started) {
             return Ok(());
         }
         match ports.payments().update(payment).await {

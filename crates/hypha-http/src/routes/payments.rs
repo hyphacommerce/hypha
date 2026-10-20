@@ -407,6 +407,11 @@ pub struct PaymentResponse {
     refunded: Money,
     /// The provider's ID, or for manual payments what staff typed (a bank reference).
     reference: Option<String>,
+    /// The provider's attempt the payment collects through (a Stripe PaymentIntent), for a
+    /// provider whose IDs name attempts: what reports naming another are refused for
+    /// (`payment_reference_mismatch`). Unlike `reference`, staff's text or a capture's
+    /// own ID never replace it.
+    attempt: Option<String>,
     /// The method's instructions at checkout, as the shopper was shown them.
     instructions: Option<String>,
     /// When the money was collected, RFC 3339 in UTC.
@@ -432,6 +437,7 @@ impl PaymentResponse {
             status: p.status().into(),
             refunded: p.refunded(),
             reference: p.reference().map(str::to_string),
+            attempt: p.attempt().map(str::to_string),
             instructions: p.instructions().map(str::to_string),
             paid_at: p.paid_at().map(rfc3339).transpose()?,
             voided_at: p.voided_at().map(rfc3339).transpose()?,

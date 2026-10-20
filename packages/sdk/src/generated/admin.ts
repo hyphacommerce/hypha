@@ -4578,6 +4578,13 @@ export interface components {
         /** @description A payment as the admin sees it on an order, and alone (`GET /admin/payments/{id}`). */
         PaymentResponse: {
             amount: components["schemas"]["Money"];
+            /**
+             * @description The provider's attempt the payment collects through (a Stripe PaymentIntent), for a
+             *     provider whose IDs name attempts: what reports naming another are refused for
+             *     (`payment_reference_mismatch`). Unlike `reference`, staff's text or a capture's
+             *     own ID never replace it.
+             */
+            attempt?: string | null;
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;
             id: components["schemas"]["PaymentId"];

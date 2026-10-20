@@ -55,6 +55,7 @@ impl PaymentProvider for TestProvider {
         Ok(Started {
             next_action: NextAction::Instructions("pay the test spore".to_string()),
             reference: None,
+            attempt: None,
         })
     }
 }

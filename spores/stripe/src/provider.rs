@@ -200,7 +200,8 @@ impl PaymentProvider for StripeProvider {
                 element: ELEMENT_TAG.to_string(),
                 props,
             },
-            reference: Some(intent.id),
+            reference: Some(intent.id.clone()),
+            attempt: Some(intent.id),
         })
     }
 
@@ -212,9 +213,13 @@ impl PaymentProvider for StripeProvider {
                 reason: "Stripe isn't set up: add the keys in Apps → Stripe".to_string(),
             });
         };
+        // The attempt the payment collects through, else its reference (a payment from
+        // before attempts were kept): staff's text or an operation's own ID may have
+        // replaced the reference.
         let Some(reference) = request
-            .reference
+            .attempt
             .as_deref()
+            .or(request.reference.as_deref())
             .filter(|r| r.starts_with("pi_"))
         else {
             return Ok(ActionAnswer::Refused {

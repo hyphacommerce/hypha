@@ -715,19 +715,20 @@ them, not in this list.
   money goes back.
 - **Final review (2026-10-20):** a payment collected once is checked by core, in the
   transaction that writes (two deliveries racing can't both pass), for a provider whose
-  IDs name attempts: a report may name its attempt (`PaymentEvent::attempt`; the Stripe
-  spore gives the PaymentIntent, apps may through the events route), a paid or
-  authorized one keeps it as the payment's own `attempt` (migration 0057, apart from
-  `reference`, which staff's text or an operation's own ID may replace), and a report
-  naming another is refused (`payment_reference_mismatch`, 409, `details: {status, held,
-  reported}`) unless it pays or authorizes a pending payment (started again). So money
-  another intent took for a payment past pending goes back, and another intent's
-  decline, cancel or refund changes nothing. Reports naming no attempt are checked as
-  before (a capture or void may carry an ID of its own: PayPal's capture ID, Adyen's
-  pspReference; re-reviews caught three rules keyed on references refusing those or
-  letting a second attempt through). Not guarded: a pending payment no report named an
-  attempt for (a stale cancel racing a restart voids it; money its later attempt takes
-  then goes back). Giving money back is keyed per intent
+  IDs name attempts. The payment keeps the attempt it collects through apart from
+  its `reference` (which staff's text or an operation's own ID may replace): `attempt`,
+  migration 0057 (Stripe's payments backfilled from a `pi_…` reference), shown in payment
+  responses, set by the start (`Started::attempt`, a start made again replacing it while
+  the payment is pending) or by a report naming one (`PaymentEvent::attempt`; the Stripe
+  spore gives the PaymentIntent, apps may through the events route). A report naming
+  another attempt is refused (`payment_reference_mismatch`, 409, `details: {status,
+  held, reported}`) unless it pays or authorizes a pending payment (started again). So
+  money another intent took for a payment past pending goes back, and another intent's
+  decline, cancel or refund changes nothing. Reports naming no attempt, and payments
+  with none, aren't checked, as before this branch (a capture or void may carry an ID of
+  its own: PayPal's capture ID, Adyen's pspReference; re-reviews caught three rules
+  keyed on references refusing those or letting a second attempt through). Capture,
+  void and refund act on the attempt (`ActionRequest::attempt`), else the reference. Giving money back is keyed per intent
   (`<payment>:<intent>:refund-after-void`). A stored intent Stripe no longer knows (404
   `resource_missing`: other keys) is replaced by a new one (money paid on the old
   account's intent is for staff to reconcile there). A payment

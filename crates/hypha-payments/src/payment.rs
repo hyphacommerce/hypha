@@ -179,8 +179,9 @@ pub struct Payment {
     /// reported again under one of them changes nothing (`refund`).
     refund_references: Vec<String>,
     /// The provider's attempt the payment collects through (a Stripe PaymentIntent), set
-    /// only by a provider's report naming it (`note_attempt`), never by staff or by an
-    /// operation's own ID: what a report naming another attempt is compared with.
+    /// by its start (for a provider whose IDs name attempts) or a provider's report
+    /// naming it (`note_attempt`), never by staff or by an operation's own ID: what a
+    /// report naming another attempt is compared with.
     attempt: Option<String>,
     /// The method's instructions at checkout.
     instructions: Option<String>,
@@ -495,13 +496,16 @@ impl Payment {
         self.attempt.as_deref()
     }
 
-    /// Keeps `attempt` as the one the payment collects through (a provider's report named
-    /// it); a blank one keeps the current. Records nothing.
-    pub fn note_attempt(&mut self, attempt: Option<String>) -> Result<(), PaymentError> {
-        if let Some(attempt) = optional_text("attempt", attempt)? {
-            self.attempt = Some(attempt);
+    /// Keeps `attempt` as the one the payment collects through (its start made it, or a
+    /// provider's report named it); a blank one keeps the current. Returns whether that
+    /// changed anything. Records nothing.
+    pub fn note_attempt(&mut self, attempt: Option<String>) -> Result<bool, PaymentError> {
+        let attempt = optional_text("attempt", attempt)?;
+        if attempt.is_none() || attempt == self.attempt {
+            return Ok(false);
         }
-        Ok(())
+        self.attempt = attempt;
+        Ok(true)
     }
 
     pub fn instructions(&self) -> Option<&str> {

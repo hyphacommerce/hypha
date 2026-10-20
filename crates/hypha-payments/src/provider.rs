@@ -127,6 +127,10 @@ pub struct PaymentRequest {
 pub struct Started {
     pub next_action: NextAction,
     pub reference: Option<String>,
+    /// The attempt this start made or resumed, for a provider whose IDs name attempts (a
+    /// Stripe PaymentIntent): kept as the payment's `attempt`, which reports naming
+    /// another are checked against. `None` for the rest.
+    pub attempt: Option<String>,
 }
 
 /// What the shopper must do next (design note 0027, §3; 0029, §7).
@@ -180,8 +184,12 @@ pub struct ActionRequest {
     pub order: OrderId,
     /// For a capture or refund, how much (at most what's left); `None` for the whole.
     pub amount: Option<Money>,
-    /// The provider's ID for the payment, as it gave it on start.
+    /// The provider's ID for the payment, as it gave it on start (staff's text or an
+    /// operation's own ID may have replaced it since).
     pub reference: Option<String>,
+    /// The attempt the payment collects through, for a provider whose IDs name attempts
+    /// (`Payment::attempt`): what to act on when there's one.
+    pub attempt: Option<String>,
     /// The same for every retry of this action, so a provider does it once.
     pub idempotency_key: String,
     /// As `PaymentRequest::store_settings`: a spore provider's settings, filled by the
@@ -250,6 +258,7 @@ impl PaymentProvider for ManualProvider {
         Ok(Started {
             next_action: NextAction::Instructions(payment.instructions.clone().unwrap_or_default()),
             reference: None,
+            attempt: None,
         })
     }
 }
@@ -610,6 +619,7 @@ mod tests {
         Started {
             next_action: NextAction::Instructions(text.to_string()),
             reference: None,
+            attempt: None,
         }
     }
 
@@ -633,6 +643,7 @@ mod tests {
             order: OrderId::from_uuid(Uuid::from_u128(2)),
             amount: None,
             reference: None,
+            attempt: None,
             idempotency_key: "k".to_string(),
             store_settings: serde_json::Map::new(),
         };

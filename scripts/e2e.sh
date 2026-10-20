@@ -727,7 +727,7 @@ step "orders placed before 2000" 200 - "$BASE/admin/orders?placed_before=2000-01
 contains "none" '"items":[]'
 step "a date that isn't one" 400 invalid_query "$BASE/admin/orders?placed_from=yesterday"
 step "the admin sees the pending payment" 200 - "$BASE/admin/orders/$ORDER"
-contains "with its method and instructions" '"status":"pending","refunded":{"amount":0,"currency":"EUR"},"reference":null,"instructions":"IBAN HR12 3456 7890. Quote the order number."'
+contains "with its method and instructions" '"status":"pending","refunded":{"amount":0,"currency":"EUR"},"reference":null,"attempt":null,"instructions":"IBAN HR12 3456 7890. Quote the order number."'
 step "a method a pending payment uses" 409 payment_method_in_use -X DELETE "$METHODS/$BANK"
 LONG_REFERENCE=$(printf 'x%.0s' $(seq 1 256))
 step "a reference too long" 422 field_too_long -X POST "$BASE/admin/orders/$ORDER/paid" -H "$JSON" \
