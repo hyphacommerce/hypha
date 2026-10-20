@@ -169,14 +169,19 @@ export function sporePath(name: string, deploymentDir: string, path: string): st
 
 /** The host crate's `main.rs`: `host! { spores: [...], routes: [...] }`. */
 export function hostMain(spores: SporeEntry[]): string {
+  return crateEntry("hypha_host_axum::host!", "`hypha deploy`", spores);
+}
+
+/** A generated crate's entry: `<macro> { spores: [...], routes: [...] }`. */
+function crateEntry(macro: string, writer: string, spores: SporeEntry[]): string {
   const types = spores.map((s) => (isFirstParty(s) ? `hypha_spore_${s}::${pascal(s)}` : s.spore));
   const routes = spores.flatMap((s) =>
     isFirstParty(s) ? [`hypha_spore_${s}::${s}_routes`] : s.routes ? [s.routes] : [],
   );
   return [
-    "//! Written by `hypha deploy` from hypha.json's `spores` (design note 0030, §9).",
+    `//! Written by ${writer} from hypha.json's \`spores\` (design note 0030, §9).`,
     "",
-    "hypha_host_axum::host! {",
+    `${macro} {`,
     `    spores: [${types.join(", ")}],`,
     `    routes: [${routes.join(", ")}],`,
     "}",
@@ -243,9 +248,7 @@ export function workerCargoToml(
 
 /** The Worker crate's `lib.rs`: `worker! { spores: [...], routes: [...] }`. */
 export function workerLib(spores: SporeEntry[]): string {
-  return hostMain(spores)
-    .replace("hypha_host_axum::host!", "hypha_host_workers::worker!")
-    .replace("`hypha deploy`", "`hypha deploy` (the Worker)");
+  return crateEntry("hypha_host_workers::worker!", "`hypha deploy` (the Worker)", spores);
 }
 
 /** `hypha-host-workers`' own `worker = …` line: the Worker crate needs the very same

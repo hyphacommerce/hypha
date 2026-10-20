@@ -7,5 +7,7 @@
 !crates/
 !spores/
 !.hypha-build/
-# Built elsewhere and large.
+# Built elsewhere and large: a spore crate tested on its own has its own target.
 .hypha-build/**/target
+spores/**/target
+**/node_modules

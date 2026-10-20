@@ -7,6 +7,15 @@
 
 ARG NODE_IMAGE=node:24-trixie-slim
 
+# The workspace packages' manifests alone (sdk, app-blocks, app-bridge-host,
+# storefront-elements, …: every one, so a new one isn't missed). Their sources change
+# often; a COPY of this stage is cached by its content, the manifests, so the install
+# below runs again only when one of those changes.
+FROM ${NODE_IMAGE} AS manifests
+WORKDIR /repo
+COPY packages packages
+RUN find packages -type f ! -name package.json -delete
+
 FROM ${NODE_IMAGE} AS build
 ARG APP
 WORKDIR /repo
@@ -15,11 +24,11 @@ RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/admin/package.json apps/admin/
 COPY apps/storefront/package.json apps/storefront/
-# The workspace packages the apps use (sdk, app-blocks, app-bridge-host,
-# storefront-elements, …): TypeScript source, all of them, so a new one isn't missed.
-COPY packages packages
+COPY --from=manifests /repo/packages packages
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile --filter "${APP}..."
+# The packages' sources (TypeScript, used as they are).
+COPY packages packages
 COPY apps/${APP} apps/${APP}
 RUN cd apps/${APP} \
     && rm -f cloudflare.config.ts \

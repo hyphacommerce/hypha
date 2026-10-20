@@ -142,6 +142,9 @@ export async function runPaymentAction(
 ): Promise<ActionResult> {
   const client = await sessionClient();
   const params = { path: { id: paymentId } };
+  // Where it stood, to tell whether the action moved it (a second partial refund leaves
+  // it `partially_refunded` either way).
+  const before = await client.GET("/admin/payments/{id}", { params });
   let result;
   switch (point) {
     case "payments.capture":
@@ -163,7 +166,10 @@ export async function runPaymentAction(
   // A provider built in may answer that it's done already (a spore's capture Stripe
   // answered `succeeded`): the payment has moved, so say so.
   const status = result.data.payment.status;
-  const done = DONE[point]?.includes(status);
+  const moved =
+    before.data?.status !== status ||
+    before.data?.refunded.amount !== result.data.payment.refunded.amount;
+  const done = moved && DONE[point]?.includes(status);
   return {
     message: done
       ? `Done: the payment is ${status.replace("_", " ")}.`
