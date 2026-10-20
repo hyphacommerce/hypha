@@ -23,6 +23,11 @@ export interface HyphaElementProps {
   className?: string;
   /** Replaces the shared loader (tests, a custom registry). */
   load?: typeof sharedLoad;
+  /**
+   * The mounted element, and `null` once it's gone: for a storefront calling what the
+   * element offers (a payment element's `submit()`, with `submit_mode: "external"`).
+   */
+  onElement?: (element: HTMLElement | null) => void;
 }
 
 export function HyphaElement({
@@ -32,6 +37,7 @@ export function HyphaElement({
   onEvent,
   className,
   load = sharedLoad,
+  onElement,
 }: HyphaElementProps) {
   // The mounted element, from a callback ref: the effects below run when it changes
   // (a new tag mounts a new element).
@@ -39,6 +45,12 @@ export function HyphaElement({
   // The latest handler and props, read inside effects without re-running them.
   const emitEvent = useEffectEvent((event: ElementEvent) => onEvent?.(event));
   const applyProps = useEffectEvent((target: HTMLElement) => setProps(target, props ?? {}));
+  const reportElement = useEffectEvent((target: HTMLElement | null) => onElement?.(target));
+
+  useEffect(() => {
+    reportElement(element);
+    return () => reportElement(null);
+  }, [element]);
 
   useEffect(() => {
     if (!element) return;

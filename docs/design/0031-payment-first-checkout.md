@@ -109,11 +109,15 @@ express checkout need.
 
 ## 5. Storefront
 
-- The payment step: choosing an online method shows "Continue to payment"; the card
-  form mounts in the checkout's last step, its button paying the total; on
+- The payment step, Shopify's way: once the details and shipping are in and an online
+  method is chosen, the cart's payment starts and the provider's form appears under the
+  method, its own button hidden (`submit_mode: "external"`, `docs/apps/elements.md`);
+  the summary's one "Pay €X" button calls the element's `submit()`. On
   `hypha:payment-confirmed` the order is placed and the shopper lands on the
-  confirmation. A redirect method comes back to `/<country>/checkout/complete`, which
-  checks out and redirects.
+  confirmation; a decline shows under the form and the button, and the shopper tries
+  again on the checkout (as Shopify does, no error page). A redirect method's "Pay" goes
+  to the provider's page, which comes back to `/<country>/checkout/complete` (it checks
+  out only a cart paying online).
 - The confirmation shows the order's payment status and, for manual methods, the
   instructions; it no longer starts payments.
 

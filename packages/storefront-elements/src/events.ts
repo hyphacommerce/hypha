@@ -4,6 +4,8 @@
 // proxy.
 
 export interface ElementEvents {
+  /** The element can be submitted (a payment form loaded): a storefront paying with its own button (`submit_mode: "external"`) enables it now. */
+  "hypha:ready": Record<string, never>;
   /** The shopper finished paying in the element (the payment's final state comes from the app reporting to Hypha). */
   "hypha:payment-confirmed": { paymentId: string };
   /** Something the shopper should see; the storefront shows `message`. */
@@ -15,6 +17,7 @@ export interface ElementEvents {
 export type ElementEventType = keyof ElementEvents;
 
 export const ELEMENT_EVENT_TYPES: readonly ElementEventType[] = [
+  "hypha:ready",
   "hypha:payment-confirmed",
   "hypha:error",
   "hypha:resize",

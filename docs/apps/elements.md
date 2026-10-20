@@ -122,6 +122,17 @@ Each is a `CustomEvent` dispatched on the element with `bubbles: true` and
 | `hypha:payment-confirmed` | `{ paymentId: string }` | The shopper finished paying. The storefront checks the cart out (`POST /storefront/carts/{id}/checkout`), which places the order once the app says the money is committed (its report, or `payments.status` when asked: `409 payment_pending` until then), so the storefront trusts Hypha's answer, not the event. |
 | `hypha:error` | `{ message: string }` | Something the shopper should see, in their language (plain text). |
 | `hypha:resize` | `{ height: number }` | The element's content height in CSS pixels changed. |
+| `hypha:ready` | `{}` | The element can be submitted (its payment form loaded): a storefront paying with its own button enables it now. |
+
+### Paying with the storefront's own button
+
+A payment element may let the storefront's main button pay (design note 0031: the
+checkout's one "Pay", as Shopify's): the storefront sets the prop `submit_mode:
+"external"`, and the element then hides its own button, sends `hypha:ready` once it
+can be submitted, and pays when the storefront calls its `submit()` method. The outcome
+arrives as the usual events: `hypha:payment-confirmed` (the storefront checks the cart
+out), or `hypha:error` (the shopper fixes the card and presses the button again). An
+element that doesn't support it ignores the prop and keeps its own button.
 
 Later versions may add events; storefronts ignore ones they don't know.
 

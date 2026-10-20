@@ -14,7 +14,7 @@ import { VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { type ElementEvent, HyphaElement } from "@hypha/storefront-elements/react";
-import { useState, useTransition } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, useTransition } from "react";
 
 import {
   type CartPaymentResult,
@@ -302,103 +302,244 @@ const CONFIRM_TRIES = 15;
 const CONFIRM_DELAY_MS = 2000;
 
 /**
- * Paying online before the order exists (design note 0031): "Continue to payment" starts
- * the cart's payment, the provider's card form (its storefront element, design note
- * 0029, §7) mounts here, and once it says the shopper paid the order is placed (asked
- * again for a while if the provider hasn't confirmed yet). A provider's page (a
- * redirect) comes back to `/checkout/complete`, which places the order.
+ * What the checkout's payment form (in the payment step) and its "Pay" button (in the
+ * summary) share (design note 0031): Shopify's way, the provider's form appears once the
+ * method is chosen and the summary's one button pays with it.
  */
-export function PayOnline({
+type OnlinePayment = {
+  /** The mounted payment element, for `submit()`. */
+  element: HTMLElement | null;
+  setElement: (element: HTMLElement | null) => void;
+  /** The form can be submitted. */
+  ready: boolean;
+  setReady: (ready: boolean) => void;
+  /** A provider's page to send the shopper to instead (a redirect method). */
+  redirect: string | null;
+  setRedirect: (url: string | null) => void;
+  /** The cart's money is committed already (a reload after paying): just place the order. */
+  committed: boolean;
+  setCommitted: (committed: boolean) => void;
+  /** Paying (or placing the order after): the button waits. */
+  paying: boolean;
+  setPaying: (paying: boolean) => void;
+  /** What the shopper should see, under the form and the button. */
+  error: string | null;
+  setError: (error: string | null) => void;
+  /** Places the order once the money is committed (asked again while it's confirmed). */
+  place: () => Promise<void>;
+};
+
+const PaymentContext = createContext<OnlinePayment | null>(null);
+
+function usePayment(): OnlinePayment {
+  const payment = useContext(PaymentContext);
+  if (!payment) throw new Error("the payment form and button need <CheckoutPayment>");
+  return payment;
+}
+
+/** The checkout's payment state, for the form and the button it holds. */
+export function CheckoutPayment({
   country,
   total,
   attempt,
-  ready,
-  missing,
-  label,
+  children,
 }: {
   country: string;
   total: { amount: number; currency: string };
   attempt: string;
-  ready: boolean;
-  missing?: string;
-  /** "Continue to payment" or the like. */
-  label: string;
+  children: React.ReactNode;
 }) {
-  const [started, setStarted] = useState<CartPaymentResult | null>(null);
+  const [element, setElement] = useState<HTMLElement | null>(null);
+  const [ready, setReady] = useState(false);
+  const [redirect, setRedirect] = useState<string | null>(null);
+  const [committed, setCommitted] = useState(false);
+  const [paying, setPaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [waiting, setWaiting] = useState(false);
-  const [pending, start] = useTransition();
 
-  /** Places the order, asking again while the provider hasn't confirmed the payment. */
-  const place = async () => {
-    setWaiting(true);
-    setError(null);
-    for (let attemptNo = 0; attemptNo < CONFIRM_TRIES; attemptNo++) {
-      // Success leaves this page (the action redirects to the confirmation).
-      const result = await placeOrder({ country, total, attempt });
-      if (!result?.pending) {
-        setWaiting(false);
-        if (result) setError(result.error);
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, CONFIRM_DELAY_MS));
-    }
-    setWaiting(false);
-    setError(
-      "Your payment is still being confirmed. You'll get an email once your order is placed.",
-    );
-  };
-
-  const begin = () =>
-    start(async () => {
+  const { amount, currency } = total;
+  const value = useMemo<OnlinePayment>(() => {
+    const place = async () => {
+      setPaying(true);
       setError(null);
+      for (let tries = 0; tries < CONFIRM_TRIES; tries++) {
+        // Success leaves this page (the action redirects to the confirmation).
+        const result = await placeOrder({ country, total: { amount, currency }, attempt });
+        if (!result?.pending) {
+          setPaying(false);
+          if (result) setError(result.error);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, CONFIRM_DELAY_MS));
+      }
+      setPaying(false);
+      setError(
+        "Your payment is still being confirmed. You'll get an email once your order is placed.",
+      );
+    };
+    return {
+      element,
+      setElement: (next) => {
+        setElement(next);
+        if (!next) setReady(false);
+      },
+      ready,
+      setReady,
+      redirect,
+      setRedirect,
+      committed,
+      setCommitted,
+      paying,
+      setPaying,
+      error,
+      setError,
+      place,
+    };
+  }, [element, ready, redirect, committed, paying, error, country, amount, currency, attempt]);
+  return <PaymentContext.Provider value={value}>{children}</PaymentContext.Provider>;
+}
+
+/**
+ * The online method's payment form, under the method once it's chosen and the cart is
+ * ready (design note 0031): it starts the cart's payment and mounts the provider's
+ * element (its own button hidden: the summary's "Pay" pays). Restarted (by its `key`)
+ * when the method or the total changes.
+ */
+export function OnlinePaymentForm({
+  country,
+  total,
+}: {
+  country: string;
+  total: { amount: number; currency: string };
+}) {
+  const payment = usePayment();
+  const [started, setStarted] = useState<CartPaymentResult | null>(null);
+  const [round, setRound] = useState(0);
+
+  useEffect(() => {
+    let current = true;
+    const run = async () => {
       const returnUrl = new URL(
         `${window.location.pathname.replace(/\/checkout\/?$/, "")}/checkout/complete`,
         window.location.origin,
       ).toString();
+      // The guard after the answer is the point: a form gone meanwhile drops it.
+      // react-doctor-disable-next-line react-doctor/async-defer-await -- see above
       const result = await startCartPayment({ country, total, returnUrl });
-      if (result.committed) return place();
-      const next = result.nextAction;
-      if (next?.type === "redirect" && /^https?:\/\//.test(next.url)) {
-        window.location.assign(next.url);
-        return;
-      }
+      if (!current) return;
       setStarted(result);
-      setError(result.error);
-    });
+      payment.setCommitted(result.committed);
+      payment.setError(result.error);
+      const next = result.nextAction;
+      payment.setRedirect(
+        next?.type === "redirect" && /^https?:\/\//.test(next.url) ? next.url : null,
+      );
+    };
+    void run();
+    return () => {
+      current = false;
+    };
+    // Started once per mount (and per "Try again"): the key restarts it for a new total.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- `payment`'s setters are stable in intent; re-running on every render would start a payment each time
+  }, [round]);
 
   const onEvent = (event: ElementEvent) => {
-    if (event.type === "hypha:payment-confirmed") void place();
-    else if (event.type === "hypha:error") setError(event.detail.message);
+    if (event.type === "hypha:ready") payment.setReady(true);
+    else if (event.type === "hypha:payment-confirmed") void payment.place();
+    else if (event.type === "hypha:error") {
+      payment.setPaying(false);
+      payment.setError(event.detail.message);
+    }
   };
 
-  const next = started?.nextAction ?? null;
+  if (!started) return <Text color="secondary">Loading the payment form…</Text>;
+  const next = started.nextAction;
+  if (next?.type === "client_widget") {
+    if (!started.module) {
+      return <Text color="secondary">This payment can&apos;t be shown here. Try again later.</Text>;
+    }
+    return (
+      <HyphaElement
+        tag={next.element}
+        module={started.module}
+        // The summary's button pays (`submit()`), not the element's own.
+        props={{ ...next.props, submit_mode: "external" }}
+        onEvent={onEvent}
+        onElement={payment.setElement}
+      />
+    );
+  }
+  if (next?.type === "redirect") {
+    return <Text color="secondary">You'll finish paying on the provider's page.</Text>;
+  }
+  if (started.committed) return <Text color="secondary">Your payment is in. Place the order.</Text>;
   return (
-    <VStack gap={3}>
-      {next?.type === "client_widget" && started?.module ? (
-        <HyphaElement
-          tag={next.element}
-          module={started.module}
-          props={next.props}
-          onEvent={onEvent}
-        />
-      ) : (
+    <VStack gap={2}>
+      {started.error && <Banner status="error" title={started.error} />}
+      <div>
         <Button
-          label={started ? "Try again" : label}
-          variant="primary"
-          size="lg"
-          width="100%"
-          isDisabled={!ready}
-          isLoading={pending}
-          clickAction={begin}
+          label="Try again"
+          variant="secondary"
+          clickAction={() => {
+            setStarted(null);
+            setRound((r) => r + 1);
+          }}
         />
-      )}
-      {next?.type === "client_widget" && !started?.module && (
-        <Text color="secondary">This payment can&apos;t be shown here. Try again later.</Text>
-      )}
-      {waiting && <Banner status="info" title="Confirming your payment…" />}
+      </div>
+    </VStack>
+  );
+}
+
+/**
+ * The summary's "Pay" for an online method: submits the payment form (its outcome comes
+ * back as the element's events: the order is placed once it's paid, a decline shows
+ * here, and the shopper tries again), goes to a redirect method's page, or places the
+ * order for money committed already.
+ */
+export function PayButton({
+  ready,
+  missing,
+  label,
+}: {
+  /** The cart is ready (details, shipping, lines). */
+  ready: boolean;
+  missing?: string;
+  label: string;
+}) {
+  const payment = usePayment();
+  const canPay = ready && (payment.ready || payment.redirect !== null || payment.committed);
+  const pay = () => {
+    payment.setError(null);
+    if (payment.redirect) {
+      window.location.assign(payment.redirect);
+      return;
+    }
+    if (payment.committed) {
+      void payment.place();
+      return;
+    }
+    const element: unknown = payment.element;
+    const submit: unknown =
+      element && typeof element === "object" ? Reflect.get(element, "submit") : undefined;
+    if (typeof submit !== "function") return;
+    payment.setPaying(true);
+    Reflect.apply(submit, element, []);
+  };
+  return (
+    <VStack gap={2}>
+      <Button
+        label={payment.paying ? "Processing…" : label}
+        variant="primary"
+        size="lg"
+        width="100%"
+        isDisabled={!canPay}
+        isLoading={payment.paying}
+        clickAction={pay}
+      />
       {!ready && missing && <Text type="supporting">{missing}</Text>}
-      {error && <Banner status="error" title={error} />}
+      {ready && !canPay && !payment.error && (
+        <Text type="supporting">Enter your payment details above.</Text>
+      )}
+      {payment.error && <Banner status="error" title={payment.error} />}
     </VStack>
   );
 }

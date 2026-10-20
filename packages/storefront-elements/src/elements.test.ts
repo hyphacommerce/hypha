@@ -204,5 +204,10 @@ test("on receives the typed detail of emitted events, and stops", () => {
 });
 
 test("the documented events", () => {
-  assert.deepEqual(ELEMENT_EVENT_TYPES, ["hypha:payment-confirmed", "hypha:error", "hypha:resize"]);
+  assert.deepEqual(ELEMENT_EVENT_TYPES, [
+    "hypha:ready",
+    "hypha:payment-confirmed",
+    "hypha:error",
+    "hypha:resize",
+  ]);
 });

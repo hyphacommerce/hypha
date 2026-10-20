@@ -1,9 +1,12 @@
 // `<stripe-payment>`: the storefront element for `checkout.payment` (design note 0029,
 // §7; docs/apps/elements.md). Props (set as properties): `client_secret`,
 // `publishable_key`, `return_url`, `payment_id`, as `payments.start` answered them
-// (camelCase aliases work too). It loads Stripe.js from js.stripe.com (the only way
-// Stripe allows), mounts the Payment Element, confirms with `redirect: "if_required"`,
-// and emits `hypha:payment-confirmed {paymentId}`, `hypha:error {message}` and
+// (camelCase aliases work too), and the storefront's `submit_mode`: `"external"` hides
+// the element's own button, and the storefront pays with its own by calling `submit()`
+// (design note 0031: the checkout's one "Pay" button). It loads Stripe.js from
+// js.stripe.com (the only way Stripe allows), mounts the Payment Element, confirms with
+// `redirect: "if_required"`, and emits `hypha:ready` (it can be submitted),
+// `hypha:payment-confirmed {paymentId}`, `hypha:error {message}` and
 // `hypha:resize {height}`. Themed by `--hypha-*` custom properties.
 //
 // From the Stripe app (hypha-app-stripe). Bundled into `payment-element.js` beside it by
@@ -78,13 +81,20 @@ export function loadStripe(doc: Document = document): Promise<StripeFactory> {
   return loading;
 }
 
-const PROPS = ["client_secret", "publishable_key", "return_url", "payment_id"] as const;
+const PROPS = [
+  "client_secret",
+  "publishable_key",
+  "return_url",
+  "payment_id",
+  "submit_mode",
+] as const;
 type Prop = (typeof PROPS)[number];
 const ALIASES: Record<string, Prop> = {
   clientSecret: "client_secret",
   publishableKey: "publishable_key",
   returnUrl: "return_url",
   paymentId: "payment_id",
+  submitMode: "submit_mode",
 };
 
 const STYLE = `
@@ -108,6 +118,7 @@ export class StripePayment extends HTMLElement {
     publishable_key: null,
     return_url: null,
     payment_id: null,
+    submit_mode: null,
   };
   #root: ShadowRoot;
   #mountPoint: HTMLDivElement | undefined;
@@ -158,6 +169,7 @@ export class StripePayment extends HTMLElement {
       get: () => this.#props[prop],
       set: (value: unknown) => {
         this.#props[prop] = typeof value === "string" && value ? value : null;
+        this.#button.hidden = this.#external();
         if (this.isConnected) void this.#mount();
       },
     });
@@ -180,6 +192,19 @@ export class StripePayment extends HTMLElement {
     this.#element?.destroy();
     this.#element = undefined;
     this.#mountedFor = null;
+  }
+
+  /** Whether the storefront pays with its own button (`submit()`). */
+  #external(): boolean {
+    return this.#props.submit_mode === "external";
+  }
+
+  /**
+   * Pays: what the element's own button does, for a storefront with its own (`submit_mode:
+   * "external"`). The outcome arrives as `hypha:payment-confirmed` or `hypha:error`.
+   */
+  submit(): void {
+    void this.#pay();
   }
 
   #emit(type: string, detail: Record<string, unknown>) {
@@ -243,6 +268,7 @@ export class StripePayment extends HTMLElement {
     }
     this.#element.on("ready", () => {
       this.#button.disabled = false;
+      this.#emit("hypha:ready", {});
     });
     this.#element.mount(this.#mountPoint);
   }
