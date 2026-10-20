@@ -2,12 +2,13 @@
 // §7; docs/apps/elements.md). Props (set as properties): `client_secret`,
 // `publishable_key`, `return_url`, `payment_id`, as `payments.start` answered them
 // (camelCase aliases work too), and the storefront's `submit_mode`: `"external"` hides
-// the element's own button, and the storefront pays with its own by calling `submit()`
+// the element's own button and error line, and the storefront pays with its own by calling `submit()`
 // (design note 0031: the checkout's one "Pay" button). It loads Stripe.js from
 // js.stripe.com (the only way Stripe allows), mounts the Payment Element, confirms with
 // `redirect: "if_required"`, and emits `hypha:ready` (it can be submitted),
 // `hypha:payment-confirmed {paymentId}`, `hypha:error {message}` and
-// `hypha:resize {height}`. Themed by `--hypha-*` custom properties.
+// `hypha:resize {height}`. Themed by `--hypha-*` custom properties (resolved to plain
+// colours for Stripe's Appearance API, its dark theme on a dark background).
 //
 // From the Stripe app (hypha-app-stripe). Bundled into `payment-element.js` beside it by
 // `pnpm spores:build` (`spores:check` fails while that's stale), served by the Stripe
@@ -21,6 +22,7 @@ interface StripeElement {
   mount(target: HTMLElement): void;
   destroy(): void;
   on(event: "ready" | "change", handler: (event: { complete?: boolean }) => void): void;
+  on(event: "loaderror", handler: (event: { error?: { message?: string } }) => void): void;
 }
 interface StripeElements {
   create(type: "payment", options?: Record<string, unknown>): StripeElement;
@@ -36,6 +38,12 @@ interface StripeInstance {
   retrievePaymentIntent(clientSecret: string): Promise<PaymentIntentResult>;
 }
 type StripeFactory = (publishableKey: string) => StripeInstance;
+
+/** An sRGB byte as linear light, for relative luminance. */
+function linear(c: number): number {
+  const v = c / 255;
+  return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+}
 
 /** An intent's states in which it still takes a payment attempt. */
 const OPEN = new Set(["requires_payment_method", "requires_confirmation", "requires_action"]);
@@ -169,7 +177,9 @@ export class StripePayment extends HTMLElement {
       get: () => this.#props[prop],
       set: (value: unknown) => {
         this.#props[prop] = typeof value === "string" && value ? value : null;
+        // A storefront paying with its own button shows the errors too (`hypha:error`).
         this.#button.hidden = this.#external();
+        this.#error.hidden = this.#external();
         if (this.isConnected) void this.#mount();
       },
     });
@@ -216,24 +226,73 @@ export class StripePayment extends HTMLElement {
     this.#emit("hypha:error", { message: text });
   }
 
-  /** `--hypha-*` from the page, as Stripe's Appearance API variables. */
+  /**
+   * `--hypha-*` from the page, as Stripe's Appearance API: its fields live in Stripe's
+   * iframes, which see none of the page's CSS. Colours are resolved here (a storefront's
+   * may be `light-dark()` pairs or `oklch()`, which Stripe doesn't read), and a dark
+   * background (or `--hypha-color-scheme: dark`) picks Stripe's dark theme.
+   */
   #appearance(): Record<string, unknown> {
     const css = getComputedStyle(this);
     const read = (name: string) => css.getPropertyValue(name).trim() || undefined;
     const variables: Record<string, string> = {};
-    const map: [string, string][] = [
+    const colours: [string, string][] = [
       ["--hypha-color-accent", "colorPrimary"],
       ["--hypha-color-text", "colorText"],
+      ["--hypha-color-text-secondary", "colorTextSecondary"],
       ["--hypha-color-background", "colorBackground"],
       ["--hypha-color-error", "colorDanger"],
-      ["--hypha-font-family", "fontFamily"],
-      ["--hypha-radius", "borderRadius"],
     ];
-    for (const [property, variable] of map) {
-      const value = read(property);
-      if (value) variables[variable] = value;
+    for (const [property, variable] of colours) {
+      const value = read(property) && this.#rgb(`var(${property})`);
+      if (value) variables[variable] = value.css;
     }
-    return { theme: "stripe", variables };
+    const font = read("--hypha-font-family");
+    if (font) variables.fontFamily = font;
+    const radius = read("--hypha-radius");
+    if (radius) variables.borderRadius = radius;
+
+    const scheme = read("--hypha-color-scheme");
+    const background = read("--hypha-color-background")
+      ? this.#rgb("var(--hypha-color-background)")
+      : undefined;
+    const dark = scheme ? scheme === "dark" : background ? background.luminance < 0.4 : false;
+
+    const rules: Record<string, Record<string, string>> = {};
+    const border = read("--hypha-color-border") && this.#rgb("var(--hypha-color-border)");
+    if (border) {
+      const line = { border: `1px solid ${border.css}`, boxShadow: "none" };
+      rules[".Input"] = line;
+      rules[".Tab"] = line;
+      rules[".PickerItem"] = line;
+    }
+    return { theme: dark ? "night" : "stripe", variables, rules };
+  }
+
+  /**
+   * A CSS colour as `rgb()` with its relative luminance, or nothing when it isn't one.
+   * Resolved on a probe in this element's shadow root (so `light-dark()` follows the
+   * page's colour scheme and `var()` its custom properties), then through a canvas,
+   * which turns any colour space into sRGB bytes.
+   */
+  #rgb(colour: string): { css: string; luminance: number } | undefined {
+    const probe = document.createElement("span");
+    probe.style.color = colour;
+    this.#root.append(probe);
+    const computed = getComputedStyle(probe).color;
+    probe.remove();
+    if (!computed) return undefined;
+    const context = document.createElement("canvas").getContext("2d", {
+      willReadFrequently: true,
+    });
+    if (!context) return undefined;
+    context.fillStyle = computed;
+    context.fillRect(0, 0, 1, 1);
+    const [r = 0, g = 0, b = 0, a = 255] = context.getImageData(0, 0, 1, 1).data;
+    const luminance = 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+    const css =
+      a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
+    return { css, luminance };
   }
 
   async #mount() {
@@ -258,19 +317,33 @@ export class StripePayment extends HTMLElement {
     const state = existing?.paymentIntent?.status;
     if (state === "succeeded" || state === "processing" || state === "requires_capture")
       return this.#confirmed();
-    this.#elements = this.#stripe.elements({ clientSecret, appearance: this.#appearance() });
-    this.#element?.destroy();
-    this.#element = this.#elements.create("payment", { layout: "tabs" });
     if (!this.#mountPoint) {
       this.#mountPoint = document.createElement("div");
       this.#mountPoint.slot = "stripe";
       this.append(this.#mountPoint);
     }
-    this.#element.on("ready", () => {
-      this.#button.disabled = false;
-      this.#emit("hypha:ready", {});
-    });
-    this.#element.mount(this.#mountPoint);
+    // Stripe.js throws on what it refuses (a malformed secret or key) and reports a form
+    // that couldn't load as `loaderror`: either way the storefront hears it, rather than
+    // waiting for a `hypha:ready` that won't come.
+    const unavailable = "The payment form couldn't be loaded. Please try again later.";
+    try {
+      this.#elements = this.#stripe.elements({ clientSecret, appearance: this.#appearance() });
+      this.#element?.destroy();
+      const element = this.#elements.create("payment", { layout: "tabs" });
+      this.#element = element;
+      element.on("ready", () => {
+        this.#button.disabled = false;
+        this.#emit("hypha:ready", {});
+      });
+      element.on("loaderror", () => {
+        this.#mountedFor = null;
+        this.#fail(unavailable);
+      });
+      element.mount(this.#mountPoint);
+    } catch {
+      this.#mountedFor = null;
+      this.#fail(unavailable);
+    }
   }
 
   #confirmed() {

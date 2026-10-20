@@ -98,12 +98,18 @@ The rules:
   | Custom property | Meaning |
   | --- | --- |
   | `--hypha-font-family` | the storefront's body font |
-  | `--hypha-color-text`, `--hypha-color-background` | text and surface colours |
+  | `--hypha-color-text`, `--hypha-color-background` | text and surface colours (the background is what fields sit on) |
+  | `--hypha-color-text-secondary` | labels and hints |
+  | `--hypha-color-border` | field borders |
   | `--hypha-color-accent` | buttons, focus rings |
   | `--hypha-color-error` | error text |
+  | `--hypha-color-scheme` | `light` or `dark`; unset, judge it from the background |
   | `--hypha-radius` | corner radius |
 
-  Fall back to sensible defaults when they're unset (`var(--hypha-radius, 6px)`).
+  Fall back to sensible defaults when they're unset (`var(--hypha-radius, 6px)`). Colours
+  may be any CSS colour, `light-dark()` pairs and `oklch()` included: an element that
+  hands them to something outside the page (a provider's iframe) resolves them first,
+  e.g. through a probe element's computed `color`.
   Inherited properties (font, colour) reach into the shadow root by themselves.
 - **Size**: lay out to the width the storefront gives; announce height changes that a
   storefront can't see (content inside your own iframes) with `hypha:resize`.
@@ -128,10 +134,13 @@ Each is a `CustomEvent` dispatched on the element with `bubbles: true` and
 
 A payment element may let the storefront's main button pay (design note 0031: the
 checkout's one "Pay", as Shopify's): the storefront sets the prop `submit_mode:
-"external"`, and the element then hides its own button, sends `hypha:ready` once it
+"external"`, and the element then hides its own button (and its own error text: the
+storefront shows `hypha:error`'s message by its button), sends `hypha:ready` once it
 can be submitted, and pays when the storefront calls its `submit()` method. The outcome
 arrives as the usual events: `hypha:payment-confirmed` (the storefront checks the cart
-out), or `hypha:error` (the shopper fixes the card and presses the button again). An
+out), or `hypha:error` (the shopper fixes the card and presses the button again). A form
+that can't load sends `hypha:error` too, so a storefront showing a placeholder until
+`hypha:ready` isn't left waiting. An
 element that doesn't support it ignores the prop and keeps its own button.
 
 Later versions may add events; storefronts ignore ones they don't know.
