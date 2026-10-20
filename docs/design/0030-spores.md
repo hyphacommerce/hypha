@@ -714,13 +714,18 @@ them, not in this list.
   later; should both be paid, the payment is collected once and the other intent's
   money goes back.
 - **Final review (2026-10-20):** a payment collected once is a domain rule, not the
-  spore's: `record_payment_event` refuses an authorized, paid, failed or voided report
-  under another reference than the one a payment holds money through
-  (`payment_reference_mismatch`, 409; `held_elsewhere`, in the transaction that writes,
-  so two deliveries racing can't both pass; a pending payment takes any, a refund names
-  the refund). The Stripe webhook gives a refused paid or authorized report's money back
-  and ignores declines, cancels and refunds of an intent the payment wasn't started
-  through. Giving money back is keyed per intent (`<payment>:<intent>:refund-after-void`).
+  spore's: `record_payment_event` refuses a second collection, a payment authorized or
+  paid under one reference reported authorized or paid again under another
+  (`payment_reference_mismatch`, 409, `details: {status, held, reported}`;
+  `held_elsewhere`, in the transaction that writes, so two deliveries racing can't both
+  pass). Moving on is never refused: a capture or void may carry the provider's own ID
+  for it (PayPal's capture ID, Adyen's pspReference; a re-review caught the first,
+  broader rule refusing those). Stripe captures and cancels through the payment's own
+  intent, so its webhook is stricter: a paid or authorized report of another intent on a
+  payment past pending is a second collection (its money goes back), and declines,
+  cancels and refunds of another intent are ignored (a read before the write: a cancel
+  racing a restart can still void a pending payment, whose later money then goes back).
+  A payment action's answer says whether it's `completed` (the admin's "Done"). Giving money back is keyed per intent (`<payment>:<intent>:refund-after-void`).
   A stored intent Stripe no longer knows (404: other keys) is replaced by a new one. The
   admin says a payment action is done only when the payment moved. The apps' image
   installs from the packages' manifests alone (a stage that keeps only them), so a source

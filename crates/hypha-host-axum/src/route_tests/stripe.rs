@@ -421,6 +421,7 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
     .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{json}");
     assert_eq!(json["payment"]["status"], "paid", "{json}");
+    assert_eq!(json["completed"], true, "{json}");
     assert_eq!(fake.lock().unwrap().intents["pi_1"]["status"], "succeeded");
     let succeeded = json!({ "id": "pi_1", "metadata": intent["metadata"] });
     let (status, outcome) = deliver(
@@ -654,6 +655,51 @@ async fn money_paid_through_a_second_intent_of_a_paid_payment_goes_back() {
     let (_, json) = send(&app, "GET", &format!("/admin/payments/{payment}"), None).await;
     assert_eq!(json["status"], "paid", "{json}");
     assert_eq!(json["refunded"]["amount"], 0, "{json}");
+}
+
+#[tokio::test]
+async fn another_intent_paid_while_the_payment_is_authorized_goes_back() {
+    let (app, fake_state) = stripe_host().await;
+    let (pk, cart_path) = cart_paying_by_stripe(&app).await;
+    let (status, placed) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/checkout"),
+        Some("{}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{placed}");
+    let order = placed["id"].as_str().unwrap();
+    let (_, admin) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
+    let payment = admin["payments"][0]["id"].as_str().unwrap().to_string();
+    let metadata = fake_state.lock().unwrap().intents["pi_1"]["metadata"].clone();
+    let capturable = json!({ "id": "pi_1", "amount_capturable": 3000, "metadata": metadata });
+    let (status, outcome) = deliver(
+        &app,
+        "evt_auth",
+        "payment_intent.amount_capturable_updated",
+        capturable,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    assert_eq!(payment_status(&app, &payment).await, "authorized");
+
+    // Stripe captures through the payment's own intent: another one paid is a second
+    // collection, given back, and the authorization stays as it was.
+    let other = json!({ "id": "pi_9", "metadata": metadata });
+    let (status, outcome) = deliver(&app, "evt_other", "payment_intent.succeeded", other).await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    assert_eq!(outcome["status"], "ignored", "{outcome}");
+    assert_eq!(payment_status(&app, &payment).await, "authorized");
+    let fake = fake_state.lock().unwrap();
+    assert!(
+        fake.seen.iter().any(|(m, p, _, form)| m == "POST"
+            && p == "/v1/refunds"
+            && form.contains("payment_intent=pi_9")),
+        "{:?}",
+        fake.seen
+    );
 }
 
 #[tokio::test]

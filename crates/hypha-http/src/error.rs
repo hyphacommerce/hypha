@@ -991,6 +991,13 @@ fn payment_details(e: &hypha_payments::PaymentError) -> Option<Value> {
         hypha_payments::PaymentError::AppUnavailable { app, point, .. } => {
             Some(json!({ "app": app.as_str(), "point": point }))
         }
+        // Which attempt the payment holds money through: the reported one's goes back.
+        hypha_payments::PaymentError::ReferenceMismatch {
+            status,
+            held,
+            reported,
+            ..
+        } => Some(json!({ "status": status.to_string(), "held": held, "reported": reported })),
         _ => None,
     }
 }

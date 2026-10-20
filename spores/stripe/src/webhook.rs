@@ -288,7 +288,8 @@ pub async fn receive<S: Storage>(
                 Some(payment)
                     if other_intent(&ports, payment, &intent.id)
                         .await
-                        .map_err(ApiError::internal)? =>
+                        .map_err(ApiError::internal)?
+                        .is_some() =>
                 {
                     Err("a refund of another PaymentIntent than the payment's".to_string())
                 }
@@ -332,22 +333,31 @@ pub async fn receive<S: Storage>(
                 key: report.key.clone(),
             }),
         };
-        // A decline or cancel of another intent than the payment's (one it left behind
-        // when it was started again): not the payment's.
-        if matches!(
-            report.kind,
-            PaymentEventKind::Failed | PaymentEventKind::Voided
-        ) && other_intent(&ports, report.payment, &report.reference)
+        // A report about another intent than the one the payment was started through (one
+        // it left behind when it was started again, paid in an old tab). Stripe captures
+        // and cancels through the payment's own intent, so a decline or cancel of another
+        // is not the payment's, and money another took for a payment past pending is a
+        // second collection. Core refuses that too when the payment is collected already,
+        // in the transaction that writes (two deliveries racing can't both pass).
+        let other = other_intent(&ports, report.payment, &report.reference)
             .await
-            .map_err(ApiError::internal)?
-        {
-            refused.get_or_insert_with(|| "another PaymentIntent than the payment's".to_string());
-            continue;
-        }
-        let mut unwanted = None;
-        if unwanted.is_none() {
-            match record_payment_event(&ctx, &ports, &stripe.env, input).await {
-                Ok(_) => reported += 1,
+            .map_err(ApiError::internal)?;
+        let unwanted = match (report.kind, other) {
+            (PaymentEventKind::Failed | PaymentEventKind::Voided, Some(_)) => {
+                refused
+                    .get_or_insert_with(|| "another PaymentIntent than the payment's".to_string());
+                continue;
+            }
+            (PaymentEventKind::Paid | PaymentEventKind::Authorized, Some(status))
+                if status != PaymentStatus::Pending =>
+            {
+                Some(format!("payment {status} through another PaymentIntent"))
+            }
+            _ => match record_payment_event(&ctx, &ports, &stripe.env, input).await {
+                Ok(_) => {
+                    reported += 1;
+                    None
+                }
                 // Storage failed: Stripe delivers it again, and what went through already
                 // changes nothing then.
                 Err(CommandError::Repo(e)) => {
@@ -365,28 +375,21 @@ pub async fn receive<S: Storage>(
                         PaymentEventKind::Paid | PaymentEventKind::Authorized
                     ) && matches!(from, PaymentStatus::Voided | PaymentStatus::Failed) =>
                 {
-                    unwanted = Some(format!("payment {from}"));
+                    Some(format!("payment {from}"))
                 }
-                // Money a payment already holds through another of its intents (made again
-                // after its reference couldn't be kept, paid in an old tab): Hypha
-                // collects once (checked as it records, so racing deliveries can't both
-                // pass), so this goes back.
-                Err(CommandError::Payment(PaymentError::ReferenceMismatch { status, .. }))
-                    if matches!(
-                        report.kind,
-                        PaymentEventKind::Paid | PaymentEventKind::Authorized
-                    ) =>
-                {
-                    unwanted = Some(format!("payment {status} through another PaymentIntent"));
+                // A second collection core refused as it recorded.
+                Err(CommandError::Payment(PaymentError::ReferenceMismatch { status, .. })) => {
+                    Some(format!("payment {status} through another PaymentIntent"))
                 }
                 // A move the payment can't make (voided already, …): retrying won't help.
                 Err(e) => {
                     let code = hypha_spore::core::ErrorCode::code(&e);
                     hypha_spore::tracing::warn!(event = %event.id, payment = %report.payment, "Hypha refused a Stripe report: {code}");
                     refused.get_or_insert_with(|| code.to_string());
+                    None
                 }
-            }
-        }
+            },
+        };
         // The money goes back (a payment refunded, an authorization released). Not done
         // (Stripe down, no key): 500, so Stripe delivers it again and it's tried again.
         if let Some(why) = unwanted {
@@ -437,19 +440,18 @@ pub async fn receive<S: Storage>(
     }
 }
 
-/// Whether `payment` was started through another PaymentIntent than `intent` (its
-/// reference is another `pi_…`).
+/// The payment's status when it was started through another PaymentIntent than `intent`
+/// (its reference is another `pi_…`).
 async fn other_intent<P: HasPayments>(
     ports: &P,
     payment: PaymentId,
     intent: &str,
-) -> Result<bool, RepoError> {
-    Ok(ports
-        .payments()
-        .get(payment)
-        .await?
-        .and_then(|p| p.reference().map(str::to_string))
-        .is_some_and(|r| r.starts_with("pi_") && r != intent))
+) -> Result<Option<PaymentStatus>, RepoError> {
+    Ok(ports.payments().get(payment).await?.and_then(|p| {
+        p.reference()
+            .is_some_and(|r| r.starts_with("pi_") && r != intent)
+            .then(|| p.status())
+    }))
 }
 
 /// How giving money back at Stripe went.

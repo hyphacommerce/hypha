@@ -88,9 +88,9 @@ async fn check_reporter<S: HasApps>(
 /// (`refund_reference_required`). A report of the status the payment is in already
 /// changes nothing (a webhook delivered twice). Refused: an unknown payment
 /// (`payment_not_found`), another app's payment (`payment_not_yours`), a move
-/// the status doesn't allow (`invalid_payment_transition`), a report under another
-/// reference than the one the payment holds money through (`payment_reference_mismatch`,
-/// `held_elsewhere`), an amount that doesn't fit
+/// the status doesn't allow (`invalid_payment_transition`), a second collection under
+/// another reference (`payment_reference_mismatch`, `held_elsewhere`), an amount that
+/// doesn't fit
 /// (`invalid_refund_amount`, `payment_amount_mismatch`). A cancelled order still takes
 /// reports: they say where the money is.
 pub async fn record_payment_event<S: OrderActionPorts + HasApps>(
@@ -236,32 +236,36 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
     })
 }
 
-/// Refuses a report about another attempt than the one a payment holds money through
-/// (`payment_reference_mismatch`): authorized, paid or refunded under one reference, it
-/// can't be authorized, paid, failed or voided under another (a second attempt at the
-/// provider, paid in an old tab, collects once; its provider gives that money back).
-/// Checked in the same transaction as the write, so two reports racing can't both
-/// pass. A pending payment takes any reference (its attempt was made again), and a
-/// refund names the refund, not the attempt.
+/// Refuses a second collection (`payment_reference_mismatch`): a payment authorized, or
+/// paid, under one reference reported authorized, or paid, again under another (a
+/// second attempt at the provider, paid in an old tab: the payment collects once, and
+/// its provider gives that money back). The same report under the same reference is a
+/// webhook delivered twice and changes nothing. Checked in the same transaction as the
+/// write, so two attempts' reports racing can't both pass. Moving on is never refused:
+/// a capture or a void may carry the provider's own ID for that operation (PayPal's
+/// capture ID, Adyen's pspReference), and a refund names the refund.
 fn held_elsewhere(payment: &Payment, input: &PaymentEvent) -> Result<(), PaymentError> {
-    let refund = matches!(
-        input.kind,
-        PaymentEventKind::PartiallyRefunded | PaymentEventKind::Refunded
-    );
-    let holds = matches!(
-        payment.status(),
-        PaymentStatus::Authorized
-            | PaymentStatus::Paid
-            | PaymentStatus::PartiallyRefunded
-            | PaymentStatus::Refunded
-    );
+    use PaymentStatus as S;
+    let collected_again = match input.kind {
+        PaymentEventKind::Authorized => matches!(
+            payment.status(),
+            S::Authorized | S::Paid | S::PartiallyRefunded | S::Refunded
+        ),
+        PaymentEventKind::Paid => {
+            matches!(
+                payment.status(),
+                S::Paid | S::PartiallyRefunded | S::Refunded
+            )
+        }
+        _ => false,
+    };
     let reported = input
         .reference
         .as_deref()
         .map(str::trim)
         .filter(|r| !r.is_empty());
-    match (refund || !holds, payment.reference(), reported) {
-        (false, Some(held), Some(reported)) if held != reported => {
+    match (collected_again, payment.reference(), reported) {
+        (true, Some(held), Some(reported)) if held != reported => {
             Err(PaymentError::ReferenceMismatch {
                 payment: payment.id(),
                 status: payment.status(),
