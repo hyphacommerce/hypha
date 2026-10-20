@@ -138,3 +138,21 @@ test("list says where each spore comes from", () => {
     /acme-hypha-reviews \(https:\/\/github\.com\/acme\/hypha-reviews @ aaaaaaaaaaaa\)/,
   );
 });
+
+test("a path spore must be inside the checkout, and is written relative to the host crate", () => {
+  const dir = join(REPO, ".hypha-build", "x", "host");
+  const local = {
+    ...reviews,
+    git: undefined,
+    rev: undefined,
+    path: join(REPO, "spores", "stripe"),
+  };
+  delete local.git;
+  delete local.rev;
+  const toml = hostCargoToml(dir, [local]);
+  assert.ok(toml.includes('acme-hypha-reviews = { path = "../../../spores/stripe" }'), toml);
+  assert.throws(
+    () => hostCargoToml(dir, [{ ...local, path: "/elsewhere/reviews" }]),
+    /outside this checkout/,
+  );
+});

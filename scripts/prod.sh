@@ -14,6 +14,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# First-party spores to build the API with (design note 0030, §9): HYPHA_SPORES=stripe
+# (comma-separated) turns on each one's `spore-<name>` feature.
+SPORE_FEATURES=""
+for spore in ${HYPHA_SPORES//,/ }; do SPORE_FEATURES+="spore-$spore,"; done
+SPORE_FEATURES="${SPORE_FEATURES%,}"
+
 API_PORT=3917
 
 if ! docker info >/dev/null 2>&1; then
@@ -72,11 +78,6 @@ trap stop INT TERM EXIT
 
 label() { sed -u "s/^/[$1] /"; }
 
-# First-party spores to build the API with (design note 0030, §9): HYPHA_SPORES=stripe
-# (comma-separated) turns on each one's `spore-<name>` feature.
-SPORE_FEATURES=""
-for spore in ${HYPHA_SPORES//,/ }; do SPORE_FEATURES+="spore-$spore,"; done
-SPORE_FEATURES="${SPORE_FEATURES%,}"
 
 # Through cargo (already built, so it starts at once) for `.cargo/config.toml`'s
 # HYPHA_S3_* settings, which point it at the compose file storage.

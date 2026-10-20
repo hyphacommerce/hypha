@@ -6,7 +6,7 @@
 // instead of the stock host.
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve, sep } from "node:path";
 
 import { REPO } from "./templates.ts";
 
@@ -156,11 +156,22 @@ export function hostCargoToml(dir: string, spores: SporeEntry[], deploymentDir =
       ? `git = ${JSON.stringify(s.git)}, rev = ${JSON.stringify(s.rev)}`
       : s.version
         ? `version = ${JSON.stringify(s.version)}`
-        : `path = ${JSON.stringify(resolve(deploymentDir, s.path ?? "."))}`;
+        : `path = ${JSON.stringify(relative(dir, sporePath(s.name, deploymentDir, s.path ?? ".")))}`;
     lines.push(`${s.crate} = { ${source} }`);
   }
   lines.push("", "[profile.release]", 'debug = "line-tables-only"', "");
   return lines.join("\n");
+}
+
+/** A path spore's folder: resolved against the deployment's folder, and inside this
+ * checkout, which is Docker's build context (one outside couldn't be built there). */
+export function sporePath(name: string, deploymentDir: string, path: string): string {
+  const full = resolve(deploymentDir, path);
+  if (!full.startsWith(`${REPO}${sep}`))
+    throw new Error(
+      `spore ${name}: \`path\` ${full} is outside this checkout (${REPO}), which the API is built from: put the crate inside it, or give \`git\` or \`version\``,
+    );
+  return full;
 }
 
 /** The host crate's `main.rs`: `host! { spores: [...], routes: [...] }`. */
