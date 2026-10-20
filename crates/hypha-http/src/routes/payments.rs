@@ -409,8 +409,10 @@ pub struct PaymentResponse {
     reference: Option<String>,
     /// The provider's attempt the payment collects through (a Stripe PaymentIntent), for a
     /// provider whose IDs name attempts: what reports naming another are refused for
-    /// (`payment_reference_mismatch`). Unlike `reference`, staff's text or a capture's
-    /// own ID never replace it.
+    /// (`payment_reference_mismatch`). Set by a report naming it (an app's) or by the
+    /// start of a provider built into the API (a spore's). Unlike `reference`, staff's
+    /// text or a capture's own ID never replace it. Null: none yet, and reports aren't
+    /// checked.
     attempt: Option<String>,
     /// The method's instructions at checkout, as the shopper was shown them.
     instructions: Option<String>,
@@ -598,9 +600,10 @@ pub struct PaymentEventRequest {
     /// payment (started again); give back what that attempt took. Absent, nothing is
     /// checked (a capture or void carrying an ID of its own leaves it out). A payment
     /// with no attempt yet (`attempt` null on it: its reports named none, or it's from
-    /// before attempts were kept) isn't checked either: another attempt's paid or
-    /// authorized report on it answers 200 and changes nothing, so name attempts from
-    /// the first report. Up to 255 characters.
+    /// before attempts were kept) isn't checked either: a report naming another attempt
+    /// is taken as any report is (on a paid payment, another attempt's `paid` changes
+    /// nothing and its money stays at the provider), so name attempts from the first
+    /// report. Up to 255 characters.
     #[serde(default)]
     attempt: Option<String>,
     /// When it happened at the provider, RFC 3339; absent is now.
