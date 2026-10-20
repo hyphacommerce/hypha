@@ -1,9 +1,10 @@
 // Spores (design note 0030, §9): Rust crates compiled into the deployment's API. A
 // first-party spore (this repository's `spores/<name>`, `"stripe"` in `hypha.json`) is a
 // Cargo feature of the hosts (`spore-<name>`); any other is a crate from git, crates.io
-// or a path, which needs a host crate of the deployment's own: written here
-// (`hostCrate`), next to this checkout so Docker's build context holds both, and built
-// instead of the stock host.
+// or a path, which needs host crates of the deployment's own, written next to this
+// checkout (so Docker's build context holds both) and built instead of the stock ones:
+// the native host (`writeHostCrate`: a server's API, and Cloudflare's `setup` tool) and
+// the Worker (`writeWorkerCrate`).
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
@@ -147,18 +148,7 @@ export function hostCargoToml(dir: string, spores: SporeEntry[], deploymentDir =
     "[dependencies]",
     `hypha-host-axum = { path = ${repo("crates/hypha-host-axum")} }`,
   ];
-  for (const s of spores) {
-    if (isFirstParty(s)) {
-      lines.push(`hypha-spore-${s} = { path = ${repo(`spores/${s}`)} }`);
-      continue;
-    }
-    const source = s.git
-      ? `git = ${JSON.stringify(s.git)}, rev = ${JSON.stringify(s.rev)}`
-      : s.version
-        ? `version = ${JSON.stringify(s.version)}`
-        : `path = ${JSON.stringify(relative(dir, sporePath(s.name, deploymentDir, s.path ?? ".")))}`;
-    lines.push(`${s.crate} = { ${source} }`);
-  }
+  lines.push(...sporeDependencies(dir, spores, deploymentDir));
   lines.push("", "[profile.release]", 'debug = "line-tables-only"', "");
   return lines.join("\n");
 }
@@ -196,6 +186,75 @@ function pascal(name: string): string {
     .split("_")
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join("");
+}
+
+/** Where a deployment's Worker crate goes, beside its host crate. */
+export function workerCrateDir(deploymentDir: string): string {
+  return join(REPO, ".hypha-build", basename(resolve(deploymentDir)), "worker");
+}
+
+/** The spores' dependency lines for a crate in `dir`. */
+function sporeDependencies(dir: string, spores: SporeEntry[], deploymentDir: string): string[] {
+  return spores.map((s) => {
+    if (isFirstParty(s))
+      return `hypha-spore-${s} = { path = ${JSON.stringify(relative(dir, join(REPO, "spores", s)))} }`;
+    const source = s.git
+      ? `git = ${JSON.stringify(s.git)}, rev = ${JSON.stringify(s.rev)}`
+      : s.version
+        ? `version = ${JSON.stringify(s.version)}`
+        : `path = ${JSON.stringify(relative(dir, sporePath(s.name, deploymentDir, s.path ?? ".")))}`;
+    return `${s.crate} = { ${source} }`;
+  });
+}
+
+/** The Worker crate's `Cargo.toml` (design note 0030, §9): `hypha-host-workers` without
+ * its stock Worker, `worker` (its `#[event]`s expand to `::worker`), every spore. */
+export function workerCargoToml(dir: string, spores: SporeEntry[], deploymentDir = "."): string {
+  return [
+    "# Written by `hypha deploy` from hypha.json's `spores` (design note 0030, §9): change",
+    "# those, not this file.",
+    "[package]",
+    'name = "hypha-deployment-worker"',
+    'version = "0.1.0"',
+    'edition = "2024"',
+    "publish = false",
+    "",
+    "[lib]",
+    'crate-type = ["cdylib"]',
+    "",
+    "# Its own workspace: not one of the checkout's crates.",
+    "[workspace]",
+    "",
+    "[dependencies]",
+    `hypha-host-workers = { path = ${JSON.stringify(relative(dir, join(REPO, "crates", "hypha-host-workers")))}, default-features = false }`,
+    `worker = { version = "=0.8.7", features = ["http", "axum", "tokio-postgres"] }`,
+    ...sporeDependencies(dir, spores, deploymentDir),
+    "",
+  ].join("\n");
+}
+
+/** The Worker crate's `lib.rs`: `worker! { spores: [...], routes: [...] }`. */
+export function workerLib(spores: SporeEntry[]): string {
+  return hostMain(spores)
+    .replace("hypha_host_axum::host!", "hypha_host_workers::worker!")
+    .replace("`hypha deploy`", "`hypha deploy` (the Worker)");
+}
+
+/** Writes the deployment's Worker crate (its lock seeded like the host crate's) and
+ * returns its folder (absolute: wrangler builds there). */
+export async function writeWorkerCrate(
+  deploymentDir: string,
+  spores: SporeEntry[],
+): Promise<string> {
+  const dir = workerCrateDir(deploymentDir);
+  await mkdir(join(dir, "src"), { recursive: true });
+  await writeFile(join(dir, "Cargo.toml"), workerCargoToml(dir, spores, deploymentDir));
+  await writeFile(join(dir, "src", "lib.rs"), workerLib(spores));
+  const lock = join(dir, "Cargo.lock");
+  const existing = await readFile(lock, "utf8").catch(() => undefined);
+  if (existing === undefined)
+    await writeFile(lock, await readFile(join(REPO, "Cargo.lock"), "utf8"));
+  return dir;
 }
 
 /** Writes the deployment's host crate (seeding its `Cargo.lock` from the checkout's, so

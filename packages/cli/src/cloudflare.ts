@@ -50,7 +50,7 @@ import {
 } from "./apps.ts";
 import { connectStorefront, type StorefrontKeys, syncWebhook } from "./storefront.ts";
 import { run } from "./shell.ts";
-import { needsHostCrate, sporeFeatures } from "./spores.ts";
+import { needsHostCrate, sporeFeatures, writeHostCrate, writeWorkerCrate } from "./spores.ts";
 import { REPO } from "./templates.ts";
 
 /** The generated configuration, next to `hypha.json`. */
@@ -116,6 +116,9 @@ export type WorkerInput = {
   compatibilityDate: string;
   /** With R2 keys; without, media is off. */
   media: boolean;
+  /** The deployment's own Worker crate (absolute), for spores from outside this
+   * repository; absent, this repository's `hypha-host-workers`. */
+  workerCrate?: string;
   /** Co-located apps' Workers the API binds to (design note 0029, §9): its calls to
    * `host` go through `binding` (`HYPHA_APP_BINDINGS`, the Worker's `app_bindings`). */
   apps?: AppBinding[];
@@ -129,7 +132,9 @@ const str = (value: string) => JSON.stringify(value);
 /** The Worker's `wrangler.toml`, written on every deploy from `hypha.json`. */
 export function wranglerToml(d: Deployment, input: WorkerInput): string {
   const cf = d.cloudflare!;
-  const crate = relative(input.dir, WORKER_CRATE) || ".";
+  // The deployment's own Worker crate when it has spores from outside (design note 0030).
+  const workerCrate = input.workerCrate ?? WORKER_CRATE;
+  const crate = relative(input.dir, workerCrate) || ".";
   const vars: [string, string][] = [["HYPHA_CONFIG", input.config]];
   if (input.media) {
     vars.push(
@@ -179,11 +184,12 @@ export function wranglerToml(d: Deployment, input: WorkerInput): string {
     `routes = [{ pattern = ${str(d.domains.api)}, custom_domain = true }]`,
     "",
     "[build]",
-    // This repository's spores are the Worker's features (design note 0030, §9).
-    `command = ${str(`worker-build --release${workerFeatures(d)}`)}`,
+    // This repository's spores are the stock Worker's features; the deployment's own
+    // crate lists every spore itself (design note 0030, §9).
+    `command = ${str(`worker-build --release${input.workerCrate ? "" : workerFeatures(d)}`)}`,
     // Absolute: wrangler runs the build from its own working directory, reading `cwd`
     // as given (unlike `main`, which is relative to this file).
-    `cwd = ${str(WORKER_CRATE)}`,
+    `cwd = ${str(workerCrate)}`,
     "",
     "# Next to the database: its round trips are most of a request (W12).",
     ...placement,
@@ -252,8 +258,9 @@ export function corsRules(adminOrigin: string): string {
 export interface Tools {
   /** `wrangler …` with the account set; `capture` returns its output. */
   wrangler(args: string[], options?: { capture?: boolean }): Promise<string>;
-  /** Builds the native host and returns its binary's path. */
-  buildHost(): Promise<string>;
+  /** Builds the native host and returns its binary's path: the deployment's own host
+   * crate (`hostCrate`, relative to the checkout) when it has spores from outside. */
+  buildHost(hostCrate?: string): Promise<string>;
   /** Runs the native host's binary with only `env` (plus `PATH`/`HOME`), capturing. */
   host(binary: string, args: string[], env: Record<string, string>): Promise<string>;
   /** Fails with what to install when the Rust toolchain for Workers is missing. */
@@ -333,10 +340,11 @@ export async function deployCloudflare(
   if (!databaseUrl || problem) throw new Error(`.env: DATABASE_URL should be ${problem}`);
   const secretKey = env.get("HYPHA_SECRET_KEY");
   if (!secretKey) throw new Error(".env: HYPHA_SECRET_KEY is missing");
-  if (needsHostCrate(d.spores ?? []))
-    throw new Error(
-      "hypha.json: spores from outside this repository aren't built for Cloudflare yet (a Worker crate of the deployment's own): deploy them to a server, or list only this repository's",
-    );
+  // Spores from outside this repository: the deployment's own crates, the native one for
+  // `setup` (it migrates and registers them) and the Worker (design note 0030, §9).
+  const spores = d.spores ?? [];
+  const hostCrate = needsHostCrate(spores) ? await writeHostCrate(dir, spores) : undefined;
+  const workerCrate = needsHostCrate(spores) ? await writeWorkerCrate(dir, spores) : undefined;
   const keyId = env.get("R2_ACCESS_KEY_ID");
   const keySecret = env.get("R2_SECRET_ACCESS_KEY");
   const media = Boolean(keyId && keySecret);
@@ -424,7 +432,7 @@ export async function deployCloudflare(
   try {
     // 1. The database (W9): migrations, the store, the owner, the location, search.
     start("Building the setup tool (hypha-host-axum)");
-    const binary = await tools.buildHost();
+    const binary = await tools.buildHost(hostCrate);
     const hostEnv = {
       DATABASE_URL: databaseUrl,
       HYPHA_SECRET_KEY: secretKey,
@@ -522,6 +530,7 @@ export async function deployCloudflare(
         join(dir, WRANGLER_FILE),
         wranglerToml(d, {
           dir,
+          workerCrate,
           accountId,
           databaseUrl,
           hyperdriveId: cf.hyperdriveId!,
@@ -798,8 +807,17 @@ export function hereTools(dir: string, d: Deployment, env: EnvFile): Tools {
     wrangler(args, { capture } = {}) {
       return run("wrangler", args, { capture, cwd: REPO, env: auth() });
     },
-    async buildHost() {
+    async buildHost(hostCrate) {
       // Built with the deployment's spores: `setup` migrates and registers them.
+      const target = process.env.CARGO_TARGET_DIR ?? join(REPO, "target");
+      if (hostCrate) {
+        await run(
+          "cargo",
+          ["build", "--release", "--manifest-path", join(REPO, hostCrate, "Cargo.toml")],
+          { cwd: REPO, capture: true, env: { CARGO_TARGET_DIR: target } },
+        );
+        return join(target, "release", "hypha-deployment");
+      }
       const features = sporeFeatures(d.spores ?? []);
       const featureArgs = features ? ["--features", features] : [];
       await run("cargo", ["build", "--release", "-p", "hypha-host-axum", ...featureArgs], {
