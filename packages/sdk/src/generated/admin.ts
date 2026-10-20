@@ -4475,6 +4475,15 @@ export interface components {
              *     Otherwise absent or the payment's whole amount (`payment_amount_mismatch`).
              */
             amount?: number | null;
+            /**
+             * @description The provider's ID for the attempt this report is about, for a provider whose IDs
+             *     name attempts (a Stripe PaymentIntent's `pi_…`; for a refund, the intent it
+             *     refunds). Sent, Hypha collects a payment once: another attempt's report is
+             *     `409 payment_reference_mismatch` (`details: {status, held, reported}`) unless it
+             *     pays or authorizes a pending payment (started again); give back what that
+             *     attempt took. Leave it out when a capture or void carries an ID of its own.
+             */
+            attempt?: string | null;
             /** @description When it happened at the provider, RFC 3339; absent is now. */
             occurred_at?: string | null;
             /**

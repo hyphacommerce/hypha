@@ -57,10 +57,10 @@ pub enum PaymentError {
         from: PaymentStatus,
         to: PaymentStatus,
     },
-    /// A provider's report under another reference than the one the payment holds money
-    /// through (design note 0030: a second attempt at the provider, paid in an old tab):
-    /// the payment is collected once, so the report is refused for the provider to give
-    /// that money back.
+    /// A provider's report about another attempt than the payment's (the report names its
+    /// attempt; design note 0030): a second attempt's money for a payment past pending
+    /// (paid in an old tab: the payment collects once, so the provider gives that money
+    /// back), or another attempt's decline, cancel or refund (nothing to give back).
     #[error("payment {payment} is {status} through {held:?}, not {reported:?}")]
     ReferenceMismatch {
         payment: PaymentId,

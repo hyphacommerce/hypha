@@ -250,9 +250,19 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
 /// paid or authorized through another attempt (it was started again). Checked in the
 /// transaction that writes, so two attempts' reports racing can't both pass.
 fn other_attempt(payment: &Payment, input: &PaymentEvent) -> Result<(), PaymentError> {
-    let (Some(attempt), Some(held)) = (input.attempt.as_deref(), payment.reference()) else {
+    let attempt = input
+        .attempt
+        .as_deref()
+        .map(str::trim)
+        .filter(|a| !a.is_empty());
+    let (Some(attempt), Some(held)) = (attempt, payment.reference()) else {
         return Ok(());
     };
+    // A reference of another shape isn't one of the provider's attempts (what staff
+    // typed marking it paid by hand): nothing to compare.
+    if prefix(held) != prefix(attempt) {
+        return Ok(());
+    }
     let restarted = payment.status() == PaymentStatus::Pending
         && matches!(
             input.kind,
@@ -267,6 +277,11 @@ fn other_attempt(payment: &Payment, input: &PaymentEvent) -> Result<(), PaymentE
         held: held.to_string(),
         reported: attempt.to_string(),
     })
+}
+
+/// An ID's kind: what comes before its first `_` (`pi` for Stripe's `pi_…`), or all of it.
+fn prefix(id: &str) -> &str {
+    id.split_once('_').map_or(id, |(kind, _)| kind)
 }
 
 /// The payment an earlier request with this key reported on, if this caller sent it.

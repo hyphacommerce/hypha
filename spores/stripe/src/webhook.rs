@@ -155,13 +155,10 @@ pub fn intent_reports(event: &StripeEvent) -> Result<Vec<Report>, String> {
 /// change nothing; the one that completes a fully refunded charge is `refunded`.
 pub fn refund_reports(
     payment: PaymentId,
+    intent: &str,
     charge: &serde_json::Map<String, Value>,
     refunds: &[Refund],
 ) -> Result<Vec<Report>, String> {
-    let intent = charge
-        .get("payment_intent")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
     let currency = charge
         .get("currency")
         .and_then(Value::as_str)
@@ -292,7 +289,7 @@ pub async fn receive<S: Storage>(
                 .get("hypha_payment")
                 .and_then(|p| p.parse().ok())
             {
-                Some(payment) => refund_reports(payment, &event.object, &refunds),
+                Some(payment) => refund_reports(payment, &intent.id, &event.object, &refunds),
                 None => Err("not a Hypha payment".to_string()),
             },
         }
@@ -508,8 +505,8 @@ async fn undo_unwanted(stripe: &Stripe, settings: &Settings, report: &Report) ->
 fn fingerprint(report: &Report) -> [u8; 32] {
     use sha2::Digest;
     let text = format!(
-        "{}|{:?}|{:?}|{}",
-        report.payment, report.kind, report.amount, report.reference
+        "{}|{:?}|{:?}|{}|{}",
+        report.payment, report.kind, report.amount, report.reference, report.intent
     );
     sha2::Sha256::digest(text.as_bytes()).into()
 }
@@ -633,7 +630,8 @@ mod tests {
             refund("re_x", 100, "failed", 2),
             refund("re_2", 700, "succeeded", 3),
         ];
-        let reports = refund_reports(payment(), charge.as_object().unwrap(), &refunds).unwrap();
+        let reports =
+            refund_reports(payment(), "pi_1", charge.as_object().unwrap(), &refunds).unwrap();
         let summary: Vec<_> = reports
             .iter()
             .map(|r| (r.kind, r.amount, r.reference.as_str(), r.key.as_str()))
@@ -662,6 +660,7 @@ mod tests {
         let charge = json!({ "amount": 1000, "currency": "isk", "refunded": false });
         let reports = refund_reports(
             payment(),
+            "pi_1",
             charge.as_object().unwrap(),
             &[refund("re_1", 30000, "succeeded", 1)],
         )

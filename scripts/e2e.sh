@@ -849,6 +849,9 @@ PY
     step "the payment alone" 200 - "$PAYMENTS"
     contains "with its order and status" "\"order\":\"$CARD_ORDER\",\"method\":\"$CARD\",\"method_name\":\"Card\",\"provider\":\"app_pay\""
     contains "paid" '"status":"paid"'
+    step "another attempt's money, named, is a second collection" 409 payment_reference_mismatch \
+        -X POST "$PAYMENTS/events" -H "$JSON" -d '{"type":"paid","reference":"pi_other","attempt":"pi_other"}'
+    contains "naming both attempts" '"details":{"held":"pi_e2e","reported":"pi_other","status":"paid"}'
     step "an unknown payment alone" 404 payment_not_found "$BASE/admin/payments/pay_00000000000000000000000000000000"
     step "a refund the app doesn't answer" 409 payment_action_unsupported -X POST "$PAYMENTS/refund" \
         -H "$JSON" -d '{"amount":300}'

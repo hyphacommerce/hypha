@@ -583,6 +583,14 @@ pub struct PaymentEventRequest {
     /// send it for refunds (`422 refund_reference_required`). Up to 255 characters.
     #[serde(default)]
     reference: Option<String>,
+    /// The provider's ID for the attempt this report is about, for a provider whose IDs
+    /// name attempts (a Stripe PaymentIntent's `pi_…`; for a refund, the intent it
+    /// refunds). Sent, Hypha collects a payment once: another attempt's report is
+    /// `409 payment_reference_mismatch` (`details: {status, held, reported}`) unless it
+    /// pays or authorizes a pending payment (started again); give back what that
+    /// attempt took. Leave it out when a capture or void carries an ID of its own.
+    #[serde(default)]
+    attempt: Option<String>,
     /// When it happened at the provider, RFC 3339; absent is now.
     #[serde(default, deserialize_with = "instant")]
     #[schema(value_type = Option<String>)]
@@ -627,7 +635,7 @@ pub async fn report_event<S: Storage>(
         kind: req.body.kind.into(),
         amount: req.body.amount,
         reference: req.body.reference,
-        attempt: None,
+        attempt: req.body.attempt,
         occurred_at: req.body.occurred_at,
         idempotency: req.idempotency,
     };

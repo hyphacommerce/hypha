@@ -1451,6 +1451,45 @@ fn a_pending_payment_is_paid_through_an_attempt_made_again_but_not_failed_by_an_
 }
 
 #[test]
+fn a_report_naming_no_attempt_is_checked_as_before() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    let mut payment = pending_payment(&world);
+    payment.set_reference(Some("pi_9".to_string())).unwrap();
+    block_on(world.payments.update(&mut payment)).unwrap();
+    // An app's report under another reference, naming no attempt: taken.
+    let paid = world
+        .report_ref(K::Paid, None, Some("pi_1"), None)
+        .unwrap()
+        .value;
+    assert_eq!(paid.payments[0].status(), PaymentStatus::Paid);
+    assert_eq!(paid.payments[0].reference(), Some("pi_1"));
+}
+
+#[test]
+fn a_reference_staff_typed_isnt_an_attempt() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    // Staff mark it paid by hand, typing their own reference.
+    world
+        .mark_paid_as(&Ctx::system(), Some("bank 1234"))
+        .unwrap();
+    // The provider then reports a refund of its intent: not refused for that text.
+    let refunded = world
+        .report_attempt(
+            K::PartiallyRefunded,
+            Some(500),
+            Some("re_1"),
+            Some("pi_1"),
+            None,
+        )
+        .unwrap()
+        .value;
+    assert_eq!(refunded.payments[0].refunded(), eur(500));
+}
+
+#[test]
 fn a_capture_or_void_may_carry_the_providers_own_id_for_it() {
     use hypha_order_actions::PaymentEventKind as K;
     let world = World::new();

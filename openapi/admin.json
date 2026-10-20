@@ -5336,6 +5336,13 @@
               "null"
             ]
           },
+          "attempt": {
+            "description": "The provider's ID for the attempt this report is about, for a provider whose IDs\nname attempts (a Stripe PaymentIntent's `pi_…`; for a refund, the intent it\nrefunds). Sent, Hypha collects a payment once: another attempt's report is\n`409 payment_reference_mismatch` (`details: {status, held, reported}`) unless it\npays or authorizes a pending payment (started again); give back what that\nattempt took. Leave it out when a capture or void carries an ID of its own.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "occurred_at": {
             "description": "When it happened at the provider, RFC 3339; absent is now.",
             "type": [
