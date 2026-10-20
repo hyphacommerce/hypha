@@ -1477,14 +1477,15 @@ fn a_restarted_pending_payment_refuses_its_old_attempts_cancel() {
 }
 
 #[test]
-fn a_paid_payment_without_an_attempt_doesnt_take_a_second_collections_attempt() {
+fn an_apps_paid_payment_without_an_attempt_doesnt_take_another_attempt() {
     use hypha_order_actions::PaymentEventKind as K;
     let world = World::new();
     pending_payment(&world);
-    world.report_ref(K::Paid, None, Some("pi_1"), None).unwrap();
-    // A second intent's money names pi_2: not made the payment's attempt.
+    // An app's payment whose first report named no attempt (Stripe's all have one).
+    world.report_ref(K::Paid, None, Some("TX-1"), None).unwrap();
+    // A report naming another attempt: not made the payment's (it isn't checked).
     world
-        .report_attempt(K::Paid, None, Some("pi_2"), Some("pi_2"), None)
+        .report_attempt(K::Paid, None, Some("TX-2"), Some("TX-2"), None)
         .unwrap();
     let stored = block_on(
         world
