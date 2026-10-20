@@ -243,7 +243,8 @@ fn world() -> InMemoryPorts {
 
     let mut payment = Payment::new(NewPayment {
         id: PaymentId::from_uuid(uuid(4000)),
-        order: order_id(),
+        cart: None,
+        order: Some(order_id()),
         method: None,
         method_name: Some("Bank transfer".to_string()),
         provider: ProviderKey::manual(),

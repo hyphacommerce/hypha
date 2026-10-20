@@ -981,7 +981,13 @@ fn payment_error_status(e: &hypha_payments::PaymentError) -> Option<StatusCode> 
         // An open payment whose method was deleted (only a checkout replay meets it, and
         // logs it): the state of the store, not the request.
         P::MethodUnavailable(_) => Some(StatusCode::CONFLICT),
-        P::Money(_) | P::CurrencyMismatch { .. } | P::Inconsistent { .. } => None,
+        // Checkout asks for a payment's status and waits when the provider can't say;
+        // never answered on its own.
+        P::StatusUnsupported(_) => Some(StatusCode::CONFLICT),
+        P::Money(_)
+        | P::CurrencyMismatch { .. }
+        | P::AlreadyAttached { .. }
+        | P::Inconsistent { .. } => None,
     }
 }
 
@@ -1038,16 +1044,19 @@ impl From<hypha_checkout::CommandError> for ApiError {
             // Pricing the cart and reserving stock report like their own routes.
             E::Cart(inner) => return Self::from(inner.clone()),
             E::Inventory(inner) => return Self::from(inner.clone()),
-            // Asking to pay for a cancelled order.
-            E::Order(hypha_orders::OrderError::Cancelled(_)) => StatusCode::CONFLICT,
             // Checkout builds the order from a priced cart, so a broken order rule is a bug;
             // likewise the payment, from a stored method.
-            E::Order(_) | E::Payment(_) => return Self::internal(e),
+            E::Order(_) => return Self::internal(e),
+            // Asking a payment's provider where it is, or moving it as it says.
+            E::Payment(p) => match payment_error_status(p) {
+                Some(status) => status,
+                None => return Self::internal(e),
+            },
             // A method in a body (`PUT …/payment-method`).
             E::PaymentMethodNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Idempotency(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            // The cart or the order in the URL.
-            E::CartNotFound(_) | E::OrderNotFound(_) => StatusCode::NOT_FOUND,
+            // The cart in the URL.
+            E::CartNotFound(_) => StatusCode::NOT_FOUND,
             // The cart's or the shop's state right now, not the request, is the problem.
             E::CartCompleted { .. }
             | E::EmptyCart(_)
@@ -1059,7 +1068,12 @@ impl From<hypha_checkout::CommandError> for ApiError {
             | E::ShippingUnavailable(_)
             | E::PaymentMethodRequired(_)
             | E::PaymentMethodUnavailable(_)
-            | E::NotPayable { .. } => StatusCode::CONFLICT,
+            | E::PaymentMethodOffline(_)
+            | E::NothingToPay(_)
+            | E::CartPaymentCommitted { .. }
+            | E::PaymentRequired(_)
+            | E::PaymentPending { .. }
+            | E::PaymentFailed { .. } => StatusCode::CONFLICT,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
@@ -1072,7 +1086,12 @@ impl From<hypha_checkout::CommandError> for ApiError {
             E::TotalChanged { expected, actual } => {
                 Some(json!({ "expected": expected, "actual": actual }))
             }
-            E::NotPayable { status, .. } => Some(json!({ "financial_status": status.as_str() })),
+            E::CartPaymentCommitted { payment, .. } | E::PaymentPending { payment, .. } => {
+                Some(json!({ "payment": payment }))
+            }
+            E::PaymentFailed {
+                payment, status, ..
+            } => Some(json!({ "payment": payment, "status": status.as_str() })),
             _ => None,
         };
         Self::domain(status, e).with_details(details)

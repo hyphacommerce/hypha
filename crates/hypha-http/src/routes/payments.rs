@@ -3,7 +3,9 @@
 //! §3.1): the app reporting results, staff asking it to capture, void or refund.
 
 use axum::{Json, extract::State, http::StatusCode, response::Response};
-use hypha_core::{ChannelId, MarketId, Money, OrderId, PaymentId, PaymentMethodId, Stamped};
+use hypha_core::{
+    CartId, ChannelId, MarketId, Money, OrderId, PaymentId, PaymentMethodId, Stamped,
+};
 use hypha_order_actions::{PaymentEvent, PaymentEventKind, record_payment_event};
 use hypha_payments::{
     ActOnPayment, CreatePaymentMethod, NextAction, Payment, PaymentAction, PaymentMethod,
@@ -367,6 +369,8 @@ pub async fn delete<S: Storage>(
 pub enum PaymentStatusDto {
     Pending,
     Authorized,
+    /// Taken and being collected (SEPA: days; design note 0031): not paid yet.
+    Processing,
     Paid,
     Failed,
     Voided,
@@ -379,6 +383,7 @@ impl From<PaymentStatus> for PaymentStatusDto {
         match s {
             PaymentStatus::Pending => PaymentStatusDto::Pending,
             PaymentStatus::Authorized => PaymentStatusDto::Authorized,
+            PaymentStatus::Processing => PaymentStatusDto::Processing,
             PaymentStatus::Paid => PaymentStatusDto::Paid,
             PaymentStatus::Failed => PaymentStatusDto::Failed,
             PaymentStatus::Voided => PaymentStatusDto::Voided,
@@ -392,8 +397,11 @@ impl From<PaymentStatus> for PaymentStatusDto {
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct PaymentResponse {
     id: PaymentId,
-    /// The order it collects for.
-    order: OrderId,
+    /// The cart it was started for; `null` for money staff recorded by hand.
+    cart: Option<CartId>,
+    /// The order it collects for; `null` while it's a cart's, before checkout placed
+    /// the order (design note 0031).
+    order: Option<OrderId>,
     /// The method it was made with; `null` for money staff recorded on an order placed
     /// without one.
     method: Option<PaymentMethodId>,
@@ -431,6 +439,7 @@ impl PaymentResponse {
         let (created_at, updated_at) = stamp_times(p.stamps())?;
         Ok(Self {
             id: p.id(),
+            cart: p.cart(),
             order: p.order(),
             method: p.method(),
             method_name: p.method_name().map(str::to_string),
@@ -616,9 +625,12 @@ pub struct PaymentEventRequest {
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct PaymentEventResponse {
     payment: PaymentResponse,
-    order: OrderId,
-    /// The order's payment status, derived from its payments.
-    financial_status: FinancialStatusDto,
+    /// Its order; `null` while it's a cart's and the checkout isn't complete (design
+    /// note 0031). A report that commits a cart's payment completes its checkout: the
+    /// order placed then.
+    order: Option<OrderId>,
+    /// The order's payment status, derived from its payments; `null` without an order.
+    financial_status: Option<FinancialStatusDto>,
 }
 
 /// What a payment's provider reports (design note 0029, §3.1): a payment app tells
@@ -655,18 +667,42 @@ pub async fn report_event<S: Storage>(
         idempotency: req.idempotency,
     };
     let done = record_payment_event(&ctx, &ports, &state.clock, input).await?;
-    let payment = done
-        .value
-        .payments
-        .iter()
-        .find(|p| p.id() == id)
-        .ok_or_else(|| ApiError::internal(format!("payment {id} left its order")))?;
+    let mut report = done.value;
+    // A cart's money committed: its checkout completes now (design note 0031, §1.5).
+    let completed = match state
+        .complete_paid_checkout(&ports, &ctx, &report.payment)
+        .await
+    {
+        Ok(order) => order,
+        // The report stands; the app's next report (or the shopper's checkout) tries
+        // again, and money a checkout that can't complete took is given back.
+        Err(e) => {
+            tracing::warn!(payment = %id, error = %e, "completing a paid checkout failed");
+            None
+        }
+    };
+    if let Some(order) = completed {
+        use hypha_orders::{HasOrders, OrderRepo};
+        use hypha_payments::{HasPayments, PaymentRepo};
+        let order = ports.orders().get(order).await?;
+        let payment = ports.payments().get(id).await?;
+        if let (Some(order), Some(payment)) = (order, payment) {
+            report.payment = payment;
+            report.order = Some(hypha_order_actions::OrderPayments {
+                order,
+                payments: Vec::new(),
+            });
+        }
+    }
     Ok(idempotent_response(
         StatusCode::OK,
         PaymentEventResponse {
-            payment: PaymentResponse::new(payment)?,
-            order: done.value.order.id(),
-            financial_status: done.value.order.financial_status().into(),
+            payment: PaymentResponse::new(&report.payment)?,
+            order: report.order.as_ref().map(|o| o.order.id()),
+            financial_status: report
+                .order
+                .as_ref()
+                .map(|o| o.order.financial_status().into()),
         },
         done.replayed,
     ))
@@ -809,11 +845,7 @@ async fn record_completed<S: Storage>(
     ports.act_as(actor);
     let ctx = Ctx::new(actor, vec![Scope::PaymentsWrite]);
     match record_payment_event(&ctx, ports, &state.clock, input).await {
-        Ok(done) => done
-            .value
-            .payments
-            .into_iter()
-            .find(|p| p.id() == payment.id()),
+        Ok(done) => Some(done.value.payment),
         Err(e) => {
             tracing::warn!(payment = %payment.id(), "recording what the provider completed failed: {e}");
             None

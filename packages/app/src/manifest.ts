@@ -19,6 +19,7 @@ export type PersonalDataScope = (typeof PERSONAL_DATA_SCOPES)[number];
 export type ExtensionPointName =
   | "shipping.rates"
   | "payments.start"
+  | "payments.status"
   | "payments.capture"
   | "payments.void"
   | "payments.refund"

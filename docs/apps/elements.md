@@ -23,7 +23,9 @@ publishable key) and gets `{ app, tag, module, props }` per installed app: `modu
 an absolute URL, and `props` the values to set. For payments, the props come from the
 payment's next action instead: `payments.start` answered
 `client_widget { element, props }`, and the storefront mounts that element with those
-props in the payment step.
+props in the checkout's payment step, before the order exists (design note 0031): on
+`hypha:payment-confirmed` it checks the cart out, which places the order once the app
+says the money is committed.
 
 Targets: `checkout.payment`, `product.block`, `cart.block`, `order.confirmation` (and
 whatever later versions add: a storefront shows what it supports).
@@ -117,7 +119,7 @@ Each is a `CustomEvent` dispatched on the element with `bubbles: true` and
 
 | Event | `detail` | Meaning |
 | --- | --- | --- |
-| `hypha:payment-confirmed` | `{ paymentId: string }` | The shopper finished paying. The storefront shows the confirmation; the payment's final state arrives by the app reporting to Hypha (`POST /admin/payments/{id}/events`), so the storefront reads the order rather than trusting the event. |
+| `hypha:payment-confirmed` | `{ paymentId: string }` | The shopper finished paying. The storefront checks the cart out (`POST /storefront/carts/{id}/checkout`), which places the order once the app says the money is committed (its report, or `payments.status` when asked: `409 payment_pending` until then), so the storefront trusts Hypha's answer, not the event. |
 | `hypha:error` | `{ message: string }` | Something the shopper should see, in their language (plain text). |
 | `hypha:resize` | `{ height: number }` | The element's content height in CSS pixels changed. |
 

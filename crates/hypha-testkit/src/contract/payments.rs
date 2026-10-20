@@ -1,5 +1,5 @@
 use hypha_core::{
-    ChannelId, Currency, FinancialStatus, HasBatch, HasOutbox, MarketId, Money, OrderId,
+    CartId, ChannelId, Currency, FinancialStatus, HasBatch, HasOutbox, MarketId, Money, OrderId,
     OutboxRepo, PaymentId, PaymentMethodId, RepoError, StoredEvent, Timestamp, Version, Versioned,
 };
 use hypha_orders::{HasOrders, OrderRepo, StageOrders};
@@ -37,6 +37,8 @@ pub async fn payment_repo<R: PaymentRepo>(make: impl AsyncFn() -> R) {
     payment_unique_id(&make().await).await;
     scenario("payment: an order's payments, newest first, and no other order's");
     lists_for_order(&make().await).await;
+    scenario("payment: a cart's payments before the order, newest first; attached later");
+    cart_payments(&make().await).await;
 }
 
 /// Runs the scenarios that span methods and payments: a method an open payment uses
@@ -69,6 +71,10 @@ fn mid(n: u128) -> PaymentMethodId {
 
 fn pid(n: u128) -> PaymentId {
     PaymentId::from_uuid(Uuid::from_u128(n))
+}
+
+fn cid(n: u128) -> CartId {
+    CartId::from_uuid(Uuid::from_u128(0x6a00 + n))
 }
 
 fn oid(n: u128) -> OrderId {
@@ -198,7 +204,8 @@ async fn method_deletes<R: PaymentMethodRepo>(repo: &R) {
 fn payment(n: u128, order: u128, method: u128) -> Payment {
     Payment::new(NewPayment {
         id: pid(n),
-        order: oid(order),
+        cart: Some(cid(order)),
+        order: Some(oid(order)),
         method: Some(mid(method)),
         method_name: Some("Bank transfer".to_string()),
         provider: ProviderKey::manual(),
@@ -300,6 +307,46 @@ async fn lists_for_order<R: PaymentRepo>(repo: &R) {
     assert_eq!(listed[1], voided);
 }
 
+/// Payment `n` started for cart `cart` before its order (design note 0031).
+fn cart_payment(n: u128, cart: u128) -> Payment {
+    Payment::new(NewPayment {
+        id: pid(n),
+        cart: Some(cid(cart)),
+        order: None,
+        method: Some(mid(1)),
+        method_name: Some("Card".to_string()),
+        provider: ProviderKey::new("app_pay").unwrap(),
+        amount: eur(12_345),
+        instructions: None,
+    })
+    .unwrap()
+}
+
+async fn cart_payments<R: PaymentRepo>(repo: &R) {
+    assert_eq!(repo.list_for_cart(cid(1)).await, Ok(vec![]));
+    for (n, cart) in [(2, 1), (1, 1), (3, 2)] {
+        repo.insert(&mut cart_payment(n, cart)).await.unwrap();
+    }
+    let ids: Vec<PaymentId> = repo
+        .list_for_cart(cid(1))
+        .await
+        .unwrap()
+        .iter()
+        .map(Payment::id)
+        .collect();
+    assert_eq!(ids, [pid(2), pid(1)]);
+    let stored = repo.get(pid(2)).await.unwrap().unwrap();
+    assert_eq!((stored.cart(), stored.order()), (Some(cid(1)), None));
+    assert_eq!(repo.list_for_order(oid(1)).await, Ok(vec![]));
+    // Processing, then attached to its order: an order's payment now.
+    let mut paid = stored;
+    paid.process(Some("pi_2".to_string())).unwrap();
+    paid.attach(oid(1)).unwrap();
+    repo.update(&mut paid).await.unwrap();
+    assert_eq!(repo.get(pid(2)).await, Ok(Some(paid.clone())));
+    assert_eq!(repo.list_for_order(oid(1)).await, Ok(vec![paid]));
+}
+
 async fn open_payments_keep_their_method<S: HasPaymentMethods + HasPayments>(ports: &S) {
     let mut m = method(1, 0);
     ports.payment_methods().insert(&mut m).await.unwrap();
@@ -326,6 +373,14 @@ async fn open_payments_keep_their_method<S: HasPaymentMethods + HasPayments>(por
         ports.payment_methods().delete(&m).await,
         Err(RepoError::StaleVersion)
     );
+    // A processing payment holds its method too (design note 0031).
+    let mut third = method(3, 2);
+    ports.payment_methods().insert(&mut third).await.unwrap();
+    let mut slow = payment(3, 3, 3);
+    ports.payments().insert(&mut slow).await.unwrap();
+    slow.process(None).unwrap();
+    ports.payments().update(&mut slow).await.unwrap();
+    assert_eq!(ports.payment_methods().delete(&third).await, in_use);
     // Another method's open payment doesn't hold this one.
     assert_eq!(ports.payment_methods().delete(&other).await, Ok(()));
     // Once nothing open uses it (paid, voided), it goes.
@@ -353,7 +408,8 @@ async fn order_and_payment<S: HasOrders>(ports: &S) -> (hypha_orders::Order, Pay
     ports.orders().insert(&mut o).await.unwrap();
     let p = Payment::new(NewPayment {
         id: pid(1),
-        order: o.id(),
+        cart: Some(o.cart()),
+        order: Some(o.id()),
         method: Some(mid(1)),
         method_name: Some("Cash on delivery".to_string()),
         provider: ProviderKey::manual(),

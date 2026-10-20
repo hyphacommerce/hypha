@@ -330,6 +330,7 @@ pub async fn act_on_payment<S: HasPayments, P: PaymentProviders>(
     let request = ActionRequest {
         action: input.action,
         payment: payment.id(),
+        cart: payment.cart(),
         order: payment.order(),
         amount: amount
             .map(|a| Money::new(a, currency))

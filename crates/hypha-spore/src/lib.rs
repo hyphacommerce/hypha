@@ -82,8 +82,8 @@ pub mod payments {
     pub use hypha_payments::{
         ActionAnswer, ActionRequest, HasPaymentMethods, HasPayments, NextAction, Payment,
         PaymentAction, PaymentError, PaymentMethod, PaymentMethodRepo, PaymentProvider,
-        PaymentProviders, PaymentRepo, PaymentRequest, PaymentStatus, ProviderKey, Started,
-        get_payment, no_settings,
+        PaymentProviders, PaymentRepo, PaymentRequest, PaymentStatus, ProviderKey, ProviderState,
+        ProviderStatus, Started, StatusRequest, get_payment, no_settings,
     };
 }
 
@@ -95,11 +95,18 @@ pub mod orders {
     };
 }
 
+/// Checkout (design note 0031): what completing a paid cart's checkout answers, for a
+/// payment spore's webhook (`hypha_http`'s `AppState::complete_paid_checkout` runs it).
+pub mod checkout {
+    pub use hypha_checkout::{CommandError, Placed, complete_paid_checkout};
+}
+
 /// The order workflows a spore calls: reporting what happened to a payment
 /// (`record_payment_event`, idempotent by its key), and the ports they need.
 pub mod order_actions {
     pub use hypha_order_actions::{
-        CommandError, OrderActionPorts, PaymentEvent, PaymentEventKind, record_payment_event,
+        CommandError, OrderActionPorts, PaymentEvent, PaymentEventKind, PaymentReport,
+        record_payment_event,
     };
 }
 

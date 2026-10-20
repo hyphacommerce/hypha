@@ -1,8 +1,8 @@
 //! Payment methods and payments (design note 0027): one row each, no child tables.
 
 use hypha_core::{
-    ChannelId, MarketId, Money, OrderId, PaymentId, PaymentMethodId, Recorded, RepoError, Version,
-    Versioned, stamp_insert, stamp_update,
+    CartId, ChannelId, MarketId, Money, OrderId, PaymentId, PaymentMethodId, Recorded, RepoError,
+    Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_payments::{
     Payment, PaymentMethod, PaymentMethodRepo, PaymentMethodSnapshot, PaymentRepo, PaymentSnapshot,
@@ -184,7 +184,7 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
             .query_typed_opt(
                 "DELETE FROM payment_methods WHERE id = $1 AND version = $2
                      AND NOT EXISTS (SELECT 1 FROM payments WHERE method_id = $1
-                                     AND status IN ('pending', 'authorized'))
+                                     AND status IN ('pending', 'authorized', 'processing'))
                  RETURNING id",
                 &[(&id, Type::UUID), (&version, Type::INT8)],
             )
@@ -211,7 +211,7 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
 
 fn payment_columns() -> String {
     format!(
-        "id, version, order_id, method_id, method_name, provider, currency, amount, refunded,
+        "id, version, cart_id, order_id, method_id, method_name, provider, currency, amount, refunded,
          status, reference, refund_references, attempt, instructions, {}, {}, {}",
         micros("paid_at"),
         micros("voided_at"),
@@ -228,11 +228,14 @@ fn payment_from_row(row: &Row) -> Result<Payment, RepoError> {
     let provider: String = col(row, "provider")?;
     let status: String = col(row, "status")?;
     let method: Option<Uuid> = col(row, "method_id")?;
+    let cart: Option<Uuid> = col(row, "cart_id")?;
+    let order: Option<Uuid> = col(row, "order_id")?;
     Payment::restore(PaymentSnapshot {
         id,
         version: version_from_db(col(row, "version")?)?,
         stamps: stamps_from_row(row)?,
-        order: OrderId::from_uuid(col(row, "order_id")?),
+        cart: cart.map(CartId::from_uuid),
+        order: order.map(OrderId::from_uuid),
         method: method.map(PaymentMethodId::from_uuid),
         method_name: col(row, "method_name")?,
         provider: ProviderKey::new(&provider).map_err(corrupt)?,
@@ -282,6 +285,23 @@ impl<C: PgConnection> PaymentRepo for PgStore<C> {
             .collect()
     }
 
+    async fn list_for_cart(&self, cart: CartId) -> Result<Vec<Payment>, RepoError> {
+        let mut conn = self.conn().await;
+        conn.db()
+            .query_typed(
+                &format!(
+                    "SELECT {} FROM payments WHERE cart_id = $1 ORDER BY id DESC",
+                    payment_columns()
+                ),
+                &[(&cart.as_uuid(), Type::UUID)],
+            )
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(payment_from_row)
+            .collect()
+    }
+
     async fn insert(&self, payment: &mut Payment) -> Result<(), RepoError> {
         stamp_insert(payment, self.now());
         let s = payment.snapshot();
@@ -320,14 +340,14 @@ pub(crate) async fn insert_payment(
         &format!(
             "INSERT INTO payments (id, version, order_id, method_id, method_name, provider,
                  currency, amount, refunded, status, reference, instructions, paid_at,
-                 voided_at, refund_references, attempt)
-             VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, {}, {}, $14, $15)",
+                 voided_at, refund_references, attempt, cart_id)
+             VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, {}, {}, $14, $15, $16)",
             ts(12),
             ts(13)
         ),
         &[
             (&s.id.as_uuid(), Type::UUID),
-            (&s.order.as_uuid(), Type::UUID),
+            (&s.order.map(|o| o.as_uuid()), Type::UUID),
             (&s.method.map(|m| m.as_uuid()), Type::UUID),
             (&s.method_name, Type::TEXT),
             (&s.provider.as_str(), Type::TEXT),
@@ -341,6 +361,7 @@ pub(crate) async fn insert_payment(
             (&opt_micros(s.voided_at), Type::INT8),
             (&s.refund_references, Type::TEXT_ARRAY),
             (&s.attempt, Type::TEXT),
+            (&s.cart.map(|c| c.as_uuid()), Type::UUID),
         ],
     )
     .await
@@ -361,7 +382,7 @@ pub(crate) async fn update_payment(
                      method_name = $5, provider = $6, currency = $7, amount = $8,
                      refunded = $9, status = $10, reference = $11, instructions = $12,
                      paid_at = {}, voided_at = {}, refund_references = $15,
-                     attempt = $16
+                     attempt = $16, cart_id = $17
                  WHERE id = $1 AND version = $2 RETURNING version",
                 ts(13),
                 ts(14)
@@ -369,7 +390,7 @@ pub(crate) async fn update_payment(
             &[
                 (&s.id.as_uuid(), Type::UUID),
                 (&version_to_db(s.version)?, Type::INT8),
-                (&s.order.as_uuid(), Type::UUID),
+                (&s.order.map(|o| o.as_uuid()), Type::UUID),
                 (&s.method.map(|m| m.as_uuid()), Type::UUID),
                 (&s.method_name, Type::TEXT),
                 (&s.provider.as_str(), Type::TEXT),
@@ -383,6 +404,7 @@ pub(crate) async fn update_payment(
                 (&opt_micros(s.voided_at), Type::INT8),
                 (&s.refund_references, Type::TEXT_ARRAY),
                 (&s.attempt, Type::TEXT),
+                (&s.cart.map(|c| c.as_uuid()), Type::UUID),
             ],
         )
         .await

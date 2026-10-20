@@ -1,8 +1,8 @@
 "use client";
 
-// Checkout's forms (design note 0024, §7; the `payment-form` template without its card
-// section: the store's methods are manual ones, design note 0027): contact and address,
-// a shipping option per group, how the shopper pays, and "Place order". Each saves
+// Checkout's forms (design note 0024, §7): contact and address, a shipping option per
+// group, how the shopper pays, and "Place order" (a manual method) or the payment
+// itself (an online one, paid before the order exists: design note 0031). Each saves
 // through its server action, which answers with the page re-rendered from the cart
 // (`refresh()`).
 
@@ -13,14 +13,17 @@ import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
+import { type ElementEvent, HyphaElement } from "@hypha/storefront-elements/react";
 import { useState, useTransition } from "react";
 
 import {
+  type CartPaymentResult,
   type Details,
   placeOrder,
   saveDetails,
   selectPaymentMethod,
   selectShipping,
+  startCartPayment,
 } from "@/app/[country]/actions";
 
 /** The fields the form won't save without (marked required below). */
@@ -288,6 +291,112 @@ export function PlaceOrder({
           })
         }
       />
+      {!ready && missing && <Text type="supporting">{missing}</Text>}
+      {error && <Banner status="error" title={error} />}
+    </VStack>
+  );
+}
+
+/** How long the checkout waits for the provider to confirm a payment the shopper made. */
+const CONFIRM_TRIES = 15;
+const CONFIRM_DELAY_MS = 2000;
+
+/**
+ * Paying online before the order exists (design note 0031): "Continue to payment" starts
+ * the cart's payment, the provider's card form (its storefront element, design note
+ * 0029, §7) mounts here, and once it says the shopper paid the order is placed (asked
+ * again for a while if the provider hasn't confirmed yet). A provider's page (a
+ * redirect) comes back to `/checkout/complete`, which places the order.
+ */
+export function PayOnline({
+  country,
+  total,
+  attempt,
+  ready,
+  missing,
+  label,
+}: {
+  country: string;
+  total: { amount: number; currency: string };
+  attempt: string;
+  ready: boolean;
+  missing?: string;
+  /** "Continue to payment" or the like. */
+  label: string;
+}) {
+  const [started, setStarted] = useState<CartPaymentResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState(false);
+  const [pending, start] = useTransition();
+
+  /** Places the order, asking again while the provider hasn't confirmed the payment. */
+  const place = async () => {
+    setWaiting(true);
+    setError(null);
+    for (let attemptNo = 0; attemptNo < CONFIRM_TRIES; attemptNo++) {
+      // Success leaves this page (the action redirects to the confirmation).
+      const result = await placeOrder({ country, total, attempt });
+      if (!result?.pending) {
+        setWaiting(false);
+        if (result) setError(result.error);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, CONFIRM_DELAY_MS));
+    }
+    setWaiting(false);
+    setError(
+      "Your payment is still being confirmed. You'll get an email once your order is placed.",
+    );
+  };
+
+  const begin = () =>
+    start(async () => {
+      setError(null);
+      const returnUrl = new URL(
+        `${window.location.pathname.replace(/\/checkout\/?$/, "")}/checkout/complete`,
+        window.location.origin,
+      ).toString();
+      const result = await startCartPayment({ country, total, returnUrl });
+      if (result.committed) return place();
+      const next = result.nextAction;
+      if (next?.type === "redirect" && /^https?:\/\//.test(next.url)) {
+        window.location.assign(next.url);
+        return;
+      }
+      setStarted(result);
+      setError(result.error);
+    });
+
+  const onEvent = (event: ElementEvent) => {
+    if (event.type === "hypha:payment-confirmed") void place();
+    else if (event.type === "hypha:error") setError(event.detail.message);
+  };
+
+  const next = started?.nextAction ?? null;
+  return (
+    <VStack gap={3}>
+      {next?.type === "client_widget" && started?.module ? (
+        <HyphaElement
+          tag={next.element}
+          module={started.module}
+          props={next.props}
+          onEvent={onEvent}
+        />
+      ) : (
+        <Button
+          label={started ? "Try again" : label}
+          variant="primary"
+          size="lg"
+          width="100%"
+          isDisabled={!ready}
+          isLoading={pending}
+          clickAction={begin}
+        />
+      )}
+      {next?.type === "client_widget" && !started?.module && (
+        <Text color="secondary">This payment can&apos;t be shown here. Try again later.</Text>
+      )}
+      {waiting && <Banner status="info" title="Confirming your payment…" />}
       {!ready && missing && <Text type="supporting">{missing}</Text>}
       {error && <Banner status="error" title={error} />}
     </VStack>

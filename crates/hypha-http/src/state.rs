@@ -400,6 +400,49 @@ impl<S> AppState<S> {
 }
 
 impl<S: Storage> AppState<S> {
+    /// Completes the checkout a provider's report just committed (design note 0031,
+    /// §1.5): when `payment` is a cart's, without its order yet, and `authorized`,
+    /// `processing` or `paid`, the cart becomes its order now, though the shopper never
+    /// came back (`hypha_checkout::complete_paid_checkout`, as `ctx`: the reporter, with
+    /// `payments:write`). The order placed (or placed already by the shopper's browser);
+    /// `None` when there was nothing to complete. A checkout that can't complete gives
+    /// the money back and answers why; a storage failure is worth trying again (the
+    /// provider's report delivered again does).
+    pub async fn complete_paid_checkout<P>(
+        &self,
+        ports: &P,
+        ctx: &hypha_core::Ctx,
+        payment: &hypha_payments::Payment,
+    ) -> Result<Option<hypha_core::OrderId>, hypha_checkout::CommandError>
+    where
+        P: hypha_checkout::CheckoutPorts
+            + hypha_shipping::HasAppProviders
+            + hypha_apps::HasApps
+            + hypha_apps::HasExtensionEndpoints
+            + hypha_apps::HasSporeSettings
+            + hypha_extensions::HasExtensionCalls,
+    {
+        let (Some(cart), None) = (payment.cart(), payment.order()) else {
+            return Ok(None);
+        };
+        if !payment.status().committed() {
+            return Ok(None);
+        }
+        let rates = self.cart_rates(ports, cart);
+        let providers = self.payments(ports);
+        let placed = hypha_checkout::complete_paid_checkout(
+            ctx,
+            ports,
+            &self.ids,
+            &self.clock,
+            &rates,
+            &providers,
+            payment.id(),
+        )
+        .await?;
+        Ok(placed.map(|p| p.order.id()))
+    }
+
     /// A request's payment providers: the ones this host was built with and the
     /// store's payment apps (design note 0029, §3.1).
     pub fn payments<'a, P>(

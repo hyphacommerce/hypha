@@ -1,5 +1,6 @@
 # 0029: The apps platform: extension points, installation, and app UI in any admin or storefront
 
+- **Amended by 0031** (2026-10-20): payment first. An online method's payment is started for the cart before its order exists and checkout places the order once the money is committed; `payments.start` is version 2 (a cart), `payments.status` is new, and the confirmation page no longer starts payments.
 - **Amended by 0030** (2026-10-19): spores are back beside apps, a trusted, compiled-in
   way to implement the same contracts (AP1, AP8 for Stripe, §12).
 - **Status:** Accepted (2026-10-18). Replaces the spore design this note first held

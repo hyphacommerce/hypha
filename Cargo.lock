@@ -1489,6 +1489,7 @@ name = "hypha-spore"
 version = "0.1.0"
 dependencies = [
  "hypha-apps",
+ "hypha-checkout",
  "hypha-core",
  "hypha-http",
  "hypha-order-actions",

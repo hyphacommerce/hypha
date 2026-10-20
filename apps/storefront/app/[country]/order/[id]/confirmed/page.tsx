@@ -15,13 +15,12 @@ import type { StorefrontSchemas } from "@hypha/sdk/storefront";
 
 import { AppElements } from "@/components/app-element";
 import { ReloadCart } from "@/components/cart/cart-provider";
-import { CompletePayment } from "@/components/complete-payment";
 import { lineImage } from "@/components/line-image";
 import { SummaryLine, Totals } from "@/components/totals";
 import { api, countryOf } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
-import { elementsFor, paymentElementModule } from "@/lib/app-elements";
-import { link, orderTokenCookie, paymentStartOf } from "@/lib/site";
+import { elementsFor } from "@/lib/app-elements";
+import { link, orderTokenCookie } from "@/lib/site";
 
 /** Per request: it reads the shopper's order with their token (design note 0024, §7). */
 export const dynamic = "force-dynamic";
@@ -40,6 +39,8 @@ function paymentStatus(status: PaymentStatus): {
       return { label: "Awaiting payment", variant: "warning" };
     case "authorized":
       return { label: "Authorized", variant: "neutral" };
+    case "processing":
+      return { label: "Processing", variant: "neutral" };
     case "paid":
       return { label: "Paid", variant: "success" };
     case "failed":
@@ -102,23 +103,9 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
 
   const to = order.shipping_address;
   const payment = order.payment ?? null;
-  // A payment the shopper still has to finish: a payment app's widget, or a start that
-  // failed (design note 0029, §7). Instructions (bank transfer, cash) need nothing more.
-  const unfinished =
-    payment !== null &&
-    (payment.status === "failed" || (payment.status === "pending" && !payment.instructions));
-  const [kept, confirmationElements] = await Promise.all([
-    unfinished ? paymentStartOf(order.id) : null,
-    elementsFor("order.confirmation"),
-  ]);
-  const widget = kept?.next_action?.type === "client_widget" ? kept.next_action : null;
-  const initial = kept
-    ? {
-        nextAction: kept.next_action,
-        error: kept.error,
-        module: widget ? await paymentElementModule(widget.element) : null,
-      }
-    : null;
+  // An order paid online was paid before it existed (design note 0031); one paid by
+  // hand shows its instructions (bank transfer, cash on delivery).
+  const confirmationElements = await elementsFor("order.confirmation");
   const status = payment ? paymentStatus(payment.status) : undefined;
   const placed = PLACED_DATE.format(new Date(order.placed_at));
   return (
@@ -194,7 +181,11 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
                       <span className="shop-pre-line">{payment.instructions}</span>
                     </Text>
                   )}
-                  {unfinished && <CompletePayment order={order.id} initial={initial} />}
+                  {payment.status === "processing" && (
+                    <Text color="secondary">
+                      Your payment is on its way. We&apos;ll email you once it arrives.
+                    </Text>
+                  )}
                 </>
               )}
             </VStack>

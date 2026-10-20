@@ -13,7 +13,8 @@ pub use admin::{
 
 pub use payments::{
     NextAction, PaymentActionRequest, PaymentActionResponse, PaymentStartRequest,
-    PaymentStartResponse, PaymentsCapture, PaymentsRefund, PaymentsStart, PaymentsVoid,
+    PaymentStartResponse, PaymentState, PaymentStatusRequest, PaymentStatusResponse,
+    PaymentsCapture, PaymentsRefund, PaymentsStart, PaymentsStatus, PaymentsVoid,
 };
 pub use search::{
     SearchFacetCounts, SearchFacetValue, SearchFilter, SearchGroup, SearchHit, SearchPriceRange,
@@ -49,6 +50,7 @@ const fn known<P: ExtensionPoint>() -> Known {
 pub const KNOWN: &[Known] = &[
     known::<ShippingRates>(),
     known::<PaymentsStart>(),
+    known::<PaymentsStatus>(),
     known::<PaymentsCapture>(),
     known::<PaymentsVoid>(),
     known::<PaymentsRefund>(),

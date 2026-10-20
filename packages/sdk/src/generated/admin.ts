@@ -4505,9 +4505,8 @@ export interface components {
         };
         /** @description A payment after a report, and the payment status of its order. */
         PaymentEventResponse: {
-            /** @description The order's payment status, derived from its payments. */
-            financial_status: components["schemas"]["FinancialStatusDto"];
-            order: components["schemas"]["OrderId"];
+            financial_status?: components["schemas"]["FinancialStatusDto"] | null;
+            order?: components["schemas"]["OrderId"] | null;
             payment: components["schemas"]["PaymentResponse"];
         };
         /**
@@ -4592,6 +4591,7 @@ export interface components {
              *     checked.
              */
             attempt?: string | null;
+            cart?: components["schemas"]["CartId"] | null;
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;
             id: components["schemas"]["PaymentId"];
@@ -4600,8 +4600,7 @@ export interface components {
             method?: components["schemas"]["PaymentMethodId"] | null;
             /** @description The method's name when the payment was made. */
             method_name?: string | null;
-            /** @description The order it collects for. */
-            order: components["schemas"]["OrderId"];
+            order?: components["schemas"]["OrderId"] | null;
             /** @description When the money was collected, RFC 3339 in UTC. */
             paid_at?: string | null;
             /** @description `manual`, or the key of the app that collects it. */
@@ -4619,7 +4618,7 @@ export interface components {
         /**
          * @description `PaymentStatus` on the wire (design note 0027, PA7).
          *
-         *     Known values: `pending`, `authorized`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         *     Known values: `pending`, `authorized`, `processing`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         PaymentStatusDto: string;

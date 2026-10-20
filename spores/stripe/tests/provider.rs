@@ -5,11 +5,12 @@ use std::sync::{Arc, Mutex};
 use hypha_spore::Spore;
 use hypha_spore::client::{HttpMethod, HttpRequest, HttpResponse};
 use hypha_spore::core::{
-    ChannelId, CountryCode, Currency, Email, MarketId, Money, OrderId, PaymentId, PaymentMethodId,
+    CartId, ChannelId, CountryCode, Currency, Email, MarketId, Money, OrderId, PaymentId,
+    PaymentMethodId,
 };
 use hypha_spore::payments::{
     ActionAnswer, ActionRequest, NextAction, PaymentAction, PaymentError, PaymentProvider,
-    PaymentRequest,
+    PaymentRequest, ProviderState, ProviderStatus, StatusRequest,
 };
 use hypha_spore::testing::{SporeHttp, env_with_http};
 use hypha_spore_stripe::Stripe;
@@ -73,10 +74,12 @@ fn payment_id() -> PaymentId {
 fn request(store_settings: Map<String, Value>) -> PaymentRequest {
     PaymentRequest {
         payment: payment_id(),
-        order: "ord_01a15646d13071e4b9168f3555dd4cd4"
-            .parse::<OrderId>()
+        cart: "cart_01a15646d13071e4b9168f3555dd4cd8"
+            .parse::<CartId>()
             .unwrap(),
-        order_number: 1001,
+        // A cart's payment: no order yet (design note 0031).
+        order: None,
+        order_number: None,
         method: "pm_01a15646d13071e4b9168f3555dd4cd5"
             .parse::<PaymentMethodId>()
             .unwrap(),
@@ -148,8 +151,48 @@ fn a_start_creates_one_intent_keyed_by_the_payment_and_answers_the_element() {
         "capture_method=manual",
         "receipt_email=buyer%40example.com",
         "metadata%5Bhypha_payment%5D=pay_",
+        // A cart's payment (design note 0031): the cart, no order yet.
+        "metadata%5Bhypha_cart%5D=cart_",
     ] {
         assert!(body.contains(part), "{part} in {body}");
+    }
+    assert!(!body.contains("hypha_order"), "{body}");
+    assert!(!body.contains("description="), "{body}");
+}
+
+#[test]
+fn status_reads_the_intent_as_the_payments_state() {
+    for (intent, state) in [
+        ("requires_payment_method", ProviderState::Open),
+        ("requires_action", ProviderState::Open),
+        ("requires_capture", ProviderState::Authorized),
+        ("processing", ProviderState::Processing),
+        ("succeeded", ProviderState::Paid),
+        ("canceled", ProviderState::Canceled),
+    ] {
+        let (fake, http) = Fake::new(move |_| {
+            (
+                200,
+                json!({ "id": "pi_9", "amount": 1250, "currency": "eur", "status": intent, "client_secret": "s" }),
+            )
+        });
+        let request = StatusRequest {
+            payment: payment_id(),
+            cart: None,
+            reference: Some("pi_9".to_string()),
+            attempt: Some("pi_9".to_string()),
+            store_settings: configured(),
+        };
+        assert_eq!(
+            block_on(provider(http).status(&request)),
+            Ok(ProviderStatus {
+                state,
+                reference: Some("pi_9".to_string()),
+                attempt: Some("pi_9".to_string()),
+            }),
+            "{intent}"
+        );
+        assert!(fake.requests()[0].url.ends_with("/v1/payment_intents/pi_9"));
     }
 }
 
@@ -182,7 +225,12 @@ fn action(kind: PaymentAction, amount: Option<i64>, reference: Option<&str>) -> 
     ActionRequest {
         action: kind,
         payment: payment_id(),
-        order: "ord_01a15646d13071e4b9168f3555dd4cd4".parse().unwrap(),
+        cart: None,
+        order: Some(
+            "ord_01a15646d13071e4b9168f3555dd4cd4"
+                .parse::<OrderId>()
+                .unwrap(),
+        ),
         amount: amount.map(|a| Money::new(a, Currency::EUR).unwrap()),
         reference: reference.map(str::to_string),
         attempt: None,

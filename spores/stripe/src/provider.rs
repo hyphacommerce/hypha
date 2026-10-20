@@ -10,7 +10,8 @@ use hypha_spore::SporeEnv;
 use hypha_spore::core::Money;
 use hypha_spore::payments::{
     ActionAnswer, ActionRequest, NextAction, PaymentAction, PaymentError, PaymentProvider,
-    PaymentRequest, ProviderKey, Started, no_settings,
+    PaymentRequest, ProviderKey, ProviderState, ProviderStatus, Started, StatusRequest,
+    no_settings,
 };
 use serde_json::{Map, Value, json};
 
@@ -143,7 +144,16 @@ fn intent_params(
         CaptureMode::Automatic => "automatic",
         CaptureMode::Manual => "manual",
     };
-    Ok(vec![
+    // A cart's payment has no order yet (design note 0031): its metadata names the
+    // cart, and the order is Hypha's once the money is committed.
+    let mut metadata: Vec<(&'static str, Form)> = vec![
+        ("hypha_payment", payment.payment.to_string().into()),
+        ("hypha_cart", payment.cart.to_string().into()),
+    ];
+    if let Some(order) = payment.order {
+        metadata.push(("hypha_order", order.to_string().into()));
+    }
+    let mut params: Vec<(&'static str, Form)> = vec![
         ("amount", amount.into()),
         ("currency", currency.to_ascii_lowercase().into()),
         ("capture_method", capture.into()),
@@ -151,20 +161,13 @@ fn intent_params(
             "automatic_payment_methods",
             Form::Map(vec![("enabled", "true".into())]),
         ),
-        (
-            "description",
-            format!("Order {}", payment.order_number).into(),
-        ),
         ("receipt_email", payment.customer_email.as_str().into()),
-        (
-            "metadata",
-            Form::Map(vec![
-                ("hypha_payment", payment.payment.to_string().into()),
-                ("hypha_order", payment.order.to_string().into()),
-                ("hypha_order_number", payment.order_number.into()),
-            ]),
-        ),
-    ])
+        ("metadata", Form::Map(metadata)),
+    ];
+    if let Some(number) = payment.order_number {
+        params.push(("description", format!("Order {number}").into()));
+    }
+    Ok(params)
 }
 
 /// What staff or a shopper is told when Stripe failed.
@@ -265,10 +268,12 @@ impl PaymentProvider for StripeProvider {
                     ("payment_intent", reference.into()),
                     (
                         "metadata",
-                        Form::Map(vec![
-                            ("hypha_payment", request.payment.to_string().into()),
-                            ("hypha_order", request.order.to_string().into()),
-                        ]),
+                        Form::Map(
+                            [("hypha_payment", request.payment.to_string().into())]
+                                .into_iter()
+                                .chain(request.order.map(|o| ("hypha_order", o.to_string().into())))
+                                .collect(),
+                        ),
                     ),
                 ];
                 match request.amount.map(amount).transpose() {
@@ -296,5 +301,47 @@ impl PaymentProvider for StripeProvider {
             Err(e) if e.is_refusal() => Ok(ActionAnswer::Refused { reason: e.message }),
             Err(e) => Err(Self::failed(e.message)),
         }
+    }
+
+    /// Where the payment's PaymentIntent is (design note 0031, §4): checkout asks when
+    /// the shopper's browser says they paid before the webhook arrived.
+    async fn status(&self, request: &StatusRequest) -> Result<ProviderStatus, PaymentError> {
+        let settings = Settings::from_map(&request.store_settings);
+        let Some(secret_key) = &settings.secret_key else {
+            return Err(Self::failed(
+                "Stripe isn't set up: add the keys in Apps → Stripe",
+            ));
+        };
+        let Some(reference) = intent_of(request.attempt.as_deref(), request.reference.as_deref())
+        else {
+            return Ok(ProviderStatus {
+                state: ProviderState::Open,
+                reference: None,
+                attempt: None,
+            });
+        };
+        let intent = self
+            .client(secret_key)
+            .retrieve_payment_intent(reference)
+            .await
+            .map_err(|e| Self::failed(stripe_reason(&e)))?;
+        Ok(ProviderStatus {
+            state: intent_state(&intent.status),
+            reference: Some(intent.id.clone()),
+            attempt: Some(intent.id),
+        })
+    }
+}
+
+/// A PaymentIntent's status as a payment's state: `requires_capture` holds the money,
+/// `processing` is collecting it, `succeeded` has it; the `requires_…` steps before
+/// wait for the shopper.
+fn intent_state(status: &str) -> ProviderState {
+    match status {
+        "requires_capture" => ProviderState::Authorized,
+        "processing" => ProviderState::Processing,
+        "succeeded" => ProviderState::Paid,
+        "canceled" => ProviderState::Canceled,
+        _ => ProviderState::Open,
     }
 }

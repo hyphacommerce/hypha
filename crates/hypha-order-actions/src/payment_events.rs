@@ -3,7 +3,9 @@
 //! provider's webhooks, Stripe's), and tells Hypha through
 //! `POST /admin/payments/{id}/events`. Each report moves the payment and its order's
 //! `financial_status` in one batch, under 0027's rules (the moves `PaymentStatus`
-//! allows).
+//! allows). A payment started for a cart before its order (design note 0031) has no
+//! order yet: the report moves the payment alone, and the host completes the checkout
+//! once it says the money is committed (`hypha_checkout::complete_paid_checkout`).
 
 use hypha_apps::{AppRepo, HasApps};
 use hypha_core::{
@@ -24,6 +26,8 @@ pub const PAYMENT_EVENT: &str = "payment_event";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PaymentEventKind {
     Authorized,
+    /// Taken and being collected (SEPA Direct Debit: days; design note 0031, Q3).
+    Processing,
     Paid,
     Failed,
     Voided,
@@ -31,6 +35,14 @@ pub enum PaymentEventKind {
     PartiallyRefunded,
     /// All that was left was given back.
     Refunded,
+}
+
+/// What a report left: the payment, and its order with all its payments once it has one
+/// (`None` for a cart's payment before checkout placed the order: design note 0031).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentReport {
+    pub payment: Payment,
+    pub order: Option<OrderPayments>,
 }
 
 /// A provider's report on a payment.
@@ -107,7 +119,7 @@ pub async fn record_payment_event<S: OrderActionPorts + HasApps>(
     ports: &S,
     clock: &impl Clock,
     input: PaymentEvent,
-) -> Result<Idempotent<OrderPayments>, CommandError> {
+) -> Result<Idempotent<PaymentReport>, CommandError> {
     ctx.require(Scope::PaymentsWrite)?;
     if let Some(earlier) = replay_of(ctx, ports, input.idempotency.as_ref()).await? {
         return Ok(Idempotent::replayed(payments_of(ports, earlier).await?));
@@ -132,22 +144,13 @@ async fn record_once<S: OrderActionPorts + HasApps>(
     ports: &S,
     clock: &impl Clock,
     input: &PaymentEvent,
-) -> Result<OrderPayments, CommandError> {
-    let payment = ports
+) -> Result<PaymentReport, CommandError> {
+    let mut payment = ports
         .payments()
         .get(input.payment)
         .await?
         .ok_or(CommandError::PaymentNotFound(input.payment))?;
     check_reporter(ctx, ports, &payment).await?;
-    let mut order = load_order(ports, payment.order()).await?;
-    let mut payments = ports.payments().list_for_order(order.id()).await?;
-    let Some(at) = payments.iter().position(|p| p.id() == payment.id()) else {
-        return Err(RepoError::Backend(format!(
-            "payment {} isn't among its order's payments",
-            payment.id()
-        ))
-        .into());
-    };
     let refunding = matches!(
         input.kind,
         PaymentEventKind::PartiallyRefunded | PaymentEventKind::Refunded
@@ -160,8 +163,54 @@ async fn record_once<S: OrderActionPorts + HasApps>(
         return Err(CommandError::RefundReferenceRequired(payment.id()));
     }
     let when = input.occurred_at.unwrap_or_else(|| clock.now());
+    let idempotency = input
+        .idempotency
+        .as_ref()
+        .map(|request| {
+            IdempotencyRecord::new(
+                ctx.actor(),
+                request,
+                PAYMENT_EVENT,
+                payment.id().as_uuid(),
+                clock.now(),
+            )
+        })
+        .transpose()?;
+
+    // A cart's payment before its order: the payment alone.
+    let Some(order_id) = payment.order() else {
+        if !apply(&mut payment, input, when)? {
+            return Ok(PaymentReport {
+                payment,
+                order: None,
+            });
+        }
+        let mut batch = ports.batch();
+        batch.update_payment(&mut payment);
+        if let Some(idempotency) = idempotency {
+            batch.record_idempotency(idempotency);
+        }
+        ports.commit(batch).await?;
+        return Ok(PaymentReport {
+            payment,
+            order: None,
+        });
+    };
+
+    let mut order = load_order(ports, order_id).await?;
+    let mut payments = ports.payments().list_for_order(order.id()).await?;
+    let Some(at) = payments.iter().position(|p| p.id() == payment.id()) else {
+        return Err(RepoError::Backend(format!(
+            "payment {} isn't among its order's payments",
+            payment.id()
+        ))
+        .into());
+    };
     if !apply(&mut payments[at], input, when)? {
-        return Ok(OrderPayments { order, payments });
+        return Ok(PaymentReport {
+            payment: payments[at].clone(),
+            order: Some(OrderPayments { order, payments }),
+        });
     }
     order.set_financial_status(financial_status(order.total(), &payments)?);
 
@@ -170,18 +219,14 @@ async fn record_once<S: OrderActionPorts + HasApps>(
     // Always, so two reports on one order's payments can't both commit on stale
     // views of the other: the loser reloads.
     batch.update_order(&mut order);
-    if let Some(request) = &input.idempotency {
-        let record = IdempotencyRecord::new(
-            ctx.actor(),
-            request,
-            PAYMENT_EVENT,
-            payment.id().as_uuid(),
-            clock.now(),
-        )?;
-        batch.record_idempotency(record);
+    if let Some(idempotency) = idempotency {
+        batch.record_idempotency(idempotency);
     }
     ports.commit(batch).await?;
-    Ok(OrderPayments { order, payments })
+    Ok(PaymentReport {
+        payment: payments[at].clone(),
+        order: Some(OrderPayments { order, payments }),
+    })
 }
 
 /// Moves `payment` as `input` reports; whether that changed anything.
@@ -219,6 +264,10 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
         PaymentEventKind::Paid => {
             whole(payment)?;
             collect(payment, attempt, |p| p.pay(at, reference))?
+        }
+        PaymentEventKind::Processing => {
+            whole(payment)?;
+            collect(payment, attempt, |p| p.process(reference))?
         }
         PaymentEventKind::Failed => payment.fail(reference)?,
         PaymentEventKind::Voided => {
@@ -263,7 +312,7 @@ fn other_attempt(payment: &Payment, input: &PaymentEvent) -> Result<Option<Strin
     let restarted = payment.status() == PaymentStatus::Pending
         && matches!(
             input.kind,
-            PaymentEventKind::Authorized | PaymentEventKind::Paid
+            PaymentEventKind::Authorized | PaymentEventKind::Paid | PaymentEventKind::Processing
         );
     if held == named || restarted {
         return Ok(attempt);
@@ -320,17 +369,23 @@ async fn replay_of<S: HasIdempotency>(
     .await
 }
 
-/// A payment's order and its payments, as they are now.
+/// A payment, and its order and the order's payments, as they are now.
 async fn payments_of<S: OrderActionPorts>(
     ports: &S,
     id: PaymentId,
-) -> Result<OrderPayments, CommandError> {
+) -> Result<PaymentReport, CommandError> {
     let payment = ports
         .payments()
         .get(id)
         .await?
         .ok_or(CommandError::PaymentNotFound(id))?;
-    let order = load_order(ports, payment.order()).await?;
-    let payments = ports.payments().list_for_order(order.id()).await?;
-    Ok(OrderPayments { order, payments })
+    let order = match payment.order() {
+        Some(order) => {
+            let order = load_order(ports, order).await?;
+            let payments = ports.payments().list_for_order(order.id()).await?;
+            Some(OrderPayments { order, payments })
+        }
+        None => None,
+    };
+    Ok(PaymentReport { payment, order })
 }

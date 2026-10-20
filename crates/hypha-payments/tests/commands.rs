@@ -172,7 +172,8 @@ fn a_method_with_a_pending_payment_is_disabled_not_deleted() {
     let mut payment = Payment::new(NewPayment::by(
         &method,
         PaymentId::from_uuid(Uuid::from_u128(50)),
-        OrderId::from_uuid(Uuid::from_u128(51)),
+        hypha_core::CartId::from_uuid(Uuid::from_u128(52)),
+        Some(OrderId::from_uuid(Uuid::from_u128(51))),
         Money::new(1000, Currency::EUR).unwrap(),
     ))
     .unwrap();
@@ -244,7 +245,8 @@ fn a_method_with_an_authorized_payment_is_not_deleted_either() {
     let mut payment = Payment::new(NewPayment::by(
         &method,
         PaymentId::from_uuid(Uuid::from_u128(50)),
-        OrderId::from_uuid(Uuid::from_u128(51)),
+        hypha_core::CartId::from_uuid(Uuid::from_u128(52)),
+        Some(OrderId::from_uuid(Uuid::from_u128(51))),
         Money::new(1000, Currency::EUR).unwrap(),
     ))
     .unwrap();
@@ -300,7 +302,8 @@ fn gateway_payment(ports: &InMemoryPorts, prepare: impl FnOnce(&mut Payment)) ->
     let id = PaymentId::from_uuid(Uuid::from_u128(60));
     let mut payment = Payment::new(NewPayment {
         id,
-        order: OrderId::from_uuid(Uuid::from_u128(61)),
+        cart: None,
+        order: Some(OrderId::from_uuid(Uuid::from_u128(61))),
         method: None,
         method_name: None,
         provider: ProviderKey::new("app_gateway").unwrap(),

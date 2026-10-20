@@ -10,7 +10,7 @@
 use std::fmt;
 
 use hypha_core::{
-    AppKey, AppKind, ChannelId, CountryCode, Email, MarketId, Money, OrderId, PaymentId,
+    AppKey, AppKind, CartId, ChannelId, CountryCode, Email, MarketId, Money, OrderId, PaymentId,
     PaymentMethodId, RepoError, Union,
 };
 
@@ -87,14 +87,19 @@ impl fmt::Display for ProviderKey {
     }
 }
 
-/// What a provider is asked to collect: the payment checkout just committed (or a retry
-/// of it), as plain values.
+/// What a provider is asked to collect, as plain values: a cart's payment before its
+/// order exists (an online method, design note 0031), or the payment a manual method's
+/// order was placed with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentRequest {
     pub payment: PaymentId,
-    pub order: OrderId,
-    /// The order's human number, e.g. what a bank transfer quotes as its reference.
-    pub order_number: i64,
+    /// The cart the payment is for.
+    pub cart: CartId,
+    /// The order, once there's one (a manual method's: placed with its payment); `None`
+    /// for a cart's payment, whose order checkout places once the money is committed.
+    pub order: Option<OrderId>,
+    /// The order's human number, with `order`, e.g. what a bank transfer quotes.
+    pub order_number: Option<i64>,
     pub method: PaymentMethodId,
     pub amount: Money,
     /// Where the order was placed, to whom, and where it ships.
@@ -185,7 +190,11 @@ impl fmt::Display for PaymentAction {
 pub struct ActionRequest {
     pub action: PaymentAction,
     pub payment: PaymentId,
-    pub order: OrderId,
+    /// The cart the payment was started for, and its order once placed (`None` when
+    /// checkout gives back a cart's money it couldn't place an order with: design note
+    /// 0031, §3).
+    pub cart: Option<CartId>,
+    pub order: Option<OrderId>,
     /// For a capture or refund, how much (at most what's left); `None` for the whole.
     pub amount: Option<Money>,
     /// The provider's ID for the payment, as it gave it on start (staff's text or an
@@ -222,6 +231,57 @@ pub enum ActionAnswer {
     },
 }
 
+/// What checkout asks a provider about a payment it started (design note 0031, §4): where
+/// the shopper's money is now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusRequest {
+    pub payment: PaymentId,
+    pub cart: Option<CartId>,
+    /// As `ActionRequest::reference` and `::attempt`.
+    pub reference: Option<String>,
+    pub attempt: Option<String>,
+    /// As `PaymentRequest::store_settings`.
+    pub store_settings: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Where a started payment is at its provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProviderState {
+    /// Waiting for the shopper (no money yet).
+    Open,
+    /// Taken, being collected (days, for SEPA): committed.
+    Processing,
+    /// Held: committed.
+    Authorized,
+    /// Collected: committed.
+    Paid,
+    /// Declined for good.
+    Failed,
+    /// Cancelled.
+    Canceled,
+}
+
+impl ProviderState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProviderState::Open => "open",
+            ProviderState::Processing => "processing",
+            ProviderState::Authorized => "authorized",
+            ProviderState::Paid => "paid",
+            ProviderState::Failed => "failed",
+            ProviderState::Canceled => "canceled",
+        }
+    }
+}
+
+/// A provider's answer to a status question: the state, and its IDs for the payment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderStatus {
+    pub state: ProviderState,
+    pub reference: Option<String>,
+    pub attempt: Option<String>,
+}
+
 /// One provider. No `Send` bound, like every port (Workers).
 #[allow(async_fn_in_trait)]
 pub trait PaymentProvider {
@@ -229,9 +289,17 @@ pub trait PaymentProvider {
     fn key(&self) -> ProviderKey;
     /// Checks a method's settings when staff save it.
     fn check_settings(&self, settings: &serde_json::Value) -> Result<(), PaymentError>;
-    /// Starts collecting `payment` (committed with its order): what the shopper must do
-    /// next.
+    /// Starts collecting `payment` (a cart's, before its order; or a manual method's,
+    /// committed with its order): what the shopper must do next.
     async fn start(&self, payment: &PaymentRequest) -> Result<Started, PaymentError>;
+    /// Where a payment it started is now (design note 0031, §4), asked by checkout when
+    /// the shopper says they paid before the provider reported it. A provider that can't
+    /// tell (the default): `payment_action_unsupported`, and checkout waits for its
+    /// report (`payment_pending`).
+    async fn status(&self, request: &StatusRequest) -> Result<ProviderStatus, PaymentError> {
+        let _ = request;
+        Err(PaymentError::StatusUnsupported(self.key()))
+    }
     /// Captures, voids or refunds a payment. A provider that can't (the default):
     /// `payment_action_unsupported`.
     async fn act(&self, request: &ActionRequest) -> Result<ActionAnswer, PaymentError> {
@@ -317,6 +385,12 @@ pub trait PaymentProviders {
         key: &ProviderKey,
         request: &ActionRequest,
     ) -> Result<ActionAnswer, PaymentError>;
+    /// The provider `key`'s `status`; `UnknownProvider` if there's none.
+    async fn status(
+        &self,
+        key: &ProviderKey,
+        request: &StatusRequest,
+    ) -> Result<ProviderStatus, PaymentError>;
 }
 
 impl<T: PaymentProviders + ?Sized> PaymentProviders for &T {
@@ -354,6 +428,14 @@ impl<T: PaymentProviders + ?Sized> PaymentProviders for &T {
         request: &ActionRequest,
     ) -> Result<ActionAnswer, PaymentError> {
         (**self).act(key, request).await
+    }
+
+    async fn status(
+        &self,
+        key: &ProviderKey,
+        request: &StatusRequest,
+    ) -> Result<ProviderStatus, PaymentError> {
+        (**self).status(key, request).await
     }
 }
 
@@ -419,6 +501,20 @@ macro_rules! tuple_providers {
                 )+
                 Err(PaymentError::UnknownProvider(key.clone()))
             }
+
+            async fn status(
+                &self,
+                key: &ProviderKey,
+                request: &StatusRequest,
+            ) -> Result<ProviderStatus, PaymentError> {
+                let ($($p,)+) = self;
+                $(
+                    if &$p.key() == key {
+                        return $p.status(request).await;
+                    }
+                )+
+                Err(PaymentError::UnknownProvider(key.clone()))
+            }
         }
     };
 }
@@ -459,6 +555,14 @@ impl PaymentProviders for () {
         key: &ProviderKey,
         _: &ActionRequest,
     ) -> Result<ActionAnswer, PaymentError> {
+        Err(PaymentError::UnknownProvider(key.clone()))
+    }
+
+    async fn status(
+        &self,
+        key: &ProviderKey,
+        _: &StatusRequest,
+    ) -> Result<ProviderStatus, PaymentError> {
         Err(PaymentError::UnknownProvider(key.clone()))
     }
 }
@@ -533,6 +637,20 @@ macro_rules! union_providers {
                 )+
                 Err(PaymentError::UnknownProvider(key.clone()))
             }
+
+            async fn status(
+                &self,
+                key: &ProviderKey,
+                request: &StatusRequest,
+            ) -> Result<ProviderStatus, PaymentError> {
+                let Union(($($s,)+)) = self;
+                $(
+                    if $s.has_key(key) {
+                        return $s.status(key, request).await;
+                    }
+                )+
+                Err(PaymentError::UnknownProvider(key.clone()))
+            }
         }
     };
 }
@@ -603,8 +721,9 @@ mod tests {
     fn request(instructions: Option<&str>) -> PaymentRequest {
         PaymentRequest {
             payment: PaymentId::from_uuid(Uuid::from_u128(1)),
-            order: OrderId::from_uuid(Uuid::from_u128(2)),
-            order_number: 1001,
+            cart: CartId::from_uuid(Uuid::from_u128(6)),
+            order: Some(OrderId::from_uuid(Uuid::from_u128(2))),
+            order_number: Some(1001),
             method: PaymentMethodId::from_uuid(Uuid::from_u128(3)),
             amount: Money::new(1000, Currency::EUR).unwrap(),
             channel: ChannelId::from_uuid(Uuid::from_u128(4)),
@@ -645,7 +764,8 @@ mod tests {
         let action = ActionRequest {
             action: PaymentAction::Capture,
             payment: PaymentId::from_uuid(Uuid::from_u128(1)),
-            order: OrderId::from_uuid(Uuid::from_u128(2)),
+            cart: None,
+            order: Some(OrderId::from_uuid(Uuid::from_u128(2))),
             amount: None,
             reference: None,
             attempt: None,

@@ -1,4 +1,4 @@
-use hypha_core::{OrderId, PaymentId, PaymentMethodId, RepoError};
+use hypha_core::{CartId, OrderId, PaymentId, PaymentMethodId, RepoError};
 
 use crate::{Payment, PaymentMethod};
 
@@ -34,6 +34,10 @@ pub trait PaymentRepo {
     async fn get(&self, id: PaymentId) -> Result<Option<Payment>, RepoError>;
     /// Every payment of `order`, newest first (by ID). An order has a handful.
     async fn list_for_order(&self, order: OrderId) -> Result<Vec<Payment>, RepoError>;
+    /// Every payment started for `cart`, newest first (by ID): the ones checkout started
+    /// before the order (design note 0031), and the order's own once placed. A cart has
+    /// a handful.
+    async fn list_for_cart(&self, cart: CartId) -> Result<Vec<Payment>, RepoError>;
     /// Stores a new payment (version 1). Enforces `PAYMENT_ID`. Workflows insert
     /// through `StagePayments` instead, with the order.
     async fn insert(&self, payment: &mut Payment) -> Result<(), RepoError>;
@@ -50,6 +54,19 @@ pub async fn newest_payment<S: HasPayments>(
     Ok(ports
         .payments()
         .list_for_order(order)
+        .await?
+        .into_iter()
+        .next())
+}
+
+/// The newest payment started for `cart`: the one checkout completes with.
+pub async fn newest_cart_payment<S: HasPayments>(
+    ports: &S,
+    cart: CartId,
+) -> Result<Option<Payment>, RepoError> {
+    Ok(ports
+        .payments()
+        .list_for_cart(cart)
         .await?
         .into_iter()
         .next())

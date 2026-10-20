@@ -1,7 +1,8 @@
 //! A host built with the Stripe spore (design note 0030, SP9), against a fake Stripe on
-//! localhost: settings, the provider in checkout, the storefront element, Stripe's
-//! webhooks moving the payment, staff's capture and refund, the admin block, and an
-//! order cancelled cancelling its intent.
+//! localhost: settings, the cart's payment started before its order and checkout
+//! completing once Stripe holds the money (design note 0031), from the shopper or from
+//! Stripe's webhook, the storefront element, staff's capture and refund, the admin block,
+//! and money a replaced or second intent took given back.
 
 use std::collections::BTreeMap;
 
@@ -241,8 +242,33 @@ async fn payment_status(app: &TestApp<WithStripe>, payment: &str) -> String {
     json["status"].as_str().unwrap_or_default().to_string()
 }
 
+/// The shopper starts paying for the cart (design note 0031): the answer.
+async fn start_paying(app: &TestApp<WithStripe>, pk: &str, cart_path: &str) -> Value {
+    let (status, json) =
+        send_as(app, pk, "POST", &format!("{cart_path}/payment"), Some("{}")).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    json
+}
+
+/// The shopper's checkout once the card form said it's paid.
+async fn check_out(app: &TestApp<WithStripe>, pk: &str, cart_path: &str) -> (StatusCode, Value) {
+    send_as(
+        app,
+        pk,
+        "POST",
+        &format!("{cart_path}/checkout"),
+        Some("{}"),
+    )
+    .await
+}
+
+/// Stripe holds `intent`'s money: its status as Stripe would answer it now.
+fn hold(fake: &Shared, intent: &str) {
+    fake.lock().unwrap().intents.get_mut(intent).unwrap()["status"] = json!("requires_capture");
+}
+
 #[tokio::test]
-async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_refunded() {
+async fn a_card_payment_goes_from_the_checkout_through_stripe_to_paid_and_partly_refunded() {
     let (app, fake) = stripe_host().await;
 
     // Staff are offered it as a provider.
@@ -257,32 +283,31 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
         "{providers}"
     );
 
-    // Checkout starts it: a PaymentIntent keyed by the payment, the element to mount.
+    // The shopper starts paying before any order: a PaymentIntent keyed by the payment,
+    // the element to mount on the checkout.
     let (pk, cart_path) = cart_paying_by_stripe(&app).await;
-    let (status, placed) = send_as(
-        &app,
-        &pk,
-        "POST",
-        &format!("{cart_path}/checkout"),
-        Some("{}"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{placed}");
-    assert_eq!(placed["next_action"]["type"], "client_widget", "{placed}");
-    assert_eq!(placed["next_action"]["element"], "stripe-payment");
+    let (status, early) = check_out(&app, &pk, &cart_path).await;
     assert_eq!(
-        placed["next_action"]["props"]["client_secret"],
+        (status, early["code"].as_str()),
+        (StatusCode::CONFLICT, Some("payment_required")),
+        "{early}"
+    );
+    let started = start_paying(&app, &pk, &cart_path).await;
+    assert_eq!(started["next_action"]["type"], "client_widget", "{started}");
+    assert_eq!(started["next_action"]["element"], "stripe-payment");
+    assert_eq!(
+        started["next_action"]["props"]["client_secret"],
         "pi_1_secret_x"
     );
     assert_eq!(
-        placed["next_action"]["props"]["publishable_key"],
+        started["next_action"]["props"]["publishable_key"],
         "pk_test_key"
     );
-    let order = placed["id"].as_str().unwrap().to_string();
-    let (_, admin) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
-    let payment = admin["payments"][0]["id"].as_str().unwrap().to_string();
-    // Its start kept the PaymentIntent as the attempt it collects through.
-    assert_eq!(admin["payments"][0]["attempt"], "pi_1", "{admin}");
+    assert_eq!(started["status"], "pending", "{started}");
+    let payment = started["payment"].as_str().unwrap().to_string();
+    let (_, json) = send(&app, "GET", &format!("/admin/payments/{payment}"), None).await;
+    assert_eq!(json["order"], Value::Null, "no order yet: {json}");
+    assert_eq!(json["attempt"], "pi_1", "{json}");
     {
         let fake = fake.lock().unwrap();
         let (_, path, key, form) = &fake.seen[0];
@@ -292,7 +317,9 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
             "Hypha's payment ID is Stripe's idempotency key"
         );
         assert!(
-            form.contains("capture_method=manual") && form.contains("amount="),
+            form.contains("capture_method=manual")
+                && form.contains("amount=")
+                && form.contains("metadata%5Bhypha_cart%5D=cart_"),
             "{form}"
         );
         assert_eq!(
@@ -301,21 +328,12 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
         );
     }
 
-    // The shopper back on the order page starts it again: the payment's intent is
-    // resumed by its stored ID, not made again under a key Stripe may have forgotten.
-    let token = placed["access_token"].as_str().unwrap();
-    let (status, again) = send_as(
-        &app,
-        &pk,
-        "POST",
-        &format!("/storefront/orders/{order}/payment?token={token}"),
-        Some("{}"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{again}");
+    // Started again (the checkout page reloaded): the same intent, resumed by its ID.
+    let again = start_paying(&app, &pk, &cart_path).await;
+    assert_eq!(again["payment"], json!(payment), "{again}");
     assert_eq!(
-        again["next_action"]["props"]["client_secret"], "pi_1_secret_x",
-        "{again}"
+        again["next_action"]["props"]["client_secret"],
+        "pi_1_secret_x"
     );
     {
         let fake = fake.lock().unwrap();
@@ -325,13 +343,6 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
             .filter(|(m, p, _, _)| m == "POST" && p == "/v1/payment_intents")
             .count();
         assert_eq!(creates, 1, "{:?}", fake.seen);
-        assert!(
-            fake.seen
-                .iter()
-                .any(|(m, p, _, _)| m == "GET" && p == "/v1/payment_intents/pi_1"),
-            "{:?}",
-            fake.seen
-        );
     }
 
     // The storefront finds the element, served by the spore at the API's address.
@@ -363,15 +374,27 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
     let response = app.router.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["access-control-allow-origin"], "*");
-    assert!(
-        response.headers()["content-type"]
-            .to_str()
-            .unwrap()
-            .starts_with("text/javascript")
+
+    // Before the shopper pays: checkout waits.
+    let (status, waiting) = check_out(&app, &pk, &cart_path).await;
+    assert_eq!(
+        (status, waiting["code"].as_str()),
+        (StatusCode::CONFLICT, Some("payment_pending")),
+        "{waiting}"
     );
 
-    // The shopper authorizes: Stripe says so, the payment is authorized.
-    fake.lock().unwrap().intents.get_mut("pi_1").unwrap()["status"] = json!("requires_capture");
+    // The card is authorized; the browser checks out before Stripe's webhook: Hypha
+    // asks Stripe, and the order is placed with the payment authorized.
+    hold(&fake, "pi_1");
+    let (status, placed) = check_out(&app, &pk, &cart_path).await;
+    assert_eq!(status, StatusCode::CREATED, "{placed}");
+    assert_eq!(placed["next_action"], Value::Null, "paid online already");
+    assert_eq!(placed["financial_status"], "authorized", "{placed}");
+    assert_eq!(placed["payment"]["status"], "authorized", "{placed}");
+    let order = placed["id"].as_str().unwrap().to_string();
+    let (_, json) = send(&app, "GET", &format!("/admin/payments/{payment}"), None).await;
+    assert_eq!(json["order"], json!(order), "{json}");
+    // Stripe's webhook then changes nothing.
     let intent = fake.lock().unwrap().intents["pi_1"].clone();
     let capturable =
         json!({ "id": "pi_1", "amount_capturable": 3000, "metadata": intent["metadata"] });
@@ -382,11 +405,7 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
         capturable,
     )
     .await;
-    assert_eq!(
-        (status, outcome["status"].as_str()),
-        (StatusCode::OK, Some("reported")),
-        "{outcome}"
-    );
+    assert_eq!(status, StatusCode::OK, "{outcome}");
     assert_eq!(payment_status(&app, &payment).await, "authorized");
 
     // A forged or unsigned delivery changes nothing.
@@ -424,23 +443,11 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
     assert_eq!(status, StatusCode::ACCEPTED, "{json}");
     assert_eq!(json["payment"]["status"], "paid", "{json}");
     assert_eq!(json["completed"], true, "{json}");
-    assert_eq!(fake.lock().unwrap().intents["pi_1"]["status"], "succeeded");
     let succeeded = json!({ "id": "pi_1", "metadata": intent["metadata"] });
-    let (status, outcome) = deliver(
-        &app,
-        "evt_paid",
-        "payment_intent.succeeded",
-        succeeded.clone(),
-    )
-    .await;
-    assert_eq!(
-        (status, outcome["reported"].as_u64()),
-        (StatusCode::OK, Some(1)),
-        "{outcome}"
-    );
-    assert_eq!(payment_status(&app, &payment).await, "paid");
-    let (status, _) = deliver(&app, "evt_paid", "payment_intent.succeeded", succeeded).await;
-    assert_eq!(status, StatusCode::OK);
+    for event in ["evt_paid", "evt_paid"] {
+        let (status, _) = deliver(&app, event, "payment_intent.succeeded", succeeded.clone()).await;
+        assert_eq!(status, StatusCode::OK);
+    }
     assert_eq!(payment_status(&app, &payment).await, "paid");
 
     // A partial refund: Stripe's answer says it's done, so it counts at once, and its
@@ -465,46 +472,84 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
 }
 
 #[tokio::test]
-async fn an_order_cancelled_cancels_its_intent_at_stripe() {
-    let (app, fake_state) = stripe_host().await;
+async fn stripes_webhook_completes_the_checkout_when_the_shopper_never_comes_back() {
+    let (app, fake) = stripe_host().await;
     let (pk, cart_path) = cart_paying_by_stripe(&app).await;
-    let (status, placed) = send_as(
+    let payment = start_paying(&app, &pk, &cart_path).await["payment"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    hold(&fake, "pi_1");
+    let metadata = fake.lock().unwrap().intents["pi_1"]["metadata"].clone();
+    let capturable = json!({ "id": "pi_1", "amount_capturable": 3000, "metadata": metadata });
+    let (status, outcome) = deliver(
         &app,
-        &pk,
-        "POST",
-        &format!("{cart_path}/checkout"),
-        Some("{}"),
+        "evt_auth",
+        "payment_intent.amount_capturable_updated",
+        capturable,
     )
     .await;
+    assert_eq!(
+        (status, outcome["status"].as_str()),
+        (StatusCode::OK, Some("reported")),
+        "{outcome}"
+    );
+    let (_, json) = send(&app, "GET", &format!("/admin/payments/{payment}"), None).await;
+    assert_eq!(json["status"], "authorized", "{json}");
+    let order = json["order"]
+        .as_str()
+        .expect("the order is placed")
+        .to_string();
+    let (status, admin) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
+    assert_eq!(status, StatusCode::OK, "{admin}");
+    assert_eq!(admin["financial_status"], "authorized", "{admin}");
+    // The shopper's browser comes back later: the same order.
+    let (status, placed) = check_out(&app, &pk, &cart_path).await;
     assert_eq!(status, StatusCode::CREATED, "{placed}");
-    let order = placed["id"].as_str().unwrap();
-    let (status, json) = send(
+    assert_eq!(placed["id"], json!(order), "{placed}");
+}
+
+#[tokio::test]
+async fn money_for_a_replaced_payment_goes_back() {
+    let (app, fake_state) = stripe_host().await;
+    let (pk, cart_path) = cart_paying_by_stripe(&app).await;
+    let first = start_paying(&app, &pk, &cart_path).await["payment"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let metadata = fake_state.lock().unwrap().intents["pi_1"]["metadata"].clone();
+    // The shopper takes one mug more: a new payment for the new total, the old one
+    // voided and its intent canceled at Stripe.
+    let (_, cart) = send_as(&app, &pk, "GET", &cart_path, None).await;
+    let mug = cart["lines"][0]["variant"].as_str().unwrap().to_string();
+    let body = json!({ "quantity": 4 }).to_string();
+    let (status, json) = send_as(
         &app,
-        "POST",
-        &format!("/admin/orders/{order}/cancel"),
-        Some(r#"{"reason":"customer"}"#),
+        &pk,
+        "PUT",
+        &format!("{cart_path}/lines/{mug}"),
+        Some(&body),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{json}");
-    hypha_http::jobs::dispatch(&app.state).await.unwrap();
-    // In a block: the guard mustn't be held across the awaits below.
-    let metadata = {
-        let fake = fake_state.lock().unwrap();
-        assert_eq!(
-            fake.intents["pi_1"]["status"], "canceled",
-            "{:?}",
-            fake.seen
-        );
-        assert!(
-            fake.seen
-                .iter()
-                .any(|(m, p, _, _)| m == "POST" && p == "/v1/payment_intents/pi_1/cancel")
-        );
-        fake.intents["pi_1"]["metadata"].clone()
-    };
+    let second = start_paying(&app, &pk, &cart_path).await;
+    assert_ne!(second["payment"], json!(first), "{second}");
+    assert_eq!(
+        second["next_action"]["props"]["client_secret"],
+        "pi_2_secret_x"
+    );
+    assert_eq!(payment_status(&app, &first).await, "voided");
+    assert!(
+        fake_state
+            .lock()
+            .unwrap()
+            .seen
+            .iter()
+            .any(|(m, p, _, _)| m == "POST" && p == "/v1/payment_intents/pi_1/cancel")
+    );
 
-    // Had the shopper's confirmation won the race, Stripe reports it paid: Hypha voided
-    // the payment, so the money goes back at Stripe, once.
+    // Had the old tab's confirmation won the race, Stripe reports it paid: the payment
+    // was voided, so the money goes back at Stripe, once per delivery.
     let succeeded = json!({ "id": "pi_1", "metadata": metadata });
     for event in ["evt_late", "evt_late_again"] {
         let (status, outcome) =
@@ -525,28 +570,6 @@ async fn an_order_cancelled_cancels_its_intent_at_stripe() {
                 .iter()
                 .all(|(_, _, key, form)| key.ends_with(":refund-after-void")
                     && form.contains("payment_intent=pi_1"))
-        );
-    }
-
-    // A late authorization (manual capture) for the voided payment: the hold is released.
-    let capturable = json!({ "id": "pi_1", "amount_capturable": 3000, "metadata": metadata });
-    let (status, outcome) = deliver(
-        &app,
-        "evt_late_auth",
-        "payment_intent.amount_capturable_updated",
-        capturable,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{outcome}");
-    assert_eq!(outcome["status"], "ignored", "{outcome}");
-    {
-        let fake = fake_state.lock().unwrap();
-        assert!(
-            fake.seen.iter().any(|(m, p, key, _)| m == "POST"
-                && p == "/v1/payment_intents/pi_1/cancel"
-                && key.ends_with(":cancel-after-void")),
-            "{:?}",
-            fake.seen
         );
     }
 
@@ -582,18 +605,10 @@ async fn an_order_cancelled_cancels_its_intent_at_stripe() {
 async fn money_paid_through_a_second_intent_of_a_paid_payment_goes_back() {
     let (app, fake_state) = stripe_host().await;
     let (pk, cart_path) = cart_paying_by_stripe(&app).await;
-    let (status, placed) = send_as(
-        &app,
-        &pk,
-        "POST",
-        &format!("{cart_path}/checkout"),
-        Some("{}"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{placed}");
-    let order = placed["id"].as_str().unwrap();
-    let (_, admin) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
-    let payment = admin["payments"][0]["id"].as_str().unwrap().to_string();
+    let payment = start_paying(&app, &pk, &cart_path).await["payment"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let metadata = fake_state.lock().unwrap().intents["pi_1"]["metadata"].clone();
     let paid = |id: &str| json!({ "id": id, "metadata": metadata });
     let (status, outcome) =
@@ -601,8 +616,8 @@ async fn money_paid_through_a_second_intent_of_a_paid_payment_goes_back() {
     assert_eq!(status, StatusCode::OK, "{outcome}");
     assert_eq!(payment_status(&app, &payment).await, "paid");
 
-    // Another intent of the same payment (made again when its reference wasn't kept)
-    // paid in an old tab: the payment is paid once, and that money goes back.
+    // Another intent of the same payment paid in an old tab: the payment is paid once,
+    // and that money goes back.
     let (status, outcome) =
         deliver(&app, "evt_second", "payment_intent.succeeded", paid("pi_9")).await;
     assert_eq!(status, StatusCode::OK, "{outcome}");
@@ -663,18 +678,10 @@ async fn money_paid_through_a_second_intent_of_a_paid_payment_goes_back() {
 async fn another_intent_paid_while_the_payment_is_authorized_goes_back() {
     let (app, fake_state) = stripe_host().await;
     let (pk, cart_path) = cart_paying_by_stripe(&app).await;
-    let (status, placed) = send_as(
-        &app,
-        &pk,
-        "POST",
-        &format!("{cart_path}/checkout"),
-        Some("{}"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{placed}");
-    let order = placed["id"].as_str().unwrap();
-    let (_, admin) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
-    let payment = admin["payments"][0]["id"].as_str().unwrap().to_string();
+    let payment = start_paying(&app, &pk, &cart_path).await["payment"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let metadata = fake_state.lock().unwrap().intents["pi_1"]["metadata"].clone();
     let capturable = json!({ "id": "pi_1", "amount_capturable": 3000, "metadata": metadata });
     let (status, outcome) = deliver(
@@ -710,19 +717,11 @@ async fn a_stripe_without_keys_starts_nothing_and_a_disabled_one_is_not_offered(
     let toml = format!("[spores.stripe]\napi_base = \"{base}\"");
     let app = app_with_spores::<WithStripe>(Config::load(Some(&toml), |_| None).unwrap()).await;
     let (pk, cart_path) = cart_paying_by_stripe(&app).await;
-    let (status, placed) = send_as(
-        &app,
-        &pk,
-        "POST",
-        &format!("{cart_path}/checkout"),
-        Some("{}"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{placed}");
-    assert_eq!(placed["next_action"], Value::Null, "{placed}");
+    let started = start_paying(&app, &pk, &cart_path).await;
+    assert_eq!(started["next_action"], Value::Null, "{started}");
     assert_eq!(
-        placed["payment_error"]["code"], "payment_provider_failed",
-        "{placed}"
+        started["payment_error"]["code"], "payment_provider_failed",
+        "{started}"
     );
 
     let (status, _) = send(

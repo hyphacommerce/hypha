@@ -1,38 +1,50 @@
-//! Asking a payment's provider to start collecting it (design note 0027, §4; 0029,
-//! §3.1), after checkout committed it, on a replay of checkout, and when the shopper
-//! asks again (`start_order_payment`, `POST /storefront/orders/{id}/payment`).
+//! Talking to a payment's provider (design notes 0027 §4, 0029 §3.1, 0031): starting a
+//! payment (a cart's, before its order, for an online method; a manual method's, with
+//! its order), asking where a started one is, and giving back money a checkout that
+//! couldn't complete took.
 //!
-//! A provider that fails leaves the order placed and the payment `pending` (design note
-//! 0027, §4): the answer carries the error, and asking again starts the same payment
-//! (the provider sees the same idempotency key, the payment's ID), or, once the provider
-//! reported it `failed`, a new one.
+//! A provider that fails to start leaves the payment `pending`: the answer carries the
+//! error, and starting again starts the same payment (the provider sees the same
+//! idempotency key, the payment's ID).
 
 use hypha_core::{
-    Attempts, Ctx, FinancialStatus, IdGenerator, OrderId, PaymentId, RepoError, Scope,
+    Attempts, CartId, ChannelId, Clock, CountryCode, Email, MarketId, OrderId, PaymentId, RepoError,
 };
-use hypha_orders::{Order, OrderError, OrderRepo, StageOrders};
 use hypha_payments::{
-    HasPaymentMethods, HasPayments, NewPayment, NextAction, Payment, PaymentError,
-    PaymentMethodRepo, PaymentProviders, PaymentRepo, PaymentRequest, PaymentStatus, StagePayments,
-    financial_status, newest_payment,
+    ActionAnswer, ActionRequest, HasPaymentMethods, HasPayments, NextAction, Payment,
+    PaymentAction, PaymentError, PaymentMethodRepo, PaymentProviders, PaymentRepo, PaymentRequest,
+    PaymentStatus, ProviderState, StatusRequest,
 };
 
-use crate::{CheckoutPorts, CommandError, Placed};
+use crate::CommandError;
+
+/// Who pays, as a provider is told: the cart, its order once there's one, and where and
+/// to whom it sells.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Payer {
+    pub cart: CartId,
+    /// The order and its number, for a manual method's payment (placed with it).
+    pub order: Option<(OrderId, i64)>,
+    pub channel: ChannelId,
+    pub market: MarketId,
+    pub country: CountryCode,
+    pub email: Email,
+}
 
 /// Asks `payment`'s provider to start collecting it, with its method's `settings`, and
-/// keeps the reference the provider answered with on the payment. The next action, or
-/// why there's none (`Err`: the provider failed, the payment stays `pending`).
+/// keeps the reference and attempt the provider answered with on the payment. The next
+/// action, or why there's none (`Err`: the provider failed, the payment stays
+/// `pending`).
 ///
-/// Never fails otherwise: it runs after the order and its payment are committed, so a
-/// storage failure here must not turn a placed order into a checkout error (the
-/// shopper would retry and find the cart completed). A reference that can't be stored
-/// is logged and left out: the provider answers the same one when the payment is
-/// started again (the same idempotency key, its ID), which stores it then, and the
-/// provider's reports carry it too (`record_payment_event`).
+/// Never fails otherwise: for a manual method it runs after the order is committed, so
+/// a storage failure here must not turn a placed order into a checkout error. A
+/// reference that can't be stored is logged and left out: the provider answers the same
+/// one when the payment is started again (the same idempotency key, its ID), and its
+/// reports carry it too.
 pub(crate) async fn start<S: HasPayments, Q: PaymentProviders>(
     ports: &S,
     providers: &Q,
-    order: &Order,
+    payer: &Payer,
     payment: &mut Payment,
     settings: serde_json::Value,
     return_url: Option<&str>,
@@ -42,14 +54,15 @@ pub(crate) async fn start<S: HasPayments, Q: PaymentProviders>(
     };
     let request = PaymentRequest {
         payment: payment.id(),
-        order: order.id(),
-        order_number: order.number().value(),
+        cart: payer.cart,
+        order: payer.order.map(|(order, _)| order),
+        order_number: payer.order.map(|(_, number)| number),
         method,
         amount: payment.amount(),
-        channel: order.channel(),
-        market: order.market(),
-        country: order.country(),
-        customer_email: order.email().clone(),
+        channel: payer.channel,
+        market: payer.market,
+        country: payer.country,
+        customer_email: payer.email.clone(),
         return_url: return_url.map(str::to_string),
         reference: payment.reference().map(str::to_string),
         attempt: payment.attempt().map(str::to_string),
@@ -115,150 +128,163 @@ fn missing_payment(id: PaymentId) -> CommandError {
     RepoError::Backend(format!("payment {id} is gone")).into()
 }
 
-/// Starts `payment` again while it's open (a replayed checkout, the shopper asking
-/// again), with its method's settings: none needed for `manual`, whose instructions
-/// are the payment's copy; another provider whose method is gone can't go on
-/// (`payment_method_unavailable`).
+/// A manual method's payment started again on a replay of checkout: its instructions,
+/// from its method (none needed for `manual`, whose instructions are the payment's
+/// copy).
 pub(crate) async fn restart<S: HasPayments + HasPaymentMethods, Q: PaymentProviders>(
     ports: &S,
     providers: &Q,
-    order: &Order,
+    payer: &Payer,
     payment: &mut Payment,
-    return_url: Option<&str>,
 ) -> Result<Result<NextAction, PaymentError>, CommandError> {
-    let method = match payment.method() {
-        Some(id) => ports.payment_methods().get(id).await?,
+    let settings = match payment.method() {
+        Some(id) => ports
+            .payment_methods()
+            .get(id)
+            .await?
+            .map(|m| m.settings().clone()),
         None => None,
     };
-    match (method, payment.method()) {
-        (Some(method), _) => {
-            let settings = method.settings().clone();
-            Ok(start(ports, providers, order, payment, settings, return_url).await)
-        }
-        _ if payment.provider().is_manual() => Ok(start(
-            ports,
-            providers,
-            order,
-            payment,
-            serde_json::Value::Null,
-            return_url,
-        )
-        .await),
-        (None, Some(id)) => Ok(Err(PaymentError::MethodUnavailable(id))),
-        (None, None) => Ok(Err(PaymentError::UnknownProvider(
-            payment.provider().clone(),
-        ))),
-    }
-}
-
-/// The shopper asking to pay for an order again.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StartPayment {
-    pub order: OrderId,
-    /// Where the storefront wants the buyer back after a redirect.
-    pub return_url: Option<String>,
-}
-
-/// Starts paying for an order again (`checkout`: the storefront that placed it, holding
-/// its access token, which the host checks): the provider of a `pending` payment is
-/// asked again with the same idempotency key, the payment's ID; after a `failed` one, a
-/// new payment of the order's total is made with the same method (still offered in the
-/// order's market and channel: `payment_method_unavailable` otherwise), in one batch
-/// with the order, and started. Refused for another channel's order
-/// (`order_not_found`), a cancelled one (`order_cancelled`), and one with nothing to
-/// start (`order_not_payable`: authorized, paid, refunded, or no payment at all).
-pub async fn start_order_payment<S: CheckoutPorts, Q: PaymentProviders>(
-    ctx: &Ctx,
-    ports: &S,
-    ids: &impl IdGenerator,
-    providers: &Q,
-    input: StartPayment,
-) -> Result<Placed, CommandError> {
-    ctx.require(Scope::Checkout)?;
-    let mut attempts = Attempts::first();
-    let (order, mut payment) = loop {
-        match open_payment(ctx, ports, ids, providers, input.order).await {
-            Err(CommandError::Repo(RepoError::StaleVersion)) if attempts.another() => continue,
-            done => break done?,
-        }
-    };
-    let next_action = restart(
+    Ok(start(
         ports,
         providers,
-        &order,
-        &mut payment,
-        input.return_url.as_deref(),
+        payer,
+        payment,
+        settings.unwrap_or(serde_json::Value::Null),
+        None,
     )
-    .await?;
-    Ok(Placed {
-        order,
-        payment: Some(payment),
-        next_action: Some(next_action),
-    })
+    .await)
 }
 
-/// The order and the payment to start: its pending one, or a new one after a failed
-/// one, committed with the order (whose version moves, so two requests at once can't
-/// both make one: the loser reloads and finds it).
-async fn open_payment<S: CheckoutPorts, Q: PaymentProviders>(
-    ctx: &Ctx,
+/// Asks the provider where a pending cart payment is (design note 0031, §4) and records
+/// what it says on the payment: whether it moved. A provider that can't tell, or doesn't
+/// answer, leaves it as it was (checkout then waits for its report: `payment_pending`).
+pub(crate) async fn refresh<S: HasPayments, Q: PaymentProviders>(
     ports: &S,
-    ids: &impl IdGenerator,
     providers: &Q,
-    id: OrderId,
-) -> Result<(Order, Payment), CommandError> {
-    let mut order = ports
-        .orders()
-        .get(id)
-        .await?
-        // Another channel's order reads as missing (design note 0020).
-        .filter(|o| ctx.channel().is_none_or(|c| c == o.channel()))
-        .ok_or(CommandError::OrderNotFound(id))?;
-    if order.cancelled().is_some() {
-        return Err(OrderError::Cancelled(id).into());
-    }
-    let not_payable = |order: &Order| CommandError::NotPayable {
-        order: order.id(),
-        status: order.financial_status(),
+    clock: &impl Clock,
+    payment: &mut Payment,
+) -> Result<bool, CommandError> {
+    let request = StatusRequest {
+        payment: payment.id(),
+        cart: payment.cart(),
+        reference: payment.reference().map(str::to_string),
+        attempt: payment.attempt().map(str::to_string),
+        store_settings: serde_json::Map::new(),
     };
-    let newest = newest_payment(ports, id).await?;
-    let failed = match newest {
-        Some(p) if p.status() == PaymentStatus::Pending => return Ok((order, p)),
-        Some(p) if p.status() == PaymentStatus::Failed => p,
-        _ => return Err(not_payable(&order)),
-    };
-    if order.financial_status() != FinancialStatus::Pending {
-        return Err(not_payable(&order));
-    }
-    let method = match failed.method() {
-        Some(method) => ports.payment_methods().get(method).await?,
-        None => None,
-    };
-    let method = match method {
-        Some(m)
-            if crate::payment::offered(&m, order.market(), order.channel(), providers).await? =>
-        {
-            m
-        }
-        _ => {
-            return Err(match failed.method() {
-                Some(m) => CommandError::PaymentMethodUnavailable(m),
-                None => not_payable(&order),
-            });
+    let status = match providers.status(payment.provider(), &request).await {
+        Ok(status) => status,
+        Err(e) => {
+            tracing::info!(payment = %payment.id(), error = %e, "checkout: the provider didn't say where the payment is");
+            return Ok(false);
         }
     };
-    let mut payment = Payment::new(NewPayment::by(
-        &method,
-        PaymentId::from_uuid(ids.new_uuid()),
-        order.id(),
-        order.total(),
-    ))?;
-    let mut payments = ports.payments().list_for_order(id).await?;
-    payments.insert(0, payment.clone());
-    order.set_financial_status(financial_status(order.total(), &payments)?);
-    let mut batch = ports.batch();
-    batch.insert_payment(&mut payment);
-    batch.update_order(&mut order);
-    ports.commit(batch).await?;
-    Ok((order, payment))
+    // Only the attempt the payment collects through moves it (another one's state isn't
+    // this payment's: design note 0030).
+    if let (Some(held), Some(said)) = (payment.attempt(), status.attempt.as_deref())
+        && held != said
+    {
+        return Ok(false);
+    }
+    let reference = status.reference.clone();
+    let moved = match status.state {
+        ProviderState::Open => false,
+        ProviderState::Processing => payment.process(reference)?,
+        ProviderState::Authorized => payment.authorize(reference)?,
+        ProviderState::Paid => payment.pay(clock.now(), reference)?,
+        ProviderState::Failed => payment.fail(reference)?,
+        ProviderState::Canceled => payment.void(clock.now())?,
+    };
+    if moved {
+        payment.note_attempt(status.attempt)?;
+        ports.payments().update(payment).await?;
+    }
+    Ok(moved)
+}
+
+/// Gives back what a cart's committed `payment` holds, when checkout couldn't place its
+/// order (design note 0031, §3): an authorized one voided, a paid one refunded in full,
+/// through its provider; what the provider says it did is recorded at once. A
+/// `processing` one can't be yet (logged for staff). Never fails: the shopper's error is
+/// what the caller answers, and the provider's own report records the rest.
+pub(crate) async fn release<S: HasPayments, Q: PaymentProviders>(
+    ports: &S,
+    providers: &Q,
+    clock: &impl Clock,
+    mut payment: Payment,
+) {
+    let action = match payment.status() {
+        PaymentStatus::Authorized => PaymentAction::Void,
+        PaymentStatus::Paid => PaymentAction::Refund,
+        PaymentStatus::Processing => {
+            tracing::warn!(payment = %payment.id(), "checkout: couldn't place the order, and the payment is processing: give it back from the provider's dashboard once it's collected");
+            return;
+        }
+        _ => return,
+    };
+    let request = ActionRequest {
+        action,
+        payment: payment.id(),
+        cart: payment.cart(),
+        order: None,
+        amount: None,
+        reference: payment.reference().map(str::to_string),
+        attempt: payment.attempt().map(str::to_string),
+        idempotency_key: format!("{}:{action}:checkout", payment.id()),
+        store_settings: serde_json::Map::new(),
+    };
+    let answer = providers.act(payment.provider(), &request).await;
+    let recorded = match answer {
+        Ok(ActionAnswer::Completed { reference }) => match action {
+            PaymentAction::Void => payment.void(clock.now()).map(|_| ()),
+            _ => payment
+                .refund(None, PaymentStatus::Refunded, reference)
+                .map(|_| ()),
+        },
+        // The provider's report records it.
+        Ok(ActionAnswer::Accepted { .. }) => return,
+        Ok(ActionAnswer::Refused { reason }) => {
+            tracing::warn!(payment = %payment.id(), %reason, "checkout: couldn't place the order, and the provider refused to give the money back");
+            return;
+        }
+        Err(e) => {
+            tracing::warn!(payment = %payment.id(), error = %e, "checkout: couldn't place the order, and couldn't give the money back");
+            return;
+        }
+    };
+    let stored = match recorded {
+        Ok(()) => ports
+            .payments()
+            .update(&mut payment)
+            .await
+            .map_err(|e| e.to_string()),
+        Err(e) => Err(e.to_string()),
+    };
+    if let Err(e) = stored {
+        // The provider's report (its webhook) records it.
+        tracing::warn!(payment = %payment.id(), error = %e, "checkout: gave the money back, but couldn't record it");
+    }
+}
+
+/// Asks the provider to release a cart's pending payment that a new one replaced
+/// (voided in Hypha already): best effort, so a shopper paying in an old tab is declined
+/// rather than charged. Money it takes anyway is a second collection, given back.
+pub(crate) async fn release_pending<Q: PaymentProviders>(providers: &Q, payment: Payment) {
+    let request = ActionRequest {
+        action: PaymentAction::Void,
+        payment: payment.id(),
+        cart: payment.cart(),
+        order: None,
+        amount: None,
+        reference: payment.reference().map(str::to_string),
+        attempt: payment.attempt().map(str::to_string),
+        idempotency_key: format!("{}:void:replaced", payment.id()),
+        store_settings: serde_json::Map::new(),
+    };
+    match providers.act(payment.provider(), &request).await {
+        Ok(_) | Err(PaymentError::ActionUnsupported { .. }) => {}
+        Err(e) => {
+            tracing::info!(payment = %payment.id(), error = %e, "checkout: couldn't release a replaced payment at its provider");
+        }
+    }
 }

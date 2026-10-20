@@ -73,10 +73,30 @@ export interface webhooks {
         get?: never;
         put?: never;
         /**
-         * Start a payment for an order at checkout: what the buyer does next.
-         * @description `POST` to the URL the app registered for `payments.start` v1. Answer within 15000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the flow stops with `app_unavailable` (502, `details: {app, point}`). Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).
+         * Start paying for a cart at checkout, before its order exists (design note 0031): what the buyer does next.
+         * @description `POST` to the URL the app registered for `payments.start` v2. Answer within 15000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the flow stops with `app_unavailable` (502, `details: {app, point}`). Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).
          */
-        post: operations["payments.start.v1"];
+        post: operations["payments.start.v2"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "payments.status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Say where a payment the app started is, when the shopper says they paid before the app reported it.
+         * @description `POST` to the URL the app registered for `payments.status` v1. Answer within 10000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the flow stops with `app_unavailable` (502, `details: {app, point}`). Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).
+         */
+        post: operations["payments.status.v1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -286,7 +306,8 @@ export interface components {
              *     capture's own ID may have replaced `reference`.
              */
             attempt?: string | null;
-            order: components["schemas"]["OrderId"];
+            cart?: components["schemas"]["CartId"] | null;
+            order?: components["schemas"]["OrderId"] | null;
             /** @description The payment (`pay_…`). */
             payment: components["schemas"]["PaymentId"];
             /** @description The provider's ID for the payment, as the app gave it on start. */
@@ -321,11 +342,17 @@ export interface components {
          *     keeps its own, design note 0029, §4.2): the method's ID is enough to find them.
          */
         PaymentStartRequest: {
-            /** @description What to collect: the order's total, in its currency. */
+            /** @description What to collect: the cart's total, in its currency. */
             amount: components["schemas"]["Money"];
             /**
-             * @description Where the order was placed (its sales channel), to whom (its market) and
-             *     shipped to (its country).
+             * @description The cart being paid for (`cart_…`). Hypha places its order once the app reports
+             *     the payment `authorized`, `processing` or `paid` (or says so when asked:
+             *     `payments.status`).
+             */
+            cart: components["schemas"]["CartId"];
+            /**
+             * @description Where the cart is (its sales channel), to whom it sells (its market) and where it
+             *     ships (its country).
              */
             channel: components["schemas"]["ChannelId"];
             country: components["schemas"]["CountryCode"];
@@ -333,12 +360,12 @@ export interface components {
             market: components["schemas"]["MarketId"];
             /** @description The payment method the buyer chose (`pm_…`), whose provider is this app. */
             method: components["schemas"]["PaymentMethodId"];
-            order: components["schemas"]["OrderId"];
+            order?: components["schemas"]["OrderId"] | null;
             /**
              * Format: int64
-             * @description The order's human number (`1001`), for the provider's statement.
+             * @description The order's human number (`1001`), with `order`.
              */
-            order_number: number;
+            order_number?: number | null;
             /**
              * @description The payment Hypha created for this attempt (`pay_…`), also the call's
              *     `Idempotency-Key`: a retried start must not charge twice.
@@ -352,6 +379,30 @@ export interface components {
             next_action: components["schemas"]["NextAction"];
             /** @description The provider's ID for the payment (a PaymentIntent's `pi_…`), kept on it. */
             reference?: string | null;
+        };
+        /**
+         * @description Where the shopper's money is at the provider.
+         *
+         *     Known values: `open`, `processing`, `authorized`, `paid`, `failed`, `canceled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        PaymentState: "open" | "processing" | "authorized" | "paid" | "failed" | "canceled";
+        /** @description What Hypha sends to ask where a payment is. */
+        PaymentStatusRequest: {
+            /** @description The attempt the payment collects through, when the app's reports named one. */
+            attempt?: string | null;
+            cart?: components["schemas"]["CartId"] | null;
+            /** @description The payment (`pay_…`). */
+            payment: components["schemas"]["PaymentId"];
+            /** @description The provider's ID for the payment, as the app gave it on start. */
+            reference?: string | null;
+        };
+        /** @description The app's answer: the state, and its IDs for the payment. */
+        PaymentStatusResponse: {
+            /** @description The attempt this state is about (as `attempt` on the events route). */
+            attempt?: string | null;
+            reference?: string | null;
+            state: components["schemas"]["PaymentState"];
         };
         /**
          * @description A postal address as Hypha sends it to an app (0015 §5's shape). Personal fields
@@ -678,7 +729,7 @@ export interface operations {
             };
         };
     };
-    "payments.start.v1": {
+    "payments.start.v2": {
         parameters: {
             query?: never;
             header: {
@@ -709,6 +760,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaymentStartResponse"];
+                };
+            };
+            /** @description A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "payments.status.v1": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old. */
+                "Hypha-Signature": string;
+                /** @description The point's name, as this operation's. */
+                "Hypha-Extension": string;
+                /** @description The point's version. */
+                "Hypha-Extension-Version": string;
+                /** @description The same for every retry of one piece of work: answer a repeat as the first. */
+                "Idempotency-Key": string;
+                /** @description The store the call is for (`store_…`). */
+                "Hypha-Store": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description The answer (any 2xx). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentStatusResponse"];
                 };
             };
             /** @description A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log. */
@@ -866,9 +959,14 @@ export interface ExtensionPoints {
     response: webhooks["payments.refund"]["post"]["responses"][200]["content"]["application/json"];
   };
   "payments.start": {
-    version: 1;
+    version: 2;
     request: NonNullable<webhooks["payments.start"]["post"]["requestBody"]>["content"]["application/json"];
     response: webhooks["payments.start"]["post"]["responses"][200]["content"]["application/json"];
+  };
+  "payments.status": {
+    version: 1;
+    request: NonNullable<webhooks["payments.status"]["post"]["requestBody"]>["content"]["application/json"];
+    response: webhooks["payments.status"]["post"]["responses"][200]["content"]["application/json"];
   };
   "payments.void": {
     version: 1;

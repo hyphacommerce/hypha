@@ -56,9 +56,12 @@ pub enum CommandError {
         order: OrderId,
         status: hypha_core::FinancialStatus,
     },
-    /// An authorized payment holds money only its provider can capture or release:
-    /// marking the order paid or cancelling it waits for providers that can.
-    #[error("payment {payment} of order {order} is authorized; only its provider can settle it")]
+    /// An authorized payment holds money only its provider can capture or release, and
+    /// a `processing` one is on its way (design note 0031): marking the order paid or
+    /// cancelling it waits for the provider.
+    #[error(
+        "payment {payment} of order {order} is authorized or processing; only its provider can settle it"
+    )]
     PaymentAuthorized { order: OrderId, payment: PaymentId },
     #[error("payment {0} not found")]
     PaymentNotFound(PaymentId),
@@ -431,7 +434,13 @@ async fn cancel_order_once<S: OrderActionPorts>(
     let mut payments = ports.payments().list_for_order(order.id()).await?;
     if let Some(held) = payments
         .iter()
-        .find(|p| p.status() == PaymentStatus::Authorized)
+        // Held, or on its way (`processing`, design note 0031): only the provider moves it.
+        .find(|p| {
+            matches!(
+                p.status(),
+                PaymentStatus::Authorized | PaymentStatus::Processing
+            )
+        })
     {
         return Err(CommandError::PaymentAuthorized {
             order: order.id(),
@@ -520,7 +529,13 @@ async fn mark_paid_once<S: OrderActionPorts>(
     order.refuse_if_cancelled()?;
     if let Some(held) = payments
         .iter()
-        .find(|p| p.status() == PaymentStatus::Authorized)
+        // Held, or on its way (`processing`, design note 0031): only the provider moves it.
+        .find(|p| {
+            matches!(
+                p.status(),
+                PaymentStatus::Authorized | PaymentStatus::Processing
+            )
+        })
     {
         return Err(CommandError::PaymentAuthorized {
             order: order.id(),

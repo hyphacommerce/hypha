@@ -5370,20 +5370,33 @@
         "description": "A payment after a report, and the payment status of its order.",
         "properties": {
           "financial_status": {
-            "$ref": "#/components/schemas/FinancialStatusDto",
-            "description": "The order's payment status, derived from its payments."
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FinancialStatusDto",
+                "description": "The order's payment status, derived from its payments; `null` without an order."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "order": {
-            "$ref": "#/components/schemas/OrderId"
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OrderId",
+                "description": "Its order; `null` while it's a cart's and the checkout isn't complete (design\nnote 0031). A report that commits a cart's payment completes its checkout: the\norder placed then."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "payment": {
             "$ref": "#/components/schemas/PaymentResponse"
           }
         },
         "required": [
-          "payment",
-          "order",
-          "financial_status"
+          "payment"
         ],
         "type": "object"
       },
@@ -5560,6 +5573,17 @@
               "null"
             ]
           },
+          "cart": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CartId",
+                "description": "The cart it was started for; `null` for money staff recorded by hand."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "description": "When it was created, RFC 3339 in UTC.",
             "type": "string"
@@ -5593,8 +5617,15 @@
             ]
           },
           "order": {
-            "$ref": "#/components/schemas/OrderId",
-            "description": "The order it collects for."
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OrderId",
+                "description": "The order it collects for; `null` while it's a cart's, before checkout placed\nthe order (design note 0031)."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "paid_at": {
             "description": "When the money was collected, RFC 3339 in UTC.",
@@ -5635,7 +5666,6 @@
         },
         "required": [
           "id",
-          "order",
           "provider",
           "amount",
           "status",
@@ -5646,10 +5676,11 @@
         "type": "object"
       },
       "PaymentStatusDto": {
-        "description": "`PaymentStatus` on the wire (design note 0027, PA7).\n\nKnown values: `pending`, `authorized`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "`PaymentStatus` on the wire (design note 0027, PA7).\n\nKnown values: `pending`, `authorized`, `processing`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "pending",
           "authorized",
+          "processing",
           "paid",
           "failed",
           "voided",

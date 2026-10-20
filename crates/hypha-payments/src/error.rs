@@ -1,4 +1,6 @@
-use hypha_core::{AppKey, Currency, ErrorCode, MoneyError, PaymentId, PaymentMethodId, TextError};
+use hypha_core::{
+    AppKey, Currency, ErrorCode, MoneyError, OrderId, PaymentId, PaymentMethodId, TextError,
+};
 use thiserror::Error;
 
 use crate::{PaymentAction, PaymentMethod, PaymentStatus, ProviderKey};
@@ -44,6 +46,10 @@ pub enum PaymentError {
         provider: ProviderKey,
         action: PaymentAction,
     },
+    /// The provider can't say where a payment is (design note 0031, §4): checkout waits
+    /// for its report.
+    #[error("payment provider {0} can't report a payment's status when asked")]
+    StatusUnsupported(ProviderKey),
     /// An open payment's method is gone, and its provider (not `manual`) needs the
     /// method's settings to go on collecting it.
     #[error("payment method {0} is gone; its provider can't go on without its settings")]
@@ -83,6 +89,9 @@ pub enum PaymentError {
         refunded: i64,
         reported: PaymentStatus,
     },
+    /// A payment pays for one order (design note 0031): checkout attaching it to another.
+    #[error("payment {payment} already pays for order {order}")]
+    AlreadyAttached { payment: PaymentId, order: OrderId },
     /// Bad stored data: a negative amount, more refunded than paid, a status without its
     /// time.
     #[error("payment {payment}: {reason}")]
@@ -103,12 +112,14 @@ impl ErrorCode for PaymentError {
             PaymentError::ProviderFailed { .. } => "payment_provider_failed",
             PaymentError::AppUnavailable { .. } => "app_unavailable",
             PaymentError::ActionUnsupported { .. } => "payment_action_unsupported",
+            PaymentError::StatusUnsupported(_) => "payment_status_unsupported",
             PaymentError::MethodUnavailable(_) => "payment_method_unavailable",
             PaymentError::InstructionsTooLong => "instructions_too_long",
             PaymentError::InvalidTransition { .. } => "invalid_payment_transition",
             PaymentError::ReferenceMismatch { .. } => "payment_reference_mismatch",
             PaymentError::CurrencyMismatch { .. } => "currency_mismatch",
             PaymentError::InvalidRefund { .. } => "invalid_refund_amount",
+            PaymentError::AlreadyAttached { .. } => "payment_attached",
             PaymentError::Inconsistent { .. } => "payment_inconsistent",
         }
     }

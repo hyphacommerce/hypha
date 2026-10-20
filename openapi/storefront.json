@@ -88,6 +88,50 @@
         ],
         "type": "object"
       },
+      "CartPaymentResponse": {
+        "description": "A cart's payment, started (design note 0031).",
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What it collects: the cart's total."
+          },
+          "next_action": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NextActionResponse",
+                "description": "The provider's card form (`client_widget`: mount its element with these props on\nthe checkout, and check out on its `hypha:payment-confirmed`) or page\n(`redirect`). `null` when the provider couldn't start (`payment_error`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payment": {
+            "$ref": "#/components/schemas/PaymentId",
+            "description": "The payment (`pay_…`): what the provider's reports name."
+          },
+          "payment_error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Error",
+                "description": "Why the provider couldn't start (an app that's down: `app_unavailable`): start\nagain. `null` otherwise."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/PaymentStatusDto"
+          }
+        },
+        "required": [
+          "payment",
+          "amount",
+          "status"
+        ],
+        "type": "object"
+      },
       "CartResponse": {
         "properties": {
           "country": {
@@ -298,7 +342,7 @@
                 "oneOf": [
                   {
                     "$ref": "#/components/schemas/NextActionResponse",
-                    "description": "From the payment's provider: for cash on delivery and bank transfer, the\ninstructions (quote the order number as the reference); for a payment app, its\nwidget or a redirect. `null` when there was nothing to pay, or when the provider\ncouldn't start (`payment_error` says why): the order stands, its payment pending."
+                    "description": "For cash on delivery and bank transfer, the instructions (quote the order number\nas the reference). `null` when there was nothing to pay, for a payment made\nonline (before the order), or when a manual provider couldn't start\n(`payment_error` says why)."
                   },
                   {
                     "type": "null"
@@ -309,7 +353,7 @@
                 "oneOf": [
                   {
                     "$ref": "#/components/schemas/Error",
-                    "description": "Why the payment couldn't start, when it couldn't (an app that's down:\n`app_unavailable`): the order is placed; show \"payment couldn't start; try again\"\nand start it again with `POST /storefront/orders/{id}/payment`. `null` otherwise."
+                    "description": "Why a manual method's payment couldn't start. `null` otherwise."
                   },
                   {
                     "type": "null"
@@ -1199,6 +1243,14 @@
         ],
         "type": "object"
       },
+      "PaymentId": {
+        "description": "A PaymentId: `pay_` and 32 hex digits.",
+        "examples": [
+          "pay_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^pay_[0-9a-f]{32}$",
+        "type": "string"
+      },
       "PaymentMethodId": {
         "description": "A PaymentMethodId: `pm_` and 32 hex digits.",
         "examples": [
@@ -1208,10 +1260,11 @@
         "type": "string"
       },
       "PaymentStatusDto": {
-        "description": "`PaymentStatus` on the wire (design note 0027, PA7).\n\nKnown values: `pending`, `authorized`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "`PaymentStatus` on the wire (design note 0027, PA7).\n\nKnown values: `pending`, `authorized`, `processing`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "pending",
           "authorized",
+          "processing",
           "paid",
           "failed",
           "voided",
@@ -1863,11 +1916,22 @@
         ],
         "type": "object"
       },
-      "StartPaymentRequest": {
+      "StartCartPaymentRequest": {
         "additionalProperties": false,
         "properties": {
+          "expected_total": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "The total the shopper sees; if the cart now costs something else, `409\ntotal_changed` instead of collecting a different amount."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "return_url": {
-            "description": "Where a payment provider's page sends the buyer back (a redirect).",
+            "description": "Where a payment provider's page sends the shopper back (a redirect): a page that\nchecks the cart out (`POST /storefront/carts/{id}/checkout`).",
             "type": [
               "string",
               "null"
@@ -3371,7 +3435,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns\nthe order the first request placed. The body is `{}` or `{\"expected_total\": …}`.\nSomething to pay needs a payment method chosen (`PUT …/payment-method`; 409\n`payment_method_required`) and still offered (409 `payment_method_unavailable`).",
+        "summary": "Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns\nthe order the first request placed. The body is `{}` or `{\"expected_total\": …}`.\nSomething to pay needs a payment method chosen (`PUT …/payment-method`; 409\n`payment_method_required`) and still offered (409 `payment_method_unavailable`). An\nonline method's money must be committed first (design note 0031: `POST\n…/payment`): none started is 409 `payment_required`, not yet committed `payment_pending`\n(its provider was asked; try again shortly, or it completes when the provider\nreports), declined or released `payment_failed` (start paying again). If the order\ncan't be placed once the money is committed (a line sold out meanwhile), the money is\ngiven back. A cart checked out already answers with its order (the provider's\nreport may have completed it).",
         "tags": [
           "orders"
         ],
@@ -3927,6 +3991,155 @@
         ],
         "x-hypha-scopes": [
           "carts:write"
+        ]
+      }
+    },
+    "/storefront/carts/{id}/payment": {
+      "post": {
+        "operationId": "storefront.orders.start_cart_payment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartCartPaymentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartPaymentResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Over the rate limit for this cart (`rate_limited`); see `Retry-After`"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Starts paying for the cart before its order exists (design note 0031): an online\nmethod's money is committed first, and checkout places the order once it is. Runs\ncheckout's checks (409 `total_changed`, `payment_method_required`, …). A pending\npayment of the same method and total is started again (the provider resumes it);\notherwise a new one is made and the old ones released. Refused for a manual method\n(409 `payment_method_offline`: check out instead), a total of zero (409\n`cart_nothing_to_pay`) and a cart whose money is committed already (409\n`cart_payment_committed`: check out).",
+        "tags": [
+          "orders"
+        ],
+        "x-hypha-scopes": [
+          "checkout"
         ]
       }
     },
@@ -4852,154 +5065,6 @@
           }
         ],
         "summary": "An order this storefront placed, for its confirmation page, with its access token: a\nmissing or wrong token, or another channel's order, is `404 order_not_found` (as if\nit didn't exist).",
-        "tags": [
-          "orders"
-        ],
-        "x-hypha-scopes": [
-          "checkout"
-        ]
-      }
-    },
-    "/storefront/orders/{id}/payment": {
-      "post": {
-        "operationId": "storefront.orders.start_payment",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/OrderId"
-            }
-          },
-          {
-            "description": "The order's `access_token`, from checkout's answer.",
-            "in": "query",
-            "name": "token",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StartPaymentRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutResponse"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A body that isn't JSON (`malformed_json`)."
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
-          },
-          "413": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
-          },
-          "415": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "No `Content-Type: application/json` (`missing_content_type`)."
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "A server failure (`internal_error`)."
-          }
-        },
-        "security": [
-          {
-            "publishable_key": []
-          }
-        ],
-        "summary": "Starts paying for an order again (design note 0027, §4), with its access token, when\ncheckout's start failed or the provider declined: a `pending` payment is started\nagain (its app sees the same idempotency key, the payment's ID); after a `failed`\none, a new payment is made with the same method and started. Answers like checkout,\nwith `next_action` or `payment_error`. A missing or wrong token, or another\nchannel's order, is `404 order_not_found`; a cancelled order `409 order_cancelled`;\nnothing to start (authorized, paid, refunded, or nothing was due) `409\norder_not_payable`; the method no longer offered `409 payment_method_unavailable`.",
         "tags": [
           "orders"
         ],

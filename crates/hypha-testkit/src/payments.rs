@@ -1,7 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use hypha_core::{
-    OrderId, PaymentId, PaymentMethodId, Recorded, RepoError, Versioned, stamp_insert, stamp_update,
+    CartId, OrderId, PaymentId, PaymentMethodId, Recorded, RepoError, Versioned, stamp_insert,
+    stamp_update,
 };
 use hypha_payments::{Payment, PaymentMethod, PaymentMethodRepo, PaymentRepo, keys};
 
@@ -120,7 +121,18 @@ impl PaymentRepo for InMemoryPaymentRepo {
             .payments
             .all()
             .into_iter()
-            .filter(|p| p.order() == order)
+            .filter(|p| p.order() == Some(order))
+            .collect();
+        found.sort_by_key(|p| std::cmp::Reverse(p.id().as_uuid()));
+        Ok(found)
+    }
+
+    async fn list_for_cart(&self, cart: CartId) -> Result<Vec<Payment>, RepoError> {
+        let mut found: Vec<Payment> = self
+            .payments
+            .all()
+            .into_iter()
+            .filter(|p| p.cart() == Some(cart))
             .collect();
         found.sort_by_key(|p| std::cmp::Reverse(p.id().as_uuid()));
         Ok(found)

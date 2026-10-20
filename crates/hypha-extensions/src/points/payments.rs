@@ -1,25 +1,29 @@
-//! `payments.start`, `payments.capture`, `payments.void` and `payments.refund` v1
-//! (design note 0029, §3.1): how a payment app collects an order's money. Results the
-//! app learns later (a card authorized, a refund settled) come back through
-//! `POST /admin/payments/{id}/events`, not through these answers.
+//! `payments.start` v2, `payments.status`, `payments.capture`, `payments.void` and
+//! `payments.refund` v1 (design notes 0029 §3.1, 0031): how a payment app collects a
+//! cart's money before its order exists, and settles it after. Results the app learns
+//! later (a card authorized, a refund settled) come back through
+//! `POST /admin/payments/{id}/events`, not through these answers; Hypha asks
+//! `payments.status` when the shopper says they paid before the app reported it.
 
 use core::time::Duration;
 
 use hypha_core::{
-    ChannelId, CountryCode, Email, MarketId, Money, OrderId, PaymentId, PaymentMethodId, Scope,
+    CartId, ChannelId, CountryCode, Email, MarketId, Money, OrderId, PaymentId, PaymentMethodId,
+    Scope,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{ExtensionPoint, OnFailure};
 
-/// Checkout starts a payment with a method whose provider is the app.
+/// The shopper starts paying for a cart with a method whose provider is the app (version
+/// 2: before the order exists, design note 0031).
 pub struct PaymentsStart;
 
 impl ExtensionPoint for PaymentsStart {
     const NAME: &'static str = "payments.start";
-    const VERSION: u16 = 1;
+    const VERSION: u16 = 2;
     const TIMEOUT: Duration = Duration::from_secs(15);
-    /// `app_unavailable`: the order isn't placed.
+    /// `app_unavailable`: the shopper can't pay with it now.
     const ON_FAILURE: OnFailure = OnFailure::FailClosed;
     /// A payment app reports what happened through `POST /admin/payments/{id}/events`,
     /// which takes `payments:write`: without it, it can't do its job.
@@ -64,15 +68,25 @@ pub struct PaymentStartRequest {
     /// The payment Hypha created for this attempt (`pay_…`), also the call's
     /// `Idempotency-Key`: a retried start must not charge twice.
     pub payment: PaymentId,
-    pub order: OrderId,
-    /// The order's human number (`1001`), for the provider's statement.
-    pub order_number: i64,
+    /// The cart being paid for (`cart_…`). Hypha places its order once the app reports
+    /// the payment `authorized`, `processing` or `paid` (or says so when asked:
+    /// `payments.status`).
+    pub cart: CartId,
+    /// Absent: the order doesn't exist yet. Only a payment started with its order has
+    /// one (none of an app's, today).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(required = false))]
+    pub order: Option<OrderId>,
+    /// The order's human number (`1001`), with `order`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(required = false))]
+    pub order_number: Option<i64>,
     /// The payment method the buyer chose (`pm_…`), whose provider is this app.
     pub method: PaymentMethodId,
-    /// What to collect: the order's total, in its currency.
+    /// What to collect: the cart's total, in its currency.
     pub amount: Money,
-    /// Where the order was placed (its sales channel), to whom (its market) and
-    /// shipped to (its country).
+    /// Where the cart is (its sales channel), to whom it sells (its market) and where it
+    /// ships (its country).
     pub channel: ChannelId,
     pub market: MarketId,
     pub country: CountryCode,
@@ -121,6 +135,74 @@ pub enum NextAction {
     Instructions { text: String },
 }
 
+/// Hypha asks where a payment the app started is (design note 0031, §4): the shopper's
+/// storefront says they paid, and the app hasn't reported it yet.
+pub struct PaymentsStatus;
+
+impl ExtensionPoint for PaymentsStatus {
+    const NAME: &'static str = "payments.status";
+    const VERSION: u16 = 1;
+    const TIMEOUT: Duration = Duration::from_secs(10);
+    /// `app_unavailable`: checkout waits for the app's report (`payment_pending`).
+    const ON_FAILURE: OnFailure = OnFailure::FailClosed;
+    const SCOPE: Scope = Scope::PaymentsWrite;
+    type Request = PaymentStatusRequest;
+    type Response = PaymentStatusResponse;
+}
+
+/// What Hypha sends to ask where a payment is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PaymentStatusRequest {
+    /// The payment (`pay_…`).
+    pub payment: PaymentId,
+    /// The cart it was started for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(required = false))]
+    pub cart: Option<CartId>,
+    /// The provider's ID for the payment, as the app gave it on start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(required = false))]
+    pub reference: Option<String>,
+    /// The attempt the payment collects through, when the app's reports named one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(required = false))]
+    pub attempt: Option<String>,
+}
+
+/// Where the shopper's money is at the provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentState {
+    /// Waiting for the shopper: nothing taken.
+    Open,
+    /// Taken and being collected (SEPA: days). Hypha places the order.
+    Processing,
+    /// Held. Hypha places the order.
+    Authorized,
+    /// Collected. Hypha places the order.
+    Paid,
+    /// Declined for good.
+    Failed,
+    /// Cancelled.
+    Canceled,
+}
+
+/// The app's answer: the state, and its IDs for the payment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PaymentStatusResponse {
+    pub state: PaymentState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(required = false))]
+    pub reference: Option<String>,
+    /// The attempt this state is about (as `attempt` on the events route).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(required = false))]
+    pub attempt: Option<String>,
+}
+
 /// Staff capture an authorized payment.
 pub struct PaymentsCapture;
 /// Staff void a payment that wasn't captured.
@@ -153,7 +235,14 @@ payment_action!(PaymentsRefund, "payments.refund");
 pub struct PaymentActionRequest {
     /// The payment (`pay_…`).
     pub payment: PaymentId,
-    pub order: OrderId,
+    /// The cart it was started for, and its order once placed: absent when Hypha gives
+    /// back the money of a cart whose order it couldn't place (design note 0031, §3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(required = false))]
+    pub cart: Option<CartId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(required = false))]
+    pub order: Option<OrderId>,
     /// How much: for a capture or refund, at most what's left; absent for the whole
     /// (a void never has one).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -197,8 +286,9 @@ mod tests {
     fn start() -> PaymentStartRequest {
         PaymentStartRequest {
             payment: PaymentId::from_uuid(Uuid::from_u128(1)),
-            order: OrderId::from_uuid(Uuid::from_u128(2)),
-            order_number: 1001,
+            cart: CartId::from_uuid(Uuid::from_u128(2)),
+            order: None,
+            order_number: None,
             method: PaymentMethodId::from_uuid(Uuid::from_u128(3)),
             amount: Money::new(2700, hypha_core::Currency::EUR).unwrap(),
             channel: ChannelId::from_uuid(Uuid::from_u128(4)),
@@ -217,6 +307,9 @@ mod tests {
     fn a_start_without_personal_data_leaves_the_email_out() {
         let sent = serde_json::to_value(start()).unwrap();
         assert_eq!(sent.get("customer_email"), None);
+        // No order yet: a cart's payment (version 2).
+        assert_eq!(sent.get("order"), None);
+        assert_eq!(sent["cart"], "cart_00000000000000000000000000000002");
         assert_eq!(sent["amount"], json!({"amount": 2700, "currency": "EUR"}));
         assert_eq!(sent["payment"], "pay_00000000000000000000000000000001");
     }

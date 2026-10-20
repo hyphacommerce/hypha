@@ -196,7 +196,7 @@ impl Stripe {
         named: Option<PaymentId>,
     ) -> Result<Option<Payment>, UiError> {
         let failed = |e: hypha_spore::core::RepoError| UiError::Failed(e.to_string());
-        let ours = |p: &Payment| p.order() == order && p.provider() == &key();
+        let ours = |p: &Payment| p.order() == Some(order) && p.provider() == &key();
         if let Some(id) = named {
             return Ok(ports.payments().get(id).await.map_err(failed)?.filter(ours));
         }

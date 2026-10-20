@@ -1,15 +1,15 @@
 use std::{fmt, str::FromStr};
 
 use hypha_core::{
-    FinancialStatus, Money, OrderId, PaymentId, PaymentMethodId, PendingEvent, Recorded, Recorder,
-    Stamped, Stamps, Subject, Timestamp, Version, Versioned, optional_text,
+    CartId, FinancialStatus, Money, OrderId, PaymentId, PaymentMethodId, PendingEvent, Recorded,
+    Recorder, Stamped, Stamps, Subject, Timestamp, Version, Versioned, optional_text,
 };
 
 use crate::{
     PaymentError, PaymentMethod, ProviderKey,
     events::{
-        PAYMENT, PaymentAuthorized, PaymentCreated, PaymentFailed, PaymentPaid, PaymentRefunded,
-        PaymentVoided,
+        PAYMENT, PaymentAuthorized, PaymentCreated, PaymentFailed, PaymentPaid, PaymentProcessing,
+        PaymentRefunded, PaymentVoided,
     },
     method::instructions_text,
 };
@@ -22,6 +22,9 @@ pub enum PaymentStatus {
     Pending,
     /// The money is held (a card authorization), not yet captured.
     Authorized,
+    /// The provider took the shopper's payment and is collecting it (SEPA Direct Debit:
+    /// days; design note 0031, Q3): committed, not collected.
+    Processing,
     /// Collected.
     Paid,
     /// The provider declined it.
@@ -35,9 +38,10 @@ pub enum PaymentStatus {
 }
 
 impl PaymentStatus {
-    pub const ALL: [PaymentStatus; 7] = [
+    pub const ALL: [PaymentStatus; 8] = [
         PaymentStatus::Pending,
         PaymentStatus::Authorized,
+        PaymentStatus::Processing,
         PaymentStatus::Paid,
         PaymentStatus::Failed,
         PaymentStatus::Voided,
@@ -50,6 +54,7 @@ impl PaymentStatus {
         match self {
             PaymentStatus::Pending => "pending",
             PaymentStatus::Authorized => "authorized",
+            PaymentStatus::Processing => "processing",
             PaymentStatus::Paid => "paid",
             PaymentStatus::Failed => "failed",
             PaymentStatus::Voided => "voided",
@@ -61,12 +66,17 @@ impl PaymentStatus {
     /// The moves the domain allows (§2): `pending` → `authorized` → `paid` →
     /// `partially_refunded` → `refunded`, `pending` straight to `paid`, and `voided` or
     /// `failed` from `pending` or `authorized`. A partial refund may follow another.
+    /// `processing` (design note 0031) comes from `pending` and ends `paid` or `failed`:
+    /// money on its way can't be voided.
     pub fn can_become(self, to: PaymentStatus) -> bool {
         use PaymentStatus as S;
         matches!(
             (self, to),
-            (S::Pending, S::Authorized | S::Paid | S::Failed | S::Voided)
-                | (S::Authorized, S::Paid | S::Failed | S::Voided)
+            (
+                S::Pending,
+                S::Authorized | S::Processing | S::Paid | S::Failed | S::Voided
+            ) | (S::Authorized, S::Paid | S::Failed | S::Voided)
+                | (S::Processing, S::Paid | S::Failed)
                 | (S::Paid, S::PartiallyRefunded | S::Refunded)
                 | (S::PartiallyRefunded, S::PartiallyRefunded | S::Refunded)
         )
@@ -85,7 +95,16 @@ impl PaymentStatus {
     /// money only its provider can release, so cancelling refuses it
     /// (`payment_authorized`) until providers can.
     pub fn is_open(self) -> bool {
-        matches!(self, PaymentStatus::Pending | PaymentStatus::Authorized)
+        matches!(
+            self,
+            PaymentStatus::Pending | PaymentStatus::Authorized | PaymentStatus::Processing
+        )
+    }
+
+    /// The shopper's money is committed (design note 0031): held, on its way or
+    /// collected. What lets checkout place an order paid online.
+    pub fn committed(self) -> bool {
+        matches!(self, PaymentStatus::Authorized | PaymentStatus::Processing) || self.captured()
     }
 }
 
@@ -111,7 +130,10 @@ impl FromStr for PaymentStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewPayment {
     pub id: PaymentId,
-    pub order: OrderId,
+    /// The cart checkout started it for (`None` for money staff recorded by hand).
+    pub cart: Option<CartId>,
+    /// `None` for a payment started for a cart before its order (design note 0031).
+    pub order: Option<OrderId>,
     pub method: Option<PaymentMethodId>,
     pub method_name: Option<String>,
     pub provider: ProviderKey,
@@ -120,11 +142,20 @@ pub struct NewPayment {
 }
 
 impl NewPayment {
-    /// A payment of `amount` for `order` by `method`, copying what the shopper is shown
-    /// (its name and instructions), so later edits to the method don't change it.
-    pub fn by(method: &PaymentMethod, id: PaymentId, order: OrderId, amount: Money) -> Self {
+    /// A payment of `amount` by `method` for `cart`, and `order` when it's placed with it
+    /// (a manual method; an online one is started before the order: design note 0031),
+    /// copying what the shopper is shown (its name and instructions), so later edits to
+    /// the method don't change it.
+    pub fn by(
+        method: &PaymentMethod,
+        id: PaymentId,
+        cart: CartId,
+        order: Option<OrderId>,
+        amount: Money,
+    ) -> Self {
         Self {
             id,
+            cart: Some(cart),
             order,
             method: Some(method.id()),
             method_name: Some(method.name().to_string()),
@@ -140,7 +171,8 @@ impl NewPayment {
     pub fn recorded_by_hand(id: PaymentId, order: OrderId, amount: Money) -> Self {
         Self {
             id,
-            order,
+            cart: None,
+            order: Some(order),
             method: None,
             method_name: None,
             provider: ProviderKey::manual(),
@@ -150,9 +182,11 @@ impl NewPayment {
     }
 }
 
-/// One attempt to collect an order's money (design note 0027, PA2).
+/// One attempt to collect an order's money (design note 0027, PA2), started for its cart
+/// before the order exists when it's paid online (design note 0031).
 ///
-/// Invariants, checked by `new` and `restore`: a non-negative amount; `refunded` in the
+/// Invariants, checked by `new` and `restore`: a cart or an order (or both); a
+/// non-negative amount; `refunded` in the
 /// same currency, between zero and the amount, and above zero only once refunded (all
 /// of it for `refunded`); `paid_at` set exactly when money was collected and
 /// `voided_at` exactly when voided; text trimmed and within its length.
@@ -161,7 +195,10 @@ pub struct Payment {
     id: PaymentId,
     version: Version,
     stamps: Option<Stamps>,
-    order: OrderId,
+    /// The cart it was started for; `None` for money staff recorded by hand.
+    cart: Option<CartId>,
+    /// `None` until checkout places the order it pays for (`attach`).
+    order: Option<OrderId>,
     /// `None` for money staff recorded on an order placed without a method.
     method: Option<PaymentMethodId>,
     /// The method's name when the payment was made.
@@ -224,6 +261,7 @@ impl Payment {
             id: new.id,
             version: Version::NEW,
             stamps: None,
+            cart: new.cart,
             order: new.order,
             method: new.method,
             method_name: new.method_name,
@@ -240,6 +278,7 @@ impl Payment {
         })?;
         let created = PaymentCreated {
             payment: payment.id,
+            cart: payment.cart,
             order: payment.order,
             method: payment.method,
             provider: payment.provider.to_string(),
@@ -280,6 +319,7 @@ impl Payment {
         }
         let paid = PaymentPaid {
             payment: self.id,
+            cart: self.cart,
             order: self.order,
             method: self.method,
             provider: self.provider.to_string(),
@@ -301,6 +341,7 @@ impl Payment {
         self.voided_at = Some(at);
         let voided = PaymentVoided {
             payment: self.id,
+            cart: self.cart,
             order: self.order,
             method: self.method,
             provider: self.provider.to_string(),
@@ -324,6 +365,7 @@ impl Payment {
         }
         let authorized = PaymentAuthorized {
             payment: self.id,
+            cart: self.cart,
             order: self.order,
             method: self.method,
             provider: self.provider.to_string(),
@@ -332,6 +374,47 @@ impl Payment {
         };
         self.events.record(self.subject(), &authorized);
         Ok(true)
+    }
+
+    /// The provider took the payment and is collecting it (`payment.processing`; design
+    /// note 0031), with `reference` when given. Returns whether that changed anything: a
+    /// processing payment stays as it was. Refused unless pending.
+    pub fn process(&mut self, reference: Option<String>) -> Result<bool, PaymentError> {
+        if self.status == PaymentStatus::Processing {
+            return Ok(false);
+        }
+        let reference = optional_text("reference", reference)?;
+        self.move_to(PaymentStatus::Processing)?;
+        if reference.is_some() {
+            self.reference = reference;
+        }
+        let processing = PaymentProcessing {
+            payment: self.id,
+            cart: self.cart,
+            order: self.order,
+            method: self.method,
+            provider: self.provider.to_string(),
+            amount: self.amount,
+            reference: self.reference.clone(),
+        };
+        self.events.record(self.subject(), &processing);
+        Ok(true)
+    }
+
+    /// Ties it to the order checkout placed with it (design note 0031): once, to one
+    /// order (`payment_attached` for another). Records nothing: `order.placed` says it,
+    /// and the payment's later events name the order.
+    pub fn attach(&mut self, order: OrderId) -> Result<(), PaymentError> {
+        match self.order {
+            Some(attached) if attached != order => Err(PaymentError::AlreadyAttached {
+                payment: self.id,
+                order: attached,
+            }),
+            _ => {
+                self.order = Some(order);
+                Ok(())
+            }
+        }
     }
 
     /// The provider declined it (`payment.failed`), with `reference` when given.
@@ -348,6 +431,7 @@ impl Payment {
         }
         let failed = PaymentFailed {
             payment: self.id,
+            cart: self.cart,
             order: self.order,
             method: self.method,
             provider: self.provider.to_string(),
@@ -426,6 +510,7 @@ impl Payment {
         }
         let refunded = PaymentRefunded {
             payment: self.id,
+            cart: self.cart,
             order: self.order,
             method: self.method,
             provider: self.provider.to_string(),
@@ -455,7 +540,13 @@ impl Payment {
         self.id
     }
 
-    pub fn order(&self) -> OrderId {
+    /// The cart it was started for; `None` for money staff recorded by hand.
+    pub fn cart(&self) -> Option<CartId> {
+        self.cart
+    }
+
+    /// The order it pays for; `None` while it's a cart's, before checkout completes.
+    pub fn order(&self) -> Option<OrderId> {
         self.order
     }
 
@@ -527,7 +618,8 @@ pub struct PaymentSnapshot {
     pub id: PaymentId,
     pub version: Version,
     pub stamps: Option<Stamps>,
-    pub order: OrderId,
+    pub cart: Option<CartId>,
+    pub order: Option<OrderId>,
     pub method: Option<PaymentMethodId>,
     pub method_name: Option<String>,
     pub provider: ProviderKey,
@@ -548,6 +640,7 @@ impl Payment {
             id: self.id,
             version: self.version,
             stamps: self.stamps,
+            cart: self.cart,
             order: self.order,
             method: self.method,
             method_name: self.method_name.clone(),
@@ -579,6 +672,9 @@ impl Payment {
         }
         if s.amount.amount() < 0 {
             return Err(inconsistent("a negative amount"));
+        }
+        if s.cart.is_none() && s.order.is_none() {
+            return Err(inconsistent("neither a cart nor an order"));
         }
         let refunded = s.refunded.amount();
         let refunds_fit = match s.status {
@@ -612,6 +708,7 @@ impl Payment {
             id: s.id,
             version: s.version,
             stamps: s.stamps,
+            cart: s.cart,
             order: s.order,
             method: s.method,
             method_name: optional_text("method_name", s.method_name)?,
@@ -699,6 +796,80 @@ mod tests {
         Money::new(amount, Currency::EUR).unwrap()
     }
 
+    #[test]
+    fn committed_is_held_on_its_way_or_collected() {
+        use PaymentStatus as S;
+        let committed: Vec<S> = S::ALL.into_iter().filter(|s| s.committed()).collect();
+        assert_eq!(
+            committed,
+            [
+                S::Authorized,
+                S::Processing,
+                S::Paid,
+                S::PartiallyRefunded,
+                S::Refunded
+            ]
+        );
+    }
+
+    #[test]
+    fn a_processing_payment_records_it_once() {
+        let mut p = new_payment(1, 1000);
+        p.take_events();
+        assert_eq!(p.process(Some("pi_1".to_string())), Ok(true));
+        assert_eq!(p.process(None), Ok(false));
+        assert_eq!(p.status(), PaymentStatus::Processing);
+        assert_eq!(p.reference(), Some("pi_1"));
+        assert_eq!(types(&mut p), ["payment.processing"]);
+        // A processing payment counts as nothing collected yet.
+        assert_eq!(
+            financial_status(eur(1000), std::slice::from_ref(&p)),
+            Ok(FinancialStatus::Pending)
+        );
+    }
+
+    #[test]
+    fn a_cart_payment_is_attached_to_one_order() {
+        let mut p = Payment::new(NewPayment {
+            id: PaymentId::from_uuid(Uuid::from_u128(1)),
+            cart: Some(CartId::from_uuid(Uuid::from_u128(300))),
+            order: None,
+            method: None,
+            method_name: None,
+            provider: ProviderKey::manual(),
+            amount: eur(1000),
+            instructions: None,
+        })
+        .unwrap();
+        assert_eq!(p.order(), None);
+        let order = OrderId::from_uuid(Uuid::from_u128(100));
+        assert_eq!(p.attach(order), Ok(()));
+        assert_eq!(p.attach(order), Ok(()));
+        assert_eq!(p.order(), Some(order));
+        let other = OrderId::from_uuid(Uuid::from_u128(101));
+        assert_eq!(
+            p.attach(other),
+            Err(PaymentError::AlreadyAttached {
+                payment: p.id(),
+                order
+            })
+        );
+    }
+
+    #[test]
+    fn a_payment_has_a_cart_or_an_order() {
+        let mut s = new_payment(1, 1000).snapshot();
+        s.cart = None;
+        s.order = None;
+        assert_eq!(
+            Payment::restore(s),
+            Err(PaymentError::Inconsistent {
+                payment: PaymentId::from_uuid(Uuid::from_u128(1)),
+                reason: "neither a cart nor an order",
+            })
+        );
+    }
+
     fn at() -> Timestamp {
         Timestamp::from_unix_micros(1_767_225_600_000_000)
     }
@@ -706,7 +877,8 @@ mod tests {
     fn new_payment(n: u128, amount: i64) -> Payment {
         let mut p = Payment::new(NewPayment {
             id: PaymentId::from_uuid(Uuid::from_u128(n)),
-            order: OrderId::from_uuid(Uuid::from_u128(100)),
+            cart: Some(CartId::from_uuid(Uuid::from_u128(300))),
+            order: Some(OrderId::from_uuid(Uuid::from_u128(100))),
             method: Some(PaymentMethodId::from_uuid(Uuid::from_u128(200))),
             method_name: Some("Bank transfer".to_string()),
             provider: ProviderKey::manual(),
@@ -824,6 +996,9 @@ mod tests {
             (S::Pending, S::Paid),
             (S::Pending, S::Failed),
             (S::Pending, S::Voided),
+            (S::Pending, S::Processing),
+            (S::Processing, S::Paid),
+            (S::Processing, S::Failed),
             (S::Authorized, S::Paid),
             (S::Authorized, S::Failed),
             (S::Authorized, S::Voided),

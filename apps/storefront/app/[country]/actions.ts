@@ -18,17 +18,7 @@ import { type ListingPage, readListingPage } from "@/lib/listing-data";
 import { formatRange } from "@/lib/money";
 import { COUNTRY_COOKIE } from "@/lib/routing";
 import { paymentElementModule } from "@/lib/app-elements";
-import {
-  cartId,
-  forgetCart,
-  forgetPaymentStart,
-  link,
-  mode,
-  orderTokenCookie,
-  rememberCart,
-  rememberOrder,
-  rememberPaymentStart,
-} from "@/lib/site";
+import { cartId, forgetCart, link, mode, rememberCart, rememberOrder } from "@/lib/site";
 
 /** What a refused action tells its form. */
 export type ActionResult = { error: string } | undefined;
@@ -205,28 +195,40 @@ export async function selectPaymentMethod(input: {
   refresh();
 }
 
-/** What a refused "Place order" tells the form, and the step to go back to. */
-export type PlaceOrderResult = { error: string; step?: "payment" } | undefined;
+/** What a refused "Place order" tells the form: the step to go back to, or that the
+ * payment isn't confirmed yet (`pending`: ask again in a moment). */
+export type PlaceOrderResult = { error: string; step?: "payment"; pending?: boolean } | undefined;
 
 /**
  * Places the order at the total the shopper saw, with the payment method they chose: a
  * total that moved since is refused (`total_changed`) rather than charged. The
  * idempotency key (one per render of the checkout) makes a double click place one order.
+ * A method paid online needs its money committed first (design note 0031: the card form
+ * on the checkout, `startCartPayment`); until the provider says so the answer is
+ * `pending`. A cart checked out already (the provider's webhook got there first) is
+ * answered with its order.
  */
 export async function placeOrder(input: {
   country: string;
-  total: { amount: number; currency: string };
+  /** Absent when coming back from a payment provider's page: the payment's own total. */
+  total?: { amount: number; currency: string };
   attempt: string;
 }): Promise<PlaceOrderResult> {
   const id = await currentCart(input.country);
   const { data, error } = await api().POST("/storefront/carts/{id}/checkout", {
     params: { path: { id }, header: { "Idempotency-Key": input.attempt } },
-    body: { expected_total: input.total },
+    body: input.total ? { expected_total: input.total } : {},
   });
   if (error) {
     if (error.code === "payment_method_required" || error.code === "payment_method_unavailable") {
       // Back to the payment step, re-rendered with the methods offered now.
       refresh();
+      return { error: describe(error), step: "payment" };
+    }
+    if (error.code === "payment_pending") {
+      return { error: describe(error), pending: true };
+    }
+    if (error.code === "payment_failed" || error.code === "payment_required") {
       return { error: describe(error), step: "payment" };
     }
     return refused(error);
@@ -235,58 +237,54 @@ export async function placeOrder(input: {
   // the order's ID alone reads nothing (design note 0024, §7).
   await rememberOrder(data.id, data.access_token);
   await forgetCart(input.country);
-  // A provider that pays on its own page sends the shopper there (design note 0027, §3);
-  // instructions (cash on delivery, bank transfer) are on the confirmation, read from
-  // the order's payment. A payment app's widget (`client_widget`, design note 0029, §7)
-  // and a start that failed (`payment_error`: the order stands, the payment can start
-  // again) are finished on the confirmation page, which mounts the app's element.
-  const next = data.next_action;
-  // The URL is the API's answer (the provider's page), not the shopper's input.
-  // react-doctor-disable-next-line react-doctor/clickjacking-redirect-risk
-  if (next?.type === "redirect" && /^https?:\/\//.test(next.url)) redirect(next.url);
-  if (next?.type === "client_widget" || data.payment_error) {
-    await rememberPaymentStart(data.id, {
-      next_action: next ?? null,
-      error: data.payment_error ? describe(data.payment_error) : null,
-    });
-  }
+  // Instructions (cash on delivery, bank transfer) are on the confirmation, read from
+  // the order's payment; an online payment was made before the order.
   redirect(link(input.country, `/order/${data.id}/confirmed`));
 }
 
-/** What starting (or restarting) an order's payment answered, for the payment step. */
-export type PaymentStartResult = {
+/** What starting the cart's payment answered (design note 0031). */
+export type CartPaymentResult = {
   nextAction: StorefrontSchemas["NextActionResponse"] | null;
   /** The shopper's message when it couldn't start. */
   error: string | null;
   /** The app element's module, for a `client_widget` (from the installed apps). */
   module: string | null;
+  /** The cart's money is committed already (a reload after paying): place the order. */
+  committed: boolean;
 };
 
 /**
- * Starts an order's payment again (`POST /storefront/orders/{id}/payment`, design note
- * 0027 §4): after checkout's start failed, the widget reported an error, or the page
- * was opened without the start checkout answered. The order's access token comes from
- * this buyer's cookie.
+ * Starts paying for the cart with its online method, before the order exists (design
+ * note 0031): the provider's card form (mounted on the checkout) or its page. Started
+ * again (the page reloaded), the provider resumes the same payment. `returnUrl` is where
+ * a provider's page sends the shopper back (`/checkout/complete`), made absolute in the
+ * browser.
  */
-export async function startPayment(input: { order: string }): Promise<PaymentStartResult> {
-  const token = (await cookies()).get(orderTokenCookie(input.order))?.value;
-  if (!token) return { nextAction: null, error: "Open this order from its email.", module: null };
-  const { data, error } = await api().POST("/storefront/orders/{id}/payment", {
-    params: { path: { id: input.order }, query: { token } },
-    body: {},
+export async function startCartPayment(input: {
+  country: string;
+  total: { amount: number; currency: string };
+  returnUrl: string;
+}): Promise<CartPaymentResult> {
+  const id = await currentCart(input.country);
+  const returnUrl = /^https?:\/\//.test(input.returnUrl) ? input.returnUrl : undefined;
+  const { data, error } = await api().POST("/storefront/carts/{id}/payment", {
+    params: { path: { id } },
+    body: { expected_total: input.total, return_url: returnUrl },
   });
-  if (error) return { nextAction: null, error: describe(error), module: null };
+  const none = { nextAction: null, module: null, committed: false };
+  if (error) {
+    if (error.code === "cart_payment_committed") return { ...none, error: null, committed: true };
+    // The page re-renders with what changed (the total, the methods).
+    if (error.code === "total_changed" || error.code === "payment_method_unavailable") refresh();
+    return { ...none, error: describe(error) };
+  }
   const next = data.next_action ?? null;
   return {
     nextAction: next,
     error: data.payment_error ? describe(data.payment_error) : null,
     module: next?.type === "client_widget" ? await paymentElementModule(next.element) : null,
+    committed: false,
   };
-}
-
-/** The widget said the shopper paid: the page no longer offers to start it. */
-export async function paymentConfirmed(input: { order: string }): Promise<void> {
-  await forgetPaymentStart(input.order);
 }
 
 /**

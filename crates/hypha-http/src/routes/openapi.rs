@@ -476,7 +476,10 @@ fn points() -> Vec<PointDoc> {
             "Price a cart's shipping group (design note 0015, §5's rate callback).",
         ),
         PointDoc::of::<x::PaymentsStart>(
-            "Start a payment for an order at checkout: what the buyer does next.",
+            "Start paying for a cart at checkout, before its order exists (design note 0031): what the buyer does next.",
+        ),
+        PointDoc::of::<x::PaymentsStatus>(
+            "Say where a payment the app started is, when the shopper says they paid before the app reported it.",
         ),
         PointDoc::of::<x::PaymentsCapture>("Capture an authorized payment (staff)."),
         PointDoc::of::<x::PaymentsVoid>("Void a payment that wasn't captured (staff)."),
@@ -848,6 +851,7 @@ mod tests {
                 "payments.capture",
                 "payments.refund",
                 "payments.start",
+                "payments.status",
                 "payments.void",
                 "search.query",
                 "shipping.rates"

@@ -16,8 +16,12 @@ export type PostalAddress = Schemas["PostalAddressResponse"];
 export type ShippingRatesRequest = PointRequest<"shipping.rates">;
 export type ShippingRatesResponse = PointResponse<"shipping.rates">;
 
+/** Version 2: a cart's payment, started before its order exists (design note 0031). */
 export type PaymentsStartRequest = PointRequest<"payments.start">;
 export type PaymentsStartResponse = PointResponse<"payments.start">;
+/** Where a payment the app started is, asked when the shopper says they paid. */
+export type PaymentsStatusRequest = PointRequest<"payments.status">;
+export type PaymentsStatusResponse = PointResponse<"payments.status">;
 /** What the shopper does next: a redirect, a storefront element to mount, or instructions. */
 export type NextAction = Schemas["NextAction"];
 /** `payments.capture`, `.void` and `.refund` take the same request and answer alike. */

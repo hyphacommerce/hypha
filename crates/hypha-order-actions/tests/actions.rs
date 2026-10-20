@@ -840,7 +840,8 @@ fn only_the_request_that_cancels_says_it_changed_the_order() {
 fn pending_payment(world: &World) -> Payment {
     let mut payment = Payment::new(NewPayment {
         id: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
-        order: order_id(),
+        cart: None,
+        order: Some(order_id()),
         method: Some(hypha_core::PaymentMethodId::from_uuid(Uuid::from_u128(
             8002,
         ))),
@@ -1005,7 +1006,8 @@ fn stored_payment(world: &World, n: u128, amount: i64, status: PaymentStatus, re
         id: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8100 + n)),
         version: hypha_core::Version::NEW,
         stamps: None,
-        order: order_id(),
+        cart: None,
+        order: Some(order_id()),
         method: None,
         method_name: None,
         provider: ProviderKey::manual(),
@@ -1253,6 +1255,11 @@ impl World {
             &self.clock,
             input,
         ))
+        // These payments are an order's: the report answers with it.
+        .map(|done| hypha_core::Idempotent {
+            value: done.value.order.expect("an order's payment"),
+            replayed: done.replayed,
+        })
     }
 }
 
@@ -1733,7 +1740,8 @@ fn owned_payment(world: &World, owner: &str, provider: &str, id: hypha_core::App
     block_on(world.apps.insert(&mut app)).unwrap();
     let mut payment = Payment::new(NewPayment {
         id: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
-        order: order_id(),
+        cart: None,
+        order: Some(order_id()),
         method: None,
         method_name: Some("Card".to_string()),
         provider: ProviderKey::new(provider).unwrap(),
@@ -1766,7 +1774,7 @@ impl World {
             &self.clock,
             input,
         ))
-        .map(|done| done.value.payments[0].status())
+        .map(|done| done.value.payment.status())
     }
 }
 
@@ -1844,4 +1852,76 @@ fn staff_report_on_an_apps_payment() {
     app_payment(&world, "app_pay", app_id(71));
     let staff = Actor::User(hypha_core::UserId::from_uuid(Uuid::from_u128(9)));
     assert_eq!(world.report_as(staff, K::Paid), Ok(PaymentStatus::Paid));
+}
+
+/// A payment started for a cart before its order (design note 0031).
+fn cart_payment(world: &World) -> Payment {
+    let mut payment = Payment::new(NewPayment {
+        id: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+        cart: Some(hypha_core::CartId::from_uuid(Uuid::from_u128(8003))),
+        order: None,
+        method: None,
+        method_name: Some("Card".to_string()),
+        provider: ProviderKey::new("app_card").unwrap(),
+        amount: eur(2000),
+        instructions: None,
+    })
+    .unwrap();
+    block_on(world.payments.insert(&mut payment)).unwrap();
+    payment
+}
+
+fn report_cart(
+    world: &World,
+    kind: hypha_order_actions::PaymentEventKind,
+) -> Result<hypha_order_actions::PaymentReport, CommandError> {
+    let input = hypha_order_actions::PaymentEvent {
+        payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+        kind,
+        amount: None,
+        reference: Some("pi_1".to_string()),
+        attempt: Some("pi_1".to_string()),
+        occurred_at: None,
+        idempotency: None,
+    };
+    block_on(hypha_order_actions::record_payment_event(
+        &Ctx::system(),
+        &world.ports,
+        &world.clock,
+        input,
+    ))
+    .map(|done| done.value)
+}
+
+#[test]
+fn a_report_on_a_carts_payment_moves_the_payment_alone() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    cart_payment(&world);
+    let report = report_cart(&world, K::Authorized).unwrap();
+    assert_eq!(report.order, None);
+    assert_eq!(report.payment.status(), PaymentStatus::Authorized);
+    assert_eq!(report.payment.attempt(), Some("pi_1"));
+    let stored = block_on(world.payments.get(report.payment.id()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored, report.payment);
+}
+
+#[test]
+fn processing_is_reported_and_then_paid() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    cart_payment(&world);
+    let report = report_cart(&world, K::Processing).unwrap();
+    assert_eq!(report.payment.status(), PaymentStatus::Processing);
+    // Delivered again: nothing changes.
+    assert_eq!(
+        report_cart(&world, K::Processing).map(|r| r.payment.status()),
+        Ok(PaymentStatus::Processing)
+    );
+    assert_eq!(
+        report_cart(&world, K::Paid).map(|r| r.payment.status()),
+        Ok(PaymentStatus::Paid)
+    );
 }

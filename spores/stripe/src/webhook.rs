@@ -9,6 +9,7 @@
 //! help), 400 for a request that isn't Stripe's, 500 when Hypha couldn't record it now
 //! (Stripe delivers it again).
 
+use hypha_spore::checkout::CommandError as CheckoutError;
 use hypha_spore::core::{
     ActingAs, Actor, Clock, Ctx, IdempotencyRequest, PaymentId, Scope, Timestamp,
 };
@@ -128,6 +129,8 @@ pub fn intent_reports(event: &StripeEvent) -> Result<Vec<Report>, String> {
     };
     match event.kind.as_str() {
         "payment_intent.succeeded" => Ok(vec![report(PaymentEventKind::Paid)]),
+        // Taken and being collected (SEPA Direct Debit: days; design note 0031, Q3).
+        "payment_intent.processing" => Ok(vec![report(PaymentEventKind::Processing)]),
         "payment_intent.amount_capturable_updated" => {
             match event
                 .object
@@ -335,8 +338,31 @@ pub async fn receive<S: Storage>(
         // payment past pending goes back; its decline, cancel or refund isn't the
         // payment's.
         let unwanted = match record_payment_event(&ctx, &ports, &stripe.env, input).await {
-            Ok(_) => {
+            Ok(done) => {
                 reported += 1;
+                // A cart's money committed: its checkout completes now, though the
+                // shopper never came back (design note 0031, §1.5). A storage failure is
+                // tried again with this event; a checkout that can't complete gave the
+                // money back already.
+                match state
+                    .complete_paid_checkout(&ports, &ctx, &done.value.payment)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(CheckoutError::Repo(e)) => {
+                        hypha_spore::tracing::warn!(event = %event.id, "completing the checkout failed: {e}");
+                        return answer(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            WebhookOutcome::rejected("couldn't complete the checkout; try again"),
+                        );
+                    }
+                    Err(e) => {
+                        let code = hypha_spore::core::ErrorCode::code(&e);
+                        hypha_spore::tracing::warn!(event = %event.id, payment = %report.payment, "the paid checkout couldn't complete: {code}");
+                        refused
+                            .get_or_insert_with(|| format!("checkout couldn't complete: {code}"));
+                    }
+                }
                 None
             }
             // Storage failed: Stripe delivers it again, and what went through already
@@ -353,7 +379,9 @@ pub async fn receive<S: Storage>(
             Err(CommandError::Payment(PaymentError::InvalidTransition { from, .. }))
                 if matches!(
                     report.kind,
-                    PaymentEventKind::Paid | PaymentEventKind::Authorized
+                    PaymentEventKind::Paid
+                        | PaymentEventKind::Authorized
+                        | PaymentEventKind::Processing
                 ) && matches!(from, PaymentStatus::Voided | PaymentStatus::Failed) =>
             {
                 Some(format!("payment {from}"))
@@ -362,7 +390,9 @@ pub async fn receive<S: Storage>(
             Err(CommandError::Payment(PaymentError::ReferenceMismatch { status, .. }))
                 if matches!(
                     report.kind,
-                    PaymentEventKind::Paid | PaymentEventKind::Authorized
+                    PaymentEventKind::Paid
+                        | PaymentEventKind::Authorized
+                        | PaymentEventKind::Processing
                 ) =>
             {
                 Some(format!("payment {status} through another PaymentIntent"))

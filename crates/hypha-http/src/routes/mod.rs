@@ -321,7 +321,7 @@ macro_rules! route_table {
             [storefront, GET, "/storefront/carts/{id}/payment-methods", carts::payment_methods],
             [storefront, PUT, "/storefront/carts/{id}/payment-method", carts::set_payment_method],
             [storefront, POST, "/storefront/carts/{id}/checkout", orders::checkout_handler],
-            [storefront, POST, "/storefront/orders/{id}/payment", orders::start_payment],
+            [storefront, POST, "/storefront/carts/{id}/payment", orders::start_cart_payment],
             [storefront, GET, "/storefront/orders/{id}", orders::fetch_placed],
             [storefront, GET, "/storefront/app-extensions", app_extensions::list_storefront],
             [storefront, GET, "/storefront/apps/{key}/proxy/{*path}", app_extensions::storefront_proxy_get],

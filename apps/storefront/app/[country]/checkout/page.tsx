@@ -18,6 +18,7 @@ import {
   DetailsForm,
   PAYMENT_STEP,
   PaymentChoice,
+  PayOnline,
   PlaceOrder,
   ShippingChoice,
 } from "./checkout-forms";
@@ -30,9 +31,16 @@ export const metadata: Metadata = { title: "Checkout" };
 /**
  * Checkout (design notes 0023, §3, and 0024, §7) on one page: contact and shipping
  * address, a shipping option per group (0015), how the shopper pays when there's
- * something to pay (0027, §4), and a summary with "Place order".
+ * something to pay (0027, §4), and a summary with "Place order", or, for a method paid
+ * online, the payment itself: the order is placed once it's paid (0031).
  */
-export default async function CheckoutPage({ params }: { params: Promise<{ country: string }> }) {
+export default async function CheckoutPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ country: string }>;
+  searchParams: Promise<{ payment?: string | string[] }>;
+}) {
   const country = await countryOf((await params).country);
   const code = country.country;
   const digits = country.minor_units;
@@ -59,6 +67,11 @@ export default async function CheckoutPage({ params }: { params: Promise<{ count
   // The cart's choice counts only while it's still offered.
   const method = methods.find((m) => m.id === cart.payment_method);
   const paymentDone = !pays || Boolean(method);
+  // Paid online before the order (design note 0031): the card form on this page.
+  const online = pays && method !== undefined && method.provider !== "manual";
+  // Back from a provider's page without an order (`/checkout/complete`): why.
+  const returned = (await searchParams).payment;
+  const returnError = typeof returned === "string" ? returned : undefined;
   // Nothing to pay with: the store can't take this order (as Shopify says it).
   const closed = pays && payment.data !== undefined && methods.length === 0;
   const ready = detailsDone && cart.fully_available && shippingDone && paymentDone;
@@ -184,11 +197,23 @@ export default async function CheckoutPage({ params }: { params: Promise<{ count
                 taxesIncluded={cart.taxes_included}
                 digits={digits}
               />
+              {returnError && <Banner status="error" title={returnError} />}
               {closed ? (
                 <Banner
                   status="warning"
                   title="This store can't take orders right now"
                   description="There's no way to pay for this order yet. Please try again later."
+                />
+              ) : online ? (
+                <PayOnline
+                  // A new total or method starts a new payment.
+                  key={`${method?.id}:${cart.total.amount}`}
+                  country={code}
+                  total={{ amount: cart.total.amount, currency: cart.total.currency }}
+                  attempt={attempt}
+                  ready={ready}
+                  missing={missing}
+                  label={`Pay ${formatMoney(cart.total, digits)}`}
                 />
               ) : (
                 <PlaceOrder

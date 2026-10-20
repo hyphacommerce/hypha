@@ -1,7 +1,7 @@
 //! The host's payment providers (design note 0029, §3.1, §10 item 5): the ones it was
 //! built with (`Storage::Payments`, `manual`), and every installed app answering
-//! `payments.start` under its own key (`app_stripe`). An app's start, capture, void and
-//! refund are its extension points, called through `call::<P>` (signed, capped, parsed
+//! `payments.start` under its own key (`app_stripe`). An app's start, status, capture,
+//! void and refund are its extension points, called through `call::<P>` (signed, capped, parsed
 //! and recorded in its call log with the payment), failing closed: an app that gives no
 //! usable answer is `app_unavailable`.
 
@@ -9,11 +9,13 @@ use hypha_apps::{HasApps, HasExtensionEndpoints};
 use hypha_core::{AppKey, AppPoints, RepoError, optional_text};
 use hypha_extensions::{
     ExtensionError, ExtensionPoint, HasExtensionCalls, PaymentActionRequest, PaymentActionResponse,
-    PaymentStartRequest, PaymentsCapture, PaymentsRefund, PaymentsStart, PaymentsVoid, call,
+    PaymentStartRequest, PaymentState, PaymentStatusRequest, PaymentsCapture, PaymentsRefund,
+    PaymentsStart, PaymentsStatus, PaymentsVoid, call,
 };
 use hypha_payments::{
     ActionAnswer, ActionRequest, NextAction, PaymentAction, PaymentError, PaymentProviders,
-    PaymentRequest, ProviderKey, Started, no_settings,
+    PaymentRequest, ProviderKey, ProviderState, ProviderStatus, Started, StatusRequest,
+    no_settings,
 };
 
 use crate::{
@@ -106,6 +108,7 @@ where
         })?;
         let body = PaymentActionRequest {
             payment: request.payment,
+            cart: request.cart,
             order: request.order,
             amount: request.amount,
             reference: request.reference.clone(),
@@ -186,6 +189,7 @@ where
             .ok_or_else(|| PaymentError::UnknownProvider(key.clone()))?;
         let request = PaymentStartRequest {
             payment: payment.payment,
+            cart: payment.cart,
             order: payment.order,
             order_number: payment.order_number,
             method: payment.method,
@@ -258,6 +262,62 @@ where
             PaymentAction::Void => self.act_at::<PaymentsVoid>(key, &app, request).await,
             PaymentAction::Refund => self.act_at::<PaymentsRefund>(key, &app, request).await,
         }
+    }
+
+    async fn status(
+        &self,
+        key: &ProviderKey,
+        request: &StatusRequest,
+    ) -> Result<ProviderStatus, PaymentError> {
+        let Some(app) = key.app() else {
+            if key.is_manual() {
+                return self.built_in.status(key, request).await;
+            }
+            let Some(settings) = self.spore_settings(key).await? else {
+                return Err(PaymentError::StatusUnsupported(key.clone()));
+            };
+            let request = StatusRequest {
+                store_settings: settings,
+                ..request.clone()
+            };
+            return self.built_in.status(key, &request).await;
+        };
+        // An app that doesn't answer the point: checkout waits for its report.
+        let endpoint = self
+            .endpoint(key, &app, PaymentsStatus::NAME)
+            .await?
+            .ok_or_else(|| PaymentError::StatusUnsupported(key.clone()))?;
+        let body = PaymentStatusRequest {
+            payment: request.payment,
+            cart: request.cart,
+            reference: request.reference.clone(),
+            attempt: request.attempt.clone(),
+        };
+        let correlation = request.payment.to_string();
+        let idempotency_key = format!("{}:status", request.payment);
+        let answer = call::<PaymentsStatus>(
+            &self.caller,
+            self.ports.extension_calls(),
+            self.env,
+            &endpoint.as_endpoint(),
+            &body,
+            &idempotency_key,
+            Some(&correlation),
+        )
+        .await
+        .map_err(unavailable)?;
+        Ok(ProviderStatus {
+            state: match answer.state {
+                PaymentState::Open => ProviderState::Open,
+                PaymentState::Processing => ProviderState::Processing,
+                PaymentState::Authorized => ProviderState::Authorized,
+                PaymentState::Paid => ProviderState::Paid,
+                PaymentState::Failed => ProviderState::Failed,
+                PaymentState::Canceled => ProviderState::Canceled,
+            },
+            reference: checked_reference(&app, PaymentsStatus::NAME, answer.reference)?,
+            attempt: checked_reference(&app, PaymentsStatus::NAME, answer.attempt)?,
+        })
     }
 }
 

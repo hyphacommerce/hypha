@@ -5772,7 +5772,11 @@ async fn app_answering(app: &TestApp, key: &str, base: &str, points: &[(&str, &s
     let body = json!({
         "extension_points": points
             .iter()
-            .map(|(point, path)| json!({"point": point, "version": 1, "url": format!("{base}{path}")}))
+            .map(|(point, path)| {
+                // The version this build calls (`payments.start` is a cart's: 2).
+                let version = if *point == "payments.start" { 2 } else { 1 };
+                json!({"point": point, "version": version, "url": format!("{base}{path}")})
+            })
             .collect::<Vec<_>>()
     });
     let path = format!("/admin/apps/{key}/extension-points");
@@ -5828,7 +5832,7 @@ async fn report(app: &TestApp, payment: &str, key: &str, body: Value) -> (Status
 }
 
 #[tokio::test]
-async fn an_app_collects_a_payment_from_checkout_to_its_reports() {
+async fn an_app_collects_a_carts_payment_and_its_report_places_the_order() {
     let app = app().await;
     let (base, _, saw) = fake_app(&[
         ("/start", 200, card_widget()),
@@ -5853,27 +5857,27 @@ async fn an_app_collects_a_payment_from_checkout_to_its_reports() {
     );
     let (pk, cart_path) = cart_paying_by_card(&app, &base).await;
 
-    let (status, placed) = send_as(
+    // The shopper starts paying for the cart (design note 0031): no order yet.
+    let (status, started) = send_as(
         &app,
         &pk,
         "POST",
-        &format!("{cart_path}/checkout"),
+        &format!("{cart_path}/payment"),
         Some(r#"{"return_url":"https://shop.example/back"}"#),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{placed}");
+    assert_eq!(status, StatusCode::OK, "{started}");
     assert_eq!(
-        placed["next_action"],
+        started["next_action"],
         json!({"type": "client_widget", "element": "card-payment",
                "props": {"client_secret": "pi_test_secret"}})
     );
-    assert_eq!(placed["payment_error"], Value::Null);
-    assert_eq!(placed["payment"]["status"], "pending");
-    let order = placed["id"].as_str().unwrap().to_string();
-    let (_, admin) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
-    let payment = admin["payments"][0]["id"].as_str().unwrap().to_string();
-    assert_eq!(admin["payments"][0]["provider"], "app_card");
-    assert_eq!(admin["payments"][0]["reference"], "pi_test");
+    assert_eq!(started["payment_error"], Value::Null);
+    assert_eq!(started["status"], "pending");
+    let payment = started["payment"].as_str().unwrap().to_string();
+    let cart = cart_path
+        .trim_start_matches("/storefront/carts/")
+        .to_string();
     {
         let saw = saw.lock().unwrap();
         let (path, point, key, body) = &saw[0];
@@ -5883,24 +5887,66 @@ async fn an_app_collects_a_payment_from_checkout_to_its_reports() {
         );
         assert_eq!(key, &payment, "the payment's ID is the idempotency key");
         assert_eq!(body["return_url"], "https://shop.example/back");
-        assert_eq!(body["order"], order.as_str());
+        assert_eq!(body["cart"], cart.as_str());
+        assert!(body.get("order").is_none(), "no order yet: {body}");
         assert!(body.get("customer_email").is_none(), "no grant, no email");
     }
+    let (_, alone) = send(&app, "GET", &format!("/admin/payments/{payment}"), None).await;
+    assert_eq!(
+        (&alone["cart"], &alone["order"], &alone["reference"]),
+        (&json!(cart), &Value::Null, &json!("pi_test"))
+    );
 
-    // A pending payment can be captured too: its authorization may not have been
-    // reported yet, and the provider refuses when there's nothing to take.
+    // The shopper's browser checks out before the app reported: the app can't say where
+    // the payment is (no payments.status), so checkout waits.
+    let (status, json) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/checkout"),
+        Some("{}"),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "payment_pending"),
+        "{json}"
+    );
+    assert_eq!(json["details"], json!({"payment": payment}));
+
+    // The app reports it authorized: that completes the checkout.
+    let (status, json) = report(&app, &payment, "evt_1", json!({"type": "authorized"})).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["financial_status"], "authorized", "{json}");
+    assert_eq!(json["payment"]["status"], "authorized");
+    let order = json["order"]
+        .as_str()
+        .expect("the order is placed")
+        .to_string();
+    assert_eq!(json["payment"]["order"], json!(order));
+    // The shopper's browser then gets that order.
+    let (status, placed) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/checkout"),
+        Some("{}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{placed}");
+    assert_eq!(placed["id"], json!(order));
+    assert_eq!(placed["next_action"], Value::Null);
+    assert_eq!(placed["payment"]["status"], "authorized");
+
+    // Staff capture; the app reports it paid.
     let capture = format!("/admin/payments/{payment}/capture");
     let (status, json) = send(&app, "POST", &capture, Some("{}")).await;
     assert_eq!(status, StatusCode::ACCEPTED, "{json}");
     assert_eq!(json["reference"], "ch_1");
     assert_eq!(
-        json["payment"]["status"], "pending",
+        json["payment"]["status"], "authorized",
         "until the app reports"
     );
-    let (status, json) = report(&app, &payment, "evt_1", json!({"type": "authorized"})).await;
-    assert_eq!(status, StatusCode::OK, "{json}");
-    assert_eq!(json["financial_status"], "authorized");
-    assert_eq!(json["payment"]["status"], "authorized");
     let sent_key = saw.lock().unwrap()[1].2.clone();
     assert!(
         sent_key.starts_with(&format!("{payment}:capture:")),
@@ -5953,8 +5999,6 @@ async fn an_app_collects_a_payment_from_checkout_to_its_reports() {
         (StatusCode::CONFLICT, "payment_refused")
     );
     assert_eq!(json["details"], json!({"reason": "too late"}));
-    // Twice under one key (a retry), then again under another (the provider's webhook
-    // delivered twice): the refund's own ID counts it once.
     let partial = json!({"type": "partially_refunded", "amount": 100, "reference": "re_1"});
     for key in ["evt_3", "evt_3", "evt_3b"] {
         let (status, json) = report(&app, &payment, key, partial.clone()).await;
@@ -5983,11 +6027,70 @@ async fn an_app_collects_a_payment_from_checkout_to_its_reports() {
 }
 
 #[tokio::test]
-async fn a_payment_that_couldnt_start_is_started_again_with_the_order_token() {
+async fn an_app_says_where_a_payment_is_when_checkout_asks() {
+    let app = app().await;
+    let (base, answers, saw) = fake_app(&[
+        ("/start", 200, card_widget()),
+        ("/status", 200, json!({"state": "open"})),
+    ])
+    .await;
+    let (pk, cart_path) = cart_paying_by_card(&app, &base).await;
+    let path = "/admin/apps/app_card/extension-points";
+    let body = json!({"extension_points": [
+        {"point": "payments.start", "version": 2, "url": format!("{base}/start")},
+        {"point": "payments.status", "version": 1, "url": format!("{base}/status")},
+    ]});
+    let (status, json) = send(&app, "PUT", path, Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let (_, started) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/payment"),
+        Some("{}"),
+    )
+    .await;
+    let payment = started["payment"].as_str().unwrap().to_string();
+    let checkout = format!("{cart_path}/checkout");
+    let (status, json) = send_as(&app, &pk, "POST", &checkout, Some("{}")).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "payment_pending"),
+        "{json}"
+    );
+    answers.lock().unwrap().insert(
+        "/status".to_string(),
+        (200, json!({"state": "paid", "reference": "pi_test"})),
+    );
+    let (status, placed) = send_as(&app, &pk, "POST", &checkout, Some("{}")).await;
+    assert_eq!(status, StatusCode::CREATED, "{placed}");
+    assert_eq!(placed["financial_status"], "paid", "{placed}");
+    let saw = saw.lock().unwrap();
+    let asked = saw
+        .iter()
+        .filter(|(_, point, _, _)| point == "payments.status");
+    let bodies: Vec<&Value> = asked.map(|(_, _, _, body)| body).collect();
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(bodies[0]["payment"], json!(payment));
+}
+
+#[tokio::test]
+async fn a_payment_that_couldnt_start_is_started_again() {
     let app = app().await;
     let (base, answers, saw) = fake_app(&[("/start", 503, json!({"code": "provider_down"}))]).await;
     let (pk, cart_path) = cart_paying_by_card(&app, &base).await;
-    let (status, placed) = send_as(
+    let start = format!("{cart_path}/payment");
+    let (status, started) = send_as(&app, &pk, "POST", &start, Some("{}")).await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    assert_eq!(started["next_action"], Value::Null);
+    assert_eq!(started["payment_error"]["code"], "app_unavailable");
+    assert_eq!(
+        started["payment_error"]["details"],
+        json!({"app": "app_card", "point": "payments.start"})
+    );
+    assert_eq!(started["status"], "pending");
+    // No order without the money.
+    let (status, json) = send_as(
         &app,
         &pk,
         "POST",
@@ -5995,35 +6098,21 @@ async fn a_payment_that_couldnt_start_is_started_again_with_the_order_token() {
         Some("{}"),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{placed}");
-    assert_eq!(placed["next_action"], Value::Null);
-    assert_eq!(placed["payment_error"]["code"], "app_unavailable");
-    assert_eq!(
-        placed["payment_error"]["details"],
-        json!({"app": "app_card", "point": "payments.start"})
-    );
-    assert_eq!(placed["payment"]["status"], "pending");
-
-    let order = placed["id"].as_str().unwrap();
-    let token = placed["access_token"].as_str().unwrap();
-    let wrong = format!(
-        "/storefront/orders/{order}/payment?token=hypha_ord_{}",
-        "0".repeat(64)
-    );
-    let (status, json) = send_as(&app, &pk, "POST", &wrong, Some("{}")).await;
     assert_eq!(
         (status, code(&json)),
-        (StatusCode::NOT_FOUND, "order_not_found")
+        (StatusCode::CONFLICT, "payment_pending"),
+        "{json}"
     );
+
     answers
         .lock()
         .unwrap()
         .insert("/start".to_string(), (200, card_widget()));
-    let again = format!("/storefront/orders/{order}/payment?token={token}");
-    let (status, json) = send_as(&app, &pk, "POST", &again, Some("{}")).await;
+    let (status, json) = send_as(&app, &pk, "POST", &start, Some("{}")).await;
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(json["next_action"]["type"], "client_widget");
     assert_eq!(json["payment_error"], Value::Null);
+    assert_eq!(json["payment"], started["payment"]);
     let saw = saw.lock().unwrap();
     assert_eq!(saw.len(), 2);
     assert_eq!(
@@ -6118,13 +6207,14 @@ async fn extension_points_are_checked_when_registered() {
             "unknown_extension_point",
         ),
         (
-            json!({"extension_points": [{"point": "payments.start", "version": 2, "url": "https://pay.example/x"}]}),
+            // The order-first version 1 is gone (design note 0031).
+            json!({"extension_points": [{"point": "payments.start", "version": 1, "url": "https://pay.example/x"}]}),
             "unknown_extension_point",
         ),
         (
             json!({"extension_points": [
-                {"point": "payments.start", "version": 1, "url": "https://pay.example/a"},
-                {"point": "payments.start", "version": 1, "url": "https://pay.example/b"}]}),
+                {"point": "payments.start", "version": 2, "url": "https://pay.example/a"},
+                {"point": "payments.start", "version": 2, "url": "https://pay.example/b"}]}),
             "duplicate_extension_point",
         ),
     ] {
@@ -6135,7 +6225,7 @@ async fn extension_points_are_checked_when_registered() {
             "{body}"
         );
     }
-    let body = json!({"extension_points": [{"point": "payments.start", "version": 1, "url": "https://pay.example/a"}]});
+    let body = json!({"extension_points": [{"point": "payments.start", "version": 2, "url": "https://pay.example/a"}]});
     let (status, json) = send(&app, "PUT", path, Some(&body.to_string())).await;
     assert_eq!(status, StatusCode::OK, "{json}");
     let (_, read) = send(&app, "GET", path, None).await;

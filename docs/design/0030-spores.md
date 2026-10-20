@@ -1,5 +1,6 @@
 # 0030: Spores beside apps: in-process Rust extensions, built into the deployment
 
+- **Amended by 0031** (2026-10-20): payment first. An online method's payment is started for the cart before its order exists and checkout places the order once the money is committed; `payments.start` is version 2 (a cart), `payments.status` is new, and the confirmation page no longer starts payments.
 - **Status:** Accepted (2026-10-19); built (steps 1 to 6, see the "As built" sections). Amends 0029's AP1, AP8 and §12. Danilo found that
   apps alone make some extensions harder than they should be: a payment provider has to
   be hosted as its own service (a Worker with its own D1 database, or a container), with

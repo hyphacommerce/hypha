@@ -7,8 +7,8 @@ use std::collections::HashMap;
 
 use hypha_core::{
     AssetId, CartId, ChannelId, CountryCode, Currency, CustomerId, Email, Keyset, LocationId,
-    MarketId, Money, OrderId, OrderLineId, ProductId, Scope, ShippingGroupId, ShippingOptionId,
-    SortKey, TaxClassId, TaxRate, Timestamp, VariantId,
+    MarketId, Money, OrderId, OrderLineId, PaymentId, ProductId, Scope, ShippingGroupId,
+    ShippingOptionId, SortKey, TaxClassId, TaxRate, Timestamp, VariantId,
 };
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_order_actions::{
@@ -383,14 +383,12 @@ pub struct PlacedOrderResponse {
 pub struct CheckoutResponse {
     #[serde(flatten)]
     placed: PlacedOrderResponse,
-    /// From the payment's provider: for cash on delivery and bank transfer, the
-    /// instructions (quote the order number as the reference); for a payment app, its
-    /// widget or a redirect. `null` when there was nothing to pay, or when the provider
-    /// couldn't start (`payment_error` says why): the order stands, its payment pending.
+    /// For cash on delivery and bank transfer, the instructions (quote the order number
+    /// as the reference). `null` when there was nothing to pay, for a payment made
+    /// online (before the order), or when a manual provider couldn't start
+    /// (`payment_error` says why).
     next_action: Option<NextActionResponse>,
-    /// Why the payment couldn't start, when it couldn't (an app that's down:
-    /// `app_unavailable`): the order is placed; show "payment couldn't start; try again"
-    /// and start it again with `POST /storefront/orders/{id}/payment`. `null` otherwise.
+    /// Why a manual method's payment couldn't start. `null` otherwise.
     payment_error: Option<ApiErrorBody>,
 }
 
@@ -414,7 +412,14 @@ fn next_step(
 /// Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns
 /// the order the first request placed. The body is `{}` or `{"expected_total": …}`.
 /// Something to pay needs a payment method chosen (`PUT …/payment-method`; 409
-/// `payment_method_required`) and still offered (409 `payment_method_unavailable`).
+/// `payment_method_required`) and still offered (409 `payment_method_unavailable`). An
+/// online method's money must be committed first (design note 0031: `POST
+/// …/payment`): none started is 409 `payment_required`, not yet committed `payment_pending`
+/// (its provider was asked; try again shortly, or it completes when the provider
+/// reports), declined or released `payment_failed` (start paying again). If the order
+/// can't be placed once the money is committed (a line sold out meanwhile), the money is
+/// given back. A cart checked out already answers with its order (the provider's
+/// report may have completed it).
 #[utoipa::path(
     post,
     path = "/storefront/carts/{id}/checkout",
@@ -512,56 +517,90 @@ pub async fn fetch_placed<S: Storage>(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub struct StartPaymentRequest {
-    /// Where a payment provider's page sends the buyer back (a redirect).
+pub struct StartCartPaymentRequest {
+    /// The total the shopper sees; if the cart now costs something else, `409
+    /// total_changed` instead of collecting a different amount.
+    #[serde(default)]
+    expected_total: Option<Money>,
+    /// Where a payment provider's page sends the shopper back (a redirect): a page that
+    /// checks the cart out (`POST /storefront/carts/{id}/checkout`).
     #[serde(default)]
     return_url: Option<String>,
 }
 
-/// Starts paying for an order again (design note 0027, §4), with its access token, when
-/// checkout's start failed or the provider declined: a `pending` payment is started
-/// again (its app sees the same idempotency key, the payment's ID); after a `failed`
-/// one, a new payment is made with the same method and started. Answers like checkout,
-/// with `next_action` or `payment_error`. A missing or wrong token, or another
-/// channel's order, is `404 order_not_found`; a cancelled order `409 order_cancelled`;
-/// nothing to start (authorized, paid, refunded, or nothing was due) `409
-/// order_not_payable`; the method no longer offered `409 payment_method_unavailable`.
+/// A cart's payment, started (design note 0031).
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct CartPaymentResponse {
+    /// The payment (`pay_…`): what the provider's reports name.
+    payment: PaymentId,
+    /// What it collects: the cart's total.
+    amount: Money,
+    status: crate::routes::payments::PaymentStatusDto,
+    /// The provider's card form (`client_widget`: mount its element with these props on
+    /// the checkout, and check out on its `hypha:payment-confirmed`) or page
+    /// (`redirect`). `null` when the provider couldn't start (`payment_error`).
+    next_action: Option<NextActionResponse>,
+    /// Why the provider couldn't start (an app that's down: `app_unavailable`): start
+    /// again. `null` otherwise.
+    payment_error: Option<ApiErrorBody>,
+}
+
+/// Starts paying for the cart before its order exists (design note 0031): an online
+/// method's money is committed first, and checkout places the order once it is. Runs
+/// checkout's checks (409 `total_changed`, `payment_method_required`, …). A pending
+/// payment of the same method and total is started again (the provider resumes it);
+/// otherwise a new one is made and the old ones released. Refused for a manual method
+/// (409 `payment_method_offline`: check out instead), a total of zero (409
+/// `cart_nothing_to_pay`) and a cart whose money is committed already (409
+/// `cart_payment_committed`: check out).
 #[utoipa::path(
     post,
-    path = "/storefront/orders/{id}/payment",
-    params(("id" = OrderId, Path), OrderTokenQuery),
-    request_body = StartPaymentRequest,
-    responses((status = 200, description = "OK", body = CheckoutResponse)),
+    path = "/storefront/carts/{id}/payment",
+    params(("id" = CartId, Path)),
+    request_body = StartCartPaymentRequest,
+    responses((status = 200, description = "OK", body = CartPaymentResponse), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["checkout"]))),
 )]
-pub async fn start_payment<S: Storage>(
+pub async fn start_cart_payment<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
-    PathId(id): PathId<OrderId>,
-    query: Query<OrderTokenQuery>,
-    body: JsonBody<StartPaymentRequest>,
-) -> Result<Json<CheckoutResponse>, ApiError> {
+    PathId(cart): PathId<CartId>,
+    body: JsonBody<StartCartPaymentRequest>,
+) -> Result<Json<CartPaymentResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let token = query.parse()?.token;
-    if !state.env.is_order_token(id, &token) {
-        return Err(hypha_orders::CommandError::OrderNotFound(id).into());
-    }
+    // Its checks may renew a quote, which calls rate apps, like checkout.
+    rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &cart.to_string()).await?;
     let req = body.parse()?;
-    let input = hypha_checkout::StartPayment {
-        order: id,
+    let input = hypha_checkout::StartCartPayment {
+        cart,
+        expected_total: req.expected_total,
         return_url: req.return_url,
     };
+    let rates = state.cart_rates(&ports, cart);
     let providers = state.payments(&ports);
-    let placed =
-        hypha_checkout::start_order_payment(&ctx, &ports, &state.ids, &providers, input).await?;
-    let (next_action, payment_error) = next_step(id, &placed.next_action);
-    Ok(Json(CheckoutResponse {
-        placed: PlacedOrderResponse {
-            order: OrderResponse::with_images(&placed.order, &ports, state.media.as_deref())
-                .await?,
-            access_token: token,
-            payment: placed.payment.as_ref().map(PlacedPaymentResponse::new),
-        },
+    let started = hypha_checkout::start_cart_payment(
+        &ctx,
+        &ports,
+        &state.ids,
+        &state.clock,
+        &rates,
+        &providers,
+        input,
+    )
+    .await?;
+    let payment = &started.payment;
+    let (next_action, payment_error) = match &started.next_action {
+        Ok(action) => (Some(NextActionResponse::from(action)), None),
+        Err(error) => {
+            tracing::warn!(payment = %payment.id(), %error, "the cart's payment didn't start");
+            let body = ApiError::from(hypha_payments::CommandError::from(error.clone())).body();
+            (None, Some(body))
+        }
+    };
+    Ok(Json(CartPaymentResponse {
+        payment: payment.id(),
+        amount: payment.amount(),
+        status: payment.status().into(),
         next_action,
         payment_error,
     }))

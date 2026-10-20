@@ -710,8 +710,8 @@ step "same key, different total" 422 idempotency_key_reused -X POST "$CHECKOUT" 
     -H 'idempotency-key: order-1' -d '{"expected_total":{"amount":1801,"currency":"EUR"}}'
 step "a cart key reused to add a line" 422 idempotency_key_reused -X POST "$BASE/storefront/carts/$CART/lines" \
     -H "$JSON" -H 'idempotency-key: cart-1' -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
-step "checkout again without the key" 409 cart_completed -X POST "$CHECKOUT" -H "$JSON" -d '{}'
-contains "the error names the order" "\"details\":{\"order\":\"$ORDER\"}"
+step "checkout again without the key" 201 - -X POST "$CHECKOUT" -H "$JSON" -d '{}'
+contains "answers with its order (design note 0031)" "\"id\":\"$ORDER\""
 step "get the checked-out cart" 200 - "$BASE/storefront/carts/$KEYED"
 contains "the cart names its order" "\"order\":\"$ORDER\""
 step "a completed cart takes no lines" 409 cart_completed -X POST "$BASE/storefront/carts/$KEYED/lines" \
@@ -799,7 +799,7 @@ PY
         "$BASE/admin/apps/app_pay/extension-points" -H "$JSON" \
         -d "{\"extension_points\":[{\"point\":\"payments.teleport\",\"version\":1,\"url\":\"$APP_URL/x\"}]}"
     step "it starts, captures and voids payments" 200 - -X PUT "$BASE/admin/apps/app_pay/extension-points" \
-        -H "$JSON" -d "{\"extension_points\":[{\"point\":\"payments.start\",\"version\":1,\"url\":\"$APP_URL/start\"},{\"point\":\"payments.capture\",\"version\":1,\"url\":\"$APP_URL/capture\"},{\"point\":\"payments.void\",\"version\":1,\"url\":\"$APP_URL/void\"}]}"
+        -H "$JSON" -d "{\"extension_points\":[{\"point\":\"payments.start\",\"version\":2,\"url\":\"$APP_URL/start\"},{\"point\":\"payments.capture\",\"version\":1,\"url\":\"$APP_URL/capture\"},{\"point\":\"payments.void\",\"version\":1,\"url\":\"$APP_URL/void\"}]}"
     contains "by point" '"extension_points":[{"point":"payments.capture"'
     step "card, collected by the app" 201 - -X POST "$METHODS" -H "$JSON" -d '{"provider":"app_pay","name":"Card"}'
     CARD=$(pm)
@@ -814,28 +814,31 @@ PY
     step "the card is offered" 200 - "$CARD_CART/payment-methods"
     contains "by the app" "{\"id\":\"$CARD\",\"name\":\"Card\",\"provider\":\"app_pay\""
     step "pay by card" 200 - -X PUT "$CARD_CART/payment-method" -H "$JSON" -d "{\"payment_method\":\"$CARD\"}"
-    step "checkout by card" 201 - -X POST "$CARD_CART/checkout" -H "$JSON" \
+    step "checkout before paying" 409 payment_required -X POST "$CARD_CART/checkout" -H "$JSON" -d '{}'
+    step "start paying for the cart" 200 - -X POST "$CARD_CART/payment" -H "$JSON" \
         -d '{"return_url":"https://shop.example/back"}'
-    CARD_ORDER=$(id)
     contains "the app's widget is next" '"next_action":{"type":"client_widget","element":"pay-card","props":{"client_secret":"pi_e2e_secret"}},"payment_error":null'
-    CARD_TOKEN=$(sed -E 's/.*"access_token":"(hypha_ord_[0-9a-f]+)".*/\1/' <<<"$BODY")
-    step "the admin sees the app's payment" 200 - "$BASE/admin/orders/$CARD_ORDER"
-    contains "pending, with the app's reference" '"provider":"app_pay","amount":{"amount":1390,"currency":"EUR"},"status":"pending","refunded":{"amount":0,"currency":"EUR"},"reference":"pi_e2e"'
-    CARD_PAYMENT=$(sed -E 's/.*"payments":\[\{"id":"(pay_[0-9a-f]+)".*/\1/' <<<"$BODY")
-    step "the buyer starts it again" 200 - -X POST \
-        "$BASE/storefront/orders/$CARD_ORDER/payment?token=$CARD_TOKEN" -H "$JSON" -d '{}'
-    contains "the same widget" '"next_action":{"type":"client_widget","element":"pay-card"'
-    step "without the right token" 404 order_not_found -X POST \
-        "$BASE/storefront/orders/$CARD_ORDER/payment?token=hypha_ord_00" -H "$JSON" -d '{}'
+    contains "pending, before any order" '"status":"pending"'
+    CARD_PAYMENT=$(sed -E 's/.*"payment":"(pay_[0-9a-f]+)".*/\1/' <<<"$BODY")
+    step "starting again resumes it" 200 - -X POST "$CARD_CART/payment" -H "$JSON" -d '{}'
+    contains "the same payment" "\"payment\":\"$CARD_PAYMENT\""
+    step "checkout before the app reports: waits" 409 payment_pending -X POST "$CARD_CART/checkout" \
+        -H "$JSON" -d '{}'
     PAYMENTS="$BASE/admin/payments/$CARD_PAYMENT"
-    step "capture before the authorization is reported: the provider decides" 202 - -X POST \
-        "$PAYMENTS/capture" -H "$JSON" -d '{}'
-    contains "still pending until the app reports" '"status":"pending"'
+    step "the payment has no order yet" 200 - "$PAYMENTS"
+    contains "a cart's, with the app's reference" '"order":null,"method":'
     step "the app reports it authorized" 200 - -X POST "$PAYMENTS/events" -H "$JSON" \
         -H 'idempotency-key: evt_e2e_1' -d '{"type":"authorized","reference":"pi_e2e","attempt":"pi_e2e"}'
-    contains "the order is authorized" '"financial_status":"authorized"'
+    contains "which places the order" '"financial_status":"authorized"'
+    CARD_ORDER=$(sed -E 's/.*"order":"(ord_[0-9a-f]+)".*/\1/' <<<"$BODY")
     replayed "the report again replays" -X POST "$PAYMENTS/events" -H "$JSON" \
         -H 'idempotency-key: evt_e2e_1' -d '{"type":"authorized","reference":"pi_e2e","attempt":"pi_e2e"}'
+    step "the shopper's checkout gets that order" 201 - -X POST "$CARD_CART/checkout" -H "$JSON" \
+        -d '{"return_url":"https://shop.example/back"}'
+    contains "the same order" "\"id\":\"$CARD_ORDER\""
+    contains "nothing more to do" '"next_action":null'
+    step "the admin sees the app's payment" 200 - "$BASE/admin/orders/$CARD_ORDER"
+    contains "authorized, with the app's reference" '"provider":"app_pay","amount":{"amount":1390,"currency":"EUR"},"status":"authorized","refunded":{"amount":0,"currency":"EUR"},"reference":"pi_e2e"'
     step "an authorized order can't be marked paid by hand" 409 payment_authorized -X POST \
         "$BASE/admin/orders/$CARD_ORDER/paid"
     step "staff void it, the provider refuses" 409 payment_refused -X POST "$PAYMENTS/void" -H "$JSON" -d '{}'
@@ -865,7 +868,7 @@ PY
         "$BASE/admin/payments/pay_00000000000000000000000000000000/events" -H "$JSON" -d '{"type":"paid"}'
     step "the app's calls" 200 - "$BASE/admin/apps/app_pay/extension-calls"
     contains "the capture" '"point":"payments.capture","version":1,'
-    contains "and the start, for its payment" "\"point\":\"payments.start\",\"version\":1,"
+    contains "and the start, for its payment" "\"point\":\"payments.start\",\"version\":2,"
     contains "with the payment" "\"correlation\":\"$CARD_PAYMENT\""
 
     step "a search app" 201 - -X POST "$BASE/admin/apps" -H "$JSON" -d '{"key":"app_find","name":"Find"}'

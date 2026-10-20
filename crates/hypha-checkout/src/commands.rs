@@ -6,8 +6,8 @@ use hypha_cart::{
 use hypha_core::{
     Attempts, AuthError, CartId, Clock, Ctx, CustomerId, ErrorCode, HasBatch, HasIdempotency,
     IdGenerator, IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, Money,
-    OrderId, OrderLineId, PaymentMethodId, RepoError, Scope, StageIdempotency, VariantId, Version,
-    Versioned, earlier_id,
+    OrderId, OrderLineId, PaymentId, PaymentMethodId, RepoError, Scope, StageIdempotency,
+    VariantId, Version, Versioned, earlier_id,
 };
 use hypha_customers::{Customer, CustomerRepo, StageCustomers, repo::keys as customer_keys};
 use hypha_inventory::{
@@ -18,14 +18,14 @@ use hypha_orders::{
     OrderTaxSource, StageOrders, repo::keys as order_keys,
 };
 use hypha_payments::{
-    HasPaymentMethods, HasPayments, NewPayment, NextAction, Payment, PaymentError,
-    PaymentProviders, StagePayments, newest_payment,
+    HasPaymentMethods, HasPayments, NewPayment, NextAction, Payment, PaymentError, PaymentMethod,
+    PaymentProviders, PaymentRepo, PaymentStatus, StagePayments, financial_status, newest_payment,
 };
 use hypha_shipping::{OfferOutcome, RateProvider};
 use hypha_tax::{TaxLine, TaxSource};
 use thiserror::Error;
 
-use crate::start::{restart, start};
+use crate::start::{Payer, refresh, release, restart, start};
 
 /// The operation name checkout's idempotency records carry.
 pub const CHECKOUT: &str = "checkout";
@@ -82,15 +82,30 @@ pub enum CommandError {
     PaymentMethodUnavailable(PaymentMethodId),
     #[error("payment method {0} not found")]
     PaymentMethodNotFound(PaymentMethodId),
-    /// No such order, or another channel's (design note 0020).
-    #[error("order {0} not found")]
-    OrderNotFound(OrderId),
-    /// Nothing to start paying for: the order is authorized, paid or refunded already,
-    /// or has no payment at all (nothing was due at checkout).
-    #[error("order {order}'s payments are {status}; there's no payment to start")]
-    NotPayable {
-        order: OrderId,
-        status: hypha_core::FinancialStatus,
+    /// A manual method (cash on delivery, bank transfer) has nothing to pay before the
+    /// order (design note 0031): place it.
+    #[error("payment method {0} is paid after the order: place the order")]
+    PaymentMethodOffline(PaymentMethodId),
+    /// The cart's total is zero: no payment to start.
+    #[error("cart {0} has nothing to pay")]
+    NothingToPay(CartId),
+    /// The cart's money is committed already (design note 0031): check out instead of
+    /// starting again (or choose that payment's method again, if another was chosen).
+    #[error("cart {cart}'s payment {payment} is committed: check out")]
+    CartPaymentCommitted { cart: CartId, payment: PaymentId },
+    /// An online method and no payment started for the cart with it.
+    #[error("start paying for cart {0} before checking out")]
+    PaymentRequired(CartId),
+    /// The cart's payment isn't committed yet: the shopper hasn't finished, or the
+    /// provider hasn't said (it will: checkout completes then).
+    #[error("cart {cart}'s payment {payment} isn't committed yet")]
+    PaymentPending { cart: CartId, payment: PaymentId },
+    /// The cart's payment was declined or released: start paying again.
+    #[error("cart {cart}'s payment {payment} is {status}: start paying again")]
+    PaymentFailed {
+        cart: CartId,
+        payment: PaymentId,
+        status: PaymentStatus,
     },
 }
 
@@ -116,8 +131,12 @@ impl ErrorCode for CommandError {
             CommandError::PaymentMethodRequired(_) => "payment_method_required",
             CommandError::PaymentMethodUnavailable(_) => "payment_method_unavailable",
             CommandError::PaymentMethodNotFound(_) => "payment_method_not_found",
-            CommandError::OrderNotFound(_) => "order_not_found",
-            CommandError::NotPayable { .. } => "order_not_payable",
+            CommandError::PaymentMethodOffline(_) => "payment_method_offline",
+            CommandError::NothingToPay(_) => "cart_nothing_to_pay",
+            CommandError::CartPaymentCommitted { .. } => "cart_payment_committed",
+            CommandError::PaymentRequired(_) => "payment_required",
+            CommandError::PaymentPending { .. } => "payment_pending",
+            CommandError::PaymentFailed { .. } => "payment_failed",
         }
     }
 }
@@ -157,11 +176,12 @@ impl<T> CheckoutPorts for T where
 {
 }
 
-/// What checkout placed (design note 0027, §4): the order, its payment (none when there
-/// was nothing to pay), and what the shopper must do next, from the payment's provider.
-/// `next_action` is `None` without a payment, or once the payment isn't open any more (a
-/// replay after staff recorded it); `Some(Err(…))` when the provider couldn't start,
-/// which leaves the order placed and the payment pending.
+/// What checkout placed (design notes 0027 §4, 0031): the order, its payment (none when
+/// there was nothing to pay), and, for a manual method, what the shopper does next (its
+/// instructions). `next_action` is `None` without a payment, for one paid online (paid
+/// before the order), and once the payment isn't open any more (a replay after staff
+/// recorded it); `Some(Err(…))` when a manual provider couldn't start, which leaves the
+/// order placed and the payment pending.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Placed {
     pub order: Order,
@@ -181,18 +201,28 @@ pub struct Checkout {
     pub return_url: Option<String>,
 }
 
-/// Turns a cart into an order (design note 0007, section 2).
+/// Turns a cart into an order (design notes 0007 §2, 0031).
 ///
-/// Refuses a cart that is checked out already, empty, without an email, with any line
-/// that can't be bought now, whose total isn't `expected_total`, or with something to
-/// pay and no payment method offered to it (`payment_method_required`,
-/// `payment_method_unavailable`; design note 0027). Otherwise reserves stock for every
-/// line (the order line ID is the reservation's reference) and writes, in one batch:
-/// the order, its pending payment (the whole total, the method's instructions copied),
-/// the cart marked completed, the changed inventory items, a new customer when the
-/// buyer is a guest without one, and the idempotency key. After the commit it asks the
-/// payment's provider to start (`Placed::next_action`); a replay asks again while the
-/// payment is open.
+/// Refuses a cart that's empty, without an email, with any line that can't be bought
+/// now, whose total isn't `expected_total`, or with something to pay and no payment
+/// method offered to it (`payment_method_required`, `payment_method_unavailable`; design
+/// note 0027). An online method's money must be committed first (design note 0031): the
+/// cart's payment started with it (`start_cart_payment`; none is `payment_required`) is
+/// `authorized`, `processing` or `paid`, its provider asked first while it's `pending`
+/// (still pending: `payment_pending`; declined or released: `payment_failed`), and of
+/// the cart's total (`total_changed`). Then reserves stock for every line (the order
+/// line ID is the reservation's reference) and writes, in one batch: the order, its
+/// payment (the online one attached, or a manual method's new pending one, its
+/// instructions copied), the order's payment status, the cart marked completed, the
+/// changed inventory items, a new customer when the buyer is a guest without one, and
+/// the idempotency key. A manual method's provider is asked to start after the commit
+/// (`Placed::next_action`).
+///
+/// A cart checked out already is answered with its order (replayed): the shopper's
+/// browser and the provider's webhook may both complete it. When an online payment's
+/// money is committed and the order can't be placed (a line sold out meanwhile, the
+/// total changed), the money is given back through the provider before the error is
+/// answered.
 ///
 /// When another request changed something in between (stock, the cart, a customer with
 /// the same email), the commit fails and checkout runs again on fresh data, up to
@@ -213,9 +243,68 @@ pub async fn checkout<
     input: Checkout,
 ) -> Result<Idempotent<Placed>, CommandError> {
     ctx.require(Scope::Checkout)?;
-    let return_url = input.return_url.as_deref();
+    run_checkout(ctx, ports, ids, clock, rates, payments, input).await
+}
+
+/// Completes the checkout a committed cart payment is for (design note 0031, §1.5):
+/// what the host runs after a provider reports a cart's payment `authorized`,
+/// `processing` or `paid` (`payments:write`, the reporter's scope), so the order exists
+/// though the shopper never came back. `None` when there's nothing to complete: the
+/// payment isn't a cart's, is attached to its order already, or isn't committed. The
+/// same command as the shopper's checkout: whichever comes second gets the order.
+#[allow(clippy::too_many_arguments)]
+pub async fn complete_paid_checkout<
+    S: CheckoutPorts,
+    I: IdGenerator,
+    C: Clock,
+    P: RateProvider,
+    Q: PaymentProviders,
+>(
+    ctx: &Ctx,
+    ports: &S,
+    ids: &I,
+    clock: &C,
+    rates: &P,
+    payments: &Q,
+    payment: PaymentId,
+) -> Result<Option<Placed>, CommandError> {
+    ctx.require(Scope::PaymentsWrite)?;
+    let Some(found) = ports.payments().get(payment).await? else {
+        return Ok(None);
+    };
+    let (Some(cart), None) = (found.cart(), found.order()) else {
+        return Ok(None);
+    };
+    if !found.status().committed() {
+        return Ok(None);
+    }
+    let input = Checkout {
+        cart,
+        expected_total: None,
+        idempotency: None,
+        return_url: None,
+    };
+    let placed = run_checkout(ctx, ports, ids, clock, rates, payments, input).await?;
+    Ok(Some(placed.value))
+}
+
+async fn run_checkout<
+    S: CheckoutPorts,
+    I: IdGenerator,
+    C: Clock,
+    P: RateProvider,
+    Q: PaymentProviders,
+>(
+    ctx: &Ctx,
+    ports: &S,
+    ids: &I,
+    clock: &C,
+    rates: &P,
+    payments: &Q,
+    input: Checkout,
+) -> Result<Idempotent<Placed>, CommandError> {
     if let Some(order) = replay_of(ctx, ports, input.idempotency.as_ref()).await? {
-        return replay(ports, payments, order, return_url).await;
+        return replay(ports, payments, order).await;
     }
 
     let mut attempts = Attempts::first();
@@ -239,9 +328,12 @@ pub async fn checkout<
             Ok(placed) => {
                 let (order, mut payment, settings) = placed.value;
                 let next_action = match &mut payment {
-                    // After the commit: nothing here may fail the checkout.
-                    Some(p) => Some(start(ports, payments, &order, p, settings, return_url).await),
-                    None => None,
+                    // After the commit: nothing here may fail the checkout. Only a
+                    // manual method starts now; an online one was paid before.
+                    Some(p) if p.provider().is_manual() => {
+                        Some(start(ports, payments, &payer_of(&order), p, settings, None).await)
+                    }
+                    _ => None,
                 };
                 return Ok(Idempotent::fresh(Placed {
                     order,
@@ -250,25 +342,30 @@ pub async fn checkout<
                 }));
             }
         };
-        // A request with the same key may have placed the order meanwhile: then this
-        // attempt failed because of it (the cart is completed, its version moved on, or
-        // the key is taken), and that order is this request's answer too.
+        // Checked out already (by the provider's webhook, another tab, or a request with
+        // the same key): that order is this request's answer too.
+        if let CommandError::CartCompleted { order, .. } = e {
+            return replay(ports, payments, order).await;
+        }
         if let Some(order) = replay_of(ctx, ports, input.idempotency.as_ref()).await? {
-            return replay(ports, payments, order, return_url).await;
+            return replay(ports, payments, order).await;
         }
         if !(lost_a_race(&e) && attempts.another()) {
+            if gives_back(&e) {
+                give_back(ports, payments, clock, input.cart).await?;
+            }
             return Err(e);
         }
     }
 }
 
 /// What one attempt placed: the order, its payment, and the payment method's provider
-/// settings (for `start`).
+/// settings (for a manual method's `start`).
 type Attempted = (Order, Option<Payment>, serde_json::Value);
 
 /// Errors that mean another request committed first, so a fresh attempt can succeed:
-/// a changed cart or item, a guest's customer created meanwhile, or the same cart
-/// checked out (the next attempt then reports `cart_completed`).
+/// a changed cart, item or payment, a guest's customer created meanwhile, or the same
+/// cart checked out (the next attempt then answers with its order).
 fn lost_a_race(e: &CommandError) -> bool {
     matches!(
         e,
@@ -278,6 +375,203 @@ fn lost_a_race(e: &CommandError) -> bool {
                 | RepoError::Duplicate(order_keys::ORDER_CART)
         )
     )
+}
+
+/// Whether an error means the order can't be placed as the shopper paid for it, so money
+/// the cart's payment committed goes back (design note 0031, §3). Not for errors that
+/// pass (storage, a race) or that are about the payment itself.
+fn gives_back(e: &CommandError) -> bool {
+    match e {
+        CommandError::Cart(_)
+        | CommandError::Inventory(_)
+        | CommandError::Order(_)
+        | CommandError::EmptyCart(_)
+        | CommandError::MissingEmail(_)
+        | CommandError::Unavailable { .. }
+        | CommandError::TotalChanged { .. }
+        | CommandError::ShippingAddressRequired(_)
+        | CommandError::ShippingOptionRequired(_)
+        | CommandError::ShippingUnavailable(_)
+        | CommandError::PaymentMethodRequired(_)
+        | CommandError::PaymentMethodUnavailable(_) => true,
+        CommandError::Auth(_)
+        | CommandError::Repo(_)
+        | CommandError::Idempotency(_)
+        | CommandError::Payment(_)
+        | CommandError::CartNotFound(_)
+        | CommandError::CartCompleted { .. }
+        | CommandError::PaymentMethodNotFound(_)
+        | CommandError::PaymentMethodOffline(_)
+        | CommandError::NothingToPay(_)
+        | CommandError::CartPaymentCommitted { .. }
+        | CommandError::PaymentRequired(_)
+        | CommandError::PaymentPending { .. }
+        | CommandError::PaymentFailed { .. } => false,
+    }
+}
+
+/// Gives back what the cart's committed payments without an order hold (`release`). A
+/// pending one's provider is asked first: the shopper may have paid before its report.
+async fn give_back<S: HasPayments, Q: PaymentProviders>(
+    ports: &S,
+    providers: &Q,
+    clock: &impl Clock,
+    cart: CartId,
+) -> Result<(), CommandError> {
+    for mut payment in ports.payments().list_for_cart(cart).await? {
+        if payment.order().is_some() {
+            continue;
+        }
+        if payment.status() == PaymentStatus::Pending {
+            refresh(ports, providers, clock, &mut payment).await?;
+        }
+        if payment.status().committed() {
+            release(ports, providers, clock, payment).await;
+        }
+    }
+    Ok(())
+}
+
+/// Who pays for `order`, for its provider.
+fn payer_of(order: &Order) -> Payer {
+    Payer {
+        cart: order.cart(),
+        order: Some((order.id(), order.number().value())),
+        channel: order.channel(),
+        market: order.market(),
+        country: order.country(),
+        email: order.email().clone(),
+    }
+}
+
+/// A cart ready to be checked out: every check passed, priced now, with the method that
+/// pays for it (`None`: nothing to pay).
+pub(crate) struct Ready {
+    pub cart: Cart,
+    pub reading: CartReading,
+    pub method: Option<PaymentMethod>,
+}
+
+/// Checkout's checks (the cart's lines, email, shipping, total and method), shared with
+/// `start_cart_payment`, which runs them before any money moves. `renewed` carries a
+/// quote renewed by an earlier attempt; a renewal changes `cart`, which the caller
+/// writes.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn ready<S: CheckoutPorts, C: Clock, P: RateProvider, Q: PaymentProviders>(
+    ctx: &Ctx,
+    ports: &S,
+    clock: &C,
+    rates: &P,
+    payments: &Q,
+    id: CartId,
+    expected_total: Option<Money>,
+    renewed: &mut Option<Renewal>,
+) -> Result<Ready, CommandError> {
+    let mut cart = ports
+        .carts()
+        .get(id)
+        .await?
+        // Another channel's cart reads as missing (design note 0020).
+        .filter(|cart| cart.visible_in(ctx.channel()))
+        .ok_or(CommandError::CartNotFound(id))?;
+    if let CartStatus::Completed { order } = cart.status() {
+        return Err(CommandError::CartCompleted { cart: id, order });
+    }
+
+    let reading = read_cart(ports, &cart).await?;
+    // The cart's own problems first: renewing a quote can't fix them, and their codes
+    // are what clients act on.
+    if reading.priced.lines.is_empty() {
+        return Err(CommandError::EmptyCart(cart.id()));
+    }
+    if reading.priced.email.is_none() {
+        return Err(CommandError::MissingEmail(cart.id()));
+    }
+    let unavailable: Vec<VariantId> = reading
+        .priced
+        .unavailable_lines()
+        .map(|l| l.variant)
+        .collect();
+    if !unavailable.is_empty() {
+        return Err(CommandError::Unavailable { lines: unavailable });
+    }
+    let reading = renew_expired_quote(
+        ports,
+        rates,
+        clock,
+        &mut cart,
+        reading,
+        expected_total,
+        renewed,
+    )
+    .await?;
+    check_shipping(&cart, &reading.priced)?;
+    if let Some(expected) = expected_total
+        && expected != reading.priced.total
+    {
+        return Err(CommandError::TotalChanged {
+            expected,
+            actual: reading.priced.total,
+        });
+    }
+    let method = crate::payment::checkout_method(ports, payments, &cart, &reading.priced).await?;
+    Ok(Ready {
+        cart,
+        reading,
+        method,
+    })
+}
+
+/// The cart's committed payment an online `method` pays with (design note 0031, §3),
+/// its provider asked first while it's pending.
+async fn committed_payment<S: HasPayments, Q: PaymentProviders>(
+    ports: &S,
+    providers: &Q,
+    clock: &impl Clock,
+    cart: CartId,
+    method: &PaymentMethod,
+    total: Money,
+) -> Result<Payment, CommandError> {
+    let payments = ports.payments().list_for_cart(cart).await?;
+    let open = || payments.iter().filter(|p| p.order().is_none());
+    if let Some(other) = open().find(|p| p.status().committed() && p.method() != Some(method.id()))
+    {
+        // Paid with another method than the one chosen now: choose it again.
+        return Err(CommandError::CartPaymentCommitted {
+            cart,
+            payment: other.id(),
+        });
+    }
+    let mut payment = open()
+        .find(|p| p.method() == Some(method.id()))
+        .cloned()
+        .ok_or(CommandError::PaymentRequired(cart))?;
+    if payment.status() == PaymentStatus::Pending {
+        refresh(ports, providers, clock, &mut payment).await?;
+    }
+    match payment.status() {
+        status if status.committed() => {}
+        PaymentStatus::Pending => {
+            return Err(CommandError::PaymentPending {
+                cart,
+                payment: payment.id(),
+            });
+        }
+        status => {
+            return Err(CommandError::PaymentFailed {
+                cart,
+                payment: payment.id(),
+                status,
+            });
+        }
+    }
+    if payment.amount() != total {
+        return Err(CommandError::TotalChanged {
+            expected: payment.amount(),
+            actual: total,
+        });
+    }
+    Ok(payment)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -297,52 +591,48 @@ async fn attempt<
     input: &Checkout,
     renewed: &mut Option<Renewal>,
 ) -> Result<Idempotent<Attempted>, CommandError> {
-    let mut cart = ports
-        .carts()
-        .get(input.cart)
-        .await?
-        // Another channel's cart reads as missing (design note 0020).
-        .filter(|cart| cart.visible_in(ctx.channel()))
-        .ok_or(CommandError::CartNotFound(input.cart))?;
-    if let CartStatus::Completed { order } = cart.status() {
-        return Err(CommandError::CartCompleted {
-            cart: input.cart,
-            order,
-        });
-    }
-
-    let reading = read_cart(ports, &cart).await?;
-    // The cart's own problems first: renewing a quote can't fix them, and their codes
-    // are what clients act on.
-    if reading.priced.lines.is_empty() {
-        return Err(CommandError::EmptyCart(cart.id()));
-    }
-    let email = reading
-        .priced
+    let Ready {
+        mut cart,
+        reading,
+        method,
+    } = ready(
+        ctx,
+        ports,
+        clock,
+        rates,
+        payments,
+        input.cart,
+        input.expected_total,
+        renewed,
+    )
+    .await?;
+    let CartReading { priced, stock, .. } = reading;
+    let email = priced
         .email
         .clone()
         .ok_or(CommandError::MissingEmail(cart.id()))?;
-    let unavailable: Vec<VariantId> = reading
-        .priced
-        .unavailable_lines()
-        .map(|l| l.variant)
-        .collect();
-    if !unavailable.is_empty() {
-        return Err(CommandError::Unavailable { lines: unavailable });
-    }
-    let reading =
-        renew_expired_quote(ports, rates, clock, &mut cart, reading, input, renewed).await?;
-    let CartReading { priced, stock, .. } = reading;
-    check_shipping(&cart, &priced)?;
-    if let Some(expected) = input.expected_total
-        && expected != priced.total
-    {
-        return Err(CommandError::TotalChanged {
-            expected,
-            actual: priced.total,
-        });
-    }
-    let method = crate::payment::checkout_method(ports, payments, &cart, &priced).await?;
+    // An online method's money first (design note 0031): nothing is reserved or placed
+    // without it.
+    let mut paid = match method.as_ref().filter(|m| !m.provider().is_manual()) {
+        Some(online) => {
+            Some(committed_payment(ports, payments, clock, cart.id(), online, priced.total).await?)
+        }
+        None => {
+            if let Some(other) = ports
+                .payments()
+                .list_for_cart(cart.id())
+                .await?
+                .into_iter()
+                .find(|p| p.order().is_none() && p.status().committed())
+            {
+                return Err(CommandError::CartPaymentCommitted {
+                    cart: cart.id(),
+                    payment: other.id(),
+                });
+            }
+            None
+        }
+    };
 
     let lines = priced
         .lines
@@ -410,17 +700,34 @@ async fn attempt<
     })?;
     cart.complete(order.id())
         .map_err(hypha_cart::CommandError::from)?;
-    let mut payment = method
-        .as_ref()
-        .map(|m| {
-            let id = hypha_core::PaymentId::from_uuid(ids.new_uuid());
-            Payment::new(NewPayment::by(m, id, order.id(), order.total()))
-        })
-        .transpose()?;
+    let mut created = None;
+    match &mut paid {
+        Some(payment) => payment.attach(order.id())?,
+        None => {
+            created = method
+                .as_ref()
+                .map(|m| {
+                    let id = hypha_core::PaymentId::from_uuid(ids.new_uuid());
+                    Payment::new(NewPayment::by(
+                        m,
+                        id,
+                        cart.id(),
+                        Some(order.id()),
+                        order.total(),
+                    ))
+                })
+                .transpose()?;
+        }
+    }
+    let payment_status: Vec<Payment> = paid.iter().chain(created.iter()).cloned().collect();
+    order.set_financial_status(financial_status(order.total(), &payment_status)?);
 
     let mut batch = ports.batch();
     batch.insert_order(&mut order);
-    if let Some(payment) = &mut payment {
+    if let Some(payment) = &mut paid {
+        batch.update_payment(payment);
+    }
+    if let Some(payment) = &mut created {
         batch.insert_payment(payment);
     }
     batch.update_cart(&mut cart);
@@ -450,7 +757,7 @@ async fn attempt<
     let settings = method
         .map(|m| m.settings().clone())
         .unwrap_or(serde_json::Value::Null);
-    Ok(Idempotent::fresh((order, payment, settings)))
+    Ok(Idempotent::fresh((order, paid.or(created), settings)))
 }
 
 /// Lines that need shipping need an address and, in every group, an option priced now.
@@ -474,7 +781,7 @@ fn check_shipping(cart: &Cart, priced: &PricedCart) -> Result<(), CommandError> 
 
 /// A quote renewed for the cart at `version`. Only that version may reuse it: a cart
 /// changed since (other lines, another address, a fresh choice) needs its own quote.
-struct Renewal {
+pub(crate) struct Renewal {
     version: Version,
     selection: SelectedShipping,
 }
@@ -489,7 +796,7 @@ async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
     clock: &C,
     cart: &mut Cart,
     reading: CartReading,
-    input: &Checkout,
+    expected_total: Option<Money>,
     carried: &mut Option<Renewal>,
 ) -> Result<CartReading, CommandError> {
     let now = clock.now();
@@ -518,7 +825,7 @@ async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
     *carried = Some(Renewal { version, selection });
     let renewed = read_cart(ports, cart).await?;
     if amount != old.amount
-        && let Some(expected) = input.expected_total
+        && let Some(expected) = expected_total
         && expected != renewed.priced.total
     {
         // Kept, so the buyer's next try sees (and confirms) the new price. Losing a race
@@ -675,24 +982,21 @@ async fn replay_of<S: HasIdempotency>(
 }
 
 /// What a replay returns: the order and its newest payment as they are now, and, while
-/// that payment is open, its provider's next action again.
+/// a manual method's payment is pending, its instructions again.
 async fn replay<S: HasOrders + HasPayments + HasPaymentMethods, Q: PaymentProviders>(
     ports: &S,
     providers: &Q,
     order: OrderId,
-    return_url: Option<&str>,
 ) -> Result<Idempotent<Placed>, CommandError> {
     let Some(order) = ports.orders().get(order).await? else {
-        // Records only point at orders written in the same batch; orders aren't deleted.
-        return Err(RepoError::Backend(format!(
-            "idempotency record points at missing order {order}"
-        ))
-        .into());
+        // Records and completed carts only point at orders written in the same batch;
+        // orders aren't deleted.
+        return Err(RepoError::Backend(format!("checkout points at missing order {order}")).into());
     };
     let mut payment = newest_payment(ports, order.id()).await?;
     let next_action = match &mut payment {
-        Some(p) if p.status().is_open() => {
-            Some(restart(ports, providers, &order, p, return_url).await?)
+        Some(p) if p.status() == PaymentStatus::Pending && p.provider().is_manual() => {
+            Some(restart(ports, providers, &payer_of(&order), p).await?)
         }
         _ => None,
     };

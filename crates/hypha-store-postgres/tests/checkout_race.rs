@@ -321,14 +321,20 @@ async fn one_cart_checked_out_at_once_becomes_one_order() {
     }))
     .await;
 
-    let orders: Vec<_> = results.iter().filter_map(|r| r.as_ref().ok()).collect();
-    assert_eq!(orders.len(), 1, "exactly one checkout wins: {results:?}");
-    let order = orders[0].value.order.id();
+    // One checkout places the order; the others are answered with it (design note
+    // 0031: the shopper's browser and the provider's webhook may both complete a cart),
+    // or ran out of retries.
+    let placed: Vec<_> = results
+        .iter()
+        .filter_map(|r| r.as_ref().ok())
+        .filter(|p| !p.replayed)
+        .collect();
+    assert_eq!(placed.len(), 1, "exactly one checkout wins: {results:?}");
+    let order = placed[0].value.order.id();
     for r in &results {
         assert!(
             match r {
-                Ok(_) => true,
-                Err(CommandError::CartCompleted { order: o, .. }) => *o == order,
+                Ok(p) => p.value.order.id() == order,
                 Err(CommandError::Repo(RepoError::StaleVersion)) => true,
                 _ => false,
             },

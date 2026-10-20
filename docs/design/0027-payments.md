@@ -1,5 +1,6 @@
 # 0027: Payments: the provider port, cash on delivery and bank transfer
 
+- **Amended by 0031** (2026-10-20): payment first. An online method's payment is started for the cart before its order exists and checkout places the order once the money is committed; `payments.start` is version 2 (a cart), `payments.status` is new, and the confirmation page no longer starts payments.
 - **Status:** Accepted (2026-10-18). Decided: PA2 (payment records), PA7 (the full
   set of statuses), Q1 (markets and channels), Q2 (no checkout without a method unless
   the total is zero); the rest as recommended. Danilo set the frame: a payments port with cash on
