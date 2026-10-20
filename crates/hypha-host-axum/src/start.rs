@@ -322,7 +322,8 @@ async fn ensure_search_index<S: Storage>(state: &AppState<S>) -> Result<(), Stri
 }
 
 /// Each spore this host is built with gets its app (design note 0030, §3), as the system:
-/// created with its scopes the first time, its title and scopes brought up to date after.
+/// created with its scopes the first time, its title and scopes brought up to date after;
+/// then its custom fields are synced (`Spore::custom_fields`).
 pub(crate) async fn register_spores<D: Deployment>(
     state: &AppState<PgStorage<D>>,
 ) -> Result<(), String> {
@@ -342,7 +343,9 @@ pub(crate) async fn register_spores<D: Deployment>(
                 .map_err(|e| format!("spore {:?}: {e}", spore.name))?;
         tracing::info!(app = %app.key(), enabled = app.enabled(), "spore");
     }
-    Ok(())
+    // Their custom fields, in the namespaces of the apps just registered (design note
+    // 0033, §8): a changed type stops the start, naming the spore and the field.
+    hypha_spore_core::sync_custom_fields::<D::Spores, _>(&ports, &state.env).await
 }
 
 /// Handler names and provider keys are how deliveries and payment methods find them, so

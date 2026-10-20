@@ -100,6 +100,8 @@ where
     definition_delete(&make().await).await;
     scenario("custom field definition: staged writes commit together, or not at all");
     definition_batch(&make().await).await;
+    scenario("custom field definition: removing an app removes its namespace's, with values");
+    app_removal(&make().await).await;
 }
 
 /// Stores the app `key`, whose namespace definitions then use.
@@ -285,6 +287,55 @@ where
         types.last().map(String::as_str),
         Some("custom_field_definition.deleted")
     );
+}
+
+/// Removing an app (its second `DELETE`, design note 0033, §8) removes the definitions
+/// in its namespace and their values; another app's and the merchant's stay. Storage
+/// cascades record no events.
+async fn app_removal<S>(ports: &S)
+where
+    S: HasApps
+        + HasCustomFieldDefinitions
+        + HasCustomFieldValues
+        + HasBatch<Batch: StageCustomFieldValues>,
+{
+    with_app(ports, "app_erp").await;
+    with_app(ports, "app_crm").await;
+    let repo = ports.custom_field_definitions();
+    let mut erp = definition(1, OwnerType::Customer, "app_erp", "member_id", "text");
+    let mut erp_too = definition(2, OwnerType::Product, "app_erp", "sku_ref", "text");
+    let mut crm = definition(3, OwnerType::Customer, "app_crm", "member_id", "text");
+    let mut own = definition(4, OwnerType::Customer, "custom", "tier", "text");
+    for d in [&mut erp, &mut erp_too, &mut crm, &mut own] {
+        repo.insert(d).await.unwrap();
+    }
+    let mut batch = ports.batch();
+    for d in [&erp, &crm, &own] {
+        batch.set_custom_field_value(row(d, &customer(5), json!("x")), None);
+    }
+    ports.commit(batch).await.unwrap();
+
+    ports
+        .apps()
+        .delete(&AppKey::new("app_erp").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(repo.get(did(1)).await, Ok(None));
+    assert_eq!(repo.get(did(2)).await, Ok(None));
+    let erp_namespace = Namespace::of_app(AppKey::new("app_erp").unwrap());
+    assert_eq!(repo.list_namespace(&erp_namespace).await, Ok(Vec::new()));
+    assert_eq!(repo.get(did(3)).await, Ok(Some(crm)));
+    assert_eq!(repo.get(did(4)).await, Ok(Some(own)));
+    let mut left: Vec<CustomFieldDefinitionId> = ports
+        .custom_field_values()
+        .get_many(&[customer(5).id()], None)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|v| v.definition)
+        .collect();
+    left.sort();
+    assert_eq!(left, [did(3), did(4)]);
 }
 
 async fn definition_batch<S>(ports: &S)

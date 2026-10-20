@@ -460,7 +460,7 @@ async fn without_an_admin_url_there_is_no_consent_page() {
 // ---------- personal data (AP10) ----------
 
 /// Values that must never reach a caller without the `customer_data:*` scopes.
-const PII: [&str; 9] = [
+const PII: [&str; 10] = [
     "pii-ana@example.hr",
     "Piiana",
     "Piihorvat",
@@ -470,6 +470,8 @@ const PII: [&str; 9] = [
     "Piicity",
     "PII-10000",
     "Piiprovince",
+    // A personal custom field's value (design note 0033, §5.2).
+    "Piinote",
 ];
 
 fn leaks(body: &Value) -> Vec<&'static str> {
@@ -535,6 +537,30 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
     // The order's email is the checkout's; make it a known one too.
     let (_, placed) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
     let order_email = placed["email"].as_str().unwrap().to_string();
+    // Personal custom fields on the customer and the order (design note 0033, §5.2).
+    let mut definitions = Vec::new();
+    for (owner, path) in [
+        (
+            "customer",
+            format!("/admin/customers/{customer}/custom-fields"),
+        ),
+        ("order", format!("/admin/orders/{order}/custom-fields")),
+    ] {
+        let body = json!({"owner_type": owner, "key": "note", "type": "text", "name": "Note",
+            "personal": true, "capabilities": {"filterable": true}});
+        let (status, created) = send(
+            &app,
+            "POST",
+            "/admin/custom-field-definitions",
+            Some(&body.to_string()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{created}");
+        definitions.push(created["id"].as_str().unwrap().to_string());
+        let body = json!({"custom_fields": {"custom.note": "Piinote"}}).to_string();
+        let (status, body) = send(&app, "PATCH", &path, Some(&body)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
 
     // An app granted the records but no personal data, and a secret key alike.
     let (base, _) = local_app(&[
@@ -574,6 +600,22 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
         ("POST", format!("/admin/orders/{order}/paid"), None),
         ("PUT", format!("/admin/carts/{cart}/customer"), Some(link)),
         ("GET", format!("/admin/notifications?order={order}"), None),
+        (
+            "GET",
+            "/admin/customers?custom_fields=custom.note".to_string(),
+            None,
+        ),
+        (
+            "GET",
+            format!("/admin/customers/{customer}/custom-fields"),
+            None,
+        ),
+        (
+            "GET",
+            "/admin/orders?custom_fields=custom.note".to_string(),
+            None,
+        ),
+        ("GET", format!("/admin/orders/{order}/custom-fields"), None),
     ];
     for token in [&app_token, &secret] {
         for (method, path, body) in &routes {
@@ -596,7 +638,13 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
         .await;
         assert_eq!(
             one["redacted"],
-            json!(["first_name", "last_name", "email", "phone"])
+            json!([
+                "first_name",
+                "last_name",
+                "email",
+                "phone",
+                "custom_fields.custom.note"
+            ])
         );
         assert!(one["addresses"][0]["redacted"].is_array());
         assert_eq!(one["addresses"][0]["country"], "HR");
@@ -608,6 +656,21 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
         assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
         let (status, _) = send_as(&app, token, "GET", "/admin/orders?q=1001", None).await;
         assert_eq!(status, StatusCode::OK);
+        // So would filtering by a personal custom field, or listing its values.
+        let (status, body) = send_as(
+            &app,
+            token,
+            "GET",
+            "/admin/customers?field[custom.note]=Piinote",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        for id in &definitions {
+            let path = format!("/admin/custom-field-definitions/{id}/values-in-use");
+            let (status, body) = send_as(&app, token, "GET", &path, None).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+        }
     }
 
     // With the scope, the field comes back (and only it).
@@ -625,7 +688,15 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
     )
     .await;
     assert_eq!(one["email"], "pii-ana@example.hr");
-    assert_eq!(one["redacted"], json!(["first_name", "last_name", "phone"]));
+    assert_eq!(
+        one["redacted"],
+        json!([
+            "first_name",
+            "last_name",
+            "phone",
+            "custom_fields.custom.note"
+        ])
+    );
     // Staff see everything.
     let owner = owner_session(&app).await;
     let (_, one) = send_as(
@@ -637,6 +708,7 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
     )
     .await;
     assert_eq!(one["first_name"], "Piiana");
+    assert_eq!(one["custom_fields"]["custom.note"], "Piinote");
     assert!(one.get("redacted").is_none());
 }
 

@@ -26,8 +26,13 @@ use hypha_products::{
 };
 use serde::{Deserialize, Serialize};
 
+use hypha_custom_fields::{
+    CallerKind, FieldsRead, HasCustomFieldDefinitions, HasCustomFieldValues, OwnerType,
+};
+
 use super::{
     assets::AssetKindDto,
+    custom_fields::{self, CustomFieldValues, FieldParams},
     page::{ListQuery, PageParams, PageResponse, SortedFilters},
 };
 use crate::{
@@ -106,6 +111,10 @@ pub struct ProductResponse {
     channels: Vec<ChannelId>,
     /// The categories it's directly in, sorted (design note 0022).
     categories: Vec<CategoryId>,
+    /// Its custom field values the caller may read, `{"custom.material": "wool", …}`
+    /// (design note 0033); `PATCH /admin/products/{id}/custom-fields` writes them.
+    #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
+    custom_fields: CustomFieldValues,
     /// When it was created, RFC 3339 in UTC.
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
@@ -219,6 +228,10 @@ pub struct VariantResponse {
     weight_grams: Option<u32>,
     /// `false` for what is never shipped (downloads, gift cards).
     requires_shipping: bool,
+    /// Its own custom field values the caller may read (variant fields, design note
+    /// 0033); `PATCH /admin/variants/{id}/custom-fields` writes them.
+    #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
+    custom_fields: CustomFieldValues,
 }
 
 impl ProductResponse {
@@ -226,6 +239,7 @@ impl ProductResponse {
         view: &ProductView,
         channels: Vec<ChannelId>,
         categories: Vec<CategoryId>,
+        fields: &FieldsRead,
         media: Option<&Media>,
     ) -> Result<Self, ApiError> {
         let p = &view.product;
@@ -254,13 +268,39 @@ impl ProductResponse {
                     media_asset_id: v.media(),
                     weight_grams: v.weight().map(Weight::grams),
                     requires_shipping: v.requires_shipping(),
+                    custom_fields: fields.json_of(v.id().as_uuid()),
                 })
                 .collect(),
             media: media_items(&view.media, media).await?,
             channels,
             categories,
+            custom_fields: fields.json_of(p.id().as_uuid()),
         })
     }
+}
+
+/// The product's and its variants' custom field values `kind` may read, in one read.
+async fn product_fields<P>(
+    ctx: &Ctx,
+    kind: &CallerKind,
+    ports: &P,
+    product: &Product,
+) -> Result<FieldsRead, ApiError>
+where
+    P: HasCustomFieldDefinitions + HasCustomFieldValues,
+{
+    let owners: Vec<uuid::Uuid> = std::iter::once(product.id().as_uuid())
+        .chain(product.variants().iter().map(|v| v.id().as_uuid()))
+        .collect();
+    custom_fields::read(
+        ctx,
+        kind,
+        ports,
+        &[OwnerType::Product, OwnerType::Variant],
+        &owners,
+        None,
+    )
+    .await
 }
 
 /// The response for a product a command just returned, with its media's assets.
@@ -287,8 +327,10 @@ async fn respond_view<S: Storage>(
         .await?
         .remove(&id)
         .unwrap_or_default();
+    let kind = custom_fields::caller_kind(ctx, ports).await?;
+    let fields = product_fields(ctx, &kind, ports, &view.product).await?;
     Ok(Json(
-        ProductResponse::new(view, channels, categories, state.media.as_deref()).await?,
+        ProductResponse::new(view, channels, categories, &fields, state.media.as_deref()).await?,
     ))
 }
 
@@ -380,6 +422,11 @@ pub struct ProductSummaryResponse {
     channels: Vec<ChannelId>,
     /// The categories it's directly in, sorted (design note 0022).
     categories: Vec<CategoryId>,
+    /// The custom field values `?custom_fields=` asked for (design note 0033); absent
+    /// without it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<std::collections::HashMap<String, serde_json::Value>>, required = false)]
+    custom_fields: Option<CustomFieldValues>,
     /// When it was created, RFC 3339 in UTC.
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
@@ -398,6 +445,7 @@ impl ProductSummaryResponse {
         view: &ProductSummaryView,
         channels: Vec<ChannelId>,
         categories: Vec<CategoryId>,
+        custom_fields: Option<CustomFieldValues>,
         media: Option<&Media>,
     ) -> Result<Self, ApiError> {
         let featured_media = match &view.featured_media {
@@ -427,6 +475,7 @@ impl ProductSummaryResponse {
             featured_media,
             channels,
             categories,
+            custom_fields,
         })
     }
 }
@@ -435,11 +484,11 @@ impl ProductSummaryResponse {
 type ProductSummaryPage = PageResponse<ProductSummaryResponse>;
 
 /// Products in any status, newest first or in `sort`'s order, narrowed by the filters
-/// (every one given must match).
+/// (every one given must match), custom fields' among them.
 #[utoipa::path(
     get,
     path = "/admin/products",
-    params(PageParams, ProductFilters),
+    params(PageParams, ProductFilters, FieldParams),
     responses((status = 200, description = "OK", body = ProductSummaryPage)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
@@ -449,7 +498,8 @@ pub async fn list<S: Storage>(
     query: ListQuery<ProductFilters>,
 ) -> Result<Json<ProductSummaryPage>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let (page, filters, scope) = query.parse_sorted()?;
+    let (page, filters, scope, field_query) = query.parse_sorted_with_fields()?;
+    let fields = custom_fields::list_fields(&ctx, &ports, OwnerType::Product, &field_query).await?;
     let sort = filters.sort();
     let input = ListProducts {
         filter: ProductFilterInput {
@@ -462,18 +512,37 @@ pub async fn list<S: Storage>(
             channel: filters.channel,
         },
         sort,
+        fields: fields.filters,
     };
     let page = list_product_views(&ctx, &ports, input, page).await?;
     let ids: Vec<ProductId> = page.items.iter().map(|v| v.summary.id).collect();
     let mut channels = channels_of_products(&ctx, &ports, &ids).await?;
     let mut categories = categories_of_products(&ctx, &ports, &ids).await?;
+    let values = match &fields.keys {
+        Some(keys) => {
+            let owners: Vec<uuid::Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
+            let read = custom_fields::read(
+                &ctx,
+                &fields.kind,
+                &ports,
+                &[OwnerType::Product],
+                &owners,
+                Some(keys),
+            )
+            .await?;
+            Some(read)
+        }
+        None => None,
+    };
     let mut items = Vec::with_capacity(page.items.len());
     for view in &page.items {
         let id = view.summary.id;
         let of = channels.remove(&id).unwrap_or_default();
         let in_categories = categories.remove(&id).unwrap_or_default();
+        let custom = values.as_ref().map(|v| v.json_of(id.as_uuid()));
         items.push(
-            ProductSummaryResponse::new(view, of, in_categories, state.media.as_deref()).await?,
+            ProductSummaryResponse::new(view, of, in_categories, custom, state.media.as_deref())
+                .await?,
         );
     }
     Ok(Json(PageResponse::sorted(
@@ -563,6 +632,10 @@ pub struct StorefrontProductResponse {
     currency: Option<Currency>,
     /// Whether the prices include tax (the market's rule); `null` when there are none.
     prices_include_tax: Option<bool>,
+    /// The custom field values the merchant shows storefronts (`access.storefront:
+    /// read`, design note 0033), `{"custom.material": "wool", …}`.
+    #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
+    custom_fields: CustomFieldValues,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -583,12 +656,16 @@ pub struct StorefrontVariantResponse {
     /// when there's no limit (stock isn't tracked, or it sells past zero). `0` where
     /// there's no price.
     available_quantity: Option<u64>,
+    /// The variant's own custom field values storefronts are shown.
+    #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
+    custom_fields: CustomFieldValues,
 }
 
 impl StorefrontProductResponse {
     async fn new(
         view: &ProductView,
         offer: Option<&ProductOffer>,
+        fields: &FieldsRead,
         media: Option<&Media>,
     ) -> Result<Self, ApiError> {
         let p = &view.product;
@@ -621,6 +698,7 @@ impl StorefrontProductResponse {
                             Some(o) => o.sellable,
                             None => Some(0),
                         },
+                        custom_fields: fields.json_of(v.id().as_uuid()),
                     }
                 })
                 .collect(),
@@ -628,6 +706,7 @@ impl StorefrontProductResponse {
             sold_in_country: sold,
             currency: market.map(|m| m.currency()),
             prices_include_tax: market.map(|m| m.prices_include_tax()),
+            custom_fields: fields.json_of(p.id().as_uuid()),
         })
     }
 }
@@ -651,7 +730,14 @@ async fn storefront_product<P>(
     country: Option<String>,
 ) -> Result<Json<StorefrontProductResponse>, ApiError>
 where
-    P: HasChannels + HasMarkets + HasCatalogs + HasPriceLists + HasInventoryItems + HasLocations,
+    P: HasChannels
+        + HasMarkets
+        + HasCatalogs
+        + HasPriceLists
+        + HasInventoryItems
+        + HasLocations
+        + HasCustomFieldDefinitions
+        + HasCustomFieldValues,
 {
     let id = view.product.id();
     let published = match ctx.channel() {
@@ -665,8 +751,10 @@ where
         Some(country) => Some(price_product(ctx, ports, &view.product, &country).await?),
         None => None,
     };
+    let fields = product_fields(ctx, &CallerKind::Storefront, ports, &view.product).await?;
     Ok(Json(
-        StorefrontProductResponse::new(&view, offer.as_ref(), state.media.as_deref()).await?,
+        StorefrontProductResponse::new(&view, offer.as_ref(), &fields, state.media.as_deref())
+            .await?,
     ))
 }
 

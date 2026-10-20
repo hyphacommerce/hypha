@@ -21,8 +21,13 @@ use hypha_orders::{
 use hypha_products::{HasProducts, ProductRepo};
 use serde::{Deserialize, Serialize};
 
+use hypha_apps::HasApps;
+use hypha_core::Ctx;
+use hypha_custom_fields::{HasCustomFieldDefinitions, HasCustomFieldValues, OwnerType};
+
 use super::{
     address::PostalAddressResponse,
+    custom_fields::{self, CustomFieldValues, FieldParams},
     page::{ListQuery, PageParams, PageResponse, SortedFilters},
     payments::{NextActionResponse, PaymentResponse, PlacedPaymentResponse},
     products::ProductMediaResponse,
@@ -646,10 +651,15 @@ pub struct OrderSummaryResponse {
     total: Money,
     /// How many items, adding up line quantities.
     item_count: u64,
+    /// The custom field values `?custom_fields=` asked for (design note 0033); absent
+    /// without it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<std::collections::HashMap<String, serde_json::Value>>, required = false)]
+    custom_fields: Option<CustomFieldValues>,
 }
 
 impl OrderSummaryResponse {
-    fn new(o: OrderSummary) -> Result<Self, ApiError> {
+    fn new(o: OrderSummary, custom_fields: Option<CustomFieldValues>) -> Result<Self, ApiError> {
         Ok(Self {
             id: o.id,
             number: o.number.value(),
@@ -664,6 +674,7 @@ impl OrderSummaryResponse {
             cancelled_at: o.cancelled_at.map(rfc3339).transpose()?,
             total: o.total,
             item_count: o.item_count,
+            custom_fields,
         })
     }
 }
@@ -785,11 +796,11 @@ impl SortedFilters for OrderFilters {
 }
 
 /// Orders, newest first or in `sort`'s order, narrowed by the filters (every one given
-/// must match).
+/// must match), custom fields' among them.
 #[utoipa::path(
     get,
     path = "/admin/orders",
-    params(PageParams, OrderFilters),
+    params(PageParams, OrderFilters, FieldParams),
     responses((status = 200, description = "OK", body = OrderPage)),
     extensions(("x-hypha-scopes" = json!(["orders:read"]))),
 )]
@@ -799,7 +810,8 @@ pub async fn list<S: Storage>(
     query: ListQuery<OrderFilters>,
 ) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let (page, filters, scope) = query.parse_sorted()?;
+    let (page, filters, scope, field_query) = query.parse_sorted_with_fields()?;
+    let fields = custom_fields::list_fields(&ctx, &ports, OwnerType::Order, &field_query).await?;
     // Text other than a number searches emails: only for callers who may see them
     // (design note 0029, AP10).
     if let Some(q) = filters.q.as_deref().map(str::trim)
@@ -815,13 +827,34 @@ pub async fn list<S: Storage>(
     let input = ListOrders {
         filter: filters.input()?,
         sort,
+        fields: fields.filters,
     };
     let page = list_orders(&ctx, ports.orders(), input, page).await?;
+    let values = match &fields.keys {
+        Some(keys) => {
+            let owners: Vec<uuid::Uuid> = page.items.iter().map(|o| o.id.as_uuid()).collect();
+            Some(
+                custom_fields::read(
+                    &ctx,
+                    &fields.kind,
+                    &ports,
+                    &[OwnerType::Order],
+                    &owners,
+                    Some(keys),
+                )
+                .await?,
+            )
+        }
+        None => None,
+    };
     let items = page
         .items
         .iter()
         .cloned()
-        .map(OrderSummaryResponse::new)
+        .map(|o| {
+            let custom = values.as_ref().map(|v| v.json_of(o.id.as_uuid()));
+            OrderSummaryResponse::new(o, custom)
+        })
         .collect::<Result<_, _>>()?;
     let page = PageResponse::sorted(
         &page,
@@ -832,7 +865,13 @@ pub async fn list<S: Storage>(
         },
         items,
     )?;
-    Ok(Json(redact::page(&ctx, Family::Order, page)?))
+    let hidden = values.map(|v| v.redacted).unwrap_or_default();
+    Ok(Json(redact::page_with_fields(
+        &ctx,
+        Family::Order,
+        page,
+        &hidden,
+    )?))
 }
 
 /// Units of a line still to ship, and where they wait (design note 0018, FU4).
@@ -862,11 +901,21 @@ pub struct AdminOrderResponse {
     /// Its payments, newest first (design note 0027): the method, status and
     /// instructions of each.
     payments: Vec<PaymentResponse>,
+    /// Its custom field values the caller may read (design note 0033); `PATCH
+    /// /admin/orders/{id}/custom-fields` writes them. A personal one is left out
+    /// without `customer_data:profile` and listed in `redacted` as
+    /// `custom_fields.<key>`.
+    #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
+    custom_fields: CustomFieldValues,
 }
 
 impl AdminOrderResponse {
     /// `order` is `view.order`'s response, with its images (`OrderResponse::with_images`).
-    fn new(view: &OrderView, order: OrderResponse) -> Result<Self, ApiError> {
+    fn new(
+        view: &OrderView,
+        order: OrderResponse,
+        custom_fields: CustomFieldValues,
+    ) -> Result<Self, ApiError> {
         let cancelled = view.order.cancelled();
         Ok(Self {
             order,
@@ -882,7 +931,27 @@ impl AdminOrderResponse {
                 })
                 .collect(),
             payments: PaymentResponse::all(&view.payments)?,
+            custom_fields,
         })
+    }
+
+    /// The response for `view` (its `order` already made), with its custom fields, as
+    /// `ctx` may see it.
+    async fn respond<P>(
+        ctx: &Ctx,
+        ports: &P,
+        view: &OrderView,
+        order: OrderResponse,
+    ) -> Result<Redacted, ApiError>
+    where
+        P: HasApps + HasCustomFieldDefinitions + HasCustomFieldValues,
+    {
+        let kind = custom_fields::caller_kind(ctx, ports).await?;
+        let id = view.order.id().as_uuid();
+        let fields =
+            custom_fields::read(ctx, &kind, ports, &[OwnerType::Order], &[id], None).await?;
+        let dto = Self::new(view, order, fields.json_of(id))?;
+        redact::one_with_fields(ctx, Family::Order, dto, &fields.redacted)
     }
 }
 
@@ -902,11 +971,9 @@ pub async fn fetch<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let view = order_view(&ctx, &ports, id).await?;
     let order = OrderResponse::with_images(&view.order, &ports, state.media.as_deref()).await?;
-    Ok(Json(redact::one(
-        &ctx,
-        Family::Order,
-        AdminOrderResponse::new(&view, order)?,
-    )?))
+    Ok(Json(
+        AdminOrderResponse::respond(&ctx, &ports, &view, order).await?,
+    ))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -955,11 +1022,9 @@ pub async fn cancel<S: Storage>(
         unfulfilled: Vec::new(),
         payments: done.payments,
     };
-    Ok(Json(redact::one(
-        &ctx,
-        Family::Order,
-        AdminOrderResponse::new(&view, response)?,
-    )?))
+    Ok(Json(
+        AdminOrderResponse::respond(&ctx, &ports, &view, response).await?,
+    ))
 }
 
 #[derive(Deserialize, Default, utoipa::ToSchema)]
@@ -1003,9 +1068,7 @@ pub async fn mark_paid<S: Storage>(
     let done = record_paid(&ctx, &ports, &state.ids, &state.clock, input).await?;
     let view = view_of(&ports, done.order, done.payments).await?;
     let order = OrderResponse::with_images(&view.order, &ports, state.media.as_deref()).await?;
-    Ok(Json(redact::one(
-        &ctx,
-        Family::Order,
-        AdminOrderResponse::new(&view, order)?,
-    )?))
+    Ok(Json(
+        AdminOrderResponse::respond(&ctx, &ports, &view, order).await?,
+    ))
 }

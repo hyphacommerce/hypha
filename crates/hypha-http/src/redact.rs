@@ -22,7 +22,10 @@
 use std::fmt;
 
 use hypha_apps::App;
-use hypha_core::{Ctx, Scope};
+use hypha_core::{Actor, Ctx, Scope};
+use hypha_custom_fields::{
+    CallerKind, CustomFieldDefinition, FieldCaller, FieldKey, ReadAccess, read_access,
+};
 use hypha_extensions::PostalAddress;
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
@@ -342,25 +345,84 @@ pub struct Redacted(Node);
 
 /// `dto` of `family` as `ctx` may see it.
 pub fn one(ctx: &Ctx, family: Family, dto: impl Serialize) -> Result<Redacted, ApiError> {
+    one_with_fields(ctx, family, dto, &[])
+}
+
+/// A list page (`{"items": [...], …}`) of `family` as `ctx` may see it.
+pub fn page(ctx: &Ctx, family: Family, page: impl Serialize) -> Result<Redacted, ApiError> {
+    page_with_fields(ctx, family, page, &[])
+}
+
+/// `one` for a DTO carrying `custom_fields` (design note 0033, §5.2): `hidden` are the
+/// personal fields the caller may not read (`hypha_custom_fields::FieldsRead::redacted`,
+/// per request, since definitions are data). They're absent from its `custom_fields`
+/// and listed in its `redacted` as `custom_fields.<key>`, held or not, like every other
+/// personal field.
+pub fn one_with_fields(
+    ctx: &Ctx,
+    family: Family,
+    dto: impl Serialize,
+    hidden: &[FieldKey],
+) -> Result<Redacted, ApiError> {
     let mut node = Node::of(dto)?;
     let r = Redaction::of(ctx);
     if !r.is_none() {
         family.apply(&r, &mut node);
     }
+    hide_fields(&mut node, hidden);
     Ok(Redacted(node))
 }
 
-/// A list page (`{"items": [...], …}`) of `family` as `ctx` may see it.
-pub fn page(ctx: &Ctx, family: Family, page: impl Serialize) -> Result<Redacted, ApiError> {
+/// `page` with `one_with_fields`' custom fields, for each item that carries them.
+pub fn page_with_fields(
+    ctx: &Ctx,
+    family: Family,
+    page: impl Serialize,
+    hidden: &[FieldKey],
+) -> Result<Redacted, ApiError> {
     let mut node = Node::of(page)?;
     let r = Redaction::of(ctx);
-    if !r.is_none()
+    if (!r.is_none() || !hidden.is_empty())
         && let Node::Object(fields) = &mut node
         && let Some(Node::Array(items)) = field(fields, "items")
     {
-        items.iter_mut().for_each(|item| family.apply(&r, item));
+        for item in items.iter_mut() {
+            if !r.is_none() {
+                family.apply(&r, item);
+            }
+            hide_fields(item, hidden);
+        }
     }
     Ok(Redacted(node))
+}
+
+/// Removes `hidden` from an object's `custom_fields` and lists them in its `redacted`;
+/// an object without `custom_fields` is left alone.
+fn hide_fields(node: &mut Node, hidden: &[FieldKey]) {
+    let Node::Object(object) = node else {
+        return;
+    };
+    if hidden.is_empty() {
+        return;
+    }
+    let keys: Vec<String> = hidden.iter().map(|k| k.to_string()).collect();
+    match field(object, "custom_fields") {
+        Some(Node::Object(values)) => values.retain(|(key, _)| !keys.contains(key)),
+        _ => return,
+    }
+    let names = keys
+        .iter()
+        .map(|k| Value::String(format!("custom_fields.{k}")));
+    match field(object, "redacted") {
+        Some(Node::Scalar(Value::Array(listed))) => listed.extend(names),
+        _ => {
+            object.retain(|(key, _)| key != "redacted");
+            object.push((
+                "redacted".to_string(),
+                Node::Scalar(Value::Array(names.collect())),
+            ));
+        }
+    }
 }
 
 /// Fails unless `ctx` may see every personal field `scopes` unlock: for searching or
@@ -384,6 +446,78 @@ pub fn event_data(has: impl Fn(Scope) -> bool, data: &Value) -> Value {
         r.deep(&mut data);
     }
     data
+}
+
+/// Whether `event_type` is a `<owner>.custom_fields_updated` event, whose entries
+/// `custom_field_changes` filters per receiving app.
+pub fn is_custom_fields_event(event_type: &str) -> bool {
+    event_type.ends_with(".custom_fields_updated")
+}
+
+/// A `<owner>.custom_fields_updated` event's `data` as `app` may receive it (design note
+/// 0033, §6.4): change entries for fields it may not read are dropped (another app's
+/// `private` field; a personal one without `customer_data:profile`; any field without
+/// the owner's read scope), judged by `definitions` as they are now, with the rules
+/// `hypha_custom_fields::read_access` applies to the app's own API calls. An entry
+/// whose definition is gone since stays only in the merchant's or the app's own
+/// namespace. `None` when no entry is left: the delivery isn't sent.
+///
+/// An app without a grant (made by hand) reads the records it subscribed to but no
+/// personal data, as its other webhooks.
+pub fn custom_field_changes(
+    app: &App,
+    definitions: &[CustomFieldDefinition],
+    data: &Value,
+) -> Option<Value> {
+    let key = app.key().clone();
+    let kind = match key.as_str().starts_with("spore_") {
+        true => CallerKind::Spore(key),
+        false => CallerKind::App(key),
+    };
+    let scopes = match app.grant() {
+        Some(grant) => grant.scopes().to_vec(),
+        None => vec![Scope::ProductsRead, Scope::CustomersRead, Scope::OrdersRead],
+    };
+    let ctx = Ctx::new(Actor::App(app.id()), scopes);
+    changes_visible_to(&FieldCaller::new(&ctx, &kind), definitions, data)
+}
+
+/// `custom_field_changes` for any caller (`GET /admin/events/{id}` for an app or a key,
+/// which sees an event as an app would receive it).
+pub fn changes_visible_to(
+    caller: &FieldCaller<'_>,
+    definitions: &[CustomFieldDefinition],
+    data: &Value,
+) -> Option<Value> {
+    let Some(changes) = data.get("changes").and_then(Value::as_array) else {
+        return Some(data.clone());
+    };
+    let own = caller.namespace_owner().map(|k| k.as_str().to_string());
+    let kept: Vec<Value> = changes
+        .iter()
+        .filter(|change| {
+            let Some(name) = change.get("key").and_then(Value::as_str) else {
+                return false;
+            };
+            match definitions
+                .iter()
+                .find(|d| d.field_key().to_string() == name)
+            {
+                Some(definition) => read_access(definition, caller) == ReadAccess::Visible,
+                None => {
+                    let namespace = name.split_once('.').map_or(name, |(ns, _)| ns);
+                    namespace == "custom" || own.as_deref() == Some(namespace)
+                }
+            }
+        })
+        .cloned()
+        .collect();
+    if kept.is_empty() {
+        return None;
+    }
+    let mut data = data.clone();
+    data["changes"] = Value::Array(kept);
+    Some(data)
 }
 
 #[cfg(test)]
@@ -559,5 +693,199 @@ mod tests {
         let mut all = destination();
         Redaction::NONE.postal_address(&mut all);
         assert_eq!(all, destination());
+    }
+
+    // ---------- custom fields (design note 0033, §5.2, §6.4) ----------
+
+    fn hidden(keys: &[&str]) -> Vec<FieldKey> {
+        keys.iter().map(|k| FieldKey::parse(k).unwrap()).collect()
+    }
+
+    #[test]
+    fn hidden_fields_leave_custom_fields_and_join_redacted() {
+        let customer = json!({
+            "id": "cus_1",
+            "custom_fields": {"custom.tier": "gold", "custom.birthday": "1990-05-04"}
+        });
+        let ctx = app(vec![
+            Scope::CustomersRead,
+            Scope::CustomerDataName,
+            Scope::CustomerDataEmail,
+            Scope::CustomerDataPhone,
+        ]);
+        let seen = serde_json::to_value(
+            one_with_fields(
+                &ctx,
+                Family::Customer,
+                customer,
+                &hidden(&["custom.birthday", "custom.note"]),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        // A key the owner doesn't hold is listed too: the list tells nothing.
+        assert_eq!(
+            seen,
+            json!({
+                "id": "cus_1",
+                "custom_fields": {"custom.tier": "gold"},
+                "redacted": ["custom_fields.custom.birthday", "custom_fields.custom.note"]
+            })
+        );
+    }
+
+    #[test]
+    fn hidden_fields_are_appended_to_the_redacted_fields() {
+        let customer = json!({
+            "id": "cus_1",
+            "email": "ana@example.com",
+            "custom_fields": {"custom.birthday": "1990-05-04"}
+        });
+        let seen = serde_json::to_value(
+            one_with_fields(
+                &app(vec![Scope::CustomersRead]),
+                Family::Customer,
+                customer,
+                &hidden(&["custom.birthday"]),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(seen["custom_fields"], json!({}));
+        assert_eq!(
+            seen["redacted"],
+            json!([
+                "first_name",
+                "last_name",
+                "email",
+                "phone",
+                "custom_fields.custom.birthday"
+            ])
+        );
+    }
+
+    #[test]
+    fn an_object_without_custom_fields_is_left_alone() {
+        let seen = serde_json::to_value(
+            one_with_fields(
+                &app(vec![Scope::OrdersRead, Scope::CustomerDataEmail]),
+                Family::Order,
+                json!({"id": "ord_1", "email": "ana@example.com"}),
+                &hidden(&["custom.note"]),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(seen, json!({"id": "ord_1", "email": "ana@example.com"}));
+    }
+
+    #[test]
+    fn a_pages_items_each_hide_their_fields() {
+        let page = json!({"items": [
+            {"id": "cus_1", "custom_fields": {"custom.birthday": "1990-05-04"}},
+            {"id": "cus_2", "custom_fields": {}}
+        ], "next_cursor": null});
+        let ctx = app(vec![
+            Scope::CustomersRead,
+            Scope::CustomerDataName,
+            Scope::CustomerDataEmail,
+            Scope::CustomerDataPhone,
+        ]);
+        let seen = serde_json::to_value(
+            page_with_fields(&ctx, Family::Customer, page, &hidden(&["custom.birthday"])).unwrap(),
+        )
+        .unwrap();
+        for item in seen["items"].as_array().unwrap() {
+            assert_eq!(item["custom_fields"], json!({}), "{item}");
+            assert_eq!(
+                item["redacted"],
+                json!(["custom_fields.custom.birthday"]),
+                "{item}"
+            );
+        }
+    }
+
+    fn definition(namespace: &str, key: &str, personal: bool) -> CustomFieldDefinition {
+        use hypha_core::CustomFieldDefinitionId;
+        use hypha_custom_fields::{
+            Access, Capabilities, DefinitionSpec, FieldType, Namespace, OwnerType, RawValidations,
+        };
+        CustomFieldDefinition::new(
+            CustomFieldDefinitionId::from_uuid(Uuid::from_u128(1)),
+            Namespace::parse(namespace).unwrap(),
+            DefinitionSpec {
+                owner_type: OwnerType::Customer,
+                key: key.to_string(),
+                field_type: FieldType::parse("text").unwrap(),
+                name: key.to_string(),
+                description: None,
+                validations: RawValidations::default(),
+                access: Access::default(),
+                private: false,
+                personal,
+                capabilities: Capabilities::default(),
+            },
+            0,
+        )
+        .unwrap()
+    }
+
+    fn changes(keys: &[&str]) -> Value {
+        let changes: Vec<Value> = keys.iter().map(|k| json!({"key": k})).collect();
+        json!({"customer": "cus_1", "changes": changes})
+    }
+
+    fn keys_of(data: &Value) -> Vec<&str> {
+        data["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["key"].as_str().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn an_event_loses_the_changes_its_receiver_may_not_read() {
+        use hypha_core::AppKey;
+        let definitions = [
+            definition("custom", "tier", false),
+            definition("custom", "birthday", true),
+        ];
+        let ctx = app(vec![Scope::CustomersRead]);
+        let kind = CallerKind::App(AppKey::new("app_crm").unwrap());
+        let caller = FieldCaller::new(&ctx, &kind);
+        let data = changes(&["custom.tier", "custom.birthday"]);
+        let seen = changes_visible_to(&caller, &definitions, &data).unwrap();
+        assert_eq!(keys_of(&seen), ["custom.tier"]);
+        assert_eq!(seen["customer"], "cus_1");
+    }
+
+    #[test]
+    fn a_change_to_a_deleted_field_stays_only_in_its_own_or_the_merchants_namespace() {
+        use hypha_core::AppKey;
+        let ctx = app(vec![Scope::CustomersRead]);
+        let kind = CallerKind::App(AppKey::new("app_crm").unwrap());
+        let caller = FieldCaller::new(&ctx, &kind);
+        let data = changes(&["custom.gone", "app_crm.gone", "app_other.gone"]);
+        let seen = changes_visible_to(&caller, &[], &data).unwrap();
+        assert_eq!(keys_of(&seen), ["custom.gone", "app_crm.gone"]);
+    }
+
+    #[test]
+    fn an_event_with_no_change_left_is_not_sent() {
+        let definitions = [definition("custom", "birthday", true)];
+        let ctx = app(vec![Scope::CustomersRead]);
+        let kind = CallerKind::Merchant;
+        let caller = FieldCaller::new(&ctx, &kind);
+        assert_eq!(
+            changes_visible_to(&caller, &definitions, &changes(&["custom.birthday"])),
+            None
+        );
+    }
+
+    #[test]
+    fn custom_fields_events_are_named_by_their_suffix() {
+        assert!(is_custom_fields_event("customer.custom_fields_updated"));
+        assert!(!is_custom_fields_event("customer.updated"));
     }
 }

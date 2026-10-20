@@ -504,6 +504,13 @@ pub struct SyncPlan {
     pub delete: Vec<SyncedField>,
 }
 
+impl SyncPlan {
+    /// Whether syncing changes nothing.
+    pub fn is_empty(&self) -> bool {
+        self.create.is_empty() && self.update.is_empty() && self.delete.is_empty()
+    }
+}
+
 /// What syncing `specs` into a namespace holding `existing` would do (§8), checking
 /// every spec builds a valid definition and none changes an existing key's type
 /// (`TypeChanged`, naming the key). Pure, so a manifest's consent screen can show it.
@@ -574,8 +581,8 @@ fn change_to(spec: &DefinitionSpec) -> DefinitionChange {
 /// Makes an app's or a spore's namespace hold exactly `specs` (§8): new keys created,
 /// changed ones updated (a tightening checked against stored values like any other),
 /// missing ones deleted with their values, in one batch. A changed type is
-/// `TypeChanged`. Run when an app's manifest is approved or refreshed, and by hosts for
-/// spores at startup.
+/// `TypeChanged`. Run by hosts for spores at startup; an app's manifest is synced in the
+/// batch that applies it (`stage_managed_definitions`).
 pub async fn sync_managed_definitions<S>(
     ctx: &Ctx,
     ports: &S,
@@ -588,11 +595,40 @@ where
         + HasCustomFieldValues
         + HasBatch<Batch: StageCustomFieldDefinitions>,
 {
+    let mut batch = ports.batch();
+    let plan = stage_managed_definitions(ctx, ports, ids, namespace, specs, &mut batch).await?;
+    if plan.is_empty() {
+        return Ok(plan);
+    }
+    ports
+        .commit(batch)
+        .await
+        .map_err(|e| sync_commit_error(namespace, &plan, e))?;
+    Ok(plan)
+}
+
+/// `sync_managed_definitions`' reads and checks, its writes staged in `batch` rather
+/// than committed: for a write that must land with them or not at all (an app's
+/// manifest applied with its fields, design note 0033, §8). Map the commit's error with
+/// `sync_commit_error`.
+pub async fn stage_managed_definitions<S>(
+    ctx: &Ctx,
+    ports: &S,
+    ids: &impl IdGenerator,
+    namespace: &Namespace,
+    specs: Vec<DefinitionSpec>,
+    batch: &mut S::Batch,
+) -> Result<SyncPlan, CommandError>
+where
+    S: HasCustomFieldDefinitions
+        + HasCustomFieldValues
+        + HasBatch<Batch: StageCustomFieldDefinitions>,
+{
     ctx.require(Scope::AppsWrite)?;
     let repo = ports.custom_field_definitions();
     let existing = repo.list_namespace(namespace).await?;
     let plan = plan_sync(namespace, &existing, &specs)?;
-    if plan.create.is_empty() && plan.update.is_empty() && plan.delete.is_empty() {
+    if plan.is_empty() {
         return Ok(plan);
     }
     let all = repo.list(None).await?;
@@ -606,7 +642,6 @@ where
         .cloned()
         .collect();
     let gone_ids: HashSet<CustomFieldDefinitionId> = gone.iter().map(|d| d.id()).collect();
-    let mut batch = ports.batch();
     // What each owner type holds after the sync, for positions and limits.
     let mut kept: HashMap<OwnerType, Vec<CustomFieldDefinition>> = HashMap::new();
     for d in all.iter().filter(|d| !gone_ids.contains(&d.id())) {
@@ -676,17 +711,22 @@ where
             }
         }
     }
-    match ports.commit(batch).await {
-        Err(RepoError::Duplicate(keys::CUSTOM_FIELD_KEY)) => Err(CommandError::KeyTaken {
+    Ok(plan)
+}
+
+/// A commit's error for a batch `stage_managed_definitions` staged `plan` into: a key
+/// another sync created meanwhile reads as `KeyTaken`, like any duplicate.
+pub fn sync_commit_error(namespace: &Namespace, plan: &SyncPlan, error: RepoError) -> CommandError {
+    match error {
+        RepoError::Duplicate(keys::CUSTOM_FIELD_KEY) => CommandError::KeyTaken {
             owner_type: plan
                 .create
                 .first()
                 .map_or(OwnerType::Product, |f| f.owner_type),
             key: format!("{namespace}.{}", plan.create.first().map_or("", |f| &f.key)),
-        }),
-        other => Ok(other?),
-    }?;
-    Ok(plan)
+        },
+        other => other.into(),
+    }
 }
 
 // ---------------------------------------------------------------------------------
@@ -850,6 +890,93 @@ where
             .await?
     };
     assemble(caller, &definitions, owners, stored)
+}
+
+/// What a response shows of some owners' fields (§6.2): each owner's values the caller
+/// may read, and the personal keys hidden from it (`custom_fields.<key>` in the
+/// response's `redacted`): every such key of the definitions read, held or not, so the
+/// list doesn't tell which owners have a value (§5.2).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldsRead {
+    pub owners: HashMap<Uuid, OwnerFields>,
+    pub redacted: Vec<FieldKey>,
+}
+
+impl FieldsRead {
+    /// `owner`'s values as `{"custom.material": "wool", …}`; empty for one without any.
+    pub fn json_of(&self, owner: Uuid) -> serde_json::Map<String, Value> {
+        self.owners
+            .get(&owner)
+            .map(OwnerFields::to_json)
+            .unwrap_or_default()
+    }
+}
+
+/// The values of `owners` (each of one of `owner_types`) that `caller` may read, in one
+/// read of the definitions and one of the values (§6.2): every field for a single
+/// owner's response, or only `keys` (at most 10, `?custom_fields=`) for a list. A key
+/// the caller can't see at all is `Unknown`, as for filters.
+pub async fn read_custom_fields<S>(
+    caller: &FieldCaller<'_>,
+    ports: &S,
+    owner_types: &[OwnerType],
+    owners: &[Uuid],
+    keys: Option<&[FieldKey]>,
+) -> Result<FieldsRead, CommandError>
+where
+    S: HasCustomFieldDefinitions + HasCustomFieldValues,
+{
+    for owner_type in owner_types {
+        caller.ctx().require(owner_type.read_scope())?;
+    }
+    if keys.is_some_and(|k| k.len() > MAX_LISTED_KEYS) {
+        return Err(CommandError::TooManyListedKeys {
+            max: MAX_LISTED_KEYS,
+        });
+    }
+    let all: Vec<CustomFieldDefinition> = ports
+        .custom_field_definitions()
+        .list(None)
+        .await?
+        .into_iter()
+        .filter(|d| owner_types.contains(&d.owner_type()))
+        .collect();
+    let definitions: Vec<CustomFieldDefinition> = match keys {
+        None => all,
+        Some(keys) => {
+            let mut wanted = Vec::with_capacity(keys.len());
+            for key in keys {
+                let found = all
+                    .iter()
+                    .find(|d| &d.field_key() == key && read_access(d, caller) != ReadAccess::Hidden)
+                    .ok_or_else(|| CommandError::Unknown(key.to_string()))?;
+                if !wanted
+                    .iter()
+                    .any(|w: &CustomFieldDefinition| w.id() == found.id())
+                {
+                    wanted.push(found.clone());
+                }
+            }
+            wanted
+        }
+    };
+    let mut redacted: Vec<FieldKey> = definitions
+        .iter()
+        .filter(|d| read_access(d, caller) == ReadAccess::Redacted)
+        .map(CustomFieldDefinition::field_key)
+        .collect();
+    redacted.sort();
+    let ids: Vec<CustomFieldDefinitionId> = definitions.iter().map(|d| d.id()).collect();
+    let stored = if owners.is_empty() || ids.is_empty() {
+        Vec::new()
+    } else {
+        let only = keys.map(|_| ids.as_slice());
+        ports.custom_field_values().get_many(owners, only).await?
+    };
+    Ok(FieldsRead {
+        owners: assemble(caller, &definitions, owners, stored)?,
+        redacted,
+    })
 }
 
 /// A write to an owner's fields: `values` is a JSON Merge Patch (`null` removes, absent

@@ -40,6 +40,10 @@ use crate::storage::PgDatabase;
 
 // Apps installed through OAuth, and personal data (design note 0029).
 mod app_extensions;
+// Apps' custom fields, synced with their manifests (design note 0033, §8).
+mod app_fields;
+// Custom fields: definitions, values, filters, facets and redaction (design note 0033).
+mod custom_fields;
 mod oauth;
 // A host built with a spore (design note 0030).
 mod spores;
@@ -4685,7 +4689,7 @@ async fn search_filters_repeat_and_facets_count_listings() {
         .clone();
     assert_eq!(
         colour["values"],
-        json!([{"value": "Blue", "count": 1}, {"value": "Red", "count": 1}])
+        json!([{"value": "Blue", "label": null, "count": 1}, {"value": "Red", "label": null, "count": 1}])
     );
 
     // Splitting by colour makes two listings, after a rebuild.
@@ -4705,7 +4709,7 @@ async fn search_filters_repeat_and_facets_count_listings() {
         json!([{
             "key": "option.color",
             "label": "Colour",
-            "values": [{"value": "Blue", "count": 1}, {"value": "Red", "count": 1}],
+            "values": [{"value": "Blue", "label": null, "count": 1}, {"value": "Red", "label": null, "count": 1}],
         }])
     );
 }

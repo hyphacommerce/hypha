@@ -39,18 +39,35 @@ once with its path, as `422 manifest_invalid`, e.g. `custom_fields[2].type`, or
 
 ## Lifecycle
 
-- **Install:** the fields are created when staff approve the app. The consent page lists
-  the owners the app adds fields to, and which fields are personal.
-- **Refresh:** a refreshed manifest's fields are applied when it is (approved, when it
-  asks for new scopes):
+Hypha keeps the app's namespace holding exactly the fields its manifest declares. It
+syncs them in the same transaction that applies the manifest, so the app and its fields
+change together or not at all.
+
+- **Install:** the fields are created when staff approve the app. The same goes for a
+  private app, whose manifest is uploaded. The consent page's `custom_fields` lists what
+  approving does (`added`, `kept`, `removed`, `retyped`), compared with the fields the
+  app has now. It names the owners the app adds fields to, and which fields are
+  personal.
+- **Refresh** (`POST /admin/apps/{key}/refresh`):
   - a new key creates a field
   - a changed name, description, validations, access or capabilities updates it
-  - a key the manifest no longer declares is **deleted with its values**; the consent
-    page lists these as "removes fields"
-  - a changed `type` makes the manifest invalid (`custom_fields[i].type`): declare a new
-    key instead
+  - when the manifest asks for no new scope and drops no field, this happens at once
+    (`status: updated`)
+  - a key the manifest no longer declares would be **deleted with its values**, so such
+    a refresh waits for staff like new scopes do (`status: consent_required`). The
+    consent page lists the field under `removed`, and the fields change only when staff
+    approve. If staff deny, the fields stay as they were, and the next refresh asks
+    again.
+  - a changed `type` makes the manifest invalid: `422 manifest_invalid` at
+    `custom_fields[i].type`. Declare a new key instead. `/oauth/authorize` refuses such a
+    manifest too (a `400` page), before any consent page.
+- **Checked when applied:** validations that don't fit the field's type (`min` on a
+  text) are found when the fields are synced, at approval or refresh. They're reported
+  as `422 manifest_invalid` at `custom_fields[i]` (or `custom_fields[i].validations` for
+  an unknown validation), and nothing changes.
 - **Definitions API:** an app's fields are read-only there (`409 custom_field_managed`).
   Their values are written by the app (and by staff when `access.admin` is
   `read_write`).
-- **Uninstall:** the fields and values stay, readable by staff. Removing the app (its
-  second `DELETE`) deletes them.
+- **Uninstall:** the fields and values stay, readable by staff, and an app installed
+  again finds them. Removing the app (its second `DELETE`) deletes them with their
+  values.

@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use hypha_custom_fields::CustomFieldCleanup;
 use hypha_dispatch::VariantCleanup;
 use hypha_http::mail::MailHost;
 use hypha_mail::Mailer;
@@ -18,6 +19,7 @@ pub type CoreHandlers = (
     VariantCleanup,
     SearchIndexer,
     CategoryImageCleanup,
+    CustomFieldCleanup,
     Mailer<Arc<MailHost>>,
 );
 
@@ -28,6 +30,7 @@ pub fn core_handlers(mail: Arc<MailHost>) -> CoreHandlers {
         VariantCleanup,
         SearchIndexer,
         CategoryImageCleanup,
+        CustomFieldCleanup,
         Mailer::new(mail),
     )
 }

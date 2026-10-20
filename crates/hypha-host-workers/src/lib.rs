@@ -467,9 +467,9 @@ mod worker_main {
     }
 
     /// A Worker registers nothing (it runs no migrations either): the native host's
-    /// `setup`, built with the same spores, did. One whose spores' apps aren't as this
-    /// build declares them (another list, a title or scopes changed since) refuses to
-    /// serve until `setup` runs with it.
+    /// `setup`, built with the same spores, did. One whose spores' apps or custom fields
+    /// aren't as this build declares them (another list, a title, scopes or fields
+    /// changed since) refuses to serve until `setup` runs with it.
     async fn spores_set_up<D: Deployment>(
         state: &AppState<WorkersStorage<D>>,
     ) -> Result<(), String> {
@@ -492,6 +492,14 @@ mod worker_main {
                     spore.name
                 ));
             }
+        }
+        // Their custom fields too (design note 0033, §8): `setup` synced them.
+        let stale = hypha_spore_core::custom_fields_out_of_sync::<D::Spores, _>(&ports).await?;
+        if !stale.is_empty() {
+            return Err(format!(
+                "{}: run `hypha-host-axum setup` built with the same spores first",
+                stale.join("; ")
+            ));
         }
         Ok(())
     }

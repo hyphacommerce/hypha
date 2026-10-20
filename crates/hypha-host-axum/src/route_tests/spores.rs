@@ -98,7 +98,10 @@ async fn a_host_built_with_a_spore_migrates_registers_and_runs_it() {
     assert_eq!(app.kind(), AppKind::Spore);
     assert_eq!(app.name(), "Test spore");
     assert!(app.enabled());
-    assert_eq!(app.grant().unwrap().scopes(), &[Scope::ProductsRead]);
+    assert_eq!(
+        app.grant().unwrap().scopes(),
+        &[Scope::ProductsRead, Scope::ProductsWrite]
+    );
 
     // Its table, migrated after core's.
     let config = hypha_store_postgres::database_config(&url).unwrap();
@@ -504,7 +507,7 @@ async fn a_spores_block_and_action_are_answered_in_process() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{answer}");
-    assert_eq!(answer["message"], "hello, as [ProductsRead]");
+    assert_eq!(answer["message"], "hello, as [ProductsRead, ProductsWrite]");
     assert_eq!(answer["refresh"], true);
 
     // A caller who can't read products can't use a product block.
@@ -558,4 +561,120 @@ async fn a_spore_this_build_lacks_is_listed_as_missing() {
     let built = app_with_spores::<WithTestSpore>(Config::defaults()).await;
     let (_, detail) = send(&built, "GET", "/admin/apps/spore_test", None).await;
     assert_eq!(detail["missing"], false, "{detail}");
+}
+
+/// A spore named like the test spore whose `ribbon` is an integer now, or that declares
+/// no fields (`FIELDS` false): what a later build of it might be.
+struct Rebuilt<const RETYPED: bool>;
+
+impl<const RETYPED: bool> hypha_spore_core::Spore for Rebuilt<RETYPED> {
+    const NAME: &'static str = "test";
+    const SCOPES: &'static [Scope] = &[Scope::ProductsRead];
+
+    fn title() -> &'static str {
+        "Test spore"
+    }
+
+    fn migrations() -> hypha_store_postgres::MigrationSet {
+        hypha_store_postgres::MigrationSet {
+            module: "spore_test",
+            migrations: &[],
+        }
+    }
+
+    fn new(_: hypha_spore_core::SporeEnv) -> Result<Self, hypha_spore_core::SporeError> {
+        Ok(Self)
+    }
+
+    fn custom_fields() -> Vec<hypha_custom_fields::DefinitionSpec> {
+        let mut fields = <TestSpore as hypha_spore_core::Spore>::custom_fields();
+        match RETYPED {
+            true => {
+                fields[0].field_type = hypha_custom_fields::FieldType::parse("integer").unwrap()
+            }
+            false => fields.clear(),
+        }
+        fields
+    }
+
+    type PaymentProviders = ();
+    type Handlers = ();
+
+    fn payment_providers(&self) {}
+
+    fn handlers(&self) {}
+}
+
+#[tokio::test]
+async fn a_spores_custom_fields_are_synced_at_startup_and_it_writes_them_as_itself() {
+    use hypha_custom_fields::{DefinitionRepo, HasCustomFieldDefinitions, Namespace, Owner};
+    let app = app_with_spores::<WithTestSpore>(Config::defaults()).await;
+    let ports = app.state.public_ports().await.unwrap();
+    let namespace = Namespace::of_app(AppKey::of_spore("test").unwrap());
+    let stored = ports
+        .custom_field_definitions()
+        .list_namespace(&namespace)
+        .await
+        .unwrap();
+    let keys: Vec<String> = stored.iter().map(|d| d.field_key().to_string()).collect();
+    assert_eq!(keys, ["spore_test.ribbon"]);
+    assert_eq!(stored[0].name(), "Ribbon");
+
+    // Its env writes as the spore: its own namespace, with its scopes.
+    let product: hypha_core::ProductId = create_product(&app, "ribboned").await.parse().unwrap();
+    let owner = Owner::product(product);
+    let (spore,) = app.state.storage.spores().spores();
+    let values = [("spore_test.ribbon".to_string(), json!("red"))].into();
+    let written = spore
+        .env
+        .set_custom_fields(&ports, &owner, values)
+        .await
+        .unwrap();
+    assert_eq!(written.entries.len(), 1);
+    let read = spore.env.custom_fields(&ports, &owner).await.unwrap();
+    assert_eq!(read.entries[0].definition.key().as_str(), "ribbon");
+    assert_eq!(read.entries[0].version, hypha_core::Version::new(1));
+
+    // Starting again changes nothing: the value stays.
+    crate::start::register_spores(&app.state).await.unwrap();
+    let read = spore.env.custom_fields(&ports, &owner).await.unwrap();
+    assert_eq!(read.entries.len(), 1);
+}
+
+#[tokio::test]
+async fn a_spore_field_of_another_type_stops_the_start_and_a_dropped_one_is_deleted() {
+    use hypha_custom_fields::{DefinitionRepo, HasCustomFieldDefinitions, Namespace};
+    let app = app_with_spores::<WithTestSpore>(Config::defaults()).await;
+    let ports = app.state.public_ports().await.unwrap();
+
+    let refused =
+        hypha_spore_core::sync_custom_fields::<(Rebuilt<true>,), _>(&ports, &app.state.env)
+            .await
+            .unwrap_err();
+    assert!(
+        refused.starts_with("spore \"test\": custom fields: spore_test.ribbon's type can't change"),
+        "{refused}"
+    );
+    // A Worker built so refuses to serve too.
+    let stale = hypha_spore_core::custom_fields_out_of_sync::<(Rebuilt<true>,), _>(&ports)
+        .await
+        .unwrap();
+    assert_eq!(stale.len(), 1, "{stale:?}");
+    assert!(
+        hypha_spore_core::custom_fields_out_of_sync::<(TestSpore,), _>(&ports)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    hypha_spore_core::sync_custom_fields::<(Rebuilt<false>,), _>(&ports, &app.state.env)
+        .await
+        .unwrap();
+    let namespace = Namespace::of_app(AppKey::of_spore("test").unwrap());
+    let stored = ports
+        .custom_field_definitions()
+        .list_namespace(&namespace)
+        .await
+        .unwrap();
+    assert!(stored.is_empty(), "{stored:?}");
 }

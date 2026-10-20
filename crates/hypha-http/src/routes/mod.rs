@@ -14,6 +14,7 @@ pub use auth::password_reset_in_background;
 pub mod carts;
 pub mod categories;
 pub mod channels;
+pub mod custom_fields;
 pub mod customers;
 pub mod fulfillments;
 pub mod health;
@@ -264,6 +265,27 @@ macro_rules! route_table {
             [admin, GET, "/admin/variants/{id}/inventory", inventory::fetch_variant_inventory],
             [admin, GET, "/admin/products/{id}/inventory", inventory::fetch_product_inventory],
             [admin, GET, "/admin/setup/checklist", setup::checklist],
+
+            // custom fields (design note 0033)
+            [admin, GET, "/admin/custom-field-definitions", custom_fields::list],
+            [admin, POST, "/admin/custom-field-definitions", custom_fields::create],
+            [admin, GET, "/admin/custom-field-definitions/{id}", custom_fields::fetch],
+            [admin, PATCH, "/admin/custom-field-definitions/{id}", custom_fields::update],
+            [admin, DELETE, "/admin/custom-field-definitions/{id}", custom_fields::remove],
+            [admin, PUT, "/admin/custom-field-definitions/{id}/position", custom_fields::move_to],
+            [admin, GET, "/admin/custom-field-definitions/{id}/values-in-use", custom_fields::values],
+            [admin, POST, "/admin/custom-fields/{definition}/items", custom_fields::change_items],
+            [admin, POST, "/admin/custom-fields/{definition}/values", custom_fields::set_values],
+            [admin, GET, "/admin/products/{id}/custom-fields", custom_fields::fetch_product],
+            [admin, PATCH, "/admin/products/{id}/custom-fields", custom_fields::update_product],
+            [admin, GET, "/admin/variants/{id}/custom-fields", custom_fields::fetch_variant],
+            [admin, PATCH, "/admin/variants/{id}/custom-fields", custom_fields::update_variant],
+            [admin, GET, "/admin/categories/{id}/custom-fields", custom_fields::fetch_category],
+            [admin, PATCH, "/admin/categories/{id}/custom-fields", custom_fields::update_category],
+            [admin, GET, "/admin/customers/{id}/custom-fields", custom_fields::fetch_customer],
+            [admin, PATCH, "/admin/customers/{id}/custom-fields", custom_fields::update_customer],
+            [admin, GET, "/admin/orders/{id}/custom-fields", custom_fields::fetch_order],
+            [admin, PATCH, "/admin/orders/{id}/custom-fields", custom_fields::update_order],
 
             // categories (design note 0022)
             [admin, GET, "/admin/categories", categories::list],

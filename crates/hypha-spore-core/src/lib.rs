@@ -11,7 +11,10 @@ use std::any::Any;
 use std::collections::BTreeMap;
 
 use hypha_apps::{HasApps, SettingsProblem, SettingsSchema, SporeRegistration};
-use hypha_core::{AppKey, EventHandlers, Scope, StoredEvent, Union};
+use hypha_core::{AppKey, Ctx, EventHandlers, HasBatch, IdGenerator, Scope, StoredEvent, Union};
+use hypha_custom_fields::{
+    HasCustomFieldDefinitions, HasCustomFieldValues, Namespace, StageCustomFieldDefinitions,
+};
 use hypha_payments::{PaymentProviders, ProviderKey};
 use hypha_store_postgres::MigrationSet;
 
@@ -23,8 +26,8 @@ pub use ui::{
 };
 
 pub use env::{
-    BoxFuture, HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse, SettingsError,
-    SporeEnv, SporeError, SporeHost, SporeHttp, SporeStartError,
+    BoxFuture, FieldsError, HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse,
+    SettingsError, SporeEnv, SporeError, SporeHost, SporeHttp, SporeStartError,
 };
 
 /// One spore. Built once at startup and kept for the host's life, shared by every
@@ -65,6 +68,15 @@ pub trait Spore: Sized + Send + Sync + 'static {
     ) -> Result<(), Vec<SettingsProblem>> {
         let _ = settings;
         Ok(())
+    }
+
+    /// The custom fields it keeps on Hypha's objects (design note 0033, §8), in its
+    /// namespace `spore_<NAME>` (each spec's `key` alone). The host syncs them at
+    /// startup, next to registering its app: new ones created, changed ones updated,
+    /// missing ones deleted with their values; a changed type stops the host, naming the
+    /// field. None by default. It writes and reads their values through `SporeEnv`.
+    fn custom_fields() -> Vec<hypha_custom_fields::DefinitionSpec> {
+        Vec::new()
     }
 
     /// The payment providers it adds (design note 0027): a tuple of `PaymentProvider`s,
@@ -417,6 +429,8 @@ pub trait SporeSet: Sized + Send + Sync + 'static {
     fn migrations() -> Vec<MigrationSet>;
     /// Each spore's name and settings schema as written, in order.
     fn settings_schemas() -> Vec<(&'static str, Option<serde_json::Value>)>;
+    /// Each spore's name and custom fields (`Spore::custom_fields`), in order.
+    fn custom_fields() -> Vec<(&'static str, Vec<hypha_custom_fields::DefinitionSpec>)>;
     /// Builds each spore once, in order, with its environment from `host` and its
     /// section of `config` (`[spores.<name>]`), and takes what it contributes. The first
     /// spore that fails stops it.
@@ -454,6 +468,10 @@ impl SporeSet for () {
     }
 
     fn settings_schemas() -> Vec<(&'static str, Option<serde_json::Value>)> {
+        Vec::new()
+    }
+
+    fn custom_fields() -> Vec<(&'static str, Vec<hypha_custom_fields::DefinitionSpec>)> {
         Vec::new()
     }
 
@@ -498,6 +516,10 @@ macro_rules! tuple_spores {
                 vec![$(($s::NAME, $s::settings_schema())),+]
             }
 
+            fn custom_fields() -> Vec<(&'static str, Vec<hypha_custom_fields::DefinitionSpec>)> {
+                vec![$(($s::NAME, $s::custom_fields())),+]
+            }
+
             fn build(
                 host: &SporeHost,
                 config: &BTreeMap<String, toml::Table>,
@@ -539,6 +561,59 @@ fn foreign_keys(name: &str, keys: &[ProviderKey]) -> Vec<String> {
         .filter(|key| !key.belongs_to(&owner))
         .map(|key| format!("spore {name:?}: payment provider {key} isn't {owner} or {owner}_…"))
         .collect()
+}
+
+/// Makes each spore's namespace hold exactly the fields it declares
+/// (`Spore::custom_fields`, design note 0033, §8), as the system, after its app is
+/// registered (the definitions refer to it). Each spore's sync is one batch. The first
+/// that fails stops it, naming the spore (and, for a changed type, the field): the host
+/// refuses to start.
+pub async fn sync_custom_fields<S, P>(ports: &P, ids: &impl IdGenerator) -> Result<(), String>
+where
+    S: SporeSet,
+    P: HasCustomFieldDefinitions
+        + HasCustomFieldValues
+        + HasBatch<Batch: StageCustomFieldDefinitions>,
+{
+    for (name, specs) in S::custom_fields() {
+        let key = AppKey::of_spore(name).map_err(|e| format!("spore {name:?}: {e}"))?;
+        hypha_custom_fields::sync_managed_definitions(
+            &Ctx::system(),
+            ports,
+            ids,
+            &Namespace::of_app(key),
+            specs,
+        )
+        .await
+        .map_err(|e| format!("spore {name:?}: custom fields: {e}"))?;
+    }
+    Ok(())
+}
+
+/// The spores whose stored fields differ from what this build declares (the Worker's
+/// check: it syncs nothing, the native host's `setup` did), each with why.
+pub async fn custom_fields_out_of_sync<S, P>(ports: &P) -> Result<Vec<String>, String>
+where
+    S: SporeSet,
+    P: HasCustomFieldDefinitions,
+{
+    use hypha_custom_fields::DefinitionRepo;
+    let mut stale = Vec::new();
+    for (name, specs) in S::custom_fields() {
+        let key = AppKey::of_spore(name).map_err(|e| format!("spore {name:?}: {e}"))?;
+        let namespace = Namespace::of_app(key);
+        let stored = ports
+            .custom_field_definitions()
+            .list_namespace(&namespace)
+            .await
+            .map_err(|e| format!("spore {name:?}: {e}"))?;
+        match hypha_custom_fields::plan_sync(&namespace, &stored, &specs) {
+            Ok(plan) if plan.is_empty() => {}
+            Ok(_) => stale.push(format!("spore {name:?}: its custom fields changed")),
+            Err(e) => stale.push(format!("spore {name:?}: custom fields: {e}")),
+        }
+    }
+    Ok(stale)
 }
 
 /// What's wrong with `hypha.config.toml`'s `[spores.*]` sections for a host built with

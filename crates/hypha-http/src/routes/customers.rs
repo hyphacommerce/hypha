@@ -12,7 +12,14 @@ use hypha_customers::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::page::{ListQuery, PageParams, PageResponse, SortedFilters};
+use hypha_apps::HasApps;
+use hypha_core::Ctx;
+use hypha_custom_fields::{HasCustomFieldDefinitions, HasCustomFieldValues, OwnerType};
+
+use super::{
+    custom_fields::{self, CustomFieldValues, FieldParams},
+    page::{ListQuery, PageParams, PageResponse, SortedFilters},
+};
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId},
@@ -99,12 +106,17 @@ pub struct CustomerResponse {
     default_shipping_address: Option<AddressId>,
     default_billing_address: Option<AddressId>,
     addresses: Vec<AddressResponse>,
+    /// Its custom field values the caller may read, `{"custom.tier": "gold", …}`
+    /// (design note 0033); `PATCH /admin/customers/{id}/custom-fields` writes them.
+    #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
+    custom_fields: CustomFieldValues,
     /// When it was created, RFC 3339 in UTC.
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
     updated_at: String,
     /// Personal fields left out for this caller (design note 0029, AP10): an API key or
-    /// app without the matching `customer_data:*` scope. They are absent from the
+    /// app without the matching `customer_data:*` scope (`custom_fields.<key>` for a
+    /// personal custom field, without `customer_data:profile`). They are absent from the
     /// object then, whatever the schema says. Never sent to staff or storefronts.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(required = false)]
@@ -153,7 +165,7 @@ impl From<&SavedAddress> for AddressResponse {
 }
 
 impl CustomerResponse {
-    fn new(c: &Customer) -> Result<Self, ApiError> {
+    fn new(c: &Customer, custom_fields: CustomFieldValues) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(c.stamps())?;
         Ok(Self {
             created_at,
@@ -166,9 +178,23 @@ impl CustomerResponse {
             default_shipping_address: c.default_shipping(),
             default_billing_address: c.default_billing(),
             addresses: c.addresses().iter().map(AddressResponse::from).collect(),
+            custom_fields,
             redacted: None,
         })
     }
+}
+
+/// The admin's response for `customer`: with its custom fields, as `ctx` may see it.
+async fn respond<P>(ctx: &Ctx, ports: &P, customer: &Customer) -> Result<Redacted, ApiError>
+where
+    P: HasApps + HasCustomFieldDefinitions + HasCustomFieldValues,
+{
+    let kind = custom_fields::caller_kind(ctx, ports).await?;
+    let id = customer.id().as_uuid();
+    let fields =
+        custom_fields::read(ctx, &kind, ports, &[OwnerType::Customer], &[id], None).await?;
+    let dto = CustomerResponse::new(customer, fields.json_of(id))?;
+    redact::one_with_fields(ctx, Family::Customer, dto, &fields.redacted)
 }
 
 /// A customer in a list: without the address book (design note 0024).
@@ -185,6 +211,11 @@ pub struct CustomerSummaryResponse {
     created_at: String,
     /// When the customer last changed, RFC 3339 in UTC.
     updated_at: String,
+    /// The custom field values `?custom_fields=` asked for (design note 0033); absent
+    /// without it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<std::collections::HashMap<String, serde_json::Value>>, required = false)]
+    custom_fields: Option<CustomFieldValues>,
     /// Personal fields left out for this caller (design note 0029, AP10): an API key or
     /// app without the matching `customer_data:*` scope. They are absent from the
     /// object then, whatever the schema says. Never sent to staff or storefronts.
@@ -194,7 +225,7 @@ pub struct CustomerSummaryResponse {
 }
 
 impl CustomerSummaryResponse {
-    fn new(c: CustomerSummary) -> Result<Self, ApiError> {
+    fn new(c: CustomerSummary, custom_fields: Option<CustomFieldValues>) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(c.stamps)?;
         Ok(Self {
             id: c.id,
@@ -205,6 +236,7 @@ impl CustomerSummaryResponse {
             address_count: c.address_count as u64,
             created_at,
             updated_at,
+            custom_fields,
             redacted: None,
         })
     }
@@ -259,11 +291,12 @@ impl SortedFilters for CustomerFilters {
     }
 }
 
-/// Customers, newest first or in `sort`'s order, optionally matching text.
+/// Customers, newest first or in `sort`'s order, optionally matching text and custom
+/// field filters.
 #[utoipa::path(
     get,
     path = "/admin/customers",
-    params(PageParams, CustomerFilters),
+    params(PageParams, CustomerFilters, FieldParams),
     responses((status = 200, description = "OK", body = CustomerSummaryPage)),
     extensions(("x-hypha-scopes" = json!(["customers:read"]))),
 )]
@@ -273,7 +306,9 @@ pub async fn list<S: Storage>(
     query: ListQuery<CustomerFilters>,
 ) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let (page, filters, scope) = query.parse_sorted()?;
+    let (page, filters, scope, field_query) = query.parse_sorted_with_fields()?;
+    let fields =
+        custom_fields::list_fields(&ctx, &ports, OwnerType::Customer, &field_query).await?;
     let sort = filters.sort();
     // Searching or sorting by a personal field tells what it holds: only for callers
     // who may see it (design note 0029, AP10).
@@ -296,12 +331,40 @@ pub async fn list<S: Storage>(
         }
         CustomerSort::Newest | CustomerSort::Oldest => {}
     }
-    let page = list_customers(&ctx, ports.customers(), filters.q, sort, page).await?;
+    let page = list_customers(
+        &ctx,
+        ports.customers(),
+        filters.q,
+        fields.filters,
+        sort,
+        page,
+    )
+    .await?;
+    let values = match &fields.keys {
+        Some(keys) => {
+            let owners: Vec<uuid::Uuid> = page.items.iter().map(|c| c.id.as_uuid()).collect();
+            Some(
+                custom_fields::read(
+                    &ctx,
+                    &fields.kind,
+                    &ports,
+                    &[OwnerType::Customer],
+                    &owners,
+                    Some(keys),
+                )
+                .await?,
+            )
+        }
+        None => None,
+    };
     let items = page
         .items
         .iter()
         .cloned()
-        .map(CustomerSummaryResponse::new)
+        .map(|c| {
+            let custom = values.as_ref().map(|v| v.json_of(c.id.as_uuid()));
+            CustomerSummaryResponse::new(c, custom)
+        })
         .collect::<Result<_, _>>()?;
     let page = PageResponse::sorted(
         &page,
@@ -312,7 +375,13 @@ pub async fn list<S: Storage>(
         },
         items,
     )?;
-    Ok(Json(redact::page(&ctx, Family::Customer, page)?))
+    let hidden = values.map(|v| v.redacted).unwrap_or_default();
+    Ok(Json(redact::page_with_fields(
+        &ctx,
+        Family::Customer,
+        page,
+        &hidden,
+    )?))
 }
 
 /// Creates a customer.
@@ -339,11 +408,7 @@ pub async fn create<S: Storage>(
     let customer = create_customer(&ctx, ports.customers(), &state.ids, input).await?;
     Ok((
         StatusCode::CREATED,
-        Json(redact::one(
-            &ctx,
-            Family::Customer,
-            CustomerResponse::new(&customer)?,
-        )?),
+        Json(respond(&ctx, &ports, &customer).await?),
     ))
 }
 
@@ -362,11 +427,7 @@ pub async fn fetch<S: Storage>(
 ) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let customer = get_customer(&ctx, ports.customers(), id).await?;
-    Ok(Json(redact::one(
-        &ctx,
-        Family::Customer,
-        CustomerResponse::new(&customer)?,
-    )?))
+    Ok(Json(respond(&ctx, &ports, &customer).await?))
 }
 
 /// Changes a customer's details (JSON Merge Patch).
@@ -393,11 +454,7 @@ pub async fn update<S: Storage>(
         phone: req.phone,
     };
     let customer = update_customer(&ctx, ports.customers(), id, input).await?;
-    Ok(Json(redact::one(
-        &ctx,
-        Family::Customer,
-        CustomerResponse::new(&customer)?,
-    )?))
+    Ok(Json(respond(&ctx, &ports, &customer).await?))
 }
 
 /// Adds an address to a customer's address book.
@@ -420,11 +477,7 @@ pub async fn add_address_handler<S: Storage>(
     let customer = add_address(&ctx, ports.customers(), &state.ids, id, req.into()).await?;
     Ok((
         StatusCode::CREATED,
-        Json(redact::one(
-            &ctx,
-            Family::Customer,
-            CustomerResponse::new(&customer)?,
-        )?),
+        Json(respond(&ctx, &ports, &customer).await?),
     ))
 }
 
@@ -446,11 +499,7 @@ pub async fn update_address_handler<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let customer = update_address(&ctx, ports.customers(), id, address, req.into()).await?;
-    Ok(Json(redact::one(
-        &ctx,
-        Family::Customer,
-        CustomerResponse::new(&customer)?,
-    )?))
+    Ok(Json(respond(&ctx, &ports, &customer).await?))
 }
 
 /// Removes a saved address.
@@ -468,9 +517,5 @@ pub async fn remove_address_handler<S: Storage>(
 ) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let customer = remove_address(&ctx, ports.customers(), id, address).await?;
-    Ok(Json(redact::one(
-        &ctx,
-        Family::Customer,
-        CustomerResponse::new(&customer)?,
-    )?))
+    Ok(Json(respond(&ctx, &ports, &customer).await?))
 }

@@ -41,7 +41,7 @@ use hypha_extensions::{
     ActionContext, AdminActionRequest, CallOutcome, Endpoint, ExtensionError, HasExtensionCalls,
     RunAdminAction, call,
 };
-use hypha_oauth::{Refreshed, refresh_manifest};
+use hypha_oauth::{Refreshed, prepare_refresh};
 use serde::{Deserialize, Serialize};
 
 use super::{apps::AppResponse, oauth::Issuer, rfc3339};
@@ -1430,7 +1430,8 @@ proxy_handlers! {
 pub enum RefreshStatus {
     /// The manifest's registrations are in force; scopes it dropped left the grant.
     Updated,
-    /// It also asks for new scopes: staff approve them at `consent_url`.
+    /// It also asks for new scopes, or drops custom fields (deleting their values):
+    /// staff approve at `consent_url`. The app's fields change only then.
     ConsentRequired,
 }
 
@@ -1445,10 +1446,12 @@ pub struct RefreshResponse {
 }
 
 /// Fetches an installed app's manifest again (design note 0029, §4.2) and applies its
-/// registrations (webhooks, UI). Scopes it no longer asks for leave the grant at once;
-/// new ones make an authorization request staff approve (`consent_required`): approving
-/// widens the grant, and the app then gets tokens with them from `/oauth/authorize`
-/// without asking again. Staff with `apps:write`, or the app itself with its token.
+/// registrations (webhooks, UI) and its custom fields (design note 0033, §8). Scopes it
+/// no longer asks for leave the grant at once; new ones, or fields it no longer declares
+/// (whose values would be deleted), make an authorization request staff approve
+/// (`consent_required`): approving widens the grant and syncs the fields, and the app
+/// then gets tokens with the new scopes from `/oauth/authorize` without asking again.
+/// A manifest that changes a field's type is `manifest_invalid`. Staff with `apps:write`, or the app itself with its token.
 /// `manifest_unreachable` / `manifest_invalid` (422) when the manifest can't be used;
 /// `app_not_installed` (409) for an app not installed through OAuth.
 #[utoipa::path(
@@ -1464,7 +1467,14 @@ pub async fn refresh<S: Storage>(
     PathId(key): PathId<String>,
 ) -> Result<Json<RefreshResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let refreshed = refresh_manifest(&ctx, &ports, &state.manifests(), &state.env, &key).await?;
+    // A manifest that drops custom fields waits for consent like new scopes, judged
+    // against the definitions stored now; one that doesn't syncs them in the batch that
+    // applies it (design note 0033, §8).
+    let stored = crate::app_fields::stored_fields(&ports, &key).await?;
+    let removes = |m: &hypha_apps::AppManifest| crate::app_fields::removes_fields(&stored, m);
+    let prepared =
+        prepare_refresh(&ctx, &ports, &state.manifests(), &state.env, &key, removes).await?;
+    let refreshed = crate::app_fields::commit_applying(&ports, &state.env, prepared).await?;
     Ok(Json(match refreshed {
         Refreshed::Updated(app) => RefreshResponse {
             status: RefreshStatus::Updated,

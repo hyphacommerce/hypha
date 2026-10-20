@@ -14,9 +14,10 @@ pub mod tree;
 pub use category::{Category, CategorySnapshot, NewCategory};
 pub use commands::{
     CategoryPorts, CategoryView, CommandError, CreateCategory, UpdateCategory,
-    add_category_products, categories_of_products, create_category, delete_category, get_category,
-    get_shown_category_by_handle, is_shown, list_categories, list_category_products,
-    remove_category_products, set_product_categories, shown_categories, update_category,
+    add_category_products, categories_of_products, create_category, delete_category,
+    find_categories, get_category, get_shown_category_by_handle, is_shown, list_categories,
+    list_category_products, remove_category_products, set_product_categories, shown_categories,
+    update_category,
 };
 pub use error::CategoryError;
 pub use events::{

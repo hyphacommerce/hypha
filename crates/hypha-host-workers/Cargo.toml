@@ -30,6 +30,7 @@ hypha-spore-stripe = { path = "../../spores/stripe", optional = true }
 # Spores' configuration sections (`[spores.<name>]`).
 toml = "0.9"
 hypha-merchandising = { path = "../hypha-merchandising" }
+hypha-custom-fields = { path = "../hypha-custom-fields" }
 hypha-search = { path = "../hypha-search" }
 hypha-store-postgres = { path = "../hypha-store-postgres" }
 hypha-store-s3 = { path = "../hypha-store-s3" }

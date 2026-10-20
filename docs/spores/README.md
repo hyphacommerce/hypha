@@ -84,6 +84,43 @@ impl<P> hypha_spore::SporeUi<P> for Reviews {}
   draws the form, and the spore reads them with
   `env.settings::<T>(&ports)` (secrets opened). A payment provider gets them in
   `PaymentRequest::store_settings` instead (it has no ports).
+- **Custom fields** (design note 0033, §8): `custom_fields()` returns a
+  `hypha_spore::custom_fields::DefinitionSpec` per field. Each is in the namespace
+  `spore_<name>`, so its `key` is enough: `points` is addressed as
+  `spore_loyalty.points`. The host syncs them at every start, right after it registers
+  the spore's app. New keys are created and changed ones updated. A key the spore no
+  longer declares is **deleted with its values**. A changed `field_type` stops the API,
+  naming the spore and the field: declare a new key instead. A Worker syncs nothing, so
+  it refuses to serve until `hypha-host-axum setup` (built with the same spores) has
+  synced them.
+  - The spore writes its values as itself (`Actor::App`, with its `SCOPES`):
+    `env.set_custom_fields(&ports, &Owner::product(id), values)`, where `values` is a
+    JSON Merge Patch by full key (`{"spore_loyalty.points": 120}`, `null` removes).
+    `env.custom_fields(&ports, &owner)` reads them, its private ones included.
+  - Like any write, these need the owner's scope among `SCOPES` (`products:write` to
+    write a product's fields, `products:read` to read them). The owner must exist: the
+    caller loaded it.
+  - Only the spore writes its fields, plus staff where the field's `access.admin` is
+    `read_write`.
+
+```rust
+use hypha_spore::custom_fields::{Access, Capabilities, DefinitionSpec, FieldType, OwnerType};
+
+fn custom_fields() -> Vec<DefinitionSpec> {
+    vec![DefinitionSpec {
+        owner_type: OwnerType::Customer,
+        key: "points".to_string(),
+        field_type: FieldType::parse("integer").expect("a type"),
+        name: "Loyalty points".to_string(),
+        description: None,
+        validations: Default::default(),
+        access: Access::default(),
+        private: false,
+        personal: false,
+        capabilities: Capabilities { filterable: true, unique: false },
+    }]
+}
+```
 
 ## What it can add
 
@@ -91,6 +128,7 @@ impl<P> hypha_spore::SporeUi<P> for Reviews {}
 | --- | --- |
 | A payment provider | `PaymentProvider` in `PaymentProviders`, keyed `spore_<name>` (or `spore_<name>_…`); `ActionAnswer::Completed` when the provider's answer says it's done |
 | Event handlers | `EventHandler<P>` in `Handlers`, bounded on the ports it reads; named `spore_<name>_…` |
+| Custom fields | `Spore::custom_fields()`, synced at startup in `spore_<name>`; values written through `env.set_custom_fields` |
 | Routes | `hypha_spore::http::spore_routes!` at the crate root: paths under `/spores/<name>/` (public, rate limited), `/admin/spores/<name>/`, `/storefront/spores/<name>/`; handlers generic over `S: Storage`, annotated with `#[utoipa::path]` |
 | Admin blocks and actions | `SporeUi<P>`: `blocks()`, `actions()` (an action may stand for a payment point), `block`, `action`, on the targets apps use |
 | Storefront elements | `SporeUi::elements()`: a web component's tag and the path of the spore's public route serving its module (with `Access-Control-Allow-Origin: *`), listed at the API's public address: set `server.public_url` (`hypha deploy` does) when storefronts reach the API at an internal one. Bundle a TypeScript element with `pnpm spores:build` (`spores/<name>/element/*.ts` → `.js`) |

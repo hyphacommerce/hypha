@@ -31,8 +31,8 @@ use axum::{
 use hypha_core::{OAuthRequestId, Scope};
 use hypha_oauth::{
     AuthorizationRequest, AuthorizeError, AuthorizeInput, Authorized, CodeExchange, IssuedTokens,
-    Refresh, TokenError, approve, authorize, deny, exchange_code, get_request, group_scopes,
-    reasons, refresh, request_private_app, revoke, scope_diff,
+    Refresh, TokenError, authorize, deny, exchange_code, get_request, group_scopes,
+    prepare_approval, reasons, refresh, request_private_app, revoke, scope_diff,
 };
 use serde::{Deserialize, Serialize};
 
@@ -576,8 +576,8 @@ impl From<&hypha_apps::CustomFieldSummary> for ConsentCustomField {
     }
 }
 
-/// What approving does to the app's custom fields, compared with the manifest it's
-/// installed from (everything is `added` on a first install).
+/// What approving does to the app's custom fields, compared with the definitions its
+/// namespace holds now (everything is `added` on a first install).
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct CustomFieldChangesDto {
     /// Fields the app adds: list the owners they're on, and which are personal.
@@ -590,25 +590,57 @@ pub struct CustomFieldChangesDto {
     retyped: Vec<ConsentCustomField>,
 }
 
-impl From<hypha_apps::CustomFieldChanges> for CustomFieldChangesDto {
-    fn from(c: hypha_apps::CustomFieldChanges) -> Self {
-        let list = |v: &[hypha_apps::CustomFieldSummary]| v.iter().map(Into::into).collect();
-        Self {
-            added: list(&c.added),
-            kept: list(&c.kept),
-            removed: list(&c.removed),
-            retyped: c
-                .retyped
-                .iter()
-                .map(|r| ConsentCustomField {
-                    owner_type: r.owner_type.as_str().to_string(),
-                    key: r.key.clone(),
-                    name: r.name.clone(),
-                    field_type: r.to.to_string(),
-                    personal: false,
-                })
-                .collect(),
+impl CustomFieldChangesDto {
+    /// What syncing `manifest`'s fields does to the definitions `stored` in the app's
+    /// namespace now: what approving does, whatever manifest the app had before (a
+    /// refresh applies its manifest before the fields change, and a denied one leaves
+    /// them as they were).
+    fn between(
+        stored: &[hypha_custom_fields::CustomFieldDefinition],
+        manifest: &hypha_apps::AppManifest,
+    ) -> Self {
+        let of_manifest = |f: &hypha_apps::AppCustomField| ConsentCustomField {
+            owner_type: f.owner_type.as_str().to_string(),
+            key: f.key.clone(),
+            name: f.name.clone(),
+            field_type: f.field_type.to_string(),
+            personal: f.personal,
+        };
+        let find = |f: &hypha_apps::AppCustomField| {
+            stored.iter().find(|d| {
+                d.owner_type().as_str() == f.owner_type.as_str() && d.key().as_str() == f.key
+            })
+        };
+        let mut dto = Self {
+            added: Vec::new(),
+            kept: Vec::new(),
+            removed: Vec::new(),
+            retyped: Vec::new(),
+        };
+        for field in manifest.custom_fields() {
+            match find(field) {
+                None => dto.added.push(of_manifest(field)),
+                Some(d) if d.field_type().to_string() == field.field_type.to_string() => {
+                    dto.kept.push(of_manifest(field))
+                }
+                Some(_) => dto.retyped.push(of_manifest(field)),
+            }
         }
+        for d in stored {
+            let declared = manifest.custom_fields().iter().any(|f| {
+                d.owner_type().as_str() == f.owner_type.as_str() && d.key().as_str() == f.key
+            });
+            if !declared {
+                dto.removed.push(ConsentCustomField {
+                    owner_type: d.owner_type().as_str().to_string(),
+                    key: d.key().to_string(),
+                    name: d.name().to_string(),
+                    field_type: d.field_type().to_string(),
+                    personal: d.personal(),
+                });
+            }
+        }
+        dto
     }
 }
 
@@ -638,8 +670,8 @@ pub struct ConsentRequestResponse {
     /// apart, so staff see exactly which personal data the app will see.
     personal_data: Vec<PersonalDataScope>,
     changes: ScopeChanges,
-    /// The custom fields the app declares, against those of the manifest it's installed
-    /// from.
+    /// The custom fields the app declares, against the definitions it has now: approving
+    /// creates `added`, updates `kept` and deletes `removed` with their values.
     custom_fields: CustomFieldChangesDto,
     /// Where the browser goes after the answer; empty for a private app.
     redirect_uri: String,
@@ -652,6 +684,7 @@ impl ConsentRequestResponse {
     fn new(
         request: &AuthorizationRequest,
         app: Option<&hypha_apps::App>,
+        stored: &[hypha_custom_fields::CustomFieldDefinition],
         now: hypha_core::Timestamp,
     ) -> Result<Self, ApiError> {
         let manifest = request.manifest();
@@ -662,10 +695,7 @@ impl ConsentRequestResponse {
             .map(|g| g.scopes().to_vec())
             .unwrap_or_default();
         let diff = scope_diff(&current, request.scopes());
-        let fields = hypha_apps::custom_field_changes(
-            app.and_then(|a| a.manifest()).map(|m| &m.manifest),
-            manifest,
-        );
+        let fields = CustomFieldChangesDto::between(stored, manifest);
         let (groups, personal) = group_scopes(request.scopes());
         let status = match request.status() {
             hypha_oauth::RequestStatus::Pending if request.is_expired(now) => {
@@ -704,7 +734,7 @@ impl ConsentRequestResponse {
                 removed: diff.removed,
                 kept: diff.kept,
             },
-            custom_fields: fields.into(),
+            custom_fields: fields,
             redirect_uri: request.redirect_uri().to_string(),
             created_at: rfc3339(request.created_at())?,
             expires_at: rfc3339(request.expires_at())?,
@@ -787,9 +817,11 @@ pub async fn fetch_request<S: Storage>(
     use hypha_core::Clock;
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (request, app) = get_request(&ctx, &ports, id).await?;
+    let fields = crate::app_fields::stored_fields(&ports, request.app().as_str()).await?;
     Ok(Json(ConsentRequestResponse::new(
         &request,
         app.as_ref(),
+        &fields,
         state.clock.now(),
     )?))
 }
@@ -815,7 +847,10 @@ pub async fn approve_request<S: Storage>(
     PathId(id): PathId<OAuthRequestId>,
 ) -> Result<Response, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let approval = approve(&ctx, &ports, &state.env, id).await?;
+    // The manifest applied and the app's custom fields synced to it, in one commit
+    // (design note 0033, §8).
+    let prepared = prepare_approval(&ctx, &ports, &state.env, id).await?;
+    let approval = crate::app_fields::commit_applying(&ports, &state.env, prepared).await?;
     let answer = ConsentAnswer::from_approval(approval, &issuer);
     // Credentials are in it: never cached (RFC 6749 §5.1's rule for token answers).
     Ok(no_store(StatusCode::OK, Json(answer)))
@@ -870,6 +905,7 @@ pub async fn create_private<S: Storage>(
         use hypha_apps::{AppRepo, HasApps};
         ports.apps().get(request.app()).await?
     };
+    let fields = crate::app_fields::stored_fields(&ports, request.app().as_str()).await?;
     let consent_url = state
         .config
         .server
@@ -879,7 +915,12 @@ pub async fn create_private<S: Storage>(
     Ok((
         StatusCode::CREATED,
         Json(PrivateAppResponse {
-            request: ConsentRequestResponse::new(&request, app.as_ref(), state.clock.now())?,
+            request: ConsentRequestResponse::new(
+                &request,
+                app.as_ref(),
+                &fields,
+                state.clock.now(),
+            )?,
             consent_url,
         }),
     ))

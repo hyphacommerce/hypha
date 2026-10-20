@@ -487,7 +487,7 @@
       "FacetResponse": {
         "properties": {
           "key": {
-            "description": "As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`.",
+            "description": "As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`, or\n`field.<namespace>.<key>` for a custom field (`field.custom.material`).",
             "type": "string"
           },
           "label": {
@@ -519,7 +519,15 @@
             "minimum": 0,
             "type": "integer"
           },
+          "label": {
+            "description": "What to show for it: a `choice` field's label (design note 0033, §9); `null`\nfor every other facet, whose value is its own label.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "value": {
+            "description": "As `filter` takes it: a `choice` field's value is its key.",
             "type": "string"
           }
         },
@@ -1984,6 +1992,14 @@
             },
             "type": "array"
           },
+          "custom_fields": {
+            "additionalProperties": {},
+            "description": "The custom field values the merchant shows storefronts (`access.storefront:\nread`, design note 0033).",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "description": {
             "description": "Sanitised HTML, safe to render.",
             "type": [
@@ -2016,7 +2032,8 @@
           "name",
           "handle",
           "ancestors",
-          "children"
+          "children",
+          "custom_fields"
         ],
         "type": "object"
       },
@@ -2122,6 +2139,14 @@
               }
             ]
           },
+          "custom_fields": {
+            "additionalProperties": {},
+            "description": "The custom field values the merchant shows storefronts (`access.storefront:\nread`, design note 0033), `{\"custom.material\": \"wool\", …}`.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "description": {
             "description": "Sanitised HTML (scripts, styles and event attributes removed), safe to render.",
             "type": [
@@ -2199,7 +2224,8 @@
           "tags",
           "options",
           "variants",
-          "media"
+          "media",
+          "custom_fields"
         ],
         "type": "object"
       },
@@ -2266,6 +2292,14 @@
               "null"
             ]
           },
+          "custom_fields": {
+            "additionalProperties": {},
+            "description": "The variant's own custom field values storefronts are shown.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "id": {
             "$ref": "#/components/schemas/VariantId"
           },
@@ -2308,7 +2342,8 @@
         },
         "required": [
           "id",
-          "selections"
+          "selections",
+          "custom_fields"
         ],
         "type": "object"
       },
@@ -5315,7 +5350,7 @@
             }
           },
           {
-            "description": "Repeatable `key:value`, key `option.<name>` (any case), `vendor`,\n`product_type` or `tag`: values of one key match any, different keys all.",
+            "description": "Repeatable `key:value`, key `option.<name>` (any case), `vendor`,\n`product_type`, `tag` or `field.<namespace>.<key>` (a custom field the merchant\nmade a facet; a choice field's value is its key): values of one key match any,\ndifferent keys all.",
             "in": "query",
             "name": "filter",
             "required": false,

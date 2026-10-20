@@ -14,7 +14,8 @@ pub(crate) type Apps = Arc<Mutex<BTreeMap<String, App>>>;
 /// Apps by key (design note 0016, section 8). Keys are strings, so the version rules
 /// are spelled out here, like `InMemoryAppProviderRepo`'s. Linked to one
 /// (`linked`), deleting an app deletes its rate settings and OAuth tokens too, like the
-/// database's `ON DELETE CASCADE`.
+/// database's `ON DELETE CASCADE`, and joined to custom fields (`joining_fields`), the
+/// definitions in its namespace.
 #[derive(Default)]
 pub struct InMemoryAppRepo {
     pub(crate) apps: Apps,
@@ -24,8 +25,21 @@ pub struct InMemoryAppRepo {
     oauth: Option<InMemoryOAuth>,
     /// The extension endpoints to delete with their app, when linked.
     endpoints: Option<Endpoints>,
+    /// The custom fields whose app namespace goes with its app, when linked.
+    custom_fields: Option<crate::InMemoryCustomFields>,
     /// Shared with `InMemoryPorts`' other repos: the clock writes are stamped with.
     outbox: InMemoryOutbox,
+}
+
+impl InMemoryAppRepo {
+    /// Deleting an app deletes the custom field definitions in its namespace and their
+    /// values, as the database's foreign key does (design note 0033, §8).
+    pub fn joining_fields(self, fields: &crate::InMemoryCustomFields) -> Self {
+        Self {
+            custom_fields: Some(fields.view()),
+            ..self
+        }
+    }
 }
 
 /// An app repo, a provider repo, the OAuth repos and an endpoint repo linked like the
@@ -60,6 +74,7 @@ pub(crate) fn linked(
         providers: Some(cascade),
         oauth: Some(oauth.clone()),
         endpoints: Some(Arc::clone(&endpoints.endpoints)),
+        custom_fields: None,
         outbox: outbox.clone(),
     };
     (app_repo, providers, oauth, endpoints)
@@ -121,6 +136,9 @@ impl AppRepo for InMemoryAppRepo {
         }
         if let Some(endpoints) = &self.endpoints {
             endpoints.lock().unwrap().remove(key.as_str());
+        }
+        if let Some(fields) = &self.custom_fields {
+            fields.drop_namespace(&hypha_custom_fields::Namespace::of_app(key.clone()));
         }
         Ok(())
     }

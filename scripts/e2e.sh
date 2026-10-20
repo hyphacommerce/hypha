@@ -1181,6 +1181,85 @@ step "a hidden category isn't searchable" 404 category_not_found "$BASE/storefro
 step "delete the hidden one" 204 - -X DELETE "$BASE/admin/categories/$CLEARANCE"
 step "it's gone" 404 category_not_found "$BASE/admin/categories/$CLEARANCE"
 
+echo "## custom fields (design note 0033)"
+CFD="$BASE/admin/custom-field-definitions"
+step "a product field shown to storefronts" 201 - -X POST "$CFD" -H "$JSON" \
+    -d '{"owner_type":"product","key":"material","type":"text","name":"Material","access":{"admin":"read_write","storefront":"read"},"capabilities":{"filterable":true}}'
+MATERIAL_FIELD=$(id)
+contains "named by its namespace" '"field":"custom.material"'
+step "the same key again" 409 custom_field_exists -X POST "$CFD" -H "$JSON" \
+    -d '{"owner_type":"product","key":"material","type":"text","name":"Again"}'
+step "an unknown type" 422 - -X POST "$CFD" -H "$JSON" \
+    -d '{"owner_type":"product","key":"x","type":"colour","name":"X"}'
+step "a personal customer field" 201 - -X POST "$CFD" -H "$JSON" \
+    -d '{"owner_type":"customer","key":"tags","type":"list.text","name":"Tags","personal":true,"validations":{"unique_items":true},"capabilities":{"filterable":true}}'
+TAGS_FIELD=$(id)
+step "an order field" 201 - -X POST "$CFD" -H "$JSON" \
+    -d '{"owner_type":"order","key":"gift","type":"boolean","name":"Gift","capabilities":{"filterable":true}}'
+GIFT_FIELD=$(id)
+step "a category field" 201 - -X POST "$CFD" -H "$JSON" \
+    -d '{"owner_type":"category","key":"banner","type":"text","name":"Banner","access":{"admin":"read_write","storefront":"read"}}'
+step "the product's definitions" 200 - "$CFD?owner_type=product"
+contains "material" '"key":"material"'
+step "rename one" 200 - -X PATCH "$CFD/$MATERIAL_FIELD" -H "$JSON" -d '{"description":"What it is made of"}'
+contains "described" '"description":"What it is made of"'
+step "move it first" 200 - -X PUT "$CFD/$MATERIAL_FIELD/position" -H "$JSON" -d '{"position":0}'
+step "the lamp's fields, none yet" 200 - "$BASE/admin/products/$LAMP/custom-fields"
+contains "empty" '"custom_fields":{}'
+step "an invalid value and an unknown key" 422 custom_fields_invalid -X PATCH "$BASE/admin/products/$LAMP/custom-fields" \
+    -H "$JSON" -d '{"custom_fields":{"custom.material":7,"custom.nope":1}}'
+contains "every problem listed" '"code":"custom_field_unknown"'
+step "the lamp is brass" 200 - -X PATCH "$BASE/admin/products/$LAMP/custom-fields" -H "$JSON" \
+    -d '{"custom_fields":{"custom.material":"brass"}}'
+contains "versioned" '"versions":{"custom.material":1}'
+step "a stale write" 409 custom_field_stale -X PATCH "$BASE/admin/products/$LAMP/custom-fields" -H "$JSON" \
+    -d '{"custom_fields":{"custom.material":"tin"},"if_versions":{"custom.material":7}}'
+step "products by field" 200 - "$BASE/admin/products?field%5Bcustom.material%5D=brass&custom_fields=custom.material"
+contains "finds the lamp with its value" "\"id\":\"$LAMP\""
+contains "carrying it" '"custom_fields":{"custom.material":"brass"}'
+step "the product carries its fields" 200 - "$BASE/admin/products/$LAMP"
+contains "brass" '"custom.material":"brass"'
+LAMP_VARIANT=$(variant)
+step "the storefront sees fields given to it" 200 - "$BASE/storefront/products/$LAMP"
+contains "brass" '"custom.material":"brass"'
+step "the lamp's variant fields" 200 - "$BASE/admin/variants/$LAMP_VARIANT/custom-fields"
+step "Home's banner" 200 - -X PATCH "$BASE/admin/categories/$HOME_CAT/custom-fields" -H "$JSON" \
+    -d '{"custom_fields":{"custom.banner":"Make it cosy"}}'
+step "on the storefront's category page" 200 - "$BASE/storefront/categories/by-handle/home"
+contains "with its banner" '"custom.banner":"Make it cosy"'
+step "tag the customer" 200 - -X POST "$BASE/admin/custom-fields/$TAGS_FIELD/items" -H "$JSON" \
+    -d "{\"owners\":[\"$CUSTOMER\"],\"add\":[\"vip\"]}"
+contains "added" '"added":["vip"]'
+step "tag an unknown customer" 422 owner_not_found -X POST "$BASE/admin/custom-fields/$TAGS_FIELD/items" -H "$JSON" \
+    -d '{"owners":["cus_00000000000000000000000000000001"],"add":["vip"]}'
+step "the tags in use" 200 - "$CFD/$TAGS_FIELD/values-in-use"
+contains "one vip" '{"value":"vip","owners":1}'
+step "the customer's fields" 200 - "$BASE/admin/customers/$CUSTOMER/custom-fields"
+contains "tagged" '"custom.tags":["vip"]'
+step "a key without customer_data:profile" 201 - -X POST "$BASE/admin/api-keys" -H "$JSON" \
+    -d '{"kind":"secret","name":"crm","scopes":["customers:read"]}'
+OWNER_AUTH=("${AUTH[@]}")
+AUTH=(-H "authorization: Bearer $(token)")
+step "doesn't see the personal field" 200 - "$BASE/admin/customers/$CUSTOMER"
+contains "it's listed as redacted" '"custom_fields.custom.tags"'
+step "nor filter by it" 403 missing_scope "$BASE/admin/customers?field%5Bcustom.tags%5D=vip"
+AUTH=("${OWNER_AUTH[@]}")
+step "the shop order is a gift" 204 - -X POST "$BASE/admin/custom-fields/$GIFT_FIELD/values" -H "$JSON" \
+    -d "{\"values\":[{\"owner\":\"$SHOP_ORDER\",\"value\":true}]}"
+step "orders by field" 200 - "$BASE/admin/orders?field%5Bcustom.gift%5D=true&custom_fields=custom.gift"
+contains "the shop order" "\"id\":\"$SHOP_ORDER\""
+step "the order's fields" 200 - "$BASE/admin/orders/$SHOP_ORDER/custom-fields"
+contains "a gift" '"custom.gift":true'
+step "material is a facet" 200 - -X PATCH "$BASE/admin/search/settings" -H "$JSON" \
+    -d '{"facets":[{"key":"field.custom.material","label":"Material"}]}'
+step "a field that can't be one" 422 facet_field_not_allowed -X PATCH "$BASE/admin/search/settings" -H "$JSON" \
+    -d '{"facets":[{"key":"field.custom.tags"}]}'
+wait_for "search filters by the field" "$BASE/storefront/search?country=HR&filter=field.custom.material:brass" '"handle":"lamp"'
+contains "and counts it" '"key":"field.custom.material"'
+step "no facets again" 200 - -X PATCH "$BASE/admin/search/settings" -H "$JSON" -d '{"facets":[]}'
+step "delete the order field" 204 - -X DELETE "$CFD/$GIFT_FIELD"
+step "it's gone" 404 custom_field_definition_not_found "$CFD/$GIFT_FIELD"
+
 echo "## fulfilment (design note 0018)"
 # The shop order: 2 lamps, reserved at the warehouse (4 on hand, 4 reserved with the
 # second order's), and a book.

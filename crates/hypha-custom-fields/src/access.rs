@@ -60,6 +60,15 @@ impl<'a> FieldCaller<'a> {
             || self.ctx.has_scope(Scope::CustomerDataProfile)
     }
 
+    /// The app or spore whose namespace the caller owns; `None` for the merchant and
+    /// storefronts.
+    pub fn namespace_owner(&self) -> Option<&'a AppKey> {
+        match self.kind {
+            CallerKind::App(key) | CallerKind::Spore(key) => Some(key),
+            CallerKind::Merchant | CallerKind::Storefront => None,
+        }
+    }
+
     /// Whether `namespace` is the caller's own (an app's or a spore's).
     fn owns(&self, namespace: &Namespace) -> bool {
         matches!(self.effective(), Effective::Owner(key) if namespace.managed_by() == Some(key))
@@ -358,6 +367,29 @@ mod tests {
         assert_eq!(
             write_access(&d, &FieldCaller::new(&ctx, &other)),
             Err(WriteDenied::ReadOnly)
+        );
+    }
+
+    #[test]
+    fn only_apps_and_spores_own_a_namespace() {
+        let ctx = app_ctx(vec![]);
+        let erp = app("app_erp");
+        assert_eq!(
+            FieldCaller::new(&ctx, &erp).namespace_owner(),
+            Some(&AppKey::new("app_erp").unwrap())
+        );
+        let spore = CallerKind::Spore(AppKey::new("spore_stripe").unwrap());
+        assert_eq!(
+            FieldCaller::new(&ctx, &spore).namespace_owner(),
+            Some(&AppKey::new("spore_stripe").unwrap())
+        );
+        assert_eq!(
+            FieldCaller::new(&ctx, &CallerKind::Merchant).namespace_owner(),
+            None
+        );
+        assert_eq!(
+            FieldCaller::new(&ctx, &CallerKind::Storefront).namespace_owner(),
+            None
         );
     }
 }

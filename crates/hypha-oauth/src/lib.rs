@@ -18,10 +18,11 @@ pub mod token;
 pub use code::{AuthorizationCode, CodeSnapshot, NewCode};
 pub use commands::{
     ACCESS_TOKEN_LIFETIME, Approval, AuthorizeInput, Authorized, CODE_LIFETIME, CodeExchange,
-    IssuedTokens, OAuthEnv, REFRESH_TOKEN_LIFETIME, REQUEST_LIFETIME, Refresh, Refreshed,
+    IssuedTokens, OAuthEnv, Prepared, REFRESH_TOKEN_LIFETIME, REQUEST_LIFETIME, Refresh, Refreshed,
     ScopeDiff, Uninstalled, approve, authenticate_access_token, authorize, deny, exchange_code,
-    get_request, group_scopes, is_pending, narrow_grant, reasons, refresh, refresh_manifest,
-    request_history, request_private_app, revoke, scope_diff, uninstall,
+    get_request, group_scopes, is_pending, narrow_grant, prepare_approval, prepare_refresh,
+    reasons, refresh, refresh_manifest, request_history, request_private_app, revoke, scope_diff,
+    uninstall,
 };
 pub use error::{AuthorizeError, CommandError, TokenError, UnredirectableError};
 pub use repo::{

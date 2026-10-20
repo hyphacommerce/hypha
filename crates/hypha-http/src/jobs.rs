@@ -110,19 +110,37 @@ async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Times
                 }
             };
             match prepare(ports, &state.clock, &state.config.dispatch, delivery).await {
-                Prepared::Handler => Prepared::Done(
-                    handle(
-                        ports,
-                        &state.clock,
-                        &state.config.dispatch,
-                        state.storage.handlers(),
-                        delivery,
-                    )
-                    .await,
+                Prepared::Handler => (
+                    Prepared::Done(
+                        handle(
+                            ports,
+                            &state.clock,
+                            &state.config.dispatch,
+                            state.storage.handlers(),
+                            delivery,
+                        )
+                        .await,
+                    ),
+                    None,
                 ),
-                other => other,
+                Prepared::Webhook(app)
+                    if crate::redact::is_custom_fields_event(&delivery.event.event_type) =>
+                {
+                    match custom_field_entries(ports, &app, delivery).await {
+                        Ok(Some(filtered)) => (Prepared::Webhook(app), Some(filtered)),
+                        // Nothing in it the app may read: not sent (design note 0033, §6.4).
+                        Ok(None) => (Prepared::Done(hypha_core::DeliveryOutcome::Succeeded), None),
+                        Err(error) => (
+                            Prepared::Done(retry_later(state, delivery, error.to_string())),
+                            None,
+                        ),
+                    }
+                }
+                other => (other, None),
             }
         };
+        let (prepared, filtered) = prepared;
+        let delivery_sent = filtered.as_ref().unwrap_or(delivery);
         let outcome = match prepared {
             // Too slow to send before the deadline: left under its lease for a later run
             // (whose lease it ends up in), while the deliveries behind it still go.
@@ -133,7 +151,7 @@ async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Times
                     &state.clock,
                     &state.config.dispatch,
                     &app,
-                    delivery,
+                    delivery_sent,
                 )
                 .await
             }
@@ -181,6 +199,42 @@ async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Times
         idle,
         retry_at,
     })
+}
+
+/// `delivery` as `app` may receive it when it's a `<owner>.custom_fields_updated` event
+/// (`redact::custom_field_changes`, with the definitions as they are now); `None` when
+/// nothing in it is for the app.
+async fn custom_field_entries<P: hypha_custom_fields::HasCustomFieldDefinitions>(
+    ports: &P,
+    app: &hypha_apps::App,
+    delivery: &hypha_core::Delivery,
+) -> Result<Option<hypha_core::Delivery>, hypha_core::RepoError> {
+    use hypha_custom_fields::DefinitionRepo;
+    let definitions = ports.custom_field_definitions().list(None).await?;
+    Ok(
+        crate::redact::custom_field_changes(app, &definitions, &delivery.event.data).map(|data| {
+            let mut filtered = delivery.clone();
+            filtered.event.data = data;
+            filtered
+        }),
+    )
+}
+
+/// A delivery that couldn't be prepared, tried again on the retry schedule.
+fn retry_later<S: Storage>(
+    state: &AppState<S>,
+    delivery: &hypha_core::Delivery,
+    error: String,
+) -> hypha_core::DeliveryOutcome {
+    match state
+        .config
+        .dispatch
+        .retry
+        .next_attempt(delivery.attempts + 1, state.clock.now())
+    {
+        Some(at) => hypha_core::DeliveryOutcome::Retry { error, at },
+        None => hypha_core::DeliveryOutcome::Failed { error },
+    }
 }
 
 /// The longest `app`'s webhook may take: its timeout.

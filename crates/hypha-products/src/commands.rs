@@ -1,6 +1,6 @@
 use hypha_core::{
-    AuthError, Ctx, ErrorCode, IdGenerator, Keyset, Money, MoneyError, OptionValueId, Page,
-    PageRequest, Price, ProductId, RepoError, Scope, VariantId, Weight, report_duplicate,
+    AuthError, Ctx, ErrorCode, FieldFilter, IdGenerator, Keyset, Money, MoneyError, OptionValueId,
+    Page, PageRequest, Price, ProductId, RepoError, Scope, VariantId, Weight, report_duplicate,
 };
 use thiserror::Error;
 
@@ -96,6 +96,9 @@ async fn handle_taken<R: ProductRepo>(
 pub struct ListProducts {
     pub filter: ProductFilterInput,
     pub sort: ProductSort,
+    /// Filters on custom fields (design note 0033, §7), checked by
+    /// `hypha-custom-fields` already.
+    pub fields: Vec<FieldFilter>,
 }
 
 /// A page of product summaries in `input.sort`'s order, narrowed by its filter (design
@@ -108,8 +111,23 @@ pub async fn list_products<R: ProductRepo>(
     page: PageRequest<Keyset<ProductId>>,
 ) -> Result<Page<ProductSummary>, CommandError> {
     ctx.require(Scope::ProductsRead)?;
-    let filter = ProductFilter::new(input.filter)?;
+    let filter = ProductFilter::new(input.filter)?.with_fields(input.fields);
     Ok(repo.list(&filter, input.sort, page).await?)
+}
+
+/// The product `variant` belongs to (`/admin/variants/{id}/…` routes: a variant ID is
+/// global); `VariantNotFound` when no product has it.
+pub async fn get_variant_product<R: ProductRepo>(
+    ctx: &Ctx,
+    repo: &R,
+    variant: VariantId,
+) -> Result<Product, CommandError> {
+    ctx.require(Scope::ProductsRead)?;
+    repo.get_by_variant(variant)
+        .await?
+        .ok_or(CommandError::Product(ProductError::VariantNotFound(
+            variant,
+        )))
 }
 
 pub async fn get_product<R: ProductRepo>(

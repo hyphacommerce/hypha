@@ -6,6 +6,7 @@
 //! - the crate root: the [`Spore`] trait, its environment ([`SporeEnv`]) and errors,
 //!   and what it contributes to frontends ([`ui`]) and to the settings form
 //!   ([`settings`]);
+//! - [`custom_fields`]: the fields a spore declares and the values it writes (0033);
 //! - [`core`]: Hypha's shared types (IDs, money, `Ctx` and scopes, time, errors) and
 //!   generic ports (clock, IDs, randomness, the `SecretBox`, events);
 //! - [`client`]: the host's HTTP client, for calling other services;
@@ -57,6 +58,17 @@ pub mod settings {
     pub use hypha_apps::{
         HasSporeSettings, ORDER_MARKER, SECRET_MARKER, SettingsProblem, SettingsSchema,
     };
+}
+
+/// Custom fields (design note 0033, §8): what `Spore::custom_fields` declares (a
+/// `DefinitionSpec` per field, in the spore's namespace) and what `SporeEnv`'s
+/// `set_custom_fields` / `custom_fields` take and answer.
+pub mod custom_fields {
+    pub use hypha_custom_fields::{
+        Access, AdminAccess, Capabilities, DefinitionSpec, FieldEntry, FieldType, FieldValue,
+        Owner, OwnerFields, OwnerType, RawValidations, StorefrontAccess,
+    };
+    pub use hypha_spore_core::FieldsError;
 }
 
 /// Hypha's shared types and generic ports: no domain logic.

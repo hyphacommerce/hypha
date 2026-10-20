@@ -620,7 +620,10 @@ export interface components {
             error: string;
         };
         FacetResponse: {
-            /** @description As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`. */
+            /**
+             * @description As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`, or
+             *     `field.<namespace>.<key>` for a custom field (`field.custom.material`).
+             */
             key: string;
             /** @description The merchant's label, if they set one. */
             label?: string | null;
@@ -633,6 +636,12 @@ export interface components {
              * @description Results (as grouped) with this value, ignoring this facet's own filter.
              */
             count: number;
+            /**
+             * @description What to show for it: a `choice` field's label (design note 0033, §9); `null`
+             *     for every other facet, whose value is its own label.
+             */
+            label?: string | null;
+            /** @description As `filter` takes it: a `choice` field's value is its key. */
             value: string;
         };
         /**
@@ -1124,6 +1133,13 @@ export interface components {
             ancestors: components["schemas"]["CategoryRef"][];
             /** @description Its shown children, in order. */
             children: components["schemas"]["CategoryRef"][];
+            /**
+             * @description The custom field values the merchant shows storefronts (`access.storefront:
+             *     read`, design note 0033).
+             */
+            custom_fields: {
+                [key: string]: unknown;
+            };
             /** @description Sanitised HTML, safe to render. */
             description?: string | null;
             handle: string;
@@ -1173,6 +1189,13 @@ export interface components {
          */
         StorefrontProductResponse: {
             currency?: components["schemas"]["Currency"] | null;
+            /**
+             * @description The custom field values the merchant shows storefronts (`access.storefront:
+             *     read`, design note 0033), `{"custom.material": "wool", …}`.
+             */
+            custom_fields: {
+                [key: string]: unknown;
+            };
             /** @description Sanitised HTML (scripts, styles and event attributes removed), safe to render. */
             description?: string | null;
             handle: string;
@@ -1227,6 +1250,10 @@ export interface components {
              *     there's no price.
              */
             available_quantity?: number | null;
+            /** @description The variant's own custom field values storefronts are shown. */
+            custom_fields: {
+                [key: string]: unknown;
+            };
             id: components["schemas"]["VariantId"];
             media_asset_id?: components["schemas"]["AssetId"] | null;
             price?: components["schemas"]["Money"] | null;
@@ -3465,7 +3492,9 @@ export interface operations {
                 q?: string;
                 /**
                  * @description Repeatable `key:value`, key `option.<name>` (any case), `vendor`,
-                 *     `product_type` or `tag`: values of one key match any, different keys all.
+                 *     `product_type`, `tag` or `field.<namespace>.<key>` (a custom field the merchant
+                 *     made a facet; a choice field's value is its key): values of one key match any,
+                 *     different keys all.
                  */
                 filter?: string[];
                 /** @description Inclusive, in the market currency's minor units. */

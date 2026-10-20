@@ -11,6 +11,7 @@ description = "The Spore trait (design note 0030, §4): what a spore declares an
 [dependencies]
 hypha-core.workspace = true
 hypha-apps = { path = "../hypha-apps" }
+hypha-custom-fields = { path = "../hypha-custom-fields" }
 hypha-payments = { path = "../hypha-payments" }
 hypha-store-postgres = { path = "../hypha-store-postgres" }
 serde.workspace = true

@@ -34,7 +34,7 @@ pub async fn list_orders<R: OrderRepo>(
     page: PageRequest<Keyset<OrderId>>,
 ) -> Result<Page<OrderSummary>, CommandError> {
     ctx.require(Scope::OrdersRead)?;
-    let filter = OrderFilter::new(input.filter)?;
+    let filter = OrderFilter::new(input.filter)?.with_fields(input.fields);
     input.sort.check(&filter)?;
     Ok(orders.list(&filter, input.sort, page).await?)
 }
@@ -44,6 +44,9 @@ pub async fn list_orders<R: OrderRepo>(
 pub struct ListOrders {
     pub filter: OrderFilterInput,
     pub sort: OrderSort,
+    /// Filters on custom fields (design note 0033, §7), checked by
+    /// `hypha-custom-fields` already.
+    pub fields: Vec<hypha_core::FieldFilter>,
 }
 
 /// The order a storefront's buyer placed, for its confirmation (design note 0024, §7):

@@ -6,16 +6,19 @@ use std::collections::HashMap;
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_categories::{
     Category, CategoryTree, CategoryView, CreateCategory, UpdateCategory, add_category_products,
-    create_category, delete_category, get_category, get_shown_category_by_handle, list_categories,
-    list_category_products, remove_category_products, set_product_categories, shown_categories,
-    update_category,
+    create_category, delete_category, find_categories, get_category, get_shown_category_by_handle,
+    list_categories, list_category_products, remove_category_products, set_product_categories,
+    shown_categories, update_category,
 };
 use hypha_core::{AssetId, CategoryId, ProductId};
 use hypha_merchandising::{category_image, set_category_image};
 use hypha_products::{HasProducts, get_product, get_products};
 use serde::{Deserialize, Serialize};
 
+use hypha_custom_fields::{CallerKind, FieldsRead, OwnerType};
+
 use super::{
+    custom_fields::{self, CustomFieldValues, FieldParams},
     page::{ListQuery, PageParams, PageResponse},
     products::{ProductMediaResponse, StatusDto, media_items},
     stamp_times,
@@ -39,6 +42,11 @@ pub struct CategoryNode {
     position: u32,
     #[schema(no_recursion)]
     children: Vec<CategoryNode>,
+    /// The custom field values `?custom_fields=` asked for (design note 0033); absent
+    /// without it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<std::collections::HashMap<String, serde_json::Value>>, required = false)]
+    custom_fields: Option<CustomFieldValues>,
 }
 
 fn nodes(tree: &CategoryTree, parent: Option<CategoryId>) -> Vec<CategoryNode> {
@@ -51,6 +59,7 @@ fn nodes(tree: &CategoryTree, parent: Option<CategoryId>) -> Vec<CategoryNode> {
             visible: c.visible(),
             position: c.position(),
             children: nodes(tree, Some(c.id())),
+            custom_fields: None,
         })
         .collect()
 }
@@ -62,22 +71,72 @@ pub struct CategoryTreeResponse {
     items: Vec<CategoryNode>,
 }
 
-/// Every category, as a tree.
+/// Every category, as a tree. With `field[…]` filters on custom fields (design note
+/// 0033, §7), only the matching categories, flat (each without `children`), in tree
+/// order. `custom_fields` adds those values to each node.
 #[utoipa::path(
     get,
     path = "/admin/categories",
+    params(FieldParams),
     responses((status = 200, description = "OK", body = CategoryTreeResponse)),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
 pub async fn list<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
+    query: ListQuery,
 ) -> Result<Json<CategoryTreeResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let tree = list_categories(&ctx, &ports).await?;
-    Ok(Json(CategoryTreeResponse {
-        items: nodes(&tree, None),
-    }))
+    let field_query = query.field_query()?;
+    let fields =
+        custom_fields::list_fields(&ctx, &ports, OwnerType::Category, &field_query).await?;
+    let mut items = if field_query.filters.is_empty() {
+        let tree = list_categories(&ctx, &ports).await?;
+        nodes(&tree, None)
+    } else {
+        find_categories(&ctx, &ports, &fields.filters)
+            .await?
+            .iter()
+            .map(|c| CategoryNode {
+                id: c.id(),
+                name: c.name().to_string(),
+                handle: c.handle().as_str().to_string(),
+                visible: c.visible(),
+                position: c.position(),
+                children: Vec::new(),
+                custom_fields: None,
+            })
+            .collect()
+    };
+    if let Some(keys) = &fields.keys {
+        let mut owners = Vec::new();
+        collect_ids(&items, &mut owners);
+        let read = custom_fields::read(
+            &ctx,
+            &fields.kind,
+            &ports,
+            &[OwnerType::Category],
+            &owners,
+            Some(keys),
+        )
+        .await?;
+        fill_fields(&mut items, &read);
+    }
+    Ok(Json(CategoryTreeResponse { items }))
+}
+
+fn collect_ids(nodes: &[CategoryNode], into: &mut Vec<uuid::Uuid>) {
+    for node in nodes {
+        into.push(node.id.as_uuid());
+        collect_ids(&node.children, into);
+    }
+}
+
+fn fill_fields(nodes: &mut [CategoryNode], read: &FieldsRead) {
+    for node in nodes {
+        node.custom_fields = Some(read.json_of(node.id.as_uuid()));
+        fill_fields(&mut node.children, read);
+    }
 }
 
 /// A category next to it in the tree: an ancestor or a child.
@@ -116,6 +175,10 @@ pub struct CategoryResponse {
     ancestors: Vec<CategoryRef>,
     /// In order.
     children: Vec<CategoryRef>,
+    /// Its custom field values the caller may read (design note 0033); `PATCH
+    /// /admin/categories/{id}/custom-fields` writes them.
+    #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
+    custom_fields: CustomFieldValues,
     /// When it was created, RFC 3339 in UTC.
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
@@ -126,6 +189,7 @@ impl CategoryResponse {
     async fn new(
         view: &CategoryView,
         image: Option<hypha_media::Asset>,
+        custom_fields: CustomFieldValues,
         media: Option<&Media>,
     ) -> Result<Self, ApiError> {
         let c = &view.category;
@@ -147,6 +211,7 @@ impl CategoryResponse {
             visible: c.visible(),
             ancestors: view.ancestors.iter().map(CategoryRef::from).collect(),
             children: view.children.iter().map(CategoryRef::from).collect(),
+            custom_fields,
             created_at,
             updated_at,
         })
@@ -164,7 +229,11 @@ async fn respond<S: Storage>(
         .await
         .map_err(|e| ApiError::from(e).not_found_if("category_not_found"))?;
     let image = category_image(ctx, ports, &view.category).await?;
-    CategoryResponse::new(&view, image, state.media.as_deref()).await
+    let kind = custom_fields::caller_kind(ctx, ports).await?;
+    let owner = id.as_uuid();
+    let fields =
+        custom_fields::read(ctx, &kind, ports, &[OwnerType::Category], &[owner], None).await?;
+    CategoryResponse::new(&view, image, fields.json_of(owner), state.media.as_deref()).await
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -556,6 +625,10 @@ pub struct StorefrontCategoryResponse {
     ancestors: Vec<CategoryRef>,
     /// Its shown children, in order.
     children: Vec<CategoryRef>,
+    /// The custom field values the merchant shows storefronts (`access.storefront:
+    /// read`, design note 0033).
+    #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
+    custom_fields: CustomFieldValues,
 }
 
 /// A category page (design note 0022, section 4): the category by handle, with its
@@ -583,7 +656,18 @@ pub async fn fetch_by_handle_storefront<S: Storage>(
         None => None,
     };
     let c = &view.category;
+    let owner = c.id().as_uuid();
+    let fields = custom_fields::read(
+        &ctx,
+        &CallerKind::Storefront,
+        &ports,
+        &[OwnerType::Category],
+        &[owner],
+        None,
+    )
+    .await?;
     Ok(Json(StorefrontCategoryResponse {
+        custom_fields: fields.json_of(owner),
         id: c.id(),
         name: c.name().to_string(),
         handle: c.handle().as_str().to_string(),

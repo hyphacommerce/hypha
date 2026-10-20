@@ -381,10 +381,12 @@ export interface paths {
         put?: never;
         /**
          * Fetches an installed app's manifest again (design note 0029, §4.2) and applies its
-         *     registrations (webhooks, UI). Scopes it no longer asks for leave the grant at once;
-         *     new ones make an authorization request staff approve (`consent_required`): approving
-         *     widens the grant, and the app then gets tokens with them from `/oauth/authorize`
-         *     without asking again. Staff with `apps:write`, or the app itself with its token.
+         *     registrations (webhooks, UI) and its custom fields (design note 0033, §8). Scopes it
+         *     no longer asks for leave the grant at once; new ones, or fields it no longer declares
+         *     (whose values would be deleted), make an authorization request staff approve
+         *     (`consent_required`): approving widens the grant and syncs the fields, and the app
+         *     then gets tokens with the new scopes from `/oauth/authorize` without asking again.
+         *     A manifest that changes a field's type is `manifest_invalid`. Staff with `apps:write`, or the app itself with its token.
          *     `manifest_unreachable` / `manifest_invalid` (422) when the manifest can't be used;
          *     `app_not_installed` (409) for an app not installed through OAuth.
          */
@@ -719,7 +721,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Every category, as a tree. */
+        /**
+         * Every category, as a tree. With `field[…]` filters on custom fields (design note
+         *     0033, §7), only the matching categories, flat (each without `children`), in tree
+         *     order. `custom_fields` adds those values to each node.
+         */
         get: operations["admin.categories.list"];
         put?: never;
         /** Creates a category. Its siblings after `position` move one along. */
@@ -747,6 +753,31 @@ export interface paths {
         head?: never;
         /** Renames, describes, shows or hides, moves or reorders a category. */
         patch: operations["admin.categories.update"];
+        trace?: never;
+    };
+    "/admin/categories/{id}/custom-fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The owner's custom field values the caller may read, with their versions. */
+        get: operations["admin.custom_fields.fetch_category"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Sets and removes the owner's custom field values (a JSON Merge Patch), all
+         *     or nothing, recording one `<owner>.custom_fields_updated` event. Each key
+         *     needs the caller to be allowed to write it: anyone with the owner's write
+         *     scope for `custom.*`, only its app for `app_<name>.*` (staff too when the
+         *     field's `access.admin` is `read_write`), `customer_data:profile` for a
+         *     personal field.
+         */
+        patch: operations["admin.custom_fields.update_category"];
         trace?: never;
     };
     "/admin/categories/{id}/image": {
@@ -879,6 +910,131 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/custom-field-definitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every namespace's field definitions (the merchant's, apps' and spores'). */
+        get: operations["admin.custom_fields.list"];
+        put?: never;
+        /** Creates a field in the merchant's `custom` namespace, last on its owner type's form. */
+        post: operations["admin.custom_fields.create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/custom-field-definitions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A field definition. */
+        get: operations["admin.custom_fields.fetch"];
+        put?: never;
+        post?: never;
+        /** Deletes a field of the merchant's with every value of it. */
+        delete: operations["admin.custom_fields.remove"];
+        options?: never;
+        head?: never;
+        /**
+         * Changes a field of the merchant's. An app's or a spore's is `409
+         *     custom_field_managed`: its manifest or code declares it.
+         */
+        patch: operations["admin.custom_fields.update"];
+        trace?: never;
+    };
+    "/admin/custom-field-definitions/{id}/position": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Moves a field of the merchant's on its owner type's form; the others close up. */
+        put: operations["admin.custom_fields.move_to"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/custom-field-definitions/{id}/values-in-use": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The distinct values of a filterable field with how many owners hold each: for
+         *     autocomplete and filter menus. Needs the read scope of the field's owner type
+         *     (`products:read`, `customers:read`, `orders:read`), and `customer_data:profile` for a
+         *     personal one.
+         */
+        get: operations["admin.custom_fields.values"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/custom-fields/{definition}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adds and removes items of one list field on 1 to 250 owners (design note 0033, CF6):
+         *     done in the database under each value's lock, so concurrent writers both land.
+         *     Adding what's there or removing what isn't changes nothing and records nothing. An
+         *     owner whose list would break `max_items`/`min_items` fails the whole call (`409
+         *     too_many_items` / `too_few_items`, naming it). Needs the field's owner type's write
+         *     scope.
+         */
+        post: operations["admin.custom_fields.change_items"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/custom-fields/{definition}/values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sets (or, with `null`, removes) one field on 1 to 250 owners: imports, and "set on
+         *     selected". All or nothing: every problem is reported at once (`422
+         *     custom_fields_invalid`, each with its `owner`). Records one event per owner that
+         *     changed. Needs the field's owner type's write scope.
+         */
+        post: operations["admin.custom_fields.set_values"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/customers": {
         parameters: {
             query?: never;
@@ -886,7 +1042,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Customers, newest first or in `sort`'s order, optionally matching text. */
+        /**
+         * Customers, newest first or in `sort`'s order, optionally matching text and custom
+         *     field filters.
+         */
         get: operations["admin.customers.list"];
         put?: never;
         /** Creates a customer. */
@@ -948,6 +1107,31 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/admin/customers/{id}/custom-fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The owner's custom field values the caller may read, with their versions. */
+        get: operations["admin.custom_fields.fetch_customer"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Sets and removes the owner's custom field values (a JSON Merge Patch), all
+         *     or nothing, recording one `<owner>.custom_fields_updated` event. Each key
+         *     needs the caller to be allowed to write it: anyone with the owner's write
+         *     scope for `custom.*`, only its app for `app_<name>.*` (staff too when the
+         *     field's `access.admin` is `read_write`), `customer_data:profile` for a
+         *     personal field.
+         */
+        patch: operations["admin.custom_fields.update_customer"];
         trace?: never;
     };
     "/admin/events/{id}": {
@@ -1668,7 +1852,7 @@ export interface paths {
         };
         /**
          * Orders, newest first or in `sort`'s order, narrowed by the filters (every one given
-         *     must match).
+         *     must match), custom fields' among them.
          */
         get: operations["admin.orders.list"];
         put?: never;
@@ -1718,6 +1902,31 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/admin/orders/{id}/custom-fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The owner's custom field values the caller may read, with their versions. */
+        get: operations["admin.custom_fields.fetch_order"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Sets and removes the owner's custom field values (a JSON Merge Patch), all
+         *     or nothing, recording one `<owner>.custom_fields_updated` event. Each key
+         *     needs the caller to be allowed to write it: anyone with the owner's write
+         *     scope for `custom.*`, only its app for `app_<name>.*` (staff too when the
+         *     field's `access.admin` is `read_write`), `customer_data:profile` for a
+         *     personal field.
+         */
+        patch: operations["admin.custom_fields.update_order"];
         trace?: never;
     };
     "/admin/orders/{id}/fulfillments": {
@@ -2014,7 +2223,7 @@ export interface paths {
         };
         /**
          * Products in any status, newest first or in `sort`'s order, narrowed by the filters
-         *     (every one given must match).
+         *     (every one given must match), custom fields' among them.
          */
         get: operations["admin.products.list"];
         put?: never;
@@ -2083,6 +2292,31 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/admin/products/{id}/custom-fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The owner's custom field values the caller may read, with their versions. */
+        get: operations["admin.custom_fields.fetch_product"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Sets and removes the owner's custom field values (a JSON Merge Patch), all
+         *     or nothing, recording one `<owner>.custom_fields_updated` event. Each key
+         *     needs the caller to be allowed to write it: anyone with the owner's write
+         *     scope for `custom.*`, only its app for `app_<name>.*` (staff too when the
+         *     field's `access.admin` is `read_write`), `customer_data:profile` for a
+         *     personal field.
+         */
+        patch: operations["admin.custom_fields.update_product"];
         trace?: never;
     };
     "/admin/products/{id}/inventory": {
@@ -2627,6 +2861,31 @@ export interface paths {
         patch: operations["admin.staff.update_user"];
         trace?: never;
     };
+    "/admin/variants/{id}/custom-fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The owner's custom field values the caller may read, with their versions. */
+        get: operations["admin.custom_fields.fetch_variant"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Sets and removes the owner's custom field values (a JSON Merge Patch), all
+         *     or nothing, recording one `<owner>.custom_fields_updated` event. Each key
+         *     needs the caller to be allowed to write it: anyone with the owner's write
+         *     scope for `custom.*`, only its app for `app_<name>.*` (staff too when the
+         *     field's `access.admin` is `read_write`), `customer_data:profile` for a
+         *     personal field.
+         */
+        patch: operations["admin.custom_fields.update_variant"];
+        trace?: never;
+    };
     "/admin/variants/{id}/inventory": {
         parameters: {
             query?: never;
@@ -2776,6 +3035,15 @@ export interface components {
             cancel_reason?: components["schemas"]["CancelReasonDto"] | null;
             /** @description When it was cancelled, RFC 3339 in UTC; `null` if it wasn't. */
             cancelled_at?: string | null;
+            /**
+             * @description Its custom field values the caller may read (design note 0033); `PATCH
+             *     /admin/orders/{id}/custom-fields` writes them. A personal one is left out
+             *     without `customer_data:profile` and listed in `redacted` as
+             *     `custom_fields.<key>`.
+             */
+            custom_fields: {
+                [key: string]: unknown;
+            };
             /**
              * @description Its payments, newest first (design note 0027): the method, status and
              *     instructions of each.
@@ -3109,6 +3377,13 @@ export interface components {
         /** @description A category in the admin's tree: what a list of categories shows, with its children. */
         CategoryNode: {
             children: components["schemas"]["CategoryNode"][];
+            /**
+             * @description The custom field values `?custom_fields=` asked for (design note 0033); absent
+             *     without it.
+             */
+            custom_fields?: {
+                [key: string]: unknown;
+            } | null;
             handle: string;
             id: components["schemas"]["CategoryId"];
             name: string;
@@ -3154,6 +3429,13 @@ export interface components {
             children: components["schemas"]["CategoryRef"][];
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;
+            /**
+             * @description Its custom field values the caller may read (design note 0033); `PATCH
+             *     /admin/categories/{id}/custom-fields` writes them.
+             */
+            custom_fields: {
+                [key: string]: unknown;
+            };
             /** @description Sanitised HTML (scripts, styles and event attributes removed), safe to render. */
             description?: string | null;
             handle: string;
@@ -3283,8 +3565,8 @@ export interface components {
             changes: components["schemas"]["ScopeChanges"];
             created_at: string;
             /**
-             * @description The custom fields the app declares, against those of the manifest it's installed
-             *     from.
+             * @description The custom fields the app declares, against the definitions it has now: approving
+             *     creates `added`, updates `kept` and deletes `removed` with their values.
              */
             custom_fields: components["schemas"]["CustomFieldChangesDto"];
             /** @description The request can be answered until then (RFC 3339). */
@@ -3392,6 +3674,27 @@ export interface components {
             kind: components["schemas"]["ChannelKind"];
             /** @description Up to 255 characters, unique ignoring case. */
             name: string;
+        };
+        CreateCustomFieldDefinitionRequest: {
+            access?: components["schemas"]["CustomFieldAccess"] | null;
+            capabilities?: components["schemas"]["CustomFieldCapabilities"] | null;
+            /** @description Up to 1,000 characters. */
+            description?: string | null;
+            /** @description `[a-z0-9_]{2,64}`, starting with a letter; unique per owner type in `custom`. */
+            key: string;
+            /** @description Up to 255 characters. */
+            name: string;
+            owner_type: components["schemas"]["OwnerTypeDto"];
+            /** @description Customers' and orders' fields only. */
+            personal?: boolean;
+            /**
+             * @description `text`, `multiline_text`, `rich_text`, `integer`, `decimal`, `boolean`, `date`,
+             *     `date_time`, `url`, `money`, `measurement`, `choice`, `reference`, `json`, or
+             *     `list.<type>` (not of `boolean`, `multiline_text`, `rich_text`, `json`). It never
+             *     changes.
+             */
+            type: string;
+            validations?: components["schemas"]["CustomFieldValidations"] | null;
         };
         CreateCustomerRequest: {
             email: string;
@@ -3525,9 +3828,35 @@ export interface components {
              */
             name: string;
         };
+        /** @description Who sees and writes a field's values (design note 0033, §5). */
+        CustomFieldAccess: {
+            admin: components["schemas"]["CustomFieldAdminAccess"];
+            storefront: components["schemas"]["CustomFieldStorefrontAccess"];
+        };
         /**
-         * @description What approving does to the app's custom fields, compared with the manifest it's
-         *     installed from (everything is `added` on a first install).
+         * @description What staff may do with an app's or a spore's field; the merchant's own are always
+         *     `read_write`.
+         *
+         *     Known values: `read`, `read_write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        CustomFieldAdminAccess: string;
+        /** @description What a field's values can be used for (§7). */
+        CustomFieldCapabilities: {
+            /**
+             * @description A filter on its owner's admin list (`field[custom.material]=wool`); at most 50
+             *     per owner type.
+             */
+            filterable?: boolean;
+            /**
+             * @description No two owners hold the same value (text ignoring case): `text`, `integer` and
+             *     `url` only. Filtering on it finds at most one owner.
+             */
+            unique?: boolean;
+        };
+        /**
+         * @description What approving does to the app's custom fields, compared with the definitions its
+         *     namespace holds now (everything is `added` on a first install).
          */
         CustomFieldChangesDto: {
             /** @description Fields the app adds: list the owners they're on, and which are personal. */
@@ -3542,6 +3871,137 @@ export interface components {
             retyped: components["schemas"]["ConsentCustomField"][];
         };
         /**
+         * @description A `choice` field's choice: the key is what's stored, filtered and faceted (it can't
+         *     change); the label is for people.
+         */
+        CustomFieldChoice: {
+            /** @description `[a-z0-9_-]{1,64}`. */
+            key: string;
+            label: string;
+        };
+        /**
+         * @description A CustomFieldDefinitionId: `cfd_` and 32 hex digits.
+         * @example cfd_0190f1a2b3c47d8e9f00112233445566
+         */
+        CustomFieldDefinitionId: string;
+        CustomFieldDefinitionList: {
+            /**
+             * @description By owner type, then position. A store has at most 128 per owner type and
+             *     namespace, so they come in one response.
+             */
+            items: components["schemas"]["CustomFieldDefinitionResponse"][];
+        };
+        CustomFieldDefinitionResponse: {
+            access: components["schemas"]["CustomFieldAccess"];
+            capabilities: components["schemas"]["CustomFieldCapabilities"];
+            /** @description RFC 3339 in UTC. */
+            created_at: string;
+            description?: string | null;
+            /** @description `namespace.key`: what values, filters and events name it by. */
+            field: string;
+            id: components["schemas"]["CustomFieldDefinitionId"];
+            key: string;
+            /**
+             * @description The app or spore that declares it (`app_<name>`, `spore_<name>`); `null` for the
+             *     merchant's own. Those are read-only here (`409 custom_field_managed`).
+             */
+            managed_by?: string | null;
+            name: string;
+            /** @description `custom` (the merchant's), `app_<name>` or `spore_<name>`. */
+            namespace: string;
+            owner_type: components["schemas"]["OwnerTypeDto"];
+            /** @description About a person: redacted without `customer_data:profile` (customers and orders). */
+            personal: boolean;
+            /**
+             * Format: int32
+             * @description On its owner type's form, from 0.
+             */
+            position: number;
+            /** @description Only its app (and staff) read it. */
+            private: boolean;
+            /** @description `text`, `integer`, `choice`, `list.text`, … (design note 0033, §3). */
+            type: string;
+            updated_at: string;
+            validations: components["schemas"]["CustomFieldValidations"];
+        };
+        /**
+         * @description Whether storefronts see the field (opt-in).
+         *
+         *     Known values: `none`, `read`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        CustomFieldStorefrontAccess: string;
+        /**
+         * @description A definition's validations; which apply depends on its type (design note 0033, §3).
+         *     Absent ones don't apply.
+         */
+        CustomFieldValidations: {
+            /** @description `choice` (required): at most 128. */
+            choices?: components["schemas"]["CustomFieldChoice"][] | null;
+            /** @description `money`: ISO 4217 codes. */
+            currencies?: string[] | null;
+            /** @description `measurement` (required): `weight`, `length` or `volume`. */
+            dimension?: string | null;
+            domains?: string[] | null;
+            /** @description `reference` (required): `product`, `variant`, `category`, `customer` or `asset`. */
+            kind?: string | null;
+            max?: unknown;
+            /** Format: int32 */
+            max_items?: number | null;
+            /** Format: int32 */
+            max_length?: number | null;
+            /**
+             * Format: int32
+             * @description `decimal`: digits after the point.
+             */
+            max_scale?: number | null;
+            /**
+             * @description In the type's own terms: an integer, a decimal string, a date or date-time,
+             *     money's minor units, a measurement `{"value", "unit"}`.
+             */
+            min?: unknown;
+            /**
+             * Format: int32
+             * @description Lists: at most 128 items.
+             */
+            min_items?: number | null;
+            /**
+             * Format: int32
+             * @description Text, in characters.
+             */
+            min_length?: number | null;
+            /**
+             * @description `text`: a regular expression the whole value matches (no look-around or
+             *     back-references).
+             */
+            pattern?: string | null;
+            /** @description `url`: `https`, `http`, `mailto`, `tel`. */
+            schemes?: string[] | null;
+            /** @description Lists: no item twice (text ignoring case). */
+            unique_items?: boolean | null;
+        };
+        /** @description An owner's values as the caller sees them, with versions for `if_versions`. */
+        CustomFieldsResponse: {
+            /**
+             * @description `{"custom.material": "wool", …}`: every value the caller may read, by the
+             *     definitions' order.
+             */
+            custom_fields: {
+                [key: string]: unknown;
+            };
+            /** @description The owner (`prod_…`, `var_…`, `pcat_…`, `cus_…`, `ord_…`). */
+            owner: string;
+            /**
+             * @description Personal fields left out for this caller (`custom_fields.<key>`): an API key or
+             *     app without `customer_data:profile`. Never sent to staff.
+             */
+            redacted?: string[] | null;
+            /** @description Each value's version (`{"custom.material": 3}`), for `if_versions`. */
+            versions: {
+                [key: string]: number;
+            };
+        };
+        /**
          * @description A CustomerId: `cus_` and 32 hex digits.
          * @example cus_0190f1a2b3c47d8e9f00112233445566
          */
@@ -3550,6 +4010,13 @@ export interface components {
             addresses: components["schemas"]["AddressResponse"][];
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;
+            /**
+             * @description Its custom field values the caller may read, `{"custom.tier": "gold", …}`
+             *     (design note 0033); `PATCH /admin/customers/{id}/custom-fields` writes them.
+             */
+            custom_fields: {
+                [key: string]: unknown;
+            };
             default_billing_address?: components["schemas"]["AddressId"] | null;
             default_shipping_address?: components["schemas"]["AddressId"] | null;
             email: components["schemas"]["Email"];
@@ -3559,7 +4026,8 @@ export interface components {
             phone?: string | null;
             /**
              * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
-             *     app without the matching `customer_data:*` scope. They are absent from the
+             *     app without the matching `customer_data:*` scope (`custom_fields.<key>` for a
+             *     personal custom field, without `customer_data:profile`). They are absent from the
              *     object then, whatever the schema says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
@@ -3583,6 +4051,13 @@ export interface components {
             address_count: number;
             /** @description When the customer was created, RFC 3339 in UTC. */
             created_at: string;
+            /**
+             * @description The custom field values `?custom_fields=` asked for (design note 0033); absent
+             *     without it.
+             */
+            custom_fields?: {
+                [key: string]: unknown;
+            } | null;
             email: components["schemas"]["Email"];
             first_name?: string | null;
             id: components["schemas"]["CustomerId"];
@@ -3794,13 +4269,18 @@ export interface components {
             extension_points: components["schemas"]["ExtensionEndpointDto"][];
         };
         FacetSettingRequest: {
-            /** @description `option.<name>`, `vendor`, `product_type` or `tag`. */
+            /**
+             * @description `option.<name>`, `vendor`, `product_type`, `tag`, or `field.<namespace>.<key>`:
+             *     a product or variant custom field that's `filterable`, shown to storefronts
+             *     (`access.storefront: read`) and of type `text`, `choice`, `boolean`, `integer`
+             *     or a list of those (`422 facet_field_not_allowed` otherwise).
+             */
             key: string;
             /** @description Up to 255 characters; absent or `null` lets the storefront label it. */
             label?: string | null;
         };
         FacetSettingResponse: {
-            /** @description `option.<name>`, `vendor`, `product_type` or `tag`. */
+            /** @description `option.<name>`, `vendor`, `product_type`, `tag` or `field.<namespace>.<key>`. */
             key: string;
             label?: string | null;
         };
@@ -4041,6 +4521,21 @@ export interface components {
             /** @enum {string} */
             status: "unavailable";
         };
+        ListItemsRequest: {
+            /**
+             * @description Items to add where they're missing (each once; text ignoring case when the field
+             *     has `unique_items`).
+             */
+            add?: Record<string, never>[];
+            /** @description 1 to 250 owners of the definition's owner type (`cus_…` for a customer field). */
+            owners: string[];
+            /** @description Items to remove where they're present. */
+            remove?: Record<string, never>[];
+        };
+        ListItemsResponse: {
+            /** @description In the call's order, each owner once. */
+            items: components["schemas"]["OwnerItemsResponse"][];
+        };
         /**
          * @description A LocationId: `loc_` and 32 hex digits.
          * @example loc_0190f1a2b3c47d8e9f00112233445566
@@ -4128,6 +4623,13 @@ export interface components {
              * @example EUR
              */
             currency: string;
+        };
+        MoveCustomFieldDefinitionRequest: {
+            /**
+             * Format: int32
+             * @description From 0 on its owner type's form; past the end: last.
+             */
+            position: number;
         };
         MySessionListResponse: {
             /** @description Newest first. A person has a handful, so they come in one list. */
@@ -4439,6 +4941,13 @@ export interface components {
             /** @description The sales channel it was placed through (design note 0020). */
             channel: components["schemas"]["ChannelId"];
             country: components["schemas"]["CountryCode"];
+            /**
+             * @description The custom field values `?custom_fields=` asked for (design note 0033); absent
+             *     without it.
+             */
+            custom_fields?: {
+                [key: string]: unknown;
+            } | null;
             customer: components["schemas"]["CustomerId"];
             email: components["schemas"]["Email"];
             financial_status: components["schemas"]["FinancialStatusDto"];
@@ -4474,6 +4983,31 @@ export interface components {
         OriginsResponse: {
             /** @description `scheme://host[:port]`: set `Content-Security-Policy: frame-ancestors` to these. */
             origins: string[];
+        };
+        /** @description One owner's list after the change. */
+        OwnerItemsResponse: {
+            /** @description What this call added to its list (empty: nothing changed). */
+            added: Record<string, never>[];
+            owner: string;
+            removed: Record<string, never>[];
+            /**
+             * Format: int64
+             * @description The value's version after; `null` when the list is empty (the value is gone).
+             */
+            version?: number | null;
+        };
+        /**
+         * @description The kinds of record fields belong to.
+         *
+         *     Known values: `product`, `variant`, `category`, `customer`, `order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        OwnerTypeDto: string;
+        /** @description One owner's new value. */
+        OwnerValueRequest: {
+            owner: string;
+            /** @description The value; `null` removes it. */
+            value: unknown;
         };
         /**
          * @description An embedded page: load `url` in a sandboxed iframe with the bridge
@@ -4851,6 +5385,13 @@ export interface components {
             channels: components["schemas"]["ChannelId"][];
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;
+            /**
+             * @description Its custom field values the caller may read, `{"custom.material": "wool", …}`
+             *     (design note 0033); `PATCH /admin/products/{id}/custom-fields` writes them.
+             */
+            custom_fields: {
+                [key: string]: unknown;
+            };
             /** @description Sanitised HTML (scripts, styles and event attributes removed), safe to render. */
             description?: string | null;
             handle: string;
@@ -4899,6 +5440,13 @@ export interface components {
             channels: components["schemas"]["ChannelId"][];
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;
+            /**
+             * @description The custom field values `?custom_fields=` asked for (design note 0033); absent
+             *     without it.
+             */
+            custom_fields?: {
+                [key: string]: unknown;
+            } | null;
             featured_media?: components["schemas"]["ProductMediaResponse"] | null;
             handle: string;
             id: components["schemas"]["ProductId"];
@@ -5122,8 +5670,30 @@ export interface components {
             /** Format: int32 */
             rate_ppm: number;
         };
+        /** @description A write to an owner's fields: a JSON Merge Patch of its values. */
+        SetCustomFieldsRequest: {
+            /**
+             * @description `{"custom.material": "wool", "custom.care": null}`: a key absent keeps its value,
+             *     `null` removes it. At most 50 keys; every problem is reported at once (`422
+             *     custom_fields_invalid`), and nothing is written unless all are valid.
+             */
+            custom_fields: {
+                [key: string]: unknown;
+            };
+            /**
+             * @description Writes a key only if its value's version is still this one (`0`: no value yet);
+             *     otherwise `409 custom_field_stale`. Optional: by default the last write wins.
+             */
+            if_versions?: {
+                [key: string]: number;
+            };
+        };
         SetCustomerRequest: {
             customer?: components["schemas"]["CustomerId"] | null;
+        };
+        SetFieldValuesRequest: {
+            /** @description 1 to 250 owners of the definition's owner type, each once. */
+            values: components["schemas"]["OwnerValueRequest"][];
         };
         SetFixedPricesRequest: {
             fixed_prices: components["schemas"]["FixedPriceDto"][];
@@ -5495,6 +6065,24 @@ export interface components {
             name?: string;
         };
         /**
+         * @description A JSON Merge Patch of a `custom` definition: absent keeps; `null` clears the
+         *     description. Owner type, key and type never change.
+         */
+        UpdateCustomFieldDefinitionRequest: {
+            access?: components["schemas"]["CustomFieldAccess"];
+            /** @description Turning `unique` on is checked against the stored values, like validations. */
+            capabilities?: components["schemas"]["CustomFieldCapabilities"];
+            description?: string | null;
+            name?: string;
+            personal?: boolean;
+            /**
+             * @description Replaces them all. A change that tightens them (a lower `max`, fewer `choices`, a
+             *     `pattern`) is checked against the stored values first: `409
+             *     custom_field_values_invalid` names the owners to fix.
+             */
+            validations?: components["schemas"]["CustomFieldValidations"];
+        };
+        /**
          * @description JSON Merge Patch (see `patch`): only the fields sent change, `null` clears a name or
          *     phone. The email can be changed but not cleared.
          */
@@ -5721,12 +6309,35 @@ export interface components {
             role: components["schemas"]["RoleId"];
             status: string;
         };
+        ValueInUseResponse: {
+            /**
+             * Format: int64
+             * @description How many owners hold it.
+             */
+            owners: number;
+            /**
+             * @description A value (a list's item, for a list field) as stored: a choice's key, text as
+             *     first written.
+             */
+            value: unknown;
+        };
+        ValuesInUseResponse: {
+            /** @description Most held first. */
+            items: components["schemas"]["ValueInUseResponse"][];
+        };
         /**
          * @description A VariantId: `var_` and 32 hex digits.
          * @example var_0190f1a2b3c47d8e9f00112233445566
          */
         VariantId: string;
         VariantResponse: {
+            /**
+             * @description Its own custom field values the caller may read (variant fields, design note
+             *     0033); `PATCH /admin/variants/{id}/custom-fields` writes them.
+             */
+            custom_fields: {
+                [key: string]: unknown;
+            };
             id: components["schemas"]["VariantId"];
             media_asset_id?: components["schemas"]["AssetId"] | null;
             /** @description The base price, before markets and price lists. */
@@ -9908,7 +10519,21 @@ export interface operations {
     };
     "admin.categories.list": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
+                field?: {
+                    [key: string]: string | {
+                        eq?: string;
+                        exists?: string;
+                        gt?: string;
+                        gte?: string;
+                        lt?: string;
+                        lte?: string;
+                    };
+                };
+                /** @description Comma-separated `namespace.key`s (at most 10) whose values each item carries in `custom_fields`; without it, items carry none. */
+                custom_fields?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9922,6 +10547,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CategoryTreeResponse"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
@@ -10212,6 +10846,180 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CategoryResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.fetch_category": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CategoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFieldsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.update_category": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CategoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCustomFieldsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFieldsResponse"];
                 };
             };
             /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
@@ -11316,6 +12124,798 @@ export interface operations {
             };
         };
     };
+    "admin.custom_fields.list": {
+        parameters: {
+            query?: {
+                /** @description Only this owner type's. */
+                owner_type?: "product" | "variant" | "category" | "customer" | "order";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFieldDefinitionList"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCustomFieldDefinitionRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFieldDefinitionResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomFieldDefinitionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFieldDefinitionResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomFieldDefinitionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomFieldDefinitionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateCustomFieldDefinitionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFieldDefinitionResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.move_to": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomFieldDefinitionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MoveCustomFieldDefinitionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFieldDefinitionResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.values": {
+        parameters: {
+            query?: {
+                /** @description How many values, 1 to 100 (default 50). */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomFieldDefinitionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValuesInUseResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.change_items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                definition: components["schemas"]["CustomFieldDefinitionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListItemsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListItemsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.set_values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                definition: components["schemas"]["CustomFieldDefinitionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetFieldValuesRequest"];
+            };
+        };
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.customers.list": {
         parameters: {
             query?: {
@@ -11331,6 +12931,19 @@ export interface operations {
                  */
                 q?: string;
                 sort?: "newest" | "oldest" | "email_asc" | "email_desc" | "name_asc" | "name_desc";
+                /** @description Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
+                field?: {
+                    [key: string]: string | {
+                        eq?: string;
+                        exists?: string;
+                        gt?: string;
+                        gte?: string;
+                        lt?: string;
+                        lte?: string;
+                    };
+                };
+                /** @description Comma-separated `namespace.key`s (at most 10) whose values each item carries in `custom_fields`; without it, items carry none. */
+                custom_fields?: string;
             };
             header?: never;
             path?: never;
@@ -11938,6 +13551,180 @@ export interface operations {
             };
             /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.fetch_customer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFieldsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.update_customer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCustomFieldsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFieldsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16015,6 +17802,19 @@ export interface operations {
                 /** @description Only orders placed before this instant (RFC 3339). */
                 placed_before?: string;
                 sort?: "newest" | "oldest" | "total_desc" | "total_asc";
+                /** @description Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
+                field?: {
+                    [key: string]: string | {
+                        eq?: string;
+                        exists?: string;
+                        gt?: string;
+                        gte?: string;
+                        lt?: string;
+                        lte?: string;
+                    };
+                };
+                /** @description Comma-separated `namespace.key`s (at most 10) whose values each item carries in `custom_fields`; without it, items carry none. */
+                custom_fields?: string;
             };
             header?: never;
             path?: never;
@@ -16167,6 +17967,180 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminOrderResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.fetch_order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["OrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFieldsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.update_order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["OrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCustomFieldsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFieldsResponse"];
                 };
             };
             /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
@@ -18126,6 +20100,19 @@ export interface operations {
                  */
                 channel?: components["schemas"]["ChannelId"];
                 sort?: "newest" | "oldest" | "title_asc" | "title_desc" | "updated_desc" | "updated_asc";
+                /** @description Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
+                field?: {
+                    [key: string]: string | {
+                        eq?: string;
+                        exists?: string;
+                        gt?: string;
+                        gte?: string;
+                        lt?: string;
+                        lte?: string;
+                    };
+                };
+                /** @description Comma-separated `namespace.key`s (at most 10) whose values each item carries in `custom_fields`; without it, items carry none. */
+                custom_fields?: string;
             };
             header?: never;
             path?: never;
@@ -18662,6 +20649,180 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductChannelsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.fetch_product": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFieldsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.update_product": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCustomFieldsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFieldsResponse"];
                 };
             };
             /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
@@ -22534,6 +24695,180 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.fetch_variant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["VariantId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFieldsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.update_variant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["VariantId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCustomFieldsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomFieldsResponse"];
                 };
             };
             /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */

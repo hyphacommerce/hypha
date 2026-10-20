@@ -13,6 +13,7 @@ description = "Everything a Hypha spore may use (design note 0030, §4): the Spo
 hypha-spore-core = { path = "../hypha-spore-core" }
 hypha-core.workspace = true
 hypha-apps = { path = "../hypha-apps" }
+hypha-custom-fields = { path = "../hypha-custom-fields" }
 hypha-payments = { path = "../hypha-payments" }
 hypha-orders = { path = "../hypha-orders" }
 hypha-checkout = { path = "../hypha-checkout" }

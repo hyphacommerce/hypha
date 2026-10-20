@@ -48,7 +48,8 @@ pub(crate) type Values = BTreeMap<(CustomFieldDefinitionId, Uuid), ValueRecord>;
 /// for both repos, since deleting a definition takes its values with it.
 #[derive(Default)]
 pub struct InMemoryCustomFields {
-    pub(crate) definitions: Table<CustomFieldDefinitionId, CustomFieldDefinition>,
+    /// Shared with a linked app repo, which deletes an app's namespace with it.
+    pub(crate) definitions: Arc<Table<CustomFieldDefinitionId, CustomFieldDefinition>>,
     pub(crate) values: Arc<Mutex<Values>>,
     pub(crate) outbox: InMemoryOutbox,
 }
@@ -148,6 +149,31 @@ impl InMemoryCustomFields {
     /// to lose the race between a command's check and its write.
     pub fn hide_next_lookups(&self, n: usize) {
         self.definitions.hide_next_lookups(n);
+    }
+
+    /// Deletes every definition in `namespace` and their values, as the database's
+    /// `ON DELETE CASCADE` from `apps` does when the app goes (design note 0033, §8).
+    /// No events: storage cascades record none.
+    pub(crate) fn drop_namespace(&self, namespace: &Namespace) {
+        let mut rows = self.definitions.lock();
+        let gone: Vec<CustomFieldDefinitionId> = rows
+            .values()
+            .filter(|d| d.namespace() == namespace)
+            .map(|d| d.id())
+            .collect();
+        for id in &gone {
+            rows.remove(id);
+        }
+        self.lock_values().retain(|(d, _), _| !gone.contains(d));
+    }
+
+    /// A view of the same definitions and values (for the app repo's cascade).
+    pub(crate) fn view(&self) -> Self {
+        Self {
+            definitions: Arc::clone(&self.definitions),
+            values: Arc::clone(&self.values),
+            outbox: self.outbox.clone(),
+        }
     }
 
     fn sorted(mut all: Vec<CustomFieldDefinition>) -> Vec<CustomFieldDefinition> {

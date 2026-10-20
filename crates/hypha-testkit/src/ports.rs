@@ -117,7 +117,7 @@ impl Default for InMemoryPorts {
             assets: InMemoryAssetRepo::sharing(&outbox),
             shipping_zones: InMemoryShippingZoneRepo::sharing(&outbox),
             app_providers,
-            apps,
+            apps: apps.joining_fields(&custom_fields),
             oauth,
             identities: InMemoryIdentityRepo::default(),
             sessions: InMemorySessionRepo::default(),

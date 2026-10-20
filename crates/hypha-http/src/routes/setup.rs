@@ -91,6 +91,7 @@ pub async fn checklist<S: Storage>(
                 ..ProductFilterInput::default()
             },
             sort: ProductSort::default(),
+            fields: Vec::new(),
         };
         list_product_views(&ctx, &ports, input, PageRequest::default())
             .await?

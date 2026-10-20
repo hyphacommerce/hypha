@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use hypha_core::{
-    Actor, AppId, AppKey, AuthError, Ctx, CustomFieldDefinitionId, CustomerId, ErrorCode,
+    Actor, ApiKeyId, AppId, AppKey, AuthError, Ctx, CustomFieldDefinitionId, CustomerId, ErrorCode,
     EventHandler, FieldFilterOp, FilterScalar, HasBatch, PageLimit, ProductId, Scope, StoredEvent,
     Timestamp, UserId, VariantId, Versioned,
 };
@@ -12,8 +12,9 @@ use hypha_custom_fields::{
     DefinitionChange, DefinitionRepo, DefinitionSpec, FieldCaller, FieldKey, FieldType, FieldValue,
     Namespace, Owner, OwnerType, RawFilterOp, SetCustomFields, StageCustomFieldValues,
     StorefrontAccess, ValueRepo, ValueRow, change_list_items, create_definition, delete_definition,
-    field_filter, get_custom_fields, move_definition, plan_sync, set_custom_fields,
-    set_field_values, sync_managed_definitions, update_definition, values_in_use,
+    field_filter, get_custom_fields, limits::MAX_LISTED_KEYS, move_definition, plan_sync,
+    read_custom_fields, set_custom_fields, set_field_values, stage_managed_definitions,
+    sync_managed_definitions, update_definition, values_in_use,
 };
 use hypha_testkit::{InMemoryPorts, SequentialIds};
 use pollster::block_on;
@@ -873,4 +874,173 @@ fn definition_changes_keep_identity() {
     .unwrap();
     assert_eq!(renamed.field_key().to_string(), "custom.material");
     assert_eq!(renamed.name(), "Fabric");
+}
+
+#[test]
+fn staged_definitions_are_written_only_with_their_batch() {
+    let w = World::new();
+    let namespace = Namespace::of_app(AppKey::new("app_erp").unwrap());
+    let mut batch = w.ports.batch();
+    let plan = block_on(stage_managed_definitions(
+        &w.ctx,
+        &w.ports,
+        &w.ids,
+        &namespace,
+        vec![spec(OwnerType::Customer, "member_id", "text", json!({}))],
+        &mut batch,
+    ))
+    .unwrap();
+    assert_eq!(plan.create.len(), 1);
+    assert!(!plan.is_empty());
+    assert_eq!(block_on(w.ports.custom_fields.list(None)).unwrap(), vec![]);
+    block_on(w.ports.commit(batch)).unwrap();
+    let stored = block_on(w.ports.custom_fields.list(None)).unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].field_key().to_string(), "app_erp.member_id");
+}
+
+#[test]
+fn reading_many_owners_lists_personal_keys_whether_held_or_not() {
+    let w = World::new();
+    let mut birthday = spec(OwnerType::Customer, "birthday", "date", json!({}));
+    birthday.personal = true;
+    w.define(birthday);
+    w.define(spec(OwnerType::Customer, "tier", "text", json!({})));
+    w.set(
+        &customer(1),
+        json!({"custom.birthday": "1990-05-01", "custom.tier": "gold"}),
+    )
+    .unwrap();
+    // A secret key: staff sessions see every field.
+    let crm = Ctx::new(
+        Actor::ApiKey(ApiKeyId::from_uuid(Uuid::from_u128(2))),
+        vec![Scope::CustomersRead],
+    );
+    let key_kind = CallerKind::Merchant;
+    let caller = FieldCaller::new(&crm, &key_kind);
+    let owners = [Uuid::from_u128(1), Uuid::from_u128(2)];
+    let read = block_on(read_custom_fields(
+        &caller,
+        &w.ports,
+        &[OwnerType::Customer],
+        &owners,
+        None,
+    ))
+    .unwrap();
+    assert_eq!(
+        read.json_of(owners[0]),
+        json!({"custom.tier": "gold"}).as_object().unwrap().clone()
+    );
+    assert!(read.json_of(owners[1]).is_empty());
+    // The same for an owner with no value: the list doesn't tell who holds one.
+    assert_eq!(
+        read.redacted,
+        vec![FieldKey::parse("custom.birthday").unwrap()]
+    );
+}
+
+#[test]
+fn reading_only_some_keys_returns_those() {
+    let w = World::new();
+    w.define(spec(OwnerType::Product, "material", "text", json!({})));
+    w.define(spec(OwnerType::Product, "care", "text", json!({})));
+    w.set(
+        &product(1),
+        json!({"custom.material": "wool", "custom.care": "hand wash"}),
+    )
+    .unwrap();
+    let owner = Uuid::from_u128(1);
+    let material = FieldKey::parse("custom.material").unwrap();
+    let read = block_on(read_custom_fields(
+        &w.caller(),
+        &w.ports,
+        &[OwnerType::Product],
+        &[owner],
+        Some(&[material.clone(), material.clone()]),
+    ))
+    .unwrap();
+    assert_eq!(
+        read.json_of(owner),
+        json!({"custom.material": "wool"})
+            .as_object()
+            .unwrap()
+            .clone()
+    );
+    assert!(read.redacted.is_empty());
+}
+
+#[test]
+fn reading_a_key_the_caller_cannot_see_is_unknown() {
+    let w = World::new();
+    let namespace = Namespace::of_app(AppKey::new("app_erp").unwrap());
+    let mut secret = spec(OwnerType::Product, "secret", "text", json!({}));
+    secret.private = true;
+    block_on(sync_managed_definitions(
+        &w.ctx,
+        &w.ports,
+        &w.ids,
+        &namespace,
+        vec![secret],
+    ))
+    .unwrap();
+    let other = Ctx::new(
+        Actor::App(AppId::from_uuid(Uuid::from_u128(9))),
+        vec![Scope::ProductsRead],
+    );
+    let kind = CallerKind::App(AppKey::new("app_other").unwrap());
+    let result = block_on(read_custom_fields(
+        &FieldCaller::new(&other, &kind),
+        &w.ports,
+        &[OwnerType::Product],
+        &[Uuid::from_u128(1)],
+        Some(&[FieldKey::parse("app_erp.secret").unwrap()]),
+    ));
+    assert_eq!(
+        result,
+        Err(CommandError::Unknown("app_erp.secret".to_string()))
+    );
+}
+
+#[test]
+fn reading_lists_at_most_ten_keys() {
+    let w = World::new();
+    let keys: Vec<FieldKey> = (0..=MAX_LISTED_KEYS)
+        .map(|n| FieldKey::parse(&format!("custom.k{n}")).unwrap())
+        .collect();
+    let result = block_on(read_custom_fields(
+        &w.caller(),
+        &w.ports,
+        &[OwnerType::Product],
+        &[Uuid::from_u128(1)],
+        Some(&keys),
+    ));
+    assert_eq!(
+        result,
+        Err(CommandError::TooManyListedKeys {
+            max: MAX_LISTED_KEYS
+        })
+    );
+}
+
+#[test]
+fn reading_needs_the_owners_read_scope() {
+    let w = World::new();
+    let catalog = Ctx::new(
+        Actor::User(UserId::from_uuid(Uuid::from_u128(2))),
+        vec![Scope::ProductsRead],
+    );
+    let kind = CallerKind::Merchant;
+    let result = block_on(read_custom_fields(
+        &FieldCaller::new(&catalog, &kind),
+        &w.ports,
+        &[OwnerType::Customer],
+        &[Uuid::from_u128(1)],
+        None,
+    ));
+    assert_eq!(
+        result,
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::CustomersRead
+        )))
+    );
 }

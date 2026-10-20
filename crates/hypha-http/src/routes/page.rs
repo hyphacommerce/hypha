@@ -14,6 +14,7 @@ use std::{borrow::Cow, fmt::Display, marker::PhantomData, str::FromStr};
 use axum::{extract::FromRequestParts, http::request::Parts};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use hypha_core::{Keyset, Page, PageLimit, PageRequest, SortKey, Timestamp};
+use hypha_custom_fields::RawFilterOp;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use utoipa::{
     PartialSchema, ToSchema,
@@ -264,11 +265,107 @@ impl<F: DeserializeOwned + SortedFilters> ListQuery<F> {
     pub(crate) fn parse_sorted<Id: FromStr>(
         self,
     ) -> Result<(PageRequest<Keyset<Id>>, F, ListScope), ApiError> {
-        let (page, filters, scope) = self.parse_positions()?;
+        let (page, filters, scope, _) = self.parse_positions(false)?;
         if page.after.as_ref().is_some_and(|at| !filters.fits(&at.key)) {
             return Err(ApiError::invalid_cursor());
         }
         Ok((page, filters, scope))
+    }
+
+    /// `parse_sorted` for a list of custom field owners (design note 0033, §7): the
+    /// `field[…]` filters and `custom_fields` are read apart from `F`.
+    pub(crate) fn parse_sorted_with_fields<Id: FromStr>(
+        self,
+    ) -> Result<SortedWithFields<Id, F>, ApiError> {
+        let (page, filters, scope, fields) = self.parse_positions(true)?;
+        if page.after.as_ref().is_some_and(|at| !filters.fits(&at.key)) {
+            return Err(ApiError::invalid_cursor());
+        }
+        Ok((page, filters, scope, fields))
+    }
+}
+
+/// What `parse_sorted_with_fields` reads: the page, the route's filters, its scope and
+/// the custom field parameters.
+pub(crate) type SortedWithFields<Id, F> = (PageRequest<Keyset<Id>>, F, ListScope, FieldQuery);
+
+/// A list's custom field parameters (design note 0033, §6.2, §7), as the query spells
+/// them: `field[custom.material]=wool,cotton` (any of these),
+/// `field[custom.weight][gte]=1.5` (`eq`, `gt`, `gte`, `lt`, `lte`, `exists`), and
+/// `custom_fields=custom.material,custom.tags` (the values to include). Checked against
+/// the definitions by the route (`custom_fields::filters`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FieldQuery {
+    pub filters: Vec<RawFieldFilter>,
+    /// The keys `custom_fields` names; `None` without it.
+    pub keys: Option<Vec<String>>,
+}
+
+/// One `field[…]` parameter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawFieldFilter {
+    /// `namespace.key`, as sent.
+    pub key: String,
+    pub op: RawFilterOp,
+    /// The value split at commas, blanks dropped.
+    pub operands: Vec<String>,
+}
+
+impl FieldQuery {
+    pub fn is_empty(&self) -> bool {
+        self.filters.is_empty() && self.keys.is_none()
+    }
+
+    /// Whether `name` is one of these parameters.
+    fn claims(name: &str) -> bool {
+        name == "custom_fields" || name.starts_with("field[")
+    }
+
+    fn take(&mut self, name: &str, value: &str) -> Result<(), ApiError> {
+        let split = |v: &str| -> Vec<String> {
+            v.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect()
+        };
+        if name == "custom_fields" {
+            if self.keys.replace(split(value)).is_some() {
+                return Err(ApiError::invalid_query("duplicate field `custom_fields`"));
+            }
+            return Ok(());
+        }
+        let malformed = || {
+            ApiError::invalid_query(format!(
+                "{name:?} is not a filter: `field[namespace.key]` or `field[namespace.key][op]`"
+            ))
+        };
+        let rest = name.strip_prefix("field[").ok_or_else(malformed)?;
+        let (key, rest) = rest.split_once(']').ok_or_else(malformed)?;
+        let op = match rest {
+            "" => RawFilterOp::Eq,
+            _ => rest
+                .strip_prefix('[')
+                .and_then(|r| r.strip_suffix(']'))
+                .and_then(RawFilterOp::parse)
+                .ok_or_else(|| {
+                    ApiError::invalid_query(format!(
+                        "{name:?}: the operator is eq, gt, gte, lt, lte or exists"
+                    ))
+                })?,
+        };
+        if key.is_empty() {
+            return Err(malformed());
+        }
+        if self.filters.iter().any(|f| f.key == key && f.op == op) {
+            return Err(ApiError::invalid_query(format!("duplicate field `{name}`")));
+        }
+        self.filters.push(RawFieldFilter {
+            key: key.to_string(),
+            op,
+            operands: split(value),
+        });
+        Ok(())
     }
 }
 
@@ -278,7 +375,7 @@ impl<F: DeserializeOwned> ListQuery<F> {
     /// this list (with these filters) didn't hand out is `400 invalid_cursor`; anything
     /// malformed or unknown is `400 invalid_query`.
     pub(crate) fn parse<Id: FromStr>(self) -> Result<(PageRequest<Id>, F, ListScope), ApiError> {
-        let (page, filters, scope) = self.parse_positions()?;
+        let (page, filters, scope, _) = self.parse_positions(false)?;
         let after = match page.after {
             None => None,
             Some(Keyset {
@@ -297,9 +394,13 @@ impl<F: DeserializeOwned> ListQuery<F> {
         ))
     }
 
+    /// With `fields`, the custom field parameters are taken out (`FieldQuery`) before
+    /// `F` reads the rest; without, they reach `F` (which refuses them).
+    #[allow(clippy::type_complexity)]
     fn parse_positions<Id: FromStr>(
         self,
-    ) -> Result<(PageRequest<Keyset<Id>>, F, ListScope), ApiError> {
+        fields: bool,
+    ) -> Result<(PageRequest<Keyset<Id>>, F, ListScope, FieldQuery), ApiError> {
         let pairs: Vec<(String, String)> =
             serde_urlencoded::from_str(self.query.as_deref().unwrap_or(""))
                 .map_err(ApiError::invalid_query)?;
@@ -322,6 +423,17 @@ impl<F: DeserializeOwned> ListQuery<F> {
         let scope = ListScope {
             filters: filters.clone(),
         };
+        let mut field_query = FieldQuery::default();
+        if fields {
+            let mut rest = Vec::with_capacity(filters.len());
+            for (name, value) in filters {
+                match FieldQuery::claims(&name) {
+                    true => field_query.take(&name, &value)?,
+                    false => rest.push((name, value)),
+                }
+            }
+            filters = rest;
+        }
         let after = cursor
             .map(|c| Cursor::decode(&c, &scope).ok_or_else(ApiError::invalid_cursor))
             .transpose()?;
@@ -339,7 +451,25 @@ impl<F: DeserializeOwned> ListQuery<F> {
         // and refuses one repeated for a single value.
         let rest = serde_urlencoded::to_string(&filters).map_err(ApiError::internal)?;
         let filters = serde_html_form::from_str(&rest).map_err(ApiError::invalid_query)?;
-        Ok((PageRequest { after, limit }, filters, scope))
+        Ok((PageRequest { after, limit }, filters, scope, field_query))
+    }
+}
+
+impl ListQuery<NoFilters> {
+    /// For a list that isn't paged (the category tree): only the custom field
+    /// parameters (`FieldQuery`); anything else is `400 invalid_query`.
+    pub(crate) fn field_query(self) -> Result<FieldQuery, ApiError> {
+        let pairs: Vec<(String, String)> =
+            serde_urlencoded::from_str(self.query.as_deref().unwrap_or(""))
+                .map_err(ApiError::invalid_query)?;
+        let mut fields = FieldQuery::default();
+        for (name, value) in pairs {
+            if !FieldQuery::claims(&name) {
+                return Err(ApiError::invalid_query(format!("unknown field `{name}`")));
+            }
+            fields.take(&name, &value)?;
+        }
+        Ok(fields)
     }
 }
 

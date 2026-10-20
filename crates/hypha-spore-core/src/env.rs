@@ -17,6 +17,11 @@ use hypha_apps::{HasSporeSettings, SettingsReadError, read_spore_settings};
 use hypha_core::{
     AppKey, AppKeyError, Clock, IdGenerator, Random, SealError, Sealed, SecretBox, Timestamp,
 };
+use hypha_custom_fields::{
+    CallerKind, FieldCaller, HasCustomFieldDefinitions, HasCustomFieldValues, Owner, OwnerFields,
+    ReferenceTargets, SetCustomFields, StageCustomFieldValues, get_custom_fields,
+    set_custom_fields,
+};
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 use uuid::Uuid;
@@ -235,6 +240,95 @@ impl SporeEnv {
             .map(|v| serde_json::from_value(serde_json::Value::Object(v)))
             .transpose()
             .map_err(|e| SettingsError::Shape(e.to_string()))
+    }
+}
+
+impl SporeEnv {
+    /// Who the spore is when it writes custom fields: its app (`Actor::App`) with its
+    /// grant's scopes, and the owner of its namespace (`CallerKind::Spore`).
+    async fn field_caller<P: hypha_apps::HasApps + ?Sized>(
+        &self,
+        ports: &P,
+    ) -> Result<(hypha_core::Ctx, CallerKind), FieldsError> {
+        use hypha_apps::AppRepo;
+        let key = AppKey::of_spore(self.name)?;
+        let app = ports
+            .apps()
+            .get(&key)
+            .await?
+            .ok_or(FieldsError::NotRegistered)?;
+        let scopes = app.grant().map(|g| g.scopes().to_vec()).unwrap_or_default();
+        let ctx = hypha_core::Ctx::new(hypha_core::Actor::App(app.id()), scopes);
+        Ok((ctx, CallerKind::Spore(key)))
+    }
+
+    /// Writes `owner`'s custom fields as the spore (design note 0033, §5.1): its own
+    /// `spore_<name>.*` fields, which only it writes (and staff, where a field's
+    /// `access.admin` is `read_write`), and `custom.*` ones its scopes allow. `values`
+    /// is a JSON Merge Patch by full key (`{"spore_loyalty.points": 120}`, `null`
+    /// removes). Like every write, it needs the owner's write scope (`products:write`,
+    /// …) among the spore's `SCOPES`, and the owner must exist (the caller loaded it).
+    pub async fn set_custom_fields<P>(
+        &self,
+        ports: &P,
+        owner: &Owner,
+        values: std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Result<OwnerFields, FieldsError>
+    where
+        P: hypha_apps::HasApps
+            + HasCustomFieldDefinitions
+            + HasCustomFieldValues
+            + ReferenceTargets
+            + hypha_core::HasBatch<Batch: StageCustomFieldValues + hypha_core::StageEvents>,
+    {
+        let (ctx, kind) = self.field_caller(ports).await?;
+        let input = SetCustomFields {
+            values,
+            if_versions: Default::default(),
+        };
+        Ok(set_custom_fields(&FieldCaller::new(&ctx, &kind), ports, owner, input).await?)
+    }
+
+    /// `owner`'s custom fields as the spore reads them (its private fields included),
+    /// with versions. Needs the owner's read scope among the spore's `SCOPES`.
+    pub async fn custom_fields<P>(
+        &self,
+        ports: &P,
+        owner: &Owner,
+    ) -> Result<OwnerFields, FieldsError>
+    where
+        P: hypha_apps::HasApps + HasCustomFieldDefinitions + HasCustomFieldValues,
+    {
+        let (ctx, kind) = self.field_caller(ports).await?;
+        Ok(get_custom_fields(&FieldCaller::new(&ctx, &kind), ports, owner).await?)
+    }
+}
+
+/// Why a spore couldn't read or write custom fields.
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum FieldsError {
+    /// The spore's name isn't a key (the host refuses such a build first).
+    #[error(transparent)]
+    Key(#[from] AppKeyError),
+    /// Its app isn't registered (the host registers it at startup).
+    #[error("the spore isn't registered")]
+    NotRegistered,
+    #[error(transparent)]
+    Repo(#[from] hypha_core::RepoError),
+    /// The command's own error (`custom_fields_invalid` with every problem, a missing
+    /// scope, …).
+    #[error(transparent)]
+    Fields(#[from] hypha_custom_fields::CommandError),
+}
+
+impl hypha_core::ErrorCode for FieldsError {
+    fn code(&self) -> &'static str {
+        match self {
+            FieldsError::Key(e) => e.code(),
+            FieldsError::NotRegistered => "spore_not_registered",
+            FieldsError::Repo(e) => e.code(),
+            FieldsError::Fields(e) => e.code(),
+        }
     }
 }
 

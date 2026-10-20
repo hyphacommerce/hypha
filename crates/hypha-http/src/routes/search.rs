@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::{AssetId, CategoryId, Money, ProductId, VariantId};
 use hypha_media::{AssetRepo, HasAssets};
-use hypha_search::{SearchInput, search};
+use hypha_search::{SearchInput, search, update_search_settings};
 use hypha_search_index::{
     Group, HasSearchSettings, SearchSettingsRepo, Sort, UpdateSearchSettings, get_search_settings,
-    reindex, search_status, update_search_settings,
+    reindex, search_status,
 };
 use serde::{Deserialize, Serialize};
 
@@ -85,7 +85,9 @@ pub struct SearchParams {
     /// descriptions; each must start a word. Absent lists every product.
     q: Option<String>,
     /// Repeatable `key:value`, key `option.<name>` (any case), `vendor`,
-    /// `product_type` or `tag`: values of one key match any, different keys all.
+    /// `product_type`, `tag` or `field.<namespace>.<key>` (a custom field the merchant
+    /// made a facet; a choice field's value is its key): values of one key match any,
+    /// different keys all.
     #[serde(default)]
     #[param(value_type = Vec<String>)]
     filter: Vec<String>,
@@ -151,14 +153,19 @@ pub struct SearchHitResponse {
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct FacetValueResponse {
+    /// As `filter` takes it: a `choice` field's value is its key.
     value: String,
+    /// What to show for it: a `choice` field's label (design note 0033, §9); `null`
+    /// for every other facet, whose value is its own label.
+    label: Option<String>,
     /// Results (as grouped) with this value, ignoring this facet's own filter.
     count: u64,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct FacetResponse {
-    /// As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`.
+    /// As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`, or
+    /// `field.<namespace>.<key>` for a custom field (`field.custom.material`).
     key: String,
     /// The merchant's label, if they set one.
     label: Option<String>,
@@ -290,17 +297,21 @@ pub async fn storefront_search<S: Storage>(
         facets: results
             .facets
             .into_iter()
-            .map(|f| FacetResponse {
-                label: found.labels.get(&f.key).cloned(),
-                key: f.key.to_string(),
-                values: f
-                    .values
-                    .into_iter()
-                    .map(|v| FacetValueResponse {
-                        value: v.value,
-                        count: v.count,
-                    })
-                    .collect(),
+            .map(|f| {
+                let value_labels = found.value_labels.get(&f.key);
+                FacetResponse {
+                    label: found.labels.get(&f.key).cloned(),
+                    key: f.key.to_string(),
+                    values: f
+                        .values
+                        .into_iter()
+                        .map(|v| FacetValueResponse {
+                            label: value_labels.and_then(|l| l.get(&v.value)).cloned(),
+                            value: v.value,
+                            count: v.count,
+                        })
+                        .collect(),
+                }
             })
             .collect(),
         price: results
@@ -319,7 +330,7 @@ pub async fn storefront_search<S: Storage>(
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct FacetSettingResponse {
-    /// `option.<name>`, `vendor`, `product_type` or `tag`.
+    /// `option.<name>`, `vendor`, `product_type`, `tag` or `field.<namespace>.<key>`.
     key: String,
     label: Option<String>,
 }
@@ -373,7 +384,10 @@ pub async fn fetch_settings<S: Storage>(
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FacetSettingRequest {
-    /// `option.<name>`, `vendor`, `product_type` or `tag`.
+    /// `option.<name>`, `vendor`, `product_type`, `tag`, or `field.<namespace>.<key>`:
+    /// a product or variant custom field that's `filterable`, shown to storefronts
+    /// (`access.storefront: read`) and of type `text`, `choice`, `boolean`, `integer`
+    /// or a list of those (`422 facet_field_not_allowed` otherwise).
     key: String,
     /// Up to 255 characters; absent or `null` lets the storefront label it.
     #[serde(default)]

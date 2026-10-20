@@ -306,7 +306,7 @@ pub async fn list_product_views<S: HasProducts + HasAssets>(
     page: PageRequest<Keyset<ProductId>>,
 ) -> Result<Page<ProductSummaryView>, CommandError> {
     ctx.require(Scope::ProductsRead)?;
-    let filter = ProductFilter::new(input.filter)?;
+    let filter = ProductFilter::new(input.filter)?.with_fields(input.fields);
     let page = ports.products().list(&filter, input.sort, page).await?;
     let featured: Vec<AssetId> = page.items.iter().filter_map(|s| s.featured_media).collect();
     let assets = ports.assets().get_many(&featured).await?;

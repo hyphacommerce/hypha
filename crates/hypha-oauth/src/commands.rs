@@ -6,8 +6,8 @@ use core::time::Duration;
 
 use hypha_apps::{
     App, AppManifest, AppRepo, Grant, InstalledManifest, ManifestFetcher, ManifestSource,
-    StageApps, fetch_manifest, is_private_client, new_secret, normalize, open_secret,
-    private_client_id,
+    StageApps, check_retypes, fetch_manifest, is_private_client, new_secret, normalize,
+    open_secret, private_client_id,
 };
 use hypha_auth::{NewToken, TokenHash, TokenKind};
 use hypha_core::{
@@ -96,6 +96,12 @@ pub async fn authorize<S: OAuthPorts>(
         && installed.url != client_id
     {
         return Err(UnredirectableError::OtherManifest(manifest.key().clone()).into());
+    }
+    // A field's type is part of its identity (design note 0033, CF3): a manifest that
+    // changes one can never be approved, so it doesn't reach the consent page.
+    if let Some(installed) = app.as_ref().and_then(|a| a.manifest()) {
+        check_retypes(&installed.manifest, &manifest)
+            .map_err(|e| UnredirectableError::Manifest(e.into()))?;
     }
 
     // From here on, errors go back to the app.
@@ -322,16 +328,43 @@ impl Approval {
     }
 }
 
-/// Approves a request: installs the app (a new one gets its sealed secret, handed to
-/// it once with its first tokens) or replaces its grant. A public app's answer is where
-/// to send the browser; a private app's is its tokens (`Approval`). The staff member
-/// needs `apps:write` and every scope requested.
+/// A write a command prepared without committing it (design note 0033, §8): what it
+/// decided (`answer`), its writes staged in `batch`, and the manifest the write applies
+/// to the app, if it applies one. The caller stages what this crate can't see in the
+/// same batch (the HTTP layer syncs the app's custom fields from `applies`), then
+/// commits: the app and what hangs off its manifest change together or not at all.
+#[derive(Debug)]
+pub struct Prepared<B, T> {
+    pub batch: B,
+    pub answer: T,
+    pub applies: Option<AppManifest>,
+}
+
+/// Approves a request and commits, with nothing else in the batch: `prepare_approval`
+/// alone, for callers with nothing to add (this crate's tests). Hosts sync the app's
+/// custom fields with it, so they use `prepare_approval`.
 pub async fn approve<S: OAuthPorts>(
     ctx: &Ctx,
     ports: &S,
     env: &impl OAuthEnv,
     id: OAuthRequestId,
 ) -> Result<Approval, CommandError> {
+    let prepared = prepare_approval(ctx, ports, env, id).await?;
+    ports.commit(prepared.batch).await?;
+    Ok(prepared.answer)
+}
+
+/// Approves a request: installs the app (a new one gets its sealed secret, handed to
+/// it once with its first tokens) or replaces its grant. A public app's answer is where
+/// to send the browser; a private app's is its tokens (`Approval`). The staff member
+/// needs `apps:write` and every scope requested. Staged, not committed (`Prepared`):
+/// every approval applies the request's manifest (`applies`).
+pub async fn prepare_approval<S: OAuthPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    env: &impl OAuthEnv,
+    id: OAuthRequestId,
+) -> Result<Prepared<S::Batch, Approval>, CommandError> {
     ctx.require(Scope::AppsWrite)?;
     let mut request = ports
         .oauth_requests()
@@ -348,6 +381,7 @@ pub async fn approve<S: OAuthPorts>(
         manifest: request.manifest().clone(),
         fetched_at: request.created_at(),
     };
+    let applies = Some(request.manifest().clone());
     let grant = Grant::new(request.scopes(), ctx.actor(), now);
     let app = ports.apps().get(request.app()).await?;
     // The key is an app installed (or uninstalled, keeping its manifest) from another
@@ -364,16 +398,19 @@ pub async fn approve<S: OAuthPorts>(
             CommandError::InstalledFromOtherUrl(key)
         });
     }
+    let mut batch = ports.batch();
     if request.is_private() {
         let key = request.app().clone();
-        return approve_private(ports, env, request, app, installed, grant)
-            .await
-            .map(|tokens| Approval::Credentials {
+        let tokens = approve_private(&mut batch, env, request, app, installed, grant)?;
+        return Ok(Prepared {
+            batch,
+            answer: Approval::Credentials {
                 app: key,
                 tokens: Box::new(tokens),
-            });
+            },
+            applies,
+        });
     }
-    let mut batch = ports.batch();
     // Started by a manifest refresh (`refresh_manifest`): the app has no PKCE verifier
     // waiting, so it gets no code. The grant changes now; the app learns it from
     // `app.grant_changed` and asks `/oauth/authorize` for tokens with the new scopes,
@@ -386,10 +423,11 @@ pub async fn approve<S: OAuthPorts>(
         app.set_grant(grant);
         batch.update_app(&mut app);
         batch.update_oauth_request(&mut request);
-        ports.commit(batch).await?;
-        return Ok(Approval::Redirect(
-            request.manifest().app_url().as_str().to_string(),
-        ));
+        return Ok(Prepared {
+            batch,
+            answer: Approval::Redirect(request.manifest().app_url().as_str().to_string()),
+            applies,
+        });
     };
     let first_install = match app {
         None => {
@@ -414,24 +452,26 @@ pub async fn approve<S: OAuthPorts>(
     let (location, mut code) = new_code(&request, &challenge, first_install, env);
     batch.update_oauth_request(&mut request);
     batch.insert_oauth_code(&mut code);
-    ports.commit(batch).await?;
-    Ok(Approval::Redirect(location))
+    Ok(Prepared {
+        batch,
+        answer: Approval::Redirect(location),
+        applies,
+    })
 }
 
 /// Approving a private app's request: installs it (new, again after an uninstall, or a
 /// hand-made app taking its manifest) or replaces its grant, and issues a token pair at
 /// once, since there is no redirect to send a code to. A newly sealed secret comes
 /// back with the tokens, as a public app's first code exchange gives it; an app that
-/// keeps its secret (a hand-made one, or an update) gets none.
-async fn approve_private<S: OAuthPorts>(
-    ports: &S,
+/// keeps its secret (a hand-made one, or an update) gets none. Staged in `batch`.
+fn approve_private<B: StageApps + StageOAuth>(
+    batch: &mut B,
     env: &impl OAuthEnv,
     mut request: AuthorizationRequest,
     app: Option<App>,
     installed: InstalledManifest,
     grant: Grant,
 ) -> Result<IssuedTokens, CommandError> {
-    let mut batch = ports.batch();
     let (app, app_secret) = match app {
         None => {
             let (secret, sealed) = new_secret(request.app(), env, env);
@@ -455,7 +495,6 @@ async fn approve_private<S: OAuthPorts>(
     let (access, refresh, mut token) = new_pair(env.new_uuid(), &app, request.scopes(), env);
     batch.update_oauth_request(&mut request);
     batch.insert_oauth_token(&mut token);
-    ports.commit(batch).await?;
     Ok(IssuedTokens {
         access_token: access,
         refresh_token: refresh,
@@ -487,6 +526,9 @@ pub async fn request_private_app<S: OAuthPorts>(
         && installed.url != client_id
     {
         return Err(CommandError::InstalledFromUrl(manifest.key().clone()));
+    }
+    if let Some(installed) = app.as_ref().and_then(|a| a.manifest()) {
+        check_retypes(&installed.manifest, &manifest).map_err(hypha_apps::AppError::Manifest)?;
     }
     let previous = app
         .as_ref()
@@ -888,16 +930,15 @@ pub enum Refreshed {
     /// Its registrations (webhooks, extension points, UI) are the manifest's now; scopes
     /// it no longer asks for left the grant at once.
     Updated(Box<App>),
-    /// As `Updated`, and the manifest asks for scopes the grant lacks: staff approve
-    /// them on the consent page for this request (the grant stays until then).
+    /// As `Updated`, and the manifest asks for scopes the grant lacks, or drops custom
+    /// fields (whose values would go with them): staff approve on the consent page for
+    /// this request (the grant, and the app's fields, stay until then).
     ConsentRequired(Box<App>, Box<AuthorizationRequest>),
 }
 
-/// Fetches an installed app's manifest again from its URL and applies it (design note
-/// 0029, §4.2, `POST /admin/apps/{key}/refresh`). Staff with `apps:write` do it, or
-/// the app itself with its own token. New scopes aren't granted here: they make a
-/// pending authorization request (no code: approving changes the grant, and the app
-/// then asks `/oauth/authorize` for tokens with them, approved at once).
+/// `prepare_refresh`, committed with nothing else in the batch and no custom fields
+/// considered: for callers with nothing to add (this crate's tests). Hosts use
+/// `prepare_refresh`.
 pub async fn refresh_manifest<S: OAuthPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -905,6 +946,30 @@ pub async fn refresh_manifest<S: OAuthPorts>(
     env: &impl OAuthEnv,
     key: &str,
 ) -> Result<Refreshed, CommandError> {
+    let prepared = prepare_refresh(ctx, ports, fetcher, env, key, |_| false).await?;
+    ports.commit(prepared.batch).await?;
+    Ok(prepared.answer)
+}
+
+/// Fetches an installed app's manifest again from its URL and applies it (design note
+/// 0029, §4.2, `POST /admin/apps/{key}/refresh`). Staff with `apps:write` do it, or
+/// the app itself with its own token. New scopes aren't granted here: they make a
+/// pending authorization request (no code: approving changes the grant, and the app
+/// then asks `/oauth/authorize` for tokens with them, approved at once).
+///
+/// `drops_data` says whether applying a manifest deletes data staff should see go
+/// first: the HTTP layer answers whether it removes custom fields (design note 0033,
+/// §8). Such a refresh waits for consent like new scopes do. Staged, not committed
+/// (`Prepared`): `applies` is the manifest when the app's fields change now (an
+/// `Updated` refresh), `None` when they wait for the approval.
+pub async fn prepare_refresh<S: OAuthPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    fetcher: &impl ManifestFetcher,
+    env: &impl OAuthEnv,
+    key: &str,
+    drops_data: impl Fn(&AppManifest) -> bool,
+) -> Result<Prepared<S::Batch, Refreshed>, CommandError> {
     // An app may refresh itself without `apps:write`; anyone else needs it.
     let is_app = matches!(ctx.actor(), Actor::App(_));
     if !is_app {
@@ -941,6 +1006,7 @@ pub async fn refresh_manifest<S: OAuthPorts>(
         .filter(|s| asked.contains(s))
         .copied()
         .collect();
+    // Refuses a manifest that changes a field's type (design note 0033, CF3).
     app.apply_manifest(InstalledManifest {
         url: installed.url.clone(),
         manifest: manifest.clone(),
@@ -950,9 +1016,14 @@ pub async fn refresh_manifest<S: OAuthPorts>(
     if kept.len() != grant.scopes().len() {
         app.set_grant(Grant::new(&kept, grant.approved_by(), grant.approved_at()));
     }
-    if added.is_empty() {
-        ports.apps().update(&mut app).await?;
-        return Ok(Refreshed::Updated(Box::new(app)));
+    let mut batch = ports.batch();
+    if added.is_empty() && !drops_data(&manifest) {
+        batch.update_app(&mut app);
+        return Ok(Prepared {
+            batch,
+            answer: Refreshed::Updated(Box::new(app)),
+            applies: Some(manifest),
+        });
     }
     let redirect_uri = manifest
         .redirect_uris()
@@ -971,11 +1042,13 @@ pub async fn refresh_manifest<S: OAuthPorts>(
         created_at: now,
         expires_at: now.plus(REQUEST_LIFETIME),
     });
-    let mut batch = ports.batch();
     batch.update_app(&mut app);
     batch.insert_oauth_request(&mut request);
-    ports.commit(batch).await?;
-    Ok(Refreshed::ConsentRequired(Box::new(app), Box::new(request)))
+    Ok(Prepared {
+        batch,
+        answer: Refreshed::ConsentRequired(Box::new(app), Box::new(request)),
+        applies: None,
+    })
 }
 
 /// Whether `request` is still waiting for an answer at `now`.

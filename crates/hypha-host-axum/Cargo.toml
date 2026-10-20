@@ -24,6 +24,8 @@ hypha-store-postgres = { path = "../hypha-store-postgres" }
 hypha-spore-core = { path = "../hypha-spore-core" }
 # Registering each spore's app at startup.
 hypha-apps = { path = "../hypha-apps" }
+# Syncing each spore's custom fields at startup (design note 0033, §8).
+hypha-custom-fields = { path = "../hypha-custom-fields" }
 hypha-store-s3 = { path = "../hypha-store-s3" }
 hypha-stores = { path = "../hypha-stores" }
 hypha-users = { path = "../hypha-users" }

@@ -9,6 +9,7 @@
 //! and the Tokio pieces are `hypha-host-axum`'s (design note 0026, §1).
 
 pub mod app_endpoints;
+pub mod app_fields;
 pub mod client_ip;
 pub mod email;
 pub mod error;

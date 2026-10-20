@@ -1,11 +1,11 @@
 use hypha_core::{
     Actor, AuthError, Ctx, Currency, Money, MoneyError, PageRequest, ProductId, Scope, TextError,
-    UserId,
+    UserId, VariantId,
 };
 use hypha_products::{
     CommandError, CreateSimpleProduct, Handle, HandleError, ListProducts, ProductError,
-    ProductFilterInput, ProductStatus, create_simple_product, get_product, list_products,
-    repo::ProductRepo, set_product_status,
+    ProductFilterInput, ProductStatus, create_simple_product, get_product, get_variant_product,
+    list_products, repo::ProductRepo, set_product_status,
 };
 use hypha_testkit::{InMemoryProductRepo, SequentialIds};
 use pollster::block_on;
@@ -291,5 +291,26 @@ fn list_products_needs_products_read() {
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::ProductsRead
         )))
+    );
+}
+
+#[test]
+fn a_variant_finds_its_product() {
+    let repo = InMemoryProductRepo::default();
+    let ids = SequentialIds::default();
+    let ctx = Ctx::system();
+    let mug = block_on(create_simple_product(&ctx, &repo, &ids, mug())).unwrap();
+    let variant = mug.variants()[0].id();
+    let found = block_on(get_variant_product(&ctx, &repo, variant)).unwrap();
+    assert_eq!(found.id(), mug.id());
+}
+
+#[test]
+fn an_unknown_variant_is_not_found() {
+    let repo = InMemoryProductRepo::default();
+    let id = VariantId::from_uuid(Uuid::from_u128(99));
+    assert_eq!(
+        block_on(get_variant_product(&Ctx::system(), &repo, id)),
+        Err(CommandError::Product(ProductError::VariantNotFound(id)))
     );
 }

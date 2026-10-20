@@ -375,6 +375,34 @@ pub async fn list_categories<S: HasCategories>(
     Ok(tree(ports).await?)
 }
 
+/// The categories matching every filter on their custom fields (design note 0033, §7;
+/// checked by `hypha-custom-fields` already), in tree order (by parent, then position).
+pub async fn find_categories<S: HasCategories>(
+    ctx: &Ctx,
+    ports: &S,
+    fields: &[hypha_core::FieldFilter],
+) -> Result<Vec<Category>, CommandError> {
+    ctx.require(Scope::ProductsRead)?;
+    let found = ports.categories().list_with_fields(fields).await?;
+    let tree = CategoryTree::new(found.clone());
+    let mut ordered = Vec::with_capacity(found.len());
+    fn walk(tree: &CategoryTree, parent: Option<CategoryId>, into: &mut Vec<Category>) {
+        for child in tree.children(parent) {
+            into.push(child.clone());
+            walk(tree, Some(child.id()), into);
+        }
+    }
+    walk(&tree, None, &mut ordered);
+    // Matches whose parent didn't match: after the rest, by position.
+    let mut rest: Vec<Category> = found
+        .into_iter()
+        .filter(|c| !ordered.iter().any(|o| o.id() == c.id()))
+        .collect();
+    rest.sort_by_key(|c| (c.position(), c.id()));
+    ordered.extend(rest);
+    Ok(ordered)
+}
+
 pub async fn get_category<S: HasCategories>(
     ctx: &Ctx,
     ports: &S,

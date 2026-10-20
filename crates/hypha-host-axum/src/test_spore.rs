@@ -1,12 +1,16 @@
 //! A spore for the route tests (design note 0030): one table, one event handler, a
-//! payment provider, a configuration section, settings with a secret, a block and an
-//! action, and a route on each surface
+//! payment provider, a configuration section, settings with a secret, a custom field
+//! (design note 0033, §8), a block and an action, and a route on each surface
 //! (`crate::test_spore_routes`, declared at the crate root as `spore_routes!` asks).
 //! The stock build has no spores.
 
 use axum::{Json, extract::State};
 use hypha_apps::Target;
 use hypha_core::{EventHandler, Scope, StoredEvent};
+use hypha_custom_fields::{
+    Access, AdminAccess, Capabilities, DefinitionSpec, FieldType, OwnerType, RawValidations,
+    StorefrontAccess,
+};
 use hypha_http::__private::utoipa;
 use hypha_http::error::ApiError;
 use hypha_http::extract::{Caller, Storefront};
@@ -83,7 +87,8 @@ pub struct TestSpore {
 
 impl Spore for TestSpore {
     const NAME: &'static str = "test";
-    const SCOPES: &'static [Scope] = &[Scope::ProductsRead];
+    // Writing products' fields (its own `spore_test.ribbon`) needs `products:write`.
+    const SCOPES: &'static [Scope] = &[Scope::ProductsRead, Scope::ProductsWrite];
 
     fn title() -> &'static str {
         "Test spore"
@@ -118,6 +123,24 @@ impl Spore for TestSpore {
             },
             "required": ["mode"]
         }))
+    }
+
+    fn custom_fields() -> Vec<DefinitionSpec> {
+        vec![DefinitionSpec {
+            owner_type: OwnerType::Product,
+            key: "ribbon".to_string(),
+            field_type: FieldType::parse("text").unwrap_or_else(|_| unreachable!("a type")),
+            name: "Ribbon".to_string(),
+            description: Some("The colour the spore wraps it in".to_string()),
+            validations: RawValidations::default(),
+            access: Access {
+                admin: AdminAccess::Read,
+                storefront: StorefrontAccess::None,
+            },
+            private: false,
+            personal: false,
+            capabilities: Capabilities::default(),
+        }]
     }
 
     fn check_settings(

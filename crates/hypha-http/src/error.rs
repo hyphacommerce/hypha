@@ -68,6 +68,14 @@ pub struct ApiErrorBody {
 ///   usable answer (why is in the app's call log)
 /// - `payment_refused`: `{"reason"}`, the payment provider's words
 /// - `order_not_payable`: `{"financial_status"}`
+/// - `custom_fields_invalid`: `[{"key", "owner"?, "path", "code", "message"}]`, every
+///   problem of the write at once (`owner` in bulk calls; `path` like `custom.sizes[3]`)
+/// - `custom_field_values_invalid`: `{"count", "owners": ["prod_…"]}`, the stored values
+///   a tightened definition would break (the first 20 owners); fix them first
+/// - `custom_field_stale`: `{"key"}`, the field whose `if_versions` didn't match
+/// - `too_many_items` / `too_few_items`: `{"owner", "count", "max"}` / `{…, "min"}`
+/// - `owner_not_found` / `invalid_owner`: `{"owners": ["prod_…"]}`, owners of a bulk
+///   custom fields call that don't exist or aren't the definition's owner type
 ///
 /// Status rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 429 over
 /// a rate limit or locked second factor; 403
@@ -292,6 +300,26 @@ impl ApiError {
             "internal_error",
             "internal error",
         )
+    }
+
+    /// Owners in a bulk custom fields body that don't exist (design note 0033, §6.1).
+    pub fn owners_not_found(owners: Vec<String>) -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "owner_not_found",
+            format!("no such owner: {}", owners.join(", ")),
+        )
+        .with_details(Some(json!({ "owners": owners })))
+    }
+
+    /// Owners in a bulk custom fields body that aren't IDs of the definition's owner type.
+    pub fn invalid_owners(owners: Vec<String>, owner_type: impl std::fmt::Display) -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_owner",
+            format!("not {owner_type} IDs: {owners:?}"),
+        )
+        .with_details(Some(json!({ "owners": owners })))
     }
 
     /// For routes whose URL names the resource: its "not found" (`code`) is a 404,
@@ -556,6 +584,59 @@ impl From<hypha_categories::CommandError> for ApiError {
             ) => StatusCode::CONFLICT,
         };
         Self::domain(status, e)
+    }
+}
+
+/// Custom fields (design note 0033): a definition in the URL is 404; a managed field,
+/// a stale version, a taken key, a changed type, stored values a change would break or
+/// a list that would outgrow its limits are 409; a field the caller may not write is
+/// 403; the rest is invalid input (422).
+impl From<hypha_custom_fields::CommandError> for ApiError {
+    fn from(e: hypha_custom_fields::CommandError) -> Self {
+        use hypha_custom_fields::CommandError as E;
+        let status = match &e {
+            E::Auth(_) | E::ReadOnly(_) => StatusCode::FORBIDDEN,
+            E::DefinitionNotFound(_) => StatusCode::NOT_FOUND,
+            E::KeyTaken { .. }
+            | E::Managed(_)
+            | E::Stale(_)
+            | E::TypeChanged(_)
+            | E::ValuesInvalid { .. }
+            | E::TooManyItems { .. }
+            | E::TooFewItems { .. }
+            | E::TooManyDefinitions { .. }
+            | E::TooManyFilterable { .. } => StatusCode::CONFLICT,
+            E::Definition(_)
+            | E::FieldsInvalid(_)
+            | E::TooManyKeys { .. }
+            | E::TooManyOwners { .. }
+            | E::NoOwners
+            | E::NotAList(_)
+            | E::OwnerTypeMismatch(..)
+            | E::Unknown(_)
+            | E::NotFilterable(_)
+            | E::InvalidFilter(..)
+            | E::TooManyListedKeys { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            // Only syncing an app's or a spore's fields names a namespace: a bug here.
+            E::NotManagedNamespace(_) => return Self::internal(e),
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        let details = match &e {
+            E::FieldsInvalid(problems) => serde_json::to_value(problems).ok(),
+            E::ValuesInvalid { count, owners } => Some(json!({ "count": count, "owners": owners })),
+            E::Stale(key) => Some(json!({ "key": key })),
+            E::TooManyItems { owner, count, max } => {
+                Some(json!({ "owner": owner, "count": count, "max": max }))
+            }
+            E::TooFewItems { owner, count, min } => {
+                Some(json!({ "owner": owner, "count": count, "min": min }))
+            }
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 

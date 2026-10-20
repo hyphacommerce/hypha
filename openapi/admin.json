@@ -430,6 +430,14 @@
                   "null"
                 ]
               },
+              "custom_fields": {
+                "additionalProperties": {},
+                "description": "Its custom field values the caller may read (design note 0033); `PATCH\n/admin/orders/{id}/custom-fields` writes them. A personal one is left out\nwithout `customer_data:profile` and listed in `redacted` as\n`custom_fields.<key>`.",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
               "payments": {
                 "description": "Its payments, newest first (design note 0027): the method, status and\ninstructions of each.",
                 "items": {
@@ -447,7 +455,8 @@
             },
             "required": [
               "unfulfilled",
-              "payments"
+              "payments",
+              "custom_fields"
             ],
             "type": "object"
           }
@@ -1400,6 +1409,17 @@
             },
             "type": "array"
           },
+          "custom_fields": {
+            "additionalProperties": {},
+            "description": "The custom field values `?custom_fields=` asked for (design note 0033); absent\nwithout it.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "handle": {
             "type": "string"
           },
@@ -1546,6 +1566,14 @@
             "description": "When it was created, RFC 3339 in UTC.",
             "type": "string"
           },
+          "custom_fields": {
+            "additionalProperties": {},
+            "description": "Its custom field values the caller may read (design note 0033); `PATCH\n/admin/categories/{id}/custom-fields` writes them.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "description": {
             "description": "Sanitised HTML (scripts, styles and event attributes removed), safe to render.",
             "type": [
@@ -1606,6 +1634,7 @@
           "visible",
           "ancestors",
           "children",
+          "custom_fields",
           "created_at",
           "updated_at"
         ],
@@ -1916,7 +1945,7 @@
           },
           "custom_fields": {
             "$ref": "#/components/schemas/CustomFieldChangesDto",
-            "description": "The custom fields the app declares, against those of the manifest it's installed\nfrom."
+            "description": "The custom fields the app declares, against the definitions it has now: approving\ncreates `added`, updates `kept` and deletes `removed` with their values."
           },
           "expires_at": {
             "description": "The request can be answered until then (RFC 3339).",
@@ -2238,6 +2267,75 @@
         "required": [
           "name",
           "kind"
+        ],
+        "type": "object"
+      },
+      "CreateCustomFieldDefinitionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "access": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CustomFieldAccess",
+                "description": "Default: admin `read_write`, storefront `none`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "capabilities": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CustomFieldCapabilities"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "description": "Up to 1,000 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "key": {
+            "description": "`[a-z0-9_]{2,64}`, starting with a letter; unique per owner type in `custom`.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Up to 255 characters.",
+            "type": "string"
+          },
+          "owner_type": {
+            "$ref": "#/components/schemas/OwnerTypeDto"
+          },
+          "personal": {
+            "description": "Customers' and orders' fields only.",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "`text`, `multiline_text`, `rich_text`, `integer`, `decimal`, `boolean`, `date`,\n`date_time`, `url`, `money`, `measurement`, `choice`, `reference`, `json`, or\n`list.<type>` (not of `boolean`, `multiline_text`, `rich_text`, `json`). It never\nchanges.",
+            "type": "string"
+          },
+          "validations": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CustomFieldValidations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "owner_type",
+          "key",
+          "type",
+          "name"
         ],
         "type": "object"
       },
@@ -2605,8 +2703,49 @@
         ],
         "type": "object"
       },
+      "CustomFieldAccess": {
+        "additionalProperties": false,
+        "description": "Who sees and writes a field's values (design note 0033, §5).",
+        "properties": {
+          "admin": {
+            "$ref": "#/components/schemas/CustomFieldAdminAccess"
+          },
+          "storefront": {
+            "$ref": "#/components/schemas/CustomFieldStorefrontAccess"
+          }
+        },
+        "required": [
+          "admin",
+          "storefront"
+        ],
+        "type": "object"
+      },
+      "CustomFieldAdminAccess": {
+        "description": "What staff may do with an app's or a spore's field; the merchant's own are always\n`read_write`.\n\nKnown values: `read`, `read_write`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "read",
+          "read_write"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "CustomFieldCapabilities": {
+        "additionalProperties": false,
+        "description": "What a field's values can be used for (§7).",
+        "properties": {
+          "filterable": {
+            "description": "A filter on its owner's admin list (`field[custom.material]=wool`); at most 50\nper owner type.",
+            "type": "boolean"
+          },
+          "unique": {
+            "description": "No two owners hold the same value (text ignoring case): `text`, `integer` and\n`url` only. Filtering on it finds at most one owner.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "CustomFieldChangesDto": {
-        "description": "What approving does to the app's custom fields, compared with the manifest it's\ninstalled from (everything is `added` on a first install).",
+        "description": "What approving does to the app's custom fields, compared with the definitions its\nnamespace holds now (everything is `added` on a first install).",
         "properties": {
           "added": {
             "description": "Fields the app adds: list the owners they're on, and which are personal.",
@@ -2644,6 +2783,311 @@
         ],
         "type": "object"
       },
+      "CustomFieldChoice": {
+        "additionalProperties": false,
+        "description": "A `choice` field's choice: the key is what's stored, filtered and faceted (it can't\nchange); the label is for people.",
+        "properties": {
+          "key": {
+            "description": "`[a-z0-9_-]{1,64}`.",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "type": "object"
+      },
+      "CustomFieldDefinitionId": {
+        "description": "A CustomFieldDefinitionId: `cfd_` and 32 hex digits.",
+        "examples": [
+          "cfd_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^cfd_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "CustomFieldDefinitionList": {
+        "properties": {
+          "items": {
+            "description": "By owner type, then position. A store has at most 128 per owner type and\nnamespace, so they come in one response.",
+            "items": {
+              "$ref": "#/components/schemas/CustomFieldDefinitionResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CustomFieldDefinitionResponse": {
+        "properties": {
+          "access": {
+            "$ref": "#/components/schemas/CustomFieldAccess"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/CustomFieldCapabilities"
+          },
+          "created_at": {
+            "description": "RFC 3339 in UTC.",
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "field": {
+            "description": "`namespace.key`: what values, filters and events name it by.",
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/CustomFieldDefinitionId"
+          },
+          "key": {
+            "type": "string"
+          },
+          "managed_by": {
+            "description": "The app or spore that declares it (`app_<name>`, `spore_<name>`); `null` for the\nmerchant's own. Those are read-only here (`409 custom_field_managed`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "description": "`custom` (the merchant's), `app_<name>` or `spore_<name>`.",
+            "type": "string"
+          },
+          "owner_type": {
+            "$ref": "#/components/schemas/OwnerTypeDto"
+          },
+          "personal": {
+            "description": "About a person: redacted without `customer_data:profile` (customers and orders).",
+            "type": "boolean"
+          },
+          "position": {
+            "description": "On its owner type's form, from 0.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "private": {
+            "description": "Only its app (and staff) read it.",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "`text`, `integer`, `choice`, `list.text`, … (design note 0033, §3).",
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "validations": {
+            "$ref": "#/components/schemas/CustomFieldValidations"
+          }
+        },
+        "required": [
+          "id",
+          "owner_type",
+          "namespace",
+          "key",
+          "field",
+          "name",
+          "type",
+          "validations",
+          "access",
+          "private",
+          "personal",
+          "capabilities",
+          "position",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "CustomFieldStorefrontAccess": {
+        "description": "Whether storefronts see the field (opt-in).\n\nKnown values: `none`, `read`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "none",
+          "read"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "CustomFieldValidations": {
+        "additionalProperties": false,
+        "description": "A definition's validations; which apply depends on its type (design note 0033, §3).\nAbsent ones don't apply.",
+        "properties": {
+          "choices": {
+            "description": "`choice` (required): at most 128.",
+            "items": {
+              "$ref": "#/components/schemas/CustomFieldChoice"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "currencies": {
+            "description": "`money`: ISO 4217 codes.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "dimension": {
+            "description": "`measurement` (required): `weight`, `length` or `volume`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "kind": {
+            "description": "`reference` (required): `product`, `variant`, `category`, `customer` or `asset`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max": {},
+          "max_items": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_length": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_scale": {
+            "description": "`decimal`: digits after the point.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "min": {
+            "description": "In the type's own terms: an integer, a decimal string, a date or date-time,\nmoney's minor units, a measurement `{\"value\", \"unit\"}`."
+          },
+          "min_items": {
+            "description": "Lists: at most 128 items.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "min_length": {
+            "description": "Text, in characters.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pattern": {
+            "description": "`text`: a regular expression the whole value matches (no look-around or\nback-references).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schemes": {
+            "description": "`url`: `https`, `http`, `mailto`, `tel`.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "unique_items": {
+            "description": "Lists: no item twice (text ignoring case).",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "CustomFieldsResponse": {
+        "description": "An owner's values as the caller sees them, with versions for `if_versions`.",
+        "properties": {
+          "custom_fields": {
+            "additionalProperties": {},
+            "description": "`{\"custom.material\": \"wool\", …}`: every value the caller may read, by the\ndefinitions' order.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "owner": {
+            "description": "The owner (`prod_…`, `var_…`, `pcat_…`, `cus_…`, `ord_…`).",
+            "type": "string"
+          },
+          "redacted": {
+            "description": "Personal fields left out for this caller (`custom_fields.<key>`): an API key or\napp without `customer_data:profile`. Never sent to staff.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "versions": {
+            "additionalProperties": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Each value's version (`{\"custom.material\": 3}`), for `if_versions`.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "owner",
+          "custom_fields",
+          "versions"
+        ],
+        "type": "object"
+      },
       "CustomerId": {
         "description": "A CustomerId: `cus_` and 32 hex digits.",
         "examples": [
@@ -2663,6 +3107,14 @@
           "created_at": {
             "description": "When it was created, RFC 3339 in UTC.",
             "type": "string"
+          },
+          "custom_fields": {
+            "additionalProperties": {},
+            "description": "Its custom field values the caller may read, `{\"custom.tier\": \"gold\", …}`\n(design note 0033); `PATCH /admin/customers/{id}/custom-fields` writes them.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
           },
           "default_billing_address": {
             "oneOf": [
@@ -2709,7 +3161,7 @@
             ]
           },
           "redacted": {
-            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope (`custom_fields.<key>` for a\npersonal custom field, without `customer_data:profile`). They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
             "items": {
               "type": "string"
             },
@@ -2727,6 +3179,7 @@
           "id",
           "email",
           "addresses",
+          "custom_fields",
           "created_at",
           "updated_at"
         ],
@@ -2771,6 +3224,17 @@
           "created_at": {
             "description": "When the customer was created, RFC 3339 in UTC.",
             "type": "string"
+          },
+          "custom_fields": {
+            "additionalProperties": {},
+            "description": "The custom field values `?custom_fields=` asked for (design note 0033); absent\nwithout it.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "email": {
             "$ref": "#/components/schemas/Email"
@@ -3304,7 +3768,7 @@
         "additionalProperties": false,
         "properties": {
           "key": {
-            "description": "`option.<name>`, `vendor`, `product_type` or `tag`.",
+            "description": "`option.<name>`, `vendor`, `product_type`, `tag`, or `field.<namespace>.<key>`:\na product or variant custom field that's `filterable`, shown to storefronts\n(`access.storefront: read`) and of type `text`, `choice`, `boolean`, `integer`\nor a list of those (`422 facet_field_not_allowed` otherwise).",
             "type": "string"
           },
           "label": {
@@ -3323,7 +3787,7 @@
       "FacetSettingResponse": {
         "properties": {
           "key": {
-            "description": "`option.<name>`, `vendor`, `product_type` or `tag`.",
+            "description": "`option.<name>`, `vendor`, `product_type`, `tag` or `field.<namespace>.<key>`.",
             "type": "string"
           },
           "label": {
@@ -4041,6 +4505,51 @@
           }
         ]
       },
+      "ListItemsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "add": {
+            "description": "Items to add where they're missing (each once; text ignoring case when the field\nhas `unique_items`).",
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "owners": {
+            "description": "1 to 250 owners of the definition's owner type (`cus_…` for a customer field).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "remove": {
+            "description": "Items to remove where they're present.",
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "owners"
+        ],
+        "type": "object"
+      },
+      "ListItemsResponse": {
+        "properties": {
+          "items": {
+            "description": "In the call's order, each owner once.",
+            "items": {
+              "$ref": "#/components/schemas/OwnerItemsResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "LocationId": {
         "description": "A LocationId: `loc_` and 32 hex digits.",
         "examples": [
@@ -4307,6 +4816,21 @@
         "required": [
           "amount",
           "currency"
+        ],
+        "type": "object"
+      },
+      "MoveCustomFieldDefinitionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "position": {
+            "description": "From 0 on its owner type's form; past the end: last.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "position"
         ],
         "type": "object"
       },
@@ -5225,6 +5749,17 @@
           "country": {
             "$ref": "#/components/schemas/CountryCode"
           },
+          "custom_fields": {
+            "additionalProperties": {},
+            "description": "The custom field values `?custom_fields=` asked for (design note 0033); absent\nwithout it.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "customer": {
             "$ref": "#/components/schemas/CustomerId"
           },
@@ -5324,6 +5859,71 @@
         },
         "required": [
           "origins"
+        ],
+        "type": "object"
+      },
+      "OwnerItemsResponse": {
+        "description": "One owner's list after the change.",
+        "properties": {
+          "added": {
+            "description": "What this call added to its list (empty: nothing changed).",
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "removed": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "version": {
+            "description": "The value's version after; `null` when the list is empty (the value is gone).",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "owner",
+          "added",
+          "removed"
+        ],
+        "type": "object"
+      },
+      "OwnerTypeDto": {
+        "description": "The kinds of record fields belong to.\n\nKnown values: `product`, `variant`, `category`, `customer`, `order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "product",
+          "variant",
+          "category",
+          "customer",
+          "order"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "OwnerValueRequest": {
+        "additionalProperties": false,
+        "description": "One owner's new value.",
+        "properties": {
+          "owner": {
+            "type": "string"
+          },
+          "value": {
+            "description": "The value; `null` removes it."
+          }
+        },
+        "required": [
+          "owner",
+          "value"
         ],
         "type": "object"
       },
@@ -6256,6 +6856,14 @@
             "description": "When it was created, RFC 3339 in UTC.",
             "type": "string"
           },
+          "custom_fields": {
+            "additionalProperties": {},
+            "description": "Its custom field values the caller may read, `{\"custom.material\": \"wool\", …}`\n(design note 0033); `PATCH /admin/products/{id}/custom-fields` writes them.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "description": {
             "description": "Sanitised HTML (scripts, styles and event attributes removed), safe to render.",
             "type": [
@@ -6330,6 +6938,7 @@
           "media",
           "channels",
           "categories",
+          "custom_fields",
           "created_at",
           "updated_at"
         ],
@@ -6392,6 +7001,17 @@
           "created_at": {
             "description": "When it was created, RFC 3339 in UTC.",
             "type": "string"
+          },
+          "custom_fields": {
+            "additionalProperties": {},
+            "description": "The custom field values `?custom_fields=` asked for (design note 0033); absent\nwithout it.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "featured_media": {
             "oneOf": [
@@ -7095,6 +7715,36 @@
         ],
         "type": "object"
       },
+      "SetCustomFieldsRequest": {
+        "additionalProperties": false,
+        "description": "A write to an owner's fields: a JSON Merge Patch of its values.",
+        "properties": {
+          "custom_fields": {
+            "additionalProperties": {},
+            "description": "`{\"custom.material\": \"wool\", \"custom.care\": null}`: a key absent keeps its value,\n`null` removes it. At most 50 keys; every problem is reported at once (`422\ncustom_fields_invalid`), and nothing is written unless all are valid.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "if_versions": {
+            "additionalProperties": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Writes a key only if its value's version is still this one (`0`: no value yet);\notherwise `409 custom_field_stale`. Optional: by default the last write wins.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "custom_fields"
+        ],
+        "type": "object"
+      },
       "SetCustomerRequest": {
         "additionalProperties": false,
         "properties": {
@@ -7110,6 +7760,22 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "SetFieldValuesRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "values": {
+            "description": "1 to 250 owners of the definition's owner type, each once.",
+            "items": {
+              "$ref": "#/components/schemas/OwnerValueRequest"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "values"
+        ],
         "type": "object"
       },
       "SetFixedPricesRequest": {
@@ -8097,6 +8763,36 @@
         },
         "type": "object"
       },
+      "UpdateCustomFieldDefinitionRequest": {
+        "additionalProperties": false,
+        "description": "A JSON Merge Patch of a `custom` definition: absent keeps; `null` clears the\ndescription. Owner type, key and type never change.",
+        "properties": {
+          "access": {
+            "$ref": "#/components/schemas/CustomFieldAccess"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/CustomFieldCapabilities",
+            "description": "Turning `unique` on is checked against the stored values, like validations."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "personal": {
+            "type": "boolean"
+          },
+          "validations": {
+            "$ref": "#/components/schemas/CustomFieldValidations",
+            "description": "Replaces them all. A change that tightens them (a lower `max`, fewer `choices`, a\n`pattern`) is checked against the stored values first: `409\ncustom_field_values_invalid` names the owners to fix."
+          }
+        },
+        "type": "object"
+      },
       "UpdateCustomerRequest": {
         "additionalProperties": false,
         "description": "JSON Merge Patch (see `patch`): only the fields sent change, `null` clears a name or\nphone. The email can be changed but not cleared.",
@@ -8696,6 +9392,39 @@
         ],
         "type": "object"
       },
+      "ValueInUseResponse": {
+        "properties": {
+          "owners": {
+            "description": "How many owners hold it.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "description": "A value (a list's item, for a list field) as stored: a choice's key, text as\nfirst written."
+          }
+        },
+        "required": [
+          "value",
+          "owners"
+        ],
+        "type": "object"
+      },
+      "ValuesInUseResponse": {
+        "properties": {
+          "items": {
+            "description": "Most held first.",
+            "items": {
+              "$ref": "#/components/schemas/ValueInUseResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "VariantId": {
         "description": "A VariantId: `var_` and 32 hex digits.",
         "examples": [
@@ -8706,6 +9435,14 @@
       },
       "VariantResponse": {
         "properties": {
+          "custom_fields": {
+            "additionalProperties": {},
+            "description": "Its own custom field values the caller may read (variant fields, design note\n0033); `PATCH /admin/variants/{id}/custom-fields` writes them.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "id": {
             "$ref": "#/components/schemas/VariantId"
           },
@@ -8762,7 +9499,8 @@
           "id",
           "price",
           "selections",
-          "requires_shipping"
+          "requires_shipping",
+          "custom_fields"
         ],
         "type": "object"
       },
@@ -11759,7 +12497,7 @@
             "bearer": []
           }
         ],
-        "summary": "Fetches an installed app's manifest again (design note 0029, §4.2) and applies its\nregistrations (webhooks, UI). Scopes it no longer asks for leave the grant at once;\nnew ones make an authorization request staff approve (`consent_required`): approving\nwidens the grant, and the app then gets tokens with them from `/oauth/authorize`\nwithout asking again. Staff with `apps:write`, or the app itself with its token.\n`manifest_unreachable` / `manifest_invalid` (422) when the manifest can't be used;\n`app_not_installed` (409) for an app not installed through OAuth.",
+        "summary": "Fetches an installed app's manifest again (design note 0029, §4.2) and applies its\nregistrations (webhooks, UI) and its custom fields (design note 0033, §8). Scopes it\nno longer asks for leave the grant at once; new ones, or fields it no longer declares\n(whose values would be deleted), make an authorization request staff approve\n(`consent_required`): approving widens the grant and syncs the fields, and the app\nthen gets tokens with the new scopes from `/oauth/authorize` without asking again.\nA manifest that changes a field's type is `manifest_invalid`. Staff with `apps:write`, or the app itself with its token.\n`manifest_unreachable` / `manifest_invalid` (422) when the manifest can't be used;\n`app_not_installed` (409) for an app not installed through OAuth.",
         "tags": [
           "app_extensions"
         ],
@@ -14251,6 +14989,58 @@
     "/admin/categories": {
       "get": {
         "operationId": "admin.categories.list",
+        "parameters": [
+          {
+            "description": "Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`.",
+            "explode": true,
+            "in": "query",
+            "name": "field",
+            "required": false,
+            "schema": {
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "properties": {
+                      "eq": {
+                        "type": "string"
+                      },
+                      "exists": {
+                        "type": "string"
+                      },
+                      "gt": {
+                        "type": "string"
+                      },
+                      "gte": {
+                        "type": "string"
+                      },
+                      "lt": {
+                        "type": "string"
+                      },
+                      "lte": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
+          },
+          {
+            "description": "Comma-separated `namespace.key`s (at most 10) whose values each item carries in `custom_fields`; without it, items carry none.",
+            "in": "query",
+            "name": "custom_fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -14261,6 +15051,16 @@
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`)."
           },
           "401": {
             "content": {
@@ -14298,7 +15098,7 @@
             "bearer": []
           }
         ],
-        "summary": "Every category, as a tree.",
+        "summary": "Every category, as a tree. With `field[…]` filters on custom fields (design note\n0033, §7), only the matching categories, flat (each without `children`), in tree\norder. `custom_fields` adds those values to each node.",
         "tags": [
           "categories"
         ],
@@ -14734,6 +15534,232 @@
         "summary": "Renames, describes, shows or hides, moves or reorders a category.",
         "tags": [
           "categories"
+        ],
+        "x-hypha-scopes": [
+          "products:write"
+        ]
+      }
+    },
+    "/admin/categories/{id}/custom-fields": {
+      "get": {
+        "operationId": "admin.custom_fields.fetch_category",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CategoryId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The owner's custom field values the caller may read, with their versions.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": [
+          "products:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.custom_fields.update_category",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CategoryId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCustomFieldsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sets and removes the owner's custom field values (a JSON Merge Patch), all\nor nothing, recording one `<owner>.custom_fields_updated` event. Each key\nneeds the caller to be allowed to write it: anyone with the owner's write\nscope for `custom.*`, only its app for `app_<name>.*` (staff too when the\nfield's `access.admin` is `read_write`), `customer_data:profile` for a\npersonal field.",
+        "tags": [
+          "custom_fields"
         ],
         "x-hypha-scopes": [
           "products:write"
@@ -16037,6 +17063,1032 @@
         "x-hypha-scopes": []
       }
     },
+    "/admin/custom-field-definitions": {
+      "get": {
+        "operationId": "admin.custom_fields.list",
+        "parameters": [
+          {
+            "description": "Only this owner type's.",
+            "in": "query",
+            "name": "owner_type",
+            "required": false,
+            "schema": {
+              "description": "The kinds of record fields belong to.\n\nKnown values: `product`, `variant`, `category`, `customer`, `order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "product",
+                "variant",
+                "category",
+                "customer",
+                "order"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldDefinitionList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every namespace's field definitions (the merchant's, apps' and spores').",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": [
+          "custom_fields:read"
+        ]
+      },
+      "post": {
+        "operationId": "admin.custom_fields.create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCustomFieldDefinitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldDefinitionResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Creates a field in the merchant's `custom` namespace, last on its owner type's form.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": [
+          "custom_fields:write"
+        ]
+      }
+    },
+    "/admin/custom-field-definitions/{id}": {
+      "delete": {
+        "operationId": "admin.custom_fields.remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomFieldDefinitionId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Deletes a field of the merchant's with every value of it.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": [
+          "custom_fields:write"
+        ]
+      },
+      "get": {
+        "operationId": "admin.custom_fields.fetch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomFieldDefinitionId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldDefinitionResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A field definition.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": [
+          "custom_fields:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.custom_fields.update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomFieldDefinitionId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCustomFieldDefinitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldDefinitionResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Changes a field of the merchant's. An app's or a spore's is `409\ncustom_field_managed`: its manifest or code declares it.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": [
+          "custom_fields:write"
+        ]
+      }
+    },
+    "/admin/custom-field-definitions/{id}/position": {
+      "put": {
+        "operationId": "admin.custom_fields.move_to",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomFieldDefinitionId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveCustomFieldDefinitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldDefinitionResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Moves a field of the merchant's on its owner type's form; the others close up.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": [
+          "custom_fields:write"
+        ]
+      }
+    },
+    "/admin/custom-field-definitions/{id}/values-in-use": {
+      "get": {
+        "operationId": "admin.custom_fields.values",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomFieldDefinitionId"
+            }
+          },
+          {
+            "description": "How many values, 1 to 100 (default 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValuesInUseResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The distinct values of a filterable field with how many owners hold each: for\nautocomplete and filter menus. Needs the read scope of the field's owner type\n(`products:read`, `customers:read`, `orders:read`), and `customer_data:profile` for a\npersonal one.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": []
+      }
+    },
+    "/admin/custom-fields/{definition}/items": {
+      "post": {
+        "operationId": "admin.custom_fields.change_items",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "definition",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomFieldDefinitionId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListItemsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListItemsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Adds and removes items of one list field on 1 to 250 owners (design note 0033, CF6):\ndone in the database under each value's lock, so concurrent writers both land.\nAdding what's there or removing what isn't changes nothing and records nothing. An\nowner whose list would break `max_items`/`min_items` fails the whole call (`409\ntoo_many_items` / `too_few_items`, naming it). Needs the field's owner type's write\nscope.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": []
+      }
+    },
+    "/admin/custom-fields/{definition}/values": {
+      "post": {
+        "operationId": "admin.custom_fields.set_values",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "definition",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomFieldDefinitionId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetFieldValuesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sets (or, with `null`, removes) one field on 1 to 250 owners: imports, and \"set on\nselected\". All or nothing: every problem is reported at once (`422\ncustom_fields_invalid`, each with its `owner`). Records one event per owner that\nchanged. Needs the field's owner type's write scope.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": []
+      }
+    },
     "/admin/customers": {
       "get": {
         "operationId": "admin.customers.list",
@@ -16087,6 +18139,56 @@
               ],
               "type": "string",
               "x-hypha-open-enum": true
+            }
+          },
+          {
+            "description": "Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`.",
+            "explode": true,
+            "in": "query",
+            "name": "field",
+            "required": false,
+            "schema": {
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "properties": {
+                      "eq": {
+                        "type": "string"
+                      },
+                      "exists": {
+                        "type": "string"
+                      },
+                      "gt": {
+                        "type": "string"
+                      },
+                      "gte": {
+                        "type": "string"
+                      },
+                      "lt": {
+                        "type": "string"
+                      },
+                      "lte": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
+          },
+          {
+            "description": "Comma-separated `namespace.key`s (at most 10) whose values each item carries in `custom_fields`; without it, items carry none.",
+            "in": "query",
+            "name": "custom_fields",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -16157,7 +18259,7 @@
             "bearer": []
           }
         ],
-        "summary": "Customers, newest first or in `sort`'s order, optionally matching text.",
+        "summary": "Customers, newest first or in `sort`'s order, optionally matching text and custom\nfield filters.",
         "tags": [
           "customers"
         ],
@@ -16894,6 +18996,232 @@
         "summary": "Replaces a saved address.",
         "tags": [
           "customers"
+        ],
+        "x-hypha-scopes": [
+          "customers:write"
+        ]
+      }
+    },
+    "/admin/customers/{id}/custom-fields": {
+      "get": {
+        "operationId": "admin.custom_fields.fetch_customer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The owner's custom field values the caller may read, with their versions.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": [
+          "customers:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.custom_fields.update_customer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCustomFieldsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sets and removes the owner's custom field values (a JSON Merge Patch), all\nor nothing, recording one `<owner>.custom_fields_updated` event. Each key\nneeds the caller to be allowed to write it: anyone with the owner's write\nscope for `custom.*`, only its app for `app_<name>.*` (staff too when the\nfield's `access.admin` is `read_write`), `customer_data:profile` for a\npersonal field.",
+        "tags": [
+          "custom_fields"
         ],
         "x-hypha-scopes": [
           "customers:write"
@@ -22188,6 +24516,56 @@
               "type": "string",
               "x-hypha-open-enum": true
             }
+          },
+          {
+            "description": "Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`.",
+            "explode": true,
+            "in": "query",
+            "name": "field",
+            "required": false,
+            "schema": {
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "properties": {
+                      "eq": {
+                        "type": "string"
+                      },
+                      "exists": {
+                        "type": "string"
+                      },
+                      "gt": {
+                        "type": "string"
+                      },
+                      "gte": {
+                        "type": "string"
+                      },
+                      "lt": {
+                        "type": "string"
+                      },
+                      "lte": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
+          },
+          {
+            "description": "Comma-separated `namespace.key`s (at most 10) whose values each item carries in `custom_fields`; without it, items carry none.",
+            "in": "query",
+            "name": "custom_fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -22257,7 +24635,7 @@
             "bearer": []
           }
         ],
-        "summary": "Orders, newest first or in `sort`'s order, narrowed by the filters (every one given\nmust match).",
+        "summary": "Orders, newest first or in `sort`'s order, narrowed by the filters (every one given\nmust match), custom fields' among them.",
         "tags": [
           "orders"
         ],
@@ -22488,6 +24866,232 @@
         "summary": "Cancels the order: every line's reserved stock is released and its pending payments\nare voided. Refused while fulfilments stand (`order_has_fulfillments`, 409, listing\nthem): cancel those first. Refused while a payment is authorized\n(`payment_authorized`, 409, `details.payment`): the held money is its provider's to\nrelease. A paid order stays paid; refund it outside Hypha for now. Cancelling it\nagain changes nothing.",
         "tags": [
           "orders"
+        ],
+        "x-hypha-scopes": [
+          "orders:write"
+        ]
+      }
+    },
+    "/admin/orders/{id}/custom-fields": {
+      "get": {
+        "operationId": "admin.custom_fields.fetch_order",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/OrderId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The owner's custom field values the caller may read, with their versions.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": [
+          "orders:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.custom_fields.update_order",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/OrderId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCustomFieldsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sets and removes the owner's custom field values (a JSON Merge Patch), all\nor nothing, recording one `<owner>.custom_fields_updated` event. Each key\nneeds the caller to be allowed to write it: anyone with the owner's write\nscope for `custom.*`, only its app for `app_<name>.*` (staff too when the\nfield's `access.admin` is `read_write`), `customer_data:profile` for a\npersonal field.",
+        "tags": [
+          "custom_fields"
         ],
         "x-hypha-scopes": [
           "orders:write"
@@ -25029,6 +27633,56 @@
               "type": "string",
               "x-hypha-open-enum": true
             }
+          },
+          {
+            "description": "Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`.",
+            "explode": true,
+            "in": "query",
+            "name": "field",
+            "required": false,
+            "schema": {
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "properties": {
+                      "eq": {
+                        "type": "string"
+                      },
+                      "exists": {
+                        "type": "string"
+                      },
+                      "gt": {
+                        "type": "string"
+                      },
+                      "gte": {
+                        "type": "string"
+                      },
+                      "lt": {
+                        "type": "string"
+                      },
+                      "lte": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
+          },
+          {
+            "description": "Comma-separated `namespace.key`s (at most 10) whose values each item carries in `custom_fields`; without it, items carry none.",
+            "in": "query",
+            "name": "custom_fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -25098,7 +27752,7 @@
             "bearer": []
           }
         ],
-        "summary": "Products in any status, newest first or in `sort`'s order, narrowed by the filters\n(every one given must match).",
+        "summary": "Products in any status, newest first or in `sort`'s order, narrowed by the filters\n(every one given must match), custom fields' among them.",
         "tags": [
           "products"
         ],
@@ -25812,6 +28466,232 @@
         "summary": "Sets the channels a product is sold through (the product page's Publishing card).",
         "tags": [
           "channels"
+        ],
+        "x-hypha-scopes": [
+          "products:write"
+        ]
+      }
+    },
+    "/admin/products/{id}/custom-fields": {
+      "get": {
+        "operationId": "admin.custom_fields.fetch_product",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The owner's custom field values the caller may read, with their versions.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": [
+          "products:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.custom_fields.update_product",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCustomFieldsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sets and removes the owner's custom field values (a JSON Merge Patch), all\nor nothing, recording one `<owner>.custom_fields_updated` event. Each key\nneeds the caller to be allowed to write it: anyone with the owner's write\nscope for `custom.*`, only its app for `app_<name>.*` (staff too when the\nfield's `access.admin` is `read_write`), `customer_data:profile` for a\npersonal field.",
+        "tags": [
+          "custom_fields"
         ],
         "x-hypha-scopes": [
           "products:write"
@@ -30779,6 +33659,232 @@
         ],
         "x-hypha-scopes": [
           "users:write"
+        ]
+      }
+    },
+    "/admin/variants/{id}/custom-fields": {
+      "get": {
+        "operationId": "admin.custom_fields.fetch_variant",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/VariantId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The owner's custom field values the caller may read, with their versions.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": [
+          "products:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.custom_fields.update_variant",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/VariantId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCustomFieldsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sets and removes the owner's custom field values (a JSON Merge Patch), all\nor nothing, recording one `<owner>.custom_fields_updated` event. Each key\nneeds the caller to be allowed to write it: anyone with the owner's write\nscope for `custom.*`, only its app for `app_<name>.*` (staff too when the\nfield's `access.admin` is `read_write`), `customer_data:profile` for a\npersonal field.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": [
+          "products:write"
         ]
       }
     },

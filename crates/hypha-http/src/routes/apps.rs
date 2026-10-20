@@ -738,9 +738,27 @@ pub async fn event<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let event = get_event(&ctx, ports.outbox(), id).await?;
     let mut envelope = EventEnvelope::new(&event)?;
-    // As an app would receive it (design note 0029, AP10).
+    // As an app would receive it (design note 0029, AP10), custom field entries too
+    // (design note 0033, §6.4: none it may read is an empty `changes`).
     if !ctx.is_staff() {
-        envelope.data = crate::redact::event_data(|s| ctx.has_scope(s), &event.data);
+        let mut data = event.data.clone();
+        if crate::redact::is_custom_fields_event(&event.event_type) {
+            let kind = super::custom_fields::caller_kind(&ctx, &ports).await?;
+            let definitions = hypha_custom_fields::DefinitionRepo::list(
+                hypha_custom_fields::HasCustomFieldDefinitions::custom_field_definitions(&ports),
+                None,
+            )
+            .await?;
+            let caller = hypha_custom_fields::FieldCaller::new(&ctx, &kind);
+            data = crate::redact::changes_visible_to(&caller, &definitions, &data).unwrap_or_else(
+                || {
+                    let mut empty = data.clone();
+                    empty["changes"] = serde_json::Value::Array(Vec::new());
+                    empty
+                },
+            );
+        }
+        envelope.data = crate::redact::event_data(|s| ctx.has_scope(s), &data);
     }
     Ok(Json(envelope))
 }

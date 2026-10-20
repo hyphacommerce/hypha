@@ -3,11 +3,14 @@
 
 use hypha_categories::{
     Category, CategoryError, CategoryRepo, CategorySettings, CommandError, CreateCategory,
-    UpdateCategory, add_category_products, create_category, delete_category,
+    UpdateCategory, add_category_products, create_category, delete_category, find_categories,
     get_shown_category_by_handle, list_categories, remove_category_products,
     set_product_categories, shown_categories, update_category,
 };
-use hypha_core::{Actor, AuthError, CategoryId, Ctx, ProductId, Scope, UserId, Versioned};
+use hypha_core::{
+    Actor, AuthError, CategoryId, Ctx, CustomFieldDefinitionId, FieldFilter, FieldFilterOp,
+    ProductId, Scope, UserId, Versioned,
+};
 use hypha_testkit::{InMemoryPorts, SequentialIds};
 use pollster::block_on;
 use uuid::Uuid;
@@ -397,6 +400,40 @@ fn writes_need_products_write() {
         )),
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::ProductsWrite
+        )))
+    );
+}
+
+/// A filter every category matches: no one holds this field.
+fn nobody_holds() -> Vec<FieldFilter> {
+    vec![FieldFilter {
+        definition: CustomFieldDefinitionId::from_uuid(Uuid::from_u128(7)),
+        key: "custom.banner".to_string(),
+        op: FieldFilterOp::Exists(false),
+    }]
+}
+
+#[test]
+fn categories_found_by_fields_come_in_tree_order() {
+    let w = World::new();
+    let home = w.create("Home", None);
+    let garden = w.create("Garden", None);
+    w.create("Lighting", Some(home));
+    w.create("Kitchen", Some(home));
+    w.create("Tools", Some(garden));
+    let found = block_on(find_categories(&Ctx::system(), &w.ports, &nobody_holds())).unwrap();
+    let names: Vec<&str> = found.iter().map(|c| c.name()).collect();
+    assert_eq!(names, ["Home", "Lighting", "Kitchen", "Garden", "Tools"]);
+}
+
+#[test]
+fn finding_categories_needs_products_read() {
+    let w = World::new();
+    let nobody = Ctx::new(Actor::User(UserId::from_uuid(Uuid::from_u128(1))), vec![]);
+    assert_eq!(
+        block_on(find_categories(&nobody, &w.ports, &nobody_holds())),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::ProductsRead
         )))
     );
 }
