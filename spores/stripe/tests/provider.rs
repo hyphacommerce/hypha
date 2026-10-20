@@ -137,7 +137,7 @@ fn a_start_creates_one_intent_keyed_by_the_payment_and_answers_the_element() {
     assert_eq!(header(create, "authorization"), Some("Bearer sk_test_key"));
     assert_eq!(
         header(create, "idempotency-key"),
-        Some(payment_id().to_string().as_str())
+        Some(format!("{}:manual", payment_id()).as_str())
     );
     let body = String::from_utf8(create.body.clone()).unwrap();
     for part in [

@@ -6,8 +6,9 @@
 // and emits `hypha:payment-confirmed {paymentId}`, `hypha:error {message}` and
 // `hypha:resize {height}`. Themed by `--hypha-*` custom properties.
 //
-// Bundled by scripts/build-assets.ts into src/generated/assets.ts, served at
-// /elements/payment.js.
+// From the Stripe app (hypha-app-stripe). Bundled into `payment-element.js` beside it by
+// `pnpm spores:build` (`spores:check` fails while that's stale), served by the Stripe
+// spore at /spores/stripe/elements/payment.js (design note 0030).
 
 const STRIPE_JS = "https://js.stripe.com/v3";
 const TAG = "stripe-payment";
@@ -255,8 +256,9 @@ export class StripePayment extends HTMLElement {
     this.#busy = true;
     this.#button.disabled = true;
     this.#error.textContent = "";
-    // Whether the shopper may press again on this intent. A declined card fails the
-    // payment in Hypha (its `failed` is final), so the storefront starts a new one.
+    // Whether the shopper may press again on this intent. A declined card leaves it
+    // waiting for another (Hypha's payment stays pending until the intent is over), so
+    // the shopper tries another card right here.
     let retry = true;
     try {
       const submitted = await elements.submit();
@@ -268,10 +270,7 @@ export class StripePayment extends HTMLElement {
         confirmParams: { return_url: this.#props.return_url ?? location.href },
         redirect: "if_required",
       });
-      if (result.error) {
-        retry = result.error.type !== "card_error";
-        return this.#fail(result.error.message ?? "The payment didn't go through.");
-      }
+      if (result.error) return this.#fail(result.error.message ?? "The payment didn't go through.");
       const status = result.paymentIntent?.status;
       if (status === "succeeded" || status === "processing" || status === "requires_capture") {
         retry = false;

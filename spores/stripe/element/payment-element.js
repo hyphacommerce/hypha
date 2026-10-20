@@ -1,12 +1,149 @@
-var h="https://js.stripe.com/v3",d="stripe-payment",c;function u(o=document){let e=o.defaultView;return e?.Stripe?Promise.resolve(e.Stripe):(c??=new Promise((t,n)=>{let i=o.querySelector(`script[src="${h}"]`),r=i??o.createElement("script"),s=()=>{let a=o.defaultView?.Stripe;a?t(a):(c=void 0,n(new Error("Stripe.js didn't load")))};r.addEventListener("load",s,{once:!0}),r.addEventListener("error",()=>{c=void 0,n(new Error("Stripe.js couldn't be loaded"))},{once:!0}),i||(r.src=h,r.async=!0,o.head.append(r))}),c)}var p=["client_secret","publishable_key","return_url","payment_id"],m={clientSecret:"client_secret",publishableKey:"publishable_key",returnUrl:"return_url",paymentId:"payment_id"},y=`
-  :host { display: block; font-family: var(--hypha-font-family, inherit);
-          color: var(--hypha-color-text, inherit); }
-  .wrap { display: grid; gap: 12px; }
-  button { font: inherit; font-weight: 600; padding: 12px 16px; border: 0; cursor: pointer;
-           border-radius: var(--hypha-radius, 6px);
-           background: var(--hypha-color-accent, #635bff); color: var(--hypha-color-background, #fff); }
-  button[disabled] { opacity: .6; cursor: default; }
-  button:focus-visible { outline: 2px solid var(--hypha-color-accent, #635bff); outline-offset: 2px; }
-  .error { color: var(--hypha-color-error, #d92d20); margin: 0; min-height: 1.2em; }
-  .hidden { display: none; }
-`,l=class extends HTMLElement{#r={client_secret:null,publishable_key:null,return_url:null,payment_id:null};#u;#i;#e;#t;#c;#l;#n;#s=null;#h=!1;#o;constructor(){super(),this.#u=this.attachShadow({mode:"open"});let e=document.createElement("style");e.textContent=y;let t=document.createElement("div");t.className="wrap",t.setAttribute("part","container");let n=document.createElement("slot");n.name="stripe",this.#e=document.createElement("button"),this.#e.type="button",this.#e.textContent=this.getAttribute("label")??"Pay now",this.#e.disabled=!0,this.#e.setAttribute("part","button"),this.#e.addEventListener("click",()=>{this.#b()}),this.#t=document.createElement("p"),this.#t.className="error",this.#t.setAttribute("role","alert"),this.#t.setAttribute("part","error"),t.append(n,this.#e,this.#t),this.#u.append(e,t);for(let i of p)this.#p(i,i);for(let[i,r]of Object.entries(m))this.#p(i,r)}#p(e,t){let n=Object.hasOwn(this,e)?Reflect.get(this,e):void 0;n!==void 0&&Reflect.deleteProperty(this,e),Object.defineProperty(this,e,{configurable:!0,enumerable:!0,get:()=>this.#r[t],set:i=>{this.#r[t]=typeof i=="string"&&i?i:null,this.isConnected&&this.#m()}}),n!==void 0&&Reflect.set(this,e,n)}connectedCallback(){typeof ResizeObserver=="function"&&!this.#o&&(this.#o=new ResizeObserver(()=>this.#d("hypha:resize",{height:Math.ceil(this.getBoundingClientRect().height)})),this.#o.observe(this)),this.#m()}disconnectedCallback(){this.#o?.disconnect(),this.#o=void 0,this.#n?.destroy(),this.#n=void 0,this.#s=null}#d(e,t){this.dispatchEvent(new CustomEvent(e,{detail:t,bubbles:!0,composed:!0}))}#a(e){this.#t.textContent=e,this.#d("hypha:error",{message:e})}#f(){let e=getComputedStyle(this),t=r=>e.getPropertyValue(r).trim()||void 0,n={},i=[["--hypha-color-accent","colorPrimary"],["--hypha-color-text","colorText"],["--hypha-color-background","colorBackground"],["--hypha-color-error","colorDanger"],["--hypha-font-family","fontFamily"],["--hypha-radius","borderRadius"]];for(let[r,s]of i){let a=t(r);a&&(n[s]=a)}return{theme:"stripe",variables:n}}async#m(){let{client_secret:e,publishable_key:t}=this.#r;if(!e||!t||this.#s===e)return;this.#s=e,this.#t.textContent="",this.#e.disabled=!0;let n;try{n=await u(this.ownerDocument)}catch{return this.#s=null,this.#a("The payment form couldn't be loaded. Check your connection and try again.")}if(this.#s!==e)return;this.#c=n(t);let r=(await this.#c.retrievePaymentIntent(e).catch(()=>{}))?.paymentIntent?.status;if(r==="succeeded"||r==="processing"||r==="requires_capture")return this.#y();this.#l=this.#c.elements({clientSecret:e,appearance:this.#f()}),this.#n?.destroy(),this.#n=this.#l.create("payment",{layout:"tabs"}),this.#i||(this.#i=document.createElement("div"),this.#i.slot="stripe",this.append(this.#i)),this.#n.on("ready",()=>{this.#e.disabled=!1}),this.#n.mount(this.#i)}#y(){this.#e.disabled=!0,this.#d("hypha:payment-confirmed",{paymentId:this.#r.payment_id??""})}async#b(){let e=this.#c,t=this.#l;if(!e||!t||this.#h)return;this.#h=!0,this.#e.disabled=!0,this.#t.textContent="";let n=!0;try{let i=await t.submit();if(i.error)return this.#a(i.error.message??"Check your payment details.");let r=await e.confirmPayment({elements:t,clientSecret:this.#r.client_secret,confirmParams:{return_url:this.#r.return_url??location.href},redirect:"if_required"});if(r.error)return n=r.error.type!=="card_error",this.#a(r.error.message??"The payment didn't go through.");let s=r.paymentIntent?.status;if(s==="succeeded"||s==="processing"||s==="requires_capture")return n=!1,this.#y();this.#a("The payment needs another step. Please try again.")}catch{this.#a("The payment didn't go through. Please try again.")}finally{this.#h=!1,this.#e.disabled=!n}}};customElements.get(d)||customElements.define(d,l);export{l as StripePayment,u as loadStripe};
+//#region spores/stripe/element/payment-element.ts
+var e = "https://js.stripe.com/v3", t = "stripe-payment", n;
+function r(t = document) {
+	let r = t.defaultView;
+	return r?.Stripe ? Promise.resolve(r.Stripe) : (n ??= new Promise((r, i) => {
+		let a = t.querySelector(`script[src="${e}"]`), o = a ?? t.createElement("script");
+		o.addEventListener("load", () => {
+			let e = t.defaultView?.Stripe;
+			e ? r(e) : (n = void 0, i(/* @__PURE__ */ Error("Stripe.js didn't load")));
+		}, { once: !0 }), o.addEventListener("error", () => {
+			n = void 0, i(/* @__PURE__ */ Error("Stripe.js couldn't be loaded"));
+		}, { once: !0 }), a || (o.src = e, o.async = !0, t.head.append(o));
+	}), n);
+}
+var i = [
+	"client_secret",
+	"publishable_key",
+	"return_url",
+	"payment_id"
+], a = {
+	clientSecret: "client_secret",
+	publishableKey: "publishable_key",
+	returnUrl: "return_url",
+	paymentId: "payment_id"
+}, o = "\n  :host { display: block; font-family: var(--hypha-font-family, inherit);\n          color: var(--hypha-color-text, inherit); }\n  .wrap { display: grid; gap: 12px; }\n  button { font: inherit; font-weight: 600; padding: 12px 16px; border: 0; cursor: pointer;\n           border-radius: var(--hypha-radius, 6px);\n           background: var(--hypha-color-accent, #635bff); color: var(--hypha-color-background, #fff); }\n  button[disabled] { opacity: .6; cursor: default; }\n  button:focus-visible { outline: 2px solid var(--hypha-color-accent, #635bff); outline-offset: 2px; }\n  .error { color: var(--hypha-color-error, #d92d20); margin: 0; min-height: 1.2em; }\n  .hidden { display: none; }\n", s = class extends HTMLElement {
+	#e = {
+		client_secret: null,
+		publishable_key: null,
+		return_url: null,
+		payment_id: null
+	};
+	#t;
+	#n;
+	#r;
+	#i;
+	#a;
+	#o;
+	#s;
+	#c = null;
+	#l = !1;
+	#u;
+	constructor() {
+		super(), this.#t = this.attachShadow({ mode: "open" });
+		let e = document.createElement("style");
+		e.textContent = o;
+		let t = document.createElement("div");
+		t.className = "wrap", t.setAttribute("part", "container");
+		let n = document.createElement("slot");
+		n.name = "stripe", this.#r = document.createElement("button"), this.#r.type = "button", this.#r.textContent = this.getAttribute("label") ?? "Pay now", this.#r.disabled = !0, this.#r.setAttribute("part", "button"), this.#r.addEventListener("click", () => void this.#_()), this.#i = document.createElement("p"), this.#i.className = "error", this.#i.setAttribute("role", "alert"), this.#i.setAttribute("part", "error"), t.append(n, this.#r, this.#i), this.#t.append(e, t);
+		for (let e of i) this.#d(e, e);
+		for (let [e, t] of Object.entries(a)) this.#d(e, t);
+	}
+	#d(e, t) {
+		let n = Object.hasOwn(this, e) ? Reflect.get(this, e) : void 0;
+		n !== void 0 && Reflect.deleteProperty(this, e), Object.defineProperty(this, e, {
+			configurable: !0,
+			enumerable: !0,
+			get: () => this.#e[t],
+			set: (e) => {
+				this.#e[t] = typeof e == "string" && e ? e : null, this.isConnected && this.#h();
+			}
+		}), n !== void 0 && Reflect.set(this, e, n);
+	}
+	connectedCallback() {
+		typeof ResizeObserver == "function" && !this.#u && (this.#u = new ResizeObserver(() => this.#f("hypha:resize", { height: Math.ceil(this.getBoundingClientRect().height) })), this.#u.observe(this)), this.#h();
+	}
+	disconnectedCallback() {
+		this.#u?.disconnect(), this.#u = void 0, this.#s?.destroy(), this.#s = void 0, this.#c = null;
+	}
+	#f(e, t) {
+		this.dispatchEvent(new CustomEvent(e, {
+			detail: t,
+			bubbles: !0,
+			composed: !0
+		}));
+	}
+	#p(e) {
+		this.#i.textContent = e, this.#f("hypha:error", { message: e });
+	}
+	#m() {
+		let e = getComputedStyle(this), t = (t) => e.getPropertyValue(t).trim() || void 0, n = {};
+		for (let [e, r] of [
+			["--hypha-color-accent", "colorPrimary"],
+			["--hypha-color-text", "colorText"],
+			["--hypha-color-background", "colorBackground"],
+			["--hypha-color-error", "colorDanger"],
+			["--hypha-font-family", "fontFamily"],
+			["--hypha-radius", "borderRadius"]
+		]) {
+			let i = t(e);
+			i && (n[r] = i);
+		}
+		return {
+			theme: "stripe",
+			variables: n
+		};
+	}
+	async #h() {
+		let { client_secret: e, publishable_key: t } = this.#e;
+		if (!e || !t || this.#c === e) return;
+		this.#c = e, this.#i.textContent = "", this.#r.disabled = !0;
+		let n;
+		try {
+			n = await r(this.ownerDocument);
+		} catch {
+			return this.#c = null, this.#p("The payment form couldn't be loaded. Check your connection and try again.");
+		}
+		if (this.#c !== e) return;
+		this.#a = n(t);
+		let i = (await this.#a.retrievePaymentIntent(e).catch(() => void 0))?.paymentIntent?.status;
+		if (i === "succeeded" || i === "processing" || i === "requires_capture") return this.#g();
+		this.#o = this.#a.elements({
+			clientSecret: e,
+			appearance: this.#m()
+		}), this.#s?.destroy(), this.#s = this.#o.create("payment", { layout: "tabs" }), this.#n || (this.#n = document.createElement("div"), this.#n.slot = "stripe", this.append(this.#n)), this.#s.on("ready", () => {
+			this.#r.disabled = !1;
+		}), this.#s.mount(this.#n);
+	}
+	#g() {
+		this.#r.disabled = !0, this.#f("hypha:payment-confirmed", { paymentId: this.#e.payment_id ?? "" });
+	}
+	async #_() {
+		let e = this.#a, t = this.#o;
+		if (!e || !t || this.#l) return;
+		this.#l = !0, this.#r.disabled = !0, this.#i.textContent = "";
+		let n = !0;
+		try {
+			let r = await t.submit();
+			if (r.error) return this.#p(r.error.message ?? "Check your payment details.");
+			let i = await e.confirmPayment({
+				elements: t,
+				clientSecret: this.#e.client_secret,
+				confirmParams: { return_url: this.#e.return_url ?? location.href },
+				redirect: "if_required"
+			});
+			if (i.error) return this.#p(i.error.message ?? "The payment didn't go through.");
+			let a = i.paymentIntent?.status;
+			if (a === "succeeded" || a === "processing" || a === "requires_capture") return n = !1, this.#g();
+			this.#p("The payment needs another step. Please try again.");
+		} catch {
+			this.#p("The payment didn't go through. Please try again.");
+		} finally {
+			this.#l = !1, this.#r.disabled = !n;
+		}
+	}
+};
+customElements.get(t) || customElements.define(t, s);
+//#endregion
+export { s as StripePayment, r as loadStripe };

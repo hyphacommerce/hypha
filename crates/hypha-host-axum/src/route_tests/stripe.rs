@@ -268,8 +268,9 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
         let (_, path, key, form) = &fake.seen[0];
         assert_eq!(path, "/v1/payment_intents");
         assert_eq!(
-            key, &payment,
-            "Hypha's payment ID is Stripe's idempotency key"
+            key,
+            &format!("{payment}:manual"),
+            "Hypha's payment ID (and the capture mode) is Stripe's idempotency key"
         );
         assert!(
             form.contains("capture_method=manual") && form.contains("amount="),
@@ -412,7 +413,7 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
 
 #[tokio::test]
 async fn an_order_cancelled_cancels_its_intent_at_stripe() {
-    let (app, fake) = stripe_host().await;
+    let (app, fake_state) = stripe_host().await;
     let (pk, cart_path) = cart_paying_by_stripe(&app).await;
     let (status, placed) = send_as(
         &app,
@@ -433,16 +434,43 @@ async fn an_order_cancelled_cancels_its_intent_at_stripe() {
     .await;
     assert_eq!(status, StatusCode::OK, "{json}");
     hypha_http::jobs::dispatch(&app.state).await.unwrap();
-    let fake = fake.lock().unwrap();
-    assert_eq!(
-        fake.intents["pi_1"]["status"], "canceled",
-        "{:?}",
-        fake.seen
-    );
+    // In a block: the guard mustn't be held across the awaits below.
+    let metadata = {
+        let fake = fake_state.lock().unwrap();
+        assert_eq!(
+            fake.intents["pi_1"]["status"], "canceled",
+            "{:?}",
+            fake.seen
+        );
+        assert!(
+            fake.seen
+                .iter()
+                .any(|(m, p, _, _)| m == "POST" && p == "/v1/payment_intents/pi_1/cancel")
+        );
+        fake.intents["pi_1"]["metadata"].clone()
+    };
+
+    // Had the shopper's confirmation won the race, Stripe reports it paid: Hypha voided
+    // the payment, so the money goes back at Stripe, once.
+    let succeeded = json!({ "id": "pi_1", "metadata": metadata });
+    for event in ["evt_late", "evt_late_again"] {
+        let (status, outcome) =
+            deliver(&app, event, "payment_intent.succeeded", succeeded.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{outcome}");
+        assert_eq!(outcome["status"], "ignored", "{outcome}");
+    }
+    let fake = fake_state.lock().unwrap();
+    let refunds: Vec<_> = fake
+        .seen
+        .iter()
+        .filter(|(m, p, _, _)| m == "POST" && p == "/v1/refunds")
+        .collect();
+    assert_eq!(refunds.len(), 2, "{:?}", fake.seen);
     assert!(
-        fake.seen
+        refunds
             .iter()
-            .any(|(m, p, _, _)| m == "POST" && p == "/v1/payment_intents/pi_1/cancel")
+            .all(|(_, _, key, form)| key.ends_with(":refund-after-void")
+                && form.contains("payment_intent=pi_1"))
     );
 }
 

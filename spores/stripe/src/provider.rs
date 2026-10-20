@@ -48,9 +48,9 @@ impl StripeProvider {
         }
     }
 
-    /// The PaymentIntent for a payment: Stripe answers a create with Hypha's payment ID
-    /// as its idempotency key with the intent it made the first time, so a start asked
-    /// again (the shopper reloading) charges once.
+    /// The PaymentIntent for a payment: Stripe answers a create with the same
+    /// idempotency key (Hypha's payment ID and the capture mode) with the intent it made
+    /// the first time, so a start asked again (the shopper reloading) charges once.
     async fn intent_for(
         &self,
         payment: &PaymentRequest,
@@ -86,9 +86,14 @@ impl StripeProvider {
                 ]),
             ),
         ];
+        // Stripe answers a key reused with other parameters with a refusal for 24 hours:
+        // the capture mode (the merchant may switch it while a shopper pays) is in the
+        // key, so a start after a switch makes a new intent rather than failing. The
+        // amount and the buyer's email don't change for a payment.
+        let key = format!("{}:{capture}", payment.payment);
         let intent = self
             .client(secret_key)
-            .create_payment_intent(&params, &payment.payment.to_string())
+            .create_payment_intent(&params, &key)
             .await
             .map_err(|e| Self::failed(stripe_reason(&e)))?;
         if intent.status == "canceled" {
