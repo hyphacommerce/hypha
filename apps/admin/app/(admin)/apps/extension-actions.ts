@@ -160,8 +160,21 @@ export async function runPaymentAction(
   }
   if (result.error) return { error: describe(result.error) };
   revalidatePath(`/orders/${orderId}`);
+  // A provider built in may answer that it's done already (a spore's capture Stripe
+  // answered `succeeded`): the payment has moved, so say so.
+  const status = result.data.payment.status;
+  const done = DONE[point]?.includes(status);
   return {
-    message: "Sent to the payment's app. The payment changes when it reports back.",
+    message: done
+      ? `Done: the payment is ${status.replace("_", " ")}.`
+      : "Sent to the payment's app. The payment changes when it reports back.",
     refresh: true,
   };
 }
+
+/** The statuses that mean a payment action has happened. */
+const DONE: Record<string, string[]> = {
+  "payments.capture": ["paid"],
+  "payments.void": ["voided"],
+  "payments.refund": ["refunded", "partially_refunded"],
+};
