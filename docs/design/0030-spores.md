@@ -726,7 +726,7 @@ them, not in this list.
   cancels and refunds of another intent are ignored (a read before the write: a cancel
   racing a restart can still void a pending payment, whose later money then goes back).
   A payment action's answer says whether it's `completed` (the admin's "Done"). Giving money back is keyed per intent (`<payment>:<intent>:refund-after-void`).
-  A stored intent Stripe no longer knows (404: other keys) is replaced by a new one. The
+  A stored intent Stripe no longer knows (404 `resource_missing`: other keys) is replaced by a new one (money paid on the old account's intent is for staff to reconcile there). The
   admin says a payment action is done only when the payment moved. The apps' image
   installs from the packages' manifests alone (a stage that keeps only them), so a source
   edit doesn't reinstall; spores' own `target/` stays out of the API's build context;

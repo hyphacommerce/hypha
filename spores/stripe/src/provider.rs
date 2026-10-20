@@ -69,7 +69,12 @@ impl StripeProvider {
                 Ok(intent) => return usable(intent),
                 // Not at this account (the merchant switched Stripe accounts, or test
                 // keys to live ones): nothing to resume, so the payment gets one here.
-                Err(e) if e.status == 404 => {}
+                // Only Stripe's own "no such object", not any 404 (an `api_base` that
+                // isn't Stripe's must not make intents silently). Money a shopper then
+                // pays on the old account's intent isn't seen by Hypha (that account's
+                // webhooks are signed with another secret): switching accounts with
+                // open payments is for staff to reconcile in the old dashboard.
+                Err(e) if e.status == 404 && e.code.as_deref() == Some("resource_missing") => {}
                 Err(e) => return Err(Self::failed(stripe_reason(&e))),
             }
         }

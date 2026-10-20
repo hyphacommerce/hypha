@@ -396,6 +396,24 @@ fn a_kept_intent_stripe_no_longer_knows_is_replaced() {
 }
 
 #[test]
+fn a_404_that_isnt_stripes_no_such_intent_makes_no_new_one() {
+    // A misconfigured base answering 404 without Stripe's code.
+    let (fake, http) = Fake::new(|_| {
+        (
+            404,
+            json!({ "error": { "type": "invalid_request_error", "message": "Not Found" } }),
+        )
+    });
+    let mut again = request(configured());
+    again.reference = Some("pi_kept".to_string());
+    assert!(matches!(
+        block_on(provider(http).start(&again)),
+        Err(PaymentError::ProviderFailed { .. })
+    ));
+    assert_eq!(fake.requests().len(), 1);
+}
+
+#[test]
 fn a_kept_intent_stripe_cant_read_for_now_fails_the_start() {
     // Not a 404 (Stripe down): no second intent is made.
     let (fake, http) = Fake::new(|_| {
