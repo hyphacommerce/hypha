@@ -15,10 +15,11 @@ RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/admin/package.json apps/admin/
 COPY apps/storefront/package.json apps/storefront/
-COPY packages/sdk/package.json packages/sdk/
+# The workspace packages the apps use (sdk, app-blocks, app-bridge-host,
+# storefront-elements, …): TypeScript source, all of them, so a new one isn't missed.
+COPY packages packages
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile --filter "${APP}..."
-COPY packages/sdk packages/sdk
 COPY apps/${APP} apps/${APP}
 RUN cd apps/${APP} \
     && rm -f cloudflare.config.ts \
