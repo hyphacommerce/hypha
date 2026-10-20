@@ -180,7 +180,6 @@ mod worker_main {
     use axum::Router;
     use axum::body::Body;
     use axum::http::{Response, StatusCode};
-    use futures_util::future::{FutureExt, LocalBoxFuture, Shared};
     use hypha_config::Config;
     use hypha_core::{Clock, Timestamp};
     use hypha_http::host::{AfterWrites, BoxFuture, HostBackground, HostLimiter, MailQueued};
@@ -224,13 +223,11 @@ mod worker_main {
         caller_key: Option<String>,
     }
 
-    /// An isolate's setup, its `Isolate<D>` as `Any`: a `thread_local` can't be generic,
-    /// and a Worker is built with one deployment, so the downcast always holds.
-    type Setup = Shared<LocalBoxFuture<'static, Result<Rc<dyn Any>, String>>>;
-
     thread_local! {
-        /// The isolate's setup: shared, so concurrent first events wait for one.
-        static ISOLATE: RefCell<Option<Setup>> = const { RefCell::new(None) };
+        /// The isolate, once an event has set it up: its `Isolate<D>` as `Any` (a
+        /// `thread_local` can't be generic, and a Worker is built with one deployment, so
+        /// the downcast always holds).
+        static ISOLATE: RefCell<Option<Rc<dyn Any>>> = const { RefCell::new(None) };
         /// The event whose future is being polled (`Scoped`).
         static CURRENT: RefCell<Option<Rc<Event>>> = const { RefCell::new(None) };
         /// The `due` mark this isolate last read or wrote, so runs after writes don't
@@ -295,31 +292,22 @@ mod worker_main {
             .ok()
     }
 
-    /// The isolate, set up by its first event. A failed setup is tried again by the
-    /// next event.
+    /// The isolate, set up by the first event that needs it. Events arriving while it's
+    /// being set up set it up too, each in its own context, and the first to finish is
+    /// kept: on Workers, I/O belongs to the event that started it, so one event awaiting
+    /// another's setup (a shared future) hangs when that event is cancelled or ends, and
+    /// the runtime kills it as hung. A failed setup leaves nothing, so the next event
+    /// tries again.
     async fn isolate<D: Deployment>(env: &Env) -> Result<Rc<Isolate<D>>, String> {
-        let setup = ISOLATE.with_borrow_mut(|slot| {
-            slot.get_or_insert_with(|| {
-                let env = env.clone();
-                async move {
-                    let isolate: Rc<dyn Any> = set_up::<D>(env).await?;
-                    Ok(isolate)
-                }
-                .boxed_local()
-                .shared()
-            })
-            .clone()
-        });
-        let isolate = setup.clone().await;
-        // Only this setup: another event may have started a newer one meanwhile.
-        if isolate.is_err() {
-            ISOLATE.with_borrow_mut(|slot| {
-                if slot.as_ref().is_some_and(|s| s.ptr_eq(&setup)) {
-                    *slot = None;
-                }
-            });
-        }
-        isolate?
+        let ready = ISOLATE.with_borrow(|slot| slot.clone());
+        let isolate = match ready {
+            Some(isolate) => isolate,
+            None => {
+                let built: Rc<dyn Any> = set_up::<D>(env.clone()).await?;
+                ISOLATE.with_borrow_mut(|slot| Rc::clone(slot.get_or_insert(built)))
+            }
+        };
+        isolate
             .downcast::<Isolate<D>>()
             .map_err(|_| "the isolate was set up for another deployment".to_string())
     }
