@@ -80,6 +80,8 @@ export type {
   ShippingRatesResponse,
   PaymentsStartRequest,
   PaymentsStartResponse,
+  PaymentsStatusRequest,
+  PaymentsStatusResponse,
   NextAction,
   PaymentActionRequest,
   PaymentActionResponse,
