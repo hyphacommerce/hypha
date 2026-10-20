@@ -304,6 +304,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "built_in_settings",
             sql: include_str!("../migrations/0056_built_in_settings.sql"),
         },
+        Migration {
+            version: 57,
+            name: "payment_attempt",
+            sql: include_str!("../migrations/0057_payment_attempt.sql"),
+        },
     ],
 };
 

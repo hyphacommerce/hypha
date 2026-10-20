@@ -8,7 +8,7 @@
 use hypha_apps::{AppRepo, HasApps};
 use hypha_core::{
     Actor, Attempts, Clock, Ctx, HasIdempotency, IdempotencyRecord, IdempotencyRequest, Idempotent,
-    Money, PaymentId, RepoError, Scope, StageIdempotency, Timestamp, earlier_id,
+    Money, PaymentId, RepoError, Scope, StageIdempotency, Timestamp, earlier_id, optional_text,
 };
 use hypha_orders::StageOrders;
 use hypha_payments::{
@@ -50,12 +50,12 @@ pub struct PaymentEvent {
     /// reported under another idempotency key). An app must send it for refunds
     /// (`refund_reference_required`).
     pub reference: Option<String>,
-    /// The provider's ID for the attempt this report is about, given only by a provider
-    /// whose references name attempts (the Stripe spore: the PaymentIntent). Another
-    /// attempt's report is refused (`payment_reference_mismatch`) unless it pays or
-    /// authorizes a pending payment (started again): the payment collects once. Absent,
-    /// as from apps (whose capture or void may carry an ID of its own), nothing is
-    /// checked.
+    /// The provider's ID for the attempt this report is about (a Stripe PaymentIntent;
+    /// for a refund, the attempt it refunds), from a provider whose IDs name attempts:
+    /// the Stripe spore, or an app through the events route. A paid or authorized
+    /// report keeps it as the payment's `attempt`; a report naming another is refused
+    /// (`other_attempt`). Absent, nothing is checked (a provider whose capture or void
+    /// carries an ID of its own leaves it out). Up to 255 characters.
     pub attempt: Option<String>,
     /// When it happened at the provider; absent is now. When it was paid or voided.
     pub occurred_at: Option<Timestamp>,
@@ -212,11 +212,15 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
     Ok(match input.kind {
         PaymentEventKind::Authorized => {
             whole(payment)?;
-            payment.authorize(reference)?
+            let changed = payment.authorize(reference)?;
+            payment.note_attempt(input.attempt.clone())?;
+            changed
         }
         PaymentEventKind::Paid => {
             whole(payment)?;
-            payment.pay(at, reference)?
+            let changed = payment.pay(at, reference)?;
+            payment.note_attempt(input.attempt.clone())?;
+            changed
         }
         PaymentEventKind::Failed => payment.fail(reference)?,
         PaymentEventKind::Voided => {
@@ -243,26 +247,19 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
     })
 }
 
-/// Refuses a report about another attempt than the payment's (`payment_reference_mismatch`),
-/// when the report names its attempt: a second attempt's money for a payment past
-/// pending (paid in an old tab: the payment collects once, and its provider gives that
-/// money back), or another attempt's decline, cancel or refund. A pending payment may be
-/// paid or authorized through another attempt (it was started again). Checked in the
-/// transaction that writes, so two attempts' reports racing can't both pass.
+/// Refuses a report naming another attempt than the one the payment collects through
+/// (`payment_reference_mismatch`; the payment's `attempt`, which only reports naming one
+/// set): a second attempt's money for a payment past pending (paid in an old tab: the
+/// payment collects once, and its provider gives that money back), or another attempt's
+/// decline, cancel or refund. A pending payment may be paid or authorized through
+/// another attempt (it was started again). A payment no report named an attempt for
+/// isn't checked. In the transaction that writes, so two attempts' reports racing can't
+/// both pass.
 fn other_attempt(payment: &Payment, input: &PaymentEvent) -> Result<(), PaymentError> {
-    let attempt = input
-        .attempt
-        .as_deref()
-        .map(str::trim)
-        .filter(|a| !a.is_empty());
-    let (Some(attempt), Some(held)) = (attempt, payment.reference()) else {
+    let attempt = optional_text("attempt", input.attempt.clone())?;
+    let (Some(attempt), Some(held)) = (attempt, payment.attempt()) else {
         return Ok(());
     };
-    // A reference of another shape isn't one of the provider's attempts (what staff
-    // typed marking it paid by hand): nothing to compare.
-    if prefix(held) != prefix(attempt) {
-        return Ok(());
-    }
     let restarted = payment.status() == PaymentStatus::Pending
         && matches!(
             input.kind,
@@ -275,13 +272,8 @@ fn other_attempt(payment: &Payment, input: &PaymentEvent) -> Result<(), PaymentE
         payment: payment.id(),
         status: payment.status(),
         held: held.to_string(),
-        reported: attempt.to_string(),
+        reported: attempt,
     })
-}
-
-/// An ID's kind: what comes before its first `_` (`pi` for Stripe's `pi_…`), or all of it.
-fn prefix(id: &str) -> &str {
-    id.split_once('_').map_or(id, |(kind, _)| kind)
 }
 
 /// The payment an earlier request with this key reported on, if this caller sent it.

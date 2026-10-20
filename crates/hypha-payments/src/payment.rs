@@ -178,6 +178,10 @@ pub struct Payment {
     /// The provider's IDs of the refunds counted in `refunded`, oldest first: a refund
     /// reported again under one of them changes nothing (`refund`).
     refund_references: Vec<String>,
+    /// The provider's attempt the payment collects through (a Stripe PaymentIntent), set
+    /// only by a provider's report naming it (`note_attempt`), never by staff or by an
+    /// operation's own ID: what a report naming another attempt is compared with.
+    attempt: Option<String>,
     /// The method's instructions at checkout.
     instructions: Option<String>,
     paid_at: Option<Timestamp>,
@@ -228,6 +232,7 @@ impl Payment {
             refunded: Money::zero(currency),
             reference: None,
             refund_references: Vec::new(),
+            attempt: None,
             instructions: new.instructions,
             paid_at: None,
             voided_at: None,
@@ -486,6 +491,19 @@ impl Payment {
         &self.refund_references
     }
 
+    pub fn attempt(&self) -> Option<&str> {
+        self.attempt.as_deref()
+    }
+
+    /// Keeps `attempt` as the one the payment collects through (a provider's report named
+    /// it); a blank one keeps the current. Records nothing.
+    pub fn note_attempt(&mut self, attempt: Option<String>) -> Result<(), PaymentError> {
+        if let Some(attempt) = optional_text("attempt", attempt)? {
+            self.attempt = Some(attempt);
+        }
+        Ok(())
+    }
+
     pub fn instructions(&self) -> Option<&str> {
         self.instructions.as_deref()
     }
@@ -514,6 +532,7 @@ pub struct PaymentSnapshot {
     pub refunded: Money,
     pub reference: Option<String>,
     pub refund_references: Vec<String>,
+    pub attempt: Option<String>,
     pub instructions: Option<String>,
     pub paid_at: Option<Timestamp>,
     pub voided_at: Option<Timestamp>,
@@ -534,6 +553,7 @@ impl Payment {
             refunded: self.refunded,
             reference: self.reference.clone(),
             refund_references: self.refund_references.clone(),
+            attempt: self.attempt.clone(),
             instructions: self.instructions.clone(),
             paid_at: self.paid_at,
             voided_at: self.voided_at,
@@ -597,6 +617,7 @@ impl Payment {
             refunded: s.refunded,
             reference: optional_text("reference", s.reference)?,
             refund_references,
+            attempt: optional_text("attempt", s.attempt)?,
             instructions,
             paid_at: s.paid_at,
             voided_at: s.voided_at,

@@ -504,9 +504,11 @@ async fn undo_unwanted(stripe: &Stripe, settings: &Settings, report: &Report) ->
 /// `Idempotency-Key` reused for another body is.
 fn fingerprint(report: &Report) -> [u8; 32] {
     use sha2::Digest;
+    // Not the intent: a refund's ID names its intent already, an intent report's
+    // reference is its intent, and keys recorded before must keep their fingerprints.
     let text = format!(
-        "{}|{:?}|{:?}|{}|{}",
-        report.payment, report.kind, report.amount, report.reference, report.intent
+        "{}|{:?}|{:?}|{}",
+        report.payment, report.kind, report.amount, report.reference
     );
     sha2::Sha256::digest(text.as_bytes()).into()
 }

@@ -715,17 +715,22 @@ them, not in this list.
   money goes back.
 - **Final review (2026-10-20):** a payment collected once is checked by core, in the
   transaction that writes (two deliveries racing can't both pass), for a provider whose
-  references name attempts: a report may name its attempt (`PaymentEvent::attempt`; the
-  Stripe spore gives the PaymentIntent), and another attempt's report is refused
-  (`payment_reference_mismatch`, 409, `details: {status, held, reported}`) unless it pays
-  or authorizes a pending payment (started again). So money another intent took for a
-  payment past pending goes back, and another intent's decline, cancel or refund changes
-  nothing. Apps' reports name no attempt and nothing is checked, as before: a capture or
-  void of theirs may carry an ID of its own (PayPal's capture ID, Adyen's pspReference;
-  re-reviews caught two rules keyed on references alone refusing those). Giving money
-  back is keyed per intent (`<payment>:<intent>:refund-after-void`). A stored intent
-  Stripe no longer knows (404 `resource_missing`: other keys) is replaced by a new one
-  (money paid on the old account's intent is for staff to reconcile there). A payment
+  IDs name attempts: a report may name its attempt (`PaymentEvent::attempt`; the Stripe
+  spore gives the PaymentIntent, apps may through the events route), a paid or
+  authorized one keeps it as the payment's own `attempt` (migration 0057, apart from
+  `reference`, which staff's text or an operation's own ID may replace), and a report
+  naming another is refused (`payment_reference_mismatch`, 409, `details: {status, held,
+  reported}`) unless it pays or authorizes a pending payment (started again). So money
+  another intent took for a payment past pending goes back, and another intent's
+  decline, cancel or refund changes nothing. Reports naming no attempt are checked as
+  before (a capture or void may carry an ID of its own: PayPal's capture ID, Adyen's
+  pspReference; re-reviews caught three rules keyed on references refusing those or
+  letting a second attempt through). Not guarded: a pending payment no report named an
+  attempt for (a stale cancel racing a restart voids it; money its later attempt takes
+  then goes back). Giving money back is keyed per intent
+  (`<payment>:<intent>:refund-after-void`). A stored intent Stripe no longer knows (404
+  `resource_missing`: other keys) is replaced by a new one (money paid on the old
+  account's intent is for staff to reconcile there). A payment
   action's answer says whether it's `completed` (done and recorded), which the admin's
   "Done" reads. The apps' image installs from the packages' manifests alone (a stage
   that keeps only them), so a source edit doesn't reinstall; spores' own `target/` stays

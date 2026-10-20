@@ -31,7 +31,7 @@ pub async fn payment_repo<R: PaymentRepo>(make: impl AsyncFn() -> R) {
     payment_round_trips(&make().await).await;
     scenario("payment: update stores a payment and a void; stale and missing fail");
     payment_updates(&make().await).await;
-    scenario("payment: refunds' references are stored, oldest first");
+    scenario("payment: refunds' references and the attempt are stored, oldest first");
     refund_references_round_trip(&make().await).await;
     scenario("payment: unique ID");
     payment_unique_id(&make().await).await;
@@ -253,6 +253,7 @@ async fn refund_references_round_trip<R: PaymentRepo>(repo: &R) {
     let mut p = payment(1, 1, 1);
     repo.insert(&mut p).await.unwrap();
     p.pay(at(1), Some("pi_1".to_string())).unwrap();
+    p.note_attempt(Some("pi_1".to_string())).unwrap();
     repo.update(&mut p).await.unwrap();
     for (amount, refund) in [(100, "re_2"), (200, "re_1")] {
         p.refund(
@@ -267,6 +268,7 @@ async fn refund_references_round_trip<R: PaymentRepo>(repo: &R) {
     assert_eq!(stored, p);
     assert_eq!(stored.refund_references(), ["re_2", "re_1"]);
     assert_eq!(stored.reference(), Some("pi_1"));
+    assert_eq!(stored.attempt(), Some("pi_1"));
     assert_eq!(repo.list_for_order(oid(1)).await, Ok(vec![p]));
 }
 

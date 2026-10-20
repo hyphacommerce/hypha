@@ -4478,10 +4478,12 @@ export interface components {
             /**
              * @description The provider's ID for the attempt this report is about, for a provider whose IDs
              *     name attempts (a Stripe PaymentIntent's `pi_…`; for a refund, the intent it
-             *     refunds). Sent, Hypha collects a payment once: another attempt's report is
-             *     `409 payment_reference_mismatch` (`details: {status, held, reported}`) unless it
-             *     pays or authorizes a pending payment (started again); give back what that
-             *     attempt took. Leave it out when a capture or void carries an ID of its own.
+             *     refunds). A paid or authorized report keeps it as the payment's attempt; then
+             *     Hypha collects the payment once: a report naming another attempt is `409
+             *     payment_reference_mismatch` (`details: {status, held, reported}`) unless it pays
+             *     or authorizes a pending payment (started again); give back what that attempt
+             *     took. Absent, nothing is checked (a capture or void carrying an ID of its own
+             *     leaves it out). Up to 255 characters.
              */
             attempt?: string | null;
             /** @description When it happened at the provider, RFC 3339; absent is now. */

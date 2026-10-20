@@ -212,7 +212,7 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
 fn payment_columns() -> String {
     format!(
         "id, version, order_id, method_id, method_name, provider, currency, amount, refunded,
-         status, reference, refund_references, instructions, {}, {}, {}",
+         status, reference, refund_references, attempt, instructions, {}, {}, {}",
         micros("paid_at"),
         micros("voided_at"),
         stamp_columns("")
@@ -243,6 +243,7 @@ fn payment_from_row(row: &Row) -> Result<Payment, RepoError> {
         refunded: money("refunded")?,
         reference: col(row, "reference")?,
         refund_references: col(row, "refund_references")?,
+        attempt: col(row, "attempt")?,
         instructions: col(row, "instructions")?,
         paid_at: opt_ts(col(row, "paid_at")?),
         voided_at: opt_ts(col(row, "voided_at")?),
@@ -319,8 +320,8 @@ pub(crate) async fn insert_payment(
         &format!(
             "INSERT INTO payments (id, version, order_id, method_id, method_name, provider,
                  currency, amount, refunded, status, reference, instructions, paid_at,
-                 voided_at, refund_references)
-             VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, {}, {}, $14)",
+                 voided_at, refund_references, attempt)
+             VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, {}, {}, $14, $15)",
             ts(12),
             ts(13)
         ),
@@ -339,6 +340,7 @@ pub(crate) async fn insert_payment(
             (&opt_micros(s.paid_at), Type::INT8),
             (&opt_micros(s.voided_at), Type::INT8),
             (&s.refund_references, Type::TEXT_ARRAY),
+            (&s.attempt, Type::TEXT),
         ],
     )
     .await
@@ -358,7 +360,8 @@ pub(crate) async fn update_payment(
                 "UPDATE payments SET version = version + 1, order_id = $3, method_id = $4,
                      method_name = $5, provider = $6, currency = $7, amount = $8,
                      refunded = $9, status = $10, reference = $11, instructions = $12,
-                     paid_at = {}, voided_at = {}, refund_references = $15
+                     paid_at = {}, voided_at = {}, refund_references = $15,
+                     attempt = $16
                  WHERE id = $1 AND version = $2 RETURNING version",
                 ts(13),
                 ts(14)
@@ -379,6 +382,7 @@ pub(crate) async fn update_payment(
                 (&opt_micros(s.paid_at), Type::INT8),
                 (&opt_micros(s.voided_at), Type::INT8),
                 (&s.refund_references, Type::TEXT_ARRAY),
+                (&s.attempt, Type::TEXT),
             ],
         )
         .await

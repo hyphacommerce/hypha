@@ -832,10 +832,10 @@ PY
         "$PAYMENTS/capture" -H "$JSON" -d '{}'
     contains "still pending until the app reports" '"status":"pending"'
     step "the app reports it authorized" 200 - -X POST "$PAYMENTS/events" -H "$JSON" \
-        -H 'idempotency-key: evt_e2e_1' -d '{"type":"authorized","reference":"pi_e2e"}'
+        -H 'idempotency-key: evt_e2e_1' -d '{"type":"authorized","reference":"pi_e2e","attempt":"pi_e2e"}'
     contains "the order is authorized" '"financial_status":"authorized"'
     replayed "the report again replays" -X POST "$PAYMENTS/events" -H "$JSON" \
-        -H 'idempotency-key: evt_e2e_1' -d '{"type":"authorized","reference":"pi_e2e"}'
+        -H 'idempotency-key: evt_e2e_1' -d '{"type":"authorized","reference":"pi_e2e","attempt":"pi_e2e"}'
     step "an authorized order can't be marked paid by hand" 409 payment_authorized -X POST \
         "$BASE/admin/orders/$CARD_ORDER/paid"
     step "staff void it, the provider refuses" 409 payment_refused -X POST "$PAYMENTS/void" -H "$JSON" -d '{}'

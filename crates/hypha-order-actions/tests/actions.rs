@@ -1014,6 +1014,7 @@ fn stored_payment(world: &World, n: u128, amount: i64, status: PaymentStatus, re
         refunded: eur(refunded),
         reference: None,
         refund_references: vec![],
+        attempt: None,
         instructions: None,
         paid_at: status.captured().then_some(FixedClock::DEFAULT),
         voided_at: (status == PaymentStatus::Voided).then_some(FixedClock::DEFAULT),
@@ -1423,35 +1424,68 @@ fn a_report_naming_another_attempt_is_refused_once_the_payment_is_past_pending()
 }
 
 #[test]
-fn a_pending_payment_is_paid_through_an_attempt_made_again_but_not_failed_by_an_old_one() {
+fn a_pending_payment_is_paid_through_whichever_attempt_and_keeps_it() {
     use hypha_order_actions::PaymentEventKind as K;
     let world = World::new();
-    // Started again: its start kept the new attempt, pi_9.
-    let mut payment = pending_payment(&world);
-    payment.set_reference(Some("pi_9".to_string())).unwrap();
-    block_on(world.payments.update(&mut payment)).unwrap();
-    assert_eq!(
-        world
-            .report_attempt(K::Voided, None, Some("pi_1"), Some("pi_1"), None)
-            .map(|_| ()),
-        Err(CommandError::Payment(PaymentError::ReferenceMismatch {
-            payment: payment.id(),
-            status: PaymentStatus::Pending,
-            held: "pi_9".to_string(),
-            reported: "pi_1".to_string(),
-        }))
-    );
-    // The old tab's attempt paid first: the payment is paid through it.
+    pending_payment(&world);
+    // Started twice (pi_1, then pi_9); the old tab's pi_1 is paid first.
     let paid = world
         .report_attempt(K::Paid, None, Some("pi_1"), Some("pi_1"), None)
         .unwrap()
         .value;
     assert_eq!(paid.payments[0].status(), PaymentStatus::Paid);
-    assert_eq!(paid.payments[0].reference(), Some("pi_1"));
+    assert_eq!(paid.payments[0].attempt(), Some("pi_1"));
+    // Then pi_9's money: a second collection.
+    assert_eq!(
+        world
+            .report_attempt(K::Paid, None, Some("pi_9"), Some("pi_9"), None)
+            .map(|_| ()),
+        Err(CommandError::Payment(PaymentError::ReferenceMismatch {
+            payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+            status: PaymentStatus::Paid,
+            held: "pi_1".to_string(),
+            reported: "pi_9".to_string(),
+        }))
+    );
 }
 
 #[test]
-fn a_report_naming_no_attempt_is_checked_as_before() {
+fn an_operations_own_id_doesnt_change_the_attempt() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    world
+        .report_attempt(K::Authorized, None, Some("pi_1"), Some("pi_1"), None)
+        .unwrap();
+    // A capture under its own ID (no attempt named): the attempt stays pi_1, so a
+    // refund of another attempt is still refused.
+    let paid = world
+        .report_ref(K::Paid, None, Some("ch_7"), None)
+        .unwrap()
+        .value;
+    assert_eq!(paid.payments[0].reference(), Some("ch_7"));
+    assert_eq!(paid.payments[0].attempt(), Some("pi_1"));
+    assert_eq!(
+        world
+            .report_attempt(
+                K::PartiallyRefunded,
+                Some(500),
+                Some("re_9"),
+                Some("pi_9"),
+                None
+            )
+            .map(|_| ()),
+        Err(CommandError::Payment(PaymentError::ReferenceMismatch {
+            payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+            status: PaymentStatus::Paid,
+            held: "pi_1".to_string(),
+            reported: "pi_9".to_string(),
+        }))
+    );
+}
+
+#[test]
+fn a_report_naming_no_attempt_isnt_checked() {
     use hypha_order_actions::PaymentEventKind as K;
     let world = World::new();
     let mut payment = pending_payment(&world);
