@@ -89,6 +89,10 @@ pub trait Spore: Sized + Send + Sync + 'static {
 pub trait SporeRuntime<P>: Send + Sync + 'static {
     /// What each spore adds to admins, in order.
     fn contributions(&self) -> Vec<SporeContributions>;
+    /// The spores' names (`stripe`), in order: which this build has.
+    fn names(&self) -> Vec<&'static str> {
+        self.contributions().into_iter().map(|c| c.name).collect()
+    }
     /// The spore `key`'s block `id`; `None` for no such spore.
     async fn block(
         &self,
@@ -179,6 +183,10 @@ macro_rules! tuple_runtime {
     ($($s:ident),+) => {
         #[allow(non_snake_case)]
         impl<P, $($s: Spore + SporeUi<P>),+> SporeRuntime<P> for ($($s,)+) {
+            fn names(&self) -> Vec<&'static str> {
+                vec![$($s::NAME),+]
+            }
+
             fn contributions(&self) -> Vec<SporeContributions> {
                 vec![$(SporeContributions {
                     name: $s::NAME,
@@ -337,6 +345,10 @@ impl<S: SporeSet> BuiltSpores<S> {
 impl<P, S: SporeRuntime<P>> SporeRuntime<P> for BuiltSpores<S> {
     fn contributions(&self) -> Vec<SporeContributions> {
         self.spores.contributions()
+    }
+
+    fn names(&self) -> Vec<&'static str> {
+        self.spores.names()
     }
 
     async fn block(

@@ -224,19 +224,18 @@ pub async fn list<S: Storage>(
 }
 
 /// The spores this API is built with, by key (`spore_stripe`).
-fn built_spores<S: Storage>(state: &AppState<S>) -> Vec<String> {
+fn built_spores<S: Storage>(state: &AppState<S>) -> Vec<hypha_apps::AppKey> {
     use hypha_spore_core::SporeRuntime;
-    SporeRuntime::<S::Ports<'static>>::contributions(state.storage.spores())
+    SporeRuntime::<S::Ports<'static>>::names(state.storage.spores())
         .into_iter()
-        .map(|c| format!("spore_{}", c.name))
+        .filter_map(|name| hypha_apps::AppKey::of_spore(name).ok())
         .collect()
 }
 
 impl AppResponse {
     /// `missing` for a spore's app this build lacks.
-    fn missing_from(mut self, app: &App, built: &[String]) -> Self {
-        self.missing =
-            app.kind() == AppKind::Spore && !built.iter().any(|k| k == app.key().as_str());
+    fn missing_from(mut self, app: &App, built: &[hypha_apps::AppKey]) -> Self {
+        self.missing = app.kind() == AppKind::Spore && !built.contains(app.key());
         self
     }
 }

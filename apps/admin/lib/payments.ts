@@ -37,9 +37,8 @@ export const PAYMENT_PRESETS: PaymentPreset[] = [
   },
 ];
 
-/** An installed app that takes payments: it registers `payments.start` (design note
- * 0029, §3.1), so a method can name it as its provider. */
-/** A provider a method can name besides `manual`: an app's, or a built-in spore's. */
+/** A provider a method can name besides `manual`: an installed app answering
+ * `payments.start` (design note 0029, §3.1), or a spore built into the API (0030). */
 export type PaymentApp = { key: string; name: string; isBuiltIn: boolean };
 
 /**

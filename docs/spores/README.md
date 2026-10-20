@@ -80,7 +80,8 @@ impl<P> hypha_spore::SporeUi<P> for Reviews {}
   read with `env.config_as::<T>()` (an API base for tests, a timeout). Never secrets.
 - **Merchant settings** (§8): `settings_schema()` returns a small JSON Schema (scalar
   fields; `"x-hypha-secret": true` for sealed, write-only ones) and `check_settings` its
-  own rules; the admin draws the form, and the spore reads them with
+  own rules (`"x-hypha-order": [...]` on the schema gives the fields' order); the admin
+  draws the form, and the spore reads them with
   `env.settings::<T>(&ports)` (secrets opened). A payment provider gets them in
   `PaymentRequest::store_settings` instead (it has no ports).
 
@@ -92,7 +93,7 @@ impl<P> hypha_spore::SporeUi<P> for Reviews {}
 | Event handlers | `EventHandler<P>` in `Handlers`, bounded on the ports it reads; named `spore_<name>_…` |
 | Routes | `hypha_spore::http::spore_routes!` at the crate root: paths under `/spores/<name>/` (public, rate limited), `/admin/spores/<name>/`, `/storefront/spores/<name>/`; handlers generic over `S: Storage`, annotated with `#[utoipa::path]` |
 | Admin blocks and actions | `SporeUi<P>`: `blocks()`, `actions()` (an action may stand for a payment point), `block`, `action`, on the targets apps use |
-| Storefront elements | `SporeUi::elements()`: a web component's tag and the path of the spore's public route serving its module (with `Access-Control-Allow-Origin: *`) |
+| Storefront elements | `SporeUi::elements()`: a web component's tag and the path of the spore's public route serving its module (with `Access-Control-Allow-Origin: *`), listed at the API's public address: set `server.public_url` (`hypha deploy` does) when storefronts reach the API at an internal one. Bundle a TypeScript element with `pnpm spores:build` (`spores/<name>/element/*.ts` → `.js`) |
 
 A disabled spore (staff's switch in the admin) does nothing: its providers are
 unavailable, its handlers' deliveries wait on the retry schedule, its routes answer

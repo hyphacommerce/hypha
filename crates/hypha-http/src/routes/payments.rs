@@ -165,14 +165,23 @@ pub async fn list_providers<S: Storage>(
     spores.sort_by(|a, b| a.key.cmp(&b.key));
     items.extend(spores);
     let endpoints = state.app_endpoints(&ports);
-    for app in ports.apps().list().await.map_err(ApiError::internal)? {
-        if app.kind() != AppKind::App || !app.enabled() {
-            continue;
-        }
-        let answers = endpoints
-            .answers(app.key(), hypha_extensions::PaymentsStart::NAME)
-            .await
-            .map_err(ApiError::internal)?;
+    let mut apps: Vec<_> = ports
+        .apps()
+        .list()
+        .await
+        .map_err(ApiError::internal)?
+        .into_iter()
+        .filter(|app| app.kind() == AppKind::App && app.enabled())
+        .collect();
+    apps.sort_by(|a, b| a.key().cmp(b.key()));
+    // Asked together: one round trip per app, not one after another.
+    let answers = futures_util::future::try_join_all(
+        apps.iter()
+            .map(|app| endpoints.answers(app.key(), hypha_extensions::PaymentsStart::NAME)),
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    for (app, answers) in apps.iter().zip(answers) {
         if answers {
             items.push(PaymentProviderResponse {
                 key: app.key().to_string(),

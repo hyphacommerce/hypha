@@ -37,8 +37,10 @@ pub struct UiAction {
 /// tag, the storefront target it's for (`checkout.payment` for a payment widget), and
 /// the path of the spore's own storefront route that serves its ES module
 /// (`/storefront/spores/stripe/elements/payment.js`), which storefronts load from the
-/// API's public address. The route must answer `Access-Control-Allow-Origin: *`: a
-/// module loads cross-origin.
+/// API's public address (`server.public_url`, which `hypha deploy` sets; unset, the
+/// address the storefront reached the API at, which must then be one a browser can load
+/// too). The route must answer `Access-Control-Allow-Origin: *`: a module loads
+/// cross-origin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiElement {
     pub id: &'static str,

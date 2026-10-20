@@ -671,9 +671,23 @@ them, not in this list.
   Capture and Refund from the block. Found and fixed there: a secret's description hid
   whether it was set; a captured payment stayed authorized until the webhook
   (`Completed`).
-- **Left:** a real card through Stripe's test mode (needs test keys), the settings form's
-  field order (JSON objects lose it in the API: fields read alphabetically), and the
-  TypeScript app's README pointing at the spore.
+- **Left:** a real card through Stripe's test mode (needs test keys), and the TypeScript
+  app's README pointing at the spore.
+- **Review fixes (2026-10-20):** `pnpm prod` set `SPORE_FEATURES` after the release
+  build; a `path` spore was written as an absolute path Docker can't see (it must be
+  inside the checkout, and is written relative); `charge.refunded` took any Stripe 4xx as
+  permanent (a rotated key lost the refund: only a 404 is now, the rest answer 500 so
+  Stripe redelivers); the element disabled Pay after a declined card though the payment
+  stays pending (the shopper tries another card on the same intent); the intent's
+  idempotency key was the payment's ID alone, so switching the capture mode mid-checkout
+  had Stripe refuse it for a day (the mode is in the key); a payment Stripe reports
+  succeeded after Hypha voided it (the order cancelled while the shopper confirmed) is
+  refunded at Stripe, once, and logged (*a money movement Danilo should confirm*); the
+  element's bundle is built by `pnpm spores:build` (`spores:check` in CI); the payment
+  providers' apps are sorted and asked together; `SporeRuntime::names`. A spore
+  element's module URL follows the issuer rule, so it needs `server.public_url` when
+  storefronts reach the API internally (documented). The settings schema takes
+  `"x-hypha-order"` (the form's field order: JSON objects lose it through the API).
 
 ## As built: step 3 (facade, migration check, settings, routes, UI)
 
