@@ -23,6 +23,10 @@ use crate::{AppRepo, CommandError, HasApps};
 /// The marker of a secret field in a schema: `"x-hypha-secret": true` on a string
 /// property. A contract with spores and admins.
 pub const SECRET_MARKER: &str = "x-hypha-secret";
+/// The order a form shows the fields in, on the schema: `"x-hypha-order": ["secret_key",
+/// …]`, each a property once (the rest after them). JSON objects carry no order through
+/// the API, so without it an admin sorts them by name.
+pub const ORDER_MARKER: &str = "x-hypha-order";
 
 /// The key a sealed value is stored under: `{"sealed": "<hex>"}`.
 const SEALED: &str = "sealed";
@@ -78,7 +82,7 @@ pub struct Field {
 /// A spore's settings form: a JSON Schema object of scalar properties, the subset every
 /// admin renders. Keywords allowed on the object: `type` (`"object"`), `title`,
 /// `description`, `properties`, `required`, `additionalProperties` (`false` only:
-/// unknown fields are always refused). On a property: `type` (`string`, `integer`,
+/// unknown fields are always refused), `x-hypha-order` (the fields' order). On a property: `type` (`string`, `integer`,
 /// `number`, `boolean`), `title`, `description`, `default`, `examples`, `format`,
 /// `enum`, `minLength`, `maxLength`, `minimum`, `maximum`, and `x-hypha-secret` on
 /// strings. Anything else is refused when the host starts, so an admin never meets a
@@ -97,6 +101,7 @@ const OBJECT_KEYWORDS: &[&str] = &[
     "properties",
     "required",
     "additionalProperties",
+    ORDER_MARKER,
 ];
 const FIELD_KEYWORDS: &[&str] = &[
     "type",
@@ -154,6 +159,30 @@ impl SettingsSchema {
                 &empty
             }
         };
+        if let Some(order) = object.get(ORDER_MARKER) {
+            let names: Option<Vec<&str>> = order
+                .as_array()
+                .map(|names| names.iter().filter_map(Value::as_str).collect());
+            match names {
+                Some(names) if order.as_array().is_some_and(|a| a.len() == names.len()) => {
+                    for (i, name) in names.iter().enumerate() {
+                        if !properties.contains_key(*name) {
+                            problems.push(SettingsProblem::new(
+                                *name,
+                                "is in \"x-hypha-order\" but not a property",
+                            ));
+                        } else if names[..i].contains(name) {
+                            problems
+                                .push(SettingsProblem::new(*name, "is in \"x-hypha-order\" twice"));
+                        }
+                    }
+                }
+                _ => problems.push(SettingsProblem::new(
+                    "",
+                    "\"x-hypha-order\" is a list of property names",
+                )),
+            }
+        }
         for name in &required {
             if !properties.contains_key(*name) {
                 problems.push(SettingsProblem::new(
@@ -683,6 +712,37 @@ mod tests {
             "additionalProperties": false
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_fields_order_names_each_property_once() {
+        let schema = |order: Value| {
+            json!({
+                "type": "object",
+                "properties": { "a": { "type": "string" }, "b": { "type": "string" } },
+                "x-hypha-order": order
+            })
+        };
+        assert!(SettingsSchema::parse(schema(json!(["b", "a"]))).is_ok());
+        let problems = |order| {
+            SettingsSchema::parse(schema(order))
+                .unwrap_err()
+                .into_iter()
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            problems(json!(["b", "b"]))[0],
+            "b: is in \"x-hypha-order\" twice"
+        );
+        assert_eq!(
+            problems(json!(["c"]))[0],
+            "c: is in \"x-hypha-order\" but not a property"
+        );
+        assert_eq!(
+            problems(json!("a"))[0],
+            "\"x-hypha-order\" is a list of property names"
+        );
     }
 
     #[test]

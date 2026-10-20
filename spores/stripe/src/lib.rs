@@ -136,6 +136,7 @@ impl Spore for Stripe {
         Some(json!({
             "type": "object",
             "title": "Stripe",
+            "x-hypha-order": ["secret_key", "publishable_key", "webhook_secret", "capture_mode"],
             "properties": {
                 "secret_key": {
                     "type": "string",

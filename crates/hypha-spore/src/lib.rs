@@ -54,7 +54,9 @@ pub mod ui {
 /// reports, the schema subset its form is written in, and the port it reads them
 /// through (`SporeEnv::settings` does the reading).
 pub mod settings {
-    pub use hypha_apps::{HasSporeSettings, SECRET_MARKER, SettingsProblem, SettingsSchema};
+    pub use hypha_apps::{
+        HasSporeSettings, ORDER_MARKER, SECRET_MARKER, SettingsProblem, SettingsSchema,
+    };
 }
 
 /// Hypha's shared types and generic ports: no domain logic.

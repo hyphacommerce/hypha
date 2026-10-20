@@ -52,7 +52,7 @@ pub use manifest::{
 };
 pub use repo::{AppRepo, HasApps, StageApps, keys};
 pub use spore_settings::{
-    HasSporeSettings, SECRET_MARKER, SettingsProblem, SettingsReadError, SettingsSchema,
-    SettingsView, SporeSettings, SporeSettingsRepo, get_spore_settings, read_spore_settings,
-    save_spore_settings,
+    HasSporeSettings, ORDER_MARKER, SECRET_MARKER, SettingsProblem, SettingsReadError,
+    SettingsSchema, SettingsView, SporeSettings, SporeSettingsRepo, get_spore_settings,
+    read_spore_settings, save_spore_settings,
 };

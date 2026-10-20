@@ -20,7 +20,24 @@ type Property = {
   "x-hypha-secret"?: boolean;
 };
 
-type Schema = { properties?: Record<string, Property>; required?: string[] };
+type Schema = {
+  properties?: Record<string, Property>;
+  required?: string[];
+  /** The fields' order (JSON objects carry none through the API): the rest by name. */
+  "x-hypha-order"?: string[];
+};
+
+/** The schema's fields, in its `x-hypha-order`, then the rest by name. */
+function ordered(schema: Schema): [string, Property][] {
+  const order = schema["x-hypha-order"] ?? [];
+  const rank = (name: string) => {
+    const i = order.indexOf(name);
+    return i === -1 ? order.length : i;
+  };
+  return Object.entries(schema.properties ?? {}).toSorted(
+    ([a], [b]) => rank(a) - rank(b) || a.localeCompare(b),
+  );
+}
 
 type Value = string | number | boolean | null;
 
@@ -80,7 +97,7 @@ export function SporeSettingsForm({
   const [error, setError] = useState<string>();
   const [isSaved, setIsSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const properties = Object.entries(schema.properties ?? {});
+  const properties = ordered(schema);
   const required = new Set(schema.required ?? []);
 
   const set = (name: string, value: Value) => {
