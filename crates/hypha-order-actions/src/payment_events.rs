@@ -251,8 +251,8 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
 /// money for a payment past pending (paid in an old tab: the payment collects once, and
 /// its provider gives that money back), or another attempt's decline, cancel or refund.
 /// A pending payment may be paid or authorized through another attempt (it was started
-/// again). A payment with no attempt (its provider's IDs don't name attempts, or it's
-/// from before they were kept) isn't checked. In the transaction that writes, so two
+/// again). A payment with no attempt (its provider's IDs don't name attempts, its
+/// reports named none so far, or it's from before they were kept) isn't checked. In the transaction that writes, so two
 /// attempts' reports racing can't both pass. Returns the report's attempt, checked.
 fn other_attempt(payment: &Payment, input: &PaymentEvent) -> Result<Option<String>, PaymentError> {
     let attempt = optional_text("attempt", input.attempt.clone())?;
@@ -295,7 +295,12 @@ fn collect(
 ) -> Result<bool, PaymentError> {
     let own = names_own(payment, attempt.as_deref());
     let changed = report(payment)?;
-    Ok(((changed || own) && payment.note_attempt(attempt)?) || changed)
+    let noted = if changed || own {
+        payment.note_attempt(attempt)?
+    } else {
+        false
+    };
+    Ok(changed || noted)
 }
 
 /// The payment an earlier request with this key reported on, if this caller sent it.

@@ -1477,7 +1477,7 @@ fn a_restarted_pending_payment_refuses_its_old_attempts_cancel() {
 }
 
 #[test]
-fn a_paid_payment_without_an_attempt_doesnt_take_a_second_collections() {
+fn a_paid_payment_without_an_attempt_doesnt_take_a_second_collections_attempt() {
     use hypha_order_actions::PaymentEventKind as K;
     let world = World::new();
     pending_payment(&world);
