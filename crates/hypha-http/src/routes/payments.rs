@@ -407,10 +407,11 @@ pub struct PaymentResponse {
     refunded: Money,
     /// The provider's ID, or for manual payments what staff typed (a bank reference).
     reference: Option<String>,
-    /// The provider's attempt the payment collects through (a Stripe PaymentIntent), for a
-    /// provider whose IDs name attempts: what reports naming another are refused for
-    /// (`payment_reference_mismatch`). Unlike `reference`, staff's text or a capture's
-    /// own ID never replace it.
+    /// The provider's attempt the payment collects through (a Stripe PaymentIntent), set by
+    /// its start or a report naming it, for a provider whose IDs name attempts: what
+    /// reports naming another are refused for (`payment_reference_mismatch`). Unlike
+    /// `reference`, staff's text or a capture's own ID never replace it. Null: none named
+    /// yet (a paid or authorized report naming one is then held to `reference`).
     attempt: Option<String>,
     /// The method's instructions at checkout, as the shopper was shown them.
     instructions: Option<String>,
@@ -591,16 +592,16 @@ pub struct PaymentEventRequest {
     reference: Option<String>,
     /// The provider's ID for the attempt this report is about, for a provider whose IDs
     /// name attempts (a Stripe PaymentIntent's `pi_…`; for a refund, the intent it
-    /// refunds). A paid or authorized report that moves the payment, or names its own
-    /// `reference`, keeps it as the payment's attempt; from then on Hypha collects the
-    /// payment once: a report naming another attempt is `409 payment_reference_mismatch`
-    /// (`details: {status, held, reported}`) unless it pays or authorizes a pending
-    /// payment (started again); give back what that attempt took. Absent, nothing is
-    /// checked (a capture or void carrying an ID of its own leaves it out). A payment
-    /// with no attempt yet (`attempt` null on it: its reports named none, or it's from
-    /// before attempts were kept) isn't checked either: another attempt's paid or
-    /// authorized report on it answers 200 and changes nothing, so name attempts from
-    /// the first report. Up to 255 characters.
+    /// refunds). A paid or authorized report keeps it as the payment's attempt (as does
+    /// the start, for a provider answering one); Hypha then collects the payment once: a
+    /// report naming another attempt is `409 payment_reference_mismatch` (`details:
+    /// {status, held, reported}`) unless it pays or authorizes a pending payment (started
+    /// again); give back what that attempt took. On a payment past pending with no
+    /// attempt yet (`attempt` null on it: its reports named none, or it's from before
+    /// attempts were kept), a paid or authorized report naming one is held to the
+    /// payment's `reference` instead, so name attempts from the first report; its
+    /// declines, voids and refunds aren't checked. Absent, nothing is checked (a capture
+    /// or void carrying an ID of its own leaves it out). Up to 255 characters.
     #[serde(default)]
     attempt: Option<String>,
     /// When it happened at the provider, RFC 3339; absent is now.
