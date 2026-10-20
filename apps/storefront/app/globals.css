@@ -88,6 +88,14 @@ body {
   background: var(--color-background-muted);
 }
 
+/* The page's frame grows with the page (`<Layout height="auto">`), so its content area
+   never scrolls, yet Astryx gives it `overflow: auto`: that makes it every sticky
+   element's scroll container, and nothing sticks. `clip` still keeps wide content in,
+   without being one. */
+.astryx-layout-content {
+  overflow: clip visible;
+}
+
 /* The product page's info and the checkout's summary stay in view while the other
    column scrolls; on phones the columns stack and nothing sticks. */
 @media (min-width: 900px) {
@@ -144,4 +152,58 @@ body {
    doesn't pass Item's `align="start"` on; unlayered, this wins over Astryx's layers.) */
 .shop-option-top {
   align-items: flex-start;
+}
+
+/* The checkout's choices (shipping options, payment methods) as wide cards, Shopify's
+   way: each option a bordered row, the chosen one outlined in the accent and tinted,
+   holding what goes with it (a payment method's form or instructions). */
+.shop-choice-cards .astryx-radio-list-item {
+  padding: var(--spacing-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-container);
+  background: var(--color-background-card);
+  transition:
+    border-color 120ms,
+    box-shadow 120ms,
+    background-color 120ms;
+}
+.shop-choice-cards .astryx-radio-list-item:hover {
+  border-color: var(--color-border-emphasized);
+}
+.shop-choice-cards .astryx-radio-list-item[data-selected] {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent-muted) 35%, var(--color-background-card));
+}
+
+/* A provider's payment form in the shop's look (docs/apps/elements.md, "Styling"): the
+   shared `--hypha-*` properties from the theme's tokens. Fields sit on the page's
+   background, as the checkout's own inputs do. */
+.shop-payment-element {
+  --hypha-font-family: var(--font-family-body);
+  --hypha-color-text: var(--color-text-primary);
+  --hypha-color-text-secondary: var(--color-text-secondary);
+  --hypha-color-background: var(--color-background-body);
+  --hypha-color-border: var(--color-border);
+  --hypha-color-accent: var(--color-accent);
+  --hypha-color-error: var(--color-error);
+  --hypha-radius: var(--radius-element);
+  position: relative;
+}
+.shop-payment-skeleton {
+  display: block;
+}
+/* The form mounts unseen under its skeleton until the provider says it's ready. */
+.shop-payment-element[data-loading] > :not(.shop-payment-skeleton) {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* What the chosen payment method shows inside its card: its form, on the card's own
+   background so the provider's fields read as they would anywhere. */
+.shop-choice-detail {
+  margin-top: var(--spacing-3);
+  cursor: auto;
 }

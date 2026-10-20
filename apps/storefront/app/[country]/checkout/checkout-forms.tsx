@@ -25,6 +25,7 @@ import {
   selectShipping,
   startCartPayment,
 } from "@/app/[country]/actions";
+import { Skeleton } from "@/components/skeletons";
 
 /** The fields the form won't save without (marked required below). */
 const REQUIRED: (keyof Details)[] = ["email", "last_name", "line1", "city"];
@@ -167,6 +168,7 @@ export function ShippingChoice({
       <RadioList
         label={heading ?? "Shipping method"}
         isLabelHidden={!heading}
+        containerClassName="shop-choice-cards"
         value={value}
         onChange={choose}
         isDisabled={pending}
@@ -194,19 +196,23 @@ export type Method = { id: string; name: string; instructions: string | null };
 /** The payment step's id, for "Place order" to go back to. */
 export const PAYMENT_STEP = "payment";
 
-/** How the shopper pays: one of the cart's methods; choosing one saves it. The chosen
- * method's instructions (bank details) show under it. */
+/** How the shopper pays: one of the cart's methods, each a wide card; choosing one
+ * saves it. The chosen method's card holds its instructions (bank details) or, paid
+ * online, its payment form (`detail`), as Shopify's checkout does. */
 export function PaymentChoice({
   country,
   methods,
   selected,
   problem,
+  detail,
 }: {
   country: string;
   methods: Method[];
   selected?: string;
   /** The cart's method isn't offered any more (disabled, or not in this market). */
   problem?: boolean;
+  /** What the saved method's card holds below its name (the online payment form). */
+  detail?: React.ReactNode;
 }) {
   const [value, setValue] = useState(selected ?? "");
   const [error, setError] = useState<string>();
@@ -231,26 +237,48 @@ export function PaymentChoice({
       <RadioList
         label="Payment method"
         isLabelHidden
+        containerClassName="shop-choice-cards"
         value={value}
         onChange={choose}
         isDisabled={pending}
       >
-        {methods.map((m) => (
-          <RadioListItem
-            key={m.id}
-            value={m.id}
-            label={m.name}
-            className="shop-option-top"
-            description={
-              m.id === value && m.instructions ? (
-                <span className="shop-pre-line">{m.instructions}</span>
-              ) : undefined
-            }
-          />
-        ))}
+        {methods.map((m) => {
+          const chosen = m.id === value;
+          // The form only once the cart has the method (the server sends it then).
+          const form = chosen && m.id === selected ? detail : undefined;
+          return (
+            <RadioListItem
+              key={m.id}
+              value={m.id}
+              label={<Text weight="medium">{m.name}</Text>}
+              className="shop-option-top"
+              description={
+                chosen && (m.instructions || form) ? (
+                  <>
+                    {m.instructions && <span className="shop-pre-line">{m.instructions}</span>}
+                    {form && <ChoiceDetail>{form}</ChoiceDetail>}
+                  </>
+                ) : undefined
+              }
+            />
+          );
+        })}
       </RadioList>
       {error && <Banner status="error" title={error} />}
     </VStack>
+  );
+}
+
+/**
+ * A form inside a chosen option's card. The card hands clicks on its surface to its
+ * radio (which would take focus from the form's fields), so clicks here stop.
+ */
+function ChoiceDetail({ children }: { children: React.ReactNode }) {
+  return (
+    // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- not a control: it only keeps the card's click delegation out of the form
+    <div className="shop-choice-detail" onClick={(event) => event.stopPropagation()}>
+      {children}
+    </div>
   );
 }
 
@@ -414,6 +442,8 @@ export function OnlinePaymentForm({
   const payment = usePayment();
   const [started, setStarted] = useState<CartPaymentResult | null>(null);
   const [round, setRound] = useState(0);
+  // The provider's form said it's ready (`hypha:ready`): until then, its skeleton.
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let current = true;
@@ -443,29 +473,36 @@ export function OnlinePaymentForm({
   }, [round]);
 
   const onEvent = (event: ElementEvent) => {
-    if (event.type === "hypha:ready") payment.setReady(true);
-    else if (event.type === "hypha:payment-confirmed") void payment.place();
+    if (event.type === "hypha:ready") {
+      setLoaded(true);
+      payment.setReady(true);
+    } else if (event.type === "hypha:payment-confirmed") void payment.place();
     else if (event.type === "hypha:error") {
       payment.setPaying(false);
       payment.setError(event.detail.message);
     }
   };
 
-  if (!started) return <Text color="secondary">Loading the payment form…</Text>;
+  if (!started) return <PaymentFormSkeleton />;
   const next = started.nextAction;
   if (next?.type === "client_widget") {
     if (!started.module) {
       return <Text color="secondary">This payment can&apos;t be shown here. Try again later.</Text>;
     }
+    // A failure before it's ready (Stripe.js didn't load) shows under the button.
+    const waiting = !loaded && !payment.error;
     return (
-      <HyphaElement
-        tag={next.element}
-        module={started.module}
-        // The summary's button pays (`submit()`), not the element's own.
-        props={{ ...next.props, submit_mode: "external" }}
-        onEvent={onEvent}
-        onElement={payment.setElement}
-      />
+      <div className="shop-payment-element" data-loading={waiting ? "" : undefined}>
+        {waiting && <PaymentFormSkeleton />}
+        <HyphaElement
+          tag={next.element}
+          module={started.module}
+          // The summary's button pays (`submit()`), not the element's own.
+          props={{ ...next.props, submit_mode: "external" }}
+          onEvent={onEvent}
+          onElement={payment.setElement}
+        />
+      </div>
     );
   }
   if (next?.type === "redirect") {
@@ -486,6 +523,38 @@ export function OnlinePaymentForm({
         />
       </div>
     </VStack>
+  );
+}
+
+/** One of the skeleton's fields: its label, then its input. */
+function FieldSkeleton({ index, label }: { index: number; label: string }) {
+  return (
+    <VStack gap={2}>
+      <Skeleton index={index} height={12} width={label} radius={1} />
+      <Skeleton index={index} height={44} radius={2} />
+    </VStack>
+  );
+}
+
+/** A card form's outline while it loads: the methods' tabs, then number, expiry and
+ * security code, and country, as the provider's form lays them out. */
+function PaymentFormSkeleton() {
+  return (
+    <output className="shop-payment-skeleton" aria-label="Loading the payment form">
+      <VStack gap={4}>
+        <Grid columns={3} gap={3}>
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} index={i} height={64} radius={2} />
+          ))}
+        </Grid>
+        <FieldSkeleton index={3} label="30%" />
+        <Grid columns={2} gap={3}>
+          <FieldSkeleton index={4} label="45%" />
+          <FieldSkeleton index={4} label="55%" />
+        </Grid>
+        <FieldSkeleton index={5} label="25%" />
+      </VStack>
+    </output>
   );
 }
 

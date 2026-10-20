@@ -171,14 +171,16 @@ export default async function CheckoutPage({
                       }))}
                       selected={method?.id}
                       problem={Boolean(cart.payment_method) && !method}
-                    />
-                  )}
-                  {online && ready && (
-                    <OnlinePaymentForm
-                      // A new method or total starts a new payment.
-                      key={`${method?.id}:${cart.total.amount}`}
-                      country={code}
-                      total={total}
+                      detail={
+                        online && ready ? (
+                          <OnlinePaymentForm
+                            // A new method or total starts a new payment.
+                            key={`${method?.id}:${cart.total.amount}`}
+                            country={code}
+                            total={total}
+                          />
+                        ) : undefined
+                      }
                     />
                   )}
                 </VStack>
