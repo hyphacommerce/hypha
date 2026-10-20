@@ -50,6 +50,13 @@ pub struct PaymentEvent {
     /// reported under another idempotency key). An app must send it for refunds
     /// (`refund_reference_required`).
     pub reference: Option<String>,
+    /// The provider's ID for the attempt this report is about, given only by a provider
+    /// whose references name attempts (the Stripe spore: the PaymentIntent). Another
+    /// attempt's report is refused (`payment_reference_mismatch`) unless it pays or
+    /// authorizes a pending payment (started again): the payment collects once. Absent,
+    /// as from apps (whose capture or void may carry an ID of its own), nothing is
+    /// checked.
+    pub attempt: Option<String>,
     /// When it happened at the provider; absent is now. When it was paid or voided.
     pub occurred_at: Option<Timestamp>,
     /// A retry with the same key changes nothing again and answers as the first did.
@@ -88,9 +95,9 @@ async fn check_reporter<S: HasApps>(
 /// (`refund_reference_required`). A report of the status the payment is in already
 /// changes nothing (a webhook delivered twice). Refused: an unknown payment
 /// (`payment_not_found`), another app's payment (`payment_not_yours`), a move
-/// the status doesn't allow (`invalid_payment_transition`), a second collection under
-/// another reference (`payment_reference_mismatch`, `held_elsewhere`), an amount that
-/// doesn't fit
+/// the status doesn't allow (`invalid_payment_transition`), a report about another
+/// attempt than the payment's when it names one (`payment_reference_mismatch`,
+/// `other_attempt`), an amount that doesn't fit
 /// (`invalid_refund_amount`, `payment_amount_mismatch`). A cancelled order still takes
 /// reports: they say where the money is.
 pub async fn record_payment_event<S: OrderActionPorts + HasApps>(
@@ -201,7 +208,7 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
             .map_err(PaymentError::from)?;
         Ok(payment.refund(amount, status, reference.clone())?)
     };
-    held_elsewhere(payment, input)?;
+    other_attempt(payment, input)?;
     Ok(match input.kind {
         PaymentEventKind::Authorized => {
             whole(payment)?;
@@ -236,45 +243,30 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
     })
 }
 
-/// Refuses a second collection (`payment_reference_mismatch`): a payment authorized, or
-/// paid, under one reference reported authorized, or paid, again under another (a
-/// second attempt at the provider, paid in an old tab: the payment collects once, and
-/// its provider gives that money back). The same report under the same reference is a
-/// webhook delivered twice and changes nothing. Checked in the same transaction as the
-/// write, so two attempts' reports racing can't both pass. Moving on is never refused:
-/// a capture or a void may carry the provider's own ID for that operation (PayPal's
-/// capture ID, Adyen's pspReference), and a refund names the refund.
-fn held_elsewhere(payment: &Payment, input: &PaymentEvent) -> Result<(), PaymentError> {
-    use PaymentStatus as S;
-    let collected_again = match input.kind {
-        PaymentEventKind::Authorized => matches!(
-            payment.status(),
-            S::Authorized | S::Paid | S::PartiallyRefunded | S::Refunded
-        ),
-        PaymentEventKind::Paid => {
-            matches!(
-                payment.status(),
-                S::Paid | S::PartiallyRefunded | S::Refunded
-            )
-        }
-        _ => false,
+/// Refuses a report about another attempt than the payment's (`payment_reference_mismatch`),
+/// when the report names its attempt: a second attempt's money for a payment past
+/// pending (paid in an old tab: the payment collects once, and its provider gives that
+/// money back), or another attempt's decline, cancel or refund. A pending payment may be
+/// paid or authorized through another attempt (it was started again). Checked in the
+/// transaction that writes, so two attempts' reports racing can't both pass.
+fn other_attempt(payment: &Payment, input: &PaymentEvent) -> Result<(), PaymentError> {
+    let (Some(attempt), Some(held)) = (input.attempt.as_deref(), payment.reference()) else {
+        return Ok(());
     };
-    let reported = input
-        .reference
-        .as_deref()
-        .map(str::trim)
-        .filter(|r| !r.is_empty());
-    match (collected_again, payment.reference(), reported) {
-        (true, Some(held), Some(reported)) if held != reported => {
-            Err(PaymentError::ReferenceMismatch {
-                payment: payment.id(),
-                status: payment.status(),
-                held: held.to_string(),
-                reported: reported.to_string(),
-            })
-        }
-        _ => Ok(()),
+    let restarted = payment.status() == PaymentStatus::Pending
+        && matches!(
+            input.kind,
+            PaymentEventKind::Authorized | PaymentEventKind::Paid
+        );
+    if held == attempt || restarted {
+        return Ok(());
     }
+    Err(PaymentError::ReferenceMismatch {
+        payment: payment.id(),
+        status: payment.status(),
+        held: held.to_string(),
+        reported: attempt.to_string(),
+    })
 }
 
 /// The payment an earlier request with this key reported on, if this caller sent it.

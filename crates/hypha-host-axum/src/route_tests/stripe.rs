@@ -84,7 +84,7 @@ async fn fake_stripe() -> (String, Shared) {
                     }
                     ("GET", ["payment_intents", id]) => match fake.intents.get(*id) {
                         Some(intent) => (200, intent.clone()),
-                        None => (404, json!({"error": {"type": "invalid_request_error", "message": "No such payment_intent"}})),
+                        None => (404, json!({"error": {"type": "invalid_request_error", "code": "resource_missing", "message": "No such payment_intent"}})),
                     },
                     ("POST", ["payment_intents", id, action]) => {
                         let next = match *action {
@@ -108,7 +108,7 @@ async fn fake_stripe() -> (String, Shared) {
                                         "message": format!("You cannot {action} this PaymentIntent because it has a status of {state}.")}}))
                                 }
                             }
-                            None => (404, json!({"error": {"type": "invalid_request_error", "message": "No such payment_intent"}})),
+                            None => (404, json!({"error": {"type": "invalid_request_error", "code": "resource_missing", "message": "No such payment_intent"}})),
                         }
                     }
                     ("POST", ["refunds"])

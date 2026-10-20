@@ -29,6 +29,12 @@ impl StripeError {
         (400..500).contains(&self.status) && self.status != 429
     }
 
+    /// Stripe has no such object (a 404 with its `resource_missing`), not any 404 (an
+    /// `api_base` that isn't Stripe's answering one).
+    pub fn is_missing(&self) -> bool {
+        self.status == 404 && self.code.as_deref() == Some("resource_missing")
+    }
+
     fn unreachable(e: HttpError) -> Self {
         Self {
             status: 0,

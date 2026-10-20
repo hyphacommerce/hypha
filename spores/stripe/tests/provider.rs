@@ -337,10 +337,14 @@ fn a_payment_whose_intent_was_canceled_is_not_started_again() {
     });
     let mut again = request(configured());
     again.reference = Some("pi_kept".to_string());
-    assert!(matches!(
-        block_on(provider(http).start(&again)),
-        Err(PaymentError::ProviderFailed { reason, .. }) if reason.contains("was canceled")
-    ));
+    assert_eq!(
+        block_on(provider(http).start(&again)).map(|_| ()),
+        Err(PaymentError::ProviderFailed {
+            provider: key(),
+            reason: "this payment's PaymentIntent was canceled at Stripe: the payment can't go on"
+                .to_string(),
+        })
+    );
 }
 
 #[test]
@@ -406,10 +410,13 @@ fn a_404_that_isnt_stripes_no_such_intent_makes_no_new_one() {
     });
     let mut again = request(configured());
     again.reference = Some("pi_kept".to_string());
-    assert!(matches!(
-        block_on(provider(http).start(&again)),
-        Err(PaymentError::ProviderFailed { .. })
-    ));
+    assert_eq!(
+        block_on(provider(http).start(&again)).map(|_| ()),
+        Err(PaymentError::ProviderFailed {
+            provider: key(),
+            reason: "Stripe refused: Not Found".to_string(),
+        })
+    );
     assert_eq!(fake.requests().len(), 1);
 }
 
@@ -424,9 +431,12 @@ fn a_kept_intent_stripe_cant_read_for_now_fails_the_start() {
     });
     let mut again = request(configured());
     again.reference = Some("pi_kept".to_string());
-    assert!(matches!(
-        block_on(provider(http).start(&again)),
-        Err(PaymentError::ProviderFailed { .. })
-    ));
+    assert_eq!(
+        block_on(provider(http).start(&again)).map(|_| ()),
+        Err(PaymentError::ProviderFailed {
+            provider: key(),
+            reason: "Something went wrong".to_string(),
+        })
+    );
     assert_eq!(fake.requests().len(), 1);
 }

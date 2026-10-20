@@ -1901,10 +1901,6 @@ export interface paths {
          *     provider's event ID): a retry with it answers as the first did. A refund is counted
          *     once per `reference` (the provider's refund ID), whatever the key. A move the payment's status doesn't allow is `409
          *     invalid_payment_transition`; a refund that doesn't fit, `422 invalid_refund_amount`.
-         *     A payment authorized or paid under one `reference` reported authorized or paid again
-         *     under another is a second collection: `409 payment_reference_mismatch`, `details:
-         *     {status, held, reported}` (give the reported attempt's money back). A capture or void
-         *     may carry the provider's own ID for it.
          */
         post: operations["admin.payments.report_event"];
         delete?: never;

@@ -10,7 +10,7 @@
 //! (Stripe delivers it again).
 
 use hypha_spore::core::{
-    ActingAs, Actor, Clock, Ctx, IdempotencyRequest, PaymentId, RepoError, Scope, Timestamp,
+    ActingAs, Actor, Clock, Ctx, IdempotencyRequest, PaymentId, Scope, Timestamp,
 };
 use hypha_spore::http::axum::body::Bytes;
 use hypha_spore::http::axum::extract::State;
@@ -19,7 +19,7 @@ use hypha_spore::http::{ApiError, SharedState, Storage, spore, utoipa};
 use hypha_spore::order_actions::{
     CommandError, PaymentEvent, PaymentEventKind, record_payment_event,
 };
-use hypha_spore::payments::{HasPayments, PaymentError, PaymentRepo, PaymentStatus};
+use hypha_spore::payments::{PaymentError, PaymentStatus};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -36,6 +36,8 @@ pub struct Report {
     pub amount: Option<i64>,
     /// The PaymentIntent's ID; for a refund, the refund's (`re_…`).
     pub reference: String,
+    /// The PaymentIntent it's about: the attempt core checks it against.
+    pub intent: String,
     pub occurred_at: Option<Timestamp>,
     /// The event's ID, or for a refund `stripe-refund:<re_…>`.
     pub key: String,
@@ -120,6 +122,7 @@ pub fn intent_reports(event: &StripeEvent) -> Result<Vec<Report>, String> {
         kind,
         amount: None,
         reference: intent.to_string(),
+        intent: intent.to_string(),
         occurred_at: event.occurred_at(),
         key: event.id.clone(),
     };
@@ -155,6 +158,10 @@ pub fn refund_reports(
     charge: &serde_json::Map<String, Value>,
     refunds: &[Refund],
 ) -> Result<Vec<Report>, String> {
+    let intent = charge
+        .get("payment_intent")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let currency = charge
         .get("currency")
         .and_then(Value::as_str)
@@ -183,6 +190,7 @@ pub fn refund_reports(
                 },
                 amount: Some(from_stripe(refund.amount, currency)),
                 reference: refund.id.clone(),
+                intent: intent.to_string(),
                 occurred_at: (refund.created > 0)
                     .then(|| Timestamp::from_unix_micros(refund.created * 1_000_000)),
                 key: format!("stripe-refund:{}", refund.id),
@@ -266,7 +274,9 @@ pub async fn receive<S: Storage>(
             // No such intent at Stripe (not one of this store's), or a request Stripe
             // will never take: retrying can't help. A later refund of the charge reports
             // every refund again, each counted once.
-            Err(e) if e.status == 404 || e.status == 400 => Err(e.message),
+            Err(e) if e.is_missing() || (e.status == 400 && e.kind == "invalid_request_error") => {
+                Err(e.message)
+            }
             // What can pass (Stripe down or rate limited, a key rotated or without
             // refunds:read until the merchant saves the new one): 500, so Stripe delivers
             // it again and the refund isn't lost.
@@ -282,17 +292,6 @@ pub async fn receive<S: Storage>(
                 .get("hypha_payment")
                 .and_then(|p| p.parse().ok())
             {
-                // A refund of another intent of the payment (the money given back
-                // because the payment was collected through its first): not the
-                // payment's.
-                Some(payment)
-                    if other_intent(&ports, payment, &intent.id)
-                        .await
-                        .map_err(ApiError::internal)?
-                        .is_some() =>
-                {
-                    Err("a refund of another PaymentIntent than the payment's".to_string())
-                }
                 Some(payment) => refund_reports(payment, &event.object, &refunds),
                 None => Err("not a Hypha payment".to_string()),
             },
@@ -327,68 +326,63 @@ pub async fn receive<S: Storage>(
             kind: report.kind,
             amount: report.amount,
             reference: Some(report.reference.clone()),
+            attempt: Some(report.intent.clone()),
             occurred_at: report.occurred_at,
             idempotency: Some(IdempotencyRequest {
                 fingerprint: fingerprint(&report),
                 key: report.key.clone(),
             }),
         };
-        // A report about another intent than the one the payment was started through (one
-        // it left behind when it was started again, paid in an old tab). Stripe captures
-        // and cancels through the payment's own intent, so a decline or cancel of another
-        // is not the payment's, and money another took for a payment past pending is a
-        // second collection. Core refuses that too when the payment is collected already,
-        // in the transaction that writes (two deliveries racing can't both pass).
-        let other = other_intent(&ports, report.payment, &report.reference)
-            .await
-            .map_err(ApiError::internal)?;
-        let unwanted = match (report.kind, other) {
-            (PaymentEventKind::Failed | PaymentEventKind::Voided, Some(_)) => {
-                refused
-                    .get_or_insert_with(|| "another PaymentIntent than the payment's".to_string());
-                continue;
+        // Core refuses a report about another intent than the payment's (it names its
+        // attempt), in the transaction that writes: money another intent took for a
+        // payment past pending goes back; its decline, cancel or refund isn't the
+        // payment's.
+        let unwanted = match record_payment_event(&ctx, &ports, &stripe.env, input).await {
+            Ok(_) => {
+                reported += 1;
+                None
             }
-            (PaymentEventKind::Paid | PaymentEventKind::Authorized, Some(status))
-                if status != PaymentStatus::Pending =>
+            // Storage failed: Stripe delivers it again, and what went through already
+            // changes nothing then.
+            Err(CommandError::Repo(e)) => {
+                hypha_spore::tracing::warn!(event = %event.id, "recording a Stripe event failed: {e}");
+                return answer(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    WebhookOutcome::rejected("couldn't record it; try again"),
+                );
+            }
+            // Taken or held at Stripe after Hypha voided it (the order was cancelled
+            // while the shopper confirmed, and the cancel came too late at Stripe).
+            Err(CommandError::Payment(PaymentError::InvalidTransition { from, .. }))
+                if matches!(
+                    report.kind,
+                    PaymentEventKind::Paid | PaymentEventKind::Authorized
+                ) && matches!(from, PaymentStatus::Voided | PaymentStatus::Failed) =>
+            {
+                Some(format!("payment {from}"))
+            }
+            // Another intent's money for a payment past pending: a second collection.
+            Err(CommandError::Payment(PaymentError::ReferenceMismatch { status, .. }))
+                if matches!(
+                    report.kind,
+                    PaymentEventKind::Paid | PaymentEventKind::Authorized
+                ) =>
             {
                 Some(format!("payment {status} through another PaymentIntent"))
             }
-            _ => match record_payment_event(&ctx, &ports, &stripe.env, input).await {
-                Ok(_) => {
-                    reported += 1;
-                    None
-                }
-                // Storage failed: Stripe delivers it again, and what went through already
-                // changes nothing then.
-                Err(CommandError::Repo(e)) => {
-                    hypha_spore::tracing::warn!(event = %event.id, "recording a Stripe event failed: {e}");
-                    return answer(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        WebhookOutcome::rejected("couldn't record it; try again"),
-                    );
-                }
-                // Taken or held at Stripe after Hypha voided it (the order was cancelled
-                // while the shopper confirmed, and the cancel came too late at Stripe).
-                Err(CommandError::Payment(PaymentError::InvalidTransition { from, .. }))
-                    if matches!(
-                        report.kind,
-                        PaymentEventKind::Paid | PaymentEventKind::Authorized
-                    ) && matches!(from, PaymentStatus::Voided | PaymentStatus::Failed) =>
-                {
-                    Some(format!("payment {from}"))
-                }
-                // A second collection core refused as it recorded.
-                Err(CommandError::Payment(PaymentError::ReferenceMismatch { status, .. })) => {
-                    Some(format!("payment {status} through another PaymentIntent"))
-                }
-                // A move the payment can't make (voided already, …): retrying won't help.
-                Err(e) => {
-                    let code = hypha_spore::core::ErrorCode::code(&e);
-                    hypha_spore::tracing::warn!(event = %event.id, payment = %report.payment, "Hypha refused a Stripe report: {code}");
-                    refused.get_or_insert_with(|| code.to_string());
-                    None
-                }
-            },
+            // Another intent's decline, cancel or refund: not the payment's.
+            Err(CommandError::Payment(PaymentError::ReferenceMismatch { .. })) => {
+                refused
+                    .get_or_insert_with(|| "another PaymentIntent than the payment's".to_string());
+                None
+            }
+            // A move the payment can't make (voided already, …): retrying won't help.
+            Err(e) => {
+                let code = hypha_spore::core::ErrorCode::code(&e);
+                hypha_spore::tracing::warn!(event = %event.id, payment = %report.payment, "Hypha refused a Stripe report: {code}");
+                refused.get_or_insert_with(|| code.to_string());
+                None
+            }
         };
         // The money goes back (a payment refunded, an authorization released). Not done
         // (Stripe down, no key): 500, so Stripe delivers it again and it's tried again.
@@ -438,20 +432,6 @@ pub async fn receive<S: Storage>(
             },
         ),
     }
-}
-
-/// The payment's status when it was started through another PaymentIntent than `intent`
-/// (its reference is another `pi_…`).
-async fn other_intent<P: HasPayments>(
-    ports: &P,
-    payment: PaymentId,
-    intent: &str,
-) -> Result<Option<PaymentStatus>, RepoError> {
-    Ok(ports.payments().get(payment).await?.and_then(|p| {
-        p.reference()
-            .is_some_and(|r| r.starts_with("pi_") && r != intent)
-            .then(|| p.status())
-    }))
 }
 
 /// How giving money back at Stripe went.
@@ -572,6 +552,7 @@ mod tests {
                 kind: PaymentEventKind::Paid,
                 amount: None,
                 reference: "pi_1".to_string(),
+                intent: "pi_1".to_string(),
                 occurred_at: Some(Timestamp::from_unix_micros(1_700_000_000_000_000)),
                 key: "evt_1".to_string(),
             }]

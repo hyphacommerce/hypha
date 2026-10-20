@@ -713,25 +713,24 @@ them, not in this list.
   couldn't be stored gets a second intent when the shopper comes back more than a day
   later; should both be paid, the payment is collected once and the other intent's
   money goes back.
-- **Final review (2026-10-20):** a payment collected once is a domain rule, not the
-  spore's: `record_payment_event` refuses a second collection, a payment authorized or
-  paid under one reference reported authorized or paid again under another
-  (`payment_reference_mismatch`, 409, `details: {status, held, reported}`;
-  `held_elsewhere`, in the transaction that writes, so two deliveries racing can't both
-  pass). Moving on is never refused: a capture or void may carry the provider's own ID
-  for it (PayPal's capture ID, Adyen's pspReference; a re-review caught the first,
-  broader rule refusing those). Stripe captures and cancels through the payment's own
-  intent, so its webhook is stricter: a paid or authorized report of another intent on a
-  payment past pending is a second collection (its money goes back), and declines,
-  cancels and refunds of another intent are ignored (a read before the write: a cancel
-  racing a restart can still void a pending payment, whose later money then goes back).
-  A payment action's answer says whether it's `completed` (the admin's "Done"). Giving money back is keyed per intent (`<payment>:<intent>:refund-after-void`).
-  A stored intent Stripe no longer knows (404 `resource_missing`: other keys) is replaced by a new one (money paid on the old account's intent is for staff to reconcile there). The
-  admin says a payment action is done only when the payment moved. The apps' image
-  installs from the packages' manifests alone (a stage that keeps only them), so a source
-  edit doesn't reinstall; spores' own `target/` stays out of the API's build context;
-  `GET /admin/payment-providers` reads spores from the app listing (`spore_in`); the
-  generated crates' entries come from one generator.
+- **Final review (2026-10-20):** a payment collected once is checked by core, in the
+  transaction that writes (two deliveries racing can't both pass), for a provider whose
+  references name attempts: a report may name its attempt (`PaymentEvent::attempt`; the
+  Stripe spore gives the PaymentIntent), and another attempt's report is refused
+  (`payment_reference_mismatch`, 409, `details: {status, held, reported}`) unless it pays
+  or authorizes a pending payment (started again). So money another intent took for a
+  payment past pending goes back, and another intent's decline, cancel or refund changes
+  nothing. Apps' reports name no attempt and nothing is checked, as before: a capture or
+  void of theirs may carry an ID of its own (PayPal's capture ID, Adyen's pspReference;
+  re-reviews caught two rules keyed on references alone refusing those). Giving money
+  back is keyed per intent (`<payment>:<intent>:refund-after-void`). A stored intent
+  Stripe no longer knows (404 `resource_missing`: other keys) is replaced by a new one
+  (money paid on the old account's intent is for staff to reconcile there). A payment
+  action's answer says whether it's `completed` (done and recorded), which the admin's
+  "Done" reads. The apps' image installs from the packages' manifests alone (a stage
+  that keeps only them), so a source edit doesn't reinstall; spores' own `target/` stays
+  out of the API's build context; `GET /admin/payment-providers` reads spores from the
+  app listing (`spore_in`); the generated crates' entries come from one generator.
 
 ## As built: step 3 (facade, migration check, settings, routes, UI)
 
