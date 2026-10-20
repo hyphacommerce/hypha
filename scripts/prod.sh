@@ -17,7 +17,9 @@ cd "$(dirname "$0")/.."
 # First-party spores to build the API with (design note 0030, §9): HYPHA_SPORES=stripe
 # (comma-separated) turns on each one's `spore-<name>` feature.
 SPORE_FEATURES=""
-for spore in ${HYPHA_SPORES//,/ }; do SPORE_FEATURES+="spore-$spore,"; done
+# `:-`: set -u refuses an unset variable (bash 4+).
+spores="${HYPHA_SPORES:-}"
+for spore in ${spores//,/ }; do SPORE_FEATURES+="spore-$spore,"; done
 SPORE_FEATURES="${SPORE_FEATURES%,}"
 
 API_PORT=3917

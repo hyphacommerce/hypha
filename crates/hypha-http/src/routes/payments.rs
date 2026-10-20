@@ -174,14 +174,13 @@ pub async fn list_providers<S: Storage>(
         .filter(|app| app.kind() == AppKind::App && app.enabled())
         .collect();
     apps.sort_by(|a, b| a.key().cmp(b.key()));
-    // Asked together: one round trip per app, not one after another.
-    let answers = futures_util::future::try_join_all(
-        apps.iter()
-            .map(|app| endpoints.answers(app.key(), hypha_extensions::PaymentsStart::NAME)),
-    )
-    .await
-    .map_err(ApiError::internal)?;
-    for (app, answers) in apps.iter().zip(answers) {
+    // One after another: the request's connection runs one query at a time anyway, and a
+    // store has a handful of apps.
+    for app in &apps {
+        let answers = endpoints
+            .answers(app.key(), hypha_extensions::PaymentsStart::NAME)
+            .await
+            .map_err(ApiError::internal)?;
         if answers {
             items.push(PaymentProviderResponse {
                 key: app.key().to_string(),

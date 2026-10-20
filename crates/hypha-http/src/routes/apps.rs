@@ -228,6 +228,8 @@ fn built_spores<S: Storage>(state: &AppState<S>) -> Vec<hypha_apps::AppKey> {
     use hypha_spore_core::SporeRuntime;
     SporeRuntime::<S::Ports<'static>>::names(state.storage.spores())
         .into_iter()
+        // Every name makes a key: the host refuses to start with one that doesn't
+        // (`hypha_spore_core::check`).
         .filter_map(|name| hypha_apps::AppKey::of_spore(name).ok())
         .collect()
 }
