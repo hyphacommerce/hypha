@@ -26,10 +26,17 @@ type SearchResult =
   | { data: StorefrontSchemas["SearchResponse"]; error?: undefined }
   | { data?: undefined; error: { code: string; error: string } };
 
-/** A search, as the API answers it. */
+/** A search, as the API answers it: its results, or its refusal of the query (a stale
+ * cursor, a bad filter: the listing says why). A failure (the API down, a 500, a rate
+ * limit) throws instead, so the cached search below keeps nothing and asks again. */
 async function searchNow(query: SearchQuery): Promise<SearchResult> {
-  const { data, error } = await api().GET("/storefront/search", { params: { query } });
-  return data ? { data } : { error: error ?? { code: "unknown", error: "search failed" } };
+  const { data, error, response } = await api().GET("/storefront/search", {
+    params: { query },
+  });
+  if (data) return { data };
+  const refused = response.status >= 400 && response.status < 500 && response.status !== 429;
+  if (!refused || !error) throw new Error(`${response.url} failed with ${response.status}`);
+  return { error };
 }
 
 /**

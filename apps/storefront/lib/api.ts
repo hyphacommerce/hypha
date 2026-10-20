@@ -58,6 +58,19 @@ export function loaded<T>(result: { data?: T; response: Response }): T {
   throw new Error(`${result.response.url} failed with ${result.response.status}`);
 }
 
+/**
+ * A read whose resource may be missing: its data, `null` when the API says 404, and a
+ * throw for anything else. A failing API (a 500, a timeout) must not read as "missing":
+ * the cached reads below would keep that `null`, and the static page its 404, for
+ * minutes after the API is back. Thrown, nothing is cached, and the next request asks
+ * again.
+ */
+export function found<T>(result: { data?: T; response: Response }): T | null {
+  if (result.data !== undefined) return result.data;
+  if (result.response.status === 404) return null;
+  throw new Error(`${result.response.url} failed with ${result.response.status}`);
+}
+
 /** The store's public details, once per request (and cached, tagged `store`). */
 export const loadStore = cache(
   unstable_cache(async () => loaded(await api().GET("/storefront/store")), ["store"], {
@@ -103,10 +116,11 @@ export const loadCategories = cache(
 export const loadCategory = cache((handle: string) =>
   unstable_cache(
     async () => {
-      const { data } = await api().GET("/storefront/categories/by-handle/{handle}", {
-        params: { path: { handle } },
-      });
-      return data ?? null;
+      return found(
+        await api().GET("/storefront/categories/by-handle/{handle}", {
+          params: { path: { handle } },
+        }),
+      );
     },
     ["category", handle],
     { tags: [TAGS.categories, TAGS.category(handle)], revalidate: FRESH_SECONDS },
@@ -121,10 +135,11 @@ export const loadCategory = cache((handle: string) =>
 export const loadProduct = cache((handle: string, country: string) =>
   unstable_cache(
     async () => {
-      const { data } = await api().GET("/storefront/products/by-handle/{handle}", {
-        params: { path: { handle }, query: { country } },
-      });
-      return data ?? null;
+      return found(
+        await api().GET("/storefront/products/by-handle/{handle}", {
+          params: { path: { handle }, query: { country } },
+        }),
+      );
     },
     ["product", handle, country],
     { tags: [TAGS.products, TAGS.product(handle), TAGS.prices], revalidate: FRESH_SECONDS },
