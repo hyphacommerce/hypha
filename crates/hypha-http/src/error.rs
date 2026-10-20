@@ -971,7 +971,9 @@ fn payment_error_status(e: &hypha_payments::PaymentError) -> Option<StatusCode> 
         | P::InvalidSettings { .. }
         | P::InstructionsTooLong => Some(StatusCode::UNPROCESSABLE_ENTITY),
         // The payment's state, not the request; or its provider, which takes no actions.
-        P::InvalidTransition { .. } | P::ActionUnsupported { .. } => Some(StatusCode::CONFLICT),
+        P::InvalidTransition { .. } | P::ReferenceMismatch { .. } | P::ActionUnsupported { .. } => {
+            Some(StatusCode::CONFLICT)
+        }
         // A refund that doesn't fit what was paid.
         P::InvalidRefund { .. } => Some(StatusCode::UNPROCESSABLE_ENTITY),
         // A provider that couldn't do what was asked.

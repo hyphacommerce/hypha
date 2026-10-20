@@ -1365,6 +1365,46 @@ fn an_app_must_name_the_refund_it_reports() {
 }
 
 #[test]
+fn a_payment_holding_money_refuses_reports_about_another_attempt() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    world.report(K::Paid, None, None).unwrap();
+    let mismatch = Err(CommandError::Payment(PaymentError::ReferenceMismatch {
+        payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+        status: PaymentStatus::Paid,
+        held: "pi_1".to_string(),
+        reported: "pi_9".to_string(),
+    }));
+    for kind in [K::Paid, K::Authorized, K::Failed, K::Voided] {
+        assert_eq!(
+            world.report_ref(kind, None, Some("pi_9"), None).map(|_| ()),
+            mismatch,
+            "{kind:?}"
+        );
+    }
+    assert_eq!(world.order().financial_status(), FinancialStatus::Paid);
+    // Its own attempt, and refunds (named by the refund), still go through.
+    world.report(K::Paid, None, None).unwrap();
+    world
+        .report_ref(K::PartiallyRefunded, Some(500), Some("re_1"), None)
+        .unwrap();
+}
+
+#[test]
+fn a_pending_payment_takes_a_report_about_an_attempt_made_again() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    let paid = world
+        .report_ref(K::Paid, None, Some("pi_9"), None)
+        .unwrap()
+        .value;
+    assert_eq!(paid.payments[0].status(), PaymentStatus::Paid);
+    assert_eq!(paid.payments[0].reference(), Some("pi_9"));
+}
+
+#[test]
 fn a_report_the_status_cant_take_is_refused() {
     use hypha_order_actions::PaymentEventKind as K;
     let world = World::new();

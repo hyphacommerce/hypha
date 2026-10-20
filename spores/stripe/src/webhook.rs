@@ -282,6 +282,16 @@ pub async fn receive<S: Storage>(
                 .get("hypha_payment")
                 .and_then(|p| p.parse().ok())
             {
+                // A refund of another intent of the payment (the money given back
+                // because the payment was collected through its first): not the
+                // payment's.
+                Some(payment)
+                    if other_intent(&ports, payment, &intent.id)
+                        .await
+                        .map_err(ApiError::internal)? =>
+                {
+                    Err("a refund of another PaymentIntent than the payment's".to_string())
+                }
                 Some(payment) => refund_reports(payment, &event.object, &refunds),
                 None => Err("not a Hypha payment".to_string()),
             },
@@ -322,18 +332,19 @@ pub async fn receive<S: Storage>(
                 key: report.key.clone(),
             }),
         };
-        // Money a payment already has through another of its intents (one made again
-        // after its reference couldn't be stored, paid in an old tab): Hypha records the
-        // payment once, so this goes back.
-        let mut unwanted = match report.kind {
-            PaymentEventKind::Paid | PaymentEventKind::Authorized => {
-                held_through_another(&ports, &report)
-                    .await
-                    .map_err(ApiError::internal)?
-                    .map(|status| format!("payment {status} through another PaymentIntent"))
-            }
-            _ => None,
-        };
+        // A decline or cancel of another intent than the payment's (one it left behind
+        // when it was started again): not the payment's.
+        if matches!(
+            report.kind,
+            PaymentEventKind::Failed | PaymentEventKind::Voided
+        ) && other_intent(&ports, report.payment, &report.reference)
+            .await
+            .map_err(ApiError::internal)?
+        {
+            refused.get_or_insert_with(|| "another PaymentIntent than the payment's".to_string());
+            continue;
+        }
+        let mut unwanted = None;
         if unwanted.is_none() {
             match record_payment_event(&ctx, &ports, &stripe.env, input).await {
                 Ok(_) => reported += 1,
@@ -355,6 +366,18 @@ pub async fn receive<S: Storage>(
                     ) && matches!(from, PaymentStatus::Voided | PaymentStatus::Failed) =>
                 {
                     unwanted = Some(format!("payment {from}"));
+                }
+                // Money a payment already holds through another of its intents (made again
+                // after its reference couldn't be kept, paid in an old tab): Hypha
+                // collects once (checked as it records, so racing deliveries can't both
+                // pass), so this goes back.
+                Err(CommandError::Payment(PaymentError::ReferenceMismatch { status, .. }))
+                    if matches!(
+                        report.kind,
+                        PaymentEventKind::Paid | PaymentEventKind::Authorized
+                    ) =>
+                {
+                    unwanted = Some(format!("payment {status} through another PaymentIntent"));
                 }
                 // A move the payment can't make (voided already, …): retrying won't help.
                 Err(e) => {
@@ -414,26 +437,19 @@ pub async fn receive<S: Storage>(
     }
 }
 
-/// The payment's status when it already holds money through another PaymentIntent than
-/// the report's: paid, authorized or refunded with another intent as its reference.
-async fn held_through_another<P: HasPayments>(
+/// Whether `payment` was started through another PaymentIntent than `intent` (its
+/// reference is another `pi_…`).
+async fn other_intent<P: HasPayments>(
     ports: &P,
-    report: &Report,
-) -> Result<Option<PaymentStatus>, RepoError> {
-    let Some(payment) = ports.payments().get(report.payment).await? else {
-        return Ok(None);
-    };
-    let holds = matches!(
-        payment.status(),
-        PaymentStatus::Authorized
-            | PaymentStatus::Paid
-            | PaymentStatus::PartiallyRefunded
-            | PaymentStatus::Refunded
-    );
-    let other = payment
-        .reference()
-        .is_some_and(|r| r.starts_with("pi_") && r != report.reference);
-    Ok((holds && other).then(|| payment.status()))
+    payment: PaymentId,
+    intent: &str,
+) -> Result<bool, RepoError> {
+    Ok(ports
+        .payments()
+        .get(payment)
+        .await?
+        .and_then(|p| p.reference().map(str::to_string))
+        .is_some_and(|r| r.starts_with("pi_") && r != intent))
 }
 
 /// How giving money back at Stripe went.
@@ -462,7 +478,7 @@ async fn undo_unwanted(stripe: &Stripe, settings: &Settings, report: &Report) ->
     };
     let done = match report.kind {
         PaymentEventKind::Authorized => {
-            let key = format!("{}:cancel-after-void", report.payment);
+            let key = format!("{}:{}:cancel-after-void", report.payment, report.reference);
             client
                 .cancel_payment_intent(&report.reference, &key)
                 .await
@@ -473,7 +489,7 @@ async fn undo_unwanted(stripe: &Stripe, settings: &Settings, report: &Report) ->
                 ("payment_intent", report.reference.as_str().into()),
                 ("reason", "requested_by_customer".into()),
             ];
-            let key = format!("{}:refund-after-void", report.payment);
+            let key = format!("{}:{}:refund-after-void", report.payment, report.reference);
             client.create_refund(&params, &key).await.map(|_| ())
         }
     };

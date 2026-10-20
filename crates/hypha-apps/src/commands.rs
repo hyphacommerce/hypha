@@ -233,18 +233,36 @@ pub struct SporeRegistration {
 /// names never extend one another (the hosts check), so at most one matches; the
 /// longest is tried first. `None` when none is stored.
 pub async fn spore_of<R: AppRepo>(apps: &R, key: &str) -> Result<Option<App>, RepoError> {
+    for candidate in spore_keys(key) {
+        if let Some(app) = apps.get(&candidate).await? {
+            return Ok(Some(app));
+        }
+    }
+    Ok(None)
+}
+
+/// [`spore_of`] among apps already read (a listing of them).
+pub fn spore_in<'a>(apps: &'a [App], key: &str) -> Option<&'a App> {
+    spore_keys(key)
+        .into_iter()
+        .find_map(|candidate| apps.iter().find(|app| *app.key() == candidate))
+}
+
+/// The spore keys `key` may belong to, longest first: itself, then each prefix ending
+/// before an `_` past `spore_`.
+fn spore_keys(key: &str) -> Vec<AppKey> {
+    let mut keys = Vec::new();
     let mut end = key.len();
     loop {
         if let Ok(candidate) = AppKey::new(&key[..end])
             && candidate.kind() == AppKind::Spore
-            && let Some(app) = apps.get(&candidate).await?
         {
-            return Ok(Some(app));
+            keys.push(candidate);
         }
         match key[..end].rfind('_') {
             // Not the `_` of `spore_` itself.
             Some(i) if i > "spore_".len() => end = i,
-            _ => return Ok(None),
+            _ => return keys,
         }
     }
 }

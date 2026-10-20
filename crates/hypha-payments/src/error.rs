@@ -57,6 +57,17 @@ pub enum PaymentError {
         from: PaymentStatus,
         to: PaymentStatus,
     },
+    /// A provider's report under another reference than the one the payment holds money
+    /// through (design note 0030: a second attempt at the provider, paid in an old tab):
+    /// the payment is collected once, so the report is refused for the provider to give
+    /// that money back.
+    #[error("payment {payment} is {status} through {held:?}, not {reported:?}")]
+    ReferenceMismatch {
+        payment: PaymentId,
+        status: PaymentStatus,
+        held: String,
+        reported: String,
+    },
     #[error("the payment is in {expected}, but an amount is in {found}")]
     CurrencyMismatch { expected: Currency, found: Currency },
     /// A refund of nothing, of more than is left to give back, or one that doesn't
@@ -95,6 +106,7 @@ impl ErrorCode for PaymentError {
             PaymentError::MethodUnavailable(_) => "payment_method_unavailable",
             PaymentError::InstructionsTooLong => "instructions_too_long",
             PaymentError::InvalidTransition { .. } => "invalid_payment_transition",
+            PaymentError::ReferenceMismatch { .. } => "payment_reference_mismatch",
             PaymentError::CurrencyMismatch { .. } => "currency_mismatch",
             PaymentError::InvalidRefund { .. } => "invalid_refund_amount",
             PaymentError::Inconsistent { .. } => "payment_inconsistent",

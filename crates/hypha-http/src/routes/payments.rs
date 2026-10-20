@@ -140,6 +140,9 @@ pub async fn list_providers<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     ctx.require(hypha_core::Scope::PaymentsRead)
         .map_err(hypha_payments::CommandError::from)?;
+    // Every app at once: spores and apps alike are read from it.
+    let mut listed = ports.apps().list().await.map_err(ApiError::internal)?;
+    listed.sort_by(|a, b| a.key().cmp(b.key()));
     let mut items = Vec::new();
     let mut spores = Vec::new();
     for key in hypha_payments::PaymentProviders::keys(state.storage.payment_providers()) {
@@ -151,10 +154,7 @@ pub async fn list_providers<S: Storage>(
             });
             continue;
         }
-        let spore = hypha_apps::spore_of(ports.apps(), key.as_str())
-            .await
-            .map_err(ApiError::internal)?;
-        if let Some(spore) = spore.filter(|app| app.enabled()) {
+        if let Some(spore) = hypha_apps::spore_in(&listed, key.as_str()).filter(|a| a.enabled()) {
             spores.push(PaymentProviderResponse {
                 key: key.to_string(),
                 name: spore.name().to_string(),
@@ -164,19 +164,13 @@ pub async fn list_providers<S: Storage>(
     }
     spores.sort_by(|a, b| a.key.cmp(&b.key));
     items.extend(spores);
-    let mut apps: Vec<_> = ports
-        .apps()
-        .list()
-        .await
-        .map_err(ApiError::internal)?
-        .into_iter()
-        .filter(|app| app.kind() == AppKind::App && app.enabled())
-        .collect();
-    apps.sort_by(|a, b| a.key().cmp(b.key()));
+    let apps = listed
+        .iter()
+        .filter(|app| app.kind() == AppKind::App && app.enabled());
     let point = crate::app_endpoints::known(hypha_extensions::PaymentsStart::NAME)
         .ok_or_else(|| ApiError::internal("payments.start isn't a known point"))?;
     // From the listing: an app installed from its manifest needs no further read.
-    for app in &apps {
+    for app in apps {
         let answers = hypha_apps::endpoint_of(&ports, app, point)
             .await
             .map_err(ApiError::internal)?;
@@ -612,6 +606,9 @@ pub struct PaymentEventResponse {
 /// provider's event ID): a retry with it answers as the first did. A refund is counted
 /// once per `reference` (the provider's refund ID), whatever the key. A move the payment's status doesn't allow is `409
 /// invalid_payment_transition`; a refund that doesn't fit, `422 invalid_refund_amount`.
+/// A payment authorized, paid or refunded under one `reference` refuses an authorized,
+/// paid, failed or voided report under another: `409 payment_reference_mismatch` (a
+/// second attempt at the provider, collected once; give that money back).
 #[utoipa::path(
     post,
     path = "/admin/payments/{id}/events",

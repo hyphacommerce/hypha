@@ -613,21 +613,47 @@ async fn money_paid_through_a_second_intent_of_a_paid_payment_goes_back() {
     let (_, json) = send(&app, "GET", &format!("/admin/payments/{payment}"), None).await;
     assert_eq!(json["status"], "paid", "{json}");
     assert_eq!(json["reference"], "pi_1", "{json}");
-    let fake = fake_state.lock().unwrap();
-    assert!(
-        fake.seen.iter().any(|(m, p, _, form)| m == "POST"
-            && p == "/v1/refunds"
-            && form.contains("payment_intent=pi_9")),
-        "{:?}",
-        fake.seen
-    );
-    assert!(
-        !fake.seen.iter().any(|(m, p, _, form)| m == "POST"
-            && p == "/v1/refunds"
-            && form.contains("payment_intent=pi_1")),
-        "{:?}",
-        fake.seen
-    );
+    {
+        let fake = fake_state.lock().unwrap();
+        assert!(
+            fake.seen.iter().any(|(m, p, _, form)| m == "POST"
+                && p == "/v1/refunds"
+                && form.contains("payment_intent=pi_9")),
+            "{:?}",
+            fake.seen
+        );
+        assert!(
+            !fake.seen.iter().any(|(m, p, _, form)| m == "POST"
+                && p == "/v1/refunds"
+                && form.contains("payment_intent=pi_1")),
+            "{:?}",
+            fake.seen
+        );
+    }
+
+    // Stripe then reports that intent refunded, and canceled: neither is the payment's.
+    {
+        let mut fake = fake_state.lock().unwrap();
+        let mut second = fake.intents["pi_1"].clone();
+        second["id"] = json!("pi_9");
+        fake.intents.insert("pi_9".to_string(), second);
+    }
+    let charge = json!({ "id": "ch_9", "payment_intent": "pi_9", "amount": 3000, "currency": "eur", "refunded": true });
+    let (status, outcome) = deliver(&app, "evt_refunded_9", "charge.refunded", charge).await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    assert_eq!(outcome["status"], "ignored", "{outcome}");
+    let (status, outcome) = deliver(
+        &app,
+        "evt_canceled_9",
+        "payment_intent.canceled",
+        paid("pi_9"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    assert_eq!(outcome["status"], "ignored", "{outcome}");
+    let (_, json) = send(&app, "GET", &format!("/admin/payments/{payment}"), None).await;
+    assert_eq!(json["status"], "paid", "{json}");
+    assert_eq!(json["refunded"]["amount"], 0, "{json}");
 }
 
 #[tokio::test]

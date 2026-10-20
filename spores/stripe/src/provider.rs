@@ -65,11 +65,13 @@ impl StripeProvider {
             .as_deref()
             .filter(|r| r.starts_with("pi_"))
         {
-            let intent = client
-                .retrieve_payment_intent(reference)
-                .await
-                .map_err(|e| Self::failed(stripe_reason(&e)))?;
-            return usable(intent);
+            match client.retrieve_payment_intent(reference).await {
+                Ok(intent) => return usable(intent),
+                // Not at this account (the merchant switched Stripe accounts, or test
+                // keys to live ones): nothing to resume, so the payment gets one here.
+                Err(e) if e.status == 404 => {}
+                Err(e) => return Err(Self::failed(stripe_reason(&e))),
+            }
         }
         let key = payment.payment.to_string();
         let params = [
