@@ -342,3 +342,29 @@ fn a_payment_whose_intent_was_canceled_is_not_started_again() {
         Err(PaymentError::ProviderFailed { reason, .. }) if reason.contains("was canceled")
     ));
 }
+
+#[test]
+fn a_create_stripe_failed_is_tried_again_under_a_second_key() {
+    // Stripe replays a key's 500 for a day: the second key gets past it.
+    let (fake, http) = Fake::new(|request| {
+        if header(request, "idempotency-key") == Some(payment_id().to_string().as_str()) {
+            (
+                500,
+                json!({ "error": { "type": "api_error", "message": "Something went wrong" } }),
+            )
+        } else {
+            (
+                200,
+                json!({ "id": "pi_second", "amount": 1250, "currency": "eur", "status": "requires_payment_method", "client_secret": "pi_second_secret" }),
+            )
+        }
+    });
+    let started = block_on(provider(http).start(&request(configured()))).unwrap();
+    assert_eq!(started.reference.as_deref(), Some("pi_second"));
+    let sent = fake.requests();
+    assert_eq!(sent.len(), 2);
+    assert_eq!(
+        header(&sent[1], "idempotency-key"),
+        Some(format!("{}:again", payment_id()).as_str())
+    );
+}

@@ -707,11 +707,13 @@ them, not in this list.
   route reads apps' endpoints from the listing (`hypha_apps::endpoint_of`): an app
   installed from a manifest costs no further query. Re-reviewed: a 401, 403 or 409
   while giving money back is retried (a rotated key, a racing delivery), not taken for
-  Stripe's "no". Accepted as known: Stripe replays a key's first answer for 24 hours,
-  5xx included, so a create Stripe failed with a 500 keeps failing that payment's starts
-  for a day; and a reference that couldn't be stored, with the shopper back more than a
-  day later, gets a second intent (both carry the payment, so either paying it records
-  it paid).
+  Stripe's "no". Stripe replays a key's answer for 24 hours, 5xx included, so a
+  create Stripe failed with a 5xx is tried once more under `<payment>:again` (safe: the
+  failed answer's client secret never reached the shopper). A payment whose reference
+  couldn't be stored gets a second intent when the shopper comes back more than a day
+  later; should both be paid, the webhook records the payment once and gives the other
+  intent's money back (`held_through_another`: a paid or authorized report for a
+  payment holding money through another `pi_…`).
 
 ## As built: step 3 (facade, migration check, settings, routes, UI)
 

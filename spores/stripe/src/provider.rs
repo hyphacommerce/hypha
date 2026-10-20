@@ -72,24 +72,39 @@ impl StripeProvider {
             return usable(intent);
         }
         let key = payment.payment.to_string();
-        let created = client
-            .create_payment_intent(&intent_params(payment, settings.capture_mode)?, &key)
-            .await;
-        let intent = match created {
+        let params = [
+            intent_params(payment, settings.capture_mode)?,
+            intent_params(payment, settings.capture_mode.other())?,
+        ];
+        let intent = match create(&client, &params, &key).await {
             Ok(intent) => intent,
-            // The key was used with other parameters: the merchant switched the capture
-            // mode since the first start. The same request in the other mode is the
-            // first one, which Stripe replays with the intent it made then.
-            Err(e) if e.kind == "idempotency_error" => client
-                .create_payment_intent(
-                    &intent_params(payment, settings.capture_mode.other())?,
-                    &key,
-                )
+            // Stripe keeps a key's answer for 24 hours, a 500 included, so every start of
+            // this payment would get that 500 again. A second key gets past it. Safe: an
+            // intent the failed request may have made never reached the shopper (its
+            // client secret was in the answer that failed), so it can't be paid.
+            Err(e) if e.status >= 500 => create(&client, &params, &format!("{key}:again"))
                 .await
                 .map_err(|e| Self::failed(stripe_reason(&e)))?,
             Err(e) => return Err(Self::failed(stripe_reason(&e))),
         };
         usable(intent)
+    }
+}
+
+/// Creates a payment's intent under `key` with `params` (in the merchant's capture mode,
+/// then in the other). A key used with other parameters is the merchant having switched
+/// the capture mode since the first start: the same request in the other mode is the
+/// first one, which Stripe replays with the intent it made then.
+async fn create(
+    client: &StripeClient<'_, SporeEnv>,
+    params: &[Vec<(&'static str, Form)>; 2],
+    key: &str,
+) -> Result<PaymentIntent, StripeError> {
+    match client.create_payment_intent(&params[0], key).await {
+        Err(e) if e.kind == "idempotency_error" => {
+            client.create_payment_intent(&params[1], key).await
+        }
+        answer => answer,
     }
 }
 

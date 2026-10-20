@@ -10,7 +10,7 @@
 //! (Stripe delivers it again).
 
 use hypha_spore::core::{
-    ActingAs, Actor, Clock, Ctx, IdempotencyRequest, PaymentId, Scope, Timestamp,
+    ActingAs, Actor, Clock, Ctx, IdempotencyRequest, PaymentId, RepoError, Scope, Timestamp,
 };
 use hypha_spore::http::axum::body::Bytes;
 use hypha_spore::http::axum::extract::State;
@@ -19,7 +19,7 @@ use hypha_spore::http::{ApiError, SharedState, Storage, spore, utoipa};
 use hypha_spore::order_actions::{
     CommandError, PaymentEvent, PaymentEventKind, record_payment_event,
 };
-use hypha_spore::payments::{PaymentError, PaymentStatus};
+use hypha_spore::payments::{HasPayments, PaymentError, PaymentRepo, PaymentStatus};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -322,65 +322,82 @@ pub async fn receive<S: Storage>(
                 key: report.key.clone(),
             }),
         };
-        match record_payment_event(&ctx, &ports, &stripe.env, input).await {
-            Ok(_) => reported += 1,
-            // Storage failed: Stripe delivers it again, and what went through already
-            // changes nothing then.
-            Err(CommandError::Repo(e)) => {
-                hypha_spore::tracing::warn!(event = %event.id, "recording a Stripe event failed: {e}");
-                return answer(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    WebhookOutcome::rejected("couldn't record it; try again"),
-                );
+        // Money a payment already has through another of its intents (one made again
+        // after its reference couldn't be stored, paid in an old tab): Hypha records the
+        // payment once, so this goes back.
+        let mut unwanted = match report.kind {
+            PaymentEventKind::Paid | PaymentEventKind::Authorized => {
+                held_through_another(&ports, &report)
+                    .await
+                    .map_err(ApiError::internal)?
+                    .map(|status| format!("payment {status} through another PaymentIntent"))
             }
-            // Taken or held at Stripe after Hypha voided it (the order was cancelled while
-            // the shopper confirmed, and the cancel came too late at Stripe): the money
-            // goes back (a payment refunded, an authorization released). Not done (Stripe
-            // down, no key): 500, so Stripe delivers it again and it's tried again.
-            Err(CommandError::Payment(PaymentError::InvalidTransition { from, .. }))
-                if matches!(
-                    report.kind,
-                    PaymentEventKind::Paid | PaymentEventKind::Authorized
-                ) && matches!(from, PaymentStatus::Voided | PaymentStatus::Failed) =>
-            {
-                match undo_unwanted(stripe, &settings, &report).await {
-                    Undo::Done => {
-                        hypha_spore::tracing::warn!(
-                            event = %event.id,
-                            payment = %report.payment,
-                            "Stripe took or held money for a payment Hypha {from}: given back at Stripe"
-                        );
-                        refused
-                            .get_or_insert_with(|| format!("payment {from}: given back at Stripe"));
-                    }
-                    // Stripe said no (a disputed charge, …): asking again won't change
-                    // that, so it's acknowledged, and staff give it back by hand.
-                    Undo::Refused(reason) => {
-                        hypha_spore::tracing::error!(
-                            event = %event.id,
-                            payment = %report.payment,
-                            intent = %report.reference,
-                            "Stripe took or held money for a payment Hypha {from}, and refused to give it back: {reason}; do it in Stripe's dashboard"
-                        );
-                        refused.get_or_insert_with(|| {
-                            format!("payment {from}: Stripe refused to give it back: {reason}")
-                        });
-                    }
-                    Undo::Failed => {
-                        return answer(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            WebhookOutcome::rejected(
-                                "couldn't give the money back at Stripe; try again",
-                            ),
-                        );
-                    }
+            _ => None,
+        };
+        if unwanted.is_none() {
+            match record_payment_event(&ctx, &ports, &stripe.env, input).await {
+                Ok(_) => reported += 1,
+                // Storage failed: Stripe delivers it again, and what went through already
+                // changes nothing then.
+                Err(CommandError::Repo(e)) => {
+                    hypha_spore::tracing::warn!(event = %event.id, "recording a Stripe event failed: {e}");
+                    return answer(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        WebhookOutcome::rejected("couldn't record it; try again"),
+                    );
+                }
+                // Taken or held at Stripe after Hypha voided it (the order was cancelled
+                // while the shopper confirmed, and the cancel came too late at Stripe).
+                Err(CommandError::Payment(PaymentError::InvalidTransition { from, .. }))
+                    if matches!(
+                        report.kind,
+                        PaymentEventKind::Paid | PaymentEventKind::Authorized
+                    ) && matches!(from, PaymentStatus::Voided | PaymentStatus::Failed) =>
+                {
+                    unwanted = Some(format!("payment {from}"));
+                }
+                // A move the payment can't make (voided already, …): retrying won't help.
+                Err(e) => {
+                    let code = hypha_spore::core::ErrorCode::code(&e);
+                    hypha_spore::tracing::warn!(event = %event.id, payment = %report.payment, "Hypha refused a Stripe report: {code}");
+                    refused.get_or_insert_with(|| code.to_string());
                 }
             }
-            // A move the payment can't make (voided already, …): retrying won't help.
-            Err(e) => {
-                let code = hypha_spore::core::ErrorCode::code(&e);
-                hypha_spore::tracing::warn!(event = %event.id, payment = %report.payment, "Hypha refused a Stripe report: {code}");
-                refused.get_or_insert_with(|| code.to_string());
+        }
+        // The money goes back (a payment refunded, an authorization released). Not done
+        // (Stripe down, no key): 500, so Stripe delivers it again and it's tried again.
+        if let Some(why) = unwanted {
+            match undo_unwanted(stripe, &settings, &report).await {
+                Undo::Done => {
+                    hypha_spore::tracing::warn!(
+                        event = %event.id,
+                        payment = %report.payment,
+                        intent = %report.reference,
+                        "Stripe took or held money Hypha doesn't want ({why}): given back at Stripe"
+                    );
+                    refused.get_or_insert_with(|| format!("{why}: given back at Stripe"));
+                }
+                // Stripe said no (a disputed charge, …): asking again won't change that, so
+                // it's acknowledged, and staff give it back by hand.
+                Undo::Refused(reason) => {
+                    hypha_spore::tracing::error!(
+                        event = %event.id,
+                        payment = %report.payment,
+                        intent = %report.reference,
+                        "Stripe took or held money Hypha doesn't want ({why}), and refused to give it back: {reason}; do it in Stripe's dashboard"
+                    );
+                    refused.get_or_insert_with(|| {
+                        format!("{why}: Stripe refused to give it back: {reason}")
+                    });
+                }
+                Undo::Failed => {
+                    return answer(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        WebhookOutcome::rejected(
+                            "couldn't give the money back at Stripe; try again",
+                        ),
+                    );
+                }
             }
         }
     }
@@ -395,6 +412,28 @@ pub async fn receive<S: Storage>(
             },
         ),
     }
+}
+
+/// The payment's status when it already holds money through another PaymentIntent than
+/// the report's: paid, authorized or refunded with another intent as its reference.
+async fn held_through_another<P: HasPayments>(
+    ports: &P,
+    report: &Report,
+) -> Result<Option<PaymentStatus>, RepoError> {
+    let Some(payment) = ports.payments().get(report.payment).await? else {
+        return Ok(None);
+    };
+    let holds = matches!(
+        payment.status(),
+        PaymentStatus::Authorized
+            | PaymentStatus::Paid
+            | PaymentStatus::PartiallyRefunded
+            | PaymentStatus::Refunded
+    );
+    let other = payment
+        .reference()
+        .is_some_and(|r| r.starts_with("pi_") && r != report.reference);
+    Ok((holds && other).then(|| payment.status()))
 }
 
 /// How giving money back at Stripe went.
