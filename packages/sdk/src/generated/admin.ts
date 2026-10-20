@@ -2037,7 +2037,14 @@ export interface paths {
         get: operations["admin.products.fetch"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Deletes a product with its variants and options, whatever its status (design note
+         *     0033, section 6.3). Its media stay in the library; its catalog, channel and category
+         *     membership go with it, and its fixed prices, stock records and search listings
+         *     shortly after (`product.deleted`). Orders keep their lines; carts show its lines as
+         *     unavailable until they're removed. Archive instead to keep it.
+         */
+        delete: operations["admin.products.remove"];
         options?: never;
         head?: never;
         /** Changes a product's title, handle, description, vendor, product type or tags. */
@@ -3256,11 +3263,30 @@ export interface components {
             /** @description The app's own version. */
             version: string;
         };
+        /**
+         * @description A custom field the app declares (design note 0033, §8), always in its own namespace
+         *     (`app_<name>.<key>`).
+         */
+        ConsentCustomField: {
+            key: string;
+            name: string;
+            /** @description `product`, `variant`, `category`, `customer` or `order`. */
+            owner_type: string;
+            /** @description The value is about a person: the app asks for `customer_data:profile` to see it. */
+            personal: boolean;
+            /** @description `text`, `list.choice`, … */
+            type: string;
+        };
         /** @description An authorization request, as the consent page shows it. */
         ConsentRequestResponse: {
             app: components["schemas"]["ConsentApp"];
             changes: components["schemas"]["ScopeChanges"];
             created_at: string;
+            /**
+             * @description The custom fields the app declares, against those of the manifest it's installed
+             *     from.
+             */
+            custom_fields: components["schemas"]["CustomFieldChangesDto"];
             /** @description The request can be answered until then (RFC 3339). */
             expires_at: string;
             /** @description The scopes that aren't personal data, by area. */
@@ -3498,6 +3524,22 @@ export interface components {
              *     (`Intl.DisplayNames`) and fall back to this.
              */
             name: string;
+        };
+        /**
+         * @description What approving does to the app's custom fields, compared with the manifest it's
+         *     installed from (everything is `added` on a first install).
+         */
+        CustomFieldChangesDto: {
+            /** @description Fields the app adds: list the owners they're on, and which are personal. */
+            added: components["schemas"]["ConsentCustomField"][];
+            kept: components["schemas"]["ConsentCustomField"][];
+            /** @description Fields the app no longer declares: approving deletes them with their values. */
+            removed: components["schemas"]["ConsentCustomField"][];
+            /**
+             * @description Fields whose type the manifest changes: such a manifest can't be approved
+             *     (`422 manifest_invalid`).
+             */
+            retyped: components["schemas"]["ConsentCustomField"][];
         };
         /**
          * @description A CustomerId: `cus_` and 32 hex digits.
@@ -4987,7 +5029,7 @@ export interface components {
             };
         };
         /**
-         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         Scope: string;
@@ -18292,6 +18334,80 @@ export interface operations {
             };
             /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.products.remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

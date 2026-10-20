@@ -12,6 +12,7 @@ export const PERSONAL_DATA_SCOPES = [
   "customer_data:email",
   "customer_data:phone",
   "customer_data:address",
+  "customer_data:profile",
 ] as const;
 export type PersonalDataScope = (typeof PERSONAL_DATA_SCOPES)[number];
 
@@ -116,6 +117,65 @@ export interface ManifestStorefront {
   proxy?: string;
 }
 
+/** What a custom field is on (design note 0033). */
+export type CustomFieldOwnerType = "product" | "variant" | "category" | "customer" | "order";
+
+/** The types a field may also be a list of (`list.<type>`). */
+export type ListableCustomFieldType =
+  | "text"
+  | "integer"
+  | "decimal"
+  | "date"
+  | "date_time"
+  | "url"
+  | "money"
+  | "measurement"
+  | "choice"
+  | "reference";
+
+/** A custom field's type (design note 0033, §3). It can't change once installed. */
+export type CustomFieldType =
+  | ListableCustomFieldType
+  | "multiline_text"
+  | "rich_text"
+  | "boolean"
+  | "json"
+  | `list.${ListableCustomFieldType}`;
+
+/**
+ * A custom field the app keeps on Hypha's objects, always in its own namespace
+ * (`app_<name>.<key>`): created when staff approve the app, updated when they approve a
+ * refreshed manifest, deleted with its values when a refreshed manifest drops it.
+ */
+export interface ManifestCustomField {
+  owner_type: CustomFieldOwnerType;
+  /** `[a-z][a-z0-9_]{1,63}`, unique per owner type. */
+  key: string;
+  type: CustomFieldType;
+  /** Its label on forms, at most 255 characters. */
+  name: string;
+  /** Help text, at most 1,000 characters. */
+  description?: string;
+  /** The type's validations (`max_length`, `choices`, …). */
+  validations?: Record<string, unknown>;
+  access?: {
+    /** `read` (default): staff only read the values; `read_write`: they edit them too. */
+    admin?: "read" | "read_write";
+    /** `none` (default) or `read`: storefronts see the values. */
+    storefront?: "none" | "read";
+  };
+  /** Only the app and staff read the values. */
+  private?: boolean;
+  /** About a person (customer and order fields only); needs `customer_data:profile`. */
+  personal?: boolean;
+  capabilities?: {
+    /** Lists can filter on it. */
+    filterable?: boolean;
+    /** No two owners hold the same value (`text`, `integer`, `url`). */
+    unique?: boolean;
+  };
+}
+
 export interface AppManifest {
   $schema?: string;
   /** `app_<name>`: lowercase letters, digits and `_`. */
@@ -140,6 +200,8 @@ export interface AppManifest {
   settings?: ManifestSettings;
   admin?: ManifestAdmin;
   storefront?: ManifestStorefront;
+  /** Custom fields in the app's namespace (design note 0033, §8). */
+  custom_fields?: ManifestCustomField[];
 }
 
 /** The manifest's schema URL. */

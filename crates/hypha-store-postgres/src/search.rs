@@ -490,9 +490,10 @@ fn facet_branch(source: &str, keys: &[&FacetKey], distinct: bool, params: &mut P
 
 /// Vendor, product type and tags are the product's, the same on all its variants: a
 /// listing or product group has one set of them, so they count once per group, from
-/// its representative, instead of over every matching variant.
+/// its representative, instead of over every matching variant. Custom fields aren't:
+/// a variant's value wins over its product's (design note 0033, §9).
 fn product_level(key: &FacetKey) -> bool {
-    !matches!(key, FacetKey::Option(_))
+    !matches!(key, FacetKey::Option(_) | FacetKey::Field(_))
 }
 
 async fn run_search(tx: &impl Queries, q: &SearchQuery) -> Result<SearchResults, RepoError> {
@@ -693,6 +694,17 @@ fn document_from_row(row: &Row) -> Result<SearchDocument, RepoError> {
     };
     let names: Vec<String> = col(row, "option_names")?;
     let values: Vec<String> = col(row, "option_values")?;
+    // Custom field values live only in `facets` (design note 0033, §9), in the
+    // document's order: no column of their own.
+    let field_prefix = FacetKey::Field(String::new()).to_string();
+    let fields = col::<Vec<String>>(row, "facets")?
+        .into_iter()
+        .filter_map(|entry| {
+            let (key, value) = entry.split_once(SEPARATOR)?;
+            let key = key.strip_prefix(&field_prefix)?;
+            Some((key.to_string(), value.to_string()))
+        })
+        .collect();
     Ok(SearchDocument {
         market: MarketId::from_uuid(col(row, "market_id")?),
         product: ProductId::from_uuid(col(row, "product_id")?),
@@ -715,6 +727,7 @@ fn document_from_row(row: &Row) -> Result<SearchDocument, RepoError> {
         tags: col(row, "tags")?,
         sku: col(row, "sku")?,
         options: names.into_iter().zip(values).collect(),
+        fields,
         price: money("price")?,
         product_price: PriceRange {
             min: money("product_min")?,

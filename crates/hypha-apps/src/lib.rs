@@ -10,6 +10,7 @@
 pub mod app;
 pub mod blocks;
 pub mod commands;
+pub mod custom_fields;
 pub mod endpoints;
 pub mod error;
 pub mod events;
@@ -37,6 +38,11 @@ pub use commands::{
     delete_app, get_app, get_event, list_apps, list_deliveries, new_secret, open_secret,
     register_spore, retry_delivery, rotate_app_secret, spore_enabled, spore_in, spore_of,
     spore_registered, update_app,
+};
+pub use custom_fields::{
+    AdminAccess, AppCustomField, BaseFieldType, CustomFieldChanges, CustomFieldOwnerType,
+    CustomFieldSummary, CustomFieldType, ManifestCustomField, ManifestFieldAccess,
+    ManifestFieldCapabilities, RetypedField, StorefrontAccess, check_retypes, custom_field_changes,
 };
 pub use endpoints::{
     EndpointInput, ExtensionEndpoint, ExtensionEndpointRepo, HasExtensionEndpoints, KnownPoint,

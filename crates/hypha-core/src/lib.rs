@@ -7,6 +7,7 @@ pub mod description;
 pub mod email;
 pub mod error_code;
 pub mod events;
+pub mod field_filter;
 pub mod financial;
 pub mod handle;
 pub mod handlers;
@@ -42,6 +43,7 @@ pub use events::{
     EventRoute, HasOutbox, OutboxRepo, Outcome, PendingEvent, Recorded, Recorder, SignalsDispatch,
     StageEvents, StoredEvent, Subject,
 };
+pub use field_filter::{FieldFilter, FieldFilterOp, FilterScalar};
 pub use financial::FinancialStatus;
 pub use handle::{Handle, HandleError};
 pub use handlers::{EventHandler, EventHandlers, Union};
@@ -51,11 +53,11 @@ pub use idempotency::{
 };
 pub use ids::{
     AddressId, AgentId, ApiKeyId, AppId, AssetId, CartId, CatalogId, CategoryId, ChannelId,
-    CustomerId, DeliveryId, EventId, ExtensionCallId, FulfillmentId, IdError, IdentityId,
-    InventoryItemId, InviteId, LocationId, MarketId, NotificationId, OAuthRequestId, OptionId,
-    OptionValueId, OrderId, OrderLineId, PasswordResetId, PaymentId, PaymentMethodId, PriceListId,
-    ProductId, RoleId, SessionId, ShippingGroupId, ShippingOptionId, ShippingZoneId, StoreId,
-    TaxClassId, TaxRegionId, UserId, VariantId,
+    CustomFieldDefinitionId, CustomerId, DeliveryId, EventId, ExtensionCallId, FulfillmentId,
+    IdError, IdentityId, InventoryItemId, InviteId, LocationId, MarketId, NotificationId,
+    OAuthRequestId, OptionId, OptionValueId, OrderId, OrderLineId, PasswordResetId, PaymentId,
+    PaymentMethodId, PriceListId, ProductId, RoleId, SessionId, ShippingGroupId, ShippingOptionId,
+    ShippingZoneId, StoreId, TaxClassId, TaxRegionId, UserId, VariantId,
 };
 pub use language::{Language, LanguageError};
 pub use money::{BasisPoints, Currency, CurrencyError, Money, MoneyError, Price, TaxRate};

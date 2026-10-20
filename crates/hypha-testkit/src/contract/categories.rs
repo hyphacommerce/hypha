@@ -17,7 +17,7 @@ fn pid(n: u128) -> ProductId {
     ProductId::from_uuid(Uuid::from_u128(n))
 }
 
-fn category(n: u128, parent: Option<u128>, position: u32) -> Category {
+pub(crate) fn category(n: u128, parent: Option<u128>, position: u32) -> Category {
     Category::new(NewCategory {
         id: cid(n),
         name: format!("Category {n}"),

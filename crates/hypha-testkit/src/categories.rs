@@ -5,12 +5,13 @@ use std::{
 
 use hypha_categories::{Category, CategoryRepo, keys};
 use hypha_core::{
-    CategoryId, Page, PageRequest, ProductId, Recorded, RepoError, Versioned, stamp_insert,
-    stamp_update,
+    CategoryId, FieldFilter, Page, PageRequest, ProductId, Recorded, RepoError, Versioned,
+    stamp_insert, stamp_update,
 };
 
 use crate::{
     InMemoryOutbox,
+    custom_fields::{SharedValues, fields_match, values_for},
     table::{Table, missing, page_of},
 };
 
@@ -24,6 +25,7 @@ pub struct InMemoryCategoryRepo {
     /// product repo, whose list filters by category (design note 0024, AU5).
     pub(crate) members: Arc<Mutex<Members>>,
     pub(crate) outbox: InMemoryOutbox,
+    field_values: SharedValues,
 }
 
 impl InMemoryCategoryRepo {
@@ -32,6 +34,15 @@ impl InMemoryCategoryRepo {
         Self {
             outbox: outbox.clone(),
             ..Self::default()
+        }
+    }
+
+    /// The same repo, filtering its list by the custom field values `fields` holds
+    /// (design note 0033, §7), as a database joins them.
+    pub fn joining_fields(self, fields: &crate::InMemoryCustomFields) -> Self {
+        Self {
+            field_values: fields.shared_values(),
+            ..self
         }
     }
 
@@ -68,6 +79,16 @@ impl CategoryRepo for InMemoryCategoryRepo {
 
     async fn list_all(&self) -> Result<Vec<Category>, RepoError> {
         Ok(self.categories.all())
+    }
+
+    async fn list_with_fields(&self, fields: &[FieldFilter]) -> Result<Vec<Category>, RepoError> {
+        let values = values_for(&self.field_values, fields);
+        Ok(self
+            .categories
+            .all()
+            .into_iter()
+            .filter(|c| fields_match(values.as_ref(), c.id().as_uuid(), fields))
+            .collect())
     }
 
     async fn insert(&self, category: &mut Category) -> Result<(), RepoError> {

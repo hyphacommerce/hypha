@@ -113,7 +113,7 @@ fn key(k: &str) -> AppKey {
     AppKey::new(k).unwrap()
 }
 
-fn app(k: &str) -> App {
+pub(crate) fn app(k: &str) -> App {
     App::new(NewApp {
         key: key(k),
         id: id_of(k),

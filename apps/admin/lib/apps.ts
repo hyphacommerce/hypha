@@ -87,6 +87,8 @@ export function personalDataLabel(scope: string): string {
       return "Customers' phone numbers";
     case "customer_data:address":
       return "Customers' addresses";
+    case "customer_data:profile":
+      return "Customers' personal custom fields";
     default:
       return scope;
   }
@@ -100,6 +102,7 @@ const AREAS: Record<string, string> = {
   categories: "categories",
   channels: "sales channels",
   checkout: "checkout",
+  custom_fields: "custom fields",
   customers: "customers",
   inventory: "inventory",
   keys: "API keys",

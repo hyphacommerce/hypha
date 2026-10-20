@@ -172,6 +172,8 @@ export default async function ConsentPage({
           </VStack>
         </Card>
 
+        <CustomFields request={request} />
+
         {/* Always here, so a private app's credentials stay shown once the page re-renders
             with the request approved. */}
         <ConsentButtons
@@ -306,6 +308,85 @@ function ChangeRow({
         </HStack>
       </VStack>
     )
+  );
+}
+
+const OWNER_LABELS: Record<string, string> = {
+  product: "Products",
+  variant: "Variants",
+  category: "Categories",
+  customer: "Customers",
+  order: "Orders",
+};
+
+type Field = Request["custom_fields"]["added"][number];
+
+/** One line per field: its name, where it lives and whether it's about a person. */
+function FieldItems({ fields, badge }: { fields: Field[]; badge?: ReactNode }) {
+  return (
+    <List>
+      {fields.map((field) => (
+        <ListItem
+          key={`${field.owner_type}.${field.key}`}
+          label={field.name}
+          description={`${OWNER_LABELS[field.owner_type] ?? field.owner_type} · ${field.key} · ${field.type}`}
+          endContent={
+            <HStack gap={1}>
+              {field.personal && <Badge label="Personal" variant="warning" />}
+              {badge}
+            </HStack>
+          }
+        />
+      ))}
+    </List>
+  );
+}
+
+/**
+ * The custom fields the app keeps on the store's objects (design note 0033, §8): which
+ * owners it adds fields to, which are personal, and on an update which it removes.
+ */
+function CustomFields({ request }: { request: Request }) {
+  const { added, kept, removed, retyped } = request.custom_fields;
+  if (added.length + kept.length + removed.length + retyped.length === 0) return null;
+  const owners = [...new Set(added.map((f) => OWNER_LABELS[f.owner_type] ?? f.owner_type))];
+  return (
+    <Card>
+      <VStack gap={3}>
+        <Text type="display-3" as="h2">
+          Custom fields
+        </Text>
+        {owners.length > 0 && (
+          <Text color="secondary">
+            The app adds fields to {owners.join(", ").toLowerCase()}, in its own namespace (
+            {request.app.key}).
+          </Text>
+        )}
+        {retyped.length > 0 && (
+          <Banner
+            status="error"
+            title="This version can't be approved"
+            description={`It changes the type of ${retyped.map((f) => f.key).join(", ")}; a field's type can't change.`}
+          />
+        )}
+        {added.length > 0 && (
+          <FieldItems
+            fields={added}
+            badge={request.app.installed ? <Badge label="New" variant="info" /> : undefined}
+          />
+        )}
+        {request.app.installed && kept.length > 0 && <FieldItems fields={kept} />}
+        {removed.length > 0 && (
+          <VStack gap={1}>
+            <Text type="label">Removes fields</Text>
+            <Text color="secondary">
+              Approving deletes these fields and every value stored in them.
+            </Text>
+            <FieldItems fields={removed} badge={<Badge label="Removed" variant="error" />} />
+          </VStack>
+        )}
+      </VStack>
+    </Card>
   );
 }
 

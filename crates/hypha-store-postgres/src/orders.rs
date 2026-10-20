@@ -21,6 +21,7 @@ use crate::{
         write_stamps,
     },
     error::{corrupt, repo_error},
+    field_filters::{Params, field_predicates},
     outbox::insert_events,
     store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
@@ -91,6 +92,8 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
                     .collect()
             });
         let us = |t: Option<Timestamp>| t.map(|t| t.unix_micros());
+        let mut extra = Params::after(13);
+        let fields = field_predicates(filter.fields(), "o.id", &mut extra);
         let mut conn = self.conn().await;
         let rows = conn
             .db()
@@ -115,11 +118,12 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
                         OR o.placed_at >= 'epoch'::timestamptz + $12 * interval '1 microsecond')
                    AND ($13::bigint IS NULL
                         OR o.placed_at < 'epoch'::timestamptz + $13 * interval '1 microsecond')
+                   {fields}
                  ORDER BY {order} LIMIT $2",
                     placed = micros("o.placed_at"),
                     cancelled = micros("o.cancelled_at"),
                 ),
-                &[
+                &extra.with_fixed(&[
                     (&after, Type::UUID),
                     (&fetch, Type::INT8),
                     (&total_key, Type::INT8),
@@ -133,7 +137,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
                     (&filter.currency().map(|c| c.as_str()), Type::TEXT),
                     (&us(filter.placed_from()), Type::INT8),
                     (&us(filter.placed_before()), Type::INT8),
-                ],
+                ]),
             )
             .await
             .map_err(repo_error)?;

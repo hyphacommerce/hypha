@@ -1871,6 +1871,37 @@
         ],
         "type": "object"
       },
+      "ConsentCustomField": {
+        "description": "A custom field the app declares (design note 0033, §8), always in its own namespace\n(`app_<name>.<key>`).",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_type": {
+            "description": "`product`, `variant`, `category`, `customer` or `order`.",
+            "type": "string"
+          },
+          "personal": {
+            "description": "The value is about a person: the app asks for `customer_data:profile` to see it.",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "`text`, `list.choice`, …",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_type",
+          "key",
+          "name",
+          "type",
+          "personal"
+        ],
+        "type": "object"
+      },
       "ConsentRequestResponse": {
         "description": "An authorization request, as the consent page shows it.",
         "properties": {
@@ -1882,6 +1913,10 @@
           },
           "created_at": {
             "type": "string"
+          },
+          "custom_fields": {
+            "$ref": "#/components/schemas/CustomFieldChangesDto",
+            "description": "The custom fields the app declares, against those of the manifest it's installed\nfrom."
           },
           "expires_at": {
             "description": "The request can be answered until then (RFC 3339).",
@@ -1927,6 +1962,7 @@
           "groups",
           "personal_data",
           "changes",
+          "custom_fields",
           "redirect_uri",
           "created_at",
           "expires_at"
@@ -2566,6 +2602,45 @@
           "code",
           "name",
           "minor_units"
+        ],
+        "type": "object"
+      },
+      "CustomFieldChangesDto": {
+        "description": "What approving does to the app's custom fields, compared with the manifest it's\ninstalled from (everything is `added` on a first install).",
+        "properties": {
+          "added": {
+            "description": "Fields the app adds: list the owners they're on, and which are personal.",
+            "items": {
+              "$ref": "#/components/schemas/ConsentCustomField"
+            },
+            "type": "array"
+          },
+          "kept": {
+            "items": {
+              "$ref": "#/components/schemas/ConsentCustomField"
+            },
+            "type": "array"
+          },
+          "removed": {
+            "description": "Fields the app no longer declares: approving deletes them with their values.",
+            "items": {
+              "$ref": "#/components/schemas/ConsentCustomField"
+            },
+            "type": "array"
+          },
+          "retyped": {
+            "description": "Fields whose type the manifest changes: such a manifest can't be approved\n(`422 manifest_invalid`).",
+            "items": {
+              "$ref": "#/components/schemas/ConsentCustomField"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "added",
+          "kept",
+          "removed",
+          "retyped"
         ],
         "type": "object"
       },
@@ -6733,7 +6808,7 @@
         "type": "object"
       },
       "Scope": {
-        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "products:read",
           "products:write",
@@ -6772,10 +6847,13 @@
           "payments:write",
           "notifications:read",
           "notifications:write",
+          "custom_fields:read",
+          "custom_fields:write",
           "customer_data:name",
           "customer_data:email",
           "customer_data:phone",
-          "customer_data:address"
+          "customer_data:address",
+          "customer_data:profile"
         ],
         "type": "string",
         "x-hypha-open-enum": true
@@ -25147,6 +25225,96 @@
       }
     },
     "/admin/products/{id}": {
+      "delete": {
+        "operationId": "admin.products.remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Deletes a product with its variants and options, whatever its status (design note\n0033, section 6.3). Its media stay in the library; its catalog, channel and category\nmembership go with it, and its fixed prices, stock records and search listings\nshortly after (`product.deleted`). Orders keep their lines; carts show its lines as\nunavailable until they're removed. Archive instead to keep it.",
+        "tags": [
+          "products"
+        ],
+        "x-hypha-scopes": [
+          "products:write"
+        ]
+      },
       "get": {
         "operationId": "admin.products.fetch",
         "parameters": [

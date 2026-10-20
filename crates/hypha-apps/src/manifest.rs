@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::EventPattern;
+use crate::custom_fields::{self, AppCustomField, ManifestCustomField};
 
 /// The JSON Schema URL a manifest may name in `$schema`.
 pub const SCHEMA_URL: &str = "https://hypha.dev/schemas/app-manifest/1.json";
@@ -113,6 +114,12 @@ pub struct ManifestDocument {
     /// What the app adds to a storefront.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storefront: Option<ManifestStorefront>,
+    /// The custom fields the app keeps on Hypha's objects, in its own namespace
+    /// (`app_<name>.<key>`, design note 0033, §8): created when staff approve the app,
+    /// updated when they approve a refreshed manifest, deleted when a refreshed
+    /// manifest no longer declares them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_fields: Vec<ManifestCustomField>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -288,6 +295,8 @@ pub struct AppManifest {
     /// In `Scope::ALL` order, each once.
     scopes: Vec<Scope>,
     webhook: Option<(CallbackUrl, Vec<EventPattern>)>,
+    /// In the document's order.
+    custom_fields: Vec<AppCustomField>,
 }
 
 impl AppManifest {
@@ -387,6 +396,11 @@ impl AppManifest {
         self.webhook
             .as_ref()
             .map(|(url, events)| (url, &events[..]))
+    }
+
+    /// The custom fields the app declares, checked, in the document's order.
+    pub fn custom_fields(&self) -> &[AppCustomField] {
+        &self.custom_fields
     }
 
     fn check(
@@ -644,6 +658,8 @@ impl AppManifest {
             }
         }
 
+        let custom_fields = custom_fields::check(&mut c, &document.custom_fields, &document.scopes);
+
         if !c.problems.is_empty() {
             return Err(ManifestError {
                 problems: c.problems,
@@ -660,24 +676,25 @@ impl AppManifest {
             redirect_uris,
             scopes,
             webhook,
+            custom_fields,
         })
     }
 }
 
 #[derive(Default)]
-struct Checker {
-    problems: Vec<ManifestProblem>,
+pub(crate) struct Checker {
+    pub(crate) problems: Vec<ManifestProblem>,
 }
 
 impl Checker {
-    fn add(&mut self, path: &str, message: impl Into<String>) {
+    pub(crate) fn add(&mut self, path: &str, message: impl Into<String>) {
         self.problems.push(ManifestProblem {
             path: path.to_string(),
             message: message.into(),
         });
     }
 
-    fn text(&mut self, path: &str, value: &str, max: usize) {
+    pub(crate) fn text(&mut self, path: &str, value: &str, max: usize) {
         if value.trim().is_empty() || value.chars().count() > max {
             self.add(path, format!("is 1 to {max} characters"));
         }

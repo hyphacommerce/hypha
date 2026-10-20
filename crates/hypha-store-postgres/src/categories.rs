@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use hypha_categories::{Category, CategoryRepo, CategorySnapshot};
 use hypha_core::{
-    AssetId, CategoryId, Page, PageRequest, ProductId, Recorded, RepoError, Version, Versioned,
-    stamp_insert, stamp_update,
+    AssetId, CategoryId, FieldFilter, Page, PageRequest, ProductId, Recorded, RepoError, Version,
+    Versioned, stamp_insert, stamp_update,
 };
 use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::{
     columns::{col, stamp_columns, stamps_from_row, version_from_db, version_to_db, write_stamps},
     error::{corrupt, repo_error},
+    field_filters::{Params, field_predicates},
     outbox::insert_events,
     store::Queries,
     store::{PgConnection, PgStore, in_transaction},
@@ -206,6 +207,25 @@ impl<C: PgConnection> CategoryRepo for PgStore<C> {
         let mut conn = self.conn().await;
         conn.db()
             .query_typed(&format!("SELECT {} FROM categories", columns()), &[])
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(category_from_row)
+            .collect()
+    }
+
+    async fn list_with_fields(&self, fields: &[FieldFilter]) -> Result<Vec<Category>, RepoError> {
+        let mut params = Params::after(0);
+        let predicates = field_predicates(fields, "c.id", &mut params);
+        let mut conn = self.conn().await;
+        conn.db()
+            .query_typed(
+                &format!(
+                    "SELECT {} FROM categories c WHERE true{predicates}",
+                    columns()
+                ),
+                &params.as_slice(),
+            )
             .await
             .map_err(repo_error)?
             .iter()

@@ -160,6 +160,8 @@ define_id!(ExtensionCallId, "xcall");
 define_id!(AppId, "appid");
 // Pending OAuth authorization requests, shown on the consent page (design note 0029).
 define_id!(OAuthRequestId, "oareq");
+// Custom field definitions (design note 0033).
+define_id!(CustomFieldDefinitionId, "cfd");
 
 #[cfg(test)]
 mod tests {

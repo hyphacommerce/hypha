@@ -12,6 +12,10 @@ use hypha_core::{
     PriceListId, ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency,
     TaxClassId, Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
+use hypha_custom_fields::{
+    CustomFieldDefinition, StageCustomFieldDefinitions, StageCustomFieldValues, ValueRow,
+    keys as custom_field_keys,
+};
 use hypha_customers::{Customer, StageCustomers, repo::keys as customer_keys};
 use hypha_fulfillment::{Fulfillment, StageFulfillments, keys as fulfillment_keys};
 use hypha_inventory::{InventoryItem, StageInventoryItems};
@@ -62,6 +66,8 @@ enum Staged {
     NewCart(Cart),
     Cart(Cart),
     Product(Product),
+    /// A product removed at the version it was loaded at.
+    DeletedProduct(Product),
     AssetUsages(UsageOwner, Vec<(hypha_core::AssetId, UsageRole)>),
     InventoryItem(InventoryItem),
     DeletedInventoryItem(InventoryItem),
@@ -99,6 +105,15 @@ enum Staged {
     NewOAuthToken(OAuthToken),
     OAuthToken(OAuthToken),
     RevokeAppTokens(AppKey, Timestamp),
+    NewCustomFieldDefinition(CustomFieldDefinition),
+    CustomFieldDefinition(CustomFieldDefinition),
+    DeletedCustomFieldDefinition(CustomFieldDefinition),
+    CustomFieldValue(ValueRow, Option<Version>),
+    RemovedCustomFieldValue(
+        hypha_core::CustomFieldDefinitionId,
+        uuid::Uuid,
+        Option<Version>,
+    ),
     Events(Vec<PendingEvent>, Option<Version>),
 }
 
@@ -283,6 +298,12 @@ impl StageProducts for InMemoryBatch {
         self.stage(Staged::Product(product.clone()));
         product.set_version(version);
     }
+
+    fn delete_product(&mut self, product: &mut Product) {
+        let events = product.take_events();
+        self.stage(Staged::DeletedProduct(product.clone()));
+        self.stage(Staged::Events(events, None));
+    }
 }
 
 impl StageAssetUsages for InMemoryBatch {
@@ -435,6 +456,11 @@ impl HasBatch for InMemoryPorts {
         let apps_before = apps.clone();
         let mut oauth = self.oauth.lock();
         let oauth_before = oauth.clone();
+        let mut field_definitions = self.custom_fields.definitions.lock();
+        let field_definitions_before = field_definitions.clone();
+        let mut field_values = self.custom_fields.lock_values();
+        let field_values_before = field_values.clone();
+        let now = self.outbox.now();
         // Single writes first, the set-based revocation after them (as Postgres sorts).
         let mut revocations = Vec::new();
         let before = (
@@ -504,6 +530,25 @@ impl HasBatch for InMemoryPorts {
                     }
                     Staged::Product(mut product) => {
                         update_row(&mut products, product.id(), &mut product, &unique_product)?
+                    }
+                    Staged::DeletedProduct(product) => {
+                        match products.get(&product.id()) {
+                            Some(stored) if stored.version() == product.version() => {}
+                            _ => return Err(RepoError::StaleVersion),
+                        }
+                        let id = product.id();
+                        products.remove(&id);
+                        // What Postgres removes with the row: what only names it.
+                        for included in memberships.values_mut() {
+                            included.remove(&id);
+                        }
+                        for published in publications.values_mut() {
+                            published.remove(&id);
+                        }
+                        for members in category_members.values_mut() {
+                            members.remove(&id);
+                        }
+                        tax_classes.remove(&id);
                     }
                     Staged::AssetUsages(owner, replacement) => {
                         replace_usages(&assets, &mut usages, &owner, &replacement)?
@@ -741,6 +786,42 @@ impl HasBatch for InMemoryPorts {
                         &crate::oauth::unique_token,
                     )?,
                     Staged::RevokeAppTokens(app, at) => revocations.push((app, at)),
+                    Staged::NewCustomFieldDefinition(mut definition) => insert_row(
+                        &mut field_definitions,
+                        definition.id(),
+                        &mut definition,
+                        custom_field_keys::CUSTOM_FIELD_DEFINITION_ID,
+                        &crate::custom_fields::unique_definition,
+                    )?,
+                    Staged::CustomFieldDefinition(mut definition) => update_row(
+                        &mut field_definitions,
+                        definition.id(),
+                        &mut definition,
+                        &crate::custom_fields::unique_definition,
+                    )?,
+                    Staged::DeletedCustomFieldDefinition(definition) => {
+                        match field_definitions.get(&definition.id()) {
+                            Some(stored) if stored.version() == definition.version() => {}
+                            _ => return Err(RepoError::StaleVersion),
+                        }
+                        field_definitions.remove(&definition.id());
+                        field_values.retain(|(d, _), _| *d != definition.id());
+                    }
+                    Staged::CustomFieldValue(row, expected) => crate::custom_fields::set_value(
+                        &field_definitions,
+                        &mut field_values,
+                        row,
+                        expected,
+                        now,
+                    )?,
+                    Staged::RemovedCustomFieldValue(definition, owner, expected) => {
+                        crate::custom_fields::remove_value(
+                            &mut field_values,
+                            definition,
+                            owner,
+                            expected,
+                        )?
+                    }
                     Staged::Events(staged, version) => events.push((staged, version)),
                 }
             }
@@ -768,6 +849,8 @@ impl HasBatch for InMemoryPorts {
             *notification_settings = notification_settings_before;
             *apps = apps_before;
             *oauth = oauth_before;
+            *field_definitions = field_definitions_before;
+            *field_values = field_values_before;
             (*identities, *sessions, *resets, *roles, *users, *invites) = before_staff;
         }
         written
@@ -854,5 +937,48 @@ impl StageFixedPrices for InMemoryBatch {
 impl StageTaxAssignments for InMemoryBatch {
     fn assign_tax_class(&mut self, products: &[ProductId], class: Option<TaxClassId>) {
         self.stage(Staged::TaxAssignment(products.to_vec(), class));
+    }
+}
+
+impl StageCustomFieldDefinitions for InMemoryBatch {
+    fn insert_custom_field_definition(&mut self, definition: &mut CustomFieldDefinition) {
+        stamp_insert(definition, self.now);
+        let events = definition.take_events();
+        self.stage(Staged::NewCustomFieldDefinition(definition.clone()));
+        if !events.is_empty() {
+            self.stage(Staged::Events(events, Some(Version::NEW.next())));
+        }
+        definition.set_version(Version::NEW.next());
+    }
+
+    fn update_custom_field_definition(&mut self, definition: &mut CustomFieldDefinition) {
+        stamp_update(definition, self.now);
+        let version = definition.version().next();
+        self.stage_events_of(definition, version);
+        self.stage(Staged::CustomFieldDefinition(definition.clone()));
+        definition.set_version(version);
+    }
+
+    fn delete_custom_field_definition(&mut self, definition: &mut CustomFieldDefinition) {
+        let events = definition.take_events();
+        self.stage(Staged::DeletedCustomFieldDefinition(definition.clone()));
+        if !events.is_empty() {
+            self.stage(Staged::Events(events, None));
+        }
+    }
+}
+
+impl StageCustomFieldValues for InMemoryBatch {
+    fn set_custom_field_value(&mut self, row: ValueRow, expected: Option<Version>) {
+        self.stage(Staged::CustomFieldValue(row, expected));
+    }
+
+    fn remove_custom_field_value(
+        &mut self,
+        definition: hypha_core::CustomFieldDefinitionId,
+        owner: uuid::Uuid,
+        expected: Option<Version>,
+    ) {
+        self.stage(Staged::RemovedCustomFieldValue(definition, owner, expected));
     }
 }

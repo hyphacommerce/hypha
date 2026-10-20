@@ -9,10 +9,14 @@
 
 pub mod build;
 pub mod commands;
+pub mod fields;
 pub mod handler;
 pub mod sync;
 
 pub use build::build_documents;
-pub use commands::{CommandError, DEFAULT_OPTION_FACETS, Found, SearchInput, search};
+pub use commands::{
+    CommandError, DEFAULT_OPTION_FACETS, Found, SearchInput, search, update_search_settings,
+};
+pub use fields::{FacetFields, facet_field, facet_values, load_facet_fields};
 pub use handler::SearchIndexer;
 pub use sync::{SyncError, SyncPorts, SyncSettings, Synced, documents_for, sync};

@@ -251,6 +251,12 @@ async fn asset_usages() {
 }
 
 #[tokio::test]
+async fn deletions() {
+    let Some(url) = database_url() else { return };
+    contract::deletions(async || fresh_store(&url, "contract_deletions").await).await;
+}
+
+#[tokio::test]
 async fn shipping_zone_repo() {
     let Some(url) = database_url() else { return };
     contract::shipping_zone_repo(async || fresh_store(&url, "contract_shipping_zones").await).await;
@@ -368,6 +374,31 @@ async fn notification_settings_batch() {
     let Some(url) = database_url() else { return };
     contract::notification_settings_batch(async || {
         fresh_store(&url, "contract_notification_settings_batch").await
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn custom_field_definitions() {
+    let Some(url) = database_url() else { return };
+    contract::custom_field_definitions(async || {
+        fresh_store(&url, "contract_custom_field_definitions").await
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn custom_field_values() {
+    let Some(url) = database_url() else { return };
+    contract::custom_field_values(async || fresh_store(&url, "contract_custom_field_values").await)
+        .await;
+}
+
+#[tokio::test]
+async fn custom_field_filters() {
+    let Some(url) = database_url() else { return };
+    contract::custom_field_filters(async || {
+        fresh_store(&url, "contract_custom_field_filters").await
     })
     .await;
 }

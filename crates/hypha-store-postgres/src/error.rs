@@ -6,6 +6,7 @@ use hypha_cart::repo::keys as cart_keys;
 use hypha_categories::keys as category_keys;
 use hypha_channels::keys as channel_keys;
 use hypha_core::{RepoError, idempotency::keys as idempotency_keys};
+use hypha_custom_fields::keys as custom_field_keys;
 use hypha_customers::repo::keys as customer_keys;
 use hypha_extensions::keys as extension_keys;
 use hypha_fulfillment::keys as fulfillment_keys;
@@ -112,6 +113,15 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("oauth_token_id", oauth_keys::OAUTH_TOKEN_ID),
     ("oauth_access_token", oauth_keys::OAUTH_ACCESS_TOKEN),
     ("oauth_refresh_token", oauth_keys::OAUTH_REFRESH_TOKEN),
+    (
+        "custom_field_definitions_pkey",
+        custom_field_keys::CUSTOM_FIELD_DEFINITION_ID,
+    ),
+    ("custom_field_key", custom_field_keys::CUSTOM_FIELD_KEY),
+    (
+        "custom_field_unique_value",
+        custom_field_keys::CUSTOM_FIELD_UNIQUE_VALUE,
+    ),
 ];
 
 /// Maps a driver error to the repo error the ports promise.

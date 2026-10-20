@@ -1,18 +1,24 @@
 //! Searching a market (design note 0019, SE6): the shopper's country picks the market.
-//! The settings, reindex and status commands are `hypha_search_index`'s.
+//! Changing the settings checks custom field facets here (design note 0033, §9: the
+//! leaf can't see definitions), then is `hypha_search_index`'s, as are reindex and
+//! status.
 
 use std::collections::BTreeMap;
 
 use hypha_categories::{CategoryRepo, CategoryTree, HasCategories};
 use hypha_core::{
-    AuthError, CategoryId, CountryCode, CountryError, Ctx, ErrorCode, RepoError, Scope,
+    AppPoints, AuthError, CategoryId, CountryCode, CountryError, Ctx, ErrorCode, RepoError, Scope,
     optional_text,
 };
+use hypha_custom_fields::{DefinitionRepo, HasCustomFieldDefinitions};
 use hypha_markets::{HasMarkets, Market, MarketRepo};
 use hypha_search_index::{
     FacetKey, Filter, Group, HasSearchSettings, IndexError, MAX_DEPTH, MAX_LIMIT, PriceBounds,
-    SearchError, SearchIndex, SearchQuery, SearchResults, SearchSettingsRepo, Sort, terms,
+    SearchError, SearchIndex, SearchQuery, SearchResults, SearchSettings, SearchSettingsRepo, Sort,
+    UpdateSearchSettings, terms,
 };
+
+use crate::fields::{choice_labels, facet_field};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -77,6 +83,9 @@ pub struct Found {
     pub results: SearchResults,
     /// The labels of the facets in `results`, where the merchant set one.
     pub labels: BTreeMap<FacetKey, String>,
+    /// The value labels of `choice` field facets in `results`, by choice key (design
+    /// note 0033, §9: filters use keys).
+    pub value_labels: BTreeMap<FacetKey, BTreeMap<String, String>>,
 }
 
 /// How many default option facets a search counts (the most used options).
@@ -85,7 +94,10 @@ pub const DEFAULT_OPTION_FACETS: usize = 5;
 /// Searches the market serving `input.country` (design note 0019, SE6). The facets
 /// counted are the merchant's (`SearchSettings::facets`), else product type, vendor,
 /// the market's most used options and tags.
-pub async fn search<S: HasMarkets + HasSearchSettings + HasCategories, I: SearchIndex>(
+pub async fn search<
+    S: HasMarkets + HasSearchSettings + HasCategories + HasCustomFieldDefinitions,
+    I: SearchIndex,
+>(
     ctx: &Ctx,
     ports: &S,
     index: &I,
@@ -173,11 +185,59 @@ pub async fn search<S: HasMarkets + HasSearchSettings + HasCategories, I: Search
         limit,
     };
     let results = index.search(&query).await?;
+    let value_labels = choice_labels(ports, &query.facets).await?;
     Ok(Found {
         market,
         results,
         labels,
+        value_labels,
     })
+}
+
+impl From<hypha_search_index::CommandError> for CommandError {
+    fn from(e: hypha_search_index::CommandError) -> Self {
+        use hypha_search_index::CommandError as E;
+        match e {
+            E::Auth(e) => CommandError::Auth(e),
+            E::Search(e) => CommandError::Search(e),
+            E::Repo(e) => CommandError::Repo(e),
+            E::Index(e) => CommandError::Index(e),
+        }
+    }
+}
+
+/// Changes the search settings (`hypha_search_index::update_search_settings`), after
+/// checking each `field.<namespace>.<key>` facet names a field that may be one
+/// (`facet_field`: a filterable product or variant field a storefront reads, of a type
+/// with discrete values), else `facet_field_not_allowed`.
+pub async fn update_search_settings<S: HasSearchSettings + HasCustomFieldDefinitions>(
+    ctx: &Ctx,
+    ports: &S,
+    apps: &impl AppPoints,
+    input: UpdateSearchSettings,
+) -> Result<SearchSettings, CommandError> {
+    ctx.require(Scope::ProductsWrite)?;
+    let fields: Vec<String> = input
+        .facets
+        .iter()
+        .flatten()
+        .filter_map(|(key, _)| match key.parse() {
+            Ok(FacetKey::Field(field)) => Some(field),
+            _ => None,
+        })
+        .collect();
+    if !fields.is_empty() {
+        let definitions = ports.custom_field_definitions().list(None).await?;
+        for field in fields {
+            let allowed = definitions
+                .iter()
+                .any(|d| facet_field(d) && d.field_key().to_string() == field);
+            if !allowed {
+                return Err(SearchError::FacetFieldNotAllowed(field).into());
+            }
+        }
+    }
+    Ok(hypha_search_index::update_search_settings(ctx, ports, apps, input).await?)
 }
 
 /// `key:value` filters, grouped by key in the order keys first appear.

@@ -210,7 +210,9 @@ impl SearchSettingsRepo for InMemorySearchSettingsRepo {
 /// Documents for engine tests (design note 0019): two markets; shirts with options
 /// split by colour, a product without options, ties on price and creation time, a
 /// title beyond ASCII and unavailable variants. Channel 1 sells products 1–3, channel 2
-/// products 1 and 4 (design note 0020).
+/// products 1 and 4 (design note 0020). Custom field facets (design note 0033, §9):
+/// `custom.material` (one shirt variant's own value over its product's), a list
+/// `custom.care`, a boolean `custom.organic`.
 pub fn search_fixture() -> Vec<SearchDocument> {
     use hypha_core::{ChannelId, Currency, Money, VariantId};
     use hypha_search_index::PriceRange;
@@ -400,6 +402,7 @@ pub fn search_fixture() -> Vec<SearchDocument> {
                 tags: p.tags.iter().map(|t| t.to_string()).collect(),
                 sku: variant.sku.map(str::to_string),
                 options,
+                fields: fixture_fields(variant.n),
                 price: eur(variant.price),
                 product_price: range(&prices),
                 listing_price: range(&same_listing),
@@ -411,4 +414,24 @@ pub fn search_fixture() -> Vec<SearchDocument> {
         }
     }
     documents
+}
+
+/// The custom field facet values of the fixture's variant `n`, sorted by key.
+fn fixture_fields(n: u128) -> Vec<(String, String)> {
+    let entries: &[(&str, &str)] = match n {
+        11 | 13 => &[("custom.material", "linen"), ("custom.organic", "true")],
+        // The variant's own value wins over the product's linen.
+        12 => &[("custom.material", "silk"), ("custom.organic", "true")],
+        21 | 22 => &[
+            ("custom.care", "hand_wash"),
+            ("custom.care", "machine"),
+            ("custom.material", "cotton"),
+        ],
+        41 => &[("custom.material", "linen"), ("custom.organic", "false")],
+        _ => &[],
+    };
+    entries
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
 }

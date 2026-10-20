@@ -394,6 +394,8 @@ accessors! {
     hypha_extensions::HasExtensionCalls => ExtensionCalls, extension_calls;
     hypha_apps::HasExtensionEndpoints => ExtensionEndpoints, extension_endpoints;
     hypha_apps::HasSporeSettings => SporeSettings, spore_settings;
+    hypha_custom_fields::HasCustomFieldDefinitions => CustomFieldDefinitions, custom_field_definitions;
+    hypha_custom_fields::HasCustomFieldValues => CustomFieldValues, custom_field_values;
 }
 
 /// Runs a load that takes several queries (a root row, then its children) in one

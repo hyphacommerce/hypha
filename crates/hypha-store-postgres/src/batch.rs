@@ -8,9 +8,14 @@ use hypha_auth::{
 use hypha_cart::{Cart, CartSnapshot, StageCarts};
 use hypha_categories::{Category, CategorySnapshot, StageCategories};
 use hypha_core::{
-    CatalogId, CategoryId, ChannelId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price,
-    PriceListId, ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency,
-    TaxClassId, Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
+    CatalogId, CategoryId, ChannelId, CustomFieldDefinitionId, HasBatch, IdempotencyRecord,
+    IdentityId, PendingEvent, Price, PriceListId, ProductId, Recorded, RepoError, SessionId,
+    StageEvents, StageIdempotency, TaxClassId, Timestamp, VariantId, Version, Versioned,
+    stamp_insert, stamp_update,
+};
+use hypha_custom_fields::{
+    CustomFieldDefinition, DefinitionSnapshot, StageCustomFieldDefinitions, StageCustomFieldValues,
+    ValueRow,
 };
 use hypha_customers::{Customer, CustomerSnapshot, StageCustomers};
 use hypha_fulfillment::{Fulfillment, FulfillmentSnapshot, StageFulfillments};
@@ -57,7 +62,7 @@ use crate::{
     orders::{insert_order, update_order},
     outbox::insert_events,
     payments::{insert_payment, update_payment},
-    products::update_product,
+    products::{delete_product, update_product},
     store::{Db, end_transaction},
     store::{PgConnection, PgStore},
     tax::assign_tax_class,
@@ -84,6 +89,8 @@ enum Staged {
     NewCart(CartSnapshot),
     Cart(CartSnapshot),
     Product(ProductSnapshot),
+    /// A product removed at the version it was loaded at.
+    DeletedProduct(ProductId, Version),
     AssetUsages(UsageOwner, Vec<(hypha_core::AssetId, UsageRole)>),
     NewCustomer(CustomerSnapshot),
     Idempotency(IdempotencyRecord),
@@ -131,6 +138,14 @@ enum Staged {
     /// Events about the aggregate staged just before, with the version that write gives
     /// it, or staged on their own (`StageEvents`, no version).
     Events(Vec<PendingEvent>, Option<Version>),
+    NewCustomFieldDefinition(DefinitionSnapshot),
+    CustomFieldDefinition(DefinitionSnapshot),
+    /// A definition removed at the version it was loaded at (its values cascade).
+    DeletedCustomFieldDefinition(CustomFieldDefinitionId, Version),
+    /// A value written over what's stored (`None`), only as new (`Version::NEW`) or only
+    /// over that version.
+    CustomFieldValue(ValueRow, Option<Version>),
+    RemovedCustomFieldValue(CustomFieldDefinitionId, uuid::Uuid, Option<Version>),
 }
 
 impl Staged {
@@ -149,7 +164,7 @@ impl Staged {
             Staged::Payment(_) => 5,
             Staged::NewCart(_) => 6,
             Staged::Cart(_) => 7,
-            Staged::Product(_) => 8,
+            Staged::Product(_) | Staged::DeletedProduct(..) => 8,
             // The one settings row, before the usages staged with it (its logo's).
             Staged::NewNotificationSettings(_) | Staged::NotificationSettings(_) => 9,
             Staged::AssetUsages(..) => 10,
@@ -193,6 +208,11 @@ impl Staged {
             Staged::NewOAuthToken(_) => 43,
             Staged::OAuthToken(_) => 44,
             Staged::RevokeAppTokens(..) => 45,
+            // Definitions after the apps that manage them, values after definitions.
+            Staged::NewCustomFieldDefinition(_) => 46,
+            Staged::CustomFieldDefinition(_) => 47,
+            Staged::DeletedCustomFieldDefinition(..) => 48,
+            Staged::CustomFieldValue(..) | Staged::RemovedCustomFieldValue(..) => 49,
         }
     }
 
@@ -212,6 +232,7 @@ impl Staged {
                     a.id.cmp(&b.id)
                 }
                 (Staged::Product(a), Staged::Product(b)) => a.id.cmp(&b.id),
+                (Staged::DeletedProduct(a, _), Staged::DeletedProduct(b, _)) => a.cmp(b),
                 (Staged::AssetUsages(a, _), Staged::AssetUsages(b, _)) => a.cmp(b),
                 (Staged::NewCustomer(a), Staged::NewCustomer(b)) => a.id.cmp(&b.id),
                 (Staged::NewRole(a), Staged::NewRole(b)) | (Staged::Role(a), Staged::Role(b)) => {
@@ -245,8 +266,29 @@ impl Staged {
                 | (Staged::OAuthRequest(a), Staged::OAuthRequest(b)) => a.id.cmp(&b.id),
                 (Staged::NewOAuthToken(a), Staged::NewOAuthToken(b))
                 | (Staged::OAuthToken(a), Staged::OAuthToken(b)) => a.id.cmp(&b.id),
+                (Staged::NewCustomFieldDefinition(a), Staged::NewCustomFieldDefinition(b))
+                | (Staged::CustomFieldDefinition(a), Staged::CustomFieldDefinition(b)) => {
+                    a.id.cmp(&b.id)
+                }
+                (
+                    Staged::DeletedCustomFieldDefinition(a, _),
+                    Staged::DeletedCustomFieldDefinition(b, _),
+                ) => a.cmp(b),
+                (
+                    Staged::CustomFieldValue(..) | Staged::RemovedCustomFieldValue(..),
+                    Staged::CustomFieldValue(..) | Staged::RemovedCustomFieldValue(..),
+                ) => value_key(self).cmp(&value_key(other)),
                 _ => Ordering::Equal,
             })
+    }
+}
+
+/// A value write's row: (definition, owner).
+fn value_key(write: &Staged) -> Option<(CustomFieldDefinitionId, uuid::Uuid)> {
+    match write {
+        Staged::CustomFieldValue(row, _) => Some((row.definition, row.owner)),
+        Staged::RemovedCustomFieldValue(definition, owner, _) => Some((*definition, *owner)),
+        _ => None,
     }
 }
 
@@ -370,6 +412,14 @@ impl StageProducts for PgBatch {
         self.stage_events_of(product, version);
         product.set_version(version);
     }
+
+    fn delete_product(&mut self, product: &mut Product) {
+        self.stage(Staged::DeletedProduct(product.id(), product.version()));
+        let events = product.take_events();
+        if !events.is_empty() {
+            self.stage(Staged::Events(events, None));
+        }
+    }
 }
 
 impl StageAssetUsages for PgBatch {
@@ -485,6 +535,7 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
             return Ok(());
         }
         batch.staged.sort_by(Staged::cmp);
+        let now = batch.now;
         let mut items = Vec::new();
         let mut deleted = Vec::new();
         let mut records = Vec::new();
@@ -516,6 +567,7 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     Staged::Product(s) => {
                         update_product(&db, &s).await?;
                     }
+                    Staged::DeletedProduct(id, version) => delete_product(&db, id, version).await?,
                     Staged::NewNotificationSettings(s) => insert_settings(&db, &s).await?,
                     Staged::NotificationSettings(s) => {
                         update_settings(&db, &s).await?;
@@ -612,6 +664,21 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     Staged::OAuthToken(s) => crate::oauth::update_token(&db, &s).await?,
                     Staged::RevokeAppTokens(app, at) => {
                         crate::oauth::revoke_app_tokens(&db, &app, at).await?;
+                    }
+                    Staged::NewCustomFieldDefinition(s) => {
+                        crate::custom_fields::insert_definition(&db, &s).await?
+                    }
+                    Staged::CustomFieldDefinition(s) => {
+                        crate::custom_fields::update_definition(&db, &s).await?;
+                    }
+                    Staged::DeletedCustomFieldDefinition(id, version) => {
+                        crate::custom_fields::delete_definition(&db, id, version).await?
+                    }
+                    Staged::CustomFieldValue(row, expected) => {
+                        crate::custom_fields::set_value(&db, &row, expected, now).await?
+                    }
+                    Staged::RemovedCustomFieldValue(definition, owner, expected) => {
+                        crate::custom_fields::remove_value(&db, definition, owner, expected).await?
                     }
                 }
             }
@@ -766,5 +833,48 @@ impl StageOAuth for PgBatch {
 impl StageTaxAssignments for PgBatch {
     fn assign_tax_class(&mut self, products: &[ProductId], class: Option<TaxClassId>) {
         self.stage(Staged::TaxAssignment(products.to_vec(), class));
+    }
+}
+
+impl StageCustomFieldDefinitions for PgBatch {
+    fn insert_custom_field_definition(&mut self, definition: &mut CustomFieldDefinition) {
+        stamp_insert(definition, self.now);
+        self.stage(Staged::NewCustomFieldDefinition(definition.snapshot()));
+        self.stage_events_of(definition, Version::NEW.next());
+        definition.set_version(Version::NEW.next());
+    }
+
+    fn update_custom_field_definition(&mut self, definition: &mut CustomFieldDefinition) {
+        stamp_update(definition, self.now);
+        self.stage(Staged::CustomFieldDefinition(definition.snapshot()));
+        let version = definition.version().next();
+        self.stage_events_of(definition, version);
+        definition.set_version(version);
+    }
+
+    fn delete_custom_field_definition(&mut self, definition: &mut CustomFieldDefinition) {
+        self.stage(Staged::DeletedCustomFieldDefinition(
+            definition.id(),
+            definition.version(),
+        ));
+        let events = definition.take_events();
+        if !events.is_empty() {
+            self.stage(Staged::Events(events, None));
+        }
+    }
+}
+
+impl StageCustomFieldValues for PgBatch {
+    fn set_custom_field_value(&mut self, row: ValueRow, expected: Option<Version>) {
+        self.stage(Staged::CustomFieldValue(row, expected));
+    }
+
+    fn remove_custom_field_value(
+        &mut self,
+        definition: CustomFieldDefinitionId,
+        owner: uuid::Uuid,
+        expected: Option<Version>,
+    ) {
+        self.stage(Staged::RemovedCustomFieldValue(definition, owner, expected));
     }
 }

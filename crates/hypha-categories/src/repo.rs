@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use hypha_core::{CategoryId, Page, PageRequest, ProductId, RepoError};
+use hypha_core::{CategoryId, FieldFilter, Page, PageRequest, ProductId, RepoError};
 
 use crate::Category;
 
@@ -22,6 +22,10 @@ pub trait CategoryRepo {
     /// Every category, in no particular order: a store has tens or hundreds, and
     /// `CategoryTree` orders them.
     async fn list_all(&self) -> Result<Vec<Category>, RepoError>;
+    /// The categories whose custom field values match every one of `fields` (design
+    /// note 0033, §7; checked against their definitions by `hypha-custom-fields`), in no
+    /// particular order; every category when `fields` is empty.
+    async fn list_with_fields(&self, fields: &[FieldFilter]) -> Result<Vec<Category>, RepoError>;
     /// Stores a new category (version 1). Enforces `keys`.
     async fn insert(&self, category: &mut Category) -> Result<(), RepoError>;
     /// Stores changes and bumps the version, or fails with `StaleVersion`. Enforces

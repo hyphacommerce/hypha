@@ -16,9 +16,17 @@ pub enum SearchError {
     DuplicateFacet(FacetKey),
     #[error("at most {max} facets are shown")]
     TooManyFacets { max: usize },
-    /// Not `vendor`, `product_type`, `tag` or `option.<name>`.
+    /// Not `vendor`, `product_type`, `tag`, `option.<name>` or
+    /// `field.<namespace>.<key>`.
     #[error("unknown facet {0:?}")]
     UnknownFacet(String),
+    /// A `field.<namespace>.<key>` facet whose field can't be one (design note 0033, §9):
+    /// no product or variant field has that key, or it isn't `filterable`, shown on
+    /// storefronts, and of type text, choice, boolean, integer or a list of those.
+    #[error(
+        "custom field {0} can't be a search facet: it must be a filterable product or variant field shown on storefronts, of type text, choice, boolean or integer (or a list of them)"
+    )]
+    FacetFieldNotAllowed(String),
     /// A filter isn't `key:value`.
     #[error("filter {0:?} isn't key:value")]
     InvalidFilter(String),
@@ -45,6 +53,7 @@ impl ErrorCode for SearchError {
             SearchError::DuplicateFacet(_) => "duplicate_facet",
             SearchError::TooManyFacets { .. } => "too_many_facets",
             SearchError::UnknownFacet(_) => "unknown_facet",
+            SearchError::FacetFieldNotAllowed(_) => "facet_field_not_allowed",
             SearchError::InvalidFilter(_) => "invalid_filter",
             SearchError::InvalidPriceRange => "invalid_price_range",
             SearchError::TooDeep { .. } => "search_too_deep",

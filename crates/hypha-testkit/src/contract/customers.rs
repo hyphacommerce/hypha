@@ -21,7 +21,7 @@ fn email(s: &str) -> Email {
     Email::new(s).unwrap()
 }
 
-fn customer(n: u128, mail: &str) -> Customer {
+pub(crate) fn customer(n: u128, mail: &str) -> Customer {
     Customer::new(customer_id(n), email(mail))
 }
 
@@ -74,7 +74,7 @@ pub async fn customer_repo<R: CustomerRepo>(make: impl AsyncFn() -> R) {
 }
 
 /// Every page of `sort`'s list under `filter`, `limit` at a time.
-async fn all_customers<R: CustomerRepo>(
+pub(crate) async fn all_customers<R: CustomerRepo>(
     repo: &R,
     filter: &CustomerFilter,
     sort: CustomerSort,

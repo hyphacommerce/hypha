@@ -230,3 +230,140 @@ fn between_groups(a: &SearchDocument, b: &SearchDocument, sort: Sort, q: &[Strin
         .then_with(|| a.listing.cmp(&b.listing))
         .then_with(|| a.position.cmp(&b.position))
 }
+
+#[cfg(test)]
+mod tests {
+    use hypha_core::{Currency, Money, ProductId, Timestamp, VariantId};
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::{Filter, PriceRange};
+
+    const MATERIAL: &str = "custom.material";
+
+    fn doc(product: u128, variant: u128, fields: &[(&str, &str)]) -> SearchDocument {
+        let price = Money::new(1000, Currency::EUR).unwrap();
+        let product = ProductId::from_uuid(Uuid::from_u128(product));
+        SearchDocument {
+            market: MarketId::from_uuid(Uuid::from_u128(1)),
+            product,
+            variant: VariantId::from_uuid(Uuid::from_u128(variant)),
+            listing: product.to_string(),
+            channels: vec![],
+            categories: vec![],
+            handle: "h".to_string(),
+            title: "T".to_string(),
+            variant_title: None,
+            description: String::new(),
+            vendor: None,
+            product_type: None,
+            tags: vec![],
+            sku: None,
+            options: vec![],
+            fields: fields
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            price,
+            product_price: PriceRange::of(price),
+            listing_price: PriceRange::of(price),
+            available: true,
+            image: None,
+            created_at: Timestamp::from_unix_micros(0),
+            position: 0,
+        }
+    }
+
+    fn query(filters: Vec<Filter>, facets: Vec<FacetKey>) -> SearchQuery {
+        SearchQuery {
+            market: MarketId::from_uuid(Uuid::from_u128(1)),
+            channel: None,
+            category: None,
+            terms: vec![],
+            filters,
+            price: Default::default(),
+            available: None,
+            sort: Sort::Newest,
+            group: Group::Product,
+            facets,
+            offset: 0,
+            limit: 10,
+        }
+    }
+
+    fn field() -> FacetKey {
+        FacetKey::Field(MATERIAL.to_string())
+    }
+
+    fn documents() -> Vec<SearchDocument> {
+        vec![
+            // A product of wool, one variant of it silk instead.
+            doc(1, 11, &[(MATERIAL, "wool")]),
+            doc(1, 12, &[(MATERIAL, "silk")]),
+            // A list: one entry per item.
+            doc(2, 21, &[(MATERIAL, "wool"), (MATERIAL, "linen")]),
+            doc(3, 31, &[]),
+        ]
+    }
+
+    #[test]
+    fn a_field_filter_keeps_documents_with_any_of_its_values() {
+        let found = search(
+            &documents(),
+            &query(
+                vec![Filter {
+                    key: field(),
+                    values: vec!["linen".to_string(), "silk".to_string()],
+                }],
+                vec![],
+            ),
+        );
+        let products: Vec<u128> = found
+            .hits
+            .iter()
+            .map(|h| h.document.product.as_uuid().as_u128())
+            .collect();
+        assert_eq!(products, vec![2, 1]);
+        // Product 1 matches through its silk variant only.
+        assert_eq!(found.hits[1].matched, 1);
+    }
+
+    #[test]
+    fn a_field_facet_counts_groups_per_value_ignoring_its_own_filter() {
+        let found = search(
+            &documents(),
+            &query(
+                vec![Filter {
+                    key: field(),
+                    values: vec!["silk".to_string()],
+                }],
+                vec![field()],
+            ),
+        );
+        let counts: Vec<(String, u64)> = found.facets[0]
+            .values
+            .iter()
+            .map(|v| (v.value.clone(), v.count))
+            .collect();
+        assert_eq!(
+            counts,
+            vec![
+                ("wool".to_string(), 2),
+                ("linen".to_string(), 1),
+                ("silk".to_string(), 1),
+            ]
+        );
+        assert_eq!(found.total, 1);
+    }
+
+    #[test]
+    fn field_values_are_facet_values_under_their_key() {
+        assert_eq!(
+            doc(2, 21, &[(MATERIAL, "wool"), (MATERIAL, "linen")]).facet_values(),
+            vec![
+                ("field.custom.material".to_string(), "wool".to_string()),
+                ("field.custom.material".to_string(), "linen".to_string()),
+            ]
+        );
+    }
+}

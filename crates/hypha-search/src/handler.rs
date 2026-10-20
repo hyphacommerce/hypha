@@ -16,6 +16,21 @@ const PRODUCT_EVENTS: &[&str] = &[
     "product.variant_added",
     "product.variant_updated",
     "product.variant_removed",
+    // Its documents go: the product doesn't load any more (design note 0033, 6.3).
+    "product.deleted",
+];
+/// A product's or its variants' custom field values (design note 0033, §9): its facet
+/// fields.
+const PRODUCT_FIELDS: &[&str] = &["product.custom_fields_updated"];
+/// A product or variant field definition's change to who reads it or whether it
+/// filters, or its deletion (with its values), changes which values every document
+/// holds: everything. Others (names, validations, positions) aren't in documents.
+const FIELD_DEFINITIONS: &[(&str, &[&str])] = &[
+    (
+        "custom_field_definition.updated",
+        &["access", "capabilities"],
+    ),
+    ("custom_field_definition.deleted", &[]),
 ];
 const CATALOG_PRODUCTS: &[&str] = &["catalog.products_added", "catalog.products_removed"];
 /// Which channels sell a product (design note 0020); a channel's name isn't in documents.
@@ -70,6 +85,7 @@ impl<P: HasSearchQueue> EventHandler<P> for SearchIndexer {
     fn wants(&self, event_type: &str) -> bool {
         [
             PRODUCT_EVENTS,
+            PRODUCT_FIELDS,
             CATALOG_PRODUCTS,
             PUBLICATIONS,
             CATEGORY_PRODUCTS,
@@ -80,6 +96,7 @@ impl<P: HasSearchQueue> EventHandler<P> for SearchIndexer {
         .iter()
         .any(|types| types.contains(&event_type))
             || WHEN_FIELD.iter().any(|(t, ..)| *t == event_type)
+            || FIELD_DEFINITIONS.iter().any(|(t, _)| *t == event_type)
     }
 
     async fn handle(&self, ports: &P, event: &StoredEvent) -> Result<(), String> {
@@ -116,7 +133,7 @@ pub fn targets(event: &StoredEvent) -> Result<Vec<Target>, String> {
             .collect()
     };
 
-    if PRODUCT_EVENTS.contains(&t) {
+    if PRODUCT_EVENTS.contains(&t) || PRODUCT_FIELDS.contains(&t) {
         parse("product", |id| id.parse().ok().map(Target::Product))
     } else if CATALOG_PRODUCTS.contains(&t)
         || PUBLICATIONS.contains(&t)
@@ -129,6 +146,22 @@ pub fn targets(event: &StoredEvent) -> Result<Vec<Target>, String> {
         parse("variant", |id| id.parse().ok().map(Target::Variant))
     } else if EVERYTHING.contains(&t) {
         Ok(vec![Target::All])
+    } else if let Some((_, wanted)) = FIELD_DEFINITIONS.iter().find(|(w, _)| *w == t) {
+        let owner = event.data["owner_type"]
+            .as_str()
+            .ok_or_else(|| bad("owner_type"))?;
+        if !matches!(owner, "product" | "variant") {
+            return Ok(vec![]);
+        }
+        // Every field of a deletion counts (`wanted` is empty).
+        let changed = wanted.is_empty()
+            || match &event.data["fields"] {
+                serde_json::Value::Array(fields) => {
+                    fields.iter().any(|f| wanted.iter().any(|w| f == *w))
+                }
+                _ => return Err(bad("fields")),
+            };
+        Ok(if changed { vec![Target::All] } else { vec![] })
     } else if let Some((_, wanted, rebuild)) = WHEN_FIELD.iter().find(|(w, ..)| *w == t) {
         // Events written before `fields` existed (`market.changed`) rebuild as if every
         // field changed: the safe guess.

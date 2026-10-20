@@ -107,8 +107,15 @@ That page is yours; it must:
    `app_url`, `privacy_url`, `installed`, `private`), `groups` (non-personal scopes by
    area), `personal_data` (each `customer_data:*` scope with the app's `reason`: list
    these apart), `changes` (`added`, `removed`, `kept` against the current grant; show
-   them when `installed`), `status` (`pending`, `approved`, `denied`, `expired`) and
-   `expires_at`.
+   them when `installed`), `custom_fields` (below), `status` (`pending`, `approved`,
+   `denied`, `expired`) and `expires_at`.
+   - `custom_fields` has `added`, `kept`, `removed` and `retyped`, each a list of
+     `{owner_type, key, name, type, personal}` against the manifest the app is installed
+     from (everything is `added` on a first install). Say which owners the app adds
+     fields to and flag the `personal` ones; list `removed` as "removes fields", since
+     approving deletes them with their values; a non-empty `retyped` means the
+     manifest can't be approved (`422 manifest_invalid`), so say why. See
+     [custom-fields.md](custom-fields.md).
 3. Explain when the staff member can't approve: approving needs `apps:write` and every
    scope requested (`403 not_allowed_to_grant` otherwise); denying needs `apps:write`.
 4. Answer with `POST …/approve` or `…/deny` and then:

@@ -201,6 +201,11 @@ fn asset_usages() {
 }
 
 #[test]
+fn deletions() {
+    block_on(contract::deletions(async || InMemoryPorts::default()));
+}
+
+#[test]
 fn blob_store() {
     let store = InMemoryBlobStore::default();
     let now = Timestamp::from_unix_micros(1_767_225_600_000_000);
@@ -329,6 +334,27 @@ fn notification_repo() {
 #[test]
 fn notification_settings_batch() {
     block_on(contract::notification_settings_batch(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
+fn custom_field_definitions() {
+    block_on(contract::custom_field_definitions(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
+fn custom_field_values() {
+    block_on(contract::custom_field_values(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
+fn custom_field_filters() {
+    block_on(contract::custom_field_filters(async || {
         InMemoryPorts::default()
     }));
 }

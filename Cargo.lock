@@ -1061,6 +1061,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-custom-fields"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "hypha-testkit",
+ "jiff",
+ "pollster",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-customers"
 version = "0.1.0"
 dependencies = [
@@ -1216,6 +1232,7 @@ dependencies = [
  "hypha-checkout",
  "hypha-config",
  "hypha-core",
+ "hypha-custom-fields",
  "hypha-customers",
  "hypha-dispatch",
  "hypha-extensions",
@@ -1325,6 +1342,8 @@ dependencies = [
  "hypha-testkit",
  "imagesize",
  "pollster",
+ "serde",
+ "serde_json",
  "thiserror",
  "uuid",
 ]
@@ -1339,6 +1358,7 @@ dependencies = [
  "hypha-products",
  "hypha-testkit",
  "pollster",
+ "serde_json",
  "thiserror",
  "uuid",
 ]
@@ -1445,6 +1465,7 @@ dependencies = [
  "hypha-categories",
  "hypha-channels",
  "hypha-core",
+ "hypha-custom-fields",
  "hypha-inventory",
  "hypha-markets",
  "hypha-pricing",
@@ -1542,6 +1563,7 @@ dependencies = [
  "hypha-channels",
  "hypha-checkout",
  "hypha-core",
+ "hypha-custom-fields",
  "hypha-customers",
  "hypha-extensions",
  "hypha-fulfillment",
@@ -1615,6 +1637,7 @@ dependencies = [
  "hypha-categories",
  "hypha-channels",
  "hypha-core",
+ "hypha-custom-fields",
  "hypha-customers",
  "hypha-extensions",
  "hypha-fulfillment",
@@ -2572,6 +2595,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.7",
+]
+
+[[package]]
+name = "regex"
+version = "1.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f020237b6c8eed93db2e2cb53c00c60a8e1bc73da7d073199a1180401450218d"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-automata",
+ "regex-syntax",
 ]
 
 [[package]]

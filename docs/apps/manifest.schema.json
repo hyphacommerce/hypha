@@ -1,5 +1,13 @@
 {
   "$defs": {
+    "AdminAccess": {
+      "description": "Whether staff may write an app's field (design note 0033, §5.1).",
+      "enum": [
+        "read",
+        "read_write"
+      ],
+      "type": "string"
+    },
     "AdminAction": {
       "additionalProperties": false,
       "properties": {
@@ -91,6 +99,17 @@
       ],
       "type": "object"
     },
+    "CustomFieldOwnerType": {
+      "description": "What a field is on (design note 0033, Q3).",
+      "enum": [
+        "product",
+        "variant",
+        "category",
+        "customer",
+        "order"
+      ],
+      "type": "string"
+    },
     "ManifestAdmin": {
       "additionalProperties": false,
       "properties": {
@@ -128,6 +147,76 @@
       },
       "type": "object"
     },
+    "ManifestCustomField": {
+      "additionalProperties": false,
+      "description": "A custom field the app keeps on Hypha's objects, in its own namespace.",
+      "properties": {
+        "access": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ManifestFieldAccess"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Who besides the app reads or writes the values."
+        },
+        "capabilities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ManifestFieldCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "description": "Help text on forms, at most 1,000 characters.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "description": "`[a-z][a-z0-9_]{1,63}`: addressed as `app_<name>.<key>`. Unique per owner type.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Its label on forms, at most 255 characters.",
+          "type": "string"
+        },
+        "owner_type": {
+          "$ref": "#/$defs/CustomFieldOwnerType",
+          "description": "What the field is on."
+        },
+        "personal": {
+          "description": "The value is about a person: only on `customer` and `order` fields, and the\nmanifest must ask for `customer_data:profile`.",
+          "type": "boolean"
+        },
+        "private": {
+          "description": "Only the app and staff read the values (other apps don't, even with the owner's\nread scope).",
+          "type": "boolean"
+        },
+        "type": {
+          "$ref": "#/$defs/TypeName",
+          "description": "The value's type (`text`, `choice`, `list.text`, …). Can't change once installed."
+        },
+        "validations": {
+          "additionalProperties": true,
+          "description": "The type's validations (`max_length`, `choices`, …), design note 0033 §3.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "owner_type",
+        "key",
+        "type",
+        "name"
+      ],
+      "type": "object"
+    },
     "ManifestExtensionPoint": {
       "additionalProperties": false,
       "properties": {
@@ -152,6 +241,50 @@
         "version",
         "url"
       ],
+      "type": "object"
+    },
+    "ManifestFieldAccess": {
+      "additionalProperties": false,
+      "properties": {
+        "admin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AdminAccess"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`read` (the default) or `read_write`: whether staff may write the values too."
+        },
+        "storefront": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StorefrontAccess"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`none` (the default) or `read`: whether storefronts see the values."
+        }
+      },
+      "type": "object"
+    },
+    "ManifestFieldCapabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "filterable": {
+          "default": false,
+          "description": "Lists can filter on it.",
+          "type": "boolean"
+        },
+        "unique": {
+          "default": false,
+          "description": "No two owners hold the same value (text, integer and url fields).",
+          "type": "boolean"
+        }
+      },
       "type": "object"
     },
     "ManifestSettings": {
@@ -218,6 +351,14 @@
       ],
       "type": "object"
     },
+    "StorefrontAccess": {
+      "description": "Whether storefronts see an app's field.",
+      "enum": [
+        "none",
+        "read"
+      ],
+      "type": "string"
+    },
     "StorefrontElement": {
       "additionalProperties": false,
       "properties": {
@@ -243,6 +384,36 @@
         "tag"
       ],
       "type": "object"
+    },
+    "TypeName": {
+      "description": "A custom field's type (design note 0033, §3): one value, or `list.<type>`.",
+      "enum": [
+        "text",
+        "multiline_text",
+        "rich_text",
+        "integer",
+        "decimal",
+        "boolean",
+        "date",
+        "date_time",
+        "url",
+        "money",
+        "measurement",
+        "choice",
+        "reference",
+        "json",
+        "list.text",
+        "list.integer",
+        "list.decimal",
+        "list.date",
+        "list.date_time",
+        "list.url",
+        "list.money",
+        "list.measurement",
+        "list.choice",
+        "list.reference"
+      ],
+      "type": "string"
     }
   },
   "$id": "https://hypha.dev/schemas/app-manifest/1.json",
@@ -271,6 +442,13 @@
     "app_url": {
       "description": "The app's base URL (`https://`, or `http://localhost` in development): every\nrelative URL below resolves against it.",
       "type": "string"
+    },
+    "custom_fields": {
+      "description": "The custom fields the app keeps on Hypha's objects, in its own namespace\n(`app_<name>.<key>`, design note 0033, §8): created when staff approve the app,\nupdated when they approve a refreshed manifest, deleted when a refreshed\nmanifest no longer declares them.",
+      "items": {
+        "$ref": "#/$defs/ManifestCustomField"
+      },
+      "type": "array"
     },
     "extension_points": {
       "default": [],

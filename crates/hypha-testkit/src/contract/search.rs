@@ -59,6 +59,9 @@ fn query(market_n: u128) -> SearchQuery {
             FacetKey::Option("color".to_string()),
             FacetKey::Option("size".to_string()),
             FacetKey::Tag,
+            FacetKey::Field("custom.material".to_string()),
+            FacetKey::Field("custom.care".to_string()),
+            FacetKey::Field("custom.organic".to_string()),
         ],
         offset: 0,
         limit: 10,
@@ -171,6 +174,19 @@ async fn battery<I: SearchIndex>(index: &I) {
             min: Some(1500),
             max: Some(3000),
         }
+    });
+    // Custom field facets (design note 0033, §9): a variant's value, a list's items,
+    // a boolean, and a field filter with an option filter.
+    let field = |key: &str| FacetKey::Field(key.to_string());
+    base(&|q| q.filters = vec![filter(field("custom.material"), &["silk"])]);
+    base(&|q| q.filters = vec![filter(field("custom.material"), &["linen", "cotton"])]);
+    base(&|q| q.filters = vec![filter(field("custom.care"), &["machine"])]);
+    base(&|q| q.filters = vec![filter(field("custom.organic"), &["true"])]);
+    base(&|q| {
+        q.filters = vec![
+            filter(field("custom.material"), &["linen"]),
+            filter(FacetKey::Option("color".into()), &["Blue"]),
+        ]
     });
     base(&|q| q.price.min = Some(3001));
     base(&|q| q.available = Some(true));

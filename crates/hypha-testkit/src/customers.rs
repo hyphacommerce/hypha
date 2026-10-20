@@ -6,12 +6,17 @@ use hypha_customers::{
     Customer, CustomerFilter, CustomerRepo, CustomerSort, CustomerSummary, repo::keys,
 };
 
-use crate::{InMemoryOutbox, table::Table};
+use crate::{
+    InMemoryOutbox,
+    custom_fields::{SharedValues, fields_match, values_for},
+    table::Table,
+};
 
 #[derive(Default)]
 pub struct InMemoryCustomerRepo {
     pub(crate) customers: Table<CustomerId, Customer>,
     pub(crate) outbox: InMemoryOutbox,
+    field_values: SharedValues,
 }
 
 impl InMemoryCustomerRepo {
@@ -20,6 +25,15 @@ impl InMemoryCustomerRepo {
         Self {
             outbox: outbox.clone(),
             ..Self::default()
+        }
+    }
+
+    /// The same repo, filtering its list by the custom field values `fields` holds
+    /// (design note 0033, §7), as a database joins them.
+    pub fn joining_fields(self, fields: &crate::InMemoryCustomFields) -> Self {
+        Self {
+            field_values: fields.shared_values(),
+            ..self
         }
     }
 
@@ -58,8 +72,12 @@ impl CustomerRepo for InMemoryCustomerRepo {
                 after.key
             )));
         }
+        let values = values_for(&self.field_values, filter.fields());
         Ok(self.customers.page_sorted(
-            |c| filter.matches(c),
+            |c| {
+                filter.matches(c)
+                    && fields_match(values.as_ref(), c.id().as_uuid(), filter.fields())
+            },
             &page,
             sort.direction(),
             Customer::summary,

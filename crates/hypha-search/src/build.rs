@@ -9,13 +9,18 @@ use hypha_pricing::{PricingContext, resolve_price};
 use hypha_products::{Product, ProductStatus};
 use hypha_search_index::{PriceRange, SearchDocument, SearchSettings};
 
+use crate::fields::FacetFields;
+
 /// `product`'s documents in the context's market: one per variant whose price
 /// resolves there, none if the product isn't active or the market's catalog doesn't
 /// include it. `pricing` and `stock` must have been loaded for this product's variants
 /// (`hypha_pricing::load_pricing`, `StockContext::load`), the same way a cart is, so
 /// search and cart agree on prices and stock.
 /// `channels` are the ones the product is published to (`ChannelRepo::channels_of`);
-/// `categories` its categories with all their ancestors, sorted (design note 0022, CA3).
+/// `categories` its categories with all their ancestors, sorted (design note 0022, CA3);
+/// `fields` its and its variants' storefront-visible facet fields
+/// (`crate::fields::load_facet_fields`, design note 0033, §9): a variant's value wins
+/// over its product's for the same key.
 pub fn build_documents(
     product: &Product,
     pricing: &PricingContext,
@@ -23,6 +28,7 @@ pub fn build_documents(
     settings: &SearchSettings,
     channels: &[ChannelId],
     categories: &[CategoryId],
+    fields: &FacetFields,
 ) -> Vec<SearchDocument> {
     if product.status() != ProductStatus::Active {
         return Vec::new();
@@ -73,6 +79,7 @@ pub fn build_documents(
             tags: product.tags().to_vec(),
             sku: variant.sku().map(str::to_string),
             options,
+            fields: fields.for_variant(variant.id()),
             price,
             product_price: PriceRange::of(price),
             listing_price: PriceRange::of(price),

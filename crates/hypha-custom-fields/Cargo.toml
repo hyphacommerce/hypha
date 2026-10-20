@@ -1,0 +1,25 @@
+[package]
+name = "hypha-custom-fields"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+hypha-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+# `pattern` validations: no backtracking, so a merchant's pattern can't stall a write;
+# builds for wasm.
+regex = "1.13"
+# Parsing `date` and `date_time` values (RFC 3339); builds for wasm, as in hypha-mail.
+jiff = { version = "0.2", default-features = false, features = ["std"] }
+url = "2.5"
+
+[dev-dependencies]
+hypha-testkit = { path = "../hypha-testkit" }
+pollster = "0.4"
+
+[lints]
+workspace = true

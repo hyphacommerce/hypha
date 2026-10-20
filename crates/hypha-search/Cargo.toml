@@ -8,6 +8,7 @@ license.workspace = true
 hypha-core.workspace = true
 hypha-channels = { path = "../hypha-channels" }
 hypha-categories = { path = "../hypha-categories" }
+hypha-custom-fields = { path = "../hypha-custom-fields" }
 hypha-inventory = { path = "../hypha-inventory" }
 hypha-markets = { path = "../hypha-markets" }
 hypha-pricing = { path = "../hypha-pricing" }
@@ -15,9 +16,9 @@ hypha-products = { path = "../hypha-products" }
 hypha-search-index = { path = "../hypha-search-index" }
 serde_json.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
-uuid.workspace = true
 hypha-testkit = { path = "../hypha-testkit" }
 hypha-apps = { path = "../hypha-apps" }
 pollster = "0.4"

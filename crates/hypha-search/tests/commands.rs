@@ -374,6 +374,24 @@ fn a_product_leaving_active_leaves_the_index() {
 }
 
 #[test]
+fn a_deleted_product_leaves_the_index() {
+    use hypha_core::HasBatch;
+    use hypha_products::StageProducts;
+    let w = World::new();
+    w.settle();
+    let mut p = block_on(w.ports.products.get(shirt())).unwrap().unwrap();
+    p.delete();
+    let mut batch = w.ports.batch();
+    batch.delete_product(&mut p);
+    block_on(w.ports.commit(batch)).unwrap();
+    w.deliver();
+    assert_eq!(w.ports.search_queue.targets(), [Target::Product(shirt())]);
+    w.settle();
+    let variants: Vec<VariantId> = w.documents(hr_market()).iter().map(|d| d.variant).collect();
+    assert_eq!(variants, [mug_v()]);
+}
+
+#[test]
 fn stock_arriving_makes_a_variant_available() {
     let w = World::new();
     w.settle();
@@ -952,4 +970,342 @@ fn a_search_app_must_answer_search_queries() {
     assert_eq!(stored.search_app(), Some(&key));
     // Back to the built-in engine.
     assert_eq!(set_search_app(&w, None), Ok(None));
+}
+
+// ---------- custom fields as facets (design note 0033, §9) ----------
+
+mod fields {
+    use std::collections::BTreeMap;
+
+    use hypha_custom_fields::{
+        Access, AdminAccess, CallerKind, Capabilities, DefinitionSpec, FieldCaller, FieldType,
+        Owner, OwnerType, SetCustomFields, StorefrontAccess, create_definition, set_custom_fields,
+    };
+    use hypha_testkit::SequentialIds;
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    const SHOWN: Access = Access {
+        admin: AdminAccess::ReadWrite,
+        storefront: StorefrontAccess::Read,
+    };
+    const FILTERABLE: Capabilities = Capabilities {
+        filterable: true,
+        unique: false,
+    };
+
+    fn spec(
+        owner_type: OwnerType,
+        key: &str,
+        field_type: &str,
+        validations: Value,
+        access: Access,
+        capabilities: Capabilities,
+    ) -> DefinitionSpec {
+        DefinitionSpec {
+            owner_type,
+            key: key.to_string(),
+            field_type: FieldType::parse(field_type).unwrap(),
+            name: key.to_string(),
+            description: None,
+            validations: serde_json::from_value(validations).unwrap(),
+            access,
+            private: false,
+            personal: false,
+            capabilities,
+        }
+    }
+
+    fn set(w: &World, owner: Owner, values: Value) {
+        let ctx = Ctx::system();
+        let kind = CallerKind::Merchant;
+        let values: BTreeMap<String, Value> = serde_json::from_value(values).unwrap();
+        block_on(set_custom_fields(
+            &FieldCaller::new(&ctx, &kind),
+            &w.ports,
+            &owner,
+            SetCustomFields {
+                values,
+                ..SetCustomFields::default()
+            },
+        ))
+        .unwrap();
+    }
+
+    /// The shirt's fields: a material on the product and on Red/M (silk wins there), a
+    /// choice, a list, a boolean, an integer; and fields that can't be facets (staff
+    /// only, not filterable, a decimal).
+    fn world() -> World {
+        let w = World::new();
+        let ids = SequentialIds::default();
+        let d = |owner, key, ty, validations, access, caps| {
+            let spec = spec(owner, key, ty, validations, access, caps);
+            block_on(create_definition(&Ctx::system(), &w.ports, &ids, spec)).unwrap();
+        };
+        d(
+            OwnerType::Product,
+            "material",
+            "text",
+            json!({}),
+            SHOWN,
+            FILTERABLE,
+        );
+        d(
+            OwnerType::Variant,
+            "material",
+            "text",
+            json!({}),
+            SHOWN,
+            FILTERABLE,
+        );
+        let fits = json!({ "choices": [
+            { "key": "slim", "label": "Slim fit" },
+            { "key": "loose", "label": "Loose fit" },
+        ] });
+        d(OwnerType::Product, "fit", "choice", fits, SHOWN, FILTERABLE);
+        d(
+            OwnerType::Product,
+            "care",
+            "list.text",
+            json!({}),
+            SHOWN,
+            FILTERABLE,
+        );
+        d(
+            OwnerType::Product,
+            "organic",
+            "boolean",
+            json!({}),
+            SHOWN,
+            FILTERABLE,
+        );
+        d(
+            OwnerType::Product,
+            "gsm",
+            "integer",
+            json!({}),
+            SHOWN,
+            FILTERABLE,
+        );
+        d(
+            OwnerType::Product,
+            "cost",
+            "text",
+            json!({}),
+            Access::default(),
+            FILTERABLE,
+        );
+        d(
+            OwnerType::Product,
+            "note",
+            "text",
+            json!({}),
+            SHOWN,
+            Capabilities::default(),
+        );
+        d(
+            OwnerType::Product,
+            "weight",
+            "decimal",
+            json!({}),
+            SHOWN,
+            FILTERABLE,
+        );
+        set(
+            &w,
+            Owner::product(shirt()),
+            json!({
+                "custom.material": "linen",
+                "custom.fit": "slim",
+                "custom.care": ["hand wash", "cold", "hand wash"],
+                "custom.organic": true,
+                "custom.gsm": 180,
+                "custom.cost": "12",
+                "custom.note": "secret",
+                "custom.weight": "0.25",
+            }),
+        );
+        set(
+            &w,
+            Owner::variant(shirt(), red_m()),
+            json!({ "custom.material": "silk" }),
+        );
+        w.settle();
+        w
+    }
+
+    fn fields_of(w: &World, variant: VariantId) -> Vec<(String, String)> {
+        w.documents(hr_market())
+            .into_iter()
+            .find(|d| d.variant == variant)
+            .unwrap()
+            .fields
+    }
+
+    fn pairs(entries: &[(&str, &str)]) -> Vec<(String, String)> {
+        entries
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn documents_hold_storefront_filterable_values_the_variants_winning() {
+        let w = world();
+        let product = [
+            ("custom.care", "hand wash"),
+            ("custom.care", "cold"),
+            ("custom.fit", "slim"),
+            ("custom.gsm", "180"),
+            ("custom.material", "linen"),
+            ("custom.organic", "true"),
+        ];
+        assert_eq!(fields_of(&w, red_s()), pairs(&product));
+        let mut silk = product;
+        silk[4] = ("custom.material", "silk");
+        assert_eq!(fields_of(&w, red_m()), pairs(&silk));
+        assert_eq!(fields_of(&w, mug_v()), vec![]);
+    }
+
+    #[test]
+    fn a_value_change_rebuilds_its_product() {
+        let w = world();
+        set(
+            &w,
+            Owner::product(shirt()),
+            json!({ "custom.material": "hemp" }),
+        );
+        w.settle();
+        assert!(fields_of(&w, red_s()).contains(&("custom.material".into(), "hemp".into())));
+        // Red/M keeps its own.
+        assert!(fields_of(&w, red_m()).contains(&("custom.material".into(), "silk".into())));
+    }
+
+    fn set_facets(w: &World, keys: &[&str]) -> Result<(), CommandError> {
+        block_on(hypha_search::update_search_settings(
+            &Ctx::system(),
+            &w.ports,
+            &w.ports,
+            UpdateSearchSettings {
+                facets: Some(keys.iter().map(|k| (k.to_string(), None)).collect()),
+                ..UpdateSearchSettings::default()
+            },
+        ))
+        .map(|_| ())
+    }
+
+    #[test]
+    fn only_filterable_storefront_fields_of_discrete_types_can_be_facets() {
+        let w = world();
+        for key in [
+            "custom.cost",
+            "custom.note",
+            "custom.weight",
+            "custom.nothing",
+        ] {
+            assert_eq!(
+                set_facets(&w, &["vendor", &format!("field.{key}")]),
+                Err(CommandError::Search(SearchError::FacetFieldNotAllowed(
+                    key.to_string()
+                ))),
+                "{key}"
+            );
+        }
+        assert_eq!(
+            set_facets(
+                &w,
+                &[
+                    "field.custom.material",
+                    "field.custom.fit",
+                    "field.custom.care",
+                    "field.custom.organic",
+                    "field.custom.gsm",
+                ]
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn field_facets_count_filter_and_label_choices() {
+        let w = world();
+        set_facets(&w, &["field.custom.material", "field.custom.fit"]).unwrap();
+        let material = FacetKey::Field("custom.material".to_string());
+        let fit = FacetKey::Field("custom.fit".to_string());
+        let found = w
+            .search(SearchInput {
+                group: Group::Variant,
+                filters: vec!["field.custom.material:silk".to_string()],
+                ..input("HR")
+            })
+            .unwrap();
+        assert_eq!(found.results.total, 1);
+        assert_eq!(found.results.hits[0].document.variant, red_m());
+        let counts: Vec<(String, u64)> = found.results.facets[0]
+            .values
+            .iter()
+            .map(|v| (v.value.clone(), v.count))
+            .collect();
+        // The filter's own facet ignores it.
+        assert_eq!(
+            counts,
+            vec![("linen".to_string(), 2), ("silk".to_string(), 1)]
+        );
+        assert_eq!(found.results.facets[1].key, fit);
+        assert_eq!(
+            found.value_labels.get(&fit).and_then(|l| l.get("slim")),
+            Some(&"Slim fit".to_string())
+        );
+        assert!(!found.value_labels.contains_key(&material));
+    }
+
+    #[test]
+    fn field_events_mark_their_product_or_everything() {
+        use hypha_search::handler::targets;
+        let updated = json!({ "product": shirt(), "variant": null, "changes": [] });
+        assert_eq!(
+            targets(&event("product.custom_fields_updated", updated)),
+            Ok(vec![Target::Product(shirt())])
+        );
+        let definition = |owner: &str, fields: Value| {
+            json!({ "definition": "cfd_x", "owner_type": owner, "namespace": "custom",
+                    "key": "material", "fields": fields })
+        };
+        let updated = "custom_field_definition.updated";
+        for (owner, fields, expected) in [
+            ("product", json!(["access"]), vec![Target::All]),
+            (
+                "variant",
+                json!(["capabilities", "name"]),
+                vec![Target::All],
+            ),
+            ("product", json!(["name", "validations"]), vec![]),
+            ("customer", json!(["access"]), vec![]),
+        ] {
+            assert_eq!(
+                targets(&event(updated, definition(owner, fields.clone()))),
+                Ok(expected),
+                "{owner} {fields}"
+            );
+        }
+        let deleted = "custom_field_definition.deleted";
+        let gone = |owner: &str| {
+            json!({ "definition": "cfd_x", "owner_type": owner, "namespace": "custom",
+                    "key": "material" })
+        };
+        assert_eq!(
+            targets(&event(deleted, gone("product"))),
+            Ok(vec![Target::All])
+        );
+        assert_eq!(targets(&event(deleted, gone("order"))), Ok(vec![]));
+        assert!(EventHandler::<InMemoryPorts>::wants(
+            &SearchIndexer,
+            deleted
+        ));
+        assert!(!EventHandler::<InMemoryPorts>::wants(
+            &SearchIndexer,
+            "custom_field_definition.created"
+        ));
+    }
 }

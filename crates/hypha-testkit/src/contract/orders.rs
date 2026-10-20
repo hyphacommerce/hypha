@@ -337,7 +337,7 @@ fn varied(n: u128, amount: i64, currency: Currency, email: &str, country: &str, 
 }
 
 /// Every page of `sort`'s list under `filter`, `limit` at a time.
-async fn all_orders<R: OrderRepo>(
+pub(crate) async fn all_orders<R: OrderRepo>(
     repo: &R,
     filter: &OrderFilter,
     sort: OrderSort,

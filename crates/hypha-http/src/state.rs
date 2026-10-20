@@ -523,6 +523,9 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_search_index::HasSearchSettings
         + hypha_channels::HasChannels
         + hypha_categories::HasCategories
+        + hypha_custom_fields::HasCustomFieldDefinitions
+        + hypha_custom_fields::HasCustomFieldValues
+        + hypha_custom_fields::ReferenceTargets
         + hypha_auth::ChannelDirectory
         + hypha_mail::MailPorts
         + HasBatch<

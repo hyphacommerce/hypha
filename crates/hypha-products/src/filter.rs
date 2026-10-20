@@ -2,7 +2,9 @@
 //! list, read straight from the products, so staff see drafts and their own edits at
 //! once. Shoppers search the index instead (`hypha-search`).
 
-use hypha_core::{CategoryId, ChannelId, Direction, SortKey, Timestamp, optional_text};
+use hypha_core::{
+    CategoryId, ChannelId, Direction, FieldFilter, SortKey, Timestamp, optional_text,
+};
 
 use crate::{Product, ProductError, ProductStatus, ProductSummary};
 
@@ -17,6 +19,7 @@ pub struct ProductFilter {
     tag: Option<String>,
     category: Option<CategoryId>,
     channel: Option<ChannelId>,
+    fields: Vec<FieldFilter>,
 }
 
 /// What a product list may be narrowed to, unchecked (`ProductFilter::new` checks it).
@@ -52,7 +55,20 @@ impl ProductFilter {
             tag: optional_text("tag", input.tag)?,
             category: input.category,
             channel: input.channel,
+            fields: Vec::new(),
         })
+    }
+
+    /// Filters on custom fields (design note 0033, §7), checked against their definitions
+    /// by `hypha-custom-fields` already; every one must match. `matches` doesn't see
+    /// them: adapters apply them to the stored values.
+    pub fn with_fields(mut self, fields: Vec<FieldFilter>) -> Self {
+        self.fields = fields;
+        self
+    }
+
+    pub fn fields(&self) -> &[FieldFilter] {
+        &self.fields
     }
 
     /// Only these statuses (sorted, no repeats); empty is all of them.

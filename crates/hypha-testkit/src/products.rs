@@ -13,8 +13,11 @@ use hypha_products::{
 };
 
 use crate::{
-    InMemoryCategoryRepo, InMemoryChannelRepo, InMemoryOutbox, categories::Members,
-    channels::Publications, table::Table,
+    InMemoryCategoryRepo, InMemoryChannelRepo, InMemoryOutbox,
+    categories::Members,
+    channels::Publications,
+    custom_fields::{SharedValues, fields_match, values_for},
+    table::Table,
 };
 
 #[derive(Default)]
@@ -26,6 +29,7 @@ pub struct InMemoryProductRepo {
     /// shared (`InMemoryPorts` shares its repos').
     members: Arc<Mutex<Members>>,
     publications: Arc<Mutex<Publications>>,
+    field_values: SharedValues,
 }
 
 impl InMemoryProductRepo {
@@ -46,6 +50,15 @@ impl InMemoryProductRepo {
         Self {
             members: categories.members.clone(),
             publications: channels.products.clone(),
+            ..self
+        }
+    }
+
+    /// The same repo, filtering its list by the custom field values `fields` holds
+    /// (design note 0033, §7), as a database joins them.
+    pub fn joining_fields(self, fields: &crate::InMemoryCustomFields) -> Self {
+        Self {
+            field_values: fields.shared_values(),
             ..self
         }
     }
@@ -128,13 +141,14 @@ impl ProductRepo for InMemoryProductRepo {
         });
         let has =
             |set: &Option<HashSet<ProductId>>, id| set.as_ref().is_some_and(|s| s.contains(&id));
+        let values = values_for(&self.field_values, filter.fields());
         Ok(self.products.page_sorted(
             |p| {
                 filter.matches(
                     p,
                     |_| has(&in_category, p.id()),
                     |_| has(&in_channel, p.id()),
-                )
+                ) && fields_match(values.as_ref(), p.id().as_uuid(), filter.fields())
             },
             &page,
             sort.direction(),

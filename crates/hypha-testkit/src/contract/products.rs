@@ -154,7 +154,7 @@ fn simple_with_variant(n: u128, handle: &str, variant: VariantId) -> Product {
 }
 
 /// Simple product `n`; its variant is `n * 100 + 1`.
-fn simple(n: u128, handle: &str) -> Product {
+pub(crate) fn simple(n: u128, handle: &str) -> Product {
     simple_with_variant(n, handle, vid(n * 100 + 1))
 }
 
@@ -586,7 +586,7 @@ async fn list_pages<R: ProductRepo>(repo: &R) {
 
 /// Every page of `sort`'s list under `filter`, `limit` at a time, each continued from
 /// the last item's position.
-async fn all_pages<R: ProductRepo>(
+pub(crate) async fn all_pages<R: ProductRepo>(
     repo: &R,
     filter: &ProductFilter,
     sort: ProductSort,

@@ -84,6 +84,8 @@ pub struct InMemoryPorts {
     pub stores: crate::InMemoryStoreRepo,
     /// Spores' settings (design note 0030, §8).
     pub spore_settings: crate::InMemorySporeSettingsRepo,
+    /// Custom field definitions and values (design note 0033).
+    pub custom_fields: crate::InMemoryCustomFields,
 }
 
 impl Default for InMemoryPorts {
@@ -92,10 +94,13 @@ impl Default for InMemoryPorts {
         let (apps, app_providers, oauth, extension_endpoints) = crate::apps::linked(&outbox);
         let (payment_methods, payments) = crate::payments::linked(&outbox);
         let channels = InMemoryChannelRepo::sharing(&outbox);
-        let categories = InMemoryCategoryRepo::sharing(&outbox);
+        let custom_fields = crate::InMemoryCustomFields::sharing(&outbox);
+        let categories = InMemoryCategoryRepo::sharing(&outbox).joining_fields(&custom_fields);
         Self {
             carts: InMemoryCartRepo::sharing(&outbox),
-            products: InMemoryProductRepo::sharing(&outbox).joining(&categories, &channels),
+            products: InMemoryProductRepo::sharing(&outbox)
+                .joining(&categories, &channels)
+                .joining_fields(&custom_fields),
             markets: InMemoryMarketRepo::sharing(&outbox),
             catalogs: InMemoryCatalogRepo::sharing(&outbox),
             price_lists: InMemoryPriceListRepo::sharing(&outbox),
@@ -103,13 +108,13 @@ impl Default for InMemoryPorts {
             tax_regions: InMemoryTaxRegionRepo::sharing(&outbox),
             inventory_items: InMemoryInventoryItemRepo::sharing(&outbox),
             locations: InMemoryLocationRepo::sharing(&outbox),
-            customers: InMemoryCustomerRepo::sharing(&outbox),
+            customers: InMemoryCustomerRepo::sharing(&outbox).joining_fields(&custom_fields),
             idempotency: InMemoryIdempotencyRepo::default(),
-            orders: InMemoryOrderRepo::sharing(&outbox),
+            orders: InMemoryOrderRepo::sharing(&outbox).joining_fields(&custom_fields),
             fulfillments: InMemoryFulfillmentRepo::sharing(&outbox),
             payment_methods,
             payments,
-            assets: InMemoryAssetRepo::default(),
+            assets: InMemoryAssetRepo::sharing(&outbox),
             shipping_zones: InMemoryShippingZoneRepo::sharing(&outbox),
             app_providers,
             apps,
@@ -132,6 +137,7 @@ impl Default for InMemoryPorts {
             extension_endpoints,
             stores: crate::InMemoryStoreRepo::sharing(&outbox),
             spore_settings: crate::InMemorySporeSettingsRepo::sharing(&outbox),
+            custom_fields,
             outbox,
         }
     }
@@ -484,6 +490,71 @@ impl hypha_search_index::HasSearchSettings for InMemoryPorts {
     type SearchSettings = InMemorySearchSettingsRepo;
     fn search_settings(&self) -> &InMemorySearchSettingsRepo {
         &self.search_settings
+    }
+}
+
+impl hypha_custom_fields::HasCustomFieldDefinitions for InMemoryPorts {
+    type CustomFieldDefinitions = crate::InMemoryCustomFields;
+    fn custom_field_definitions(&self) -> &crate::InMemoryCustomFields {
+        &self.custom_fields
+    }
+}
+
+impl hypha_custom_fields::HasCustomFieldValues for InMemoryPorts {
+    type CustomFieldValues = crate::InMemoryCustomFields;
+    fn custom_field_values(&self) -> &crate::InMemoryCustomFields {
+        &self.custom_fields
+    }
+}
+
+/// References' targets exist when their records do in these repos (design note 0033,
+/// §3): what a host answers from the same tables.
+impl hypha_custom_fields::ReferenceTargets for InMemoryPorts {
+    async fn existing(
+        &self,
+        references: &[hypha_custom_fields::Reference],
+    ) -> Result<std::collections::HashSet<hypha_custom_fields::Reference>, RepoError> {
+        use hypha_custom_fields::ReferenceKind;
+        let mut found = std::collections::HashSet::new();
+        for reference in references {
+            let id = reference.id;
+            let exists = match reference.kind {
+                ReferenceKind::Product => self
+                    .products
+                    .products
+                    .get(&hypha_core::ProductId::from_uuid(id))
+                    .is_some(),
+                ReferenceKind::Variant => {
+                    let variant = hypha_core::VariantId::from_uuid(id);
+                    self.products
+                        .products
+                        .all()
+                        .iter()
+                        .any(|p| p.variants().iter().any(|v| v.id() == variant))
+                }
+                ReferenceKind::Category => hypha_categories::CategoryRepo::get(
+                    &self.categories,
+                    hypha_core::CategoryId::from_uuid(id),
+                )
+                .await?
+                .is_some(),
+                ReferenceKind::Customer => hypha_customers::CustomerRepo::get(
+                    &self.customers,
+                    hypha_core::CustomerId::from_uuid(id),
+                )
+                .await?
+                .is_some(),
+                ReferenceKind::Asset => {
+                    hypha_media::AssetRepo::get(&self.assets, hypha_core::AssetId::from_uuid(id))
+                        .await?
+                        .is_some()
+                }
+            };
+            if exists {
+                found.insert(*reference);
+            }
+        }
+        Ok(found)
     }
 }
 

@@ -95,6 +95,12 @@ pub enum Scope {
     NotificationsRead,
     #[serde(rename = "notifications:write")]
     NotificationsWrite,
+    /// Custom field definitions in the merchant's `custom` namespace (design note 0033,
+    /// §2). Values are governed by their owner's scopes (`products:write`, …).
+    #[serde(rename = "custom_fields:read")]
+    CustomFieldsRead,
+    #[serde(rename = "custom_fields:write")]
+    CustomFieldsWrite,
     /// Personal data (design note 0029, AP10, §4.2): without these, a caller that isn't
     /// a staff session (an API key, an app) gets customers, orders and carts with the
     /// field absent and listed in `redacted`. First and last names.
@@ -109,6 +115,10 @@ pub enum Scope {
     /// Street lines, postal code, city and province (country and company stay visible).
     #[serde(rename = "customer_data:address")]
     CustomerDataAddress,
+    /// Personal custom fields on customers and orders (design note 0033, §5.2; 0032
+    /// CD9): a birthday, a gift message.
+    #[serde(rename = "customer_data:profile")]
+    CustomerDataProfile,
 }
 
 impl Scope {
@@ -152,10 +162,13 @@ impl Scope {
             Scope::PaymentsWrite => "payments:write",
             Scope::NotificationsRead => "notifications:read",
             Scope::NotificationsWrite => "notifications:write",
+            Scope::CustomFieldsRead => "custom_fields:read",
+            Scope::CustomFieldsWrite => "custom_fields:write",
             Scope::CustomerDataName => "customer_data:name",
             Scope::CustomerDataEmail => "customer_data:email",
             Scope::CustomerDataPhone => "customer_data:phone",
             Scope::CustomerDataAddress => "customer_data:address",
+            Scope::CustomerDataProfile => "customer_data:profile",
         }
     }
 
@@ -193,6 +206,7 @@ impl Scope {
             Scope::ChannelsRead => Some(Scope::ChannelsWrite),
             Scope::PaymentsRead => Some(Scope::PaymentsWrite),
             Scope::NotificationsRead => Some(Scope::NotificationsWrite),
+            Scope::CustomFieldsRead => Some(Scope::CustomFieldsWrite),
             Scope::ProductsWrite
             | Scope::MarketsWrite
             | Scope::PricingWrite
@@ -212,10 +226,12 @@ impl Scope {
             | Scope::ChannelsWrite
             | Scope::PaymentsWrite
             | Scope::NotificationsWrite
+            | Scope::CustomFieldsWrite
             | Scope::CustomerDataName
             | Scope::CustomerDataEmail
             | Scope::CustomerDataPhone
-            | Scope::CustomerDataAddress => None,
+            | Scope::CustomerDataAddress
+            | Scope::CustomerDataProfile => None,
         }
     }
 
@@ -232,14 +248,15 @@ impl Scope {
     ];
 
     /// The personal-data scopes (AP10), in `ALL` order.
-    pub const CUSTOMER_DATA: [Scope; 4] = [
+    pub const CUSTOMER_DATA: [Scope; 5] = [
         Scope::CustomerDataName,
         Scope::CustomerDataEmail,
         Scope::CustomerDataPhone,
         Scope::CustomerDataAddress,
+        Scope::CustomerDataProfile,
     ];
 
-    pub const ALL: [Scope; 41] = [
+    pub const ALL: [Scope; 44] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -277,10 +294,13 @@ impl Scope {
         Scope::PaymentsWrite,
         Scope::NotificationsRead,
         Scope::NotificationsWrite,
+        Scope::CustomFieldsRead,
+        Scope::CustomFieldsWrite,
         Scope::CustomerDataName,
         Scope::CustomerDataEmail,
         Scope::CustomerDataPhone,
         Scope::CustomerDataAddress,
+        Scope::CustomerDataProfile,
     ];
 }
 
@@ -325,6 +345,7 @@ mod test {
         }
         assert_eq!(Scope::parse("customer_data:ssn"), None);
         assert!(Scope::CustomerDataEmail.is_personal_data());
+        assert!(Scope::CustomerDataProfile.is_personal_data());
         assert!(!Scope::CustomersRead.is_personal_data());
     }
 

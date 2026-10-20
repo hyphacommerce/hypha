@@ -63,6 +63,20 @@ const full = {
     ],
     proxy: "/storefront-proxy",
   },
+  custom_fields: [
+    {
+      owner_type: "customer",
+      key: "member_id",
+      type: "text",
+      name: "Mailchimp member",
+      description: "The contact's ID in Mailchimp",
+      validations: { max_length: 64 },
+      access: { admin: "read", storefront: "none" },
+      private: false,
+      personal: false,
+      capabilities: { filterable: true, unique: true },
+    },
+  ],
 } satisfies DeepRequired<AppManifest>;
 
 const schema = JSON.parse(

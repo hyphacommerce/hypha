@@ -549,6 +549,69 @@ pub struct ScopeChanges {
     kept: Vec<Scope>,
 }
 
+/// A custom field the app declares (design note 0033, §8), always in its own namespace
+/// (`app_<name>.<key>`).
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct ConsentCustomField {
+    /// `product`, `variant`, `category`, `customer` or `order`.
+    owner_type: String,
+    key: String,
+    name: String,
+    /// `text`, `list.choice`, …
+    #[serde(rename = "type")]
+    field_type: String,
+    /// The value is about a person: the app asks for `customer_data:profile` to see it.
+    personal: bool,
+}
+
+impl From<&hypha_apps::CustomFieldSummary> for ConsentCustomField {
+    fn from(f: &hypha_apps::CustomFieldSummary) -> Self {
+        Self {
+            owner_type: f.owner_type.as_str().to_string(),
+            key: f.key.clone(),
+            name: f.name.clone(),
+            field_type: f.field_type.to_string(),
+            personal: f.personal,
+        }
+    }
+}
+
+/// What approving does to the app's custom fields, compared with the manifest it's
+/// installed from (everything is `added` on a first install).
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct CustomFieldChangesDto {
+    /// Fields the app adds: list the owners they're on, and which are personal.
+    added: Vec<ConsentCustomField>,
+    kept: Vec<ConsentCustomField>,
+    /// Fields the app no longer declares: approving deletes them with their values.
+    removed: Vec<ConsentCustomField>,
+    /// Fields whose type the manifest changes: such a manifest can't be approved
+    /// (`422 manifest_invalid`).
+    retyped: Vec<ConsentCustomField>,
+}
+
+impl From<hypha_apps::CustomFieldChanges> for CustomFieldChangesDto {
+    fn from(c: hypha_apps::CustomFieldChanges) -> Self {
+        let list = |v: &[hypha_apps::CustomFieldSummary]| v.iter().map(Into::into).collect();
+        Self {
+            added: list(&c.added),
+            kept: list(&c.kept),
+            removed: list(&c.removed),
+            retyped: c
+                .retyped
+                .iter()
+                .map(|r| ConsentCustomField {
+                    owner_type: r.owner_type.as_str().to_string(),
+                    key: r.key.clone(),
+                    name: r.name.clone(),
+                    field_type: r.to.to_string(),
+                    personal: false,
+                })
+                .collect(),
+        }
+    }
+}
+
 /// Where a request stands.
 #[derive(Debug, Clone, Copy, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -575,6 +638,9 @@ pub struct ConsentRequestResponse {
     /// apart, so staff see exactly which personal data the app will see.
     personal_data: Vec<PersonalDataScope>,
     changes: ScopeChanges,
+    /// The custom fields the app declares, against those of the manifest it's installed
+    /// from.
+    custom_fields: CustomFieldChangesDto,
     /// Where the browser goes after the answer; empty for a private app.
     redirect_uri: String,
     created_at: String,
@@ -596,6 +662,10 @@ impl ConsentRequestResponse {
             .map(|g| g.scopes().to_vec())
             .unwrap_or_default();
         let diff = scope_diff(&current, request.scopes());
+        let fields = hypha_apps::custom_field_changes(
+            app.and_then(|a| a.manifest()).map(|m| &m.manifest),
+            manifest,
+        );
         let (groups, personal) = group_scopes(request.scopes());
         let status = match request.status() {
             hypha_oauth::RequestStatus::Pending if request.is_expired(now) => {
@@ -634,6 +704,7 @@ impl ConsentRequestResponse {
                 removed: diff.removed,
                 kept: diff.kept,
             },
+            custom_fields: fields.into(),
             redirect_uri: request.redirect_uri().to_string(),
             created_at: rfc3339(request.created_at())?,
             expires_at: rfc3339(request.expires_at())?,

@@ -145,6 +145,7 @@ pub fn event_scope(subject_kind: &str) -> Option<Scope> {
         "order" | "payment" => Scope::OrdersRead,
         "fulfillment" => Scope::FulfillmentsRead,
         "shipping_zone" => Scope::ShippingRead,
+        "asset" => Scope::MediaRead,
         _ => return None,
     })
 }
@@ -367,6 +368,11 @@ impl App {
             return Err(AppError::ManifestForOtherApp(
                 manifest.manifest.key().clone(),
             ));
+        }
+        // A custom field's type is part of its identity (design note 0033, CF3): the
+        // app's definitions outlive an uninstall, so this holds for a reinstall too.
+        if let Some(previous) = &self.manifest {
+            crate::custom_fields::check_retypes(&previous.manifest, &manifest.manifest)?;
         }
         self.name = required_text("name", manifest.manifest.name())?;
         let timeout = self.webhook.as_ref().map(|w| w.timeout_ms);

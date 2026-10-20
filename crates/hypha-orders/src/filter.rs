@@ -1,6 +1,8 @@
 //! What an order list is narrowed to and how it is ordered (design note 0024, §2).
 
-use hypha_core::{ChannelId, CountryCode, Currency, Direction, SortKey, Timestamp, optional_text};
+use hypha_core::{
+    ChannelId, CountryCode, Currency, Direction, FieldFilter, SortKey, Timestamp, optional_text,
+};
 
 use crate::{FinancialStatus, FulfillmentStatus, Order, OrderError, OrderSummary};
 
@@ -17,6 +19,7 @@ pub struct OrderFilter {
     currency: Option<Currency>,
     placed_from: Option<Timestamp>,
     placed_before: Option<Timestamp>,
+    fields: Vec<FieldFilter>,
 }
 
 /// What an order list may be narrowed to, unchecked (`OrderFilter::new` checks it).
@@ -57,7 +60,20 @@ impl OrderFilter {
             currency: input.currency,
             placed_from: input.placed_from,
             placed_before: input.placed_before,
+            fields: Vec::new(),
         })
+    }
+
+    /// Filters on custom fields (design note 0033, §7), checked against their definitions
+    /// by `hypha-custom-fields` already; every one must match. `matches` doesn't see
+    /// them: adapters apply them to the stored values.
+    pub fn with_fields(mut self, fields: Vec<FieldFilter>) -> Self {
+        self.fields = fields;
+        self
+    }
+
+    pub fn fields(&self) -> &[FieldFilter] {
+        &self.fields
     }
 
     /// The text filter as given, trimmed.

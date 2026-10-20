@@ -7,7 +7,8 @@ use hypha_core::{CategoryId, ChannelId, MarketId, Money};
 use crate::SearchDocument;
 
 /// What a facet counts, and a filter narrows by. As a string (the API's form):
-/// `option.<name>` (name lowercased), `vendor`, `product_type`, `tag`.
+/// `option.<name>` (name lowercased), `vendor`, `product_type`, `tag`,
+/// `field.<namespace>.<key>` (design note 0033, §9).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum FacetKey {
     /// An option, by its name ignoring case ("Color" and "color" are one facet).
@@ -15,10 +16,15 @@ pub enum FacetKey {
     Vendor,
     ProductType,
     Tag,
+    /// A custom field, by its full key (`custom.material`): the storefront-visible,
+    /// filterable product and variant fields (design note 0033, §9). This leaf can't see
+    /// definitions: the settings command checks the field is allowed.
+    Field(String),
 }
 
 impl FacetKey {
     const OPTION: &'static str = "option.";
+    const FIELD: &'static str = "field.";
 }
 
 impl fmt::Display for FacetKey {
@@ -28,6 +34,7 @@ impl fmt::Display for FacetKey {
             FacetKey::Vendor => f.write_str("vendor"),
             FacetKey::ProductType => f.write_str("product_type"),
             FacetKey::Tag => f.write_str("tag"),
+            FacetKey::Field(key) => write!(f, "{}{key}", Self::FIELD),
         }
     }
 }
@@ -36,16 +43,30 @@ impl FromStr for FacetKey {
     /// The text that isn't a key.
     type Err = String;
 
-    /// The `Display` form; an option's name is lowercased and must not be blank.
+    /// The `Display` form; an option's name is lowercased and must not be blank; a
+    /// field's key is `<namespace>.<key>`, both parts present and without blanks.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "vendor" => Ok(FacetKey::Vendor),
             "product_type" => Ok(FacetKey::ProductType),
             "tag" => Ok(FacetKey::Tag),
-            _ => match s.strip_prefix(Self::OPTION).map(str::trim) {
-                Some(name) if !name.is_empty() => Ok(FacetKey::Option(name.to_lowercase())),
-                _ => Err(s.to_string()),
-            },
+            _ => {
+                if let Some(key) = s.strip_prefix(Self::FIELD) {
+                    let shaped = key
+                        .split_once('.')
+                        .is_some_and(|(namespace, name)| !namespace.is_empty() && !name.is_empty())
+                        && !key.chars().any(char::is_whitespace);
+                    return if shaped {
+                        Ok(FacetKey::Field(key.to_string()))
+                    } else {
+                        Err(s.to_string())
+                    };
+                }
+                match s.strip_prefix(Self::OPTION).map(str::trim) {
+                    Some(name) if !name.is_empty() => Ok(FacetKey::Option(name.to_lowercase())),
+                    _ => Err(s.to_string()),
+                }
+            }
         }
     }
 }
@@ -150,3 +171,36 @@ pub const MAX_FACET_VALUES: usize = 100;
 pub const MAX_DEPTH: u32 = 1000;
 /// The most hits per page.
 pub const MAX_LIMIT: u32 = 100;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn field_keys_round_trip() {
+        let key: FacetKey = "field.custom.material".parse().unwrap();
+        assert_eq!(key, FacetKey::Field("custom.material".to_string()));
+        assert_eq!(key.to_string(), "field.custom.material");
+    }
+
+    #[test]
+    fn a_field_key_needs_a_namespace_and_a_key() {
+        for bad in [
+            "field.",
+            "field.custom",
+            "field.custom.",
+            "field..x",
+            "field.a .b",
+        ] {
+            assert_eq!(bad.parse::<FacetKey>(), Err(bad.to_string()), "{bad}");
+        }
+    }
+
+    #[test]
+    fn option_names_are_lowercased() {
+        assert_eq!(
+            "option. Color ".parse::<FacetKey>(),
+            Ok(FacetKey::Option("color".to_string()))
+        );
+    }
+}

@@ -64,6 +64,13 @@ pub struct SearchDocument {
     pub sku: Option<String>,
     /// Option name and value label, in option order (`("Color", "Red")`).
     pub options: Vec<(String, String)>,
+    /// Custom field values a storefront may filter by (design note 0033, §9): the
+    /// field's full key and one facet value (`("custom.material", "wool")`), the
+    /// variant's value where it has one, else the product's. A `choice` gives its key
+    /// (labels come from the definition), a list one entry per item, a boolean
+    /// `true`/`false`, an integer its digits. Sorted by key, then in the list's order;
+    /// no (key, value) twice.
+    pub fields: Vec<(String, String)>,
     /// In the market's currency.
     pub price: Money,
     /// Over the product's documents in this market, and its listing's.
@@ -127,7 +134,7 @@ impl SearchDocument {
     }
 
     /// Its facet values, as `FacetKey` strings and values: `option.color` → `Red`,
-    /// `vendor` → `Acme`, one `tag` per tag.
+    /// `vendor` → `Acme`, one `tag` per tag, `field.custom.material` → `wool`.
     pub fn facet_values(&self) -> Vec<(String, String)> {
         let mut values = Vec::new();
         for (name, value) in &self.options {
@@ -147,6 +154,12 @@ impl SearchDocument {
         }
         for tag in &self.tags {
             values.push((crate::FacetKey::Tag.to_string(), tag.clone()));
+        }
+        for (key, value) in &self.fields {
+            values.push((
+                crate::FacetKey::Field(key.clone()).to_string(),
+                value.clone(),
+            ));
         }
         values
     }

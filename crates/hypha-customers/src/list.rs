@@ -1,7 +1,7 @@
 //! Customer lists (design note 0024, §2): the summary a table shows, what a list is
 //! narrowed to, and how it is ordered.
 
-use hypha_core::{CustomerId, Direction, Email, SortKey, Stamps, optional_text};
+use hypha_core::{CustomerId, Direction, Email, FieldFilter, SortKey, Stamps, optional_text};
 
 use crate::{Customer, CustomerError};
 
@@ -35,6 +35,7 @@ impl Customer {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CustomerFilter {
     q: Option<String>,
+    fields: Vec<FieldFilter>,
 }
 
 impl CustomerFilter {
@@ -43,7 +44,20 @@ impl CustomerFilter {
     pub fn new(q: Option<String>) -> Result<Self, CustomerError> {
         Ok(Self {
             q: optional_text("q", q)?,
+            fields: Vec::new(),
         })
+    }
+
+    /// Filters on custom fields (design note 0033, §7), checked against their definitions
+    /// by `hypha-custom-fields` already; every one must match. `matches` doesn't see
+    /// them: adapters apply them to the stored values.
+    pub fn with_fields(mut self, fields: Vec<FieldFilter>) -> Self {
+        self.fields = fields;
+        self
+    }
+
+    pub fn fields(&self) -> &[FieldFilter] {
+        &self.fields
     }
 
     pub fn q(&self) -> Option<&str> {

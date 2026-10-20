@@ -17,6 +17,7 @@ use hypha_core::{
     CategoryId, ChannelId, Clock, ErrorCode, Keyset, PageLimit, PageRequest, ProductId, Progress,
     RepoError, SortKey, VariantId,
 };
+use hypha_custom_fields::{HasCustomFieldDefinitions, HasCustomFieldValues};
 use hypha_inventory::{
     HasInventoryItems, HasLocations, InventoryItemRepo, LocationRepo, StockContext,
 };
@@ -29,7 +30,10 @@ use hypha_search_index::{
 };
 use thiserror::Error;
 
-use crate::build_documents;
+use crate::{
+    build_documents,
+    fields::{FacetFields, load_facet_fields},
+};
 
 /// Everything the sync job reads: the queue and settings, and what documents are made
 /// of. Anything with all of them is `SyncPorts` (the blanket impl below).
@@ -44,6 +48,8 @@ pub trait SyncPorts:
     + HasPriceLists
     + HasInventoryItems
     + HasLocations
+    + HasCustomFieldDefinitions
+    + HasCustomFieldValues
 {
 }
 
@@ -58,6 +64,8 @@ impl<T> SyncPorts for T where
         + HasPriceLists
         + HasInventoryItems
         + HasLocations
+        + HasCustomFieldDefinitions
+        + HasCustomFieldValues
         + ?Sized
 {
 }
@@ -233,7 +241,8 @@ async fn rebuild<S: SyncPorts, I: SearchIndex>(
 }
 
 /// What documents are made of, for a set of products, loaded once for every market:
-/// the products, their stock items, publications and categories, and the settings.
+/// the products, their stock items, publications, categories and facet fields, and the
+/// settings.
 struct Sources {
     loaded: BTreeMap<ProductId, Product>,
     variants: Vec<VariantId>,
@@ -241,6 +250,7 @@ struct Sources {
     stock: StockContext,
     channels: BTreeMap<ProductId, Vec<ChannelId>>,
     categories: BTreeMap<ProductId, Vec<CategoryId>>,
+    fields: BTreeMap<ProductId, FacetFields>,
 }
 
 impl Sources {
@@ -292,6 +302,9 @@ impl Sources {
                 (product, all.into_iter().collect())
             })
             .collect();
+        // Custom field values a storefront filters by (design note 0033, §9).
+        let products: Vec<&Product> = loaded.values().collect();
+        let fields = load_facet_fields(ports, &products).await?;
         Ok(Self {
             loaded,
             variants,
@@ -299,6 +312,7 @@ impl Sources {
             stock,
             channels,
             categories,
+            fields,
         })
     }
 
@@ -315,6 +329,7 @@ impl Sources {
         self.stock.locations = ports.locations().serving(market_id).await?;
         let none: &[ChannelId] = &[];
         let no_categories: &[CategoryId] = &[];
+        let no_fields = FacetFields::default();
         Ok(ids
             .iter()
             .filter_map(|id| self.loaded.get(id))
@@ -328,6 +343,7 @@ impl Sources {
                     self.categories
                         .get(&p.id())
                         .map_or(no_categories, Vec::as_slice),
+                    self.fields.get(&p.id()).unwrap_or(&no_fields),
                 )
             })
             .collect())

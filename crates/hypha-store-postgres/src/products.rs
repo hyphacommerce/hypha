@@ -22,6 +22,7 @@ use crate::{
         write_stamps,
     },
     error::{corrupt, repo_error},
+    field_filters::{Params, field_predicates},
     outbox::insert_events,
     store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
@@ -108,6 +109,8 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         let category = filter.category().map(|c| c.as_uuid());
         let channel = filter.channel().map(|c| c.as_uuid());
         let fetch = i64::from(page.limit.get()) + 1;
+        let mut extra = Params::after(11);
+        let fields = field_predicates(filter.fields(), "p.id", &mut extra);
         let mut conn = self.conn().await;
         let rows = conn
             .db()
@@ -149,10 +152,11 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
                    AND ($11::uuid IS NULL
                         OR EXISTS (SELECT 1 FROM channel_products chp
                                    WHERE chp.product_id = p.id AND chp.channel_id = $11))
+                   {fields}
                  ORDER BY {order} LIMIT $3",
                     stamps = stamp_columns("p."),
                 ),
-                &[
+                &extra.with_fixed(&[
                     (&statuses, Type::TEXT_ARRAY),
                     (&after, Type::UUID),
                     (&fetch, Type::INT8),
@@ -164,7 +168,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
                     (&filter.tag(), Type::TEXT),
                     (&category, Type::UUID),
                     (&channel, Type::UUID),
-                ],
+                ]),
             )
             .await
             .map_err(repo_error)?;
@@ -354,6 +358,42 @@ pub(crate) async fn update_product(
     let written = new_version;
     write_stamps(tx, "products", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
     Ok(written)
+}
+
+/// `StageProducts::delete_product` inside the caller's transaction, in one statement:
+/// the product at `version` (its options, values, variants and media cascade), and the
+/// rows that only name it in other modules' tables, which have no foreign key to it
+/// (catalog, channel and category membership, its tax class; design note 0033, 6.3).
+/// Fixed prices, inventory items and search documents are per variant and cleaned up by
+/// handlers on `product.deleted`; carts and orders keep their lines.
+pub(crate) async fn delete_product(
+    tx: &impl Queries,
+    id: ProductId,
+    version: Version,
+) -> Result<(), RepoError> {
+    let expected = version_to_db(version)?;
+    let gone = tx
+        .query_typed_opt(
+            "WITH gone AS (
+                 DELETE FROM products WHERE id = $1 AND version = $2 RETURNING id
+             ), catalogs AS (
+                 DELETE FROM catalog_products WHERE product_id IN (SELECT id FROM gone)
+             ), channels AS (
+                 DELETE FROM channel_products WHERE product_id IN (SELECT id FROM gone)
+             ), categories AS (
+                 DELETE FROM category_products WHERE product_id IN (SELECT id FROM gone)
+             ), tax AS (
+                 DELETE FROM product_tax_classes WHERE product_id IN (SELECT id FROM gone)
+             )
+             SELECT id FROM gone",
+            &[(&id.as_uuid(), Type::UUID), (&expected, Type::INT8)],
+        )
+        .await
+        .map_err(repo_error)?;
+    match gone {
+        Some(_) => Ok(()),
+        None => Err(RepoError::StaleVersion),
+    }
 }
 
 /// Writes options, option values, variants and media in 4 statements however many there are:

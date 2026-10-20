@@ -15,6 +15,7 @@ use crate::{
         version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
+    field_filters::{Params, field_predicates},
     outbox::insert_events,
     store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
@@ -78,6 +79,8 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
             ),
         };
         let fetch = i64::from(page.limit.get()) + 1;
+        let mut extra = Params::after(4);
+        let fields = field_predicates(filter.fields(), "c.id", &mut extra);
         let mut conn = self.conn().await;
         let rows = conn
             .db()
@@ -93,15 +96,16 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
                             OR strpos(lower(c.first_name), lower($3)) > 0
                             OR strpos(lower(c.last_name), lower($3)) > 0
                             OR strpos(lower(c.phone), lower($3)) > 0)
+                       {fields}
                      ORDER BY {order} LIMIT $2",
                     stamps = stamp_columns("c."),
                 ),
-                &[
+                &extra.with_fixed(&[
                     (&after, Type::UUID),
                     (&fetch, Type::INT8),
                     (&filter.q(), Type::TEXT),
                     (&text_key, Type::TEXT),
-                ],
+                ]),
             )
             .await
             .map_err(repo_error)?;

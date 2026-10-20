@@ -10,7 +10,11 @@ use hypha_orders::{
     Order, OrderFilter, OrderNumber, OrderRepo, OrderSort, OrderSummary, repo::keys,
 };
 
-use crate::{InMemoryOutbox, table::Table};
+use crate::{
+    InMemoryOutbox,
+    custom_fields::{SharedValues, fields_match, values_for},
+    table::Table,
+};
 
 pub struct InMemoryOrderRepo {
     pub(crate) orders: Table<OrderId, Order>,
@@ -19,6 +23,7 @@ pub struct InMemoryOrderRepo {
     pub(crate) outbox: InMemoryOutbox,
     /// What the next `get` returns instead of the stored order (`serve_next_get`).
     stale: Mutex<Option<Order>>,
+    field_values: SharedValues,
 }
 
 impl Default for InMemoryOrderRepo {
@@ -28,6 +33,7 @@ impl Default for InMemoryOrderRepo {
             last_number: AtomicI64::new(1000),
             outbox: InMemoryOutbox::default(),
             stale: Mutex::new(None),
+            field_values: SharedValues::default(),
         }
     }
 }
@@ -38,6 +44,15 @@ impl InMemoryOrderRepo {
         Self {
             outbox: outbox.clone(),
             ..Self::default()
+        }
+    }
+
+    /// The same repo, filtering its list by the custom field values `fields` holds
+    /// (design note 0033, §7), as a database joins them.
+    pub fn joining_fields(self, fields: &crate::InMemoryCustomFields) -> Self {
+        Self {
+            field_values: fields.shared_values(),
+            ..self
         }
     }
 
@@ -95,8 +110,12 @@ impl OrderRepo for InMemoryOrderRepo {
                 after.key
             )));
         }
+        let values = values_for(&self.field_values, filter.fields());
         Ok(self.orders.page_sorted(
-            |o| filter.matches(o),
+            |o| {
+                filter.matches(o)
+                    && fields_match(values.as_ref(), o.id().as_uuid(), filter.fields())
+            },
             &page,
             sort.direction(),
             Order::summary,

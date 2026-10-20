@@ -324,6 +324,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "payment_first_checkout",
             sql: include_str!("../migrations/0060_payment_first_checkout.sql"),
         },
+        Migration {
+            version: 61,
+            name: "custom_fields",
+            sql: include_str!("../migrations/0061_custom_fields.sql"),
+        },
     ],
 };
 
