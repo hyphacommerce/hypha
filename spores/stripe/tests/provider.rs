@@ -90,6 +90,7 @@ fn request(store_settings: Map<String, Value>) -> PaymentRequest {
         country: CountryCode::new("HR").unwrap(),
         customer_email: Email::new("buyer@example.com").unwrap(),
         return_url: Some("https://shop.example/order/1".to_string()),
+        reference: None,
         instructions: None,
         settings: json!({}),
         store_settings,
@@ -278,21 +279,19 @@ fn a_payment_without_an_intent_is_refused_without_calling_stripe() {
 }
 
 #[test]
-fn a_start_after_the_capture_mode_changed_finds_the_payments_intent() {
-    // Stripe refuses the payment's key with other parameters; the intent is found by its
-    // metadata instead of a second one being made.
+fn a_start_after_the_capture_mode_changed_replays_the_first_intent() {
+    // Stripe refuses the payment's key with other parameters; the same request in the
+    // other mode is the first one, and Stripe answers it with the intent made then.
     let (fake, http) = Fake::new(|request| {
-        if request.url.contains("/search") {
-            (
-                200,
-                json!({ "object": "search_result", "data": [
-                { "id": "pi_first", "amount": 1250, "currency": "eur", "status": "requires_payment_method", "client_secret": "pi_first_secret" }
-            ], "has_more": false }),
-            )
-        } else {
+        if String::from_utf8_lossy(&request.body).contains("capture_method=manual") {
             (
                 400,
                 json!({ "error": { "type": "idempotency_error", "message": "Keys for idempotent requests can only be used with the same parameters" } }),
+            )
+        } else {
+            (
+                200,
+                json!({ "id": "pi_first", "amount": 1250, "currency": "eur", "status": "requires_payment_method", "client_secret": "pi_first_secret" }),
             )
         }
     });
@@ -300,9 +299,46 @@ fn a_start_after_the_capture_mode_changed_finds_the_payments_intent() {
     assert_eq!(started.reference.as_deref(), Some("pi_first"));
     let sent = fake.requests();
     assert_eq!(sent.len(), 2);
-    assert!(
-        sent[1].url.contains("/v1/payment_intents/search?query="),
-        "{}",
-        sent[1].url
+    assert_eq!(
+        header(&sent[1], "idempotency-key"),
+        Some(payment_id().to_string().as_str())
     );
+}
+
+#[test]
+fn a_payment_started_before_resumes_its_intent() {
+    let (fake, http) = Fake::new(|_| {
+        (
+            200,
+            json!({ "id": "pi_kept", "amount": 1250, "currency": "eur", "status": "requires_payment_method", "client_secret": "pi_kept_secret" }),
+        )
+    });
+    let mut again = request(configured());
+    again.reference = Some("pi_kept".to_string());
+    let started = block_on(provider(http).start(&again)).unwrap();
+    assert_eq!(started.reference.as_deref(), Some("pi_kept"));
+    let sent = fake.requests();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].method, HttpMethod::Get);
+    assert!(
+        sent[0].url.ends_with("/v1/payment_intents/pi_kept"),
+        "{}",
+        sent[0].url
+    );
+}
+
+#[test]
+fn a_payment_whose_intent_was_canceled_is_not_started_again() {
+    let (_, http) = Fake::new(|_| {
+        (
+            200,
+            json!({ "id": "pi_kept", "amount": 1250, "currency": "eur", "status": "canceled", "client_secret": "pi_kept_secret" }),
+        )
+    });
+    let mut again = request(configured());
+    again.reference = Some("pi_kept".to_string());
+    assert!(matches!(
+        block_on(provider(http).start(&again)),
+        Err(PaymentError::ProviderFailed { reason, .. }) if reason.contains("was canceled")
+    ));
 }

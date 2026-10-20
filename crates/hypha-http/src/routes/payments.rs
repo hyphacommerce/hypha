@@ -135,7 +135,7 @@ pub async fn list_providers<S: Storage>(
     caller: Caller,
 ) -> Result<Json<PaymentProviderListResponse>, ApiError> {
     use hypha_apps::{AppRepo, HasApps};
-    use hypha_core::{AppKind, AppPoints};
+    use hypha_core::AppKind;
     use hypha_extensions::ExtensionPoint;
     let (ports, ctx) = caller.authenticate(&state).await?;
     ctx.require(hypha_core::Scope::PaymentsRead)
@@ -164,7 +164,6 @@ pub async fn list_providers<S: Storage>(
     }
     spores.sort_by(|a, b| a.key.cmp(&b.key));
     items.extend(spores);
-    let endpoints = state.app_endpoints(&ports);
     let mut apps: Vec<_> = ports
         .apps()
         .list()
@@ -174,14 +173,14 @@ pub async fn list_providers<S: Storage>(
         .filter(|app| app.kind() == AppKind::App && app.enabled())
         .collect();
     apps.sort_by(|a, b| a.key().cmp(b.key()));
-    // One after another: the request's connection runs one query at a time anyway, and a
-    // store has a handful of apps.
+    let point = crate::app_endpoints::known(hypha_extensions::PaymentsStart::NAME)
+        .ok_or_else(|| ApiError::internal("payments.start isn't a known point"))?;
+    // From the listing: an app installed from its manifest needs no further read.
     for app in &apps {
-        let answers = endpoints
-            .answers(app.key(), hypha_extensions::PaymentsStart::NAME)
+        let answers = hypha_apps::endpoint_of(&ports, app, point)
             .await
             .map_err(ApiError::internal)?;
-        if answers {
+        if answers.is_some() {
             items.push(PaymentProviderResponse {
                 key: app.key().to_string(),
                 name: app.name().to_string(),

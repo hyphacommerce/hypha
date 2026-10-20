@@ -221,24 +221,6 @@ impl<H: HttpClient> StripeClient<'_, H> {
         .await
     }
 
-    /// The PaymentIntent made for the Hypha payment `payment` (its metadata), if any:
-    /// through Stripe's search, which may lag a write by a few seconds.
-    pub async fn find_payment_intent(
-        &self,
-        payment: &str,
-    ) -> Result<Option<PaymentIntent>, StripeError> {
-        let query = format!("metadata['hypha_payment']:'{payment}'");
-        let page: List<PaymentIntent> = self
-            .request(
-                HttpMethod::Get,
-                "/v1/payment_intents/search",
-                &[("query", query.into())],
-                None,
-            )
-            .await?;
-        Ok(page.data.into_iter().find(|i| i.status != "canceled"))
-    }
-
     pub async fn capture_payment_intent(
         &self,
         id: &str,

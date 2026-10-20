@@ -671,23 +671,41 @@ them, not in this list.
   Capture and Refund from the block. Found and fixed there: a secret's description hid
   whether it was set; a captured payment stayed authorized until the webhook
   (`Completed`).
-- **Left:** a real card through Stripe's test mode (needs test keys), and the TypeScript
-  app's README pointing at the spore.
+- **Left:** a real card through Stripe's test mode (needs test keys). The TypeScript
+  app's README points at the spore (its branch `docs/point-at-spore`).
 - **Review fixes (2026-10-20):** `pnpm prod` set `SPORE_FEATURES` after the release
   build; a `path` spore was written as an absolute path Docker can't see (it must be
-  inside the checkout, and is written relative); `charge.refunded` took any Stripe 4xx as
+  inside the checkout's `spores/`, the folder Docker's context holds, and is written
+  relative); `charge.refunded` took any Stripe 4xx as
   permanent (a rotated key lost the refund: only a 404 is now, the rest answer 500 so
   Stripe redelivers); the element disabled Pay after a declined card though the payment
   stays pending (the shopper tries another card on the same intent); the intent's
   idempotency key was the payment's ID alone, so switching the capture mode mid-checkout
-  had Stripe refuse it for a day (the mode is in the key); a payment Stripe reports
+  had Stripe refuse it for a day (see the fourth round); a payment Stripe reports
   succeeded after Hypha voided it (the order cancelled while the shopper confirmed) is
   refunded at Stripe, once, and logged (*a money movement Danilo should confirm*); the
   element's bundle is built by `pnpm spores:build` (`spores:check` in CI); the payment
-  providers' apps are sorted and asked together; `SporeRuntime::names`. A spore
+  providers' apps are sorted (and read from the listing: see the fourth round); `SporeRuntime::names`. A spore
   element's module URL follows the issuer rule, so it needs `server.public_url` when
   storefronts reach the API internally (documented). The settings schema takes
   `"x-hypha-order"` (the form's field order: JSON objects lose it through the API).
+- **Review fixes, fourth round (2026-10-20):** one intent per payment rests on the
+  payment's stored reference, not on Stripe's idempotency key alone, which Stripe
+  forgets after 24 hours: `PaymentRequest::reference` carries what the payment kept, and
+  Stripe resumes that intent (refusing a canceled one); a first start creates it keyed
+  by the payment's ID, and an `idempotency_error` (the capture mode switched since)
+  sends the same request in the other mode, which Stripe replays with the first intent
+  (no search, which lags and can't see canceled intents). Giving money back after a void
+  tells Stripe's refusals (a disputed charge: logged as an error, acknowledged, for staff
+  to do in Stripe's dashboard) from failures (500, redelivered), and an intent canceled
+  already is read from the intent, not from the wording of Stripe's message. The element
+  asks Stripe for the intent's state after an error instead of guessing from the
+  error's type, so a failed 3-D Secure check or a passing network error leaves Pay on.
+  The CLI: a path spore must be under `spores/`; generated crates share one writer, and
+  their `Cargo.lock` follows the checkout's when that changes (`Cargo.lock.seed`); the
+  Worker crate's `worker` line is read from `hypha-host-workers`. The payment providers'
+  route reads apps' endpoints from the listing (`hypha_apps::endpoint_of`): an app
+  installed from a manifest costs no further query.
 
 ## As built: step 3 (facade, migration check, settings, routes, UI)
 

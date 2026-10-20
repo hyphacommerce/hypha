@@ -95,18 +95,29 @@ async fn fake_stripe() -> (String, Shared) {
                             Some(intent) => {
                                 let ok = match *action {
                                     "capture" => intent["status"] == "requires_capture",
-                                    _ => intent["status"] != "succeeded",
+                                    _ => intent["status"] != "succeeded"
+                                        && intent["status"] != "canceled",
                                 };
                                 if ok {
                                     intent["status"] = json!(next);
                                     (200, intent.clone())
                                 } else {
+                                    let state = intent["status"].as_str().unwrap_or_default();
                                     (400, json!({"error": {"type": "invalid_request_error",
-                                        "message": format!("This PaymentIntent could not be {action}d.")}}))
+                                        "code": "payment_intent_unexpected_state",
+                                        "message": format!("You cannot {action} this PaymentIntent because it has a status of {state}.")}}))
                                 }
                             }
                             None => (404, json!({"error": {"type": "invalid_request_error", "message": "No such payment_intent"}})),
                         }
+                    }
+                    ("POST", ["refunds"])
+                        if fake.intents.get(&field("payment_intent"))
+                            .is_some_and(|i| i["disputed"] == json!(true)) =>
+                    {
+                        (400, json!({"error": {"type": "invalid_request_error",
+                            "code": "charge_disputed",
+                            "message": "This charge is disputed and can't be refunded."}}))
                     }
                     ("POST", ["refunds"]) => {
                         let id = format!("re_{}", fake.refunds.len() + 1);
@@ -278,6 +289,39 @@ async fn a_card_payment_goes_from_checkout_through_stripe_to_paid_and_partly_ref
         assert_eq!(
             fake.intents["pi_1"]["metadata"]["hypha_payment"],
             json!(payment)
+        );
+    }
+
+    // The shopper back on the order page starts it again: the payment's intent is
+    // resumed by its stored ID, not made again under a key Stripe may have forgotten.
+    let token = placed["access_token"].as_str().unwrap();
+    let (status, again) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("/storefront/orders/{order}/payment?token={token}"),
+        Some("{}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(
+        again["next_action"]["props"]["client_secret"], "pi_1_secret_x",
+        "{again}"
+    );
+    {
+        let fake = fake.lock().unwrap();
+        let creates = fake
+            .seen
+            .iter()
+            .filter(|(m, p, _, _)| m == "POST" && p == "/v1/payment_intents")
+            .count();
+        assert_eq!(creates, 1, "{:?}", fake.seen);
+        assert!(
+            fake.seen
+                .iter()
+                .any(|(m, p, _, _)| m == "GET" && p == "/v1/payment_intents/pi_1"),
+            "{:?}",
+            fake.seen
         );
     }
 
@@ -458,20 +502,21 @@ async fn an_order_cancelled_cancels_its_intent_at_stripe() {
         assert_eq!(status, StatusCode::OK, "{outcome}");
         assert_eq!(outcome["status"], "ignored", "{outcome}");
     }
-    let fake = fake_state.lock().unwrap();
-    let refunds: Vec<_> = fake
-        .seen
-        .iter()
-        .filter(|(m, p, _, _)| m == "POST" && p == "/v1/refunds")
-        .collect();
-    assert_eq!(refunds.len(), 2, "{:?}", fake.seen);
-    assert!(
-        refunds
+    {
+        let fake = fake_state.lock().unwrap();
+        let refunds: Vec<_> = fake
+            .seen
             .iter()
-            .all(|(_, _, key, form)| key.ends_with(":refund-after-void")
-                && form.contains("payment_intent=pi_1"))
-    );
-    drop(fake);
+            .filter(|(m, p, _, _)| m == "POST" && p == "/v1/refunds")
+            .collect();
+        assert_eq!(refunds.len(), 2, "{:?}", fake.seen);
+        assert!(
+            refunds
+                .iter()
+                .all(|(_, _, key, form)| key.ends_with(":refund-after-void")
+                    && form.contains("payment_intent=pi_1"))
+        );
+    }
 
     // A late authorization (manual capture) for the voided payment: the hold is released.
     let capturable = json!({ "id": "pi_1", "amount_capturable": 3000, "metadata": metadata });
@@ -483,13 +528,30 @@ async fn an_order_cancelled_cancels_its_intent_at_stripe() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{outcome}");
-    let fake = fake_state.lock().unwrap();
+    assert_eq!(outcome["status"], "ignored", "{outcome}");
+    {
+        let fake = fake_state.lock().unwrap();
+        assert!(
+            fake.seen.iter().any(|(m, p, key, _)| m == "POST"
+                && p == "/v1/payment_intents/pi_1/cancel"
+                && key.ends_with(":cancel-after-void")),
+            "{:?}",
+            fake.seen
+        );
+    }
+
+    // A refund Stripe refuses (the charge is disputed) is acknowledged, not retried
+    // forever: staff give the money back in Stripe's dashboard.
+    fake_state.lock().unwrap().intents.get_mut("pi_1").unwrap()["disputed"] = json!(true);
+    let (status, outcome) =
+        deliver(&app, "evt_disputed", "payment_intent.succeeded", succeeded).await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    assert_eq!(outcome["status"], "ignored", "{outcome}");
     assert!(
-        fake.seen.iter().any(|(m, p, key, _)| m == "POST"
-            && p == "/v1/payment_intents/pi_1/cancel"
-            && key.ends_with(":cancel-after-void")),
-        "{:?}",
-        fake.seen
+        outcome["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("Stripe refused to give it back")),
+        "{outcome}"
     );
 }
 

@@ -34,6 +34,9 @@ interface StripeInstance {
 }
 type StripeFactory = (publishableKey: string) => StripeInstance;
 
+/** An intent's states in which it still takes a payment attempt. */
+const OPEN = new Set(["requires_payment_method", "requires_confirmation", "requires_action"]);
+
 declare global {
   interface Window {
     Stripe?: StripeFactory;
@@ -256,9 +259,10 @@ export class StripePayment extends HTMLElement {
     this.#busy = true;
     this.#button.disabled = true;
     this.#error.textContent = "";
-    // Whether the shopper may press again on this intent. A declined card leaves it
-    // waiting for another (Hypha's payment stays pending until the intent is over), so
-    // the shopper tries another card right here; other refusals end it.
+    // Whether the shopper may press again on this intent. A declined card, a failed
+    // 3-D Secure check or a passing network error leaves it waiting for another try
+    // (Hypha's payment stays pending until the intent is over), so the shopper tries
+    // again right here; an intent that's over (canceled with its order) ends it.
     let retry = true;
     try {
       const submitted = await elements.submit();
@@ -271,14 +275,20 @@ export class StripePayment extends HTMLElement {
         redirect: "if_required",
       });
       if (result.error) {
-        // A declined card or a field to fix: the shopper tries again here. Anything else
-        // (the intent canceled with its order, paid in another tab) can't succeed here.
-        const type = result.error.type;
-        retry = type === "card_error" || type === "validation_error";
+        // Whether the intent still takes a try is the intent's state, not the error's
+        // type: Stripe is asked. Unknown (no answer) leaves the button on.
+        const message = result.error.message ?? "The payment didn't go through.";
+        const now = await stripe
+          .retrievePaymentIntent(this.#props.client_secret)
+          .then((r) => r.paymentIntent?.status)
+          .catch(() => undefined);
+        if (now === "succeeded" || now === "processing" || now === "requires_capture") {
+          retry = false;
+          return this.#confirmed();
+        }
+        retry = now === undefined || OPEN.has(now);
         return this.#fail(
-          retry
-            ? (result.error.message ?? "The payment didn't go through.")
-            : "This payment can't go on here: reload the page to start again.",
+          retry ? message : "This payment can't go on here: reload the page to start again.",
         );
       }
       const status = result.paymentIntent?.status;

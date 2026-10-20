@@ -343,22 +343,38 @@ pub async fn receive<S: Storage>(
                     PaymentEventKind::Paid | PaymentEventKind::Authorized
                 ) && matches!(from, PaymentStatus::Voided | PaymentStatus::Failed) =>
             {
-                let undone = undo_unwanted(stripe, &settings, &report).await;
-                hypha_spore::tracing::warn!(
-                    event = %event.id,
-                    payment = %report.payment,
-                    undone,
-                    "Stripe took or held money for a payment Hypha {from}: given back at Stripe"
-                );
-                if !undone {
-                    return answer(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        WebhookOutcome::rejected(
-                            "couldn't give the money back at Stripe; try again",
-                        ),
-                    );
+                match undo_unwanted(stripe, &settings, &report).await {
+                    Undo::Done => {
+                        hypha_spore::tracing::warn!(
+                            event = %event.id,
+                            payment = %report.payment,
+                            "Stripe took or held money for a payment Hypha {from}: given back at Stripe"
+                        );
+                        refused
+                            .get_or_insert_with(|| format!("payment {from}: given back at Stripe"));
+                    }
+                    // Stripe said no (a disputed charge, …): asking again won't change
+                    // that, so it's acknowledged, and staff give it back by hand.
+                    Undo::Refused(reason) => {
+                        hypha_spore::tracing::error!(
+                            event = %event.id,
+                            payment = %report.payment,
+                            intent = %report.reference,
+                            "Stripe took or held money for a payment Hypha {from}, and refused to give it back: {reason}; do it in Stripe's dashboard"
+                        );
+                        refused.get_or_insert_with(|| {
+                            format!("payment {from}: Stripe refused to give it back: {reason}")
+                        });
+                    }
+                    Undo::Failed => {
+                        return answer(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            WebhookOutcome::rejected(
+                                "couldn't give the money back at Stripe; try again",
+                            ),
+                        );
+                    }
                 }
-                refused.get_or_insert_with(|| format!("payment {from}: given back at Stripe"));
             }
             // A move the payment can't make (voided already, …): retrying won't help.
             Err(e) => {
@@ -381,13 +397,24 @@ pub async fn receive<S: Storage>(
     }
 }
 
+/// How giving money back at Stripe went.
+#[derive(Debug, PartialEq, Eq)]
+enum Undo {
+    /// Given back (now, or by an earlier try).
+    Done,
+    /// Stripe said no, which it will say again: staff must look.
+    Refused(String),
+    /// Not done for now (Stripe down, no key): worth trying again.
+    Failed,
+}
+
 /// Gives back what Stripe took or holds for a Hypha payment that's voided or failed (an
 /// order cancelled while the shopper confirmed): a payment refunded, an authorization's
-/// intent cancelled, once each (keyed by the payment). Whether Stripe did it (an intent
-/// already canceled or refunded counts).
-async fn undo_unwanted(stripe: &Stripe, settings: &Settings, report: &Report) -> bool {
+/// intent cancelled, once each (keyed by the payment). An intent already canceled or a
+/// charge already refunded counts as done.
+async fn undo_unwanted(stripe: &Stripe, settings: &Settings, report: &Report) -> Undo {
     let Some(secret_key) = settings.secret_key.as_deref() else {
-        return false;
+        return Undo::Failed;
     };
     let client = StripeClient {
         http: &stripe.env,
@@ -411,14 +438,27 @@ async fn undo_unwanted(stripe: &Stripe, settings: &Settings, report: &Report) ->
             client.create_refund(&params, &key).await.map(|_| ())
         }
     };
-    match done {
-        Ok(()) => true,
-        // Canceled or refunded already (a retry after Stripe did it): done.
-        Err(e) => {
-            e.code.as_deref() == Some("charge_already_refunded")
-                || e.message.contains("status of canceled")
+    let e = match done {
+        Ok(()) => return Undo::Done,
+        Err(e) if !e.is_refusal() => return Undo::Failed,
+        Err(e) => e,
+    };
+    if e.code.as_deref() == Some("charge_already_refunded") {
+        return Undo::Done;
+    }
+    // A cancel refused because of the intent's state: canceled already is done. Read
+    // from the intent itself, not from the wording of Stripe's message.
+    if report.kind == PaymentEventKind::Authorized
+        && e.code.as_deref() == Some("payment_intent_unexpected_state")
+    {
+        match client.retrieve_payment_intent(&report.reference).await {
+            Ok(intent) if intent.status == "canceled" => return Undo::Done,
+            Ok(_) => {}
+            Err(e) if !e.is_refusal() => return Undo::Failed,
+            Err(_) => {}
         }
     }
+    Undo::Refused(e.message)
 }
 
 /// What a report says, hashed: a key reused for another report is refused, as an

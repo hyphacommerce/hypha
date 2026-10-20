@@ -106,6 +106,10 @@ pub struct PaymentRequest {
     pub customer_email: Email,
     /// Where the storefront wants the buyer back after a redirect, when it said.
     pub return_url: Option<String>,
+    /// The provider's reference already kept on the payment, when it was started before
+    /// (a shopper back on the order page): a provider resumes what it made then rather
+    /// than making another, since its own idempotency may not outlive the gap.
+    pub reference: Option<String>,
     /// The method's instructions as the payment copied them.
     pub instructions: Option<String>,
     /// The method's provider settings.
@@ -595,6 +599,7 @@ mod tests {
             country: CountryCode::new("HR").unwrap(),
             customer_email: Email::new("buyer@example.com").unwrap(),
             return_url: None,
+            reference: None,
             instructions: instructions.map(str::to_string),
             settings: serde_json::json!({}),
             store_settings: serde_json::Map::new(),

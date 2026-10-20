@@ -51,6 +51,7 @@ pub(crate) async fn start<S: HasPayments, Q: PaymentProviders>(
         country: order.country(),
         customer_email: order.email().clone(),
         return_url: return_url.map(str::to_string),
+        reference: payment.reference().map(str::to_string),
         instructions: payment.instructions().map(str::to_string),
         settings,
         // The host fills a spore provider's (design note 0030, §8).

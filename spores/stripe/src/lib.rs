@@ -75,6 +75,16 @@ pub enum CaptureMode {
     Manual,
 }
 
+impl CaptureMode {
+    /// The mode it isn't.
+    pub fn other(self) -> Self {
+        match self {
+            CaptureMode::Automatic => CaptureMode::Manual,
+            CaptureMode::Manual => CaptureMode::Automatic,
+        }
+    }
+}
+
 /// The merchant's settings, as the spore reads them: secrets opened (design note 0030,
 /// §8). Every field is optional until the merchant saves them.
 #[derive(Debug, Clone, Default, Deserialize)]

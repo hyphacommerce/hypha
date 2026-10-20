@@ -48,68 +48,96 @@ impl StripeProvider {
         }
     }
 
-    /// The PaymentIntent for a payment: Stripe answers a create with the same
-    /// idempotency key (Hypha's payment ID) with the intent it made the first time, so a
-    /// start asked again (the shopper reloading) charges once.
+    /// The PaymentIntent for a payment, one whatever happens. A payment started before
+    /// keeps its intent's ID as its reference, so a later start (the shopper back on the
+    /// order page, days later) resumes that intent. A first start creates one with the
+    /// payment's ID as the idempotency key, so a start asked again before the reference
+    /// was kept is answered with the same intent (Stripe keeps keys for 24 hours).
     async fn intent_for(
         &self,
         payment: &PaymentRequest,
         settings: &Settings,
         secret_key: &str,
     ) -> Result<PaymentIntent, PaymentError> {
-        let currency = payment.amount.currency().to_string();
-        let amount = to_stripe(payment.amount.amount(), &currency)
-            .map_err(|e: AmountError| Self::failed(e.to_string()))?;
-        let capture = match settings.capture_mode {
-            CaptureMode::Automatic => "automatic",
-            CaptureMode::Manual => "manual",
-        };
-        let params: Vec<(&str, Form)> = vec![
-            ("amount", amount.into()),
-            ("currency", currency.to_ascii_lowercase().into()),
-            ("capture_method", capture.into()),
-            (
-                "automatic_payment_methods",
-                Form::Map(vec![("enabled", "true".into())]),
-            ),
-            (
-                "description",
-                format!("Order {}", payment.order_number).into(),
-            ),
-            ("receipt_email", payment.customer_email.as_str().into()),
-            (
-                "metadata",
-                Form::Map(vec![
-                    ("hypha_payment", payment.payment.to_string().into()),
-                    ("hypha_order", payment.order.to_string().into()),
-                    ("hypha_order_number", payment.order_number.into()),
-                ]),
-            ),
-        ];
-        // One intent per payment, whatever happens: the key is the payment's ID. A start
-        // after the merchant switched the capture mode sends other parameters under it,
-        // which Stripe refuses (`idempotency_error`): the payment's intent is then found by
-        // its metadata, and keeps the mode it was made with.
         let client = self.client(secret_key);
-        let intent = match client
-            .create_payment_intent(&params, &payment.payment.to_string())
-            .await
+        if let Some(reference) = payment
+            .reference
+            .as_deref()
+            .filter(|r| r.starts_with("pi_"))
         {
-            Ok(intent) => intent,
-            Err(e) if e.kind == "idempotency_error" => client
-                .find_payment_intent(&payment.payment.to_string())
+            let intent = client
+                .retrieve_payment_intent(reference)
                 .await
-                .map_err(|e| Self::failed(stripe_reason(&e)))?
-                .ok_or_else(|| Self::failed(stripe_reason(&e)))?,
+                .map_err(|e| Self::failed(stripe_reason(&e)))?;
+            return usable(intent);
+        }
+        let key = payment.payment.to_string();
+        let created = client
+            .create_payment_intent(&intent_params(payment, settings.capture_mode)?, &key)
+            .await;
+        let intent = match created {
+            Ok(intent) => intent,
+            // The key was used with other parameters: the merchant switched the capture
+            // mode since the first start. The same request in the other mode is the
+            // first one, which Stripe replays with the intent it made then.
+            Err(e) if e.kind == "idempotency_error" => client
+                .create_payment_intent(
+                    &intent_params(payment, settings.capture_mode.other())?,
+                    &key,
+                )
+                .await
+                .map_err(|e| Self::failed(stripe_reason(&e)))?,
             Err(e) => return Err(Self::failed(stripe_reason(&e))),
         };
-        if intent.status == "canceled" {
-            return Err(Self::failed(
-                "this payment's PaymentIntent was canceled: start a new payment",
-            ));
-        }
-        Ok(intent)
+        usable(intent)
     }
+}
+
+/// An intent the shopper can still pay, or why not.
+fn usable(intent: PaymentIntent) -> Result<PaymentIntent, PaymentError> {
+    match intent.status.as_str() {
+        "canceled" => Err(StripeProvider::failed(
+            "this payment's PaymentIntent was canceled: start a new payment",
+        )),
+        _ => Ok(intent),
+    }
+}
+
+/// What a payment's PaymentIntent is created with: the same for every start of one
+/// payment except the capture mode, which the merchant may switch.
+fn intent_params(
+    payment: &PaymentRequest,
+    capture_mode: CaptureMode,
+) -> Result<Vec<(&'static str, Form)>, PaymentError> {
+    let currency = payment.amount.currency().to_string();
+    let amount = to_stripe(payment.amount.amount(), &currency)
+        .map_err(|e: AmountError| StripeProvider::failed(e.to_string()))?;
+    let capture = match capture_mode {
+        CaptureMode::Automatic => "automatic",
+        CaptureMode::Manual => "manual",
+    };
+    Ok(vec![
+        ("amount", amount.into()),
+        ("currency", currency.to_ascii_lowercase().into()),
+        ("capture_method", capture.into()),
+        (
+            "automatic_payment_methods",
+            Form::Map(vec![("enabled", "true".into())]),
+        ),
+        (
+            "description",
+            format!("Order {}", payment.order_number).into(),
+        ),
+        ("receipt_email", payment.customer_email.as_str().into()),
+        (
+            "metadata",
+            Form::Map(vec![
+                ("hypha_payment", payment.payment.to_string().into()),
+                ("hypha_order", payment.order.to_string().into()),
+                ("hypha_order_number", payment.order_number.into()),
+            ]),
+        ),
+    ])
 }
 
 /// What staff or a shopper is told when Stripe failed.

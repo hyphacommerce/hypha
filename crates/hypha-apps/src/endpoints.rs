@@ -86,20 +86,29 @@ pub async fn find_endpoint<S: HasApps + HasExtensionEndpoints>(
     let Some(found) = ports.apps().get(app).await? else {
         return Ok(None);
     };
-    if !found.may_answer(point.scope) {
+    Ok(endpoint_of(ports, &found, point).await?.map(|e| (found, e)))
+}
+
+/// [`find_endpoint`]'s rule for an app already read (a listing of them): an app
+/// installed from its manifest needs no further read.
+pub async fn endpoint_of<S: HasExtensionEndpoints>(
+    ports: &S,
+    app: &App,
+    point: KnownPoint,
+) -> Result<Option<ExtensionEndpoint>, RepoError> {
+    if !app.may_answer(point.scope) {
         return Ok(None);
     }
-    let endpoint = match found.manifest_endpoints() {
+    Ok(match app.manifest_endpoints() {
         Some(registered) => registered
             .into_iter()
             .find(|e| e.point == point.name && e.version == point.version),
         None => ports
             .extension_endpoints()
-            .get(app, point.name)
+            .get(app.key(), point.name)
             .await?
             .filter(|e| e.version == point.version),
-    };
-    Ok(endpoint.map(|e| (found, e)))
+    })
 }
 
 /// An app's endpoints (`apps:read`): its manifest's registrations for an app installed
