@@ -841,7 +841,7 @@ PY
     step "staff void it, the provider refuses" 409 payment_refused -X POST "$PAYMENTS/void" -H "$JSON" -d '{}'
     contains "and says why" '"details":{"reason":"already captured"}'
     step "staff capture it" 202 - -X POST "$PAYMENTS/capture" -H "$JSON" -d '{}'
-    contains "accepted; the payment waits for the app" '"reference":"ch_e2e","payment":{'
+    contains "accepted; the payment waits for the app" '"reference":"ch_e2e","completed":false,"payment":{'
     contains "still authorized" '"status":"authorized"'
     step "the app reports it paid" 200 - -X POST "$PAYMENTS/events" -H "$JSON" \
         -H 'idempotency-key: evt_e2e_2' -d '{"type":"paid","occurred_at":"2026-10-18T12:00:00Z"}'

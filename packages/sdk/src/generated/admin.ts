@@ -1901,9 +1901,10 @@ export interface paths {
          *     provider's event ID): a retry with it answers as the first did. A refund is counted
          *     once per `reference` (the provider's refund ID), whatever the key. A move the payment's status doesn't allow is `409
          *     invalid_payment_transition`; a refund that doesn't fit, `422 invalid_refund_amount`.
-         *     A payment authorized, paid or refunded under one `reference` refuses an authorized,
-         *     paid, failed or voided report under another: `409 payment_reference_mismatch` (a
-         *     second attempt at the provider, collected once; give that money back).
+         *     A payment authorized or paid under one `reference` reported authorized or paid again
+         *     under another is a second collection: `409 payment_reference_mismatch`, `details:
+         *     {status, held, reported}` (give the reported attempt's money back). A capture or void
+         *     may carry the provider's own ID for it.
          */
         post: operations["admin.payments.report_event"];
         delete?: never;
@@ -4454,11 +4455,18 @@ export interface components {
             email: string;
         };
         /**
-         * @description The provider took the action. Nothing has moved yet: the payment changes when the
-         *     provider reports what happened (`POST /admin/payments/{id}/events`).
+         * @description The provider took the action. Unless it said it's done already (`completed`), nothing
+         *     has moved yet: the payment changes when the provider reports what happened
+         *     (`POST /admin/payments/{id}/events`).
          */
         PaymentActionAcceptedResponse: {
-            /** @description The payment as it is still. */
+            /**
+             * @description Whether the action is done and recorded: a provider built into the API (a spore)
+             *     may answer that at once, and `payment` has moved. `false`: the payment moves when
+             *     the provider reports.
+             */
+            completed: boolean;
+            /** @description The payment as it is now. */
             payment: components["schemas"]["PaymentResponse"];
             /** @description The provider's ID for the capture or refund, when it gave one. */
             reference?: string | null;

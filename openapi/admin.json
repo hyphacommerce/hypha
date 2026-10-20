@@ -5301,11 +5301,15 @@
         "type": "object"
       },
       "PaymentActionAcceptedResponse": {
-        "description": "The provider took the action. Nothing has moved yet: the payment changes when the\nprovider reports what happened (`POST /admin/payments/{id}/events`).",
+        "description": "The provider took the action. Unless it said it's done already (`completed`), nothing\nhas moved yet: the payment changes when the provider reports what happened\n(`POST /admin/payments/{id}/events`).",
         "properties": {
+          "completed": {
+            "description": "Whether the action is done and recorded: a provider built into the API (a spore)\nmay answer that at once, and `payment` has moved. `false`: the payment moves when\nthe provider reports.",
+            "type": "boolean"
+          },
           "payment": {
             "$ref": "#/components/schemas/PaymentResponse",
-            "description": "The payment as it is still."
+            "description": "The payment as it is now."
           },
           "reference": {
             "description": "The provider's ID for the capture or refund, when it gave one.",
@@ -5316,6 +5320,7 @@
           }
         },
         "required": [
+          "completed",
           "payment"
         ],
         "type": "object"
@@ -23699,7 +23704,7 @@
             "bearer": []
           }
         ],
-        "summary": "What a payment's provider reports (design note 0029, §3.1): a payment app tells\nHypha what its provider did (Stripe's webhook landed on the app). Moves the payment\nand its order's payment status in one batch, recording `payment.authorized`,\n`.paid`, `.failed`, `.voided` or `.refunded` (and `order.paid`). Reporting the\nstatus a payment is in already changes nothing. Send an `Idempotency-Key` (the\nprovider's event ID): a retry with it answers as the first did. A refund is counted\nonce per `reference` (the provider's refund ID), whatever the key. A move the payment's status doesn't allow is `409\ninvalid_payment_transition`; a refund that doesn't fit, `422 invalid_refund_amount`.\nA payment authorized, paid or refunded under one `reference` refuses an authorized,\npaid, failed or voided report under another: `409 payment_reference_mismatch` (a\nsecond attempt at the provider, collected once; give that money back).",
+        "summary": "What a payment's provider reports (design note 0029, §3.1): a payment app tells\nHypha what its provider did (Stripe's webhook landed on the app). Moves the payment\nand its order's payment status in one batch, recording `payment.authorized`,\n`.paid`, `.failed`, `.voided` or `.refunded` (and `order.paid`). Reporting the\nstatus a payment is in already changes nothing. Send an `Idempotency-Key` (the\nprovider's event ID): a retry with it answers as the first did. A refund is counted\nonce per `reference` (the provider's refund ID), whatever the key. A move the payment's status doesn't allow is `409\ninvalid_payment_transition`; a refund that doesn't fit, `422 invalid_refund_amount`.\nA payment authorized or paid under one `reference` reported authorized or paid again\nunder another is a second collection: `409 payment_reference_mismatch`, `details:\n{status, held, reported}` (give the reported attempt's money back). A capture or void\nmay carry the provider's own ID for it.",
         "tags": [
           "payments"
         ],

@@ -606,9 +606,10 @@ pub struct PaymentEventResponse {
 /// provider's event ID): a retry with it answers as the first did. A refund is counted
 /// once per `reference` (the provider's refund ID), whatever the key. A move the payment's status doesn't allow is `409
 /// invalid_payment_transition`; a refund that doesn't fit, `422 invalid_refund_amount`.
-/// A payment authorized, paid or refunded under one `reference` refuses an authorized,
-/// paid, failed or voided report under another: `409 payment_reference_mismatch` (a
-/// second attempt at the provider, collected once; give that money back).
+/// A payment authorized or paid under one `reference` reported authorized or paid again
+/// under another is a second collection: `409 payment_reference_mismatch`, `details:
+/// {status, held, reported}` (give the reported attempt's money back). A capture or void
+/// may carry the provider's own ID for it.
 #[utoipa::path(
     post,
     path = "/admin/payments/{id}/events",
@@ -685,13 +686,18 @@ pub struct RefundRequest {
     amount: Option<i64>,
 }
 
-/// The provider took the action. Nothing has moved yet: the payment changes when the
-/// provider reports what happened (`POST /admin/payments/{id}/events`).
+/// The provider took the action. Unless it said it's done already (`completed`), nothing
+/// has moved yet: the payment changes when the provider reports what happened
+/// (`POST /admin/payments/{id}/events`).
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct PaymentActionAcceptedResponse {
     /// The provider's ID for the capture or refund, when it gave one.
     reference: Option<String>,
-    /// The payment as it is still.
+    /// Whether the action is done and recorded: a provider built into the API (a spore)
+    /// may answer that at once, and `payment` has moved. `false`: the payment moves when
+    /// the provider reports.
+    completed: bool,
+    /// The payment as it is now.
     payment: PaymentResponse,
 }
 
@@ -712,16 +718,17 @@ async fn act<S: Storage>(
         idempotency_key,
     };
     let acted = act_on_payment(ctx, ports, &state.ids, &state.payments(ports), input).await?;
-    let payment = match acted.completed {
-        true => record_completed(state, ports, &acted, action, amount)
-            .await
-            .unwrap_or(acted.payment),
-        false => acted.payment,
+    let recorded = match acted.completed {
+        true => record_completed(state, ports, &acted, action, amount).await,
+        false => None,
     };
+    let completed = recorded.is_some();
+    let payment = recorded.unwrap_or(acted.payment);
     Ok((
         StatusCode::ACCEPTED,
         Json(PaymentActionAcceptedResponse {
             reference: acted.reference,
+            completed,
             payment: PaymentResponse::new(&payment)?,
         }),
     ))

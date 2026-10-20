@@ -142,9 +142,6 @@ export async function runPaymentAction(
 ): Promise<ActionResult> {
   const client = await sessionClient();
   const params = { path: { id: paymentId } };
-  // Where it stood, to tell whether the action moved it (a second partial refund leaves
-  // it `partially_refunded` either way).
-  const before = await client.GET("/admin/payments/{id}", { params });
   let result;
   switch (point) {
     case "payments.capture":
@@ -163,24 +160,13 @@ export async function runPaymentAction(
   }
   if (result.error) return { error: describe(result.error) };
   revalidatePath(`/orders/${orderId}`);
-  // A provider built in may answer that it's done already (a spore's capture Stripe
-  // answered `succeeded`): the payment has moved, so say so.
-  const status = result.data.payment.status;
-  const moved =
-    before.data?.status !== status ||
-    before.data?.refunded.amount !== result.data.payment.refunded.amount;
-  const done = moved && DONE[point]?.includes(status);
+  // A provider built into the API may answer that it's done already (Stripe's capture
+  // `succeeded`): the payment has moved, so say so.
+  const { completed, payment } = result.data;
   return {
-    message: done
-      ? `Done: the payment is ${status.replace("_", " ")}.`
+    message: completed
+      ? `Done: the payment is ${payment.status.replace("_", " ")}.`
       : "Sent to the payment's app. The payment changes when it reports back.",
     refresh: true,
   };
 }
-
-/** The statuses that mean a payment action has happened. */
-const DONE: Record<string, string[]> = {
-  "payments.capture": ["paid"],
-  "payments.void": ["voided"],
-  "payments.refund": ["refunded", "partially_refunded"],
-};
