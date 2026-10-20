@@ -4,6 +4,8 @@ import { Section } from "@astryxdesign/core/Section";
 import { PageHeader } from "@/components/page-header";
 import { type SearchParams, one, oneOf } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
+import { fieldQuery, isFilterOffered } from "@/lib/custom-fields";
+import { definitionsOf } from "@/lib/custom-fields-server";
 import { sessionClient } from "@/lib/hypha";
 import { CustomersTable } from "@/resources/customers";
 
@@ -16,9 +18,16 @@ export default async function CustomersPage({
 }) {
   const params = await searchParams;
   const client = await sessionClient();
+  // Filterable custom fields (design note 0033, §7).
+  const fieldFilters = (await definitionsOf("customer")).filter(isFilterOffered);
   const result = await client.GET("/admin/customers", {
     params: {
-      query: { ...pageQuery(params), q: one(params, "q"), sort: oneOf(params, "sort", SORTS) },
+      query: {
+        ...pageQuery(params),
+        q: one(params, "q"),
+        sort: oneOf(params, "sort", SORTS),
+        field: fieldQuery(params, fieldFilters),
+      },
     },
   });
   const page = listPage(result, "/customers", params);
@@ -27,7 +36,7 @@ export default async function CustomersPage({
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader title="Customers" />
-        <CustomersTable page={page} />
+        <CustomersTable page={page} fieldFilters={fieldFilters} />
       </VStack>
     </Section>
   );

@@ -4,8 +4,11 @@ import type { AdminSchemas } from "@hypha/sdk/admin";
 import { type ReactNode, useEffect, useState, useTransition } from "react";
 
 import { useCurrencies } from "@/components/currencies";
+import { useCustomFields } from "@/components/custom-fields/custom-fields-card";
+import { CustomFieldsForm, CustomFieldsFrame } from "@/components/custom-fields/custom-fields-form";
 import { SaveBar } from "@/components/save-bar";
 import type { CategoryNode } from "@/lib/categories";
+import { type Definition, type FieldsResponse, isWritable } from "@/lib/custom-fields";
 
 import { type Stock, saveProduct } from "../actions";
 import { CategoriesCard } from "./categories-card";
@@ -17,6 +20,13 @@ import { PublishingCard } from "./publishing-card";
 import { VariantsSection } from "./variants-section";
 
 type Product = AdminSchemas["ProductResponse"];
+
+const NO_DEFINITIONS: Definition[] = [];
+
+/** No values, for a product whose fields weren't read. */
+function emptyFields(owner: string): FieldsResponse {
+  return { owner, custom_fields: {}, versions: {} };
+}
 
 /**
  * The product's details, content, publishing, categories, options and variants as one
@@ -38,6 +48,8 @@ export function ProductEditor({
   categoryTree,
   stock,
   locations,
+  customFields,
+  variantFields,
 }: {
   product: Product;
   /** Cards for the side column, around the draft's own. */
@@ -51,9 +63,30 @@ export function ProductEditor({
   /** The variants' stock by variant ID; `undefined` without `inventory:read`. */
   stock?: Record<string, Stock>;
   locations: AdminSchemas["LocationResponse"][];
+  /**
+   * The product's custom fields (design note 0033), saved with the bar; `undefined`
+   * without `custom_fields:read` or with no product definitions: no card then.
+   */
+  customFields?: {
+    definitions: Definition[];
+    fields: FieldsResponse;
+    scopes: readonly string[] | null;
+  };
+  /** The variants' definitions: each saved variant's fields open in a dialog. */
+  variantFields?: { definitions: Definition[]; scopes: readonly string[] | null };
 }) {
   const currencies = useCurrencies();
   const currency = product.variants[0]?.price.currency ?? "EUR";
+  const fieldDefinitions = customFields?.definitions ?? NO_DEFINITIONS;
+  // A stable stand-in: a new object each render would read as new values from the server.
+  const [noFields] = useState(() => emptyFields(product.id));
+  const fields = useCustomFields({
+    ownerType: "product",
+    ownerId: product.id,
+    definitions: fieldDefinitions,
+    fields: customFields?.fields ?? noFields,
+    currency,
+  });
   const [base, setBase] = useState(product);
   const [draft, setDraft] = useState(() => fromProduct(product, currencies));
   const [error, setError] = useState<string>();
@@ -66,7 +99,8 @@ export function ProductEditor({
     changed.options ||
     changed.variants ||
     changed.categories ||
-    changed.channels;
+    changed.channels ||
+    fields.isDirty;
 
   // A new saved product (React's "adjust state while rendering"): take it in, and reset
   // the draft to it unless the draft holds unsaved edits.
@@ -90,6 +124,7 @@ export function ProductEditor({
   };
   const discard = () => {
     setDraft(saved);
+    fields.discard();
     setError(undefined);
   };
   const save = () => {
@@ -98,10 +133,17 @@ export function ProductEditor({
       setError(built.error);
       return;
     }
+    const fieldPlan = fields.prepare();
+    if ("error" in fieldPlan) {
+      setError(fieldPlan.error);
+      return;
+    }
     startTransition(async () => {
-      const result = await saveProduct(product.id, built.plan);
+      const result = await saveProduct(product.id, built.plan, fieldPlan.patch ?? undefined);
+      if (result.customFields) fields.accept(result.customFields);
       if (result.error) {
         setError(result.error);
+        if (result.fieldProblems) fields.reject(result.fieldProblems);
         // The options were stored before the failure: point the draft at them, so
         // saving again doesn't add their new values a second time.
         const stored = result.options;
@@ -151,6 +193,7 @@ export function ProductEditor({
             currency={currency}
             stock={stock}
             locations={locations}
+            variantFields={variantFields}
             onChange={edit}
           />
         </div>
@@ -166,6 +209,21 @@ export function ProductEditor({
           )}
           {categoryTree && <CategoriesCard tree={categoryTree} draft={draft} onChange={edit} />}
           <OrganisationCard draft={draft} onChange={edit} />
+          {customFields && fieldDefinitions.length > 0 && (
+            <CustomFieldsFrame ownerType="product">
+              <CustomFieldsForm
+                definitions={fieldDefinitions}
+                inputs={fields.inputs}
+                onChange={(key, input) => {
+                  fields.edit(key, input);
+                  setError(undefined);
+                }}
+                problems={fields.problems}
+                isWritable={(d) => isWritable(d, "product", customFields.scopes)}
+                redacted={fields.saved.redacted ?? undefined}
+              />
+            </CustomFieldsFrame>
+          )}
           {identifiers}
         </div>
       </div>

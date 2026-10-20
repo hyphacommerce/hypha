@@ -8,12 +8,14 @@ import { Text } from "@astryxdesign/core/Text";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
 import { AppSlot } from "@/components/app-extensions/app-slot";
+import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
 import { DateTime } from "@/components/date-time";
 import { PageHeader } from "@/components/page-header";
 import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
 import { customerName, formatMoney } from "@/lib/format";
 import { loadExtensions } from "@/lib/app-extensions";
-import { loadCountries, loadCurrencies, loaded, sessionClient } from "@/lib/hypha";
+import { definitionsOf } from "@/lib/custom-fields-server";
+import { loadCountries, loadCurrencies, loaded, requireStaff, sessionClient } from "@/lib/hypha";
 
 type Address = AdminSchemas["AddressResponse"];
 
@@ -44,11 +46,15 @@ function AddressLines({ address, country }: { address: Address; country: string 
 export default async function CustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = await sessionClient();
-  const [customer, countries, currencies, extensions] = await Promise.all([
+  const [customer, countries, currencies, extensions, definitions, fields, me] = await Promise.all([
     client.GET("/admin/customers/{id}", { params: { path: { id } } }).then(loaded),
     loadCountries(),
     loadCurrencies(),
     loadExtensions(),
+    // Its custom fields (design note 0033): none shown without `custom_fields:read`.
+    definitionsOf("customer"),
+    client.GET("/admin/customers/{id}/custom-fields", { params: { path: { id } } }),
+    requireStaff(),
   ]);
   // Their latest orders: the email search matches parts of addresses too, so keep the
   // ones with exactly theirs. Needs `orders:read`; without it the card says so.
@@ -160,6 +166,15 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                 )}
               </VStack>
             </Card>
+            {definitions.length > 0 && fields.data && (
+              <CustomFieldsCard
+                ownerType="customer"
+                ownerId={customer.id}
+                definitions={definitions}
+                fields={fields.data}
+                scopes={me.scopes}
+              />
+            )}
             <AppSlot
               extensions={extensions}
               target="customer.details"

@@ -19,6 +19,7 @@ import type { ReactNode } from "react";
 import { Link } from "@astryxdesign/core/Link";
 
 import { AppActions, AppSlot } from "@/components/app-extensions/app-slot";
+import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
 import { DateTime } from "@/components/date-time";
 import { PageHeader } from "@/components/page-header";
 import {
@@ -37,6 +38,7 @@ import {
   sessionClient,
 } from "@/lib/hypha";
 import { type Extensions, loadExtensions } from "@/lib/app-extensions";
+import { definitionsOf } from "@/lib/custom-fields-server";
 import { canMarkPaid, providerLabel } from "@/lib/payments";
 
 import { EmailsCard } from "./emails";
@@ -78,18 +80,32 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
   // them the request is refused and the card isn't shown. The staff member is the
   // layout's read too.
   // What installed apps add here (design note 0029, §5) is one more read.
-  const [found, shipments, locations, channelName, currencies, countries, emails, me, extensions] =
-    await Promise.all([
-      client.GET("/admin/orders/{id}", { params: { path: { id } } }),
-      client.GET("/admin/orders/{id}/fulfillments", { params: { path: { id } } }),
-      client.GET("/admin/locations"),
-      channelNames(client),
-      loadCurrencies(),
-      loadCountries(),
-      client.GET("/admin/notifications", { params: { query: { order: id } } }),
-      requireStaff(),
-      loadExtensions(),
-    ]);
+  const [
+    found,
+    shipments,
+    locations,
+    channelName,
+    currencies,
+    countries,
+    emails,
+    me,
+    extensions,
+    definitions,
+    fields,
+  ] = await Promise.all([
+    client.GET("/admin/orders/{id}", { params: { path: { id } } }),
+    client.GET("/admin/orders/{id}/fulfillments", { params: { path: { id } } }),
+    client.GET("/admin/locations"),
+    channelNames(client),
+    loadCurrencies(),
+    loadCountries(),
+    client.GET("/admin/notifications", { params: { query: { order: id } } }),
+    requireStaff(),
+    loadExtensions(),
+    // Its custom fields (design note 0033): none shown without `custom_fields:read`.
+    definitionsOf("order"),
+    client.GET("/admin/orders/{id}/custom-fields", { params: { path: { id } } }),
+  ]);
   const order = loaded(found);
   const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
   const fulfillments = shipments.data?.items ?? [];
@@ -353,6 +369,16 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
               </Card>
             )}
 
+            {definitions.length > 0 && fields.data && (
+              <CustomFieldsCard
+                ownerType="order"
+                ownerId={order.id}
+                definitions={definitions}
+                fields={fields.data}
+                scopes={me.scopes}
+                currency={order.currency}
+              />
+            )}
             <AppSlot
               extensions={extensions}
               target="order.details"

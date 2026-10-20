@@ -18,6 +18,8 @@ import {
   loadTimeZone,
   sessionClient,
 } from "@/lib/hypha";
+import { fieldQuery, isFilterOffered } from "@/lib/custom-fields";
+import { definitionsOf } from "@/lib/custom-fields-server";
 import { OrdersTable } from "@/resources/orders";
 
 const PAYMENT: AdminSchemas["FinancialStatusDto"][] = [
@@ -49,6 +51,8 @@ export default async function OrdersPage({
   // only a placed filter waits for the store's time zone (read once per request, shared
   // with the layout).
   const timeZone = placed ? await loadTimeZone() : "UTC";
+  // Filterable custom fields (design note 0033, §7).
+  const fieldFilters = (await definitionsOf("order")).filter(isFilterOffered);
   const [result, markets, channelName, currencies, countries] = await Promise.all([
     client.GET("/admin/orders", {
       params: {
@@ -64,6 +68,7 @@ export default async function OrdersPage({
           placed_from: placed && startOfDay(placed.start, timeZone),
           placed_before: placed && startOfDay(nextDay(placed.end), timeZone),
           sort: oneOf(params, "sort", SORTS),
+          field: fieldQuery(params, fieldFilters),
         },
       },
     }),
@@ -90,6 +95,7 @@ export default async function OrdersPage({
           channels={Object.fromEntries(channelName)}
           countries={soldTo}
           orderCurrencies={[...new Set(sold.map((m) => m.currency))].toSorted()}
+          fieldFilters={fieldFilters}
         />
       </VStack>
     </Section>

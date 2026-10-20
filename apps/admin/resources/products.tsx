@@ -11,6 +11,7 @@ import { CubeIcon, PhotoIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { useState } from "react";
 
+import { customFieldFilters } from "@/components/custom-fields/filters";
 import { DateTime } from "@/components/date-time";
 import {
   type FilterDef,
@@ -20,9 +21,13 @@ import {
   type View,
 } from "@/components/resource-table/resource-table";
 import { ProductStatusBadge } from "@/components/status";
+import type { Definition } from "@/lib/custom-fields";
 import { type Currencies, formatMoney } from "@/lib/format";
 
 import { type BulkOutcome, BulkOutcomeBanner, ProductBulkActions } from "./bulk";
+
+/** No filterable custom fields. */
+const NO_FIELDS: Definition[] = [];
 
 type Product = AdminSchemas["ProductSummaryResponse"];
 
@@ -104,9 +109,12 @@ export function ProductsTable({
   currencies,
   channels,
   categories,
+  fieldFilters = NO_FIELDS,
 }: {
   page: { items: Product[]; next_cursor: string | null; error?: string };
   currencies: Currencies;
+  /** Filterable custom fields (design note 0033, §7), offered as filters. */
+  fieldFilters?: Definition[];
   /** Channel names by ID. */
   channels: Record<string, string>;
   /** Category paths by ID ("Clothing › Shirts"). */
@@ -141,6 +149,7 @@ export function ProductsTable({
     { kind: "text", param: "vendor", label: "Vendor" },
     { kind: "text", param: "product_type", label: "Type" },
     { kind: "text", param: "tag", label: "Tag" },
+    ...customFieldFilters(fieldFilters),
   ];
   const columns: TableColumn<Product>[] = [
     {

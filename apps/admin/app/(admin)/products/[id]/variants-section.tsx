@@ -20,6 +20,9 @@ import { MagnifyingGlassIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/ou
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { useEffect, useState, useTransition } from "react";
 
+import { VariantFieldsCell } from "@/components/custom-fields/variant-fields";
+import type { Definition } from "@/lib/custom-fields";
+
 import {
   type Stock,
   type StockChange,
@@ -64,6 +67,7 @@ export function VariantsSection({
   currency,
   stock,
   locations,
+  variantFields,
   onChange,
 }: {
   /** As saved: the variants' images and the product's media. */
@@ -75,6 +79,8 @@ export function VariantsSection({
    * Stock column then). A variant missing from it is read when its stock is opened. */
   stock?: Record<string, Stock>;
   locations: Location[];
+  /** The variants' custom field definitions (design note 0033); none: no Fields column. */
+  variantFields?: { definitions: Definition[]; scopes: readonly string[] | null };
   onChange: (change: Partial<Draft>) => void;
 }) {
   const [isAdding, setIsAdding] = useState(false);
@@ -271,6 +277,30 @@ export function VariantsSection({
                 </Text>
               );
             },
+          },
+        ]
+      : []),
+    ...(variantFields
+      ? [
+          {
+            key: "fields",
+            header: "Fields",
+            width: pixel(96),
+            resizable: false,
+            renderCell: ({ variant }: Row) =>
+              variant.id ? (
+                <VariantFieldsCell
+                  variantId={variant.id}
+                  title={title(variant)}
+                  currency={currency}
+                  definitions={variantFields.definitions}
+                  scopes={variantFields.scopes}
+                />
+              ) : (
+                <Text type="supporting" color="secondary">
+                  After saving
+                </Text>
+              ),
           },
         ]
       : []),

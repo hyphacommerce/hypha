@@ -7,6 +7,8 @@ import { PageHeader } from "@/components/page-header";
 import { type SearchParams, manyOf, one, oneOf } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { pathsById } from "@/lib/categories";
+import { fieldQuery, isFilterOffered } from "@/lib/custom-fields";
+import { definitionsOf } from "@/lib/custom-fields-server";
 import { channelNames, loadCurrencies, sessionClient } from "@/lib/hypha";
 import { ProductsTable } from "@/resources/products";
 
@@ -27,6 +29,9 @@ export default async function ProductsPage({
 }) {
   const params = await searchParams;
   const client = await sessionClient();
+  // Filterable custom fields (design note 0033, §7): read before the list, which only
+  // passes on filters of fields that exist and are filterable.
+  const fieldFilters = (await definitionsOf("product")).filter(isFilterOffered);
   const [result, channelName, currencies, categories] = await Promise.all([
     client.GET("/admin/products", {
       params: {
@@ -40,6 +45,7 @@ export default async function ProductsPage({
           category: one(params, "category"),
           channel: one(params, "channel"),
           sort: oneOf(params, "sort", SORTS),
+          field: fieldQuery(params, fieldFilters),
         },
       },
     }),
@@ -66,6 +72,7 @@ export default async function ProductsPage({
           currencies={currencies}
           channels={Object.fromEntries(channelName)}
           categories={Object.fromEntries(pathsById(categories.data?.items ?? []))}
+          fieldFilters={fieldFilters}
         />
       </VStack>
     </Section>

@@ -6,7 +6,9 @@ import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 import { Badge } from "@astryxdesign/core/Badge";
 
-import { loaded, sessionClient } from "@/lib/hypha";
+import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
+import { definitionsOf } from "@/lib/custom-fields-server";
+import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
 
 import { CategoryForm, DeleteCategory, ImageCard, ProductsCard } from "./category-cards";
 
@@ -22,12 +24,16 @@ export default async function CategoryPage({
   const query = await searchParams;
   const cursor = typeof query.cursor === "string" ? query.cursor : undefined;
   const client = await sessionClient();
-  const [category, tree, products] = await Promise.all([
+  const [category, tree, products, definitions, fields, me] = await Promise.all([
     client.GET("/admin/categories/{id}", { params: { path: { id } } }).then(loaded),
     client.GET("/admin/categories").then(loaded),
     client
       .GET("/admin/categories/{id}/products", { params: { path: { id }, query: { cursor } } })
       .then(loaded),
+    // Its custom fields (design note 0033): none shown without `custom_fields:read`.
+    definitionsOf("category"),
+    client.GET("/admin/categories/{id}/custom-fields", { params: { path: { id } } }),
+    requireStaff(),
   ]);
   // Ancestors come nearest first; a breadcrumb reads from the top.
   const trail = category.ancestors.toReversed();
@@ -65,6 +71,15 @@ export default async function CategoryPage({
           side={
             <>
               <ImageCard id={category.id} image={category.image ?? null} />
+              {definitions.length > 0 && fields.data && (
+                <CustomFieldsCard
+                  ownerType="category"
+                  ownerId={category.id}
+                  definitions={definitions}
+                  fields={fields.data}
+                  scopes={me.scopes}
+                />
+              )}
               <Card>
                 <MetadataList title="Identifiers">
                   <MetadataListItem label="Category ID">

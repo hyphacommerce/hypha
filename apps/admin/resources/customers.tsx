@@ -9,7 +9,9 @@ import { Text } from "@astryxdesign/core/Text";
 import { UsersIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
+import { customFieldFilters } from "@/components/custom-fields/filters";
 import { DateTime } from "@/components/date-time";
+import type { Definition } from "@/lib/custom-fields";
 import { customerName } from "@/lib/format";
 import {
   type FilterDef,
@@ -17,6 +19,9 @@ import {
   type SortDef,
   type SortOption,
 } from "@/components/resource-table/resource-table";
+
+/** No filterable custom fields. */
+const NO_FIELDS: Definition[] = [];
 
 type Customer = AdminSchemas["CustomerSummaryResponse"];
 
@@ -47,9 +52,13 @@ const FILTERS: FilterDef[] = [
 /** "Ana Horvat", or nothing for a customer known only by email. */
 export function CustomersTable({
   page,
+  fieldFilters = NO_FIELDS,
 }: {
   page: { items: Customer[]; next_cursor: string | null; error?: string };
+  /** Filterable custom fields (design note 0033, §7), offered as filters. */
+  fieldFilters?: Definition[];
 }) {
+  const filters = [...FILTERS, ...customFieldFilters(fieldFilters)];
   const columns: TableColumn<Customer>[] = [
     {
       key: "name",
@@ -88,7 +97,7 @@ export function CustomersTable({
       columns={columns}
       idKey="id"
       rowHref={(c) => `/customers/${c.id}`}
-      filters={FILTERS}
+      filters={filters}
       sorts={SORTS}
       sortOptions={SORT_OPTIONS}
       defaultSort="newest"

@@ -4,6 +4,8 @@ import type { AdminSchemas, ApiError } from "@hypha/sdk/admin";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import type { FieldsPatch } from "@/components/custom-fields/actions";
+import { type FieldsResponse, jsonObject, problemsOf } from "@/lib/custom-fields";
 import { parseMoney } from "@/lib/format";
 import { describe, loadCurrencies, sessionClient } from "@/lib/hypha";
 
@@ -83,6 +85,10 @@ export type SaveResult = {
   categories?: string[];
   /** The product's channels as stored, when the save set them. */
   channels?: string[];
+  /** The product's custom fields as stored, when the save set them (design note 0033). */
+  customFields?: FieldsResponse;
+  /** A refused custom fields write's problems by field key. */
+  fieldProblems?: Record<string, string>;
 };
 
 /**
@@ -90,11 +96,15 @@ export type SaveResult = {
  * then its options, then its whole variant list (`PUT …/variants`), then its categories
  * (`PUT …/categories`, design note 0022), then its channels (`PUT …/channels`, design
  * note 0020), each only when its part changed; categories and channels together, after
- * the rest. Values created by the options step are found by option name and label for
+ * the rest; then its custom fields (`PATCH …/custom-fields`, design note 0033). Values created by the options step are found by option name and label for
  * the variants that select them. Stops at the first failure: what came before it stays
  * saved.
  */
-export async function saveProduct(id: string, plan: SavePlan): Promise<SaveResult> {
+export async function saveProduct(
+  id: string,
+  plan: SavePlan,
+  customFields?: FieldsPatch,
+): Promise<SaveResult> {
   const client = await sessionClient();
   let product: AdminSchemas["ProductResponse"] | undefined;
   try {
@@ -147,11 +157,30 @@ export async function saveProduct(id: string, plan: SavePlan): Promise<SaveResul
     ]);
     const failure = categories?.error ?? channels?.error;
     if (failure) return { error: describe(failure), options };
-    return {
+    const stored = {
       product,
       categories: categories?.data?.categories,
       channels: channels?.data?.channels,
     };
+    if (customFields) {
+      const { data, error } = await client.PATCH("/admin/products/{id}/custom-fields", {
+        params: { path: { id } },
+        body: {
+          custom_fields: jsonObject(customFields.custom_fields),
+          if_versions: customFields.if_versions,
+        },
+      });
+      if (error) {
+        return {
+          ...stored,
+          error: describe(error),
+          options,
+          fieldProblems: problemsOf(error.code, error.details),
+        };
+      }
+      return { ...stored, customFields: data };
+    }
+    return stored;
   } finally {
     refresh(id);
   }

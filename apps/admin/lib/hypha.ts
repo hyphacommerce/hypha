@@ -589,6 +589,45 @@ export function describe(error: ApiError): string {
       return "That file is no longer in the media library.";
     case "asset_not_public":
       return "That image is private. Emails can only show public images: change its visibility on the Media page.";
+    case "custom_fields_invalid":
+      return "Some custom fields aren't valid: see the marked fields.";
+    case "custom_field_stale":
+      return "Someone else changed a custom field meanwhile. Reload to see it, then try again.";
+    case "custom_field_read_only":
+      return "One of these fields is read-only: its app manages it.";
+    case "custom_field_exists":
+      return "Another field of this kind of record already has that key.";
+    case "custom_field_managed":
+      return "An app or spore declares this field, so it can't be changed here.";
+    case "custom_field_values_invalid": {
+      const n = numberDetail(error.details, "count");
+      return `${n === undefined ? "Some" : n.toLocaleString("en")} stored ${n === 1 ? "value breaks" : "values break"} the new rules. Fix them first, or loosen the rules.`;
+    }
+    case "custom_field_definition_not_found":
+      return "That field no longer exists. Reload the page.";
+    case "custom_field_unknown":
+      return "A filter names a custom field that doesn't exist any more.";
+    case "custom_field_not_filterable":
+      return "A filter names a custom field that isn't filterable.";
+    case "personal_not_allowed":
+      return "Only customers' and orders' fields can hold personal data.";
+    case "unique_not_allowed":
+      return "Only single text, integer and URL fields can be unique.";
+    case "filterable_not_allowed":
+      return "Multi-line text, rich text and JSON fields can't be filters.";
+    case "too_many_filterable_custom_fields":
+      return "A kind of record has at most 50 filterable fields.";
+    case "too_many_custom_fields":
+      return "There are too many fields for this kind of record.";
+    case "invalid_custom_field_key":
+      return "The key is 2 to 64 lowercase letters, digits and _, starting with a letter.";
+    case "invalid_field_type":
+      return "That isn't a field type.";
+    case "invalid_validation":
+    case "validation_required":
+    case "validation_not_allowed":
+    case "description_too_long":
+      return `${error.error.charAt(0).toUpperCase()}${error.error.slice(1)}.`;
     case "rate_limited": {
       const secs = numberDetail(error.details, "retry_after_secs");
       return secs ? `Too many attempts. Try again in ${secs} seconds.` : "Too many attempts.";
