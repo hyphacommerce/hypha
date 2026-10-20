@@ -5337,7 +5337,7 @@
             ]
           },
           "attempt": {
-            "description": "The provider's ID for the attempt this report is about, for a provider whose IDs\nname attempts (a Stripe PaymentIntent's `pi_…`; for a refund, the intent it\nrefunds). A paid or authorized report that moves the payment, or names its own\n`reference`, keeps it as the payment's attempt; then\nHypha collects the payment once: a report naming another attempt is `409\npayment_reference_mismatch` (`details: {status, held, reported}`) unless it pays\nor authorizes a pending payment (started again); give back what that attempt\ntook. Absent, nothing is checked (a capture or void carrying an ID of its own\nleaves it out). Up to 255 characters.",
+            "description": "The provider's ID for the attempt this report is about, for a provider whose IDs\nname attempts (a Stripe PaymentIntent's `pi_…`; for a refund, the intent it\nrefunds). A paid or authorized report that moves the payment, or names its own\n`reference`, keeps it as the payment's attempt; from then on Hypha collects the\npayment once: a report naming another attempt is `409 payment_reference_mismatch`\n(`details: {status, held, reported}`) unless it pays or authorizes a pending\npayment (started again); give back what that attempt took. Absent, nothing is\nchecked (a capture or void carrying an ID of its own leaves it out). A payment\nwith no attempt yet (`attempt` null on it: its reports named none, or it's from\nbefore attempts were kept) isn't checked either: another attempt's paid or\nauthorized report on it answers 200 and changes nothing, so name attempts from\nthe first report. Up to 255 characters.",
             "type": [
               "string",
               "null"

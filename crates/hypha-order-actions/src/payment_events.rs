@@ -54,8 +54,10 @@ pub struct PaymentEvent {
     /// for a refund, the attempt it refunds), from a provider whose IDs name attempts:
     /// the Stripe spore, or an app through the events route. A paid or authorized
     /// report that moves the payment, or names its own reference, keeps it as the
-    /// payment's `attempt`; a report naming another is refused (`other_attempt`). Absent, nothing is checked (a provider whose capture or void
-    /// carries an ID of its own leaves it out). Up to 255 characters.
+    /// payment's `attempt`; a report naming another is refused (`other_attempt`).
+    /// Absent, nothing is checked (a provider whose capture or void carries an ID of
+    /// its own leaves it out), and neither is a payment without an attempt yet.
+    /// Up to 255 characters.
     pub attempt: Option<String>,
     /// When it happened at the provider; absent is now. When it was paid or voided.
     pub occurred_at: Option<Timestamp>,
@@ -212,15 +214,11 @@ fn apply(payment: &mut Payment, input: &PaymentEvent, at: Timestamp) -> Result<b
     Ok(match input.kind {
         PaymentEventKind::Authorized => {
             whole(payment)?;
-            let own = names_own(payment, attempt.as_deref());
-            let changed = payment.authorize(reference)?;
-            ((changed || own) && payment.note_attempt(attempt)?) || changed
+            collect(payment, attempt, |p| p.authorize(reference))?
         }
         PaymentEventKind::Paid => {
             whole(payment)?;
-            let own = names_own(payment, attempt.as_deref());
-            let changed = payment.pay(at, reference)?;
-            ((changed || own) && payment.note_attempt(attempt)?) || changed
+            collect(payment, attempt, |p| p.pay(at, reference))?
         }
         PaymentEventKind::Failed => payment.fail(reference)?,
         PaymentEventKind::Voided => {
@@ -285,6 +283,19 @@ fn other_attempt(payment: &Payment, input: &PaymentEvent) -> Result<Option<Strin
 /// attempt isn't taken.
 fn names_own(payment: &Payment, attempt: Option<&str>) -> bool {
     attempt.is_some() && payment.reference() == attempt
+}
+
+/// Moves `payment` with `report` (an authorization or a payment), keeping the report's
+/// `attempt` as the payment's when the report moved it or names its own reference
+/// (`names_own`): the one rule for both. Whether that changed anything.
+fn collect(
+    payment: &mut Payment,
+    attempt: Option<String>,
+    report: impl FnOnce(&mut Payment) -> Result<bool, PaymentError>,
+) -> Result<bool, PaymentError> {
+    let own = names_own(payment, attempt.as_deref());
+    let changed = report(payment)?;
+    Ok(((changed || own) && payment.note_attempt(attempt)?) || changed)
 }
 
 /// The payment an earlier request with this key reported on, if this caller sent it.
