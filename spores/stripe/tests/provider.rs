@@ -368,3 +368,47 @@ fn a_create_stripe_failed_is_tried_again_under_a_second_key() {
         Some(format!("{}:again", payment_id()).as_str())
     );
 }
+
+#[test]
+fn a_kept_intent_stripe_no_longer_knows_is_replaced() {
+    // The merchant switched Stripe accounts: the stored intent is a 404 there, so the
+    // payment gets one at this account rather than never being payable.
+    let (fake, http) = Fake::new(|request| {
+        if request.method == HttpMethod::Get {
+            (
+                404,
+                json!({ "error": { "type": "invalid_request_error", "code": "resource_missing", "message": "No such payment_intent: 'pi_gone'" } }),
+            )
+        } else {
+            (
+                200,
+                json!({ "id": "pi_new", "amount": 1250, "currency": "eur", "status": "requires_payment_method", "client_secret": "pi_new_secret" }),
+            )
+        }
+    });
+    let mut again = request(configured());
+    again.reference = Some("pi_gone".to_string());
+    let started = block_on(provider(http).start(&again)).unwrap();
+    assert_eq!(started.reference.as_deref(), Some("pi_new"));
+    let sent = fake.requests();
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[1].method, HttpMethod::Post);
+}
+
+#[test]
+fn a_kept_intent_stripe_cant_read_for_now_fails_the_start() {
+    // Not a 404 (Stripe down): no second intent is made.
+    let (fake, http) = Fake::new(|_| {
+        (
+            500,
+            json!({ "error": { "type": "api_error", "message": "Something went wrong" } }),
+        )
+    });
+    let mut again = request(configured());
+    again.reference = Some("pi_kept".to_string());
+    assert!(matches!(
+        block_on(provider(http).start(&again)),
+        Err(PaymentError::ProviderFailed { .. })
+    ));
+    assert_eq!(fake.requests().len(), 1);
+}
