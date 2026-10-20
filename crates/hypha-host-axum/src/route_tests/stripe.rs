@@ -113,6 +113,13 @@ async fn fake_stripe() -> (String, Shared) {
                     }
                     ("POST", ["refunds"])
                         if fake.intents.get(&field("payment_intent"))
+                            .is_some_and(|i| i["key_revoked"] == json!(true)) =>
+                    {
+                        (401, json!({"error": {"type": "invalid_request_error",
+                            "message": "Expired API Key provided."}}))
+                    }
+                    ("POST", ["refunds"])
+                        if fake.intents.get(&field("payment_intent"))
                             .is_some_and(|i| i["disputed"] == json!(true)) =>
                     {
                         (400, json!({"error": {"type": "invalid_request_error",
@@ -539,6 +546,19 @@ async fn an_order_cancelled_cancels_its_intent_at_stripe() {
             fake.seen
         );
     }
+
+    // A key the merchant rotated isn't Stripe saying no about the money: 500, so
+    // Stripe delivers it again once the new key is saved.
+    fake_state.lock().unwrap().intents.get_mut("pi_1").unwrap()["key_revoked"] = json!(true);
+    let (status, outcome) = deliver(
+        &app,
+        "evt_rotated",
+        "payment_intent.succeeded",
+        succeeded.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{outcome}");
+    fake_state.lock().unwrap().intents.get_mut("pi_1").unwrap()["key_revoked"] = json!(false);
 
     // A refund Stripe refuses (the charge is disputed) is acknowledged, not retried
     // forever: staff give the money back in Stripe's dashboard.

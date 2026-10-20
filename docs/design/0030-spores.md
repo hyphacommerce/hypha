@@ -705,7 +705,13 @@ them, not in this list.
   their `Cargo.lock` follows the checkout's when that changes (`Cargo.lock.seed`); the
   Worker crate's `worker` line is read from `hypha-host-workers`. The payment providers'
   route reads apps' endpoints from the listing (`hypha_apps::endpoint_of`): an app
-  installed from a manifest costs no further query.
+  installed from a manifest costs no further query. Re-reviewed: a 401, 403 or 409
+  while giving money back is retried (a rotated key, a racing delivery), not taken for
+  Stripe's "no". Accepted as known: Stripe replays a key's first answer for 24 hours,
+  5xx included, so a create Stripe failed with a 500 keeps failing that payment's starts
+  for a day; and a reference that couldn't be stored, with the shopper back more than a
+  day later, gets a second intent (both carry the payment, so either paying it records
+  it paid).
 
 ## As built: step 3 (facade, migration check, settings, routes, UI)
 

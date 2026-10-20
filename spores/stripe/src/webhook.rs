@@ -440,7 +440,12 @@ async fn undo_unwanted(stripe: &Stripe, settings: &Settings, report: &Report) ->
     };
     let e = match done {
         Ok(()) => return Undo::Done,
-        Err(e) if !e.is_refusal() => return Undo::Failed,
+        // Not a "no" about this money: Stripe down, a key rotated, revoked or without
+        // the permission (401, 403: the merchant can fix it), the same key in use by a
+        // racing delivery (409, which does it). Worth trying again.
+        Err(e) if !e.is_refusal() || matches!(e.status, 401 | 403 | 409) => {
+            return Undo::Failed;
+        }
         Err(e) => e,
     };
     if e.code.as_deref() == Some("charge_already_refunded") {

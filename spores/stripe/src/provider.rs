@@ -97,7 +97,7 @@ impl StripeProvider {
 fn usable(intent: PaymentIntent) -> Result<PaymentIntent, PaymentError> {
     match intent.status.as_str() {
         "canceled" => Err(StripeProvider::failed(
-            "this payment's PaymentIntent was canceled: start a new payment",
+            "this payment's PaymentIntent was canceled at Stripe: the payment can't go on",
         )),
         _ => Ok(intent),
     }
