@@ -88,21 +88,25 @@ function VariantFieldsDialog({
         subtitle="Saved at once, apart from the product's other changes."
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
-      <VStack gap={4} padding={4}>
-        {error && <Banner status="error" title={error} />}
-        {fields ? (
-          <VariantFieldsForm
-            variantId={variantId}
-            currency={currency}
-            definitions={definitions}
-            scopes={scopes}
-            fields={fields}
-            onClose={onClose}
-          />
-        ) : (
-          !error && <Skeleton height={120} />
-        )}
-      </VStack>
+      {/* Many fields scroll on short screens; a flex item keeps its content's height
+          unless allowed to shrink (`minHeight: 0`). */}
+      <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
+        <VStack gap={4} padding={4}>
+          {error && <Banner status="error" title={error} />}
+          {fields ? (
+            <VariantFieldsForm
+              variantId={variantId}
+              currency={currency}
+              definitions={definitions}
+              scopes={scopes}
+              fields={fields}
+              onClose={onClose}
+            />
+          ) : (
+            !error && <Skeleton height={120} />
+          )}
+        </VStack>
+      </div>
     </Dialog>
   );
 }

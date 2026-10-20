@@ -511,107 +511,112 @@ function DefinitionDialog({
         }
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
-      <VStack gap={4} padding={4}>
-        {error && <Banner status="error" title={error} />}
-        <TextInput
-          label="Name"
-          description="What staff see on the form."
-          value={form.name}
-          onChange={(name) =>
-            set({ name, ...(isKeyTouched.current ? {} : { key: keyFrom(name) }) })
-          }
-        />
-        {isNew && (
+      {/* The fields scroll on short screens; the buttons stay in view below them. A flex
+          item keeps its content's height unless allowed to shrink (`minHeight: 0`). */}
+      <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
+        <VStack gap={4} padding={4}>
           <TextInput
-            label="Key"
-            description={`Code reads it as custom.${form.key || "key"}: lowercase letters, digits and _.`}
-            value={form.key}
-            onChange={(key) => {
-              isKeyTouched.current = true;
-              set({ key });
-            }}
+            label="Name"
+            description="What staff see on the form."
+            value={form.name}
+            onChange={(name) =>
+              set({ name, ...(isKeyTouched.current ? {} : { key: keyFrom(name) }) })
+            }
           />
-        )}
-        <TextArea
-          label="Description"
-          isOptional
-          description="Help shown under the field."
-          value={form.description}
-          onChange={(description) => set({ description })}
-          rows={2}
-        />
-        {isNew && (
-          <HStack gap={3} vAlign="end" wrap="wrap">
-            <Selector
-              label="Type"
-              options={typeOptions}
-              value={form.base}
-              onChange={(value: string) => {
-                const base = BASE_TYPES.find((t) => t.value === value)?.value ?? "text";
-                set({ base, isList: form.isList && isListable(base) });
+          {isNew && (
+            <TextInput
+              label="Key"
+              description={`Code reads it as custom.${form.key || "key"}: lowercase letters, digits and _.`}
+              value={form.key}
+              onChange={(key) => {
+                isKeyTouched.current = true;
+                set({ key });
               }}
-              width={240}
             />
-            <CheckboxInput
-              label="A list of values"
-              value={form.isList}
-              isDisabled={!isListable(form.base)}
-              onChange={(isList) => set({ isList })}
-            />
-          </HStack>
-        )}
-        {isNew && (
-          <Text type="supporting" color="secondary">
-            {BASE_TYPES.find((t) => t.value === form.base)?.description}
-          </Text>
-        )}
-
-        <ValidationsEditor
-          form={form}
-          allowed={allowed}
-          set={set}
-          currencyList={currencyCodes(currencies)}
-        />
-
-        <VStack gap={2}>
-          <Text weight="medium">Access and uses</Text>
-          <Selector
-            label="Storefront"
-            description="Whether storefronts can read the value."
-            options={[
-              { value: "none", label: "Hidden from storefronts" },
-              { value: "read", label: "Storefronts can read it" },
-            ]}
-            value={form.storefront}
-            onChange={(value: string) => set({ storefront: value === "read" ? "read" : "none" })}
-            width={280}
+          )}
+          <TextArea
+            label="Description"
+            isOptional
+            description="Help shown under the field."
+            value={form.description}
+            onChange={(description) => set({ description })}
+            rows={2}
           />
-          {mayBeFilterable(type) && (
-            <CheckboxInput
-              label="Filterable"
-              description="Offered as a filter on the list, and usable as a search filter."
-              value={form.filterable}
-              onChange={(filterable) => set({ filterable })}
-            />
+          {isNew && (
+            <HStack gap={3} vAlign="end" wrap="wrap">
+              <Selector
+                label="Type"
+                options={typeOptions}
+                value={form.base}
+                onChange={(value: string) => {
+                  const base = BASE_TYPES.find((t) => t.value === value)?.value ?? "text";
+                  set({ base, isList: form.isList && isListable(base) });
+                }}
+                width={240}
+              />
+              <CheckboxInput
+                label="A list of values"
+                value={form.isList}
+                isDisabled={!isListable(form.base)}
+                onChange={(isList) => set({ isList })}
+              />
+            </HStack>
           )}
-          {mayBeUnique(type) && (
-            <CheckboxInput
-              label="Unique"
-              description="No two records hold the same value (text ignoring case)."
-              value={form.unique}
-              onChange={(unique) => set({ unique })}
-            />
+          {isNew && (
+            <Text type="supporting" color="secondary">
+              {BASE_TYPES.find((t) => t.value === form.base)?.description}
+            </Text>
           )}
-          {allowsPersonal(owner) && (
-            <CheckboxInput
-              label="Personal data"
-              description="About a person (a birthday, a gift message): hidden from apps and keys without customer_data:profile."
-              value={form.personal}
-              onChange={(personal) => set({ personal })}
-            />
-          )}
-        </VStack>
 
+          <ValidationsEditor
+            form={form}
+            allowed={allowed}
+            set={set}
+            currencyList={currencyCodes(currencies)}
+          />
+
+          <VStack gap={2}>
+            <Text weight="medium">Access and uses</Text>
+            <Selector
+              label="Storefront"
+              description="Whether storefronts can read the value."
+              options={[
+                { value: "none", label: "Hidden from storefronts" },
+                { value: "read", label: "Storefronts can read it" },
+              ]}
+              value={form.storefront}
+              onChange={(value: string) => set({ storefront: value === "read" ? "read" : "none" })}
+              width={280}
+            />
+            {mayBeFilterable(type) && (
+              <CheckboxInput
+                label="Filterable"
+                description="Offered as a filter on the list, and usable as a search filter."
+                value={form.filterable}
+                onChange={(filterable) => set({ filterable })}
+              />
+            )}
+            {mayBeUnique(type) && (
+              <CheckboxInput
+                label="Unique"
+                description="No two records hold the same value (text ignoring case)."
+                value={form.unique}
+                onChange={(unique) => set({ unique })}
+              />
+            )}
+            {allowsPersonal(owner) && (
+              <CheckboxInput
+                label="Personal data"
+                description="About a person (a birthday, a gift message): hidden from apps and keys without customer_data:profile."
+                value={form.personal}
+                onChange={(personal) => set({ personal })}
+              />
+            )}
+          </VStack>
+        </VStack>
+      </div>
+      <VStack gap={3} padding={4}>
+        {error && <Banner status="error" title={error} />}
         <HStack gap={2} hAlign="end">
           <Button label="Cancel" variant="ghost" onClick={onClose} />
           <Button

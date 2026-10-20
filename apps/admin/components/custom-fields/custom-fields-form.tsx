@@ -79,20 +79,20 @@ export function CustomFieldsFrame({
   return (
     <Card>
       <VStack gap={3}>
-        <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
-          <VStack gap={1}>
-            <Text type="display-3" as="h2">
-              Custom fields
-            </Text>
-            <Text type="supporting" color="secondary">
-              Your own data on this {ownerType}, and what apps keep here.{" "}
-              <Link href={`/settings/custom-fields?owner=${ownerType}`}>Manage fields</Link>
-            </Text>
-          </VStack>
-          {actions}
-        </HStack>
+        <VStack gap={1}>
+          <Text type="display-3" as="h2">
+            Custom fields
+          </Text>
+          <Text type="supporting" color="secondary">
+            Your own data on this {ownerType}, and what apps keep here.{" "}
+            <Link href={`/settings/custom-fields?owner=${ownerType}`}>Manage fields</Link>
+          </Text>
+        </VStack>
         {error && <Banner status="error" title={error} />}
         {children}
+        {/* Below the fields: the card often sits in a narrow column, where header
+            buttons would wrap above them. */}
+        {actions && <HStack hAlign="end">{actions}</HStack>}
       </VStack>
     </Card>
   );
