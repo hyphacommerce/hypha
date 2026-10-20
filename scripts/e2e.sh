@@ -640,7 +640,7 @@ METHODS="$BASE/admin/payment-methods"
 step "a provider key that isn't one" 422 invalid_payment_provider -X POST "$METHODS" -H "$JSON" \
     -d '{"provider":"stripe","name":"Card"}'
 step "a spore this build doesn't have (design note 0030)" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \
-    -d '{"provider":"spore_stripe","name":"Card"}'
+    -d '{"provider":"spore_nowhere","name":"Card"}'
 step "settings the manual provider doesn't take" 422 invalid_payment_settings -X POST "$METHODS" -H "$JSON" \
     -d '{"provider":"manual","name":"Bank transfer","settings":{"iban":"HR12"}}'
 step "bank transfer" 201 - -X POST "$METHODS" -H "$JSON" \
@@ -1609,7 +1609,9 @@ if [[ -n $UI_APP ]]; then
     contains "its page, absolute" "\"id\":\"dashboard\",\"title\":\"Dashboard\",\"url\":\"$UI_BASE/admin\""
     contains "its point action, to run elsewhere" '"id":"refund","label":"Refund","target":"payment","input_schema":null,"point":"payments.refund"'
     step "for one target" 200 - "$BASE/admin/app-extensions?target=order.payment"
-    contains "only its block" '"pages":[],"blocks":[{"app":"app_e2e_ui","id":"payment","target":"order.payment"'
+    # No pages there, and its block (a build with spores lists theirs beside it).
+    contains "no pages for it" '"pages":[],"blocks":['
+    contains "its block" '{"app":"app_e2e_ui","id":"payment","target":"order.payment"'
     step "a target that isn't one" 400 invalid_query "$BASE/admin/app-extensions?target=order.paymnet"
     step "a session token for its page" 200 - -X POST "$BASE/admin/app-extensions/app_e2e_ui/session"
     contains "a JWT" '"token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.'
