@@ -5,8 +5,10 @@ import { HStack, VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { CustomFields } from "@/components/custom-fields";
 import { Listing } from "@/components/listing";
-import { countryOf, loadCategory } from "@/lib/api";
+import { countryOf, fieldContext, loadCategory } from "@/lib/api";
+import { presentFields } from "@/lib/custom-fields";
 import { readListingPage } from "@/lib/listing-data";
 import { link } from "@/lib/site";
 
@@ -45,12 +47,17 @@ export default async function CategoryPage({ params }: Props) {
   const [country, category] = await Promise.all([countryOf(folder), load(handle)]);
   const code = country.country;
   const ancestors = category.ancestors.toReversed();
-  const first = await readListingPage({
-    country: code,
-    digits: country.minor_units,
-    params: {},
-    category: category.id,
-  });
+  const [first, context] = await Promise.all([
+    readListingPage({
+      country: code,
+      digits: country.minor_units,
+      params: {},
+      category: category.id,
+    }),
+    fieldContext(country, category.custom_fields),
+  ]);
+  // The merchant's custom fields shown to storefronts (design note 0033, §6.2).
+  const fields = presentFields(category.custom_fields, context);
   const productBase = link(code, "/p");
 
   return (
@@ -75,6 +82,11 @@ export default async function CategoryPage({ params }: Props) {
             // Sanitised by the API (scripts, styles and event attributes removed).
             dangerouslySetInnerHTML={{ __html: category.description }}
           />
+        )}
+        {fields.length > 0 && (
+          <div style={{ maxWidth: 720 }}>
+            <CustomFields entries={fields} columns="multi" />
+          </div>
         )}
         {category.children.length > 0 && (
           <HStack gap={2} wrap="wrap">

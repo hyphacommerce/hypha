@@ -851,6 +851,7 @@ async function main() {
         "channel.*",
         "category.*",
         "market.*",
+        "custom_field_definition.*",
       ],
       webhook: { url: `${STOREFRONT_URL}/api/revalidate` },
     });

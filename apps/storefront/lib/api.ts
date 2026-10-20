@@ -11,6 +11,8 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 
 import { FRESH_SECONDS, TAGS } from "./cache-tags";
+import { type FieldContext, type FieldPart, referenceIds } from "./custom-fields";
+import { link } from "./site";
 
 export type Country = StorefrontSchemas["StorefrontCountryResponse"];
 
@@ -145,6 +147,68 @@ export const loadProduct = cache((handle: string, country: string) =>
     { tags: [TAGS.products, TAGS.product(handle), TAGS.prices], revalidate: FRESH_SECONDS },
   )(),
 );
+
+/** References resolved one by one on a page; more aren't shown as links. */
+const MAX_REFERENCES = 10;
+
+/** A referenced product's handle and title, cached (tagged `products`, so any product's
+ * change refreshes it); `null` when the storefront can't show it. */
+const loadReferencedProduct = (id: string, country: string) =>
+  unstable_cache(
+    async () => {
+      const product = found(
+        await api().GET("/storefront/products/{id}", {
+          params: { path: { id }, query: { country } },
+        }),
+      );
+      return product ? { title: product.title, handle: product.handle } : null;
+    },
+    ["product-ref", id, country],
+    { tags: [TAGS.products], revalidate: FRESH_SECONDS },
+  )();
+
+type CategoryNode = { id: string; name: string; handle: string; children: CategoryNode[] };
+
+function flatten(nodes: CategoryNode[]): CategoryNode[] {
+  return nodes.flatMap((n) => [n, ...flatten(n.children)]);
+}
+
+/**
+ * What custom fields need to be shown on a page (design note 0033, §6.2): the store's
+ * language, the country's currency, and the product and category references among
+ * `values` as links to their pages (categories from the shown tree; products read by ID,
+ * at most `MAX_REFERENCES`). A reference that can't be read isn't shown: a field is
+ * decoration, so its failure never fails the page.
+ */
+export async function fieldContext(
+  country: Country,
+  ...values: (Record<string, unknown> | undefined)[]
+): Promise<FieldContext> {
+  const ids = referenceIds(...values.filter((v) => v !== undefined));
+  const code = country.country;
+  const refs: Record<string, FieldPart> = {};
+  const [store, categories] = await Promise.all([
+    loadStore(),
+    ids.some((id) => id.startsWith("pcat_")) ? loadCategories() : Promise.resolve([]),
+  ]);
+  for (const c of flatten(categories)) {
+    if (ids.includes(c.id)) refs[c.id] = { text: c.name, href: link(code, `/c/${c.handle}`) };
+  }
+  const products = ids.filter((id) => id.startsWith("prod_")).slice(0, MAX_REFERENCES);
+  const read = await Promise.all(
+    products.map((id) => loadReferencedProduct(id, code).catch(() => null)),
+  );
+  products.forEach((id, i) => {
+    const product = read[i];
+    if (product) refs[id] = { text: product.title, href: link(code, `/p/${product.handle}`) };
+  });
+  return {
+    locale: store.default_language,
+    currency: country.currency,
+    digits: country.minor_units,
+    refs,
+  };
+}
 
 /** A message for the shopper, by the API's stable error code. */
 export function describe(error: { code: string; error: string }): string {

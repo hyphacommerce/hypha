@@ -23,6 +23,8 @@ import type { StorefrontSchemas } from "@hypha/sdk/storefront";
 import { useState, useTransition } from "react";
 
 import { useCart } from "@/components/cart/cart-provider";
+import { CustomFields } from "@/components/custom-fields";
+import { type FieldEntry, withVariant } from "@/lib/custom-fields";
 import { formatMoney } from "@/lib/money";
 
 type Product = StorefrontSchemas["StorefrontProductResponse"];
@@ -48,7 +50,18 @@ function offered(product: Product, selections: string[], index: number, value: s
   );
 }
 
-export function ProductForm({ product, digits }: { product: Product; digits: number }) {
+/** The product's custom fields and each variant's (by ID), formatted by the page. */
+export type ProductFields = { product: FieldEntry[]; variants: Record<string, FieldEntry[]> };
+
+export function ProductForm({
+  product,
+  digits,
+  fields,
+}: {
+  product: Product;
+  digits: number;
+  fields: ProductFields;
+}) {
   // Start on the first variant that can be bought, else the first.
   const start = product.variants.find((v) => v.available) ?? product.variants[0];
   const cart = useCart();
@@ -101,8 +114,14 @@ export function ProductForm({ product, digits }: { product: Product; digits: num
     });
   };
 
+  // The selected variant's values win over the product's (design note 0033, §6.2).
+  const custom = withVariant(fields.product, variant ? fields.variants[variant.id] : undefined);
   const hasDetails = Boolean(
-    product.vendor || product.product_type || variant?.title || product.tags.length > 0,
+    product.vendor ||
+    product.product_type ||
+    variant?.title ||
+    product.tags.length > 0 ||
+    custom.length > 0,
   );
 
   const label = !variant
@@ -269,17 +288,20 @@ export function ProductForm({ product, digits }: { product: Product; digits: num
             )}
             {hasDetails && (
               <Collapsible value="details" trigger={<Heading level={3}>Details</Heading>}>
-                <VStack gap={1}>
-                  {product.vendor && <Text>Brand: {product.vendor}</Text>}
-                  {product.product_type && <Text>Type: {product.product_type}</Text>}
-                  {variant?.title && <Text>Variant: {variant.title}</Text>}
-                  {product.tags.length > 0 && (
-                    <HStack gap={1} wrap="wrap">
-                      {product.tags.map((t) => (
-                        <Badge key={t} label={t} variant="neutral" />
-                      ))}
-                    </HStack>
-                  )}
+                <VStack gap={3}>
+                  <VStack gap={1}>
+                    {product.vendor && <Text>Brand: {product.vendor}</Text>}
+                    {product.product_type && <Text>Type: {product.product_type}</Text>}
+                    {variant?.title && <Text>Variant: {variant.title}</Text>}
+                    {product.tags.length > 0 && (
+                      <HStack gap={1} wrap="wrap">
+                        {product.tags.map((t) => (
+                          <Badge key={t} label={t} variant="neutral" />
+                        ))}
+                      </HStack>
+                    )}
+                  </VStack>
+                  <CustomFields entries={custom} />
                 </VStack>
               </Collapsible>
             )}

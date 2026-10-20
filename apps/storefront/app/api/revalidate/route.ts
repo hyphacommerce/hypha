@@ -1,6 +1,7 @@
 // Hypha's webhook for the storefront's static pages (design note 0024, §7). Register
 // the storefront as an app in the admin (Settings → Apps) with this URL as its webhook
-// and the product, inventory, price, catalog, channel, category and market events, and
+// and the product, inventory, price, catalog, channel, category, market and
+// custom_field_definition events, and
 // put its signing secret in `HYPHA_WEBHOOK_SECRET`. Each event expires the tags of the
 // cached reads it affects (`lib/cache-tags.ts`); the pages that rendered them are
 // re-rendered on their next visit. Nothing is warmed here: a page nobody visits isn't
@@ -14,7 +15,7 @@
 import { revalidatePath, revalidateTag } from "next/cache";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { api, loadCountries } from "@/lib/api";
+import { api, loadCategories, loadCountries } from "@/lib/api";
 import { TAGS } from "@/lib/cache-tags";
 import { link } from "@/lib/site";
 
@@ -105,6 +106,35 @@ async function productTags(products: string[]): Promise<string[]> {
   return found.length === handles.length ? found.map((h) => TAGS.product(h)) : [TAGS.products];
 }
 
+type CategoryNode = { id: string; handle: string; children: CategoryNode[] };
+
+/** A shown category's page by ID, else every category page (a hidden one's handle
+ * can't be read). */
+async function categoryTags(id: string | undefined): Promise<string[]> {
+  if (!id) return [TAGS.categories];
+  const find = (nodes: CategoryNode[]): CategoryNode | undefined => {
+    for (const n of nodes) {
+      const hit = n.id === id ? n : find(n.children);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  const category = find(await loadCategories());
+  return category ? [TAGS.category(category.handle)] : [TAGS.categories];
+}
+
+/** The definition changes a storefront can see (design note 0033, §6.2): who may read
+ * the field, its choices' labels (facets), whether it's a facet, and its place. Its name
+ * and description aren't shown. */
+const SHOWN_DEFINITION_FIELDS = new Set([
+  "access",
+  "validations",
+  "capabilities",
+  "position",
+  "private",
+  "personal",
+]);
+
 /** What an event changes, as tags (and paths, for a page that may be cached as a 404). */
 async function affected(event: Envelope): Promise<{ tags: string[]; paths: string[] }> {
   const data = event.data;
@@ -146,6 +176,37 @@ async function affected(event: Envelope): Promise<{ tags: string[]; paths: strin
     case "market.changed":
     case "catalog.changed":
       return { tags: [TAGS.prices, TAGS.store], paths: [] };
+    // Custom fields (design note 0033, §6.2): values appear on product pages and, when a
+    // field is a facet, in listings.
+    case "product.custom_fields_updated": {
+      const product = typeof data.product === "string" ? data.product : event.subject.id;
+      return { tags: [TAGS.listings, ...(await productTags([product]))], paths: [] };
+    }
+    case "category.custom_fields_updated": {
+      const category = typeof data.category === "string" ? data.category : event.subject.id;
+      return { tags: await categoryTags(category), paths: [] };
+    }
+    // A definition changed: its values may now be shown, hidden or labelled differently
+    // on every page of its owner type. A new one has no values yet.
+    case "custom_field_definition.updated":
+    case "custom_field_definition.deleted": {
+      const fields = ids(data.fields);
+      if (
+        event.type === "custom_field_definition.updated" &&
+        !fields.some((f) => SHOWN_DEFINITION_FIELDS.has(f))
+      ) {
+        return { tags: [], paths: [] };
+      }
+      switch (data.owner_type) {
+        case "product":
+        case "variant":
+          return { tags: [TAGS.products, TAGS.listings], paths: [] };
+        case "category":
+          return { tags: [TAGS.categories], paths: [] };
+        default:
+          return { tags: [], paths: [] };
+      }
+    }
     case "category.changed":
     case "category.deleted":
       return {

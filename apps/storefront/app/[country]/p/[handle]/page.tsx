@@ -6,8 +6,9 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { AppElements } from "@/components/app-element";
-import { countryOf, loadProduct } from "@/lib/api";
+import { countryOf, fieldContext, loadProduct } from "@/lib/api";
 import { elementsFor } from "@/lib/app-elements";
+import { presentFields } from "@/lib/custom-fields";
 import { link } from "@/lib/site";
 
 import { ProductForm } from "./product-form";
@@ -52,6 +53,19 @@ export default async function ProductPage({ params }: Props) {
     elementsFor("product.block"),
   ]);
   const code = country.country;
+  // The merchant's custom fields (design note 0033, §6.2), formatted here so the form
+  // shows the selected variant's over the product's without formatting in the browser.
+  const context = await fieldContext(
+    country,
+    product.custom_fields,
+    ...product.variants.map((v) => v.custom_fields),
+  );
+  const fields = {
+    product: presentFields(product.custom_fields, context),
+    variants: Object.fromEntries(
+      product.variants.map((v) => [v.id, presentFields(v.custom_fields, context)]),
+    ),
+  };
 
   return (
     <VStack gap={5}>
@@ -71,7 +85,7 @@ export default async function ProductPage({ params }: Props) {
           />
         </VStack>
       ) : (
-        <ProductForm product={product} digits={country.minor_units} />
+        <ProductForm product={product} digits={country.minor_units} fields={fields} />
       )}
       <AppElements elements={appBlocks} props={{ productId: product.id }} />
     </VStack>

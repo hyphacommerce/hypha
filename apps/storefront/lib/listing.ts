@@ -22,7 +22,8 @@ const MAX_BACK = 30;
 
 export type ListingState = {
   q?: string;
-  /** `key:value` facet filters, as the API takes them. */
+  /** `key:value` facet filters, as the API takes them (`option.color:red`,
+   * `field.custom.material:wool`: the key ends at its first colon). */
   filters: string[];
   sort?: Sort;
   /** The price range in major units, as the shopper typed it ("10", "24.5"). */
@@ -114,10 +115,16 @@ export function toMinor(value: string | undefined, digits: number): number | und
   return Number.isSafeInteger(minor) ? minor : undefined;
 }
 
-/** `option.color` → "Color", `product_type` → "Type". */
+/** `option.color` → "Color", `field.custom.skin_type` → "Skin type" (a custom field,
+ * design note 0033, §9: its namespace isn't shown), `product_type` → "Type". */
 export function facetName(key: string): string {
   if (key.startsWith("option.")) {
     const name = key.slice("option.".length);
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  }
+  if (key.startsWith("field.")) {
+    const field = key.slice("field.".length);
+    const name = field.slice(field.indexOf(".") + 1).replaceAll("_", " ");
     return name.charAt(0).toUpperCase() + name.slice(1);
   }
   return { vendor: "Brand", product_type: "Type", tag: "Tag" }[key] ?? key;

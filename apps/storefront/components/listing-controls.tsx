@@ -33,7 +33,9 @@ import { CloseOnNavigate } from "./close-on-navigate";
 export type Facet = {
   key: string;
   label?: string | null;
-  values: { value: string; count: number }[];
+  /** `label`: what to show for the value (a choice field's label), when it isn't the
+   * value itself. */
+  values: { value: string; label?: string | null; count: number }[];
 };
 
 type Props = {
@@ -44,6 +46,13 @@ type Props = {
   priceHint?: { min: string; max: string };
   currency?: string;
 };
+
+/** A facet's heading: the merchant's label for an option or a custom field (design note
+ * 0033, §9), else its name. */
+function facetLabel(facet: Facet): string {
+  const labelled = facet.key.startsWith("option.") || facet.key.startsWith("field.");
+  return labelled && facet.label ? facet.label : facetName(facet.key);
+}
 
 /** How many values a facet shows before "Show all". */
 const SHOWN = 8;
@@ -70,7 +79,7 @@ function FacetList({
   return (
     <VStack gap={1}>
       <CheckboxList
-        label={facet.key.startsWith("option.") && facet.label ? facet.label : facetName(facet.key)}
+        label={facetLabel(facet)}
         density="compact"
         value={selected.filter((f) => f.startsWith(prefix))}
         onChange={(picked) =>
@@ -81,7 +90,7 @@ function FacetList({
           <CheckboxListItem
             key={v.value}
             value={`${prefix}${v.value}`}
-            label={v.value}
+            label={v.label ?? v.value}
             endContent={<Text type="supporting">{v.count}</Text>}
           />
         ))}

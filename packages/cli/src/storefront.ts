@@ -16,6 +16,9 @@ const EVENTS = [
   "channel.*",
   "category.*",
   "market.*",
+  // Custom field definitions: one shown to storefronts, or no longer, changes product
+  // and category pages (design note 0033, §6.2).
+  "custom_field_definition.*",
 ];
 
 /** `webhookSecret` is `null` without a webhook (on this machine); `orderUrl` is the
