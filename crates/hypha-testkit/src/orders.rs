@@ -4,10 +4,11 @@ use std::sync::{
 };
 
 use hypha_core::{
-    Keyset, OrderId, Page, PageRequest, Recorded, RepoError, Versioned, stamp_insert, stamp_update,
+    CustomerId, Keyset, OrderId, Page, PageRequest, Recorded, RepoError, Versioned, stamp_insert,
+    stamp_update,
 };
 use hypha_orders::{
-    Order, OrderFilter, OrderNumber, OrderRepo, OrderSort, OrderSummary, repo::keys,
+    Order, OrderFilter, OrderNumber, OrderRepo, OrderSort, OrderStats, OrderSummary, repo::keys,
 };
 
 use crate::{
@@ -120,6 +121,13 @@ impl OrderRepo for InMemoryOrderRepo {
             sort.direction(),
             Order::summary,
             |s: &OrderSummary| sort.key(s),
+        ))
+    }
+
+    async fn stats_for(&self, customer: CustomerId) -> Result<OrderStats, RepoError> {
+        let orders = self.orders.all();
+        Ok(OrderStats::of(
+            orders.iter().filter(|o| o.customer() == customer),
         ))
     }
 

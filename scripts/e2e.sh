@@ -1083,6 +1083,11 @@ contains "the order copies the tax line" '"tax":{"rate_ppm":130000,"amount":{"am
 contains "and adds tax on top" '"subtotal":{"amount":2700,"currency":"EUR"},"shipping_total":{"amount":0,"currency":"EUR"},"tax_total":{"amount":351,"currency":"EUR"},"total":{"amount":3051'
 step "the guest became a customer" 200 - "$BASE/admin/customers/$GUEST"
 contains "with the cart's email" '"email":"guest@example.hr"'
+contains "and one order's statistics (design note 0032)" '"orders":{"count":1,"first_placed_at":"20'
+contains "spent in EUR" '"amount_spent":[{"amount":3051,"currency":"EUR"}]'
+step "the guest's orders" 200 - "$BASE/admin/orders?customer=$GUEST"
+contains "the order" "\"id\":\"$SHOP_ORDER\""
+step "a customer that isn't one" 400 invalid_query "$BASE/admin/orders?customer=nope"
 step "the lamps are reserved" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
 contains "2 of 5" "\"on_hand\":5,\"reserved\":2,\"available\":3"
 step "the checked-out cart" 200 - "$BASE/storefront/carts/$SHOP_CART"

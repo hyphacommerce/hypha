@@ -3154,6 +3154,10 @@
               "null"
             ]
           },
+          "orders": {
+            "$ref": "#/components/schemas/OrderStatsResponse",
+            "description": "What the customer's orders add up to (design note 0032)."
+          },
           "phone": {
             "type": [
               "string",
@@ -3180,6 +3184,7 @@
           "email",
           "addresses",
           "custom_fields",
+          "orders",
           "created_at",
           "updated_at"
         ],
@@ -5702,6 +5707,43 @@
           "code",
           "name",
           "amount"
+        ],
+        "type": "object"
+      },
+      "OrderStatsResponse": {
+        "description": "A customer's orders, added up over those that weren't cancelled (design note 0032,\n§8): `GET /admin/orders?customer=` lists them.",
+        "properties": {
+          "amount_spent": {
+            "description": "Their totals, one per currency the customer paid in, by currency code.",
+            "items": {
+              "$ref": "#/components/schemas/Money"
+            },
+            "type": "array"
+          },
+          "count": {
+            "description": "How many orders the customer placed that weren't cancelled.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "first_placed_at": {
+            "description": "When the first of them was placed, RFC 3339 in UTC; absent without orders.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_placed_at": {
+            "description": "When the last of them was placed, RFC 3339 in UTC; absent without orders.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "amount_spent"
         ],
         "type": "object"
       },
@@ -24454,6 +24496,15 @@
             "required": false,
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Only this customer's orders (design note 0032).",
+            "in": "query",
+            "name": "customer",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerId"
             }
           },
           {

@@ -4084,6 +4084,52 @@ async fn placed_order_for_three_mugs(app: &TestApp) -> (String, String, String) 
     )
 }
 
+/// Design note 0032, §12 step 1: a customer's response adds its orders up, and the
+/// orders list narrows to one customer.
+#[tokio::test]
+async fn a_customer_carries_its_order_statistics_and_lists_its_orders() {
+    let app = app().await;
+    let (order, _, _) = placed_order_for_three_mugs(&app).await;
+    let (_, placed) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
+    let customer = placed["customer"].as_str().unwrap().to_string();
+
+    let (status, json) = send(&app, "GET", &format!("/admin/customers/{customer}"), None).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["orders"]["count"], 1);
+    assert_eq!(json["orders"]["amount_spent"], json!([placed["total"]]));
+    assert_eq!(json["orders"]["first_placed_at"], placed["placed_at"]);
+    assert_eq!(json["orders"]["last_placed_at"], placed["placed_at"]);
+
+    let uri = format!("/admin/orders?customer={customer}");
+    let (status, page) = send(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page["items"][0]["id"], order);
+    let nobody = "cus_00000000000000000000000000000063";
+    let (_, page) = send(
+        &app,
+        "GET",
+        &format!("/admin/orders?customer={nobody}"),
+        None,
+    )
+    .await;
+    assert_eq!(page["items"], json!([]));
+
+    // Cancelled orders count for nothing.
+    let cancel = format!("/admin/orders/{order}/cancel");
+    let (status, json) = send(&app, "POST", &cancel, Some(r#"{"reason":"customer"}"#)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let (_, json) = send(&app, "GET", &format!("/admin/customers/{customer}"), None).await;
+    assert_eq!(json["orders"], json!({"count": 0, "amount_spent": []}));
+
+    // A customer ID that is not one is refused before any lookup.
+    let (status, json) = send(&app, "GET", "/admin/orders?customer=nope", None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+}
+
 #[tokio::test]
 async fn an_order_is_fulfilled_and_taken_back_over_http() {
     let app = app().await;

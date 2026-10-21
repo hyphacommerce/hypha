@@ -56,12 +56,13 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
     client.GET("/admin/customers/{id}/custom-fields", { params: { path: { id } } }),
     requireStaff(),
   ]);
-  // Their latest orders: the email search matches parts of addresses too, so keep the
-  // ones with exactly theirs. Needs `orders:read`; without it the card says so.
+  // Their latest orders (design note 0032, §12 step 1). Needs `orders:read`; without it
+  // the card says so.
   const recent = await client.GET("/admin/orders", {
-    params: { query: { q: customer.email, limit: 10 } },
+    params: { query: { customer: customer.id, limit: 10 } },
   });
-  const orders = (recent.data?.items ?? []).filter((o) => o.customer === customer.id);
+  const orders = recent.data?.items ?? [];
+  const stats = customer.orders;
   const countryName = new Map(countries.map((c) => [c.code, c.name]));
   const name = customerName(customer);
 
@@ -81,7 +82,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                     Orders
                   </Text>
                   {orders.length > 0 && (
-                    <Link href={`/orders?q=${encodeURIComponent(customer.email)}`}>View all</Link>
+                    <Link href={`/orders?customer=${customer.id}`}>View all</Link>
                   )}
                 </HStack>
                 {!recent.data ? (
@@ -126,6 +127,21 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                   <MetadataListItem label="Email">{customer.email}</MetadataListItem>
                   <MetadataListItem label="Name">{name || "—"}</MetadataListItem>
                   <MetadataListItem label="Phone">{customer.phone ?? "—"}</MetadataListItem>
+                  <MetadataListItem label="Orders">
+                    {stats.count === 0
+                      ? "None"
+                      : `${stats.count} · ${stats.amount_spent.map((m) => formatMoney(m, currencies)).join(" + ")}`}
+                  </MetadataListItem>
+                  {stats.first_placed_at && (
+                    <MetadataListItem label="First order">
+                      <DateTime value={stats.first_placed_at} />
+                    </MetadataListItem>
+                  )}
+                  {stats.last_placed_at && stats.count > 1 && (
+                    <MetadataListItem label="Last order">
+                      <DateTime value={stats.last_placed_at} />
+                    </MetadataListItem>
+                  )}
                   <MetadataListItem label="Customer since">
                     <DateTime value={customer.created_at} />
                   </MetadataListItem>

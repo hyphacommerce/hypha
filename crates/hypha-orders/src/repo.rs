@@ -1,6 +1,6 @@
-use hypha_core::{Keyset, OrderId, Page, PageRequest, RepoError};
+use hypha_core::{CustomerId, Keyset, OrderId, Page, PageRequest, RepoError};
 
-use crate::{Order, OrderFilter, OrderNumber, OrderSort, OrderSummary};
+use crate::{Order, OrderFilter, OrderNumber, OrderSort, OrderStats, OrderSummary};
 
 /// Uniqueness rules an `OrderRepo` enforces, reported as `RepoError::Duplicate(key)`.
 pub mod keys {
@@ -28,6 +28,9 @@ pub trait OrderRepo {
         sort: OrderSort,
         page: PageRequest<Keyset<OrderId>>,
     ) -> Result<Page<OrderSummary>, RepoError>;
+    /// What `customer`'s orders add up to: equals `OrderStats::of` the stored orders
+    /// with that customer (design note 0032, §12 step 1). An adapter may sum in storage.
+    async fn stats_for(&self, customer: CustomerId) -> Result<OrderStats, RepoError>;
     /// Stores a new order (version 1). Enforces every key in `keys`. Checkout inserts
     /// through `StageOrders` instead, together with its other writes.
     async fn insert(&self, order: &mut Order) -> Result<(), RepoError>;

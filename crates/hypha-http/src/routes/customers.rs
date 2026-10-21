@@ -4,7 +4,9 @@ use hypha_core::Stamped;
 
 use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{AddressId, AddressParts, CountryCode, CustomerId, Email, Keyset, Scope, SortKey};
+use hypha_core::{
+    AddressId, AddressParts, CountryCode, CustomerId, Email, Keyset, Money, Scope, SortKey,
+};
 use hypha_customers::{
     CreateCustomer, Customer, CustomerSort, CustomerSummary, HasCustomers, SaveAddress,
     SavedAddress, UpdateCustomer, add_address, create_customer, get_customer, list_customers,
@@ -15,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use hypha_apps::HasApps;
 use hypha_core::Ctx;
 use hypha_custom_fields::{HasCustomFieldDefinitions, HasCustomFieldValues, OwnerType};
+use hypha_orders::{HasOrders, OrderStats, customer_order_stats};
 
 use super::{
     custom_fields::{self, CustomFieldValues, FieldParams},
@@ -110,6 +113,8 @@ pub struct CustomerResponse {
     /// (design note 0033); `PATCH /admin/customers/{id}/custom-fields` writes them.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     custom_fields: CustomFieldValues,
+    /// What the customer's orders add up to (design note 0032).
+    orders: OrderStatsResponse,
     /// When it was created, RFC 3339 in UTC.
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
@@ -164,12 +169,46 @@ impl From<&SavedAddress> for AddressResponse {
     }
 }
 
+/// A customer's orders, added up over those that weren't cancelled (design note 0032,
+/// §8): `GET /admin/orders?customer=` lists them.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct OrderStatsResponse {
+    /// How many orders the customer placed that weren't cancelled.
+    count: u64,
+    /// When the first of them was placed, RFC 3339 in UTC; absent without orders.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    first_placed_at: Option<String>,
+    /// When the last of them was placed, RFC 3339 in UTC; absent without orders.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    last_placed_at: Option<String>,
+    /// Their totals, one per currency the customer paid in, by currency code.
+    amount_spent: Vec<Money>,
+}
+
+impl OrderStatsResponse {
+    fn new(s: OrderStats) -> Result<Self, ApiError> {
+        Ok(Self {
+            count: s.orders_count,
+            first_placed_at: s.first_order_at.map(super::rfc3339).transpose()?,
+            last_placed_at: s.last_order_at.map(super::rfc3339).transpose()?,
+            amount_spent: s.amount_spent,
+        })
+    }
+}
+
 impl CustomerResponse {
-    fn new(c: &Customer, custom_fields: CustomFieldValues) -> Result<Self, ApiError> {
+    fn new(
+        c: &Customer,
+        custom_fields: CustomFieldValues,
+        orders: OrderStats,
+    ) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(c.stamps())?;
         Ok(Self {
             created_at,
             updated_at,
+            orders: OrderStatsResponse::new(orders)?,
             id: c.id(),
             email: c.email().clone(),
             first_name: c.first_name().map(str::to_string),
@@ -187,13 +226,14 @@ impl CustomerResponse {
 /// The admin's response for `customer`: with its custom fields, as `ctx` may see it.
 async fn respond<P>(ctx: &Ctx, ports: &P, customer: &Customer) -> Result<Redacted, ApiError>
 where
-    P: HasApps + HasCustomFieldDefinitions + HasCustomFieldValues,
+    P: HasApps + HasCustomFieldDefinitions + HasCustomFieldValues + HasOrders,
 {
     let kind = custom_fields::caller_kind(ctx, ports).await?;
     let id = customer.id().as_uuid();
     let fields =
         custom_fields::read(ctx, &kind, ports, &[OwnerType::Customer], &[id], None).await?;
-    let dto = CustomerResponse::new(customer, fields.json_of(id))?;
+    let stats = customer_order_stats(ctx, ports.orders(), customer.id()).await?;
+    let dto = CustomerResponse::new(customer, fields.json_of(id), stats)?;
     redact::one_with_fields(ctx, Family::Customer, dto, &fields.redacted)
 }
 

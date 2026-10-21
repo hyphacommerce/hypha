@@ -1,7 +1,8 @@
 //! What an order list is narrowed to and how it is ordered (design note 0024, §2).
 
 use hypha_core::{
-    ChannelId, CountryCode, Currency, Direction, FieldFilter, SortKey, Timestamp, optional_text,
+    ChannelId, CountryCode, Currency, CustomerId, Direction, FieldFilter, SortKey, Timestamp,
+    optional_text,
 };
 
 use crate::{FinancialStatus, FulfillmentStatus, Order, OrderError, OrderSummary};
@@ -14,6 +15,7 @@ pub struct OrderFilter {
     financial_statuses: Vec<FinancialStatus>,
     fulfillment_statuses: Vec<FulfillmentStatus>,
     cancelled: Option<bool>,
+    customer: Option<CustomerId>,
     channel: Option<ChannelId>,
     country: Option<CountryCode>,
     currency: Option<Currency>,
@@ -31,6 +33,8 @@ pub struct OrderFilterInput {
     pub fulfillment_statuses: Vec<FulfillmentStatus>,
     /// Only cancelled orders (`true`) or only those that aren't (`false`).
     pub cancelled: Option<bool>,
+    /// Only this customer's orders (design note 0032, §12 step 1).
+    pub customer: Option<CustomerId>,
     pub channel: Option<ChannelId>,
     pub country: Option<CountryCode>,
     pub currency: Option<Currency>,
@@ -55,6 +59,7 @@ impl OrderFilter {
             financial_statuses,
             fulfillment_statuses,
             cancelled: input.cancelled,
+            customer: input.customer,
             channel: input.channel,
             country: input.country,
             currency: input.currency,
@@ -99,6 +104,10 @@ impl OrderFilter {
         self.cancelled
     }
 
+    pub fn customer(&self) -> Option<CustomerId> {
+        self.customer
+    }
+
     pub fn channel(&self) -> Option<ChannelId> {
         self.channel
     }
@@ -139,6 +148,7 @@ impl OrderFilter {
             && self
                 .cancelled
                 .is_none_or(|c| c == order.cancelled().is_some())
+            && self.customer.is_none_or(|c| c == order.customer())
             && self.channel.is_none_or(|c| c == order.channel())
             && self.country.is_none_or(|c| c == order.country())
             && self.currency.is_none_or(|c| c == order.currency())

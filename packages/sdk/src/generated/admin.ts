@@ -4023,6 +4023,8 @@ export interface components {
             first_name?: string | null;
             id: components["schemas"]["CustomerId"];
             last_name?: string | null;
+            /** @description What the customer's orders add up to (design note 0032). */
+            orders: components["schemas"]["OrderStatsResponse"];
             phone?: string | null;
             /**
              * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
@@ -4925,6 +4927,23 @@ export interface components {
             reference?: string | null;
             service?: string | null;
             tax?: components["schemas"]["OrderTaxResponse"] | null;
+        };
+        /**
+         * @description A customer's orders, added up over those that weren't cancelled (design note 0032,
+         *     §8): `GET /admin/orders?customer=` lists them.
+         */
+        OrderStatsResponse: {
+            /** @description Their totals, one per currency the customer paid in, by currency code. */
+            amount_spent: components["schemas"]["Money"][];
+            /**
+             * Format: int64
+             * @description How many orders the customer placed that weren't cancelled.
+             */
+            count: number;
+            /** @description When the first of them was placed, RFC 3339 in UTC; absent without orders. */
+            first_placed_at?: string | null;
+            /** @description When the last of them was placed, RFC 3339 in UTC; absent without orders. */
+            last_placed_at?: string | null;
         };
         /** @description A page of a list, newest first (design note 0012). */
         OrderSummaryPage: {
@@ -17791,6 +17810,8 @@ export interface operations {
                 fulfillment_status?: components["schemas"]["FulfillmentStatusDto"][];
                 /** @description Only cancelled orders (`true`), or only those that aren't (`false`). */
                 cancelled?: boolean;
+                /** @description Only this customer's orders (design note 0032). */
+                customer?: components["schemas"]["CustomerId"];
                 /** @description Only orders placed through this sales channel. */
                 channel?: components["schemas"]["ChannelId"];
                 /** @description Only orders shipped to (or placed in) this country (ISO 3166-1 alpha-2). */
