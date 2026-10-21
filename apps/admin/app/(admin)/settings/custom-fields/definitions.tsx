@@ -268,11 +268,11 @@ function SuggestionsCard({
             by these names. Add the ones you want; change or delete them like any other.
           </Text>
         </VStack>
-        <VStack gap={0}>
-          {suggestions.map((suggestion, i) => (
-            <div key={suggestion.key} className={i > 0 ? "list-row list-row-divided" : "list-row"}>
+        <VStack gap={3}>
+          {suggestions.map((suggestion) => (
+            <HStack key={suggestion.key} gap={3} hAlign="between" vAlign="center" wrap="wrap">
               <VStack gap={0.5}>
-                <HStack gap={1} vAlign="center">
+                <HStack gap={1} vAlign="center" wrap="wrap">
                   <Text weight="medium">{suggestion.name}</Text>
                   <Text type="supporting" color="secondary">
                     {suggestion.field} · {typeLabel(suggestion.type)}
@@ -292,7 +292,7 @@ function SuggestionsCard({
                 isDisabled={adding !== undefined && adding !== suggestion.key}
                 onClick={() => add(suggestion)}
               />
-            </div>
+            </HStack>
           ))}
         </VStack>
       </VStack>

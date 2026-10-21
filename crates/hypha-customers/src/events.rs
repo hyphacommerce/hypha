@@ -69,8 +69,8 @@ impl Event for MarketingConsentUpdated {
 #[derive(Debug, Serialize)]
 pub struct CustomerErasureRequested {
     pub customer: CustomerId,
-    /// RFC 3339 in UTC.
-    pub due_at: String,
+    /// Microseconds since the Unix epoch, as `Timestamp` counts.
+    pub due_at: i64,
 }
 
 impl Event for CustomerErasureRequested {
@@ -162,10 +162,12 @@ impl Changes {
     }
 
     pub(crate) fn erasure_requested(&mut self, customer: CustomerId, due_at: Timestamp) {
-        let due_at = jiff_free_rfc3339(due_at);
         self.extra.push(PendingEvent::new(
             customer_subject(customer),
-            &CustomerErasureRequested { customer, due_at },
+            &CustomerErasureRequested {
+                customer,
+                due_at: due_at.unix_micros(),
+            },
         ));
     }
 
@@ -210,45 +212,5 @@ impl Changes {
         }
         events.extend(changes.extra);
         events
-    }
-}
-
-/// `at` as RFC 3339 in UTC with microseconds, without a date library: event payloads are
-/// a contract and this crate stays small.
-fn jiff_free_rfc3339(at: Timestamp) -> String {
-    let micros = at.unix_micros();
-    let secs = micros.div_euclid(1_000_000);
-    let sub = micros.rem_euclid(1_000_000);
-    let days = secs.div_euclid(86_400);
-    let rem = secs.rem_euclid(86_400);
-    let (h, m, s) = (rem / 3600, (rem % 3600) / 60, rem % 60);
-    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if mo <= 2 { y + 1 } else { y };
-    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}.{sub:06}Z")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rfc3339_without_a_date_library() {
-        assert_eq!(
-            jiff_free_rfc3339(Timestamp::from_unix_micros(1_767_225_600_000_000)),
-            "2026-01-01T00:00:00.000000Z"
-        );
-        assert_eq!(
-            jiff_free_rfc3339(Timestamp::from_unix_micros(951_782_400_000_001)),
-            "2000-02-29T00:00:00.000001Z"
-        );
     }
 }

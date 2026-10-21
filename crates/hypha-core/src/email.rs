@@ -70,7 +70,9 @@ impl Email {
     /// Whether this is an erased customer's placeholder: nothing should be sent to it,
     /// and apps must not treat it as an address.
     pub fn is_placeholder(&self) -> bool {
-        self.0.ends_with(&format!("@{}", Self::PLACEHOLDER_DOMAIN))
+        self.0
+            .rsplit_once('@')
+            .is_some_and(|(_, domain)| domain == Self::PLACEHOLDER_DOMAIN)
     }
 }
 

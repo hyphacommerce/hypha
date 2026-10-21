@@ -762,11 +762,17 @@ async fn attempt<
         if let Some(guest) = &mut new_customer {
             guest.set_marketing_consent(Channel::Email, change, ConsentSource::Checkout, now)?;
         }
-        if let Some(buyer) = &mut known_customer
-            && !buyer.is_erased()
-            && !buyer.set_marketing_consent(Channel::Email, change, ConsentSource::Checkout, now)?
-        {
-            known_customer = None;
+        if let Some(buyer) = &mut known_customer {
+            let subscribed = !buyer.is_erased()
+                && buyer.set_marketing_consent(
+                    Channel::Email,
+                    change,
+                    ConsentSource::Checkout,
+                    now,
+                )?;
+            if !subscribed {
+                known_customer = None;
+            }
         }
     } else {
         known_customer = None;

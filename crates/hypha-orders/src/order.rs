@@ -523,10 +523,11 @@ impl Order {
         self.customer
     }
 
-    /// Erasure (design note 0032, §7.3): the buyer's email becomes `placeholder` and the
-    /// shipping address goes (the order's country stays). Lines, totals, payments and
-    /// fulfilments are untouched: placed orders are never deleted. Records no event of its
-    /// own: `customer.redacted` names the orders.
+    /// Erasure (design note 0032, §7.3): the buyer's email becomes `placeholder` (an
+    /// erased customer's, `Email::is_placeholder`) and the shipping address goes (the
+    /// order's country and shipping lines stay). Lines, totals, payments and fulfilments
+    /// are untouched: placed orders are never deleted. Records no event of its own:
+    /// `customer.redacted` names the orders.
     pub fn redact(&mut self, placeholder: Email) -> bool {
         let mut changed = false;
         if self.email != placeholder {
@@ -688,7 +689,10 @@ impl Order {
             }
         }
 
-        if !s.shipping_lines.is_empty() && s.shipping_address.is_none() {
+        // An erased customer's order (design note 0032, §7.3) keeps its shipping lines and
+        // loses its address: the placeholder email says so.
+        if !s.shipping_lines.is_empty() && s.shipping_address.is_none() && !s.email.is_placeholder()
+        {
             return Err(OrderError::ShippingWithoutAddress);
         }
         let mut shipping_total = Money::zero(currency);
@@ -885,6 +889,18 @@ mod tests {
             ..new_order()
         });
         assert_eq!(result, Err(OrderError::ShippingWithoutAddress));
+    }
+
+    #[test]
+    fn a_redacted_order_keeps_its_shipping_lines_without_an_address() {
+        let mut order = Order::place(new_order()).unwrap();
+        assert!(order.shipping_address().is_some() || order.shipping_lines().is_empty());
+        let placeholder = Email::placeholder(uuid::Uuid::from_u128(7));
+        assert!(order.redact(placeholder.clone()));
+        assert_eq!(order.email(), &placeholder);
+        assert_eq!(order.shipping_address(), None);
+        assert!(!order.redact(placeholder), "a second run changes nothing");
+        assert_eq!(Order::restore(order.snapshot()), Ok(order));
     }
 
     fn new_order() -> NewOrder {

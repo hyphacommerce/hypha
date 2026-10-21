@@ -213,7 +213,8 @@ function AddressDialog({
   onClose: () => void;
 }) {
   const router = useRouter();
-  const [draft, setDraft] = useState(() => draftOf(address, countries[0]?.code ?? ""));
+  // No country until chosen: the first of the list is nobody's default.
+  const [draft, setDraft] = useState(() => draftOf(address, ""));
   const [defaultShipping, setDefaultShipping] = useState(isDefaultShipping);
   const [defaultBilling, setDefaultBilling] = useState(isDefaultBilling);
   const [error, setError] = useState<string>();

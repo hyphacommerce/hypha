@@ -83,7 +83,7 @@ export function ConsentCard({
             can&apos;t undo a newer opt-out.
           </Text>
         </VStack>
-        <VStack gap={0}>
+        <VStack gap={3}>
           {rows.map((row, i) => {
             const state = STATES[row.consent.state] ?? { label: row.consent.state };
             const details = [
@@ -91,37 +91,39 @@ export function ConsentCard({
               sourceLabel(row.consent.source) && `from ${sourceLabel(row.consent.source)}`,
             ].filter(Boolean);
             return (
-              <div key={row.channel} className={i > 0 ? "list-row list-row-divided" : "list-row"}>
-                <VStack gap={0.5}>
-                  <HStack gap={1} vAlign="center">
+              <div key={row.channel} className={i > 0 ? "list-row-divided" : undefined}>
+                <VStack gap={1}>
+                  <HStack gap={2} hAlign="between" vAlign="center">
                     <Text weight="medium">{row.label}</Text>
-                    <Badge label={state.label} variant={state.variant} />
+                    {canEdit && !isErased && !row.disabled && (
+                      <Button
+                        label="Change"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setEditing(row.channel)}
+                      />
+                    )}
                   </HStack>
-                  {details.length > 0 && (
-                    <Text type="supporting" color="secondary">
-                      {details.join(", ")}
-                      {row.consent.consented_at && (
-                        <>
-                          {" · "}
-                          <DateTime value={row.consent.consented_at} />
-                        </>
-                      )}
-                    </Text>
-                  )}
+                  <HStack gap={1} vAlign="center" wrap="wrap">
+                    <Badge label={state.label} variant={state.variant} />
+                    {details.length > 0 && (
+                      <Text type="supporting" color="secondary">
+                        {details.join(", ")}
+                        {row.consent.consented_at && (
+                          <>
+                            {" · "}
+                            <DateTime value={row.consent.consented_at} />
+                          </>
+                        )}
+                      </Text>
+                    )}
+                  </HStack>
                   {row.disabled && (
                     <Text type="supporting" color="secondary">
                       {row.disabled}
                     </Text>
                   )}
                 </VStack>
-                {canEdit && !isErased && !row.disabled && (
-                  <Button
-                    label="Change"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setEditing(row.channel)}
-                  />
-                )}
               </div>
             );
           })}

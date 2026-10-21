@@ -1471,8 +1471,8 @@ impl From<hypha_mail::CommandError> for ApiError {
             E::NotificationNotFound(_) => StatusCode::NOT_FOUND,
             // The deployment, not the request: a test send with the `log` sender.
             E::EmailNotConfigured => StatusCode::CONFLICT,
-            // The message in the URL is an invite or a reset.
-            E::NotResendable { .. } => StatusCode::CONFLICT,
+            // The message in the URL is an invite or a reset, or its customer was erased.
+            E::NotResendable { .. } | E::RecipientErased => StatusCode::CONFLICT,
             // A host set up wrongly, or an event the store wrote itself.
             E::StoreNotFound(_) | E::BadEvent { .. } => return Self::internal(e),
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),

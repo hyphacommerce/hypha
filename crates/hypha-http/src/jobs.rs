@@ -459,9 +459,13 @@ pub async fn prune<S: Storage>(state: &AppState<S>) -> Step {
     )
     .await
     .map_err(|e| e.to_string())?;
-    let erased = hypha_privacy::erase_due(&ports, &state.clock, state.config.dispatch.batch)
+    let erasures = hypha_privacy::erase_due(&ports, &state.clock, state.config.dispatch.batch)
         .await
         .map_err(|e| e.to_string())?;
+    for (customer, error) in &erasures.failed {
+        tracing::warn!(%customer, %error, "jobs: a customer's erasure failed; tried again next run");
+    }
+    let erased = erasures.progress;
     let done = events.done + keys.done + sessions.done + calls.done + erased.done;
     if done > 0 {
         tracing::info!(

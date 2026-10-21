@@ -10,7 +10,7 @@ pub mod settings;
 
 pub use commands::{CommandError, PrivacyPorts, delete_customer};
 pub use erasure::{
-    CustomerExport, Erased, ErasurePorts, cancel_erasure, erase_customer, erase_due,
+    CustomerExport, Erased, ErasurePorts, Erasures, cancel_erasure, erase_customer, erase_due,
     export_customer, request_erasure,
 };
 pub use settings::PrivacySettings;

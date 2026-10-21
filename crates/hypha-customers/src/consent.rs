@@ -170,15 +170,17 @@ pub struct ConsentChange {
 
 impl MarketingConsent {
     /// Applies `change` from `source` if it's at least as new as what's stored: the
-    /// newest `consented_at` wins. Returns whether anything changed. The caller checks
-    /// the state may be set (`not_subscribed` and `redacted` can't be asked for).
+    /// newest `consented_at` wins. A time in the future counts as `now` (a skewed clock
+    /// must not lock the channel until then). Returns whether anything changed. The
+    /// caller checks the state may be set (`not_subscribed` and `redacted` can't be
+    /// asked for).
     pub(crate) fn apply(
         &mut self,
         change: ConsentChange,
         source: ConsentSource,
         now: Timestamp,
     ) -> bool {
-        let at = change.consented_at.unwrap_or(now);
+        let at = change.consented_at.unwrap_or(now).min(now);
         if self.consented_at.is_some_and(|stored| at < stored) {
             return false;
         }
@@ -252,6 +254,20 @@ mod tests {
         assert!(consent.apply(confirmed, ConsentSource::Admin, at(500)));
         assert_eq!(consent.opt_in_level, OptInLevel::Confirmed);
         assert_eq!(consent.source, Some(ConsentSource::Admin));
+    }
+
+    #[test]
+    fn a_time_in_the_future_counts_as_now() {
+        let mut consent = MarketingConsent::default();
+        assert!(consent.apply(subscribe(Some(9_999)), ConsentSource::Admin, at(7)));
+        assert_eq!(consent.consented_at, Some(at(7)));
+        // So a later unsubscribe still wins.
+        let unsubscribe = ConsentChange {
+            state: ConsentState::Unsubscribed,
+            opt_in_level: OptInLevel::Unknown,
+            consented_at: None,
+        };
+        assert!(consent.apply(unsubscribe, ConsentSource::Admin, at(8)));
     }
 
     #[test]

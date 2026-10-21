@@ -17,7 +17,7 @@ use hypha_notifications::{HasNotifications, Notification, NotificationFilter, No
 use hypha_orders::{
     HasOrders, Order, OrderFilter, OrderFilterInput, OrderRepo, OrderSort, StageOrders,
 };
-use hypha_payments::{HasPayments, Payment, PaymentRepo};
+use hypha_payments::{HasPayments, Payment, PaymentRepo, PaymentStatus};
 
 use crate::{CommandError, PrivacySettings};
 
@@ -210,6 +210,21 @@ pub async fn erase_customer<S: ErasurePorts>(
 
     let values = personal_values(ports, id, &order_ids).await?;
     let mut carts = ports.carts().of_customer(id).await?;
+    // An open cart whose payment holds money (started online, never checked out;
+    // design note 0031) isn't deleted: the payment points at it, and giving the money
+    // back needs it. It's redacted like a placed one.
+    let mut keep = Vec::new();
+    for cart in &carts {
+        if matches!(cart.status(), hypha_cart::CartStatus::Open) {
+            let payments = ports.payments().list_for_cart(cart.id()).await?;
+            if payments
+                .iter()
+                .any(|p| p.status().committed() || p.status() == PaymentStatus::Pending)
+            {
+                keep.push(cart.id());
+            }
+        }
+    }
     customer.erase(now);
 
     let mut batch = ports.batch();
@@ -220,13 +235,11 @@ pub async fn erase_customer<S: ErasurePorts>(
         }
     }
     for cart in &mut carts {
-        match cart.status() {
-            hypha_cart::CartStatus::Open => batch.delete_cart(cart),
-            hypha_cart::CartStatus::Completed { .. } => {
-                if cart.redact(placeholder.clone()) {
-                    batch.update_cart(cart);
-                }
-            }
+        let open = matches!(cart.status(), hypha_cart::CartStatus::Open);
+        if open && !keep.contains(&cart.id()) {
+            batch.delete_cart(cart);
+        } else if cart.redact(placeholder.clone()) {
+            batch.update_cart(cart);
         }
     }
     for value in &values {
@@ -244,32 +257,37 @@ pub async fn erase_customer<S: ErasurePorts>(
     }))
 }
 
+/// What a run of the erasure step did: the erasures that went through, and each one
+/// that didn't with why, so the host can log it (a customer whose erasure keeps failing
+/// stays due and is tried every run).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Erasures {
+    pub progress: Progress,
+    pub failed: Vec<(CustomerId, CommandError)>,
+}
+
 /// The `erase_customers` step: runs every erasure due at `clock.now()`, up to `limit` a
 /// run (design note 0032, §7.3). A customer whose erasure fails is left for the next
-/// run; the step reports the first failure after finishing the rest.
+/// run and reported in `failed`; only the due list's own failure fails the step.
 pub async fn erase_due<S: ErasurePorts>(
     ports: &S,
     clock: &impl Clock,
     limit: u32,
-) -> Result<Progress, CommandError> {
+) -> Result<Erasures, CommandError> {
     let now = clock.now();
     let due = ports.customers().due_for_erasure(now, limit).await?;
     let mut done = 0;
-    let mut failed = None;
+    let mut failed = Vec::new();
     for id in &due {
         match erase_customer(ports, now, *id).await {
             Ok(_) => done += 1,
-            Err(e) => {
-                failed.get_or_insert(e);
-            }
+            Err(e) => failed.push((*id, e)),
         }
     }
-    if let Some(e) = failed
-        && done == 0
-    {
-        return Err(e);
-    }
-    Ok(Progress::of(done, limit))
+    Ok(Erasures {
+        progress: Progress::of(done, limit),
+        failed,
+    })
 }
 
 /// Everything Hypha holds about a customer (design note 0032, §7.4), for one JSON

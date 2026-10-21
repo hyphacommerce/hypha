@@ -253,13 +253,21 @@ impl Customer {
         Ok(())
     }
 
-    /// Trimmed; empty clears it. Free text for now (no E.164 check).
+    /// Trimmed; empty clears it. Free text for now (no E.164 check). Clearing it resets
+    /// SMS consent to never asked: there's nowhere to send (design note 0032, §5).
     pub fn set_phone(&mut self, phone: Option<String>) -> Result<(), CustomerError> {
         self.ensure_not_erased()?;
         let phone = optional_text("phone", phone)?;
         if phone != self.phone {
             self.phone = phone;
             self.changes.field("phone");
+            if self.phone.is_none() && self.sms_marketing.reset() {
+                self.changes.consent(
+                    Channel::Sms,
+                    self.sms_marketing.state,
+                    self.sms_marketing.opt_in_level,
+                );
+            }
         }
         Ok(())
     }
@@ -605,6 +613,25 @@ mod tests {
         assert_eq!(
             c.marketing_consent(Channel::Email).state,
             ConsentState::NotSubscribed
+        );
+    }
+
+    #[test]
+    fn clearing_the_phone_resets_sms_consent() {
+        let mut c = customer();
+        c.set_phone(Some("+385 91".to_string())).unwrap();
+        c.set_marketing_consent(Channel::Sms, subscribe(), ConsentSource::Admin, at(1))
+            .unwrap();
+        c.take_events();
+        c.set_phone(None).unwrap();
+        assert_eq!(
+            c.marketing_consent(Channel::Sms),
+            MarketingConsent::default()
+        );
+        let types: Vec<&str> = c.take_events().iter().map(|e| e.event_type).collect();
+        assert_eq!(
+            types,
+            ["customer.updated", "customer.marketing_consent_updated"]
         );
     }
 

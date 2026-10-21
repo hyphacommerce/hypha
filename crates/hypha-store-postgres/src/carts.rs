@@ -5,7 +5,12 @@ use hypha_core::{
     stamp_insert, stamp_update,
 };
 use hypha_shipping::ProviderKey;
-use tokio_postgres::types::{ToSql, Type};
+use std::collections::HashMap;
+
+use tokio_postgres::{
+    Row,
+    types::{ToSql, Type},
+};
 use uuid::Uuid;
 
 use crate::{
@@ -27,23 +32,7 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
 
     async fn of_customer(&self, customer: CustomerId) -> Result<Vec<Cart>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn, |tx| {
-            let ids = tx
-                .query_typed(
-                    "SELECT id FROM carts WHERE customer_id = $1 ORDER BY id",
-                    &[(&customer.as_uuid(), Type::UUID)],
-                )
-                .await
-                .map_err(repo_error)?;
-            let mut carts = Vec::with_capacity(ids.len());
-            for row in &ids {
-                let id = CartId::from_uuid(col(row, "id")?);
-                if let Some(cart) = load_cart(tx, id).await? {
-                    carts.push(cart);
-                }
-            }
-            Ok(carts)
-        })
+        consistent_read!(conn, |tx| load_carts_of(tx, customer).await)
     }
 
     async fn insert(&self, cart: &mut Cart) -> Result<(), RepoError> {
@@ -225,16 +214,7 @@ async fn write_lines(
 async fn load_cart(client: &impl Queries, id: CartId) -> Result<Option<Cart>, RepoError> {
     let Some(row) = client
         .query_typed_opt(
-            &format!(
-                "SELECT version, market_id, country, email, customer_id, order_id, channel_id,
-                        payment_method_id, marketing_opt_in, {},
-                        shipping_option_id, quote_amount, quote_currency, quote_provider,
-                        quote_service, quote_reference, {}, {}
-                 FROM carts WHERE id = $1",
-                address_columns("shipping_"),
-                micros("quoted_at"),
-                stamp_columns(""),
-            ),
+            &format!("{} WHERE id = $1", select_carts()),
             &[(&id.as_uuid(), Type::UUID)],
         )
         .await
@@ -251,16 +231,81 @@ async fn load_cart(client: &impl Queries, id: CartId) -> Result<Option<Cart>, Re
         .await
         .map_err(repo_error)?
         .iter()
-        .map(|line| {
-            let quantity: i64 = col(line, "quantity")?;
-            Ok(CartLineSnapshot {
-                product: ProductId::from_uuid(col(line, "product_id")?),
-                variant: VariantId::from_uuid(col(line, "variant_id")?),
-                quantity: u32::try_from(quantity)
-                    .map_err(|_| corrupt(format!("cart quantity {quantity}")))?,
-            })
-        })
+        .map(line_from_row)
         .collect::<Result<Vec<_>, RepoError>>()?;
+    cart_from_row(&row, id, lines).map(Some)
+}
+
+/// Every cart of `customer`, oldest first, in 2 queries for all of them (run inside
+/// `consistent_read`): the rows, then every line of theirs.
+async fn load_carts_of(
+    client: &impl Queries,
+    customer: CustomerId,
+) -> Result<Vec<Cart>, RepoError> {
+    let rows = client
+        .query_typed(
+            &format!("{} WHERE customer_id = $1 ORDER BY id", select_carts()),
+            &[(&customer.as_uuid(), Type::UUID)],
+        )
+        .await
+        .map_err(repo_error)?;
+    let ids: Vec<Uuid> = rows
+        .iter()
+        .map(|row| col(row, "id"))
+        .collect::<Result<_, RepoError>>()?;
+    let mut lines: HashMap<Uuid, Vec<CartLineSnapshot>> = HashMap::new();
+    for row in client
+        .query_typed(
+            "SELECT cart_id, product_id, variant_id, quantity FROM cart_lines
+             WHERE cart_id = ANY($1) ORDER BY cart_id, position",
+            &[(&ids, Type::UUID_ARRAY)],
+        )
+        .await
+        .map_err(repo_error)?
+        .iter()
+    {
+        lines
+            .entry(col(row, "cart_id")?)
+            .or_default()
+            .push(line_from_row(row)?);
+    }
+    rows.iter()
+        .map(|row| {
+            let id: Uuid = col(row, "id")?;
+            cart_from_row(
+                row,
+                CartId::from_uuid(id),
+                lines.remove(&id).unwrap_or_default(),
+            )
+        })
+        .collect()
+}
+
+/// The cart columns a load reads, without the `WHERE`.
+fn select_carts() -> String {
+    format!(
+        "SELECT id, version, market_id, country, email, customer_id, order_id, channel_id,
+                payment_method_id, marketing_opt_in, {},
+                shipping_option_id, quote_amount, quote_currency, quote_provider,
+                quote_service, quote_reference, {}, {}
+         FROM carts",
+        address_columns("shipping_"),
+        micros("quoted_at"),
+        stamp_columns(""),
+    )
+}
+
+fn line_from_row(line: &Row) -> Result<CartLineSnapshot, RepoError> {
+    let quantity: i64 = col(line, "quantity")?;
+    Ok(CartLineSnapshot {
+        product: ProductId::from_uuid(col(line, "product_id")?),
+        variant: VariantId::from_uuid(col(line, "variant_id")?),
+        quantity: u32::try_from(quantity)
+            .map_err(|_| corrupt(format!("cart quantity {quantity}")))?,
+    })
+}
+
+fn cart_from_row(row: &Row, id: CartId, lines: Vec<CartLineSnapshot>) -> Result<Cart, RepoError> {
     let country: String = col(&row, "country")?;
     let email: Option<String> = col(&row, "email")?;
     let snapshot = CartSnapshot {
@@ -305,7 +350,5 @@ async fn load_cart(client: &impl Queries, id: CartId) -> Result<Option<Cart>, Re
             }),
         },
     };
-    Cart::restore(snapshot)
-        .map(Some)
-        .map_err(|e| corrupt(format!("cart {id}: {e}")))
+    Cart::restore(snapshot).map_err(|e| corrupt(format!("cart {id}: {e}")))
 }

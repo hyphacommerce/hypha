@@ -171,7 +171,13 @@ fn an_erasure_is_requested_after_the_window_and_can_be_cancelled() {
         ))
     );
     // Not due yet: the job does nothing.
-    assert_eq!(block_on(erase_due(&ports, &clock, 10)).unwrap().done, 0);
+    assert_eq!(
+        block_on(erase_due(&ports, &clock, 10))
+            .unwrap()
+            .progress
+            .done,
+        0
+    );
     let ana = block_on(cancel_erasure(&eraser(), &ports, ana_id())).unwrap();
     assert_eq!(ana.erasure_due_at(), None);
     assert_eq!(
@@ -286,16 +292,23 @@ fn the_job_erases_what_is_due() {
     ))
     .unwrap();
     let later = FixedClock::at(clock.now().plus(Duration::from_secs(3601)));
-    let progress = block_on(erase_due(&ports, &later, 10)).unwrap();
-    assert_eq!(progress.done, 1);
-    assert!(!progress.more);
+    let run = block_on(erase_due(&ports, &later, 10)).unwrap();
+    assert_eq!(run.progress.done, 1);
+    assert!(!run.progress.more);
+    assert!(run.failed.is_empty());
     assert!(
         block_on(ports.customers.get(ana_id()))
             .unwrap()
             .unwrap()
             .is_erased()
     );
-    assert_eq!(block_on(erase_due(&ports, &later, 10)).unwrap().done, 0);
+    assert_eq!(
+        block_on(erase_due(&ports, &later, 10))
+            .unwrap()
+            .progress
+            .done,
+        0
+    );
 }
 
 #[test]
