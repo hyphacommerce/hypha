@@ -6,7 +6,9 @@ import { type SearchParams, one, oneOf } from "@/components/resource-table/param
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { fieldQuery, isFilterOffered } from "@/lib/custom-fields";
 import { definitionsOf } from "@/lib/custom-fields-server";
-import { sessionClient } from "@/lib/hypha";
+import { requireStaff, sessionClient } from "@/lib/hypha";
+import { hasScope } from "@/lib/navigation";
+import { wellKnownField } from "@/lib/well-known-fields";
 import { CustomersTable } from "@/resources/customers";
 
 const SORTS = ["newest", "oldest", "email_asc", "email_desc", "name_asc", "name_desc"] as const;
@@ -18,8 +20,11 @@ export default async function CustomersPage({
 }) {
   const params = await searchParams;
   const client = await sessionClient();
-  // Filterable custom fields (design note 0033, §7).
-  const fieldFilters = (await definitionsOf("customer")).filter(isFilterOffered);
+  const [definitions, me] = await Promise.all([definitionsOf("customer"), requireStaff()]);
+  // Filterable custom fields (design note 0033, §7); the labels field (design note 0032,
+  // CD1) also gets a column and the selection bar's actions.
+  const fieldFilters = definitions.filter(isFilterOffered);
+  const labels = wellKnownField(definitions, "labels");
   const result = await client.GET("/admin/customers", {
     params: {
       query: {
@@ -27,6 +32,7 @@ export default async function CustomersPage({
         q: one(params, "q"),
         sort: oneOf(params, "sort", SORTS),
         field: fieldQuery(params, fieldFilters),
+        custom_fields: labels?.field,
       },
     },
   });
@@ -36,7 +42,12 @@ export default async function CustomersPage({
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader title="Customers" />
-        <CustomersTable page={page} fieldFilters={fieldFilters} />
+        <CustomersTable
+          page={page}
+          fieldFilters={fieldFilters}
+          labels={labels}
+          canLabel={hasScope(me.scopes, "customers:write")}
+        />
       </VStack>
     </Section>
   );

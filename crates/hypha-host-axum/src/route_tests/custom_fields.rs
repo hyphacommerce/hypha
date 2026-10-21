@@ -1115,3 +1115,65 @@ async fn webhooks_carry_only_the_entries_the_app_may_read() {
         json!([{"key": "custom.tier", "value": "gold"}])
     );
 }
+
+/// Design note 0032, CD11: the well-known customer fields are offered with the body that
+/// creates them, and marked taken once the merchant has a definition of their key.
+#[tokio::test]
+async fn suggested_fields_are_offered_until_created() {
+    let app = app().await;
+    let path = "/admin/custom-field-definitions/suggestions?owner_type=customer";
+    let (status, list) = send(&app, "GET", path, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let items = list["items"].as_array().unwrap();
+    let keys: Vec<&str> = items.iter().map(|i| i["key"].as_str().unwrap()).collect();
+    assert_eq!(keys, ["tags", "note"]);
+    assert!(items.iter().all(|i| i["existing"].is_null()), "{list}");
+    let note = &items[1];
+    assert_eq!(note["field"], "custom.note");
+    assert_eq!(note["type"], "multiline_text");
+    assert_eq!(note["personal"], true);
+    assert_eq!(items[0]["type"], "list.text");
+    assert_eq!(items[0]["capabilities"]["filterable"], true);
+    assert_eq!(items[0]["validations"]["unique_items"], true);
+
+    // Creating one is sending the suggestion back as it is, minus what describes it.
+    let mut body = note.clone();
+    for key in ["field", "why", "existing"] {
+        body.as_object_mut().unwrap().remove(key);
+    }
+    let created = define(&app, body).await;
+    assert_eq!(created["field"], "custom.note");
+    assert_eq!(created["validations"]["max_length"], 5000);
+    assert_eq!(created["personal"], true);
+
+    let (_, list) = send(&app, "GET", path, None).await;
+    assert_eq!(list["items"][1]["existing"], created["id"]);
+    assert_eq!(list["items"][0]["existing"], Value::Null);
+
+    // Taken by key alone: a merchant's own `tags` of another shape counts.
+    define(
+        &app,
+        json!({"owner_type": "customer", "key": "tags", "type": "text", "name": "Tag"}),
+    )
+    .await;
+    let (_, list) = send(&app, "GET", path, None).await;
+    assert!(list["items"][0]["existing"].is_string(), "{list}");
+
+    // Products have no suggestions; without an owner type, every type's come.
+    let (_, none) = send(
+        &app,
+        "GET",
+        "/admin/custom-field-definitions/suggestions?owner_type=product",
+        None,
+    )
+    .await;
+    assert_eq!(none["items"].as_array().unwrap().len(), 0);
+    let (_, all) = send(
+        &app,
+        "GET",
+        "/admin/custom-field-definitions/suggestions",
+        None,
+    )
+    .await;
+    assert_eq!(all["items"].as_array().unwrap().len(), 2);
+}

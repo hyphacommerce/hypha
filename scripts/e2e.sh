@@ -1199,6 +1199,14 @@ step "an unknown type" 422 - -X POST "$CFD" -H "$JSON" \
 step "a personal customer field" 201 - -X POST "$CFD" -H "$JSON" \
     -d '{"owner_type":"customer","key":"tags","type":"list.text","name":"Tags","personal":true,"validations":{"unique_items":true},"capabilities":{"filterable":true}}'
 TAGS_FIELD=$(id)
+step "the suggested customer fields (design note 0032, CD11)" 200 - "$CFD/suggestions?owner_type=customer"
+contains "labels are taken by the tags field" "\"existing\":\"$TAGS_FIELD\""
+contains "the note is offered" '"field":"custom.note"'
+step "create the note as suggested" 201 - -X POST "$CFD" -H "$JSON" \
+    -d '{"owner_type":"customer","key":"note","type":"multiline_text","name":"Note","personal":true,"validations":{"max_length":5000}}'
+NOTE_FIELD=$(id)
+step "the note is taken now" 200 - "$CFD/suggestions?owner_type=customer"
+contains "by its ID" "\"existing\":\"$NOTE_FIELD\""
 step "an order field" 201 - -X POST "$CFD" -H "$JSON" \
     -d '{"owner_type":"order","key":"gift","type":"boolean","name":"Gift","capabilities":{"filterable":true}}'
 GIFT_FIELD=$(id)

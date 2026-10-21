@@ -22,9 +22,15 @@ export default async function CustomFieldsSettingsPage({
   const owner =
     typeof query.owner === "string" && isOwnerType(query.owner) ? query.owner : "product";
   const client = await sessionClient();
-  const [definitions, me] = await Promise.all([
+  const [definitions, suggestions, me] = await Promise.all([
     client
       .GET("/admin/custom-field-definitions", { params: { query: { owner_type: owner } } })
+      .then(loaded),
+    // The well-known fields the API suggests for this owner type (design note 0032, CD11).
+    client
+      .GET("/admin/custom-field-definitions/suggestions", {
+        params: { query: { owner_type: owner } },
+      })
       .then(loaded),
     requireStaff(),
   ]);
@@ -41,6 +47,7 @@ export default async function CustomFieldsSettingsPage({
           key={owner}
           owner={owner}
           definitions={definitions.items.toSorted((a, b) => a.position - b.position)}
+          suggestions={suggestions.items.filter((s) => !s.existing)}
           canWrite={hasScope(me.scopes, "custom_fields:write")}
         />
       </VStack>

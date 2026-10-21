@@ -549,13 +549,22 @@ routes, OpenAPI, SDK and e2e steps:
    filter, order statistics on the customer response (`orders_count`, `first_order_at`,
    `last_order_at`, `amount_spent` per currency, over placed orders that aren't
    cancelled), and the admin customer page using them instead of `/orders?q=<email>`.
-2. **Editing and the well-known fields (CD11):**
+2. **Editing and the well-known fields (CD11)** (built 2026-10-21):
    - Admin: edit forms for the customer's own fields and addresses (none exist yet).
    - The suggested definitions `custom.tags` and `custom.note` (a `suggestions` list in
      `hypha-custom-fields` per owner type, offered by the admin and created through the
      ordinary definitions route; `pnpm seed` creates them), labels rendered as chips
      under the name with values-in-use autocomplete, the note as its own card, a
      "Labels" filter on the list and "add / remove a label on selected".
+   - As built: `hypha_custom_fields::suggestions` (`suggestions.rs`) and
+     `GET /admin/custom-field-definitions/suggestions` (`?owner_type=`), each item the
+     create body plus `why` and `existing`; the admin's Settings → Custom fields shows a
+     "Suggested" card for what's missing, and the customer page offers "Add labels" /
+     "Add a note field" in place to staff with `custom_fields:write`. The admin renders a
+     well-known field in place only when it has the suggested type (`list.text`,
+     `multiline_text`); a merchant's `custom.tags` of another type is an ordinary field.
+     The labels filter is 0033's generic field filter (`field[custom.tags]`), and the
+     bulk action is the items route (`POST /admin/custom-fields/{definition}/items`).
 3. **Delete:** `can_delete`, `customer.deleted`, the admin's delete button
    (`CustomFieldCleanup` already follows the event).
 4. **Marketing consent:**

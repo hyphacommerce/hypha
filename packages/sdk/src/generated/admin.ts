@@ -928,6 +928,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/custom-field-definitions/suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The well-known fields a merchant may want (design note 0032, CD11: customers' labels
+         *     `custom.tags` and note `custom.note`), each with the body that creates it and the
+         *     merchant's definition of its key when there is one. They're conventions: nothing
+         *     creates them but a click here or `pnpm seed`.
+         */
+        get: operations["admin.custom_fields.suggestions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/custom-field-definitions/{id}": {
         parameters: {
             query?: never;
@@ -4528,11 +4550,11 @@ export interface components {
              * @description Items to add where they're missing (each once; text ignoring case when the field
              *     has `unique_items`).
              */
-            add?: Record<string, never>[];
+            add?: unknown[];
             /** @description 1 to 250 owners of the definition's owner type (`cus_…` for a customer field). */
             owners: string[];
             /** @description Items to remove where they're present. */
-            remove?: Record<string, never>[];
+            remove?: unknown[];
         };
         ListItemsResponse: {
             /** @description In the call's order, each owner once. */
@@ -5006,9 +5028,9 @@ export interface components {
         /** @description One owner's list after the change. */
         OwnerItemsResponse: {
             /** @description What this call added to its list (empty: nothing changed). */
-            added: Record<string, never>[];
+            added: unknown[];
             owner: string;
-            removed: Record<string, never>[];
+            removed: unknown[];
             /**
              * Format: int64
              * @description The value's version after; `null` when the list is empty (the value is gone).
@@ -5942,6 +5964,30 @@ export interface components {
             /** @description How far the admin's setup guide got (design note 0024, AU11). */
             setup: components["schemas"]["SetupProgressResponse"];
             timezone?: components["schemas"]["Timezone"] | null;
+        };
+        SuggestedDefinitionList: {
+            /** @description In the order the admin shows them. */
+            items: components["schemas"]["SuggestedDefinitionResponse"][];
+        };
+        /**
+         * @description A field worth having (design note 0032, CD11): the body `POST
+         *     /admin/custom-field-definitions` takes to create it, and why.
+         */
+        SuggestedDefinitionResponse: {
+            access: components["schemas"]["CustomFieldAccess"];
+            capabilities: components["schemas"]["CustomFieldCapabilities"];
+            description?: string | null;
+            existing?: components["schemas"]["CustomFieldDefinitionId"] | null;
+            /** @description `custom.<key>`: what values, filters and events would name it by. */
+            field: string;
+            key: string;
+            name: string;
+            owner_type: components["schemas"]["OwnerTypeDto"];
+            personal: boolean;
+            type: string;
+            validations: components["schemas"]["CustomFieldValidations"];
+            /** @description One sentence for staff: what the field is for. */
+            why: string;
         };
         /**
          * @description A TaxClassId: `txc_` and 32 hex digits.
@@ -12280,6 +12326,65 @@ export interface operations {
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.custom_fields.suggestions": {
+        parameters: {
+            query?: {
+                /** @description Only this owner type's. */
+                owner_type?: "product" | "variant" | "category" | "customer" | "order";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuggestedDefinitionList"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

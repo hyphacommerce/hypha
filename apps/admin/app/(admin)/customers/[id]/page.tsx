@@ -1,11 +1,9 @@
-import { Badge } from "@astryxdesign/core/Badge";
 import { Card } from "@astryxdesign/core/Card";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
-import type { AdminSchemas } from "@hypha/sdk/admin";
 
 import { AppSlot } from "@/components/app-extensions/app-slot";
 import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
@@ -16,32 +14,13 @@ import { customerName, formatMoney } from "@/lib/format";
 import { loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
 import { loadCountries, loadCurrencies, loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import { hasScope } from "@/lib/navigation";
+import { wellKnownField, withoutWellKnown } from "@/lib/well-known-fields";
 
-type Address = AdminSchemas["AddressResponse"];
-
-/** An address as it would be written on a parcel. */
-function AddressLines({ address, country }: { address: Address; country: string }) {
-  // Each line by what it holds, which is also its key; blank ones are left out.
-  const lines = Object.entries({
-    name: [address.first_name, address.last_name].filter(Boolean).join(" "),
-    company: address.company,
-    line1: address.line1,
-    line2: address.line2,
-    city: [address.postal_code, address.city].filter(Boolean).join(" "),
-    province: address.province,
-    country,
-    phone: address.phone,
-  }).filter(([, line]) => line);
-  return (
-    <VStack gap={0.5}>
-      {lines.map(([part, line], i) => (
-        <Text key={part} color={i === 0 ? "primary" : "secondary"}>
-          {line}
-        </Text>
-      ))}
-    </VStack>
-  );
-}
+import { AddressesCard } from "./addresses";
+import { EditCustomer } from "./edit-customer";
+import { CustomerLabels } from "./labels";
+import { NoteCard } from "./note";
 
 export default async function CustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -63,8 +42,14 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
   });
   const orders = recent.data?.items ?? [];
   const stats = customer.orders;
-  const countryName = new Map(countries.map((c) => [c.code, c.name]));
   const name = customerName(customer);
+  const canWrite = hasScope(me.scopes, "customers:write");
+  const canDefine = hasScope(me.scopes, "custom_fields:write");
+  // The well-known fields (design note 0032, CD11) are rendered in place: labels under
+  // the name, the note as its own card; the rest on the custom fields card.
+  const labels = wellKnownField(definitions, "labels");
+  const note = wellKnownField(definitions, "note");
+  const otherFields = withoutWellKnown(definitions);
 
   return (
     <Section padding={6}>
@@ -72,6 +57,16 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
         <PageHeader
           title={name || customer.email}
           back={{ label: "Customers", href: "/customers" }}
+          badges={
+            <CustomerLabels
+              customerId={customer.id}
+              definition={labels}
+              fields={fields.data}
+              canEdit={canWrite}
+              canDefine={canDefine}
+            />
+          }
+          actions={canWrite && <EditCustomer customer={customer} />}
         />
         <div className="detail-columns">
           <div>
@@ -116,6 +111,13 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                 )}
               </VStack>
             </Card>
+            <NoteCard
+              customerId={customer.id}
+              definition={note}
+              fields={fields.data}
+              canEdit={canWrite}
+              canDefine={canDefine}
+            />
           </div>
           <div>
             <Card>
@@ -151,42 +153,19 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                 </MetadataList>
               </VStack>
             </Card>
-            <Card>
-              <VStack gap={3}>
-                <Text type="display-3" as="h2">
-                  Addresses
-                </Text>
-                {customer.addresses.length === 0 ? (
-                  <Text color="secondary">
-                    No saved addresses. Checkout keeps an order&apos;s address on the order.
-                  </Text>
-                ) : (
-                  <VStack gap={4}>
-                    {customer.addresses.map((address) => (
-                      <VStack key={address.id} gap={2}>
-                        <HStack gap={1}>
-                          {customer.default_shipping_address === address.id && (
-                            <Badge label="Default shipping" />
-                          )}
-                          {customer.default_billing_address === address.id && (
-                            <Badge label="Default billing" />
-                          )}
-                        </HStack>
-                        <AddressLines
-                          address={address}
-                          country={countryName.get(address.country) ?? address.country}
-                        />
-                      </VStack>
-                    ))}
-                  </VStack>
-                )}
-              </VStack>
-            </Card>
-            {definitions.length > 0 && fields.data && (
+            <AddressesCard
+              customer={customer.id}
+              addresses={customer.addresses}
+              defaultShipping={customer.default_shipping_address}
+              defaultBilling={customer.default_billing_address}
+              countries={countries}
+              canWrite={canWrite}
+            />
+            {otherFields.length > 0 && fields.data && (
               <CustomFieldsCard
                 ownerType="customer"
                 ownerId={customer.id}
-                definitions={definitions}
+                definitions={otherFields}
                 fields={fields.data}
                 scopes={me.scopes}
               />

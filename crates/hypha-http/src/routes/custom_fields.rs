@@ -23,7 +23,7 @@ use hypha_custom_fields::{
     ReferenceKind, ReferenceTargets, SetCustomFields, StorefrontAccess, change_list_items,
     create_definition, definitions_for, delete_definition, field_filter, get_definition,
     list_definitions, move_definition, read_custom_fields, set_custom_fields, set_field_values,
-    storefront_definitions, update_definition, values_in_use,
+    storefront_definitions, suggested_definitions, update_definition, values_in_use,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -549,6 +549,78 @@ pub async fn list<S: Storage>(
             .iter()
             .map(CustomFieldDefinitionResponse::new)
             .collect::<Result<_, _>>()?,
+    }))
+}
+
+/// A field worth having (design note 0032, CD11): the body `POST
+/// /admin/custom-field-definitions` takes to create it, and why.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct SuggestedDefinitionResponse {
+    owner_type: OwnerTypeDto,
+    key: String,
+    /// `custom.<key>`: what values, filters and events would name it by.
+    field: String,
+    #[serde(rename = "type")]
+    field_type: String,
+    name: String,
+    description: Option<String>,
+    validations: ValidationsDto,
+    access: AccessDto,
+    personal: bool,
+    capabilities: CapabilitiesDto,
+    /// One sentence for staff: what the field is for.
+    why: String,
+    /// The merchant's definition with this key, when it exists: the suggestion is then
+    /// taken, whatever else changed about it.
+    existing: Option<CustomFieldDefinitionId>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct SuggestedDefinitionList {
+    /// In the order the admin shows them.
+    items: Vec<SuggestedDefinitionResponse>,
+}
+
+/// The well-known fields a merchant may want (design note 0032, CD11: customers' labels
+/// `custom.tags` and note `custom.note`), each with the body that creates it and the
+/// merchant's definition of its key when there is one. They're conventions: nothing
+/// creates them but a click here or `pnpm seed`.
+#[utoipa::path(
+    get,
+    path = "/admin/custom-field-definitions/suggestions",
+    params(DefinitionFilters),
+    responses((status = 200, description = "OK", body = SuggestedDefinitionList)),
+    extensions(("x-hypha-scopes" = json!(["custom_fields:read"]))),
+)]
+pub async fn suggestions<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    query: Query<DefinitionFilters>,
+) -> Result<Json<SuggestedDefinitionList>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let filters = query.parse()?;
+    let suggested = suggested_definitions(&ctx, &ports, filters.owner_type.map(Into::into)).await?;
+    Ok(Json(SuggestedDefinitionList {
+        items: suggested
+            .into_iter()
+            .map(|s| {
+                let spec = s.suggestion.spec;
+                SuggestedDefinitionResponse {
+                    owner_type: spec.owner_type.into(),
+                    field: format!("custom.{}", spec.key),
+                    key: spec.key,
+                    field_type: spec.field_type.to_string(),
+                    name: spec.name,
+                    description: spec.description,
+                    validations: spec.validations.into(),
+                    access: spec.access.into(),
+                    personal: spec.personal,
+                    capabilities: spec.capabilities.into(),
+                    why: s.suggestion.why.to_string(),
+                    existing: s.existing,
+                }
+            })
+            .collect(),
     }))
 }
 
@@ -1229,11 +1301,11 @@ pub struct ListItemsRequest {
     /// Items to add where they're missing (each once; text ignoring case when the field
     /// has `unique_items`).
     #[serde(default)]
-    #[schema(value_type = Vec<Object>)]
+    #[schema(value_type = Vec<serde_json::Value>)]
     add: Vec<Value>,
     /// Items to remove where they're present.
     #[serde(default)]
-    #[schema(value_type = Vec<Object>)]
+    #[schema(value_type = Vec<serde_json::Value>)]
     remove: Vec<Value>,
 }
 
@@ -1242,9 +1314,9 @@ pub struct ListItemsRequest {
 pub struct OwnerItemsResponse {
     owner: String,
     /// What this call added to its list (empty: nothing changed).
-    #[schema(value_type = Vec<Object>)]
+    #[schema(value_type = Vec<serde_json::Value>)]
     added: Vec<Value>,
-    #[schema(value_type = Vec<Object>)]
+    #[schema(value_type = Vec<serde_json::Value>)]
     removed: Vec<Value>,
     /// The value's version after; `null` when the list is empty (the value is gone).
     version: Option<u64>,

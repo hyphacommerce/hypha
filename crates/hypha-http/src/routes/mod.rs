@@ -269,6 +269,7 @@ macro_rules! route_table {
             // custom fields (design note 0033)
             [admin, GET, "/admin/custom-field-definitions", custom_fields::list],
             [admin, POST, "/admin/custom-field-definitions", custom_fields::create],
+            [admin, GET, "/admin/custom-field-definitions/suggestions", custom_fields::suggestions],
             [admin, GET, "/admin/custom-field-definitions/{id}", custom_fields::fetch],
             [admin, PATCH, "/admin/custom-field-definitions/{id}", custom_fields::update],
             [admin, DELETE, "/admin/custom-field-definitions/{id}", custom_fields::remove],

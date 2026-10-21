@@ -102,3 +102,26 @@ export async function markOrdersPaid(orders: (Item & { pending: boolean })[]): P
   revalidatePath("/orders");
   return result;
 }
+
+/**
+ * Adds `label` to, or removes it from, the customers' labels (`custom.tags`, design note
+ * 0032, CD1): one call, done under each value's lock, so concurrent writers both land
+ * (design note 0033, CF6). A customer that has (or lacks) it already is unchanged.
+ */
+export async function setCustomersLabel(
+  definition: string,
+  customers: Item[],
+  label: string,
+  add: boolean,
+): Promise<BulkResult> {
+  const client = await sessionClient();
+  const owners = customers.map((c) => c.id);
+  const { data, error } = await client.POST("/admin/custom-fields/{definition}/items", {
+    params: { path: { definition } },
+    body: { owners, add: add ? [label] : [], remove: add ? [] : [label] },
+  });
+  revalidatePath("/customers");
+  if (error) return { changed: 0, unchanged: 0, failed: [], error: describe(error) };
+  const changed = data.items.filter((i) => i.added.length > 0 || i.removed.length > 0).length;
+  return { changed, unchanged: owners.length - changed, failed: [] };
+}

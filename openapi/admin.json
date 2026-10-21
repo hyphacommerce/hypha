@@ -4515,9 +4515,7 @@
         "properties": {
           "add": {
             "description": "Items to add where they're missing (each once; text ignoring case when the field\nhas `unique_items`).",
-            "items": {
-              "type": "object"
-            },
+            "items": {},
             "type": "array"
           },
           "owners": {
@@ -4529,9 +4527,7 @@
           },
           "remove": {
             "description": "Items to remove where they're present.",
-            "items": {
-              "type": "object"
-            },
+            "items": {},
             "type": "array"
           }
         },
@@ -5909,18 +5905,14 @@
         "properties": {
           "added": {
             "description": "What this call added to its list (empty: nothing changed).",
-            "items": {
-              "type": "object"
-            },
+            "items": {},
             "type": "array"
           },
           "owner": {
             "type": "string"
           },
           "removed": {
-            "items": {
-              "type": "object"
-            },
+            "items": {},
             "type": "array"
           },
           "version": {
@@ -8411,6 +8403,88 @@
           "name",
           "default_language",
           "setup"
+        ],
+        "type": "object"
+      },
+      "SuggestedDefinitionList": {
+        "properties": {
+          "items": {
+            "description": "In the order the admin shows them.",
+            "items": {
+              "$ref": "#/components/schemas/SuggestedDefinitionResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "SuggestedDefinitionResponse": {
+        "description": "A field worth having (design note 0032, CD11): the body `POST\n/admin/custom-field-definitions` takes to create it, and why.",
+        "properties": {
+          "access": {
+            "$ref": "#/components/schemas/CustomFieldAccess"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/CustomFieldCapabilities"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "existing": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CustomFieldDefinitionId",
+                "description": "The merchant's definition with this key, when it exists: the suggestion is then\ntaken, whatever else changed about it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "field": {
+            "description": "`custom.<key>`: what values, filters and events would name it by.",
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_type": {
+            "$ref": "#/components/schemas/OwnerTypeDto"
+          },
+          "personal": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
+          },
+          "validations": {
+            "$ref": "#/components/schemas/CustomFieldValidations"
+          },
+          "why": {
+            "description": "One sentence for staff: what the field is for.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_type",
+          "key",
+          "field",
+          "type",
+          "name",
+          "validations",
+          "access",
+          "personal",
+          "capabilities",
+          "why"
         ],
         "type": "object"
       },
@@ -17308,6 +17382,95 @@
         ],
         "x-hypha-scopes": [
           "custom_fields:write"
+        ]
+      }
+    },
+    "/admin/custom-field-definitions/suggestions": {
+      "get": {
+        "operationId": "admin.custom_fields.suggestions",
+        "parameters": [
+          {
+            "description": "Only this owner type's.",
+            "in": "query",
+            "name": "owner_type",
+            "required": false,
+            "schema": {
+              "description": "The kinds of record fields belong to.\n\nKnown values: `product`, `variant`, `category`, `customer`, `order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "product",
+                "variant",
+                "category",
+                "customer",
+                "order"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuggestedDefinitionList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The well-known fields a merchant may want (design note 0032, CD11: customers' labels\n`custom.tags` and note `custom.note`), each with the body that creates it and the\nmerchant's definition of its key when there is one. They're conventions: nothing\ncreates them but a click here or `pnpm seed`.",
+        "tags": [
+          "custom_fields"
+        ],
+        "x-hypha-scopes": [
+          "custom_fields:read"
         ]
       }
     },
