@@ -5,12 +5,15 @@ use hypha_core::Stamped;
 use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::{
-    AddressId, AddressParts, CountryCode, CustomerId, Email, Keyset, Money, Scope, SortKey,
+    AddressId, AddressParts, CountryCode, CustomerGroupId, CustomerId, Email, Keyset, Money, Scope,
+    SortKey,
 };
 use hypha_customers::{
-    CreateCustomer, Customer, CustomerSort, CustomerSummary, HasCustomers, SaveAddress,
-    SavedAddress, UpdateCustomer, add_address, create_customer, get_customer, list_customers,
-    remove_address, update_address, update_customer,
+    Channel, ConsentChange, ConsentSource, ConsentState, CreateCustomer, Customer, CustomerSort,
+    CustomerSummary, HasCustomerGroups, HasCustomers, MarketingConsent, OptInLevel, SaveAddress,
+    SavedAddress, UpdateCustomer, add_address, create_customer, get_customer, groups_of_customers,
+    list_customers, remove_address, set_customer_groups, set_marketing_consent, update_address,
+    update_customer,
 };
 use serde::{Deserialize, Serialize};
 
@@ -115,6 +118,27 @@ pub struct CustomerResponse {
     custom_fields: CustomFieldValues,
     /// What the customer's orders add up to (design note 0032).
     orders: OrderStatsResponse,
+    /// The customer groups it's in (design note 0032, §6), sorted; `PUT
+    /// /admin/customers/{id}/groups` sets them.
+    groups: Vec<CustomerGroupId>,
+    /// Consent to marketing by email (design note 0032, §5); `PUT
+    /// /admin/customers/{id}/marketing/email` changes it.
+    email_marketing: ConsentResponse,
+    /// Consent to marketing by SMS; needs a phone.
+    sms_marketing: ConsentResponse,
+    /// When the customer's personal data was erased, RFC 3339 in UTC (design note 0032,
+    /// §7.3): the customer is read-only then and its email a placeholder.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    erased_at: Option<String>,
+    /// When a requested erasure runs, RFC 3339 in UTC; absent without a request. `DELETE
+    /// /admin/customers/{id}/erasure` cancels it until then.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    erasure_due_at: Option<String>,
+    /// Whether `DELETE /admin/customers/{id}` would work: only while the customer has no
+    /// orders, cancelled ones included (design note 0032, CD7). Otherwise erase it.
+    can_delete: bool,
     /// When it was created, RFC 3339 in UTC.
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
@@ -169,6 +193,145 @@ impl From<&SavedAddress> for AddressResponse {
     }
 }
 
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetCustomerGroupsRequest {
+    /// The groups the customer is in afterwards: added to the new ones, removed from the
+    /// rest. Every group must exist (`422 customer_group_not_found`).
+    groups: Vec<CustomerGroupId>,
+}
+
+/// Makes `groups` the customer's groups (design note 0032, §6): one write, an event per
+/// group whose membership changed.
+#[utoipa::path(
+    put,
+    path = "/admin/customers/{id}/groups",
+    params(("id" = CustomerId, Path)),
+    request_body = SetCustomerGroupsRequest,
+    responses((status = 200, description = "OK", body = CustomerResponse)),
+    extensions(("x-hypha-scopes" = json!(["customers:write"]))),
+)]
+pub async fn set_groups<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<CustomerId>,
+    body: JsonBody<SetCustomerGroupsRequest>,
+) -> Result<Json<Redacted>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    set_customer_groups(&ctx, &ports, id, req.groups)
+        .await
+        .map_err(|e| match e {
+            hypha_customers::CommandError::CustomerNotFound(c) if c == id => {
+                ApiError::from(e).not_found_if("customer_not_found")
+            }
+            e => e.into(),
+        })?;
+    let customer = get_customer(&ctx, ports.customers(), id).await?;
+    Ok(Json(respond(&ctx, &ports, &customer).await?))
+}
+
+/// A channel's marketing consent (design note 0032, §5).
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct ConsentResponse {
+    /// `not_subscribed` (never asked), `pending`, `subscribed`, `unsubscribed`, or
+    /// `redacted` (erased).
+    #[schema(value_type = String)]
+    state: ConsentState,
+    /// `single`, `confirmed` (double opt-in) or `unknown`.
+    #[schema(value_type = String)]
+    opt_in_level: OptInLevel,
+    /// When the customer last said so, RFC 3339 in UTC; absent while never asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    consented_at: Option<String>,
+    /// Where it came from: `checkout`, `storefront`, `admin`, `import`, `system`, or
+    /// `app:<appid_…>`; absent while never asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    source: Option<String>,
+}
+
+impl ConsentResponse {
+    fn new(c: MarketingConsent) -> Result<Self, ApiError> {
+        Ok(Self {
+            state: c.state,
+            opt_in_level: c.opt_in_level,
+            consented_at: c.consented_at.map(super::rfc3339).transpose()?,
+            source: c.source.map(ConsentSource::as_text),
+        })
+    }
+}
+
+/// What a consent write asks for. The source is the caller's (an app is itself, staff
+/// and keys are `admin`), never input.
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetConsentRequest {
+    /// `pending`, `subscribed` or `unsubscribed`: `not_subscribed` is the starting
+    /// state and `redacted` erasure's, so neither can be asked for.
+    #[schema(value_type = String)]
+    state: ConsentState,
+    /// `single`, `confirmed` or `unknown` (the default).
+    #[serde(default)]
+    #[schema(value_type = String)]
+    opt_in_level: OptInLevel,
+    /// When the customer said so, RFC 3339; default now. The newest consent wins: a
+    /// write older than the stored one changes nothing (`applied: false`).
+    #[serde(default, deserialize_with = "super::payments::instant")]
+    #[schema(value_type = Option<String>)]
+    consented_at: Option<hypha_core::Timestamp>,
+}
+
+/// A consent write's outcome: whether it changed anything, and the customer as it is.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct ConsentUpdateResponse {
+    /// `false` when a newer consent is stored, or nothing changed.
+    applied: bool,
+    #[schema(value_type = CustomerResponse)]
+    customer: Redacted,
+}
+
+/// Records a customer's marketing consent for a channel (`email` or `sms`; design note
+/// 0032, §5). The newest `consented_at` wins, so a delayed sync can't overwrite a newer
+/// opt-out: an older write answers `applied: false`. SMS needs a phone (`409
+/// consent_needs_phone`); an erased customer is read-only (`409 customer_erased`).
+#[utoipa::path(
+    put,
+    path = "/admin/customers/{id}/marketing/{channel}",
+    params(
+        ("id" = CustomerId, Path),
+        ("channel" = String, Path, description = "`email` or `sms`", example = "email")
+    ),
+    request_body = SetConsentRequest,
+    responses((status = 200, description = "OK", body = ConsentUpdateResponse)),
+    extensions(("x-hypha-scopes" = json!(["customers:write"]))),
+)]
+pub async fn set_consent<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId((id, channel)): PathId<(CustomerId, String)>,
+    body: JsonBody<SetConsentRequest>,
+) -> Result<Json<ConsentUpdateResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    // Only `email` and `sms` exist under `/marketing/`: anything else is no route.
+    let Some(channel) = Channel::parse(&channel) else {
+        return Err(ApiError::route_not_found());
+    };
+    let req = body.parse()?;
+    let change = ConsentChange {
+        state: req.state,
+        opt_in_level: req.opt_in_level,
+        consented_at: req.consented_at,
+    };
+    let (customer, applied) =
+        set_marketing_consent(&ctx, ports.customers(), &state.clock, id, channel, change).await?;
+    Ok(Json(ConsentUpdateResponse {
+        applied,
+        customer: respond(&ctx, &ports, &customer).await?,
+    }))
+}
+
 /// A customer's orders, added up over those that weren't cancelled (design note 0032,
 /// §8): `GET /admin/orders?customer=` lists them.
 #[derive(Serialize, utoipa::ToSchema)]
@@ -185,6 +348,9 @@ pub struct OrderStatsResponse {
     last_placed_at: Option<String>,
     /// Their totals, one per currency the customer paid in, by currency code.
     amount_spent: Vec<Money>,
+    /// How many of the customer's orders were cancelled: counted apart, since they add
+    /// up to nothing, but they still keep the customer from being deleted.
+    cancelled: u64,
 }
 
 impl OrderStatsResponse {
@@ -194,6 +360,7 @@ impl OrderStatsResponse {
             first_placed_at: s.first_order_at.map(super::rfc3339).transpose()?,
             last_placed_at: s.last_order_at.map(super::rfc3339).transpose()?,
             amount_spent: s.amount_spent,
+            cancelled: s.cancelled_count,
         })
     }
 }
@@ -203,12 +370,19 @@ impl CustomerResponse {
         c: &Customer,
         custom_fields: CustomFieldValues,
         orders: OrderStats,
+        groups: Vec<CustomerGroupId>,
     ) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(c.stamps())?;
         Ok(Self {
             created_at,
             updated_at,
+            groups,
+            can_delete: orders.orders_count + orders.cancelled_count == 0,
             orders: OrderStatsResponse::new(orders)?,
+            email_marketing: ConsentResponse::new(c.marketing_consent(Channel::Email))?,
+            sms_marketing: ConsentResponse::new(c.marketing_consent(Channel::Sms))?,
+            erased_at: c.erased_at().map(super::rfc3339).transpose()?,
+            erasure_due_at: c.erasure_due_at().map(super::rfc3339).transpose()?,
             id: c.id(),
             email: c.email().clone(),
             first_name: c.first_name().map(str::to_string),
@@ -226,14 +400,18 @@ impl CustomerResponse {
 /// The admin's response for `customer`: with its custom fields, as `ctx` may see it.
 async fn respond<P>(ctx: &Ctx, ports: &P, customer: &Customer) -> Result<Redacted, ApiError>
 where
-    P: HasApps + HasCustomFieldDefinitions + HasCustomFieldValues + HasOrders,
+    P: HasApps + HasCustomFieldDefinitions + HasCustomFieldValues + HasOrders + HasCustomerGroups,
 {
     let kind = custom_fields::caller_kind(ctx, ports).await?;
     let id = customer.id().as_uuid();
     let fields =
         custom_fields::read(ctx, &kind, ports, &[OwnerType::Customer], &[id], None).await?;
     let stats = customer_order_stats(ctx, ports.orders(), customer.id()).await?;
-    let dto = CustomerResponse::new(customer, fields.json_of(id), stats)?;
+    let groups = groups_of_customers(ctx, ports, &[customer.id()])
+        .await?
+        .remove(&customer.id())
+        .unwrap_or_default();
+    let dto = CustomerResponse::new(customer, fields.json_of(id), stats, groups)?;
     redact::one_with_fields(ctx, Family::Customer, dto, &fields.redacted)
 }
 
@@ -294,6 +472,9 @@ pub struct CustomerFilters {
     /// a staff session needs `customer_data:name`, `:email` and `:phone` for it
     /// (sorting by email or name, the matching one).
     q: Option<String>,
+    /// Only customers in this group (design note 0032, §6).
+    #[param(value_type = Option<CustomerGroupId>)]
+    group: Option<CustomerGroupId>,
     #[param(inline)]
     sort: Option<CustomerSortDto>,
 }
@@ -376,6 +557,7 @@ pub async fn list<S: Storage>(
         ports.customers(),
         filters.q,
         fields.filters,
+        filters.group,
         sort,
         page,
     )
@@ -540,6 +722,128 @@ pub async fn update_address_handler<S: Storage>(
     let req = body.parse()?;
     let customer = update_address(&ctx, ports.customers(), id, address, req.into()).await?;
     Ok(Json(respond(&ctx, &ports, &customer).await?))
+}
+
+/// Deletes a customer that has no orders (design note 0032, CD7): the row, its address
+/// book and memberships go, its carts are unlinked (email kept), and its custom field
+/// values follow `customer.deleted`. One with orders, cancelled ones included, is
+/// refused with `409 customer_has_orders`: request its erasure instead.
+#[utoipa::path(
+    delete,
+    path = "/admin/customers/{id}",
+    params(("id" = CustomerId, Path)),
+    responses((status = 204, description = "No content")),
+    extensions(("x-hypha-scopes" = json!(["customers:write"]))),
+)]
+pub async fn remove<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<CustomerId>,
+) -> Result<StatusCode, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    hypha_privacy::delete_customer(&ctx, &ports, id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Asks for the customer's personal data to be erased after the cancel window
+/// (`customers.erasure_delay`, 10 days by default; design note 0032, §7.3), recording
+/// `customer.erasure_requested`. The job then removes names, contact details, addresses,
+/// consents and personal custom fields from the customer and its orders, carts and email
+/// records, keeps the orders themselves, and records `customer.redacted` for apps. Needs
+/// `customers:erase`; `409 erasure_already_requested` while one is pending, `409
+/// customer_erased` after.
+#[utoipa::path(
+    post,
+    path = "/admin/customers/{id}/erasure",
+    params(("id" = CustomerId, Path)),
+    responses((status = 200, description = "OK", body = CustomerResponse)),
+    extensions(("x-hypha-scopes" = json!(["customers:erase"]))),
+)]
+pub async fn request_erasure_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<CustomerId>,
+) -> Result<Json<Redacted>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let customer =
+        hypha_privacy::request_erasure(&ctx, &ports, &state.clock, &state.config.privacy, id)
+            .await?;
+    Ok(Json(respond(&ctx, &ports, &customer).await?))
+}
+
+/// Cancels a requested erasure while its window is open (`409 erasure_not_requested`
+/// otherwise), recording `customer.erasure_cancelled`.
+#[utoipa::path(
+    delete,
+    path = "/admin/customers/{id}/erasure",
+    params(("id" = CustomerId, Path)),
+    responses((status = 200, description = "OK", body = CustomerResponse)),
+    extensions(("x-hypha-scopes" = json!(["customers:erase"]))),
+)]
+pub async fn cancel_erasure_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<CustomerId>,
+) -> Result<Json<Redacted>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let customer = hypha_privacy::cancel_erasure(&ctx, &ports, id).await?;
+    Ok(Json(respond(&ctx, &ports, &customer).await?))
+}
+
+/// Everything Hypha holds about a customer, as one document (design note 0032, §7.4).
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct CustomerExportResponse {
+    /// When the export was made, RFC 3339 in UTC.
+    exported_at: String,
+    #[schema(value_type = CustomerResponse)]
+    customer: Redacted,
+    orders: Vec<super::orders::OrderResponse>,
+    payments: Vec<super::payments::PaymentResponse>,
+    /// The emails sent about the orders.
+    emails: Vec<super::notifications::NotificationResponse>,
+}
+
+/// Answers a customer's data request with one JSON document: the customer with its
+/// addresses, consent and custom fields, its orders, their payments and the emails sent
+/// about them. Records `customer.data_requested` so apps can answer too. Needs
+/// `customers:read`, and every `customer_data:*` scope for a caller that isn't a staff
+/// session.
+#[utoipa::path(
+    get,
+    path = "/admin/customers/{id}/export",
+    params(("id" = CustomerId, Path)),
+    responses((status = 200, description = "OK", body = CustomerExportResponse)),
+    extensions(("x-hypha-scopes" = json!(["customers:read", "orders:read"]))),
+)]
+pub async fn export<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<CustomerId>,
+) -> Result<Json<CustomerExportResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    redact::require_fields(&ctx, &Scope::CUSTOMER_DATA)?;
+    ctx.require(Scope::OrdersRead)
+        .map_err(hypha_privacy::CommandError::from)?;
+    let export = hypha_privacy::export_customer(&ctx, &ports, id).await?;
+    Ok(Json(CustomerExportResponse {
+        exported_at: super::rfc3339(hypha_core::Clock::now(&state.clock))?,
+        customer: respond(&ctx, &ports, &export.customer).await?,
+        orders: export
+            .orders
+            .iter()
+            .map(super::orders::OrderResponse::new)
+            .collect::<Result<_, _>>()?,
+        payments: export
+            .payments
+            .iter()
+            .map(super::payments::PaymentResponse::new)
+            .collect::<Result<_, _>>()?,
+        emails: export
+            .notifications
+            .iter()
+            .map(super::notifications::NotificationResponse::new)
+            .collect::<Result<_, _>>()?,
+    }))
 }
 
 /// Removes a saved address.

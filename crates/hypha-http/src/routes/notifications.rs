@@ -702,7 +702,7 @@ pub struct NotificationResponse {
 }
 
 impl NotificationResponse {
-    fn new(n: &Notification) -> Result<Self, ApiError> {
+    pub(crate) fn new(n: &Notification) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(n.stamps())?;
         Ok(Self {
             id: n.id(),

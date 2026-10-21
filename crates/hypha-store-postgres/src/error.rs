@@ -59,6 +59,12 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ),
     ("customers_pkey", customer_keys::CUSTOMER_ID),
     ("customer_email", customer_keys::CUSTOMER_EMAIL),
+    ("customer_groups_pkey", customer_keys::CUSTOMER_GROUP_ID),
+    (
+        "customer_group_handle",
+        customer_keys::CUSTOMER_GROUP_HANDLE,
+    ),
+    ("customer_group_name", customer_keys::CUSTOMER_GROUP_NAME),
     ("stores_pkey", store_keys::STORE_ID),
     ("channels_pkey", channel_keys::CHANNEL_ID),
     ("channel_name", channel_keys::CHANNEL_NAME),

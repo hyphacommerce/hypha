@@ -1174,6 +1174,10 @@
             "$ref": "#/components/schemas/MarketId",
             "description": "Picked from the country when the cart was created; it sets the currency."
           },
+          "marketing_opt_in": {
+            "description": "Whether the buyer ticked \"Email me with news and offers\" (`PUT …/marketing`):\ncheckout records the consent then (design note 0032, §5).",
+            "type": "boolean"
+          },
           "order": {
             "oneOf": [
               {
@@ -1262,7 +1266,8 @@
           "fully_available",
           "lines",
           "shipping_groups",
-          "shipping_ready"
+          "shipping_ready",
+          "marketing_opt_in"
         ],
         "type": "object"
       },
@@ -1998,6 +2003,55 @@
         ],
         "type": "object"
       },
+      "ConsentResponse": {
+        "description": "A channel's marketing consent (design note 0032, §5).",
+        "properties": {
+          "consented_at": {
+            "description": "When the customer last said so, RFC 3339 in UTC; absent while never asked.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "opt_in_level": {
+            "description": "`single`, `confirmed` (double opt-in) or `unknown`.",
+            "type": "string"
+          },
+          "source": {
+            "description": "Where it came from: `checkout`, `storefront`, `admin`, `import`, `system`, or\n`app:<appid_…>`; absent while never asked.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "description": "`not_subscribed` (never asked), `pending`, `subscribed`, `unsubscribed`, or\n`redacted` (erased).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "opt_in_level"
+        ],
+        "type": "object"
+      },
+      "ConsentUpdateResponse": {
+        "description": "A consent write's outcome: whether it changed anything, and the customer as it is.",
+        "properties": {
+          "applied": {
+            "description": "`false` when a newer consent is stored, or nothing changed.",
+            "type": "boolean"
+          },
+          "customer": {
+            "$ref": "#/components/schemas/CustomerResponse"
+          }
+        },
+        "required": [
+          "applied",
+          "customer"
+        ],
+        "type": "object"
+      },
       "CountryCode": {
         "description": "An ISO 3166-1 alpha-2 country code.",
         "examples": [
@@ -2336,6 +2390,31 @@
           "key",
           "type",
           "name"
+        ],
+        "type": "object"
+      },
+      "CreateCustomerGroupRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "Plain text, up to 1,000 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "handle": {
+            "description": "Lowercase letters, digits and single dashes; unique among groups.",
+            "type": "string"
+          },
+          "name": {
+            "description": "1 to 255 characters, trimmed; unique among groups ignoring case.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "handle"
         ],
         "type": "object"
       },
@@ -3088,6 +3167,103 @@
         ],
         "type": "object"
       },
+      "CustomerExportResponse": {
+        "description": "Everything Hypha holds about a customer, as one document (design note 0032, §7.4).",
+        "properties": {
+          "customer": {
+            "$ref": "#/components/schemas/CustomerResponse"
+          },
+          "emails": {
+            "description": "The emails sent about the orders.",
+            "items": {
+              "$ref": "#/components/schemas/NotificationResponse"
+            },
+            "type": "array"
+          },
+          "exported_at": {
+            "description": "When the export was made, RFC 3339 in UTC.",
+            "type": "string"
+          },
+          "orders": {
+            "items": {
+              "$ref": "#/components/schemas/OrderResponse"
+            },
+            "type": "array"
+          },
+          "payments": {
+            "items": {
+              "$ref": "#/components/schemas/PaymentResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "exported_at",
+          "customer",
+          "orders",
+          "payments",
+          "emails"
+        ],
+        "type": "object"
+      },
+      "CustomerGroupId": {
+        "description": "A CustomerGroupId: `cgrp_` and 32 hex digits.",
+        "examples": [
+          "cgrp_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^cgrp_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "CustomerGroupList": {
+        "properties": {
+          "items": {
+            "description": "By name, ignoring case. A store has few groups, so they come in one response.",
+            "items": {
+              "$ref": "#/components/schemas/CustomerGroupResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CustomerGroupResponse": {
+        "properties": {
+          "created_at": {
+            "description": "RFC 3339 in UTC.",
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "handle": {
+            "description": "Lowercase letters, digits and single dashes; unique among groups.",
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/CustomerGroupId"
+          },
+          "name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "handle",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "CustomerId": {
         "description": "A CustomerId: `cus_` and 32 hex digits.",
         "examples": [
@@ -3103,6 +3279,10 @@
               "$ref": "#/components/schemas/AddressResponse"
             },
             "type": "array"
+          },
+          "can_delete": {
+            "description": "Whether `DELETE /admin/customers/{id}` would work: only while the customer has no\norders, cancelled ones included (design note 0032, CD7). Otherwise erase it.",
+            "type": "boolean"
           },
           "created_at": {
             "description": "When it was created, RFC 3339 in UTC.",
@@ -3139,11 +3319,36 @@
           "email": {
             "$ref": "#/components/schemas/Email"
           },
+          "email_marketing": {
+            "$ref": "#/components/schemas/ConsentResponse",
+            "description": "Consent to marketing by email (design note 0032, §5); `PUT\n/admin/customers/{id}/marketing/email` changes it."
+          },
+          "erased_at": {
+            "description": "When the customer's personal data was erased, RFC 3339 in UTC (design note 0032,\n§7.3): the customer is read-only then and its email a placeholder.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "erasure_due_at": {
+            "description": "When a requested erasure runs, RFC 3339 in UTC; absent without a request. `DELETE\n/admin/customers/{id}/erasure` cancels it until then.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "first_name": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "groups": {
+            "description": "The customer groups it's in (design note 0032, §6), sorted; `PUT\n/admin/customers/{id}/groups` sets them.",
+            "items": {
+              "$ref": "#/components/schemas/CustomerGroupId"
+            },
+            "type": "array"
           },
           "id": {
             "$ref": "#/components/schemas/CustomerId"
@@ -3174,6 +3379,10 @@
               "null"
             ]
           },
+          "sms_marketing": {
+            "$ref": "#/components/schemas/ConsentResponse",
+            "description": "Consent to marketing by SMS; needs a phone."
+          },
           "updated_at": {
             "description": "When it last changed, RFC 3339 in UTC.",
             "type": "string"
@@ -3185,6 +3394,10 @@
           "addresses",
           "custom_fields",
           "orders",
+          "groups",
+          "email_marketing",
+          "sms_marketing",
+          "can_delete",
           "created_at",
           "updated_at"
         ],
@@ -4123,6 +4336,22 @@
           "scopes",
           "approved_by",
           "approved_at"
+        ],
+        "type": "object"
+      },
+      "GroupCustomersRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "customers": {
+            "description": "Each must exist (`422 customer_not_found`).",
+            "items": {
+              "$ref": "#/components/schemas/CustomerId"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "customers"
         ],
         "type": "object"
       },
@@ -5716,6 +5945,12 @@
             },
             "type": "array"
           },
+          "cancelled": {
+            "description": "How many of the customer's orders were cancelled: counted apart, since they add\nup to nothing, but they still keep the customer from being deleted.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "count": {
             "description": "How many orders the customer placed that weren't cancelled.",
             "format": "int64",
@@ -5739,7 +5974,8 @@
         },
         "required": [
           "count",
-          "amount_spent"
+          "amount_spent",
+          "cancelled"
         ],
         "type": "object"
       },
@@ -7462,7 +7698,7 @@
         "type": "object"
       },
       "Scope": {
-        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `customers:erase`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "products:read",
           "products:write",
@@ -7478,6 +7714,7 @@
           "inventory:write",
           "customers:read",
           "customers:write",
+          "customers:erase",
           "stores:read",
           "stores:write",
           "orders:read",
@@ -7749,6 +7986,31 @@
         ],
         "type": "object"
       },
+      "SetConsentRequest": {
+        "additionalProperties": false,
+        "description": "What a consent write asks for. The source is the caller's (an app is itself, staff\nand keys are `admin`), never input.",
+        "properties": {
+          "consented_at": {
+            "description": "When the customer said so, RFC 3339; default now. The newest consent wins: a\nwrite older than the stored one changes nothing (`applied: false`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "opt_in_level": {
+            "description": "`single`, `confirmed` or `unknown` (the default).",
+            "type": "string"
+          },
+          "state": {
+            "description": "`pending`, `subscribed` or `unsubscribed`: `not_subscribed` is the starting\nstate and `redacted` erasure's, so neither can be asked for.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
       "SetCustomFieldsRequest": {
         "additionalProperties": false,
         "description": "A write to an owner's fields: a JSON Merge Patch of its values.",
@@ -7776,6 +8038,22 @@
         },
         "required": [
           "custom_fields"
+        ],
+        "type": "object"
+      },
+      "SetCustomerGroupsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "groups": {
+            "description": "The groups the customer is in afterwards: added to the new ones, removed from the\nrest. Every group must exist (`422 customer_group_not_found`).",
+            "items": {
+              "$ref": "#/components/schemas/CustomerGroupId"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "groups"
         ],
         "type": "object"
       },
@@ -8905,6 +9183,25 @@
           "validations": {
             "$ref": "#/components/schemas/CustomFieldValidations",
             "description": "Replaces them all. A change that tightens them (a lower `max`, fewer `choices`, a\n`pattern`) is checked against the stored values first: `409\ncustom_field_values_invalid` names the owners to fix."
+          }
+        },
+        "type": "object"
+      },
+      "UpdateCustomerGroupRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "`null` clears it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "handle": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -18294,6 +18591,760 @@
         "x-hypha-scopes": []
       }
     },
+    "/admin/customer-groups": {
+      "get": {
+        "operationId": "admin.customer_groups.list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerGroupList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every customer group, by name.",
+        "tags": [
+          "customer_groups"
+        ],
+        "x-hypha-scopes": [
+          "customers:read"
+        ]
+      },
+      "post": {
+        "operationId": "admin.customer_groups.create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCustomerGroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerGroupResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Creates a customer group.",
+        "tags": [
+          "customer_groups"
+        ],
+        "x-hypha-scopes": [
+          "customers:write"
+        ]
+      }
+    },
+    "/admin/customer-groups/{id}": {
+      "delete": {
+        "operationId": "admin.customer_groups.remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerGroupId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Deletes a group with its membership; its customers stay. Once prices or payment\nmethods point at groups, one in use is refused.",
+        "tags": [
+          "customer_groups"
+        ],
+        "x-hypha-scopes": [
+          "customers:write"
+        ]
+      },
+      "get": {
+        "operationId": "admin.customer_groups.fetch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerGroupId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerGroupResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A customer group. Its customers: `GET /admin/customers?group={id}`.",
+        "tags": [
+          "customer_groups"
+        ],
+        "x-hypha-scopes": [
+          "customers:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.customer_groups.update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerGroupId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCustomerGroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerGroupResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Renames, re-handles or describes a group (JSON Merge Patch).",
+        "tags": [
+          "customer_groups"
+        ],
+        "x-hypha-scopes": [
+          "customers:write"
+        ]
+      }
+    },
+    "/admin/customer-groups/{id}/customers": {
+      "delete": {
+        "operationId": "admin.customer_groups.remove_customers",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerGroupId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupCustomersRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Removes customers from a group; ones not in it are ignored.",
+        "tags": [
+          "customer_groups"
+        ],
+        "x-hypha-scopes": [
+          "customers:write"
+        ]
+      },
+      "post": {
+        "operationId": "admin.customer_groups.add_customers",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerGroupId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupCustomersRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Adds customers to a group; ones already in it are ignored. One\n`customer_group.members_added` for what changed.",
+        "tags": [
+          "customer_groups"
+        ],
+        "x-hypha-scopes": [
+          "customers:write"
+        ]
+      }
+    },
     "/admin/customers": {
       "get": {
         "operationId": "admin.customers.list",
@@ -18326,6 +19377,15 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Only customers in this group (design note 0032, §6).",
+            "in": "query",
+            "name": "group",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerGroupId"
             }
           },
           {
@@ -18591,6 +19651,96 @@
       }
     },
     "/admin/customers/{id}": {
+      "delete": {
+        "operationId": "admin.customers.remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Deletes a customer that has no orders (design note 0032, CD7): the row, its address\nbook and memberships go, its carts are unlinked (email kept), and its custom field\nvalues follow `customer.deleted`. One with orders, cancelled ones included, is\nrefused with `409 customer_has_orders`: request its erasure instead.",
+        "tags": [
+          "customers"
+        ],
+        "x-hypha-scopes": [
+          "customers:write"
+        ]
+      },
       "get": {
         "operationId": "admin.customers.fetch",
         "parameters": [
@@ -19427,6 +20577,580 @@
         "summary": "Sets and removes the owner's custom field values (a JSON Merge Patch), all\nor nothing, recording one `<owner>.custom_fields_updated` event. Each key\nneeds the caller to be allowed to write it: anyone with the owner's write\nscope for `custom.*`, only its app for `app_<name>.*` (staff too when the\nfield's `access.admin` is `read_write`), `customer_data:profile` for a\npersonal field.",
         "tags": [
           "custom_fields"
+        ],
+        "x-hypha-scopes": [
+          "customers:write"
+        ]
+      }
+    },
+    "/admin/customers/{id}/erasure": {
+      "delete": {
+        "operationId": "admin.customers.cancel_erasure",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cancels a requested erasure while its window is open (`409 erasure_not_requested`\notherwise), recording `customer.erasure_cancelled`.",
+        "tags": [
+          "customers"
+        ],
+        "x-hypha-scopes": [
+          "customers:erase"
+        ]
+      },
+      "post": {
+        "operationId": "admin.customers.request_erasure",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Asks for the customer's personal data to be erased after the cancel window\n(`customers.erasure_delay`, 10 days by default; design note 0032, §7.3), recording\n`customer.erasure_requested`. The job then removes names, contact details, addresses,\nconsents and personal custom fields from the customer and its orders, carts and email\nrecords, keeps the orders themselves, and records `customer.redacted` for apps. Needs\n`customers:erase`; `409 erasure_already_requested` while one is pending, `409\ncustomer_erased` after.",
+        "tags": [
+          "customers"
+        ],
+        "x-hypha-scopes": [
+          "customers:erase"
+        ]
+      }
+    },
+    "/admin/customers/{id}/export": {
+      "get": {
+        "operationId": "admin.customers.export",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerExportResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Answers a customer's data request with one JSON document: the customer with its\naddresses, consent and custom fields, its orders, their payments and the emails sent\nabout them. Records `customer.data_requested` so apps can answer too. Needs\n`customers:read`, and every `customer_data:*` scope for a caller that isn't a staff\nsession.",
+        "tags": [
+          "customers"
+        ],
+        "x-hypha-scopes": [
+          "customers:read",
+          "orders:read"
+        ]
+      }
+    },
+    "/admin/customers/{id}/groups": {
+      "put": {
+        "operationId": "admin.customers.set_groups",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCustomerGroupsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Makes `groups` the customer's groups (design note 0032, §6): one write, an event per\ngroup whose membership changed.",
+        "tags": [
+          "customers"
+        ],
+        "x-hypha-scopes": [
+          "customers:write"
+        ]
+      }
+    },
+    "/admin/customers/{id}/marketing/{channel}": {
+      "put": {
+        "operationId": "admin.customers.set_consent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerId"
+            }
+          },
+          {
+            "description": "`email` or `sms`",
+            "example": "email",
+            "in": "path",
+            "name": "channel",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetConsentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentUpdateResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Records a customer's marketing consent for a channel (`email` or `sms`; design note\n0032, §5). The newest `consented_at` wins, so a delayed sync can't overwrite a newer\nopt-out: an older write answers `applied: false`. SMS needs a phone (`409\nconsent_needs_phone`); an erased customer is read-only (`409 customer_erased`).",
+        "tags": [
+          "customers"
         ],
         "x-hypha-scopes": [
           "customers:write"

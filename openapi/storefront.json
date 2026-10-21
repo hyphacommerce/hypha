@@ -179,6 +179,10 @@
             "$ref": "#/components/schemas/MarketId",
             "description": "Picked from the country when the cart was created; it sets the currency."
           },
+          "marketing_opt_in": {
+            "description": "Whether the buyer ticked \"Email me with news and offers\" (`PUT …/marketing`):\ncheckout records the consent then (design note 0032, §5).",
+            "type": "boolean"
+          },
           "order": {
             "oneOf": [
               {
@@ -267,7 +271,8 @@
           "fully_available",
           "lines",
           "shipping_groups",
-          "shipping_ready"
+          "shipping_ready",
+          "marketing_opt_in"
         ],
         "type": "object"
       },
@@ -1832,6 +1837,19 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "SetMarketingRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "opt_in": {
+            "description": "Whether the buyer wants news and offers by email.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "opt_in"
+        ],
         "type": "object"
       },
       "SetPaymentMethodRequest": {
@@ -4116,6 +4134,145 @@
           }
         ],
         "summary": "Sets a line's quantity.",
+        "tags": [
+          "carts"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
+      }
+    },
+    "/storefront/carts/{id}/marketing": {
+      "put": {
+        "operationId": "storefront.carts.set_marketing",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMarketingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Ticks or unticks \"Email me with news and offers\" (design note 0032, §5). Checkout\nrecords the consent when it's ticked; unticked never unsubscribes anyone.",
         "tags": [
           "carts"
         ],

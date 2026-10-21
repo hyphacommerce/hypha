@@ -394,6 +394,23 @@ pub async fn set_cart_email<S: HasCarts + PricingPorts>(
     Ok(priced)
 }
 
+/// Ticks or unticks the cart's marketing box (design note 0032, §5): checkout records
+/// the consent when it's ticked.
+pub async fn set_cart_marketing<S: HasCarts + PricingPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: CartId,
+    opt_in: bool,
+) -> Result<PricedCart, CommandError> {
+    ctx.require(Scope::CartsWrite)?;
+
+    let mut cart = load_open_cart(ctx, ports, id).await?;
+    cart.set_marketing_opt_in(opt_in)?;
+    let priced = reprice(ports, &cart).await?;
+    ports.carts().update(&mut cart).await?;
+    Ok(priced)
+}
+
 /// Links the cart to an existing customer (taking their email), or unlinks it with
 /// `None` (design note 0005, C5). Linking needs `customers:read` as well as `carts:write`.
 pub async fn set_cart_customer<S: HasCarts + HasCustomers + PricingPorts>(

@@ -566,19 +566,57 @@ routes, OpenAPI, SDK and e2e steps:
      The labels filter is 0033's generic field filter (`field[custom.tags]`), and the
      bulk action is the items route (`POST /admin/custom-fields/{definition}/items`).
 3. **Delete:** `can_delete`, `customer.deleted`, the admin's delete button
-   (`CustomFieldCleanup` already follows the event).
-4. **Marketing consent:**
+   (`CustomFieldCleanup` already follows the event). Built 2026-10-21: the workflow is
+   `hypha_privacy::delete_customer` (a new workflow crate, `hypha-privacy`, that §7's
+   erasure and export join), which refuses a customer with any order, cancelled ones
+   included (`OrderStats::cancelled_count`, shown as `orders.cancelled`), unlinks the
+   customer's carts (`CartRepo::of_customer`) and deletes it in one batch
+   (`StageCustomers::delete_customer`, `update_customer` added alongside).
+4. **Marketing consent** (built 2026-10-21):
    - The consent fields and command (newest consent wins); the reset on email change;
      the event.
    - The cart's `marketing_opt_in` and checkout setting it.
    - The storefront's checkbox, and the admin's consent badge and editor.
-5. **Customer groups:** the aggregate, membership, events, the `group` filter, admin
-   pages.
+   - As built: `hypha_customers::consent` (`Channel`, `ConsentState`, `OptInLevel`,
+     `ConsentSource`, `MarketingConsent`), `Customer::set_marketing_consent` and
+     `set_marketing_consent` (`PUT /admin/customers/{id}/marketing/{channel}`, answering
+     `{applied, customer}`), `customer.marketing_consent_updated`, migration 0064; the
+     cart's `PUT /storefront/carts/{id}/marketing {opt_in}`, which checkout turns into
+     `subscribed`/`single`/`checkout` on the buyer, staged with the order
+     (`StageCustomers::update_customer`). An app's source is `app:<appid_…>` (the actor
+     carries the ID, not the key). A `PATCH` that changes the email resets email consent
+     whatever else it carries; a consent in the same request isn't supported (set it
+     after).
+5. **Customer groups** (built 2026-10-21): the aggregate, membership, events, the
+   `group` filter, admin pages. As built: `CustomerGroup` (`cgrp_…`, `group.rs`),
+   `CustomerGroupRepo` with set-based membership and `StageCustomerGroups`, the commands
+   in `groups.rs`, routes `/admin/customer-groups` (CRUD, `POST`/`DELETE
+   …/{id}/customers`), `PUT /admin/customers/{id}/groups`, `GET /admin/customers?group=`,
+   `groups` on the customer, migration 0065 (`customer_groups`,
+   `customer_group_members`), events `customer_group.*` under `customers:read`.
 6. ~~Custom fields on customers~~: built by 0033 (§4). Only step 2's conventions remain.
-7. **Privacy:**
+7. **Privacy** (built 2026-10-21):
    - `hypha-privacy`, `customers:erase`, the erasure request, the job, the placeholder
      email and `customer.redacted`; export and `customer.data_requested`.
-   - The apps docs' "what an app must do on `customer.redacted`".
+   - The apps docs' "what an app must do on `customer.redacted`" (`docs/apps/privacy.md`).
+   - As built: `POST`/`DELETE /admin/customers/{id}/erasure` (`customers:erase`;
+     `Customer::request_erasure`/`cancel_erasure`, `erasure_due_at` on the response),
+     `customers.erasure_delay` in `hypha.config.toml` (`PrivacySettings`, at least an
+     hour, 10 days by default); the erasure runs inside the `prune` job
+     (`hypha_privacy::erase_due`, `CustomerRepo::due_for_erasure`) rather than as a job of
+     its own, since it's data past its time like the rest of what prune removes. One
+     erasure (`erase_customer`) writes the customer (`Customer::erase`: placeholder email,
+     consents `redacted`, address book gone), its orders (`Order::redact`: email and the
+     whole shipping address, company included; the country stays on the order), its
+     placed carts (`Cart::redact`) and the personal custom field values of the customer
+     and its orders in one batch with `customer.redacted {customer, orders}`, deletes its
+     open carts in the same batch, and redacts the orders' email records just before
+     (`Notification::redact`; a queued one becomes `skipped`). `hypha-mail` skips a
+     placeholder recipient (`Email::is_placeholder`). `customer.redacted` reaches every
+     app whose grant has `customers:read` whether or not it subscribed
+     (`App::wants_event`). `GET /admin/customers/{id}/export` answers with the customer,
+     its orders, their payments and emails, and records `customer.data_requested`; a
+     caller that isn't staff needs every `customer_data:*` scope.
 8. **Then, in their own notes:** customer accounts; group prices, payment methods and
    tax exemption (after accounts); segments; merging customers; B2B companies; staff
    roles under `customer_data:*`.

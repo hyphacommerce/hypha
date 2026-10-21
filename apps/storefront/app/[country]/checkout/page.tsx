@@ -101,6 +101,7 @@ export default async function CheckoutPage({
               country={code}
               countryName={country.name}
               saved={detailsDone}
+              initialOptIn={cart.marketing_opt_in}
               initial={{
                 email: cart.email ?? "",
                 first_name: address?.first_name ?? "",

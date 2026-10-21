@@ -100,6 +100,9 @@ pub struct CartResponse {
     /// How the buyer chose to pay (`PUT …/payment-method`); checkout requires one when
     /// there's something to pay.
     payment_method: Option<PaymentMethodId>,
+    /// Whether the buyer ticked "Email me with news and offers" (`PUT …/marketing`):
+    /// checkout records the consent then (design note 0032, §5).
+    marketing_opt_in: bool,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -233,6 +236,7 @@ impl From<&PricedCart> for CartResponse {
             shipping_groups: cart.shipping_groups.iter().map(Into::into).collect(),
             shipping_ready: cart.is_shipping_ready(),
             payment_method: cart.payment_method,
+            marketing_opt_in: cart.marketing_opt_in,
             lines: cart
                 .lines
                 .iter()
@@ -388,6 +392,37 @@ pub async fn set_email<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let priced = set_cart_email(&ctx, &ports, id, req.email).await?;
+    Ok(Json(
+        cart_response(&priced, &ports, state.media.as_deref()).await?,
+    ))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetMarketingRequest {
+    /// Whether the buyer wants news and offers by email.
+    opt_in: bool,
+}
+
+/// Ticks or unticks "Email me with news and offers" (design note 0032, §5). Checkout
+/// records the consent when it's ticked; unticked never unsubscribes anyone.
+#[utoipa::path(
+    put,
+    path = "/storefront/carts/{id}/marketing",
+    params(("id" = CartId, Path)),
+    request_body = SetMarketingRequest,
+    responses((status = 200, description = "OK", body = CartResponse)),
+    extensions(("x-hypha-scopes" = json!(["carts:write"]))),
+)]
+pub async fn set_marketing<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller<Storefront>,
+    PathId(id): PathId<CartId>,
+    body: JsonBody<SetMarketingRequest>,
+) -> Result<Json<CartResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let priced = hypha_cart::set_cart_marketing(&ctx, &ports, id, req.opt_in).await?;
     Ok(Json(
         cart_response(&priced, &ports, state.media.as_deref()).await?,
     ))

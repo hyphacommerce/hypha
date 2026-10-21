@@ -53,11 +53,11 @@ pub use idempotency::{
 };
 pub use ids::{
     AddressId, AgentId, ApiKeyId, AppId, AssetId, CartId, CatalogId, CategoryId, ChannelId,
-    CustomFieldDefinitionId, CustomerId, DeliveryId, EventId, ExtensionCallId, FulfillmentId,
-    IdError, IdentityId, InventoryItemId, InviteId, LocationId, MarketId, NotificationId,
-    OAuthRequestId, OptionId, OptionValueId, OrderId, OrderLineId, PasswordResetId, PaymentId,
-    PaymentMethodId, PriceListId, ProductId, RoleId, SessionId, ShippingGroupId, ShippingOptionId,
-    ShippingZoneId, StoreId, TaxClassId, TaxRegionId, UserId, VariantId,
+    CustomFieldDefinitionId, CustomerGroupId, CustomerId, DeliveryId, EventId, ExtensionCallId,
+    FulfillmentId, IdError, IdentityId, InventoryItemId, InviteId, LocationId, MarketId,
+    NotificationId, OAuthRequestId, OptionId, OptionValueId, OrderId, OrderLineId, PasswordResetId,
+    PaymentId, PaymentMethodId, PriceListId, ProductId, RoleId, SessionId, ShippingGroupId,
+    ShippingOptionId, ShippingZoneId, StoreId, TaxClassId, TaxRegionId, UserId, VariantId,
 };
 pub use language::{Language, LanguageError};
 pub use money::{BasisPoints, Currency, CurrencyError, Money, MoneyError, Price, TaxRate};

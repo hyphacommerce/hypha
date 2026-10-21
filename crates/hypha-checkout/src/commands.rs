@@ -9,7 +9,10 @@ use hypha_core::{
     OrderId, OrderLineId, PaymentId, PaymentMethodId, RepoError, Scope, StageIdempotency,
     VariantId, Version, Versioned, earlier_id,
 };
-use hypha_customers::{Customer, CustomerRepo, StageCustomers, repo::keys as customer_keys};
+use hypha_customers::{
+    Channel, ConsentChange, ConsentSource, ConsentState, Customer, CustomerRepo, OptInLevel,
+    StageCustomers, repo::keys as customer_keys,
+};
 use hypha_inventory::{
     InventoryItem, ReservationRef, StageInventoryItems, StockContext, reserve_lines,
 };
@@ -46,6 +49,9 @@ pub enum CommandError {
     Idempotency(#[from] IdempotencyError),
     #[error(transparent)]
     Payment(#[from] PaymentError),
+    /// Recording the buyer's marketing consent (design note 0032, §5).
+    #[error(transparent)]
+    Customer(#[from] hypha_customers::CustomerError),
     #[error("cart {0} not found")]
     CartNotFound(CartId),
     #[error("cart {cart} was already checked out as order {order}")]
@@ -119,6 +125,7 @@ impl ErrorCode for CommandError {
             CommandError::Order(e) => e.code(),
             CommandError::Idempotency(e) => e.code(),
             CommandError::Payment(e) => e.code(),
+            CommandError::Customer(e) => e.code(),
             CommandError::CartNotFound(_) => "cart_not_found",
             CommandError::CartCompleted { .. } => "cart_completed",
             CommandError::EmptyCart(_) => "cart_empty",
@@ -440,6 +447,7 @@ impl CommandError {
             | CommandError::Repo(_)
             | CommandError::Idempotency(_)
             | CommandError::Payment(_)
+            | CommandError::Customer(_)
             | CommandError::CartNotFound(_)
             | CommandError::CartCompleted { .. }
             | CommandError::PaymentMethodNotFound(_)
@@ -715,14 +723,24 @@ async fn attempt<
     // keeps a copy from when it was linked, which goes stale if they change it); else
     // the customer with the cart's email; else a new one created with the order.
     let mut new_customer = None;
+    let mut known_customer = None;
     let (customer, email) = match priced.customer {
         Some(linked) => match ports.customers().get(linked).await? {
-            Some(buyer) => (linked, buyer.email().clone()),
-            // Customers aren't deleted, so this is a broken link; the cart's copy will do.
+            Some(buyer) => {
+                let email = buyer.email().clone();
+                known_customer = Some(buyer);
+                (linked, email)
+            }
+            // A deleted customer's carts are unlinked, so this is a broken link; the
+            // cart's copy will do.
             None => (linked, email),
         },
         None => match ports.customers().get_by_email(&email).await? {
-            Some(existing) => (existing.id(), email),
+            Some(existing) => {
+                let id = existing.id();
+                known_customer = Some(existing);
+                (id, email)
+            }
             None => {
                 let guest = Customer::new(CustomerId::from_uuid(ids.new_uuid()), email.clone());
                 let id = guest.id();
@@ -731,6 +749,28 @@ async fn attempt<
             }
         },
     };
+    // The marketing box (design note 0032, §5): ticked, the buyer subscribes from
+    // checkout, unless a newer consent is stored; unticked never unsubscribes anyone. An
+    // erased customer can't consent: the order still goes through.
+    if priced.marketing_opt_in {
+        let change = ConsentChange {
+            state: ConsentState::Subscribed,
+            opt_in_level: OptInLevel::Single,
+            consented_at: None,
+        };
+        let now = clock.now();
+        if let Some(guest) = &mut new_customer {
+            guest.set_marketing_consent(Channel::Email, change, ConsentSource::Checkout, now)?;
+        }
+        if let Some(buyer) = &mut known_customer
+            && !buyer.is_erased()
+            && !buyer.set_marketing_consent(Channel::Email, change, ConsentSource::Checkout, now)?
+        {
+            known_customer = None;
+        }
+    } else {
+        known_customer = None;
+    }
 
     let mut order = Order::place(NewOrder {
         id: OrderId::from_uuid(ids.new_uuid()),
@@ -814,6 +854,9 @@ async fn attempt<
     }
     if let Some(guest) = &mut new_customer {
         batch.insert_customer(guest);
+    }
+    if let Some(buyer) = &mut known_customer {
+        batch.update_customer(buyer);
     }
     if let Some(request) = &input.idempotency {
         let record = IdempotencyRecord::new(

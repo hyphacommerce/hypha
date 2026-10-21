@@ -24,10 +24,14 @@ import { type Definition, filterParam } from "@/lib/custom-fields";
 import { customerName } from "@/lib/format";
 import { textItems } from "@/lib/well-known-fields";
 
+import type { Group } from "@/app/(admin)/customers/groups/groups";
+
 import { type BulkOutcome, BulkOutcomeBanner, CustomerBulkActions } from "./bulk";
 
 /** No filterable custom fields. */
 const NO_FIELDS: Definition[] = [];
+/** No customer groups. */
+const NO_GROUPS: Group[] = [];
 
 /** Labels shown in a row before "+n". */
 const SHOWN_LABELS = 3;
@@ -62,6 +66,7 @@ export function CustomersTable({
   page,
   fieldFilters = NO_FIELDS,
   labels,
+  groups = NO_GROUPS,
   canLabel = false,
 }: {
   page: { items: Customer[]; next_cursor: string | null; error?: string };
@@ -69,11 +74,24 @@ export function CustomersTable({
   fieldFilters?: Definition[];
   /** The well-known labels field, when the merchant has it: a column and bulk actions. */
   labels?: Definition;
-  /** `customers:write`: labels can be added to and removed from the selection. */
+  /** The store's customer groups (design note 0032, §6): a filter and bulk actions. */
+  groups?: Group[];
+  /** `customers:write`: labels and groups can be changed on the selection. */
   canLabel?: boolean;
 }) {
   const [outcome, setOutcome] = useState<BulkOutcome>();
-  const filters = [...FILTERS, ...customFieldFilters(fieldFilters)];
+  const groupFilter: FilterDef[] =
+    groups.length > 0
+      ? [
+          {
+            kind: "select",
+            param: "group",
+            label: "Group",
+            options: groups.map((g) => ({ value: g.id, label: g.name })),
+          },
+        ]
+      : [];
+  const filters = [...FILTERS, ...groupFilter, ...customFieldFilters(fieldFilters)];
   const columns: TableColumn<Customer>[] = [
     {
       key: "name",
@@ -135,7 +153,7 @@ export function CustomersTable({
       renderCell: (c) => <DateTime value={c.created_at} short />,
     },
   ];
-  const bulk = labels && canLabel ? labels : undefined;
+  const bulk = canLabel && (labels !== undefined || groups.length > 0);
   return (
     <VStack gap={3}>
       {outcome && (
@@ -152,14 +170,15 @@ export function CustomersTable({
         idKey="id"
         rowHref={(c) => `/customers/${c.id}`}
         rowLabel={(c) => customerName(c) || c.email}
-        isSelectable={bulk !== undefined}
+        isSelectable={bulk}
         renderBulkActions={
           bulk
             ? (selected, clear) => (
                 <CustomerBulkActions
                   selected={selected}
                   clear={clear}
-                  labels={bulk}
+                  labels={labels}
+                  groups={groups}
                   onDone={setOutcome}
                 />
               )

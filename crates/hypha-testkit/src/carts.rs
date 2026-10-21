@@ -1,5 +1,5 @@
 use hypha_cart::{Cart, CartRepo, repo::keys};
-use hypha_core::{CartId, RepoError, stamp_insert, stamp_update};
+use hypha_core::{CartId, CustomerId, RepoError, stamp_insert, stamp_update};
 
 use crate::{
     InMemoryOutbox,
@@ -37,6 +37,15 @@ impl CartRepo for InMemoryCartRepo {
     async fn update(&self, cart: &mut Cart) -> Result<(), RepoError> {
         stamp_update(cart, self.outbox.now());
         self.carts.update(cart.id(), cart, &no_unique_keys)
+    }
+
+    async fn of_customer(&self, customer: CustomerId) -> Result<Vec<Cart>, RepoError> {
+        Ok(self
+            .carts
+            .all_oldest_first()
+            .into_iter()
+            .filter(|c| c.customer() == Some(customer))
+            .collect())
     }
 }
 

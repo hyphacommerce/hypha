@@ -807,6 +807,29 @@ impl From<hypha_inventory::CommandError> for ApiError {
     }
 }
 
+impl From<hypha_privacy::CommandError> for ApiError {
+    fn from(e: hypha_privacy::CommandError) -> Self {
+        use hypha_privacy::CommandError as E;
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // The customer in the URL.
+            E::CustomerNotFound(_) => StatusCode::NOT_FOUND,
+            // Its state: placed orders keep their customer.
+            E::CustomerHasOrders { .. } => StatusCode::CONFLICT,
+            // Unlinking a cart only fails on a completed one, which has an order and was
+            // refused above: a bug, not a request problem.
+            E::Cart(_) => return Self::internal(e),
+            // An erasure requested already, none to cancel, or an erased customer.
+            E::Customer(_) => StatusCode::CONFLICT,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
 impl From<hypha_customers::CommandError> for ApiError {
     fn from(e: hypha_customers::CommandError) -> Self {
         use hypha_customers::{CommandError as E, CustomerError as C};
@@ -814,10 +837,24 @@ impl From<hypha_customers::CommandError> for ApiError {
             E::Auth(_) => StatusCode::FORBIDDEN,
             // Customer and address IDs only ever arrive in URLs.
             E::CustomerNotFound(_) | E::Customer(C::AddressNotFound(_)) => StatusCode::NOT_FOUND,
-            E::CustomerExists { .. } => StatusCode::CONFLICT,
-            E::Email(_) | E::Address(_) | E::Customer(C::Text(_)) => {
+            E::CustomerExists { .. } | E::GroupHandleTaken(_) | E::GroupNameTaken(_) => {
+                StatusCode::CONFLICT
+            }
+            // A group in a body (a customer's groups) unless a route says it's its URL's.
+            E::GroupNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Email(_)
+            | E::Address(_)
+            | E::Customer(C::Text(_) | C::Handle(_) | C::ConsentStateNotSettable(_)) => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
+            // The customer's state: no phone for SMS consent, erased, or an erasure
+            // requested already or not at all.
+            E::Customer(
+                C::ConsentNeedsPhone
+                | C::Erased
+                | C::ErasureAlreadyRequested
+                | C::ErasureNotRequested,
+            ) => StatusCode::CONFLICT,
             // Address IDs are generated, so a clash is a bug, not a bad request.
             E::Customer(C::DuplicateAddress(_)) => return Self::internal(e),
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
@@ -1126,8 +1163,9 @@ impl From<hypha_checkout::CommandError> for ApiError {
             E::Cart(inner) => return Self::from(inner.clone()),
             E::Inventory(inner) => return Self::from(inner.clone()),
             // Checkout builds the order from a priced cart, so a broken order rule is a bug;
-            // likewise the payment, from a stored method.
-            E::Order(_) => return Self::internal(e),
+            // likewise the payment, from a stored method, and the buyer's email consent
+            // (it needs no phone, and an erased customer is skipped).
+            E::Order(_) | E::Customer(_) => return Self::internal(e),
             // Asking a payment's provider where it is, or moving it as it says.
             E::Payment(p) => match payment_error_status(p) {
                 Some(status) => status,

@@ -1054,6 +1054,29 @@ step "unlink the customer" 200 - -X PUT "$BASE/admin/carts/$BUYER_CART/customer"
 contains "email stays" '"email":"ana@example.hr","customer":null'
 step "remove the address" 200 - -X DELETE "$BASE/admin/customers/$CUSTOMER/addresses/$ADDRESS"
 contains "address book is empty, defaults cleared" '"default_billing_address":null,"addresses":[]'
+contains "without orders, she could be deleted (design note 0032, CD7)" '"can_delete":true'
+echo "## customer groups (design note 0032, §6)"
+step "a group" 201 - -X POST "$BASE/admin/customer-groups" -H "$JSON" -d '{"name":"Wholesale","handle":"wholesale","description":"Buys in bulk"}'
+WHOLESALE=$(id)
+step "the same handle again" 409 customer_group_handle_taken -X POST "$BASE/admin/customer-groups" -H "$JSON" -d '{"name":"Other","handle":"wholesale"}'
+step "the same name in another case" 409 customer_group_name_taken -X POST "$BASE/admin/customer-groups" -H "$JSON" -d '{"name":"WHOLESALE","handle":"other"}'
+step "rename it" 200 - -X PATCH "$BASE/admin/customer-groups/$WHOLESALE" -H "$JSON" -d '{"name":"Trade"}'
+contains "renamed" '"name":"Trade","handle":"wholesale"'
+step "Ana joins" 204 - -X POST "$BASE/admin/customer-groups/$WHOLESALE/customers" -H "$JSON" -d "{\"customers\":[\"$CUSTOMER\"]}"
+step "the group's customers" 200 - "$BASE/admin/customers?group=$WHOLESALE"
+contains "Ana" "\"id\":\"$CUSTOMER\""
+step "the customer lists her groups" 200 - "$BASE/admin/customers/$CUSTOMER"
+contains "in the group" "\"groups\":[\"$WHOLESALE\"]"
+step "an unknown customer can't join" 422 customer_not_found -X POST "$BASE/admin/customer-groups/$WHOLESALE/customers" -H "$JSON" -d '{"customers":["cus_00000000000000000000000000000063"]}'
+step "set her groups whole: none" 200 - -X PUT "$BASE/admin/customers/$CUSTOMER/groups" -H "$JSON" -d '{"groups":[]}'
+contains "out again" '"groups":[]'
+step "every group" 200 - "$BASE/admin/customer-groups"
+contains "one" '"handle":"wholesale"'
+step "an unknown group" 404 customer_group_not_found "$BASE/admin/customer-groups/cgrp_00000000000000000000000000000063"
+step "a passer-by" 201 - -X POST "$BASE/admin/customers" -H "$JSON" -d '{"email":"passerby@example.hr"}'
+PASSERBY=$(id)
+step "is deleted" 204 - -X DELETE "$BASE/admin/customers/$PASSERBY"
+step "and gone" 404 customer_not_found "$BASE/admin/customers/$PASSERBY"
 
 echo "## checkout with stock and tax"
 # Books and lamps cost 900 (the price list takes 10%) and pay the region's 13% default;
@@ -1065,6 +1088,8 @@ step "add 2 lamps" 200 - -X POST "$BASE/storefront/carts/$SHOP_CART/lines" -H "$
     -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":2}"
 step "add a book" 200 - -X POST "$BASE/storefront/carts/$SHOP_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$BOOK_VAR\",\"quantity\":1}"
+step "the guest wants news and offers (design note 0032, §5)" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/marketing" -H "$JSON" -d '{"opt_in":true}'
+contains "ticked" '"marketing_opt_in":true'
 step "a guest's email" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/email" -H "$JSON" \
     -d '{"email":"guest@example.hr"}'
 step "ship to Zagreb" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/shipping-address" -H "$JSON" \
@@ -1083,8 +1108,27 @@ contains "the order copies the tax line" '"tax":{"rate_ppm":130000,"amount":{"am
 contains "and adds tax on top" '"subtotal":{"amount":2700,"currency":"EUR"},"shipping_total":{"amount":0,"currency":"EUR"},"tax_total":{"amount":351,"currency":"EUR"},"total":{"amount":3051'
 step "the guest became a customer" 200 - "$BASE/admin/customers/$GUEST"
 contains "with the cart's email" '"email":"guest@example.hr"'
+contains "who can't be deleted any more" '"can_delete":false'
+contains "and subscribed from checkout" '"email_marketing":{"state":"subscribed","opt_in_level":"single","consented_at":"20'
+contains "by the checkout" '"source":"checkout"}'
+step "an older unsubscribe from a sync changes nothing" 200 - -X PUT "$BASE/admin/customers/$GUEST/marketing/email" -H "$JSON" \
+    -d '{"state":"unsubscribed","consented_at":"2020-01-01T00:00:00Z"}'
+contains "not applied" '"applied":false'
+step "staff unsubscribe now" 200 - -X PUT "$BASE/admin/customers/$GUEST/marketing/email" -H "$JSON" -d '{"state":"unsubscribed"}'
+contains "applied" '"applied":true,"customer":{'
+step "never asked can't be asked for" 422 consent_state_not_settable -X PUT "$BASE/admin/customers/$GUEST/marketing/email" -H "$JSON" -d '{"state":"not_subscribed"}'
+step "SMS consent needs a phone" 409 consent_needs_phone -X PUT "$BASE/admin/customers/$GUEST/marketing/sms" -H "$JSON" -d '{"state":"subscribed"}'
+step "request the guest's erasure (design note 0032, §7.3)" 200 - -X POST "$BASE/admin/customers/$GUEST/erasure"
+contains "due later" '"erasure_due_at":"20'
+step "twice is refused" 409 erasure_already_requested -X POST "$BASE/admin/customers/$GUEST/erasure"
+step "cancel it" 200 - -X DELETE "$BASE/admin/customers/$GUEST/erasure"
+step "nothing to cancel now" 409 erasure_not_requested -X DELETE "$BASE/admin/customers/$GUEST/erasure"
+step "export the guest's data (§7.4)" 200 - "$BASE/admin/customers/$GUEST/export"
+contains "the customer" "\"customer\":{\"id\":\"$GUEST\""
+contains "the order" "\"orders\":[{\"id\":\"$SHOP_ORDER\""
 contains "and one order's statistics (design note 0032)" '"orders":{"count":1,"first_placed_at":"20'
 contains "spent in EUR" '"amount_spent":[{"amount":3051,"currency":"EUR"}]'
+step "deleting a customer with orders is refused" 409 customer_has_orders -X DELETE "$BASE/admin/customers/$GUEST"
 step "the guest's orders" 200 - "$BASE/admin/orders?customer=$GUEST"
 contains "the order" "\"id\":\"$SHOP_ORDER\""
 step "a customer that isn't one" 400 invalid_query "$BASE/admin/orders?customer=nope"

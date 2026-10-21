@@ -1,10 +1,10 @@
 use hypha_core::{
     Address, AddressId, AddressParts, CustomerId, Direction, Email, Keyset, Page, PageRequest,
-    Recorded, RepoError, SortKey, Version, Versioned, stamp_insert, stamp_update,
+    Recorded, RepoError, SortKey, Timestamp, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_customers::{
-    Customer, CustomerFilter, CustomerRepo, CustomerSnapshot, CustomerSort, CustomerSummary,
-    SavedAddress,
+    ConsentSource, ConsentState, Customer, CustomerFilter, CustomerRepo, CustomerSnapshot,
+    CustomerSort, CustomerSummary, MarketingConsent, OptInLevel, SavedAddress,
 };
 use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
@@ -79,7 +79,8 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
             ),
         };
         let fetch = i64::from(page.limit.get()) + 1;
-        let mut extra = Params::after(4);
+        let group = filter.group().map(|g| g.as_uuid());
+        let mut extra = Params::after(5);
         let fields = field_predicates(filter.fields(), "c.id", &mut extra);
         let mut conn = self.conn().await;
         let rows = conn
@@ -96,6 +97,9 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
                             OR strpos(lower(c.first_name), lower($3)) > 0
                             OR strpos(lower(c.last_name), lower($3)) > 0
                             OR strpos(lower(c.phone), lower($3)) > 0)
+                       AND ($5::uuid IS NULL OR EXISTS (
+                            SELECT 1 FROM customer_group_members m
+                            WHERE m.group_id = $5 AND m.customer_id = c.id))
                        {fields}
                      ORDER BY {order} LIMIT $2",
                     stamps = stamp_columns("c."),
@@ -105,6 +109,7 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
                     (&fetch, Type::INT8),
                     (&filter.q(), Type::TEXT),
                     (&text_key, Type::TEXT),
+                    (&group, Type::UUID),
                 ]),
             )
             .await
@@ -157,6 +162,29 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
         customer.set_version(version);
         Ok(())
     }
+
+    async fn due_for_erasure(
+        &self,
+        now: Timestamp,
+        limit: u32,
+    ) -> Result<Vec<CustomerId>, RepoError> {
+        let mut conn = self.conn().await;
+        conn.db()
+            .query_typed(
+                "SELECT id FROM customers
+                 WHERE erased_at IS NULL AND erasure_due_at IS NOT NULL AND erasure_due_at <= $1
+                 ORDER BY erasure_due_at, id LIMIT $2",
+                &[
+                    (&now.unix_micros(), Type::INT8),
+                    (&i64::from(limit), Type::INT8),
+                ],
+            )
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(|row| Ok(CustomerId::from_uuid(col(row, "id")?)))
+            .collect()
+    }
 }
 
 /// `CustomerRepo::update` inside the caller's transaction; the new version. The version
@@ -169,7 +197,12 @@ pub(crate) async fn update_customer(
         .query_typed_opt(
             "UPDATE customers SET version = version + 1, email = $3, first_name = $4,
                  last_name = $5, phone = $6, default_shipping_address_id = $7,
-                 default_billing_address_id = $8
+                 default_billing_address_id = $8,
+                 email_marketing_state = $9, email_marketing_level = $10,
+                 email_marketing_at = $11, email_marketing_source = $12,
+                 sms_marketing_state = $13, sms_marketing_level = $14,
+                 sms_marketing_at = $15, sms_marketing_source = $16,
+                 erased_at = $17, erasure_due_at = $18
              WHERE id = $1 AND version = $2 RETURNING version",
             &[
                 (&s.id.as_uuid(), Type::UUID),
@@ -180,6 +213,28 @@ pub(crate) async fn update_customer(
                 (&s.phone, Type::TEXT),
                 (&s.default_shipping.map(|a| a.as_uuid()), Type::UUID),
                 (&s.default_billing.map(|a| a.as_uuid()), Type::UUID),
+                (&s.email_marketing.state.as_str(), Type::TEXT),
+                (&s.email_marketing.opt_in_level.as_str(), Type::TEXT),
+                (
+                    &s.email_marketing.consented_at.map(Timestamp::unix_micros),
+                    Type::INT8,
+                ),
+                (
+                    &s.email_marketing.source.map(ConsentSource::as_text),
+                    Type::TEXT,
+                ),
+                (&s.sms_marketing.state.as_str(), Type::TEXT),
+                (&s.sms_marketing.opt_in_level.as_str(), Type::TEXT),
+                (
+                    &s.sms_marketing.consented_at.map(Timestamp::unix_micros),
+                    Type::INT8,
+                ),
+                (
+                    &s.sms_marketing.source.map(ConsentSource::as_text),
+                    Type::TEXT,
+                ),
+                (&s.erased_at.map(Timestamp::unix_micros), Type::INT8),
+                (&s.erasure_due_at.map(Timestamp::unix_micros), Type::INT8),
             ],
         )
         .await
@@ -197,6 +252,26 @@ pub(crate) async fn update_customer(
     Ok(written)
 }
 
+/// Removes a customer at `version` (design note 0032, §7.2): its addresses and group
+/// memberships cascade; its carts are unlinked by the workflow in the same batch.
+pub(crate) async fn delete_customer(
+    tx: &impl Queries,
+    id: CustomerId,
+    version: Version,
+) -> Result<(), RepoError> {
+    let gone = tx
+        .query_typed_opt(
+            "DELETE FROM customers WHERE id = $1 AND version = $2 RETURNING id",
+            &[
+                (&id.as_uuid(), Type::UUID),
+                (&version_to_db(version)?, Type::INT8),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    gone.map(|_| ()).ok_or(RepoError::StaleVersion)
+}
+
 /// `CustomerRepo::insert` inside the caller's transaction (also used by `PgBatch`).
 pub(crate) async fn insert_customer(
     tx: &impl Queries,
@@ -204,8 +279,11 @@ pub(crate) async fn insert_customer(
 ) -> Result<(), RepoError> {
     tx.query_typed(
         "INSERT INTO customers (id, version, email, first_name, last_name, phone,
-             default_shipping_address_id, default_billing_address_id)
-         VALUES ($1, 1, $2, $3, $4, $5, $6, $7)",
+             default_shipping_address_id, default_billing_address_id,
+             email_marketing_state, email_marketing_level, email_marketing_at,
+             email_marketing_source, sms_marketing_state, sms_marketing_level,
+             sms_marketing_at, sms_marketing_source, erased_at, erasure_due_at)
+         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&s.email.as_str(), Type::TEXT),
@@ -214,6 +292,28 @@ pub(crate) async fn insert_customer(
             (&s.phone, Type::TEXT),
             (&s.default_shipping.map(|a| a.as_uuid()), Type::UUID),
             (&s.default_billing.map(|a| a.as_uuid()), Type::UUID),
+            (&s.email_marketing.state.as_str(), Type::TEXT),
+            (&s.email_marketing.opt_in_level.as_str(), Type::TEXT),
+            (
+                &s.email_marketing.consented_at.map(Timestamp::unix_micros),
+                Type::INT8,
+            ),
+            (
+                &s.email_marketing.source.map(ConsentSource::as_text),
+                Type::TEXT,
+            ),
+            (&s.sms_marketing.state.as_str(), Type::TEXT),
+            (&s.sms_marketing.opt_in_level.as_str(), Type::TEXT),
+            (
+                &s.sms_marketing.consented_at.map(Timestamp::unix_micros),
+                Type::INT8,
+            ),
+            (
+                &s.sms_marketing.source.map(ConsentSource::as_text),
+                Type::TEXT,
+            ),
+            (&s.erased_at.map(Timestamp::unix_micros), Type::INT8),
+            (&s.erasure_due_at.map(Timestamp::unix_micros), Type::INT8),
         ],
     )
     .await
@@ -281,7 +381,10 @@ async fn load<T: tokio_postgres::types::ToSql + Sync>(
         .query_typed_opt(
             &format!(
                 "SELECT id, version, email, first_name, last_name, phone,
-                     default_shipping_address_id, default_billing_address_id, {}
+                     default_shipping_address_id, default_billing_address_id,
+                     email_marketing_state, email_marketing_level, email_marketing_at,
+                     email_marketing_source, sms_marketing_state, sms_marketing_level,
+                     sms_marketing_at, sms_marketing_source, erased_at, erasure_due_at, {}
                  FROM customers WHERE {filter}",
                 stamp_columns(""),
             ),
@@ -321,10 +424,36 @@ async fn load<T: tokio_postgres::types::ToSql + Sync>(
             .map(AddressId::from_uuid),
         default_billing: col::<Option<Uuid>>(&row, "default_billing_address_id")?
             .map(AddressId::from_uuid),
+        email_marketing: consent_from_row(&row, "email_marketing_")?,
+        sms_marketing: consent_from_row(&row, "sms_marketing_")?,
+        erased_at: col::<Option<i64>>(&row, "erased_at")?.map(Timestamp::from_unix_micros),
+        erasure_due_at: col::<Option<i64>>(&row, "erasure_due_at")?
+            .map(Timestamp::from_unix_micros),
     };
     Customer::restore(snapshot)
         .map(Some)
         .map_err(|e| corrupt(format!("customer {id}: {e}")))
+}
+
+/// A channel's consent from its four columns (`<prefix>state`, `level`, `at`, `source`).
+fn consent_from_row(row: &Row, prefix: &str) -> Result<MarketingConsent, RepoError> {
+    let state: String = col(row, &format!("{prefix}state"))?;
+    let level: String = col(row, &format!("{prefix}level"))?;
+    let source: Option<String> = col(row, &format!("{prefix}source"))?;
+    Ok(MarketingConsent {
+        state: ConsentState::parse(&state)
+            .ok_or_else(|| corrupt(format!("consent state {state:?}")))?,
+        opt_in_level: OptInLevel::parse(&level)
+            .ok_or_else(|| corrupt(format!("opt-in level {level:?}")))?,
+        consented_at: col::<Option<i64>>(row, &format!("{prefix}at"))?
+            .map(Timestamp::from_unix_micros),
+        source: source
+            .as_deref()
+            .map(|s| {
+                ConsentSource::parse(s).ok_or_else(|| corrupt(format!("consent source {s:?}")))
+            })
+            .transpose()?,
+    })
 }
 
 fn saved_address(row: &Row) -> Result<SavedAddress, RepoError> {

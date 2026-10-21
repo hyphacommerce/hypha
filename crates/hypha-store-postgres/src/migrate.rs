@@ -339,6 +339,16 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "orders_by_customer",
             sql: include_str!("../migrations/0063_orders_by_customer.sql"),
         },
+        Migration {
+            version: 64,
+            name: "customer_consent",
+            sql: include_str!("../migrations/0064_customer_consent.sql"),
+        },
+        Migration {
+            version: 65,
+            name: "customer_groups",
+            sql: include_str!("../migrations/0065_customer_groups.sql"),
+        },
     ],
 };
 

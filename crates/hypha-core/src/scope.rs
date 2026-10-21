@@ -33,6 +33,10 @@ pub enum Scope {
     CustomersRead,
     #[serde(rename = "customers:write")]
     CustomersWrite,
+    /// Requesting and cancelling the erasure of a customer's personal data (design note
+    /// 0032, §7.3): only the owner role has it by default.
+    #[serde(rename = "customers:erase")]
+    CustomersErase,
     #[serde(rename = "stores:read")]
     StoresRead,
     #[serde(rename = "stores:write")]
@@ -139,6 +143,7 @@ impl Scope {
             Scope::InventoryWrite => "inventory:write",
             Scope::CustomersRead => "customers:read",
             Scope::CustomersWrite => "customers:write",
+            Scope::CustomersErase => "customers:erase",
             Scope::StoresRead => "stores:read",
             Scope::StoresWrite => "stores:write",
             Scope::OrdersRead => "orders:read",
@@ -214,6 +219,7 @@ impl Scope {
             | Scope::TaxesWrite
             | Scope::InventoryWrite
             | Scope::CustomersWrite
+            | Scope::CustomersErase
             | Scope::StoresWrite
             | Scope::OrdersWrite
             | Scope::Checkout
@@ -256,7 +262,7 @@ impl Scope {
         Scope::CustomerDataProfile,
     ];
 
-    pub const ALL: [Scope; 44] = [
+    pub const ALL: [Scope; 45] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -271,6 +277,7 @@ impl Scope {
         Scope::InventoryWrite,
         Scope::CustomersRead,
         Scope::CustomersWrite,
+        Scope::CustomersErase,
         Scope::StoresRead,
         Scope::StoresWrite,
         Scope::OrdersRead,

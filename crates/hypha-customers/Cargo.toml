@@ -10,6 +10,7 @@ serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 uuid.workspace = true
 hypha-testkit = { path = "../hypha-testkit" }
 pollster = "0.4"

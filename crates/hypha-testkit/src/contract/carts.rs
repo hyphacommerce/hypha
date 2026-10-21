@@ -17,6 +17,10 @@ pub async fn cart_repo<R: CartRepo>(make: impl AsyncFn() -> R) {
     keys_and_stale(&make().await).await;
     scenario("cart: clearing the buyer stores no email and no customer");
     buyer_cleared(&make().await).await;
+    scenario("cart: a customer's carts, oldest first, open or completed");
+    of_customer(&make().await).await;
+    scenario("cart: the marketing opt-in round trips (design note 0032, §5)");
+    marketing_round_trips(&make().await).await;
     scenario("cart: shipping address, choice and quote round trip, and clear");
     shipping_round_trips(&make().await).await;
     scenario("cart: the payment method round trips on insert and update, and clears");
@@ -148,6 +152,52 @@ async fn buyer_cleared<R: CartRepo>(repo: &R) {
     let stored = repo.get(c.id()).await.unwrap().unwrap();
     assert_eq!((stored.customer(), stored.email()), (None, None));
     assert_eq!(stored, c);
+}
+
+async fn marketing_round_trips<R: CartRepo>(repo: &R) {
+    let mut c = cart(1);
+    c.set_marketing_opt_in(true).unwrap();
+    repo.insert(&mut c).await.unwrap();
+    assert_eq!(repo.get(c.id()).await, Ok(Some(c.clone())));
+    assert!(repo.get(c.id()).await.unwrap().unwrap().marketing_opt_in());
+    c.set_marketing_opt_in(false).unwrap();
+    repo.update(&mut c).await.unwrap();
+    assert!(!repo.get(c.id()).await.unwrap().unwrap().marketing_opt_in());
+}
+
+async fn of_customer<R: CartRepo>(repo: &R) {
+    let ana = CustomerId::from_uuid(Uuid::from_u128(70));
+    let ivo = CustomerId::from_uuid(Uuid::from_u128(71));
+    let email = |s: &str| Email::new(s).unwrap();
+    let mut anas_first = cart(1);
+    anas_first
+        .set_customer(Some((ana, email("ana@example.hr"))))
+        .unwrap();
+    let mut ivos = cart(2);
+    ivos.set_customer(Some((ivo, email("ivo@example.hr"))))
+        .unwrap();
+    let mut anas_second = cart(3);
+    anas_second
+        .set_customer(Some((ana, email("ana@example.hr"))))
+        .unwrap();
+    anas_second
+        .complete(hypha_core::OrderId::from_uuid(Uuid::from_u128(900)))
+        .unwrap();
+    let mut nobodys = cart(4);
+    nobodys.set_email(Some(email("ana@example.hr"))).unwrap();
+    for c in [&mut anas_first, &mut ivos, &mut anas_second, &mut nobodys] {
+        repo.insert(c).await.unwrap();
+    }
+    assert_eq!(
+        repo.of_customer(ana).await,
+        Ok(vec![anas_first, anas_second])
+    );
+    assert_eq!(repo.of_customer(ivo).await, Ok(vec![ivos]));
+    assert_eq!(
+        repo.of_customer(CustomerId::from_uuid(Uuid::from_u128(72)))
+            .await,
+        Ok(vec![])
+    );
 }
 
 async fn shipping_round_trips<R: CartRepo>(repo: &R) {

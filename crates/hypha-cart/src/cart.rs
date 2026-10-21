@@ -95,6 +95,9 @@ pub struct Cart {
     /// How the buyer will pay (design note 0027, PA6): checked when chosen and again
     /// at checkout.
     payment_method: Option<PaymentMethodId>,
+    /// "Email me with news and offers" (design note 0032, §5): checkout records the
+    /// consent when it's ticked; unticked never unsubscribes anyone.
+    marketing_opt_in: bool,
 }
 
 impl Versioned for Cart {
@@ -133,7 +136,36 @@ impl Cart {
             shipping_address: None,
             shipping: None,
             payment_method: None,
+            marketing_opt_in: false,
         }
+    }
+
+    /// Erasure (design note 0032, §7.3) of a cart that was checked out: the buyer's email
+    /// becomes `placeholder` and the address goes; the lines, totals and link to the
+    /// customer stay. Open carts are deleted instead. Not bound to the cart being open.
+    pub fn redact(&mut self, placeholder: Email) -> bool {
+        let mut changed = false;
+        if self.email.as_ref().is_some_and(|e| *e != placeholder) {
+            self.email = Some(placeholder);
+            changed = true;
+        }
+        if self.shipping_address.is_some() {
+            self.shipping_address = None;
+            self.shipping = None;
+            changed = true;
+        }
+        changed
+    }
+
+    /// Ticks or unticks the marketing box (design note 0032, §5).
+    pub fn set_marketing_opt_in(&mut self, opt_in: bool) -> Result<(), CartError> {
+        self.ensure_open()?;
+        self.marketing_opt_in = opt_in;
+        Ok(())
+    }
+
+    pub fn marketing_opt_in(&self) -> bool {
+        self.marketing_opt_in
     }
 
     /// Every change goes through this first: a checked-out cart is the order's history.
@@ -357,6 +389,7 @@ pub struct CartSnapshot {
     pub shipping_address: Option<AddressParts>,
     pub shipping: Option<SelectedShipping>,
     pub payment_method: Option<PaymentMethodId>,
+    pub marketing_opt_in: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -393,6 +426,7 @@ impl Cart {
             shipping_address: self.shipping_address.as_ref().map(|a| a.parts().clone()),
             shipping: self.shipping.clone(),
             payment_method: self.payment_method,
+            marketing_opt_in: self.marketing_opt_in,
         }
     }
 
@@ -444,6 +478,7 @@ impl Cart {
             shipping_address,
             shipping: s.shipping,
             payment_method: s.payment_method,
+            marketing_opt_in: s.marketing_opt_in,
         })
     }
 }

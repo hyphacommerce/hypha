@@ -141,7 +141,7 @@ pub fn event_scope(subject_kind: &str) -> Option<Scope> {
         "price_list" => Scope::PricingRead,
         "tax_class" | "tax_region" => Scope::TaxesRead,
         "inventory_item" | "location" => Scope::InventoryRead,
-        "customer" => Scope::CustomersRead,
+        "customer" | "customer_group" => Scope::CustomersRead,
         "order" | "payment" => Scope::OrdersRead,
         "fulfillment" => Scope::FulfillmentsRead,
         "shipping_zone" => Scope::ShippingRead,
@@ -521,6 +521,21 @@ impl App {
                 && self.webhook.is_some()
                 && (route.event_type == AppUninstalled::TYPE
                     || (self.enabled && self.uninstalled_at.is_none()));
+        }
+        // `customer.redacted` (design note 0032, §7.3) reaches every app that reads
+        // customers, subscribed or not: it's how Hypha asks them to delete their copies.
+        if route.event_type == "customer.redacted" {
+            return self.enabled
+                && self.uninstalled_at.is_none()
+                && self.webhook.is_some()
+                && match (&self.grant, &self.manifest) {
+                    (Some(grant), _) => grant.has(Scope::CustomersRead),
+                    (None, Some(_)) => false,
+                    (None, None) => self
+                        .subscriptions
+                        .iter()
+                        .any(|p| p.matches(route.event_type)),
+                };
         }
         if !self.wants(route.event_type) {
             return false;

@@ -54,6 +54,10 @@ where
     second_order_for_a_cart_writes_nothing(&make().await).await;
     scenario("batch: inserts a customer; a taken email writes nothing");
     customers(&make().await).await;
+    scenario("batch: updates a customer with a cart; a stale customer writes nothing");
+    customer_updated(&make().await).await;
+    scenario("batch: deletes a customer at its version with its carts unlinked");
+    customer_deleted(&make().await).await;
     scenario("batch: a stale cart rolls back the order and customer inserted before it");
     failure_rolls_back_inserts(&make().await).await;
     scenario("batch: a taken idempotency key writes nothing else (checkout's batch)");
@@ -66,6 +70,8 @@ where
     stale_order_writes_nothing(&make().await).await;
     scenario("batch: a stale fulfilment writes nothing");
     stale_fulfillment_writes_nothing(&make().await).await;
+    scenario("batch: deletes a cart at its version; a stale or missing one writes nothing");
+    cart_deleted(&make().await).await;
     scenario("batch: deletes an inventory item at its version");
     deletes_an_item(&make().await).await;
     scenario("batch: deleting a stale or missing inventory item writes nothing");
@@ -288,6 +294,109 @@ where
         Err(RepoError::Duplicate(customer_keys::CUSTOMER_EMAIL))
     );
     assert_eq!(ports.carts().get(c.id()).await, Ok(Some(c)));
+}
+
+async fn cart_deleted<S>(ports: &S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems,
+    S::Batch: StageCarts,
+{
+    let (c, _, _) = stored(ports).await;
+    let mut stale = c.clone();
+    stale.set_version(Version::new(7));
+    let mut batch = ports.batch();
+    batch.delete_cart(&stale);
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+    assert_eq!(ports.carts().get(c.id()).await, Ok(Some(c.clone())));
+
+    let mut batch = ports.batch();
+    batch.delete_cart(&c);
+    assert_eq!(ports.commit(batch).await, Ok(()));
+    assert_eq!(ports.carts().get(c.id()).await, Ok(None));
+    let mut batch = ports.batch();
+    batch.delete_cart(&c);
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+}
+
+async fn customer_updated<S>(ports: &S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems + HasCustomers,
+    S::Batch: StageCarts + StageCustomers,
+{
+    let mut ana = Customer::new(CustomerId::from_uuid(Uuid::from_u128(1)), ana());
+    ports.customers().insert(&mut ana).await.unwrap();
+    let (c, _, _) = stored(ports).await;
+
+    let mut changed = ana.clone();
+    changed.set_first_name(Some("Ana".to_string())).unwrap();
+    let mut cart = c.clone();
+    cart.set_customer(Some((ana.id(), ana.email().clone())))
+        .unwrap();
+    let mut batch = ports.batch();
+    batch.update_customer(&mut changed);
+    batch.update_cart(&mut cart);
+    assert_eq!(ports.commit(batch).await, Ok(()));
+    assert_eq!(changed.version(), Version::new(2));
+    assert_eq!(
+        ports.customers().get(ana.id()).await,
+        Ok(Some(changed.clone()))
+    );
+    assert_eq!(ports.carts().get(c.id()).await, Ok(Some(cart.clone())));
+
+    // From the old copy: nothing, not even the cart staged with it.
+    let mut stale = ana;
+    stale.set_phone(Some("+385".to_string())).unwrap();
+    let mut cart_again = cart.clone();
+    cart_again.set_customer(None).unwrap();
+    let mut batch = ports.batch();
+    batch.update_customer(&mut stale);
+    batch.update_cart(&mut cart_again);
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+    assert_eq!(ports.customers().get(changed.id()).await, Ok(Some(changed)));
+    assert_eq!(ports.carts().get(c.id()).await, Ok(Some(cart)));
+}
+
+async fn customer_deleted<S>(ports: &S)
+where
+    S: HasBatch + HasCarts + HasInventoryItems + HasCustomers,
+    S::Batch: StageCarts + StageCustomers,
+{
+    let mut ana = Customer::new(CustomerId::from_uuid(Uuid::from_u128(1)), ana());
+    ports.customers().insert(&mut ana).await.unwrap();
+    let (c, _, _) = stored(ports).await;
+    let mut cart = c.clone();
+    cart.set_customer(Some((ana.id(), ana.email().clone())))
+        .unwrap();
+    ports.carts().update(&mut cart).await.unwrap();
+
+    // Deleting from a stale copy writes nothing.
+    let mut stale = ana.clone();
+    stale.set_version(Version::new(7));
+    let mut batch = ports.batch();
+    batch.delete_customer(&mut stale);
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+    assert_eq!(ports.customers().get(ana.id()).await, Ok(Some(ana.clone())));
+
+    let mut unlinked = cart.clone();
+    unlinked.set_customer(None).unwrap();
+    let mut batch = ports.batch();
+    batch.update_cart(&mut unlinked);
+    ana.delete();
+    batch.delete_customer(&mut ana);
+    assert_eq!(ports.commit(batch).await, Ok(()));
+    assert_eq!(ports.customers().get(ana.id()).await, Ok(None));
+    assert_eq!(ports.customers().get_by_email(ana.email()).await, Ok(None));
+    assert_eq!(ports.carts().of_customer(ana.id()).await, Ok(vec![]));
+    let stored = ports.carts().get(c.id()).await.unwrap().unwrap();
+    assert_eq!(
+        (stored.customer(), stored.email()),
+        (None, Some(ana.email()))
+    );
+
+    // Deleting what's gone: stale, like products.
+    let mut batch = ports.batch();
+    batch.delete_customer(&mut ana);
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
 }
 
 async fn second_order_for_a_cart_writes_nothing<S>(ports: &S)

@@ -44,6 +44,8 @@ mod app_extensions;
 mod app_fields;
 // Custom fields: definitions, values, filters, facets and redaction (design note 0033).
 mod custom_fields;
+// Customers: deleting, consent, groups and erasure (design note 0032).
+mod customers;
 mod oauth;
 // A host built with a spore (design note 0030).
 mod spores;
@@ -4084,6 +4086,37 @@ async fn placed_order_for_three_mugs(app: &TestApp) -> (String, String, String) 
     )
 }
 
+/// `placed_order_for_three_mugs` with "Email me with news and offers" ticked (design
+/// note 0032, §5).
+async fn placed_order_for_three_mugs_opting_in(app: &TestApp) -> (String, String, String) {
+    let (pk, cart_path, location) = cart_for_three_mugs(app).await;
+    let (status, cart) = send_as(
+        app,
+        &pk,
+        "PUT",
+        &format!("{cart_path}/marketing"),
+        Some(r#"{"opt_in":true}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cart}");
+    assert_eq!(cart["marketing_opt_in"], true);
+    pay_on_delivery(app, &pk, &cart_path).await;
+    let (status, order) = send_as(
+        app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/checkout"),
+        Some("{}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{order}");
+    (
+        order["id"].as_str().unwrap().to_string(),
+        order["lines"][0]["id"].as_str().unwrap().to_string(),
+        location,
+    )
+}
+
 /// Design note 0032, §12 step 1: a customer's response adds its orders up, and the
 /// orders list narrows to one customer.
 #[tokio::test]
@@ -4120,7 +4153,10 @@ async fn a_customer_carries_its_order_statistics_and_lists_its_orders() {
     let (status, json) = send(&app, "POST", &cancel, Some(r#"{"reason":"customer"}"#)).await;
     assert_eq!(status, StatusCode::OK, "{json}");
     let (_, json) = send(&app, "GET", &format!("/admin/customers/{customer}"), None).await;
-    assert_eq!(json["orders"], json!({"count": 0, "amount_spent": []}));
+    assert_eq!(
+        json["orders"],
+        json!({"count": 0, "amount_spent": [], "cancelled": 1})
+    );
 
     // A customer ID that is not one is refused before any lookup.
     let (status, json) = send(&app, "GET", "/admin/orders?customer=nope", None).await;

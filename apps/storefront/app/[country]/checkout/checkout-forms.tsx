@@ -8,6 +8,7 @@
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Grid } from "@astryxdesign/core/Grid";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { VStack } from "@astryxdesign/core/Stack";
@@ -35,15 +36,19 @@ export function DetailsForm({
   country,
   countryName,
   initial,
+  initialOptIn,
   saved,
 }: {
   country: string;
   countryName: string;
   initial: Details;
+  /** Whether the shopper ticked "Email me with news and offers" (design note 0032, §5). */
+  initialOptIn: boolean;
   /** Whether the cart already has them (the button says "Update"). */
   saved: boolean;
 }) {
   const [details, setDetails] = useState(initial);
+  const [optIn, setOptIn] = useState(initialOptIn);
   const [error, setError] = useState<string>();
   const [pending, start] = useTransition();
   const [tried, setTried] = useState(false);
@@ -60,7 +65,7 @@ export function DetailsForm({
     if (REQUIRED.some((k) => details[k].trim() === "")) return;
     start(async () => {
       // A save answers with the page re-rendered (`refresh` in the action).
-      const result = await saveDetails(country, details);
+      const result = await saveDetails(country, details, optIn);
       setError(result?.error);
     });
   };
@@ -89,6 +94,7 @@ export function DetailsForm({
           Contact
         </Text>
         {field("email", "Email", { required: true, type: "email" })}
+        <CheckboxInput label="Email me with news and offers" value={optIn} onChange={setOptIn} />
       </VStack>
       <VStack gap={3}>
         <VStack gap={1}>

@@ -169,7 +169,20 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
             )
             .await
             .map_err(repo_error)?;
+        let cancelled = conn
+            .db()
+            .query_typed_opt(
+                "SELECT count(*)::bigint AS cancelled FROM orders
+                 WHERE customer_id = $1 AND cancelled_at IS NOT NULL",
+                &[(&customer.as_uuid(), Type::UUID)],
+            )
+            .await
+            .map_err(repo_error)?;
         let mut stats = OrderStats::default();
+        if let Some(row) = cancelled {
+            let count: i64 = col(&row, "cancelled")?;
+            stats.cancelled_count = u64::try_from(count).map_err(|e| corrupt(e.to_string()))?;
+        }
         for row in &rows {
             let currency =
                 currency_from_db(&row.try_get::<_, String>("currency").map_err(corrupt)?)?;

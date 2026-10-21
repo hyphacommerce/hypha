@@ -362,6 +362,7 @@ accessors! {
     hypha_inventory::HasInventoryItems => InventoryItems, inventory_items;
     hypha_inventory::HasLocations => Locations, locations;
     hypha_customers::HasCustomers => Customers, customers;
+    hypha_customers::HasCustomerGroups => CustomerGroups, customer_groups;
     hypha_core::HasIdempotency => Idempotency, idempotency;
     hypha_orders::HasOrders => Orders, orders;
     hypha_fulfillment::HasFulfillments => Fulfillments, fulfillments;

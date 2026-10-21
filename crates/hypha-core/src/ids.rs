@@ -123,6 +123,7 @@ define_id!(LocationId, "loc");
 define_id!(InventoryItemId, "invi");
 
 define_id!(CustomerId, "cus");
+define_id!(CustomerGroupId, "cgrp");
 define_id!(AddressId, "addr");
 
 define_id!(OrderId, "ord");

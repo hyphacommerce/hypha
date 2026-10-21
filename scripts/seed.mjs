@@ -1061,6 +1061,12 @@ async function main() {
   for (const { why: _why, existing: taken, field: _field, ...body } of suggested.items) {
     if (!taken) await admin.post("/admin/custom-field-definitions", body);
   }
+  // A group (design note 0032, §6): what group prices and payment methods will point at.
+  const wholesale = await admin.post("/admin/customer-groups", {
+    name: "Wholesale",
+    handle: "wholesale",
+    description: "Studios and shops buying in bulk.",
+  });
   const LABELS = {
     "ana.horvat@example.com": { tags: ["vip", "newsletter"], note: "Prefers email over phone." },
     "lukas.weber@example.com": {
@@ -1080,6 +1086,11 @@ async function main() {
     await admin.patch(`/admin/customers/${customer.id}/custom-fields`, {
       custom_fields: { "custom.tags": tags, ...(note ? { "custom.note": note } : {}) },
     });
+    if (tags.includes("wholesale")) {
+      await admin.post(`/admin/customer-groups/${wholesale.id}/customers`, {
+        customers: [customer.id],
+      });
+    }
   }
 
   console.log("\nDone: Lumen & Loom is set up.");

@@ -20,7 +20,12 @@ export default async function CustomersPage({
 }) {
   const params = await searchParams;
   const client = await sessionClient();
-  const [definitions, me] = await Promise.all([definitionsOf("customer"), requireStaff()]);
+  const [definitions, me, groups] = await Promise.all([
+    definitionsOf("customer"),
+    requireStaff(),
+    client.GET("/admin/customer-groups").then((r) => r.data?.items ?? []),
+  ]);
+  const group = one(params, "group");
   // Filterable custom fields (design note 0033, §7); the labels field (design note 0032,
   // CD1) also gets a column and the selection bar's actions.
   const fieldFilters = definitions.filter(isFilterOffered);
@@ -33,6 +38,7 @@ export default async function CustomersPage({
         sort: oneOf(params, "sort", SORTS),
         field: fieldQuery(params, fieldFilters),
         custom_fields: labels?.field,
+        group: groups.some((g) => g.id === group) ? group : undefined,
       },
     },
   });
@@ -46,6 +52,7 @@ export default async function CustomersPage({
           page={page}
           fieldFilters={fieldFilters}
           labels={labels}
+          groups={groups}
           canLabel={hasScope(me.scopes, "customers:write")}
         />
       </VStack>

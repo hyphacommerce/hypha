@@ -285,6 +285,13 @@ fn category_repo() {
 }
 
 #[test]
+fn customer_group_repo() {
+    block_on(contract::customer_group_repo(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
 fn payment_method_repo() {
     block_on(contract::payment_method_repo(async || {
         hypha_testkit::InMemoryPaymentMethodRepo::default()

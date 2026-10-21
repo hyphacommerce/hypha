@@ -370,6 +370,7 @@ async fn stats<R: OrderRepo>(repo: &R) {
     let day = |d: i64| Timestamp::from_unix_micros(1_767_225_600_000_000 + d * 86_400_000_000);
     let expected = OrderStats {
         orders_count: 3,
+        cancelled_count: 1,
         first_order_at: Some(day(1)),
         last_order_at: Some(day(3)),
         amount_spent: vec![
@@ -389,6 +390,7 @@ async fn stats<R: OrderRepo>(repo: &R) {
             .unwrap(),
         OrderStats {
             orders_count: 1,
+            cancelled_count: 0,
             first_order_at: Some(day(4)),
             last_order_at: Some(day(4)),
             amount_spent: vec![Money::new(100, Currency::EUR).unwrap()],

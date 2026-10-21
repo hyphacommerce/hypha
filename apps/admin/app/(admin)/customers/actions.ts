@@ -14,6 +14,8 @@ export type Result = { error?: string };
 
 export type UpdateCustomerRequest = AdminSchemas["UpdateCustomerRequest"];
 export type AddressRequest = AdminSchemas["AddressRequest"];
+export type SetConsentRequest = AdminSchemas["SetConsentRequest"];
+export type Channel = "email" | "sms";
 
 function refresh(customer: string) {
   revalidatePath(`/customers/${customer}`);
@@ -47,6 +49,56 @@ export async function saveAddress(
       });
   if (error) return { error: describe(error) };
   refresh(customer);
+  return {};
+}
+
+/**
+ * Records a marketing consent as given now by staff (design note 0032, §5). `applied`
+ * is false when a newer consent is stored: nothing changed then.
+ */
+export async function setConsent(
+  id: string,
+  channel: Channel,
+  body: SetConsentRequest,
+): Promise<Result & { applied?: boolean }> {
+  const client = await sessionClient();
+  const { data, error } = await client.PUT("/admin/customers/{id}/marketing/{channel}", {
+    params: { path: { id, channel } },
+    body,
+  });
+  if (error) return { error: describe(error) };
+  refresh(id);
+  return { applied: data.applied };
+}
+
+/** Asks for the customer's personal data to be erased after the cancel window (§7.3). */
+export async function requestErasure(id: string): Promise<Result> {
+  const client = await sessionClient();
+  const { error } = await client.POST("/admin/customers/{id}/erasure", {
+    params: { path: { id } },
+  });
+  if (error) return { error: describe(error) };
+  refresh(id);
+  return {};
+}
+
+/** Cancels a requested erasure while the window is open. */
+export async function cancelErasure(id: string): Promise<Result> {
+  const client = await sessionClient();
+  const { error } = await client.DELETE("/admin/customers/{id}/erasure", {
+    params: { path: { id } },
+  });
+  if (error) return { error: describe(error) };
+  refresh(id);
+  return {};
+}
+
+/** Deletes a customer without orders (design note 0032, CD7); the API refuses otherwise. */
+export async function deleteCustomer(id: string): Promise<Result> {
+  const client = await sessionClient();
+  const { error } = await client.DELETE("/admin/customers/{id}", { params: { path: { id } } });
+  if (error) return { error: describe(error) };
+  revalidatePath("/customers");
   return {};
 }
 

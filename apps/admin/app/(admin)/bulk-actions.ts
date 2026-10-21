@@ -103,6 +103,23 @@ export async function markOrdersPaid(orders: (Item & { pending: boolean })[]): P
   return result;
 }
 
+/** Adds the customers to `group`, or takes them out of it: one call either way. */
+export async function setCustomersGroup(
+  group: string,
+  customers: Item[],
+  add: boolean,
+): Promise<BulkResult> {
+  const client = await sessionClient();
+  const ids = customers.map((c) => c.id);
+  const options = { params: { path: { id: group } }, body: { customers: ids } };
+  const { error } = add
+    ? await client.POST("/admin/customer-groups/{id}/customers", options)
+    : await client.DELETE("/admin/customer-groups/{id}/customers", options);
+  revalidatePath("/customers", "layout");
+  if (error) return { changed: 0, unchanged: 0, failed: [], error: describe(error) };
+  return { changed: ids.length, unchanged: 0, failed: [] };
+}
+
 /**
  * Adds `label` to, or removes it from, the customers' labels (`custom.tags`, design note
  * 0032, CD1): one call, done under each value's lock, so concurrent writers both land

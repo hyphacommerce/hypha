@@ -523,6 +523,7 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_search_index::HasSearchSettings
         + hypha_channels::HasChannels
         + hypha_categories::HasCategories
+        + hypha_customers::HasCustomerGroups
         + hypha_custom_fields::HasCustomFieldDefinitions
         + hypha_custom_fields::HasCustomFieldValues
         + hypha_custom_fields::ReferenceTargets
@@ -535,6 +536,7 @@ pub trait Storage: Send + Sync + 'static {
                        + hypha_tax::StageTaxAssignments
                        + hypha_channels::StagePublications
                        + hypha_categories::StageCategories
+                       + hypha_customers::StageCustomerGroups
                        + hypha_custom_fields::StageCustomFieldDefinitions
                        + hypha_custom_fields::StageCustomFieldValues
                        + hypha_notifications::StageNotificationSettings

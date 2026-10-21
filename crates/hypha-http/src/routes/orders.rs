@@ -255,7 +255,7 @@ impl OrderResponse {
         Ok(response)
     }
 
-    fn new(order: &Order) -> Result<Self, ApiError> {
+    pub(crate) fn new(order: &Order) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(order.stamps())?;
         Ok(Self {
             created_at,

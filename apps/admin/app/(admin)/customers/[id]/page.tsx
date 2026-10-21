@@ -18,23 +18,30 @@ import { hasScope } from "@/lib/navigation";
 import { wellKnownField, withoutWellKnown } from "@/lib/well-known-fields";
 
 import { AddressesCard } from "./addresses";
+import { ConsentCard } from "./consent";
+import { DeleteCustomer } from "./delete-customer";
 import { EditCustomer } from "./edit-customer";
+import { EraseCustomer, ErasureBanner, ExportCustomer } from "./erasure";
+import { GroupsCard } from "./groups-card";
 import { CustomerLabels } from "./labels";
 import { NoteCard } from "./note";
 
 export default async function CustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = await sessionClient();
-  const [customer, countries, currencies, extensions, definitions, fields, me] = await Promise.all([
-    client.GET("/admin/customers/{id}", { params: { path: { id } } }).then(loaded),
-    loadCountries(),
-    loadCurrencies(),
-    loadExtensions(),
-    // Its custom fields (design note 0033): none shown without `custom_fields:read`.
-    definitionsOf("customer"),
-    client.GET("/admin/customers/{id}/custom-fields", { params: { path: { id } } }),
-    requireStaff(),
-  ]);
+  const [customer, countries, currencies, extensions, definitions, fields, me, groups] =
+    await Promise.all([
+      client.GET("/admin/customers/{id}", { params: { path: { id } } }).then(loaded),
+      loadCountries(),
+      loadCurrencies(),
+      loadExtensions(),
+      // Its custom fields (design note 0033): none shown without `custom_fields:read`.
+      definitionsOf("customer"),
+      client.GET("/admin/customers/{id}/custom-fields", { params: { path: { id } } }),
+      requireStaff(),
+      // The store's groups (design note 0032, §6), for the groups card.
+      client.GET("/admin/customer-groups").then((r) => r.data?.items ?? []),
+    ]);
   // Their latest orders (design note 0032, §12 step 1). Needs `orders:read`; without it
   // the card says so.
   const recent = await client.GET("/admin/orders", {
@@ -43,7 +50,9 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
   const orders = recent.data?.items ?? [];
   const stats = customer.orders;
   const name = customerName(customer);
-  const canWrite = hasScope(me.scopes, "customers:write");
+  const isErased = Boolean(customer.erased_at);
+  const canWrite = hasScope(me.scopes, "customers:write") && !isErased;
+  const canErase = hasScope(me.scopes, "customers:erase");
   const canDefine = hasScope(me.scopes, "custom_fields:write");
   // The well-known fields (design note 0032, CD11) are rendered in place: labels under
   // the name, the note as its own card; the rest on the custom fields card.
@@ -66,7 +75,32 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
               canDefine={canDefine}
             />
           }
-          actions={canWrite && <EditCustomer customer={customer} />}
+          actions={
+            <HStack gap={2}>
+              <ExportCustomer id={customer.id} />
+              <EraseCustomer
+                id={customer.id}
+                name={name || customer.email}
+                canErase={canErase}
+                erasureDueAt={customer.erasure_due_at}
+                isErased={isErased}
+              />
+              {canWrite && (
+                <DeleteCustomer
+                  id={customer.id}
+                  name={name || customer.email}
+                  canDelete={customer.can_delete}
+                />
+              )}
+              {canWrite && <EditCustomer customer={customer} />}
+            </HStack>
+          }
+        />
+        <ErasureBanner
+          id={customer.id}
+          erasureDueAt={customer.erasure_due_at}
+          erasedAt={customer.erased_at}
+          canErase={canErase}
         />
         <div className="detail-columns">
           <div>
@@ -153,6 +187,20 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                 </MetadataList>
               </VStack>
             </Card>
+            <GroupsCard
+              customerId={customer.id}
+              groups={groups}
+              current={customer.groups}
+              canEdit={canWrite}
+            />
+            <ConsentCard
+              customerId={customer.id}
+              email={customer.email_marketing}
+              sms={customer.sms_marketing}
+              hasPhone={Boolean(customer.phone)}
+              canEdit={canWrite}
+              isErased={Boolean(customer.erased_at)}
+            />
             <AddressesCard
               customer={customer.id}
               addresses={customer.addresses}

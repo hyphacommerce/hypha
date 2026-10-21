@@ -241,6 +241,11 @@ async fn queue_template<E: MailEnv, P: MailPorts>(
             event: Some(event),
             order: Some(about.order.id()),
         };
+        // An erased customer's placeholder can't receive mail (design note 0032, CD10).
+        if message.to.is_placeholder() {
+            records.push(crate::send::skip_as(env, ports, &message, crate::send::ERASED).await?);
+            continue;
+        }
         records.push(match &rendering {
             Some(rendering) => {
                 queued = true;

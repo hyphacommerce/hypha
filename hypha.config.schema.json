@@ -21,6 +21,12 @@
         "max_depth": 5
       }
     },
+    "customers": {
+      "$ref": "#/$defs/Customers",
+      "default": {
+        "erasure_delay": "10d"
+      }
+    },
     "database": {
       "$ref": "#/$defs/Database",
       "default": {
@@ -237,6 +243,18 @@
           "default": 5,
           "maximum": 255,
           "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Customers": {
+      "description": "Customers and their personal data (design note 0032).",
+      "type": "object",
+      "properties": {
+        "erasure_delay": {
+          "description": "How long a requested erasure of a customer's personal data can be cancelled\nbefore the job runs it. At least 1 hour; 10 days by default. A merchant under a\nretention duty sets it longer.",
+          "$ref": "#/$defs/Duration",
+          "default": "10d"
         }
       },
       "additionalProperties": false

@@ -15,6 +15,7 @@ pub mod carts;
 pub mod categories;
 pub mod channels;
 pub mod custom_fields;
+pub mod customer_groups;
 pub mod customers;
 pub mod fulfillments;
 pub mod health;
@@ -189,6 +190,19 @@ macro_rules! route_table {
             [admin, POST, "/admin/customers", customers::create],
             [admin, GET, "/admin/customers/{id}", customers::fetch],
             [admin, PATCH, "/admin/customers/{id}", customers::update],
+            [admin, DELETE, "/admin/customers/{id}", customers::remove],
+            [admin, POST, "/admin/customers/{id}/erasure", customers::request_erasure_handler],
+            [admin, DELETE, "/admin/customers/{id}/erasure", customers::cancel_erasure_handler],
+            [admin, GET, "/admin/customers/{id}/export", customers::export],
+            [admin, PUT, "/admin/customers/{id}/marketing/{channel}", customers::set_consent],
+            [admin, PUT, "/admin/customers/{id}/groups", customers::set_groups],
+            [admin, GET, "/admin/customer-groups", customer_groups::list],
+            [admin, POST, "/admin/customer-groups", customer_groups::create],
+            [admin, GET, "/admin/customer-groups/{id}", customer_groups::fetch],
+            [admin, PATCH, "/admin/customer-groups/{id}", customer_groups::update],
+            [admin, DELETE, "/admin/customer-groups/{id}", customer_groups::remove],
+            [admin, POST, "/admin/customer-groups/{id}/customers", customer_groups::add_customers],
+            [admin, DELETE, "/admin/customer-groups/{id}/customers", customer_groups::remove_customers],
             [admin, POST, "/admin/customers/{id}/addresses", customers::add_address_handler],
             [admin, PUT, "/admin/customers/{id}/addresses/{address_id}", customers::update_address_handler],
             [admin, DELETE, "/admin/customers/{id}/addresses/{address_id}", customers::remove_address_handler],
@@ -340,6 +354,7 @@ macro_rules! route_table {
             [storefront, PUT, "/storefront/carts/{id}/lines/{variant}", carts::set_quantity],
             [storefront, DELETE, "/storefront/carts/{id}/lines/{variant}", carts::remove_line],
             [storefront, PUT, "/storefront/carts/{id}/email", carts::set_email],
+            [storefront, PUT, "/storefront/carts/{id}/marketing", carts::set_marketing],
             [storefront, PUT, "/storefront/carts/{id}/shipping-address", carts::set_address],
             [storefront, GET, "/storefront/carts/{id}/shipping-options", carts::shipping_options],
             [storefront, PUT, "/storefront/carts/{id}/shipping/{group_id}", carts::select],

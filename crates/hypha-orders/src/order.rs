@@ -523,6 +523,22 @@ impl Order {
         self.customer
     }
 
+    /// Erasure (design note 0032, §7.3): the buyer's email becomes `placeholder` and the
+    /// shipping address goes (the order's country stays). Lines, totals, payments and
+    /// fulfilments are untouched: placed orders are never deleted. Records no event of its
+    /// own: `customer.redacted` names the orders.
+    pub fn redact(&mut self, placeholder: Email) -> bool {
+        let mut changed = false;
+        if self.email != placeholder {
+            self.email = placeholder;
+            changed = true;
+        }
+        if self.shipping_address.take().is_some() {
+            changed = true;
+        }
+        changed
+    }
+
     pub fn email(&self) -> &Email {
         &self.email
     }

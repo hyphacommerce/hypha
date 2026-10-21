@@ -52,6 +52,26 @@ impl Email {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// The domain erasure writes addresses under (design note 0032, CD10): `.invalid` is
+    /// reserved (RFC 2606), so no such address can ever receive mail.
+    pub const PLACEHOLDER_DOMAIN: &str = "redacted.invalid";
+
+    /// The address an erased customer keeps, since email stays mandatory and unique:
+    /// `erased+<uuid>@redacted.invalid`, which says nothing about the person.
+    pub fn placeholder(id: uuid::Uuid) -> Self {
+        Self(format!(
+            "erased+{}@{}",
+            id.simple(),
+            Self::PLACEHOLDER_DOMAIN
+        ))
+    }
+
+    /// Whether this is an erased customer's placeholder: nothing should be sent to it,
+    /// and apps must not treat it as an address.
+    pub fn is_placeholder(&self) -> bool {
+        self.0.ends_with(&format!("@{}", Self::PLACEHOLDER_DOMAIN))
+    }
 }
 
 impl fmt::Display for Email {

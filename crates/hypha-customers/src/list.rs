@@ -1,7 +1,9 @@
 //! Customer lists (design note 0024, §2): the summary a table shows, what a list is
 //! narrowed to, and how it is ordered.
 
-use hypha_core::{CustomerId, Direction, Email, FieldFilter, SortKey, Stamps, optional_text};
+use hypha_core::{
+    CustomerGroupId, CustomerId, Direction, Email, FieldFilter, SortKey, Stamps, optional_text,
+};
 
 use crate::{Customer, CustomerError};
 
@@ -36,6 +38,7 @@ impl Customer {
 pub struct CustomerFilter {
     q: Option<String>,
     fields: Vec<FieldFilter>,
+    group: Option<CustomerGroupId>,
 }
 
 impl CustomerFilter {
@@ -45,7 +48,19 @@ impl CustomerFilter {
         Ok(Self {
             q: optional_text("q", q)?,
             fields: Vec::new(),
+            group: None,
         })
+    }
+
+    /// Only customers in `group` (design note 0032, §6). `matches` doesn't see it:
+    /// adapters apply it to the membership.
+    pub fn in_group(mut self, group: Option<CustomerGroupId>) -> Self {
+        self.group = group;
+        self
+    }
+
+    pub fn group(&self) -> Option<CustomerGroupId> {
+        self.group
     }
 
     /// Filters on custom fields (design note 0033, §7), checked against their definitions

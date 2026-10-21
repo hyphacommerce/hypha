@@ -1037,6 +1037,7 @@ dependencies = [
  "hypha-extensions",
  "hypha-media",
  "hypha-notifications",
+ "hypha-privacy",
  "hypha-search",
  "ipnet",
  "schemars",
@@ -1084,6 +1085,7 @@ dependencies = [
  "hypha-testkit",
  "pollster",
  "serde",
+ "serde_json",
  "thiserror",
  "uuid",
 ]
@@ -1249,6 +1251,7 @@ dependencies = [
  "hypha-order-actions",
  "hypha-orders",
  "hypha-payments",
+ "hypha-privacy",
  "hypha-products",
  "hypha-search",
  "hypha-search-index",
@@ -1442,6 +1445,23 @@ version = "0.1.0"
 dependencies = [
  "hypha-core",
  "hypha-markets",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "hypha-privacy"
+version = "0.1.0"
+dependencies = [
+ "hypha-cart",
+ "hypha-core",
+ "hypha-custom-fields",
+ "hypha-customers",
+ "hypha-notifications",
+ "hypha-orders",
+ "hypha-payments",
+ "hypha-testkit",
+ "pollster",
  "thiserror",
  "uuid",
 ]

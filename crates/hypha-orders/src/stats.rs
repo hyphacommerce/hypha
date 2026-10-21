@@ -12,6 +12,9 @@ use crate::Order;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OrderStats {
     pub orders_count: u64,
+    /// Cancelled orders, counted apart: they add up to nothing, but a customer with
+    /// any order can't be deleted, only erased (design note 0032, CD7).
+    pub cancelled_count: u64,
     pub first_order_at: Option<Timestamp>,
     pub last_order_at: Option<Timestamp>,
     pub amount_spent: Vec<Money>,
@@ -23,7 +26,11 @@ impl OrderStats {
     /// shouldn't make the customer unreadable.
     pub fn of<'a>(orders: impl IntoIterator<Item = &'a Order>) -> Self {
         let mut stats = Self::default();
-        for order in orders.into_iter().filter(|o| o.cancelled().is_none()) {
+        for order in orders {
+            if order.cancelled().is_some() {
+                stats.cancelled_count += 1;
+                continue;
+            }
             stats.orders_count += 1;
             let at = order.placed_at();
             stats.first_order_at = Some(stats.first_order_at.map_or(at, |t| t.min(at)));

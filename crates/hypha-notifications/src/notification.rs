@@ -337,6 +337,34 @@ impl Notification {
     }
 
     /// Done with: nothing to send any more, so the bodies go (Q1).
+    /// Erasure (design note 0032, §7.3): the recipient becomes `placeholder`, the subject
+    /// and the rendered email go, and a message still waiting is `skipped` (it would go
+    /// to an address that no longer exists). Says whether anything changed.
+    pub fn redact(&mut self, placeholder: Email) -> bool {
+        let mut changed = false;
+        if self.to != placeholder {
+            self.to = placeholder;
+            changed = true;
+        }
+        if !self.subject.is_empty() {
+            self.subject.clear();
+            changed = true;
+        }
+        if matches!(
+            self.status,
+            NotificationStatus::Queued | NotificationStatus::Sending
+        ) {
+            self.status = NotificationStatus::Skipped;
+            self.error = Some("the customer was erased".to_string());
+            changed = true;
+        }
+        if self.email.is_some() || self.lease_until.is_some() || self.next_attempt_at.is_some() {
+            self.finish();
+            changed = true;
+        }
+        changed
+    }
+
     fn finish(&mut self) {
         self.lease_until = None;
         self.next_attempt_at = None;
