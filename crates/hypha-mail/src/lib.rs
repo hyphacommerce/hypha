@@ -18,8 +18,8 @@ pub mod handler;
 pub mod send;
 
 pub use commands::{
-    StaffMailer, TemplateInput, UpdateSettings, preview, resend, save_template, send_staff,
-    send_test, update_settings,
+    StaffMailer, TemplateInput, UpdateSettings, preview, resend, save_template, send_customer,
+    send_staff, send_test, update_settings,
 };
 pub use context::MailContext;
 pub use env::MailEnv;

@@ -1317,6 +1317,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/customers/{id}/sessions/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Signs the customer out of every device (design note 0034, §7): every session of their
+         *     account is revoked. Nothing to do for a customer without one.
+         */
+        post: operations["admin.customers.revoke_sessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/events/{id}": {
         parameters: {
             query?: never;
@@ -3099,6 +3119,16 @@ export interface components {
             session: components["schemas"]["SessionResponse"];
             user: components["schemas"]["UserResponse"];
         };
+        /** @description What the admin knows of a customer's account (design note 0034, §7). */
+        AccountFactsResponse: {
+            /**
+             * Format: int32
+             * @description Sessions neither signed out nor expired: the devices they're signed in on.
+             */
+            active_sessions: number;
+            /** @description When any of those was last used, RFC 3339 in UTC; `null` with none active. */
+            last_active_at?: string | null;
+        };
         /** @description A button: run it with `POST /admin/app-extensions/actions/{app}/{id}`. */
         ActionExtension: {
             app: string;
@@ -4255,6 +4285,7 @@ export interface components {
          */
         CustomerId: string;
         CustomerResponse: {
+            account?: components["schemas"]["AccountFactsResponse"] | null;
             addresses: components["schemas"]["AddressResponse"][];
             /**
              * @description Whether `DELETE /admin/customers/{id}` would work: only while the customer has no
@@ -5034,7 +5065,7 @@ export interface components {
         /**
          * @description One of the store's templates. The names are stable.
          *
-         *     Known values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         *     Known values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         NotificationTemplateKey: string;
@@ -15276,6 +15307,80 @@ export interface operations {
             };
         };
     };
+    "admin.customers.revoke_sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.apps.event": {
         parameters: {
             query?: never;
@@ -18877,7 +18982,7 @@ export interface operations {
                 /** @description Only this order's emails. */
                 order?: components["schemas"]["OrderId"];
                 /** @description Only messages of this template. */
-                template?: "layout" | "order_confirmation" | "order_shipped" | "order_tracking_updated" | "order_cancelled" | "staff_new_order" | "staff_invite" | "staff_password_reset";
+                template?: "layout" | "order_confirmation" | "order_shipped" | "order_tracking_updated" | "order_cancelled" | "staff_new_order" | "staff_invite" | "staff_password_reset" | "customer_login_code" | "customer_erasure_requested";
                 /** @description Only messages in this status. */
                 status?: "queued" | "sending" | "sent" | "failed" | "skipped";
             };

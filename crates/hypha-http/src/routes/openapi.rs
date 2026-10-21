@@ -66,7 +66,10 @@ impl Doc {
                 "publishable_key",
                 SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
                     "X-Publishable-Key",
-                    "A publishable API key (`hypha_pk_…`); `Authorization: Bearer` works too.",
+                    "A publishable API key (`hypha_pk_…`); `Authorization: Bearer` works too. A \
+                     signed-in customer sends their session (`hypha_cs_…`, from `POST \
+                     /storefront/auth/login`) as `Authorization: Bearer` beside the key; the \
+                     routes marked `x-hypha-customer-session` need one.",
                 ))),
             ),
         }

@@ -115,6 +115,8 @@ pub struct HostEnv {
     hasher: Argon2id,
     /// Session, second-factor, reset and invite lifetimes (`[auth]`, design note 0017).
     auth: AuthSettings,
+    /// Customers' session and code lifetimes (`[customers]`, design note 0034).
+    accounts: hypha_customer_accounts::AccountSettings,
 }
 
 impl HostEnv {
@@ -127,7 +129,14 @@ impl HostEnv {
             order_tokens: OrderTokens::new(secret_key),
             hasher: Argon2id::OWASP,
             auth,
+            accounts: hypha_customer_accounts::AccountSettings::default(),
         }
+    }
+
+    /// The customer accounts' lifetimes (`config.accounts`); the defaults otherwise.
+    pub fn with_accounts(mut self, accounts: hypha_customer_accounts::AccountSettings) -> Self {
+        self.accounts = accounts;
+        self
     }
 
     /// The host's runtime: its clock, IDs, randomness and where CPU-heavy work runs.
@@ -166,6 +175,12 @@ impl HostEnv {
 impl HasAuthSettings for HostEnv {
     fn auth_settings(&self) -> &AuthSettings {
         &self.auth
+    }
+}
+
+impl hypha_customer_accounts::HasAccountSettings for HostEnv {
+    fn account_settings(&self) -> &hypha_customer_accounts::AccountSettings {
+        &self.accounts
     }
 }
 

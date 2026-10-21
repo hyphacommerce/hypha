@@ -52,7 +52,7 @@ export type FieldDefinition = {
 };
 
 /** Whose values: what `custom_fields` belongs to. */
-export type FieldOwner = "product" | "variant" | "category";
+export type FieldOwner = "product" | "variant" | "category" | "customer";
 
 /** A prefixed ID (`prod_…`, `pcat_…`), as a `reference` field holds one. */
 const REFERENCE = /^([a-z]+)_[0-9a-f]{32}$/;

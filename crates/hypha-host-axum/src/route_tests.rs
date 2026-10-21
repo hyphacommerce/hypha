@@ -46,6 +46,8 @@ mod app_fields;
 mod custom_fields;
 // Customers: deleting, consent, groups and erasure (design note 0032).
 mod customers;
+// Customer accounts: signing in with an email code (design note 0034).
+mod accounts;
 mod oauth;
 // A host built with a spore (design note 0030).
 mod spores;

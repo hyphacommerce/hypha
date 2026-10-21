@@ -11,6 +11,7 @@ use hypha_auth::{
     SealError, Sealed, SecretBox, XChaChaBox,
 };
 use hypha_core::{Clock, IdGenerator, Notifier, NotifyError, Random, Timestamp};
+use hypha_customer_accounts::{AccountSettings, CustomerEmail, HasAccountSettings};
 use hypha_users::StaffEmail;
 use uuid::Uuid;
 
@@ -24,9 +25,12 @@ pub struct TestEnv {
     pub clock: FixedClock,
     /// The defaults unless a test sets its own.
     pub auth: AuthSettings,
+    /// Customer accounts' lifetimes, the defaults unless a test sets its own.
+    pub accounts: AccountSettings,
     random: AtomicU64,
     secret_box: XChaChaBox,
     sent: Mutex<Vec<StaffEmail>>,
+    sent_to_customers: Mutex<Vec<CustomerEmail>>,
     failing: AtomicBool,
 }
 
@@ -36,9 +40,11 @@ impl Default for TestEnv {
             ids: SequentialIds::default(),
             clock: FixedClock::default(),
             auth: AuthSettings::default(),
+            accounts: AccountSettings::default(),
             random: AtomicU64::new(0),
             secret_box: XChaChaBox::new([7; 32]),
             sent: Mutex::new(Vec::new()),
+            sent_to_customers: Mutex::new(Vec::new()),
             failing: AtomicBool::new(false),
         }
     }
@@ -60,6 +66,23 @@ impl TestEnv {
                 token.clone()
             }
         })
+    }
+
+    /// Every message sent to customers so far, oldest first.
+    pub fn sent_to_customers(&self) -> Vec<CustomerEmail> {
+        self.sent_to_customers.lock().unwrap().clone()
+    }
+
+    /// The sign-in code in the last message sent to a customer.
+    pub fn last_code(&self) -> Option<String> {
+        self.sent_to_customers
+            .lock()
+            .unwrap()
+            .last()
+            .and_then(|m| match m {
+                CustomerEmail::LoginCode { code, .. } => Some(code.clone()),
+                CustomerEmail::ErasureRequested { .. } => None,
+            })
     }
 
     /// Makes every later send fail (or work again).
@@ -142,6 +165,22 @@ impl SecretBox for TestEnv {
 
     fn open(&self, sealed: &Sealed, context: &[u8]) -> Result<Vec<u8>, SealError> {
         self.secret_box.open(sealed, context)
+    }
+}
+
+impl HasAccountSettings for TestEnv {
+    fn account_settings(&self) -> &AccountSettings {
+        &self.accounts
+    }
+}
+
+impl Notifier<CustomerEmail> for TestEnv {
+    async fn notify(&self, message: CustomerEmail) -> Result<(), NotifyError> {
+        if self.failing.load(Ordering::Relaxed) {
+            return Err(NotifyError("the test made sending fail".to_string()));
+        }
+        self.sent_to_customers.lock().unwrap().push(message);
+        Ok(())
     }
 }
 

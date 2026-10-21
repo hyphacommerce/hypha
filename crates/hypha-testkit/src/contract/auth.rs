@@ -98,6 +98,55 @@ pub async fn identity_repo<R: IdentityRepo>(make: impl AsyncFn() -> R) {
     identity_keys(&make().await).await;
     scenario("identity: stale and missing updates fail");
     identity_stale(&make().await).await;
+    scenario("identity: a customer signing in with an email code round trips (0034)");
+    customer_identity(&make().await).await;
+}
+
+async fn customer_identity<R: IdentityRepo>(repo: &R) {
+    let customer = hypha_core::CustomerId::from_uuid(Uuid::from_u128(40));
+    let mut i = Identity::with_email_code(
+        identity_id(4),
+        Principal::Customer(customer),
+        Email::new("nina@example.com").unwrap(),
+    );
+    repo.insert(&mut i).await.unwrap();
+    assert_eq!(
+        repo.get_by_principal(Principal::Customer(customer)).await,
+        Ok(Some(i.clone()))
+    );
+    assert_eq!(
+        repo.find_login(
+            PrincipalKind::Customer,
+            CredentialKind::EmailCode,
+            "nina@example.com"
+        )
+        .await,
+        Ok(Some(i.clone()))
+    );
+    // A staff member may share the email: logins are unique per principal kind.
+    assert_eq!(
+        repo.find_login(
+            PrincipalKind::Staff,
+            CredentialKind::Password,
+            "nina@example.com"
+        )
+        .await,
+        Ok(None)
+    );
+    i.set_email_code(hash(8), Timestamp::from_unix_micros(600_000_000))
+        .unwrap();
+    i.use_email_code(hash(1), Timestamp::from_unix_micros(1_000_000));
+    repo.update(&mut i).await.unwrap();
+    assert_eq!(repo.get(i.id()).await, Ok(Some(i.clone())));
+    let mut twin = Identity::with_email_code(
+        identity_id(5),
+        Principal::Customer(hypha_core::CustomerId::from_uuid(Uuid::from_u128(41))),
+        Email::new("nina@example.com").unwrap(),
+    );
+    assert_eq!(
+        repo.insert(&mut twin).await,
+        Err(RepoError::Duplicate(keys::IDENTITY_LOGIN))
+    );
 }
 
 async fn identity_round_trips<R: IdentityRepo>(repo: &R) {

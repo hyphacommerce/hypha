@@ -1,0 +1,25 @@
+{% extends "layout" %}
+
+{% block preheader %}Your personal data will be erased on {{ due_at.formatted }} unless you cancel.{% endblock %}
+
+{% block content %}
+<p
+  style="font-size:22px;line-height:30px;font-weight:700;color:#18181b;margin:8px 0 16px;margin-top:8px;margin-right:0;margin-bottom:16px;margin-left:0">
+  We'll erase your data
+</p>
+<p
+  style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 16px;margin-top:0;margin-right:0;margin-bottom:16px;margin-left:0">
+  You asked {{ shop.name }} to erase your personal data. We'll do it on {{ due_at.formatted }}: your name, contact details,
+  addresses and marketing choices will be removed from your account and your orders, and your
+  account will be closed. Your orders themselves stay on record without anything that identifies
+  you.
+</p>
+<p
+  style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 16px;margin-top:0;margin-right:0;margin-bottom:16px;margin-left:0">
+  Changed your mind? Sign in to your account before then and cancel the request.
+</p>
+<p
+  style="font-size:13px;line-height:20px;color:#71717a;margin:0;margin-top:16px;margin-bottom:0;margin-left:0;margin-right:0">
+  If you didn't ask for this, sign in and cancel the request, or contact us.
+</p>
+{% endblock %}

@@ -30,7 +30,7 @@ pub use commands::{
 };
 pub use error::{ApiKeyError, IdentityError, RestoreError};
 pub use identity::{
-    Credential, CredentialKind, Identity, IdentitySnapshot, Principal, PrincipalKind,
+    CodeCheck, Credential, CredentialKind, Identity, IdentitySnapshot, Principal, PrincipalKind,
     StoredCredential,
 };
 pub use password::{Argon2id, HashError, Password, PasswordError, PasswordHash, PasswordHasher};

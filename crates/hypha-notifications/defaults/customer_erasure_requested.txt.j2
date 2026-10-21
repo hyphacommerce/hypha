@@ -1,0 +1,11 @@
+You asked {{ shop.name }} to erase your personal data. We'll do it on {{ due_at.formatted }}: your name, contact details, addresses and marketing choices will be removed from your account and your orders, and your account will be closed. Your orders themselves stay on record without anything that identifies you.
+
+Changed your mind? Sign in to your account before then and cancel the request.
+
+If you didn't ask for this, sign in and cancel the request, or contact us.
+
+--
+{{ shop.name }}{% if shop.email %} · {{ shop.email }}{% endif %}
+{%- if brand.footer %}
+{{ brand.footer }}
+{%- endif %}

@@ -11,6 +11,10 @@ pub enum CartError {
     LineNotFound(VariantId),
     #[error("a cart linked to a customer needs an email; unlink the customer first")]
     EmailRequired,
+    /// A signed-in customer's cart is for them (design note 0034, §4): the order is
+    /// theirs, so the email stays theirs.
+    #[error("the cart is a customer's: its email is theirs")]
+    CustomerEmailFixed,
     /// Checked out: the cart became `order` and can't change any more.
     #[error("the cart was checked out as order {order}")]
     Completed { order: OrderId },
@@ -72,6 +76,7 @@ impl ErrorCode for CartError {
             CartError::Quantity(e) => e.code(),
             CartError::LineNotFound(_) => "line_not_found",
             CartError::EmailRequired => "email_required",
+            CartError::CustomerEmailFixed => "cart_email_fixed",
             CartError::Completed { .. } => "cart_completed",
             CartError::AddressCountryMismatch { .. } => "address_country_mismatch",
             CartError::ShippingAddressRequired => "shipping_address_required",

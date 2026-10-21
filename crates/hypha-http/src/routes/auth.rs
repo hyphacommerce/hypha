@@ -37,7 +37,7 @@ fn limit_email(raw: &str) -> Option<Email> {
 
 /// Where a login request came from, kept on the session it opens so its owner can
 /// tell their sessions apart (`GET /admin/me/sessions`).
-fn session_client(addr: &ClientAddr, headers: &HeaderMap) -> SessionClient {
+pub(super) fn session_client(addr: &ClientAddr, headers: &HeaderMap) -> SessionClient {
     let user_agent = headers.get(USER_AGENT).and_then(|v| v.to_str().ok());
     SessionClient::new(Some(&addr.0.to_string()), user_agent)
 }

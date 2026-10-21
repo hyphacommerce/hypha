@@ -58,11 +58,21 @@ pub enum Rule {
     /// address: one rule for every spore, so a build's spores don't change a Worker's
     /// Rate Limiting bindings.
     SporePublic,
+    /// `POST /storefront/auth/code`, per client address (design note 0034): each sends an
+    /// email.
+    CodeIp,
+    /// `POST /storefront/auth/code`, per email and address.
+    CodeEmailFromIp,
+    /// `POST /storefront/auth/login`, per client address.
+    CustomerLoginIp,
+    /// `POST /storefront/auth/login`, per email and address: guesses at one account from
+    /// one place.
+    CustomerLoginEmailFromIp,
 }
 
 impl Rule {
     /// In declaration order: an in-memory limiter can index by `rule as usize`.
-    pub const ALL: [Rule; 12] = [
+    pub const ALL: [Rule; 16] = [
         Rule::LoginIp,
         Rule::LoginEmailFromIp,
         Rule::LoginEmail,
@@ -75,6 +85,10 @@ impl Rule {
         Rule::CartCreateIp,
         Rule::OAuthIp,
         Rule::SporePublic,
+        Rule::CodeIp,
+        Rule::CodeEmailFromIp,
+        Rule::CustomerLoginIp,
+        Rule::CustomerLoginEmailFromIp,
     ];
 
     /// The rule's key under `[rate_limits]` (`login_ip`): a contract with operators,
@@ -93,6 +107,10 @@ impl Rule {
             Rule::CartCreateIp => "cart_create_ip",
             Rule::OAuthIp => "oauth_ip",
             Rule::SporePublic => "spore_public",
+            Rule::CodeIp => "code_ip",
+            Rule::CodeEmailFromIp => "code_email_from_ip",
+            Rule::CustomerLoginIp => "customer_login_ip",
+            Rule::CustomerLoginEmailFromIp => "customer_login_email_from_ip",
         }
     }
 
@@ -113,6 +131,10 @@ impl Rule {
             Rule::CartCreateIp => "RL_CART_CREATE_IP",
             Rule::OAuthIp => "RL_OAUTH_IP",
             Rule::SporePublic => "RL_SPORE_PUBLIC",
+            Rule::CodeIp => "RL_CODE_IP",
+            Rule::CodeEmailFromIp => "RL_CODE_EMAIL_FROM_IP",
+            Rule::CustomerLoginIp => "RL_CUSTOMER_LOGIN_IP",
+            Rule::CustomerLoginEmailFromIp => "RL_CUSTOMER_LOGIN_EMAIL_FROM_IP",
         }
     }
 
@@ -133,6 +155,10 @@ impl Rule {
             Rule::CartCreateIp => 9,
             Rule::OAuthIp => 10,
             Rule::SporePublic => 11,
+            Rule::CodeIp => 12,
+            Rule::CodeEmailFromIp => 13,
+            Rule::CustomerLoginIp => 14,
+            Rule::CustomerLoginEmailFromIp => 15,
         }
     }
 
@@ -161,6 +187,10 @@ impl Rule {
             Rule::CartCreateIp => limits.cart_create_ip,
             Rule::OAuthIp => limits.oauth_ip,
             Rule::SporePublic => limits.spore_public,
+            Rule::CodeIp => limits.code_ip,
+            Rule::CodeEmailFromIp => limits.code_email_from_ip,
+            Rule::CustomerLoginIp => limits.customer_login_ip,
+            Rule::CustomerLoginEmailFromIp => limits.customer_login_email_from_ip,
         };
         (quota.burst, quota.per.0)
     }

@@ -24,10 +24,12 @@ pub enum TokenKind {
     AccessToken,
     /// An app's OAuth refresh token: 30 days, replaced on every use.
     RefreshToken,
+    /// A customer's session on the storefront (design note 0034, AC3).
+    CustomerSession,
 }
 
 impl TokenKind {
-    const ALL: [TokenKind; 8] = [
+    const ALL: [TokenKind; 9] = [
         TokenKind::Session,
         TokenKind::SecretKey,
         TokenKind::PublishableKey,
@@ -36,6 +38,7 @@ impl TokenKind {
         TokenKind::AuthorizationCode,
         TokenKind::AccessToken,
         TokenKind::RefreshToken,
+        TokenKind::CustomerSession,
     ];
 
     pub const fn prefix(self) -> &'static str {
@@ -48,6 +51,7 @@ impl TokenKind {
             TokenKind::AuthorizationCode => "hypha_ac_",
             TokenKind::AccessToken => "hypha_at_",
             TokenKind::RefreshToken => "hypha_rt_",
+            TokenKind::CustomerSession => "hypha_cs_",
         }
     }
 

@@ -4,6 +4,7 @@
 pub(crate) mod address;
 // Handlers and their request and response types are `pub` so a host's router (`router!`,
 // expanded in its crate) can name them; the types' fields stay private.
+pub mod account;
 pub mod api_keys;
 pub mod app_extensions;
 pub mod apps;
@@ -194,6 +195,7 @@ macro_rules! route_table {
             [admin, POST, "/admin/customers/{id}/erasure", customers::request_erasure_handler],
             [admin, DELETE, "/admin/customers/{id}/erasure", customers::cancel_erasure_handler],
             [admin, GET, "/admin/customers/{id}/export", customers::export],
+            [admin, POST, "/admin/customers/{id}/sessions/revoke", customers::revoke_sessions],
             [admin, PUT, "/admin/customers/{id}/marketing/{channel}", customers::set_consent],
             [admin, PUT, "/admin/customers/{id}/groups", customers::set_groups],
             [admin, GET, "/admin/customer-groups", customer_groups::list],
@@ -348,6 +350,21 @@ macro_rules! route_table {
             [storefront, GET, "/storefront/custom-field-definitions", custom_fields::list_storefront],
             [storefront, GET, "/storefront/categories/by-handle/{handle}", categories::fetch_by_handle_storefront],
             [storefront, GET, "/storefront/search", search::storefront_search],
+            [storefront, POST, "/storefront/auth/code", account::request_code],
+            [storefront, POST, "/storefront/auth/login", account::login],
+            [storefront, POST, "/storefront/account/logout", account::logout_handler],
+            [storefront, POST, "/storefront/account/logout-all", account::logout_all_handler],
+            [storefront, GET, "/storefront/account", account::fetch],
+            [storefront, PATCH, "/storefront/account", account::update],
+            [storefront, POST, "/storefront/account/addresses", account::add_address_handler],
+            [storefront, PUT, "/storefront/account/addresses/{address_id}", account::update_address_handler],
+            [storefront, DELETE, "/storefront/account/addresses/{address_id}", account::remove_address_handler],
+            [storefront, PUT, "/storefront/account/marketing/{channel}", account::set_consent],
+            [storefront, GET, "/storefront/account/orders", account::list_orders_handler],
+            [storefront, GET, "/storefront/account/orders/{id}", account::fetch_order],
+            [storefront, GET, "/storefront/account/export", account::export],
+            [storefront, POST, "/storefront/account/erasure", account::request_erasure_handler],
+            [storefront, DELETE, "/storefront/account/erasure", account::cancel_erasure_handler],
             [storefront, POST, "/storefront/carts", carts::create],
             [storefront, GET, "/storefront/carts/{id}", carts::fetch],
             [storefront, POST, "/storefront/carts/{id}/lines", carts::add],

@@ -202,6 +202,9 @@ pub struct CreateCart {
     pub country: String,
     /// A retry with the same key returns the cart the first request created.
     pub idempotency: Option<IdempotencyRequest>,
+    /// The signed-in customer the cart is for, with their email (design note 0034, §4):
+    /// the host passes the session's customer; a guest's cart has none.
+    pub customer: Option<(CustomerId, Email)>,
 }
 
 /// Creates an empty cart shipping to `country`, in the market that sells there
@@ -234,6 +237,9 @@ pub async fn create_cart<S: IdempotentCartPorts, I: IdGenerator, C: Clock>(
         country,
         channel,
     );
+    if input.customer.is_some() {
+        cart.set_customer(input.customer)?;
+    }
     // A new cart is empty: priced from the market just read, without reading it again.
     let priced = empty_reading(&cart, market).priced;
     match write_cart(

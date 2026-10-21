@@ -18,7 +18,8 @@ use hypha_customers::{
 use serde::{Deserialize, Serialize};
 
 use hypha_apps::HasApps;
-use hypha_core::Ctx;
+use hypha_auth::{HasIdentities, HasSessions, IdentityRepo, Principal, SessionRepo, StageSessions};
+use hypha_core::{Ctx, HasBatch};
 use hypha_custom_fields::{HasCustomFieldDefinitions, HasCustomFieldValues, OwnerType};
 use hypha_orders::{HasOrders, OrderStats, customer_order_stats};
 
@@ -139,6 +140,9 @@ pub struct CustomerResponse {
     /// Whether `DELETE /admin/customers/{id}` would work: only while the customer has no
     /// orders, cancelled ones included (design note 0032, CD7). Otherwise erase it.
     can_delete: bool,
+    /// The customer's storefront account (design note 0034), `null` while they never
+    /// signed in. `POST /admin/customers/{id}/sessions/revoke` signs them out everywhere.
+    account: Option<AccountFactsResponse>,
     /// When it was created, RFC 3339 in UTC.
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
@@ -150,6 +154,15 @@ pub struct CustomerResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(required = false)]
     redacted: Option<Vec<String>>,
+}
+
+/// What the admin knows of a customer's account (design note 0034, §7).
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct AccountFactsResponse {
+    /// Sessions neither signed out nor expired: the devices they're signed in on.
+    active_sessions: u32,
+    /// When any of those was last used, RFC 3339 in UTC; `null` with none active.
+    last_active_at: Option<String>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -228,7 +241,7 @@ pub async fn set_groups<S: Storage>(
             e => e.into(),
         })?;
     let customer = get_customer(&ctx, ports.customers(), id).await?;
-    Ok(Json(respond(&ctx, &ports, &customer).await?))
+    Ok(Json(respond(&ctx, &ports, &state.clock, &customer).await?))
 }
 
 /// A channel's marketing consent (design note 0032, §5).
@@ -253,7 +266,7 @@ pub struct ConsentResponse {
 }
 
 impl ConsentResponse {
-    fn new(c: MarketingConsent) -> Result<Self, ApiError> {
+    pub(super) fn new(c: MarketingConsent) -> Result<Self, ApiError> {
         Ok(Self {
             state: c.state,
             opt_in_level: c.opt_in_level,
@@ -328,7 +341,7 @@ pub async fn set_consent<S: Storage>(
         set_marketing_consent(&ctx, ports.customers(), &state.clock, id, channel, change).await?;
     Ok(Json(ConsentUpdateResponse {
         applied,
-        customer: respond(&ctx, &ports, &customer).await?,
+        customer: respond(&ctx, &ports, &state.clock, &customer).await?,
     }))
 }
 
@@ -371,12 +384,14 @@ impl CustomerResponse {
         custom_fields: CustomFieldValues,
         orders: OrderStats,
         groups: Vec<CustomerGroupId>,
+        account: Option<AccountFactsResponse>,
     ) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(c.stamps())?;
         Ok(Self {
             created_at,
             updated_at,
             groups,
+            account,
             can_delete: orders.orders_count + orders.cancelled_count == 0,
             orders: OrderStatsResponse::new(orders)?,
             email_marketing: ConsentResponse::new(c.marketing_consent(Channel::Email))?,
@@ -398,9 +413,20 @@ impl CustomerResponse {
 }
 
 /// The admin's response for `customer`: with its custom fields, as `ctx` may see it.
-async fn respond<P>(ctx: &Ctx, ports: &P, customer: &Customer) -> Result<Redacted, ApiError>
+async fn respond<P>(
+    ctx: &Ctx,
+    ports: &P,
+    clock: &impl hypha_core::Clock,
+    customer: &Customer,
+) -> Result<Redacted, ApiError>
 where
-    P: HasApps + HasCustomFieldDefinitions + HasCustomFieldValues + HasOrders + HasCustomerGroups,
+    P: HasApps
+        + HasCustomFieldDefinitions
+        + HasCustomFieldValues
+        + HasOrders
+        + HasCustomerGroups
+        + HasIdentities
+        + HasSessions,
 {
     let kind = custom_fields::caller_kind(ctx, ports).await?;
     let id = customer.id().as_uuid();
@@ -411,8 +437,72 @@ where
         .await?
         .remove(&customer.id())
         .unwrap_or_default();
-    let dto = CustomerResponse::new(customer, fields.json_of(id), stats, groups)?;
+    let account = account_facts(ports, clock, customer.id()).await?;
+    let dto = CustomerResponse::new(customer, fields.json_of(id), stats, groups, account)?;
     redact::one_with_fields(ctx, Family::Customer, dto, &fields.redacted)
+}
+
+/// The customer's account, if they have one (design note 0034): their identity's live
+/// sessions.
+async fn account_facts<P: HasIdentities + HasSessions>(
+    ports: &P,
+    clock: &impl hypha_core::Clock,
+    customer: CustomerId,
+) -> Result<Option<AccountFactsResponse>, ApiError> {
+    let Some(identity) = ports
+        .identities()
+        .get_by_principal(Principal::Customer(customer))
+        .await?
+    else {
+        return Ok(None);
+    };
+    let now = clock.now();
+    let live = ports
+        .sessions()
+        .live_for_identity(identity.id(), now)
+        .await?;
+    Ok(Some(AccountFactsResponse {
+        active_sessions: u32::try_from(live.len()).unwrap_or(u32::MAX),
+        last_active_at: live
+            .iter()
+            .map(|s| s.last_used_at())
+            .max()
+            .map(super::rfc3339)
+            .transpose()?,
+    }))
+}
+
+/// Signs the customer out of every device (design note 0034, §7): every session of their
+/// account is revoked. Nothing to do for a customer without one.
+#[utoipa::path(
+    post,
+    path = "/admin/customers/{id}/sessions/revoke",
+    params(("id" = CustomerId, Path)),
+    responses((status = 204, description = "No content")),
+    extensions(("x-hypha-scopes" = json!(["customers:write"]))),
+)]
+pub async fn revoke_sessions<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<CustomerId>,
+) -> Result<StatusCode, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    ctx.require(Scope::CustomersWrite)
+        .map_err(hypha_customers::CommandError::from)?;
+    get_customer(&ctx, ports.customers(), id).await?;
+    if let Some(identity) = ports
+        .identities()
+        .get_by_principal(Principal::Customer(id))
+        .await?
+    {
+        let mut batch = ports.batch();
+        batch.revoke_sessions(identity.id(), None, hypha_core::Clock::now(&state.clock));
+        ports
+            .commit(batch)
+            .await
+            .map_err(hypha_customers::CommandError::from)?;
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// A customer in a list: without the address book (design note 0024).
@@ -630,7 +720,7 @@ pub async fn create<S: Storage>(
     let customer = create_customer(&ctx, ports.customers(), &state.ids, input).await?;
     Ok((
         StatusCode::CREATED,
-        Json(respond(&ctx, &ports, &customer).await?),
+        Json(respond(&ctx, &ports, &state.clock, &customer).await?),
     ))
 }
 
@@ -649,7 +739,7 @@ pub async fn fetch<S: Storage>(
 ) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let customer = get_customer(&ctx, ports.customers(), id).await?;
-    Ok(Json(respond(&ctx, &ports, &customer).await?))
+    Ok(Json(respond(&ctx, &ports, &state.clock, &customer).await?))
 }
 
 /// Changes a customer's details (JSON Merge Patch).
@@ -676,7 +766,7 @@ pub async fn update<S: Storage>(
         phone: req.phone,
     };
     let customer = update_customer(&ctx, ports.customers(), id, input).await?;
-    Ok(Json(respond(&ctx, &ports, &customer).await?))
+    Ok(Json(respond(&ctx, &ports, &state.clock, &customer).await?))
 }
 
 /// Adds an address to a customer's address book.
@@ -699,7 +789,7 @@ pub async fn add_address_handler<S: Storage>(
     let customer = add_address(&ctx, ports.customers(), &state.ids, id, req.into()).await?;
     Ok((
         StatusCode::CREATED,
-        Json(respond(&ctx, &ports, &customer).await?),
+        Json(respond(&ctx, &ports, &state.clock, &customer).await?),
     ))
 }
 
@@ -721,7 +811,7 @@ pub async fn update_address_handler<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let customer = update_address(&ctx, ports.customers(), id, address, req.into()).await?;
-    Ok(Json(respond(&ctx, &ports, &customer).await?))
+    Ok(Json(respond(&ctx, &ports, &state.clock, &customer).await?))
 }
 
 /// Deletes a customer that has no orders (design note 0032, CD7): the row, its address
@@ -741,7 +831,7 @@ pub async fn remove<S: Storage>(
     PathId(id): PathId<CustomerId>,
 ) -> Result<StatusCode, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    hypha_privacy::delete_customer(&ctx, &ports, id).await?;
+    hypha_privacy::delete_customer(&ctx, &ports, &state.clock, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -768,7 +858,7 @@ pub async fn request_erasure_handler<S: Storage>(
     let customer =
         hypha_privacy::request_erasure(&ctx, &ports, &state.clock, &state.config.privacy, id)
             .await?;
-    Ok(Json(respond(&ctx, &ports, &customer).await?))
+    Ok(Json(respond(&ctx, &ports, &state.clock, &customer).await?))
 }
 
 /// Cancels a requested erasure while its window is open (`409 erasure_not_requested`
@@ -787,7 +877,7 @@ pub async fn cancel_erasure_handler<S: Storage>(
 ) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let customer = hypha_privacy::cancel_erasure(&ctx, &ports, id).await?;
-    Ok(Json(respond(&ctx, &ports, &customer).await?))
+    Ok(Json(respond(&ctx, &ports, &state.clock, &customer).await?))
 }
 
 /// Everything Hypha holds about a customer, as one document (design note 0032, §7.4).
@@ -827,7 +917,7 @@ pub async fn export<S: Storage>(
     let export = hypha_privacy::export_customer(&ctx, &ports, id).await?;
     Ok(Json(CustomerExportResponse {
         exported_at: super::rfc3339(hypha_core::Clock::now(&state.clock))?,
-        customer: respond(&ctx, &ports, &export.customer).await?,
+        customer: respond(&ctx, &ports, &state.clock, &export.customer).await?,
         orders: export
             .orders
             .iter()
@@ -861,5 +951,5 @@ pub async fn remove_address_handler<S: Storage>(
 ) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let customer = remove_address(&ctx, ports.customers(), id, address).await?;
-    Ok(Json(respond(&ctx, &ports, &customer).await?))
+    Ok(Json(respond(&ctx, &ports, &state.clock, &customer).await?))
 }

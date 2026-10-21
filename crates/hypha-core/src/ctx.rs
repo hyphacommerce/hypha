@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{AgentId, ApiKeyId, AppId, ChannelId, ErrorCode, UserId, scope::Scope};
+use crate::{AgentId, ApiKeyId, AppId, ChannelId, CustomerId, ErrorCode, UserId, scope::Scope};
 
 /// Who a command runs for, for audit and idempotency (keys are per actor).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -15,6 +15,9 @@ pub enum Actor {
     /// scopes staff granted it (design note 0029, AP5). Its ID rather than its key
     /// (`app_<name>`), so `Actor` stays `Copy`.
     App(AppId),
+    /// A shopper signed in to their account on the storefront (design note 0034): the
+    /// customer the session belongs to. Account commands act on this customer only.
+    Customer(CustomerId),
     /// The host itself: startup tasks and tests.
     System,
 }
@@ -107,6 +110,14 @@ impl Ctx {
     /// personal data without the `customer_data:*` scopes (design note 0029, AP10).
     pub fn is_staff(&self) -> bool {
         matches!(self.actor, Actor::User(_))
+    }
+
+    /// The signed-in customer, when the caller is one (design note 0034, AC4).
+    pub fn customer(&self) -> Option<CustomerId> {
+        match self.actor {
+            Actor::Customer(id) => Some(id),
+            _ => None,
+        }
     }
 }
 

@@ -71,7 +71,11 @@ export function TemplateEditor({
 }) {
   const key = template.key;
   const isLayout = key === "layout";
-  const isStaffAccount = key === "staff_invite" || key === "staff_password_reset";
+  const isStaffAccount =
+    key === "staff_invite" ||
+    key === "staff_password_reset" ||
+    key === "customer_login_code" ||
+    key === "customer_erasure_requested";
   const [saved, setSaved] = useState(() => sourcesOf(template));
   const [draft, setDraft] = useState(saved);
   const [isCustomized, setIsCustomized] = useState(template.customized);

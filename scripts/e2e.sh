@@ -166,6 +166,24 @@ mail_token() {
     done
 }
 
+# mail_code TO SUBJECT: prints the six digits in the subject of the latest email to TO
+# whose subject has SUBJECT (a customer's sign-in code, design note 0034), waiting up to
+# 20 s; nothing without the email checks. The email stays for `mail` to find.
+mail_code() {
+    local query n found message
+    ((MAIL_CHECKS)) || return 0
+    query=$(mailpit_query "$1" "$2")
+    for n in $(seq 1 20); do
+        found=$(curl -s -G "$MAILPIT/api/v1/search" --data-urlencode "query=$query")
+        message=$(grep -o '"ID":"[^"]*"' <<<"$found" | head -1 | sed -E 's/"ID":"([^"]+)"/\1/')
+        if [[ -n $message ]]; then
+            curl -s "$MAILPIT/api/v1/message/$message" | grep -o '"Subject":"[^"]*"' | grep -oE '[0-9]{6}' | head -1
+            return
+        fi
+        sleep 1
+    done
+}
+
 # forget_mail TO: deletes what an earlier run left in Mailpit for TO.
 forget_mail() {
     ((MAIL_CHECKS)) || return 0
@@ -2087,6 +2105,74 @@ step "a made-up reset token" 401 invalid_token -X POST "$BASE/admin/auth/passwor
 AUTH=(-H "authorization: Bearer $SESSION")
 step "log out" 204 - -X POST "$BASE/admin/auth/logout"
 step "the session is over" 401 invalid_token "$BASE/admin/me"
+
+echo
+echo "## customer accounts (design note 0034)"
+AUTH=()
+forget_mail shopper@example.com
+step "ask for a sign-in code" 202 - -X POST "$BASE/storefront/auth/code" -H "$JSON" \
+    -d '{"email":"Shopper@Example.com"}'
+contains "always says sent" '"sent":true'
+step "whatever the address" 202 - -X POST "$BASE/storefront/auth/code" -H "$JSON" \
+    -d '{"email":"not an address"}'
+step "a made-up code" 401 invalid_code -X POST "$BASE/storefront/auth/login" -H "$JSON" \
+    -d '{"email":"nobody@example.com","code":"000000"}'
+step "signing out needs a session" 401 account_required -X POST "$BASE/storefront/account/logout"
+CODE=$(mail_code shopper@example.com "sign-in code")
+if [[ -n $CODE ]]; then
+    WRONG=000000
+    [[ $CODE == "$WRONG" ]] && WRONG=000001
+    step "a wrong code" 401 invalid_code -X POST "$BASE/storefront/auth/login" -H "$JSON" \
+        -d "{\"email\":\"shopper@example.com\",\"code\":\"$WRONG\"}"
+    step "a cart to take along" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
+    ACCOUNT_CART=$(id)
+    step "sign in with the emailed code" 200 - -X POST "$BASE/storefront/auth/login" -H "$JSON" \
+        -H "x-hypha-cart: $ACCOUNT_CART" -d "{\"email\":\"shopper@example.com\",\"code\":\"$CODE\"}"
+    contains "the customer was created on the way" '"email":"shopper@example.com"'
+    CS=$(token)
+    SHOPPER=$(sed -E 's/.*"customer":\{"id":"([^"]+)".*/\1/' <<<"$BODY")
+    step "the code works once" 401 invalid_code -X POST "$BASE/storefront/auth/login" -H "$JSON" \
+        -d "{\"email\":\"shopper@example.com\",\"code\":\"$CODE\"}"
+    step "the cart is the customer's now" 200 - "$BASE/storefront/carts/$ACCOUNT_CART"
+    contains "with their email" '"email":"shopper@example.com"'
+    step "the session rides beside the key" 200 - -H "authorization: Bearer $CS" "$BASE/storefront/store"
+    step "but isn't admin credentials" 403 admin_credentials_required -H "authorization: Bearer $CS" "$BASE/admin/store"
+    step "the account" 200 - -H "authorization: Bearer $CS" "$BASE/storefront/account"
+    contains "is theirs" '"email":"shopper@example.com"'
+    step "name themselves" 200 - -X PATCH "$BASE/storefront/account" -H "$JSON" \
+        -H "authorization: Bearer $CS" -d '{"first_name":"Sam"}'
+    contains "and it took" '"first_name":"Sam"'
+    step "save an address" 201 - -X POST "$BASE/storefront/account/addresses" -H "$JSON" \
+        -H "authorization: Bearer $CS" \
+        -d '{"last_name":"Shopper","line1":"Ilica 1","city":"Zagreb","country":"HR","default_shipping":true}'
+    contains "as the default" '"default_shipping_address":"addr_'
+    step "subscribe to email marketing" 200 - -X PUT "$BASE/storefront/account/marketing/email" -H "$JSON" \
+        -H "authorization: Bearer $CS" -d '{"state":"subscribed"}'
+    contains "from the storefront" '"source":"storefront"'
+    step "their orders" 200 - -H "authorization: Bearer $CS" "$BASE/storefront/account/orders"
+    contains "none yet" '"items":[]'
+    step "their data" 200 - -H "authorization: Bearer $CS" "$BASE/storefront/account/export"
+    contains "as one document" '"exported_at":'
+    step "ask for erasure" 200 - -X POST "$BASE/storefront/account/erasure" -H "authorization: Bearer $CS"
+    contains "with its due date" '"erasure_due_at":'
+    step "cancel it" 200 - -X DELETE "$BASE/storefront/account/erasure" -H "authorization: Bearer $CS"
+    mail "the erasure confirmation arrived" shopper@example.com "erase your data"
+    step "a cart made while signed in is theirs" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" \
+        -H "authorization: Bearer $CS" -d '{"country":"HR"}'
+    contains "with their email" '"email":"shopper@example.com"'
+    OWN_CART=$(id)
+    step "whose email is theirs to keep" 409 cart_email_fixed -X PUT "$BASE/storefront/carts/$OWN_CART/email" \
+        -H "$JSON" -H "authorization: Bearer $CS" -d '{"email":"other@example.com"}'
+    step "owner logs in again" 200 - -X POST "$BASE/admin/auth/login" -H "$JSON" \
+        -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASSWORD\"}"
+    STAFF=(-H "authorization: Bearer $(token)")
+    step "the admin sees the account" 200 - "${STAFF[@]}" "$BASE/admin/customers/$SHOPPER"
+    contains "signed in on one device" '"active_sessions":1'
+    step "and signs it out everywhere" 204 - -X POST "${STAFF[@]}" "$BASE/admin/customers/$SHOPPER/sessions/revoke"
+    step "so the session is over" 401 invalid_token "$BASE/storefront/account" -H "authorization: Bearer $CS"
+    step "sign out" 401 invalid_token -X POST "$BASE/storefront/account/logout" -H "authorization: Bearer $CS"
+    mail "the sign-in code arrived" shopper@example.com "sign-in code"
+fi
 
 echo
 echo "## rate limits (design note 0009)"

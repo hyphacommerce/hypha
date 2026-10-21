@@ -2,6 +2,200 @@
 // run `pnpm sdk:generate` after `cargo run -p hypha-host-axum -- openapi`.
 
 export interface paths {
+    "/storefront/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The signed-in customer's account: email, names, phone, address book, marketing
+         *     consent, a pending erasure, and the custom fields the merchant shows them.
+         */
+        get: operations["storefront.account.fetch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Changes the customer's names and phone (the admin's rules: `409 customer_erased`
+         *     once erased).
+         */
+        patch: operations["storefront.account.update"];
+        trace?: never;
+    };
+    "/storefront/account/addresses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Adds an address to the customer's address book. */
+        post: operations["storefront.account.add_address"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/account/addresses/{address_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replaces a saved address, defaults included. */
+        put: operations["storefront.account.update_address"];
+        post?: never;
+        /** Removes a saved address. */
+        delete: operations["storefront.account.remove_address"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/account/erasure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Asks for the customer's own personal data to be erased after the store's cancel
+         *     window (`customers.erasure_delay`; design note 0032, §7.3), recording
+         *     `customer.erasure_requested` and emailing when it runs (`customer_erasure_requested`).
+         *     Signing in still works until then, to cancel. `409 erasure_already_requested` while
+         *     one is pending.
+         */
+        post: operations["storefront.account.request_erasure"];
+        /**
+         * Cancels a requested erasure while its window is open (`409 erasure_not_requested`
+         *     otherwise), recording `customer.erasure_cancelled`.
+         */
+        delete: operations["storefront.account.cancel_erasure"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/account/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The customer's data, as one JSON document. */
+        get: operations["storefront.account.export"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/account/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ends the customer's session. */
+        post: operations["storefront.account.logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/account/logout-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ends every session of the customer, on every device, this one included. */
+        post: operations["storefront.account.logout_all"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/account/marketing/{channel}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Records the customer's own marketing consent for a channel (`email` or `sms`), from
+         *     the storefront, now. SMS needs a phone (`409 consent_needs_phone`).
+         */
+        put: operations["storefront.account.set_consent"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/account/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The customer's orders, newest first, from every channel of the store. */
+        get: operations["storefront.account.list_orders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/account/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One of the customer's orders, as the confirmation page shows it, with its access
+         *     token (so a link to the order page works); someone else's is `404 order_not_found`.
+         */
+        get: operations["storefront.account.fetch_order"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/app-extensions": {
         parameters: {
             query?: never;
@@ -41,6 +235,50 @@ export interface paths {
         head?: never;
         /** Forwards a `PATCH` to the app's storefront proxy, as `POST` does. */
         patch: operations["storefront.app_extensions.storefront_proxy_patch"];
+        trace?: never;
+    };
+    "/storefront/auth/code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Emails a sign-in code. 202 whatever the email: an address that isn't a customer's
+         *     yet becomes one (the customer is created), one that can't take email gets nothing,
+         *     and asking again within a minute sends nothing. 429 `rate_limited` per client
+         *     address and per email and address.
+         */
+        post: operations["storefront.account.request_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Signs in with the emailed code and answers the session token, shown once. 401
+         *     `invalid_code` for a wrong, expired or used-up code, deliberately one answer. With an
+         *     `X-Hypha-Cart: cart_…` header (the shopper's cart in this channel), the cart is
+         *     linked to the customer.
+         */
+        post: operations["storefront.account.login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/storefront/carts": {
@@ -483,10 +721,102 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description A consent write's outcome: whether it changed anything, and the account as it is. */
+        AccountConsentResponse: {
+            account: components["schemas"]["AccountResponse"];
+            /** @description `false` when nothing changed. */
+            applied: boolean;
+        };
+        /**
+         * @description Everything Hypha holds about the customer, for the person it's about (design note
+         *     0032, §7.4): the account, their orders, the orders' payments and the emails sent
+         *     about them. Records `customer.data_requested`, as the admin's export does.
+         */
+        AccountExportResponse: {
+            account: components["schemas"]["AccountResponse"];
+            /** @description The emails sent about the orders. */
+            emails: components["schemas"]["NotificationResponse"][];
+            /** @description When the export was made, RFC 3339 in UTC. */
+            exported_at: string;
+            orders: components["schemas"]["OrderResponse"][];
+            payments: components["schemas"]["PaymentResponse"][];
+        };
+        /** @description The signed-in customer, as they see themselves (design note 0034, §3). */
+        AccountResponse: {
+            addresses: components["schemas"]["AddressResponse"][];
+            /** @description When the account was created, RFC 3339 in UTC. */
+            created_at: string;
+            /**
+             * @description The custom field values the merchant shows the account holder (`access.storefront:
+             *     read`, design note 0034, §5), `{"custom.tier": "gold", …}`.
+             */
+            custom_fields: {
+                [key: string]: unknown;
+            };
+            default_billing_address?: components["schemas"]["AddressId"] | null;
+            default_shipping_address?: components["schemas"]["AddressId"] | null;
+            /** @description The address they sign in with; it can't be changed from the account in v1. */
+            email: components["schemas"]["Email"];
+            /** @description Consent to marketing by email; `PUT /storefront/account/marketing/email` changes it. */
+            email_marketing: components["schemas"]["ConsentResponse"];
+            /**
+             * @description When a requested erasure runs, RFC 3339 in UTC; absent without a request. `DELETE
+             *     /storefront/account/erasure` cancels it until then.
+             */
+            erasure_due_at?: string | null;
+            first_name?: string | null;
+            id: components["schemas"]["CustomerId"];
+            last_name?: string | null;
+            phone?: string | null;
+            /** @description Consent to marketing by SMS; needs a phone. */
+            sms_marketing: components["schemas"]["ConsentResponse"];
+        };
         AddLineRequest: {
             /** Format: int32 */
             quantity: number;
             variant: components["schemas"]["VariantId"];
+        };
+        /**
+         * @description A AddressId: `addr_` and 32 hex digits.
+         * @example addr_0190f1a2b3c47d8e9f00112233445566
+         */
+        AddressId: string;
+        /**
+         * @description An address for the address book. Sending it again (PUT) replaces it whole,
+         *     including whether it is a default.
+         */
+        AddressRequest: {
+            city: string;
+            company?: string | null;
+            country: string;
+            default_billing?: boolean;
+            default_shipping?: boolean;
+            first_name?: string | null;
+            last_name: string;
+            line1: string;
+            line2?: string | null;
+            phone?: string | null;
+            postal_code?: string | null;
+            province?: string | null;
+        };
+        AddressResponse: {
+            city: string;
+            company?: string | null;
+            country: components["schemas"]["CountryCode"];
+            first_name?: string | null;
+            id: components["schemas"]["AddressId"];
+            last_name: string;
+            line1: string;
+            line2?: string | null;
+            phone?: string | null;
+            postal_code?: string | null;
+            province?: string | null;
+            /**
+             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
+             *     app without the matching `customer_data:*` scope. They are absent from the
+             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             */
+            redacted?: string[] | null;
         };
         /**
          * @description A AssetId: `asset_` and 32 hex digits.
@@ -607,6 +937,23 @@ export interface components {
             next_action?: components["schemas"]["NextActionResponse"] | null;
             payment_error?: components["schemas"]["Error"] | null;
         };
+        /** @description A channel's marketing consent (design note 0032, §5). */
+        ConsentResponse: {
+            /** @description When the customer last said so, RFC 3339 in UTC; absent while never asked. */
+            consented_at?: string | null;
+            /** @description `single`, `confirmed` (double opt-in) or `unknown`. */
+            opt_in_level: string;
+            /**
+             * @description Where it came from: `checkout`, `storefront`, `admin`, `import`, `system`, or
+             *     `app:<appid_…>`; absent while never asked.
+             */
+            source?: string | null;
+            /**
+             * @description `not_subscribed` (never asked), `pending`, `subscribed`, `unsubscribed`, or
+             *     `redacted` (erased).
+             */
+            state: string;
+        };
         /**
          * @description An ISO 3166-1 alpha-2 country code.
          * @example HR
@@ -635,6 +982,18 @@ export interface components {
          * @example cus_0190f1a2b3c47d8e9f00112233445566
          */
         CustomerId: string;
+        CustomerLoginRequest: {
+            /** @description The six digits from the email. */
+            code: string;
+            email: string;
+        };
+        CustomerLoginResponse: {
+            customer: components["schemas"]["AccountResponse"];
+            /** @description When the session ends unused; every use within pushes it out again. */
+            expires_at: string;
+            /** @description Send as `Authorization: Bearer <token>` beside `X-Publishable-Key`. Shown only now. */
+            token: string;
+        };
         /** @description Delivery in days, from `min_days` to `max_days`. */
         DeliveryEstimateDto: {
             /** Format: int32 */
@@ -673,6 +1032,11 @@ export interface components {
             /** @description For humans; may change. */
             error: string;
         };
+        /**
+         * @description A EventId: `evt_` and 32 hex digits.
+         * @example evt_0190f1a2b3c47d8e9f00112233445566
+         */
+        EventId: string;
         FacetResponse: {
             /**
              * @description As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`, or
@@ -772,6 +1136,16 @@ export interface components {
             /** @enum {string} */
             status: "unavailable";
         };
+        LoginCodeRequest: {
+            email: string;
+        };
+        LoginCodeResponse: {
+            /**
+             * @description Always `true`: the route answers the same whatever the email, so it tells nobody
+             *     who is a customer. The email goes out only to an address that can take one.
+             */
+            sent: boolean;
+        };
         /**
          * @description A MarketId: `mkt_` and 32 hex digits.
          * @example mkt_0190f1a2b3c47d8e9f00112233445566
@@ -811,6 +1185,66 @@ export interface components {
             type: "redirect";
             url: string;
         };
+        /**
+         * @description A NotificationId: `ntf_` and 32 hex digits.
+         * @example ntf_0190f1a2b3c47d8e9f00112233445566
+         */
+        NotificationId: string;
+        /**
+         * @description One email's record. Bodies aren't returned (they're kept only until it's sent): `POST
+         *     /admin/notification-templates/{key}/preview` with the `order` shows what it looks
+         *     like now.
+         */
+        NotificationResponse: {
+            /**
+             * Format: int32
+             * @description Sends tried so far.
+             */
+            attempts: number;
+            created_at: string;
+            /** @description Why the last attempt failed, or why it was skipped. */
+            error?: string | null;
+            event_id?: components["schemas"]["EventId"] | null;
+            id: components["schemas"]["NotificationId"];
+            /** @description When a queued message is next tried. */
+            next_attempt_at?: string | null;
+            /**
+             * @description How it was made, when staff should know: "sent with the default template: …"
+             *     when the store's template didn't render on this order.
+             */
+            note?: string | null;
+            order_id?: components["schemas"]["OrderId"] | null;
+            /** @description The sender that handled it: `log`, `smtp`, `resend`. */
+            provider?: string | null;
+            /** @description The provider's ID for it, when it gives one. */
+            provider_message_id?: string | null;
+            /**
+             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
+             *     app without the matching `customer_data:*` scope. They are absent from the
+             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             */
+            redacted?: string[] | null;
+            sent_at?: string | null;
+            status: components["schemas"]["NotificationStatus"];
+            subject: string;
+            template: components["schemas"]["NotificationTemplateKey"];
+            to: string;
+            updated_at: string;
+        };
+        /**
+         * @description Where a message is.
+         *
+         *     Known values: `queued`, `sending`, `sent`, `failed`, `skipped`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        NotificationStatus: string;
+        /**
+         * @description One of the store's templates. The names are stable.
+         *
+         *     Known values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        NotificationTemplateKey: string;
         OfferResponse: {
             /** @description Before tax if the market's prices exclude it. */
             amount: components["schemas"]["Money"];
@@ -929,6 +1363,53 @@ export interface components {
             service?: string | null;
             tax?: components["schemas"]["OrderTaxResponse"] | null;
         };
+        /** @description A page of a list, newest first (design note 0012). */
+        OrderSummaryPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["OrderSummaryResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        /** @description An order in a list: what a table of orders shows, without lines. */
+        OrderSummaryResponse: {
+            /** @description When it was cancelled, RFC 3339 in UTC; `null` if it wasn't. */
+            cancelled_at?: string | null;
+            /** @description The sales channel it was placed through (design note 0020). */
+            channel: components["schemas"]["ChannelId"];
+            country: components["schemas"]["CountryCode"];
+            /**
+             * @description The custom field values `?custom_fields=` asked for (design note 0033); absent
+             *     without it.
+             */
+            custom_fields?: {
+                [key: string]: unknown;
+            } | null;
+            customer: components["schemas"]["CustomerId"];
+            email: components["schemas"]["Email"];
+            financial_status: components["schemas"]["FinancialStatusDto"];
+            fulfillment_status: components["schemas"]["FulfillmentStatusDto"];
+            id: components["schemas"]["OrderId"];
+            /**
+             * Format: int64
+             * @description How many items, adding up line quantities.
+             */
+            item_count: number;
+            /**
+             * Format: int64
+             * @description The human number, shown as "#1001".
+             */
+            number: number;
+            /** @description RFC 3339, UTC. */
+            placed_at: string;
+            /**
+             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
+             *     app without the matching `customer_data:*` scope. They are absent from the
+             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             */
+            redacted?: string[] | null;
+            total: components["schemas"]["Money"];
+        };
         OrderTaxResponse: {
             amount: components["schemas"]["Money"];
             /** @description Parts per million: 250000 = 25%. */
@@ -952,6 +1433,42 @@ export interface components {
          * @example pm_0190f1a2b3c47d8e9f00112233445566
          */
         PaymentMethodId: string;
+        /** @description A payment as the admin sees it on an order, and alone (`GET /admin/payments/{id}`). */
+        PaymentResponse: {
+            amount: components["schemas"]["Money"];
+            /**
+             * @description The provider's attempt the payment collects through (a Stripe PaymentIntent), for a
+             *     provider whose IDs name attempts: what reports naming another are refused for
+             *     (`payment_reference_mismatch`). Set by a report naming it (an app's) or by the
+             *     start of a provider built into the API (a spore's). Unlike `reference`, staff's
+             *     text or a capture's own ID never replace it. Null: none yet, and reports aren't
+             *     checked.
+             */
+            attempt?: string | null;
+            cart?: components["schemas"]["CartId"] | null;
+            /** @description When it was created, RFC 3339 in UTC. */
+            created_at: string;
+            id: components["schemas"]["PaymentId"];
+            /** @description The method's instructions at checkout, as the shopper was shown them. */
+            instructions?: string | null;
+            method?: components["schemas"]["PaymentMethodId"] | null;
+            /** @description The method's name when the payment was made. */
+            method_name?: string | null;
+            order?: components["schemas"]["OrderId"] | null;
+            /** @description When the money was collected, RFC 3339 in UTC. */
+            paid_at?: string | null;
+            /** @description `manual`, or the key of the app that collects it. */
+            provider: string;
+            /** @description The provider's ID, or for manual payments what staff typed (a bank reference). */
+            reference?: string | null;
+            /** @description What was given back. */
+            refunded: components["schemas"]["Money"];
+            status: components["schemas"]["PaymentStatusDto"];
+            /** @description When it last changed, RFC 3339 in UTC. */
+            updated_at: string;
+            /** @description When it was voided, RFC 3339 in UTC. */
+            voided_at?: string | null;
+        };
         /**
          * @description `PaymentStatus` on the wire (design note 0027, PA7).
          *
@@ -1132,6 +1649,14 @@ export interface components {
              */
             quote_expires_at?: string | null;
             tax?: components["schemas"]["TaxLineResponse"] | null;
+        };
+        /**
+         * @description What the customer says about marketing. The time is now and the source `storefront`:
+         *     it's the person themselves.
+         */
+        SetAccountConsentRequest: {
+            /** @description `subscribed` or `unsubscribed` (`pending` is for double opt-in flows an app runs). */
+            state: string;
         };
         SetEmailRequest: {
             /** @description `null` clears it. */
@@ -1385,6 +1910,15 @@ export interface components {
             reason: string;
         };
         /**
+         * @description JSON Merge Patch: only the fields sent change, `null` clears one. The email isn't
+         *     here: it's what the customer signs in with (design note 0034, §8).
+         */
+        UpdateAccountRequest: {
+            first_name?: string | null;
+            last_name?: string | null;
+            phone?: string | null;
+        };
+        /**
          * @description A VariantId: `var_` and 32 hex digits.
          * @example var_0190f1a2b3c47d8e9f00112233445566
          */
@@ -1398,6 +1932,943 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "storefront.account.fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountResponse"];
+                };
+            };
+            /** @description No customer session (`account_required`), or one that is invalid or expired (`invalid_token`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.account.update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.account.add_address": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddressRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.account.update_address": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                address_id: components["schemas"]["AddressId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddressRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.account.remove_address": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                address_id: components["schemas"]["AddressId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.account.request_erasure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountResponse"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.account.cancel_erasure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountResponse"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.account.export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountExportResponse"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.account.logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No customer session (`account_required`), or one that is invalid or expired (`invalid_token`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.account.logout_all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No customer session (`account_required`), or one that is invalid or expired (`invalid_token`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.account.set_consent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description `email` or `sms`
+                 * @example email
+                 */
+                channel: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetAccountConsentRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountConsentResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.account.list_orders": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderSummaryPage"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.account.fetch_order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["OrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlacedOrderResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "storefront.app_extensions.list": {
         parameters: {
             query?: {
@@ -1884,6 +3355,228 @@ export interface operations {
             };
             /** @description The app didn't answer in 10 s, or couldn't be reached (`app_unavailable`, `details: {app, point: "proxy"}`) */
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.account.request_code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginCodeResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Over the rate limit (`rate_limited`); see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The code could not be emailed (`notification_failed`) */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.account.login": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The shopper's cart (`cart_…`), linked to the customer on signing in. */
+                "X-Hypha-Cart"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerLoginResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Wrong, expired or used-up code (`invalid_code`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Over the rate limit (`rate_limited`); see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -160,7 +160,7 @@ impl ApiError {
         Self::new(
             StatusCode::FORBIDDEN,
             "admin_credentials_required",
-            "admin routes take a staff session or a secret key, not a publishable key",
+            "admin routes take a staff session or a secret key, not a publishable key or a customer session",
         )
     }
 
@@ -170,6 +170,15 @@ impl ApiError {
             StatusCode::FORBIDDEN,
             "publishable_key_required",
             "storefront routes take a publishable key (`X-Publishable-Key`)",
+        )
+    }
+
+    /// An account route called without a customer session (design note 0034).
+    pub fn account_required() -> Self {
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            "account_required",
+            "sign in first: send the customer session as `Authorization: Bearer hypha_cs_…` with the publishable key",
         )
     }
 
@@ -704,9 +713,11 @@ impl From<hypha_cart::CommandError> for ApiError {
             // Depends on the stock right now, not on the request: 409 like inventory's.
             E::Line(LineError::OutOfStock { .. }) => StatusCode::CONFLICT,
             // Checked out: the cart's state, not the request, is the problem.
-            E::Cart(CartError::Completed { .. } | CartError::ShippingAddressRequired) => {
-                StatusCode::CONFLICT
-            }
+            E::Cart(
+                CartError::Completed { .. }
+                | CartError::ShippingAddressRequired
+                | CartError::CustomerEmailFixed,
+            ) => StatusCode::CONFLICT,
             // Shipping (design note 0015): the group is in the URL; nothing to ship, no
             // zone and an option not offered right now are the cart's state.
             E::ShippingGroupNotFound(_) => StatusCode::NOT_FOUND,
@@ -1498,7 +1509,11 @@ impl From<hypha_auth::CommandError> for ApiError {
             E::ApiKeyNotFound(_) | E::SessionNotFound(_) => StatusCode::NOT_FOUND,
             E::ApiKeyRevoked(_)
             | E::Identity(
-                I::MfaAlreadyEnabled | I::MfaNotEnabled | I::MfaSetupNotStarted | I::NoPassword,
+                I::MfaAlreadyEnabled
+                | I::MfaNotEnabled
+                | I::MfaSetupNotStarted
+                | I::NoPassword
+                | I::NoEmailCode,
             ) => StatusCode::CONFLICT,
             E::Password(_)
             | E::ApiKey(
@@ -1562,6 +1577,38 @@ impl From<hypha_users::CommandError> for ApiError {
                 "saved, but the email could not be sent; try again to resend it",
             );
         }
+        Self::domain(status, e)
+    }
+}
+
+impl From<hypha_customer_accounts::CommandError> for ApiError {
+    fn from(e: hypha_customer_accounts::CommandError) -> Self {
+        use hypha_customer_accounts::CommandError as E;
+        let status = match &e {
+            E::Customers(inner) => return Self::from(inner.clone()),
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // One answer for a wrong, expired or used-up code, and for a session that is
+            // unknown, expired, revoked or whose customer is gone.
+            E::InvalidCode | E::InvalidToken | E::CustomerNotFound(_) | E::AccountRequired => {
+                StatusCode::UNAUTHORIZED
+            }
+            // Only `set_email_code` on an identity without the credential: ours are made
+            // with it, so this is a stored-data problem.
+            E::Identity(_) => return Self::internal(e),
+            E::Concurrent => StatusCode::CONFLICT,
+            E::Notify(inner) => {
+                tracing::error!(error = %inner, "email not sent");
+                return Self::new(
+                    StatusCode::BAD_GATEWAY,
+                    e.code(),
+                    "the sign-in code could not be emailed; try again",
+                );
+            }
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
         Self::domain(status, e)
     }
 }

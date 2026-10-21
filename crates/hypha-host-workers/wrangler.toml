@@ -105,3 +105,23 @@ enabled = true
 # [placement]
 # mode = "targeted"
 # host = "db.example.com:5432"
+
+[[ratelimits]]
+name = "RL_CODE_IP"
+namespace_id = "1012"
+simple = { limit = 6, period = 60 }
+
+[[ratelimits]]
+name = "RL_CODE_EMAIL_FROM_IP"
+namespace_id = "1013"
+simple = { limit = 3, period = 60 }
+
+[[ratelimits]]
+name = "RL_CUSTOMER_LOGIN_IP"
+namespace_id = "1014"
+simple = { limit = 12, period = 60 }
+
+[[ratelimits]]
+name = "RL_CUSTOMER_LOGIN_EMAIL_FROM_IP"
+namespace_id = "1015"
+simple = { limit = 6, period = 60 }

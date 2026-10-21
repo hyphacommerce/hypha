@@ -188,6 +188,7 @@ pub async fn update_customer<R: CustomerRepo>(
 fn source_of(ctx: &Ctx) -> ConsentSource {
     match ctx.actor() {
         Actor::App(id) => ConsentSource::App(id),
+        Actor::Customer(_) => ConsentSource::Storefront,
         Actor::System => ConsentSource::System,
         Actor::User(_) | Actor::Agent(_) | Actor::ApiKey(_) => ConsentSource::Admin,
     }

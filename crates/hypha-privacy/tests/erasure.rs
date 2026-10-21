@@ -1,5 +1,6 @@
 //! Erasing a customer's personal data and exporting it (design note 0032, §7.3, §7.4).
 
+use hypha_auth::{IdentityRepo as _, SessionRepo as _};
 use std::time::Duration;
 
 use hypha_cart::{Cart, CartRepo};
@@ -137,6 +138,24 @@ fn world() -> (InMemoryPorts, FixedClock) {
     block_on(ports.orders.insert(&mut order)).unwrap();
     let mut open = cart_of(ana_id(), 2);
     block_on(ports.carts.insert(&mut open)).unwrap();
+
+    // Ana has an account (design note 0034): an identity and a live session.
+    let mut identity = hypha_auth::Identity::with_email_code(
+        hypha_core::IdentityId::from_uuid(Uuid::from_u128(901)),
+        hypha_auth::Principal::Customer(ana_id()),
+        Email::new("ana@example.hr").unwrap(),
+    );
+    block_on(ports.identities.insert(&mut identity)).unwrap();
+    let mut session = hypha_auth::Session::active(
+        hypha_core::SessionId::from_uuid(Uuid::from_u128(902)),
+        identity.id(),
+        identity.principal(),
+        hypha_auth::TokenHash::of("hypha_cs_test"),
+        clock.now(),
+        None,
+        core::time::Duration::from_secs(3600),
+    );
+    block_on(ports.sessions.insert(&mut session)).unwrap();
     (ports, clock)
 }
 
@@ -260,6 +279,26 @@ fn erasing_removes_the_person_and_keeps_the_orders() {
         block_on(ports.carts.get(CartId::from_uuid(Uuid::from_u128(6002)))).unwrap(),
         None
     );
+
+    // Her account went too (design note 0034, AC10): no identity, the session ended.
+    {
+        assert_eq!(
+            block_on(
+                ports
+                    .identities
+                    .get(hypha_core::IdentityId::from_uuid(Uuid::from_u128(901)))
+            ),
+            Ok(None)
+        );
+        let ended = block_on(
+            ports
+                .sessions
+                .get(hypha_core::SessionId::from_uuid(Uuid::from_u128(902))),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!ended.is_active(clock.now()));
+    }
 
     let redacted = ports
         .outbox

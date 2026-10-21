@@ -10,6 +10,7 @@ import { redirect } from "next/navigation";
 
 import { lineImage } from "@/components/line-image";
 import { SummaryLine, Totals } from "@/components/totals";
+import { loadAccount } from "@/lib/account";
 import { api, countryOf } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
 import { cartId, link } from "@/lib/site";
@@ -51,14 +52,22 @@ export default async function CheckoutPage({
   const client = api();
   // The options alongside the cart, not after it: they only count once the cart has an
   // address and something to ship, and otherwise the API refuses them (unused here).
-  const [{ data: cart }, options, payment] = await Promise.all([
+  const [{ data: cart }, options, payment, account] = await Promise.all([
     client.GET("/storefront/carts/{id}", { params: { path: { id } } }),
     client.GET("/storefront/carts/{id}/shipping-options", { params: { path: { id } } }),
     client.GET("/storefront/carts/{id}/payment-methods", { params: { path: { id } } }),
+    // A signed-in shopper's address book and marketing choice fill the form (design
+    // note 0034, §4).
+    loadAccount(),
   ]);
   if (!cart || cart.order || cart.lines.length === 0) redirect(link(code, "/cart"));
 
   const address = cart.shipping_address;
+  // Their shipping address in this country, or the first one here.
+  const here = account?.addresses.filter((a) => a.country === code) ?? [];
+  const saved = here.find((a) => a.id === account?.default_shipping_address) ?? here[0];
+  // Prefilled from the address book until the cart has its own.
+  const prefill = address ?? saved ?? null;
   const ships = cart.shipping_groups.length > 0;
   const offers = ships && address ? (options.data?.groups ?? []) : [];
   const detailsDone = Boolean(cart.email) && (!ships || Boolean(address));
@@ -101,18 +110,21 @@ export default async function CheckoutPage({
               country={code}
               countryName={country.name}
               saved={detailsDone}
-              initialOptIn={cart.marketing_opt_in}
+              initialOptIn={
+                cart.marketing_opt_in || account?.email_marketing.state === "subscribed"
+              }
+              emailFixed={Boolean(account) && cart.customer === account?.id}
               initial={{
-                email: cart.email ?? "",
-                first_name: address?.first_name ?? "",
-                last_name: address?.last_name ?? "",
-                company: address?.company ?? "",
-                line1: address?.line1 ?? "",
-                line2: address?.line2 ?? "",
-                postal_code: address?.postal_code ?? "",
-                city: address?.city ?? "",
-                province: address?.province ?? "",
-                phone: address?.phone ?? "",
+                email: cart.email ?? account?.email ?? "",
+                first_name: prefill?.first_name ?? "",
+                last_name: prefill?.last_name ?? "",
+                company: prefill?.company ?? "",
+                line1: prefill?.line1 ?? "",
+                line2: prefill?.line2 ?? "",
+                postal_code: prefill?.postal_code ?? "",
+                city: prefill?.city ?? "",
+                province: prefill?.province ?? "",
+                phone: prefill?.phone ?? "",
               }}
             />
             {ships && (

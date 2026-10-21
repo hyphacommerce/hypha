@@ -137,6 +137,7 @@ impl World {
         let input = CreateCart {
             country: "HR".to_string(),
             idempotency: None,
+            customer: None,
         };
         let cart = block_on(create_cart(
             &ctx,
@@ -437,6 +438,7 @@ fn an_empty_cart_is_refused() {
     let input = CreateCart {
         country: "HR".to_string(),
         idempotency: None,
+        customer: None,
     };
     let cart = block_on(create_cart(
         &world.ports.storefront(),
@@ -893,6 +895,7 @@ fn nothing_to_pay_needs_no_method_and_makes_no_payment() {
     let input = CreateCart {
         country: "HR".to_string(),
         idempotency: None,
+        customer: None,
     };
     let cart = block_on(create_cart(
         &ctx,

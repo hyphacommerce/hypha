@@ -242,7 +242,7 @@ pub struct OrderTaxResponse {
 
 impl OrderResponse {
     /// The response with each line's image (`line_images`).
-    async fn with_images<P: HasProducts + HasAssets>(
+    pub(super) async fn with_images<P: HasProducts + HasAssets>(
         order: &Order,
         ports: &P,
         media: Option<&Media>,
@@ -374,13 +374,13 @@ async fn line_images<P: HasProducts + HasAssets>(
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct PlacedOrderResponse {
     #[serde(flatten)]
-    order: OrderResponse,
+    pub(super) order: OrderResponse,
     /// Lets whoever holds it read this order: keep it with the buyer (a cookie, the
     /// confirmation email's link), never in a public place. The same for every read.
-    access_token: String,
+    pub(super) access_token: String,
     /// How the buyer pays (design note 0027): the order's newest payment; `null` when
     /// there was nothing to pay.
-    payment: Option<PlacedPaymentResponse>,
+    pub(super) payment: Option<PlacedPaymentResponse>,
 }
 
 /// What checkout answers: the placed order and what the shopper must do next to pay.
@@ -659,7 +659,10 @@ pub struct OrderSummaryResponse {
 }
 
 impl OrderSummaryResponse {
-    fn new(o: OrderSummary, custom_fields: Option<CustomFieldValues>) -> Result<Self, ApiError> {
+    pub(super) fn new(
+        o: OrderSummary,
+        custom_fields: Option<CustomFieldValues>,
+    ) -> Result<Self, ApiError> {
         Ok(Self {
             id: o.id,
             number: o.number.value(),
@@ -680,7 +683,7 @@ impl OrderSummaryResponse {
 }
 
 /// A page of orders (named for the documents: utoipa's `body =` takes a plain name).
-type OrderPage = PageResponse<OrderSummaryResponse>;
+pub(super) type OrderPage = PageResponse<OrderSummaryResponse>;
 
 impl From<FinancialStatusDto> for FinancialStatus {
     fn from(s: FinancialStatusDto) -> Self {

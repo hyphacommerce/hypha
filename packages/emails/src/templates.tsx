@@ -2,6 +2,8 @@
 // and, per key, the subject, the HTML (the layout's blocks) and the plain text.
 
 import type { Email } from "./email.ts";
+import { customerErasureRequested } from "./emails/customer-erasure-requested.tsx";
+import { customerLoginCode } from "./emails/customer-login-code.tsx";
 import { orderCancelled } from "./emails/order-cancelled.tsx";
 import { orderConfirmation } from "./emails/order-confirmation.tsx";
 import { orderShipped } from "./emails/order-shipped.tsx";
@@ -17,6 +19,8 @@ export const emails: Email[] = [
   orderShipped,
   orderTrackingUpdated,
   orderCancelled,
+  customerLoginCode,
+  customerErasureRequested,
   staffNewOrder,
   staffInvite,
   staffPasswordReset,

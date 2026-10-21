@@ -349,6 +349,32 @@ pub struct StaffMail {
     pub expires_at: TimeValue,
 }
 
+/// `customer_login_code` (design note 0034, §6): the code itself, how long it works.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CodeMail {
+    pub shop: ShopContext,
+    pub brand: BrandContext,
+    /// Six digits.
+    pub code: String,
+    /// The address the code went to.
+    pub email: String,
+    /// The storefront's sign-in page with the email and code filled in
+    /// (`<shop.url>/account/login?email=…&code=…`); empty without a shop URL, when the
+    /// template shows the code alone.
+    pub link: String,
+    pub expires_at: TimeValue,
+    /// How long the code works from now, rounded down, at least 1.
+    pub expires_in_minutes: u64,
+}
+
+/// `customer_erasure_requested` (design note 0034, §3): when the erasure runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ErasureMail {
+    pub shop: ShopContext,
+    pub brand: BrandContext,
+    pub due_at: TimeValue,
+}
+
 /// One template's context, whichever it is: what rendering is given.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
@@ -358,6 +384,8 @@ pub enum MailContext {
     Cancellation(CancellationMail),
     NewOrder(NewOrderMail),
     Staff(StaffMail),
+    Code(CodeMail),
+    Erasure(ErasureMail),
 }
 
 impl MailContext {
@@ -419,6 +447,25 @@ impl MailContext {
             TemplateKey::StaffPasswordReset => MailContext::Staff(sample_staff(
                 "https://admin.example.com/reset-password?token=hypha_pwr_sample",
             )),
+            TemplateKey::CustomerErasureRequested => MailContext::Erasure(ErasureMail {
+                shop: sample_shop(),
+                brand: sample_brand(),
+                // Ten days after the sample order.
+                due_at: TimeValue::of(SAMPLE_PLACED_AT.plus_secs(10 * 24 * 3600), None),
+            }),
+            TemplateKey::CustomerLoginCode => MailContext::Code(CodeMail {
+                shop: sample_shop(),
+                brand: sample_brand(),
+                code: "481516".to_string(),
+                email: "marko@fernandfield.example".to_string(),
+                link: login_link(
+                    Some("https://shop.fernandfield.example"),
+                    "marko@fernandfield.example",
+                    "481516",
+                ),
+                expires_at: TimeValue::of(SAMPLE_PLACED_AT.plus_secs(10 * 60), None),
+                expires_in_minutes: 10,
+            }),
         }
     }
 
@@ -463,6 +510,8 @@ impl MailContext {
                 m.admin_url = None;
             }
             MailContext::Staff(m) => thin_branding(&mut m.shop, &mut m.brand),
+            MailContext::Code(m) => thin_branding(&mut m.shop, &mut m.brand),
+            MailContext::Erasure(m) => thin_branding(&mut m.shop, &mut m.brand),
         }
         context
     }
@@ -495,7 +544,7 @@ impl MailContext {
             }
             MailContext::Cancellation(m) => thin(&mut m.mail),
             MailContext::NewOrder(m) => thin(&mut m.mail),
-            MailContext::Staff(_) => {}
+            MailContext::Staff(_) | MailContext::Code(_) | MailContext::Erasure(_) => {}
         }
         context
     }
@@ -519,11 +568,37 @@ impl MailContext {
             MailContext::Cancellation(m) => (&mut m.mail.shop, &mut m.mail.brand),
             MailContext::NewOrder(m) => (&mut m.mail.shop, &mut m.mail.brand),
             MailContext::Staff(m) => (&mut m.shop, &mut m.brand),
+            MailContext::Code(m) => (&mut m.shop, &mut m.brand),
+            MailContext::Erasure(m) => (&mut m.shop, &mut m.brand),
         };
         *s = shop;
         *b = brand;
         self
     }
+}
+
+/// The storefront's sign-in link with the email and code filled in (design note 0034,
+/// §7), or empty without a shop URL.
+pub fn login_link(shop_url: Option<&str>, email: &str, code: &str) -> String {
+    let Some(base) = shop_url else {
+        return String::new();
+    };
+    let encode = |s: &str| {
+        s.bytes()
+            .map(|b| match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    (b as char).to_string()
+                }
+                _ => format!("%{b:02X}"),
+            })
+            .collect::<String>()
+    };
+    format!(
+        "{}/account/login?email={}&code={}",
+        base.trim_end_matches('/'),
+        encode(email),
+        encode(code)
+    )
 }
 
 fn thin_branding(shop: &mut ShopContext, brand: &mut BrandContext) {

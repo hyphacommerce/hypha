@@ -3,7 +3,7 @@
 
 use core::time::Duration;
 
-use hypha_core::{Email, IdentityId, Timestamp, UserId, Version, Versioned};
+use hypha_core::{CustomerId, Email, IdentityId, Timestamp, UserId, Version, Versioned};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -18,12 +18,15 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Principal {
     Staff(UserId),
+    /// A shopper with an account (design note 0034).
+    Customer(CustomerId),
 }
 
 impl Principal {
     pub fn kind(self) -> PrincipalKind {
         match self {
             Principal::Staff(_) => PrincipalKind::Staff,
+            Principal::Customer(_) => PrincipalKind::Customer,
         }
     }
 }
@@ -32,18 +35,21 @@ impl Principal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PrincipalKind {
     Staff,
+    Customer,
 }
 
 impl PrincipalKind {
     pub fn as_str(self) -> &'static str {
         match self {
             PrincipalKind::Staff => "staff",
+            PrincipalKind::Customer => "customer",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "staff" => Some(PrincipalKind::Staff),
+            "customer" => Some(PrincipalKind::Customer),
             _ => None,
         }
     }
@@ -70,12 +76,31 @@ pub enum Credential {
     },
     /// The unused recovery codes, hashed.
     RecoveryCodes { hashes: Vec<TokenHash> },
+    /// A customer's way in (design note 0034, AC1): the email a code was sent to, the
+    /// code's hash, when it stops working and how many wrong guesses it took. One live
+    /// code at a time; a new request replaces it. `None` hash: no code is out.
+    EmailCode {
+        email: Email,
+        hash: Option<TokenHash>,
+        expires_at: Option<Timestamp>,
+        attempts: u32,
+    },
+}
+
+/// What checking an email code found (`Identity::use_email_code`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeCheck {
+    Right,
+    Wrong,
+    /// No live code: none out, expired, or used up. Answered like `Wrong` to the caller.
+    None,
 }
 
 /// Ordered as an identity lists its credentials: the first factor, then the second.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CredentialKind {
     Password,
+    EmailCode,
     Totp,
     RecoveryCodes,
 }
@@ -84,6 +109,7 @@ impl CredentialKind {
     pub fn as_str(self) -> &'static str {
         match self {
             CredentialKind::Password => "password",
+            CredentialKind::EmailCode => "email_code",
             CredentialKind::Totp => "totp",
             CredentialKind::RecoveryCodes => "recovery_codes",
         }
@@ -94,6 +120,7 @@ impl Credential {
     pub fn kind(&self) -> CredentialKind {
         match self {
             Credential::Password { .. } => CredentialKind::Password,
+            Credential::EmailCode { .. } => CredentialKind::EmailCode,
             Credential::Totp { .. } => CredentialKind::Totp,
             Credential::RecoveryCodes { .. } => CredentialKind::RecoveryCodes,
         }
@@ -103,7 +130,9 @@ impl Credential {
     /// credential kind: the email for a password. Second factors have none.
     pub fn lookup(&self) -> Option<&str> {
         match self {
-            Credential::Password { email, .. } => Some(email.as_str()),
+            Credential::Password { email, .. } | Credential::EmailCode { email, .. } => {
+                Some(email.as_str())
+            }
             Credential::Totp { .. } | Credential::RecoveryCodes { .. } => None,
         }
     }
@@ -143,6 +172,126 @@ impl Identity {
             principal,
             credentials: vec![Credential::Password { email, hash }],
         }
+    }
+
+    /// An identity that signs in with a code emailed to `email` (design note 0034): no
+    /// code is out yet.
+    pub fn with_email_code(id: IdentityId, principal: Principal, email: Email) -> Self {
+        Self {
+            id,
+            version: Version::NEW,
+            principal,
+            credentials: vec![Credential::EmailCode {
+                email,
+                hash: None,
+                expires_at: None,
+                attempts: 0,
+            }],
+        }
+    }
+
+    /// Wrong email codes before the code is void (design note 0034, AC1).
+    pub const MAX_CODE_ATTEMPTS: u32 = 5;
+
+    /// The email codes go to, if this identity signs in with one.
+    pub fn code_email(&self) -> Option<&Email> {
+        match self.find(CredentialKind::EmailCode) {
+            Some(Credential::EmailCode { email, .. }) => Some(email),
+            _ => None,
+        }
+    }
+
+    /// Points the code credential at a new address (the customer's email changed), voiding
+    /// any live code.
+    pub fn set_code_email(&mut self, new: Email) -> Result<(), IdentityError> {
+        match self.find_mut(CredentialKind::EmailCode) {
+            Some(Credential::EmailCode {
+                email,
+                hash,
+                expires_at,
+                attempts,
+            }) => {
+                *email = new;
+                *hash = None;
+                *expires_at = None;
+                *attempts = 0;
+                Ok(())
+            }
+            _ => Err(IdentityError::NoEmailCode),
+        }
+    }
+
+    /// When the live code was issued, if one is out: its `expires_at` less `lifetime`.
+    /// For "no new code while the last is this young".
+    pub fn code_issued_at(&self, lifetime: Duration) -> Option<Timestamp> {
+        match self.find(CredentialKind::EmailCode) {
+            Some(Credential::EmailCode {
+                hash: Some(_),
+                expires_at: Some(at),
+                ..
+            }) => Some(at.minus(lifetime)),
+            _ => None,
+        }
+    }
+
+    /// Puts a new code out, replacing any live one and starting the guesses again.
+    pub fn set_email_code(
+        &mut self,
+        hash: TokenHash,
+        expires_at: Timestamp,
+    ) -> Result<(), IdentityError> {
+        match self.find_mut(CredentialKind::EmailCode) {
+            Some(Credential::EmailCode {
+                hash: slot,
+                expires_at: until,
+                attempts,
+                ..
+            }) => {
+                *slot = Some(hash);
+                *until = Some(expires_at);
+                *attempts = 0;
+                Ok(())
+            }
+            _ => Err(IdentityError::NoEmailCode),
+        }
+    }
+
+    /// Checks `guess` against the live code at `now` and uses it up: right, the code is
+    /// gone; wrong, a guess is counted and the `MAX_CODE_ATTEMPTS`th voids the code;
+    /// expired or none out, nothing to check. The caller stores the identity either way,
+    /// so every guess counts.
+    pub fn use_email_code(&mut self, guess: TokenHash, now: Timestamp) -> CodeCheck {
+        let Some(Credential::EmailCode {
+            hash,
+            expires_at,
+            attempts,
+            ..
+        }) = self.find_mut(CredentialKind::EmailCode)
+        else {
+            return CodeCheck::None;
+        };
+        let (Some(live), Some(until)) = (*hash, *expires_at) else {
+            return CodeCheck::None;
+        };
+        if now >= until {
+            *hash = None;
+            *expires_at = None;
+            *attempts = 0;
+            return CodeCheck::None;
+        }
+        if live == guess {
+            *hash = None;
+            *expires_at = None;
+            *attempts = 0;
+            return CodeCheck::Right;
+        }
+        *attempts += 1;
+        if *attempts >= Self::MAX_CODE_ATTEMPTS {
+            *hash = None;
+            *expires_at = None;
+            *attempts = 0;
+        }
+        CodeCheck::Wrong
     }
 
     pub fn id(&self) -> IdentityId {
@@ -394,6 +543,17 @@ struct PasswordData {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct EmailCodeData {
+    /// Hex of the SHA-256 of the code; absent while no code is out.
+    hash: Option<String>,
+    /// Microseconds since the epoch.
+    expires_at: Option<i64>,
+    #[serde(default)]
+    attempts: u32,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TotpData {
     /// Hex of the sealed bytes.
     secret: String,
@@ -436,6 +596,16 @@ impl Credential {
             Credential::RecoveryCodes { hashes } => serde_json::json!(RecoveryCodesData {
                 hashes: hashes.iter().map(|h| hex(h.as_bytes())).collect(),
             }),
+            Credential::EmailCode {
+                hash,
+                expires_at,
+                attempts,
+                ..
+            } => serde_json::json!(EmailCodeData {
+                hash: hash.map(|h| hex(h.as_bytes())),
+                expires_at: expires_at.map(Timestamp::unix_micros),
+                attempts: *attempts,
+            }),
         };
         StoredCredential {
             kind: self.kind().as_str().to_string(),
@@ -459,6 +629,31 @@ impl Credential {
                 Ok(Credential::Password {
                     email,
                     hash: PasswordHash::from_phc(data.hash),
+                })
+            }
+            "email_code" => {
+                let data: EmailCodeData =
+                    serde_json::from_value(stored.data.clone()).map_err(|e| bad(&e.to_string()))?;
+                let raw = stored.lookup.as_deref().ok_or_else(|| bad("no email"))?;
+                let email = Email::new(raw).map_err(|e| bad(&e.to_string()))?;
+                if email.as_str() != raw {
+                    return Err(bad("email not normalized"));
+                }
+                let hash = data
+                    .hash
+                    .as_deref()
+                    .map(|h| {
+                        unhex(h)
+                            .and_then(|b| <[u8; 32]>::try_from(b).ok())
+                            .map(TokenHash::from_bytes)
+                            .ok_or_else(|| bad("hash"))
+                    })
+                    .transpose()?;
+                Ok(Credential::EmailCode {
+                    email,
+                    hash,
+                    expires_at: data.expires_at.map(Timestamp::from_unix_micros),
+                    attempts: data.attempts,
                 })
             }
             "totp" => {
@@ -573,6 +768,61 @@ mod tests {
         i.start_totp(Sealed::from_bytes(vec![1, 2, 3])).unwrap();
         i.confirm_totp(10, vec![h(1), h(2)]).unwrap();
         i
+    }
+
+    fn at(secs: i64) -> Timestamp {
+        Timestamp::from_unix_micros(secs * 1_000_000)
+    }
+
+    fn customer_identity() -> Identity {
+        Identity::with_email_code(
+            IdentityId::from_uuid(Uuid::from_u128(3)),
+            Principal::Customer(hypha_core::CustomerId::from_uuid(Uuid::from_u128(4))),
+            Email::new("nina@example.com").unwrap(),
+        )
+    }
+
+    #[test]
+    fn an_email_code_is_used_once_and_voided_after_five_wrong_guesses() {
+        let mut i = customer_identity();
+        assert_eq!(i.use_email_code(h(1), at(0)), CodeCheck::None);
+        assert_eq!(i.code_issued_at(Duration::from_secs(600)), None);
+        i.set_email_code(h(1), at(600)).unwrap();
+        assert_eq!(
+            i.code_issued_at(Duration::from_secs(600)),
+            Some(at(0)),
+            "issued when it expires less its life"
+        );
+        assert_eq!(i.use_email_code(h(2), at(10)), CodeCheck::Wrong);
+        assert_eq!(i.use_email_code(h(1), at(10)), CodeCheck::Right);
+        assert_eq!(i.use_email_code(h(1), at(10)), CodeCheck::None, "used up");
+
+        i.set_email_code(h(5), at(600)).unwrap();
+        for _ in 0..Identity::MAX_CODE_ATTEMPTS {
+            assert_eq!(i.use_email_code(h(9), at(10)), CodeCheck::Wrong);
+        }
+        assert_eq!(i.use_email_code(h(5), at(10)), CodeCheck::None, "voided");
+
+        i.set_email_code(h(6), at(600)).unwrap();
+        assert_eq!(i.use_email_code(h(6), at(600)), CodeCheck::None, "expired");
+        assert_eq!(
+            identity().set_email_code(h(1), at(1)),
+            Err(IdentityError::NoEmailCode)
+        );
+        assert_eq!(i.code_email().map(Email::as_str), Some("nina@example.com"));
+        assert_eq!(i.credentials()[0].lookup(), Some("nina@example.com"));
+    }
+
+    #[test]
+    fn an_email_code_identity_round_trips_through_storage() {
+        let mut i = customer_identity();
+        i.set_email_code(h(7), at(600)).unwrap();
+        i.use_email_code(h(1), at(1));
+        assert_eq!(Identity::restore(i.snapshot()), Ok(i));
+        assert_eq!(
+            Identity::restore(customer_identity().snapshot()),
+            Ok(customer_identity())
+        );
     }
 
     #[test]

@@ -3,9 +3,10 @@
 //! resending a message, and the staff flows' direct emails.
 
 use hypha_core::{
-    Actor, AssetId, Ctx, Email, HasBatch, HasOutbox, IdGenerator, NotificationId, Notifier,
+    Actor, AssetId, Clock, Ctx, Email, HasBatch, HasOutbox, IdGenerator, NotificationId, Notifier,
     NotifyError, OrderId, OutboxRepo, RepoError, Scope, retry_on_conflict,
 };
+use hypha_customer_accounts::CustomerEmail;
 use hypha_media::{
     AssetKind, AssetRepo, AssetStatus, HasAssets, StageAssetUsages, UsageOwner, UsageRole,
     Visibility, repo::keys as media_keys,
@@ -23,7 +24,7 @@ use hypha_users::{HasUsers, StaffEmail, UserRepo};
 
 use crate::{
     CommandError, MailEnv, MailPorts,
-    context::{MailContext, StaffMail, user_context},
+    context::{CodeMail, ErasureMail, MailContext, StaffMail, login_link, user_context},
     format::TimeValue,
     handler::{load_fulfillment, load_order, order_context},
     send::{
@@ -290,7 +291,10 @@ async fn preview_context<E: MailEnv, P: MailPorts>(
 ) -> Result<MailContext, CommandError> {
     let as_order = match key {
         TemplateKey::Layout => Some(TemplateKey::OrderConfirmation),
-        TemplateKey::StaffInvite | TemplateKey::StaffPasswordReset => None,
+        TemplateKey::StaffInvite
+        | TemplateKey::StaffPasswordReset
+        | TemplateKey::CustomerLoginCode
+        | TemplateKey::CustomerErasureRequested => None,
         other => Some(other),
     };
     match (order, as_order) {
@@ -545,6 +549,79 @@ where
         link,
         expires_at: TimeValue::of(expires_at, branding.store.timezone()),
     });
+    let message = Message {
+        template,
+        to,
+        event: None,
+        order: None,
+    };
+    let sources = Sources::load(ports, template)
+        .await
+        .map_err(|e| failed(e.into()))?;
+    let record = send_now(env, ports, &branding, &sources, message, &context)
+        .await
+        .map_err(failed)?;
+    match record.status() {
+        NotificationStatus::Sent => Ok(record),
+        _ => Err(NotifyError(
+            record
+                .error()
+                .unwrap_or("the email wasn't sent")
+                .to_string(),
+        )),
+    }
+}
+
+/// Sends a customer's account email at once (design note 0034, §6), like `send_staff`:
+/// the sign-in code (a secret, not kept in the record) or the confirmation of an erasure
+/// request (which should arrive while the person is there). What a host's
+/// `Notifier<CustomerEmail>` calls.
+pub async fn send_customer<E, P>(
+    env: &E,
+    ports: &P,
+    message: CustomerEmail,
+) -> Result<Notification, NotifyError>
+where
+    E: MailEnv,
+    P: StoreRepo
+        + HasAssets
+        + HasNotificationTemplates
+        + HasNotificationSettings
+        + HasNotifications,
+{
+    let failed = |e: CommandError| NotifyError(e.to_string());
+    let branding = branding(env, ports).await.map_err(failed)?;
+    let (template, to, context) = match message {
+        CustomerEmail::LoginCode {
+            to,
+            code,
+            expires_at,
+        } => {
+            let left = expires_at
+                .unix_secs()
+                .saturating_sub(env.clock().now().unix_secs())
+                .max(0);
+            let link = login_link(branding.shop.url.as_deref(), to.as_str(), &code);
+            let context = MailContext::Code(CodeMail {
+                shop: branding.shop.clone(),
+                brand: branding.brand.clone(),
+                email: to.as_str().to_string(),
+                link,
+                code,
+                expires_at: TimeValue::of(expires_at, branding.store.timezone()),
+                expires_in_minutes: u64::try_from(left / 60).unwrap_or(0).max(1),
+            });
+            (TemplateKey::CustomerLoginCode, to, context)
+        }
+        CustomerEmail::ErasureRequested { to, due_at } => {
+            let context = MailContext::Erasure(ErasureMail {
+                shop: branding.shop.clone(),
+                brand: branding.brand.clone(),
+                due_at: TimeValue::of(due_at, branding.store.timezone()),
+            });
+            (TemplateKey::CustomerErasureRequested, to, context)
+        }
+    };
     let message = Message {
         template,
         to,

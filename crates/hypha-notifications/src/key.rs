@@ -16,6 +16,11 @@ pub enum TemplateKey {
     StaffNewOrder,
     StaffInvite,
     StaffPasswordReset,
+    /// A customer's sign-in code (design note 0034).
+    CustomerLoginCode,
+    /// A customer asked from their account for their data to be erased (design note
+    /// 0034, §3): when it runs, and that they can still cancel.
+    CustomerErasureRequested,
 }
 
 /// Who a template's messages go to.
@@ -30,12 +35,14 @@ pub enum Audience {
 impl TemplateKey {
     /// Every key: the layout first, then the buyer's templates, then the staff's, the
     /// order the admin lists them in.
-    pub const ALL: [TemplateKey; 8] = [
+    pub const ALL: [TemplateKey; 10] = [
         TemplateKey::Layout,
         TemplateKey::OrderConfirmation,
         TemplateKey::OrderShipped,
         TemplateKey::OrderTrackingUpdated,
         TemplateKey::OrderCancelled,
+        TemplateKey::CustomerLoginCode,
+        TemplateKey::CustomerErasureRequested,
         TemplateKey::StaffNewOrder,
         TemplateKey::StaffInvite,
         TemplateKey::StaffPasswordReset,
@@ -52,22 +59,26 @@ impl TemplateKey {
             TemplateKey::StaffNewOrder => "staff_new_order",
             TemplateKey::StaffInvite => "staff_invite",
             TemplateKey::StaffPasswordReset => "staff_password_reset",
+            TemplateKey::CustomerLoginCode => "customer_login_code",
+            TemplateKey::CustomerErasureRequested => "customer_erasure_requested",
         }
     }
 
-    /// Whether a merchant may turn it off. The layout isn't a message, and invites and
-    /// password resets are how staff get in: without them nobody could join or recover
-    /// an account.
+    /// Whether a merchant may turn it off. The layout isn't a message; invites and
+    /// password resets are how staff get in, and the sign-in code how customers do:
+    /// without them nobody could join, recover an account or sign in.
     pub fn can_disable(self) -> bool {
         match self {
             TemplateKey::OrderConfirmation
             | TemplateKey::OrderShipped
             | TemplateKey::OrderTrackingUpdated
             | TemplateKey::OrderCancelled
+            | TemplateKey::CustomerErasureRequested
             | TemplateKey::StaffNewOrder => true,
-            TemplateKey::Layout | TemplateKey::StaffInvite | TemplateKey::StaffPasswordReset => {
-                false
-            }
+            TemplateKey::Layout
+            | TemplateKey::StaffInvite
+            | TemplateKey::StaffPasswordReset
+            | TemplateKey::CustomerLoginCode => false,
         }
     }
 
@@ -78,7 +89,9 @@ impl TemplateKey {
             TemplateKey::OrderConfirmation
             | TemplateKey::OrderShipped
             | TemplateKey::OrderTrackingUpdated
-            | TemplateKey::OrderCancelled => Some(Audience::Buyer),
+            | TemplateKey::OrderCancelled
+            | TemplateKey::CustomerLoginCode
+            | TemplateKey::CustomerErasureRequested => Some(Audience::Buyer),
             TemplateKey::StaffNewOrder
             | TemplateKey::StaffInvite
             | TemplateKey::StaffPasswordReset => Some(Audience::Staff),
@@ -126,7 +139,7 @@ mod tests {
     }
 
     #[test]
-    fn only_order_and_new_order_emails_can_be_disabled() {
+    fn only_order_new_order_and_erasure_emails_can_be_disabled() {
         let disabled: Vec<TemplateKey> = TemplateKey::ALL
             .into_iter()
             .filter(|k| k.can_disable())
@@ -138,6 +151,7 @@ mod tests {
                 TemplateKey::OrderShipped,
                 TemplateKey::OrderTrackingUpdated,
                 TemplateKey::OrderCancelled,
+                TemplateKey::CustomerErasureRequested,
                 TemplateKey::StaffNewOrder,
             ]
         );

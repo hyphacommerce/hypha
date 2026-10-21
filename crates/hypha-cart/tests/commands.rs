@@ -224,6 +224,7 @@ impl World {
         let input = CreateCart {
             country: country.to_string(),
             idempotency: None,
+            customer: None,
         };
         block_on(create_cart(
             &self.ports.storefront(),
@@ -599,6 +600,7 @@ fn a_cart_needs_a_channel() {
     let input = CreateCart {
         country: "HR".to_string(),
         idempotency: None,
+        customer: None,
     };
     let result = block_on(create_cart(
         &Ctx::system(),
@@ -1189,6 +1191,7 @@ impl World {
         let input = CreateCart {
             country: "HR".to_string(),
             idempotency,
+            customer: None,
         };
         block_on(create_cart(ctx, &self.ports, &self.ids, &self.clock, input))
     }

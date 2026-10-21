@@ -149,6 +149,7 @@ async fn cart(
     let input = CreateCart {
         country: "HR".to_string(),
         idempotency: None,
+        customer: None,
     };
     let cart = create_cart(&ctx, store, ids, clock, input)
         .await

@@ -361,7 +361,8 @@ mod worker_main {
             runtime.clock.clone(),
         )?
         .map(Arc::new);
-        let env_ports = HostEnv::new(secret_key, config.auth, runtime.clone());
+        let env_ports =
+            HostEnv::new(secret_key, config.auth, runtime.clone()).with_accounts(config.accounts);
         let mail = Arc::new(MailHost::new(
             MailParts {
                 sender: mail_sender,

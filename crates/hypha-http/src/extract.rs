@@ -23,6 +23,8 @@ use hypha_apps::HasApps;
 use hypha_auth::{HasApiKeys, HasSessions, TokenKind, authenticate_api_key};
 use hypha_core::ActingAs;
 use hypha_core::{Clock, Ctx, IdempotencyRequest};
+use hypha_customer_accounts::{CustomerSession, authenticate_customer};
+use hypha_customers::HasCustomers;
 use hypha_oauth::{HasOAuthTokens, authenticate_access_token};
 use hypha_users::{HasStaffSessions, StaffSession, authenticate_staff};
 use serde::{Serialize, de::DeserializeOwned};
@@ -138,13 +140,16 @@ pub trait Surface {
 /// `/admin/*`: staff sessions and secret keys.
 pub struct Admin;
 
-/// `/storefront/*`: publishable keys (customer sessions later).
+/// `/storefront/*`: publishable keys, with a customer's session beside one (design note
+/// 0034).
 pub struct Storefront;
 
 impl Surface for Admin {
     fn admit(kind: Option<TokenKind>, publishable_header: bool) -> Result<(), ApiError> {
         match kind {
-            Some(TokenKind::PublishableKey) => Err(ApiError::admin_credentials_required()),
+            Some(TokenKind::PublishableKey | TokenKind::CustomerSession) => {
+                Err(ApiError::admin_credentials_required())
+            }
             Some(TokenKind::Session | TokenKind::SecretKey | TokenKind::AccessToken)
                 if !publishable_header =>
             {
@@ -159,9 +164,13 @@ impl Surface for Storefront {
     fn admit(kind: Option<TokenKind>, _publishable_header: bool) -> Result<(), ApiError> {
         match kind {
             Some(TokenKind::PublishableKey) => Ok(()),
-            Some(TokenKind::Session | TokenKind::SecretKey | TokenKind::AccessToken) => {
-                Err(ApiError::publishable_key_required())
-            }
+            // A customer's session alone names no store or channel: the key must come too.
+            Some(
+                TokenKind::Session
+                | TokenKind::SecretKey
+                | TokenKind::AccessToken
+                | TokenKind::CustomerSession,
+            ) => Err(ApiError::publishable_key_required()),
             _ => Err(hypha_auth::CommandError::InvalidToken.into()),
         }
     }
@@ -171,47 +180,73 @@ struct Credential {
     token: String,
     /// Sent as `X-Publishable-Key`, where only publishable keys are accepted.
     publishable_header: bool,
+    /// A customer's session (`Authorization: Bearer hypha_cs_…`) sent beside the
+    /// publishable key (design note 0034): the key decides the store and channel, the
+    /// session adds who the shopper is.
+    customer_session: Option<String>,
 }
 
 /// What a request authenticated as.
 enum Authenticated {
     Staff(Box<StaffSession>),
     Key(Ctx),
+    /// A shopper signed in, through their store's publishable key.
+    Customer(Box<CustomerSession>),
 }
 
-/// The token a request carries; `unauthenticated` if none.
+/// The bearer token in `Authorization`, if the header is there.
+fn bearer(parts: &Parts) -> Result<Option<String>, ApiError> {
+    let invalid = || ApiError::from(hypha_auth::CommandError::InvalidToken);
+    let Some(value) = parts.headers.get(AUTHORIZATION) else {
+        return Ok(None);
+    };
+    let value = value.to_str().map_err(|_| invalid())?;
+    let (scheme, token) = value.split_once(' ').ok_or_else(invalid)?;
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return Err(invalid());
+    }
+    Ok(Some(token.trim().to_string()))
+}
+
+/// The token a request carries; `unauthenticated` if none. With `X-Publishable-Key`,
+/// the bearer token may only be a customer's session: anything else beside the key is
+/// `invalid_token`.
 fn credential(parts: &Parts) -> Result<Credential, ApiError> {
     let invalid = || ApiError::from(hypha_auth::CommandError::InvalidToken);
-    if let Some(value) = parts.headers.get(AUTHORIZATION) {
-        let value = value.to_str().map_err(|_| invalid())?;
-        let (scheme, token) = value.split_once(' ').ok_or_else(invalid)?;
-        if !scheme.eq_ignore_ascii_case("bearer") {
+    let bearer = bearer(parts)?;
+    if let Some(value) = parts.headers.get("x-publishable-key") {
+        let token = value.to_str().map_err(|_| invalid())?.trim().to_string();
+        if let Some(session) = &bearer
+            && TokenKind::of(session) != Some(TokenKind::CustomerSession)
+        {
             return Err(invalid());
         }
         return Ok(Credential {
-            token: token.trim().to_string(),
-            publishable_header: false,
-        });
-    }
-    if let Some(value) = parts.headers.get("x-publishable-key") {
-        let token = value.to_str().map_err(|_| invalid())?.trim().to_string();
-        return Ok(Credential {
             token,
             publishable_header: true,
+            customer_session: bearer,
         });
     }
-    Err(ApiError::unauthenticated())
+    match bearer {
+        Some(token) => Ok(Credential {
+            token,
+            publishable_header: false,
+            customer_session: None,
+        }),
+        None => Err(ApiError::unauthenticated()),
+    }
 }
 
 impl Credential {
     async fn authenticate<
-        P: HasStaffSessions + HasSessions + HasApiKeys + HasOAuthTokens + HasApps,
+        P: HasStaffSessions + HasSessions + HasApiKeys + HasOAuthTokens + HasApps + HasCustomers,
     >(
         &self,
         ports: &P,
-        clock: &impl Clock,
+        env: &crate::state::HostEnv,
         publishable_keys: &KeyCache,
     ) -> Result<Authenticated, ApiError> {
+        let clock = env;
         let token = self.token.as_str();
         match TokenKind::of(token) {
             Some(TokenKind::Session) if !self.publishable_header => {
@@ -228,12 +263,23 @@ impl Credential {
             )),
             Some(TokenKind::PublishableKey) => {
                 let now = clock.now();
-                if let Some(ctx) = publishable_keys.get(token, now) {
+                let ctx = match publishable_keys.get(token, now) {
+                    Some(ctx) => ctx,
+                    None => {
+                        let ctx = authenticate_api_key(ports.api_keys(), token).await?;
+                        publishable_keys.put(token, &ctx, now);
+                        ctx
+                    }
+                };
+                let Some(session) = &self.customer_session else {
                     return Ok(Authenticated::Key(ctx));
-                }
-                let ctx = authenticate_api_key(ports.api_keys(), token).await?;
-                publishable_keys.put(token, &ctx, now);
-                Ok(Authenticated::Key(ctx))
+                };
+                // A publishable key always has a channel (design note 0020).
+                let channel = ctx
+                    .channel()
+                    .ok_or(hypha_auth::CommandError::InvalidToken)?;
+                let me = authenticate_customer(ports, env, channel, session).await?;
+                Ok(Authenticated::Customer(Box::new(me)))
             }
             _ => Err(hypha_auth::CommandError::InvalidToken.into()),
         }
@@ -252,11 +298,12 @@ impl<A: Surface> Caller<A> {
         let ports = state.public_ports().await?;
         let ctx = match self
             .0
-            .authenticate(&ports, &state.clock, &state.publishable_keys)
+            .authenticate(&ports, &state.env, &state.publishable_keys)
             .await?
         {
             Authenticated::Staff(staff) => staff.ctx,
             Authenticated::Key(ctx) => ctx,
+            Authenticated::Customer(me) => me.ctx,
         };
         // Every event these ports write from here on is the caller's (design note 0016).
         ports.act_as(ctx.actor());
@@ -275,15 +322,52 @@ impl StaffCaller {
         let ports = state.public_ports().await?;
         match self
             .0
-            .authenticate(&ports, &state.clock, &state.publishable_keys)
+            .authenticate(&ports, &state.env, &state.publishable_keys)
             .await?
         {
             Authenticated::Staff(staff) => {
                 ports.act_as(staff.ctx.actor());
                 Ok((ports, *staff))
             }
-            Authenticated::Key(_) => Err(ApiError::session_required()),
+            Authenticated::Key(_) | Authenticated::Customer(_) => Err(ApiError::session_required()),
         }
+    }
+}
+
+/// A storefront route for a signed-in customer (design note 0034, §3): the publishable
+/// key and the customer's session, both. Without the session, `401 account_required`.
+pub struct CustomerCaller(Credential);
+
+impl CustomerCaller {
+    /// The request's ports and the customer behind these credentials.
+    pub async fn authenticate<S: Storage>(
+        self,
+        state: &AppState<S>,
+    ) -> Result<(S::Ports<'_>, CustomerSession), ApiError> {
+        Storefront::admit(TokenKind::of(&self.0.token), self.0.publishable_header)?;
+        if self.0.customer_session.is_none() {
+            return Err(ApiError::account_required());
+        }
+        let ports = state.public_ports().await?;
+        match self
+            .0
+            .authenticate(&ports, &state.env, &state.publishable_keys)
+            .await?
+        {
+            Authenticated::Customer(me) => {
+                ports.act_as(me.ctx.actor());
+                Ok((ports, *me))
+            }
+            Authenticated::Staff(_) | Authenticated::Key(_) => Err(ApiError::account_required()),
+        }
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for CustomerCaller {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, ApiError> {
+        credential(parts).map(CustomerCaller)
     }
 }
 

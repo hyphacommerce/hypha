@@ -5,6 +5,7 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
+hypha-auth = { path = "../hypha-auth" }
 hypha-cart = { path = "../hypha-cart" }
 hypha-core.workspace = true
 hypha-custom-fields = { path = "../hypha-custom-fields" }
