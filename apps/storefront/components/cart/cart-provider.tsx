@@ -19,6 +19,7 @@ import {
 
 import { type Cart, addToCart, loadCart, setQuantity } from "@/app/[country]/actions";
 import { CloseOnNavigate } from "@/components/close-on-navigate";
+import { WITHIN_PAGE, addTransitionType } from "@/components/view-transition";
 import { hasCartFlag } from "@/lib/cart-flag";
 
 type CartContext = {
@@ -99,9 +100,14 @@ export function CartProvider({
   const add = useCallback(
     async (variant: string, quantity: number) => {
       const result = await addToCart({ country, variant, quantity });
-      setCart(result.cart);
-      setError(result.error);
-      if (!result.error) setIsOpen(true);
+      // Within the page: the caller's transition would otherwise start a view
+      // transition, which snapshots the page while the drawer animates open.
+      startTransition(() => {
+        addTransitionType(WITHIN_PAGE);
+        setCart(result.cart);
+        setError(result.error);
+        if (!result.error) setIsOpen(true);
+      });
       return result.error;
     },
     [country],
@@ -115,8 +121,11 @@ export function CartProvider({
         const run = queue.current.then(() => setQuantity({ country, variant, quantity }));
         queue.current = run.catch(() => undefined);
         const result = await run;
-        setCart(result.cart);
-        setError(result.error);
+        startTransition(() => {
+          addTransitionType(WITHIN_PAGE);
+          setCart(result.cart);
+          setError(result.error);
+        });
       }),
     [country],
   );

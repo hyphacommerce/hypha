@@ -25,7 +25,12 @@ import { startTransition, useState, useTransition } from "react";
 import { useCart } from "@/components/cart/cart-provider";
 import { CustomFields } from "@/components/custom-fields";
 import { productImageName } from "@/components/product-grid";
-import { ViewTransition, WITHIN_PAGE, addTransitionType } from "@/components/view-transition";
+import {
+  HERO_IMAGE,
+  ViewTransition,
+  WITHIN_PAGE,
+  addTransitionType,
+} from "@/components/view-transition";
 import { type FieldEntry, withVariant } from "@/lib/custom-fields";
 import { formatMoney } from "@/lib/money";
 
@@ -92,6 +97,7 @@ export function ProductForm({
   const showImage = (index: number) =>
     startTransition(() => {
       addTransitionType(WITHIN_PAGE);
+      addTransitionType(HERO_IMAGE);
       setShown(index);
     });
 
@@ -150,7 +156,7 @@ export function ProductForm({
           name={productImageName(product.handle)}
           default="none"
           share="shop-image-share"
-          update="shop-hero-fade"
+          update={{ [HERO_IMAGE]: "shop-hero-fade", default: "none" }}
         >
           <div className="shop-rounded">
             <AspectRatio ratio={4 / 5}>
