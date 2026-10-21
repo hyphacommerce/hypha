@@ -50,6 +50,78 @@ where
     insert_reset_with_identity(&make().await).await;
     scenario("staff batch: using up resets spares other identities and used ones");
     use_up_resets(&make().await).await;
+    scenario(
+        "staff batch: deleting an identity removes it at its version with its sessions revoked",
+    );
+    delete_identity(&make().await).await;
+}
+
+/// An erased or deleted customer's account (design note 0034, AC10): the identity goes
+/// at the version it was loaded at, its sessions are revoked in the same commit; a stale
+/// version writes nothing.
+async fn delete_identity<S>(ports: &S)
+where
+    S: HasBatch + HasIdentities + HasSessions,
+    S::Batch: StageIdentities + StageSessions,
+{
+    let mut i = identity(1, "ana@example.com");
+    ports.identities().insert(&mut i).await.unwrap();
+    let mut other = identity(2, "bob@example.com");
+    ports.identities().insert(&mut other).await.unwrap();
+    let mut s = session(1, 1, 1);
+    ports.sessions().insert(&mut s).await.unwrap();
+    let now = Timestamp::from_unix_micros(10_000_000);
+
+    // Stale: the identity moved since it was loaded.
+    let stale = i.clone();
+    ports.identities().update(&mut i).await.unwrap();
+    let mut batch = ports.batch();
+    batch.revoke_sessions(stale.id(), None, now);
+    batch.delete_identity(&stale);
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+    assert_eq!(
+        ports.identities().get(i.id()).await.unwrap(),
+        Some(i.clone())
+    );
+    assert!(
+        ports
+            .sessions()
+            .get(s.id())
+            .await
+            .unwrap()
+            .unwrap()
+            .is_active(now),
+        "nothing of a failed batch lands"
+    );
+
+    let mut batch = ports.batch();
+    batch.revoke_sessions(i.id(), None, now);
+    batch.delete_identity(&i);
+    ports.commit(batch).await.unwrap();
+    assert_eq!(ports.identities().get(i.id()).await, Ok(None));
+    assert_eq!(
+        ports
+            .identities()
+            .find_login(
+                hypha_auth::PrincipalKind::Staff,
+                hypha_auth::CredentialKind::Password,
+                "ana@example.com"
+            )
+            .await,
+        Ok(None),
+        "its credentials go with it"
+    );
+    let ended = ports.sessions().get(s.id()).await.unwrap().unwrap();
+    assert!(!ended.is_active(now));
+    assert_eq!(
+        ports.identities().get(other.id()).await.unwrap(),
+        Some(other),
+        "other identities stay"
+    );
+    // Gone already: stale too.
+    let mut batch = ports.batch();
+    batch.delete_identity(&i);
+    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
 }
 
 async fn insert_reset_with_identity<S>(ports: &S)

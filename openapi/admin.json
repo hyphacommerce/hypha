@@ -36,6 +36,28 @@
         ],
         "type": "object"
       },
+      "AccountFactsResponse": {
+        "description": "What the admin knows of a customer's account (design note 0034, §7).",
+        "properties": {
+          "active_sessions": {
+            "description": "Sessions neither signed out nor expired: the devices they're signed in on.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_active_at": {
+            "description": "When any of those was last used, RFC 3339 in UTC; `null` with none active.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "active_sessions"
+        ],
+        "type": "object"
+      },
       "ActionExtension": {
         "description": "A button: run it with `POST /admin/app-extensions/actions/{app}/{id}`.",
         "properties": {
@@ -3274,6 +3296,17 @@
       },
       "CustomerResponse": {
         "properties": {
+          "account": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountFactsResponse",
+                "description": "The customer's storefront account (design note 0034), `null` while they never\nsigned in. `POST /admin/customers/{id}/sessions/revoke` signs them out everywhere."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "addresses": {
             "items": {
               "$ref": "#/components/schemas/AddressResponse"
@@ -21151,6 +21184,98 @@
           }
         ],
         "summary": "Records a customer's marketing consent for a channel (`email` or `sms`; design note\n0032, §5). The newest `consented_at` wins, so a delayed sync can't overwrite a newer\nopt-out: an older write answers `applied: false`. SMS needs a phone (`409\nconsent_needs_phone`); an erased customer is read-only (`409 customer_erased`).",
+        "tags": [
+          "customers"
+        ],
+        "x-hypha-scopes": [
+          "customers:write"
+        ]
+      }
+    },
+    "/admin/customers/{id}/sessions/revoke": {
+      "post": {
+        "operationId": "admin.customers.revoke_sessions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Signs the customer out of every device (design note 0034, §7): every session of their\naccount is revoked. Nothing to do for a customer without one.",
         "tags": [
           "customers"
         ],

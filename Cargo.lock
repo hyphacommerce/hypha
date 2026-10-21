@@ -1470,6 +1470,7 @@ dependencies = [
 name = "hypha-privacy"
 version = "0.1.0"
 dependencies = [
+ "hypha-auth",
  "hypha-cart",
  "hypha-core",
  "hypha-custom-fields",

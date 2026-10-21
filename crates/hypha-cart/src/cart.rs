@@ -185,12 +185,19 @@ impl Cart {
         Ok(())
     }
 
-    /// A linked customer is who the order is for, so their cart keeps an email: clearing
-    /// it fails until the customer is unlinked.
+    /// A linked customer is who the order is for, so their cart keeps their email:
+    /// clearing it fails until the customer is unlinked, and changing it is refused
+    /// (design note 0034, §4; setting the same address again is fine).
     pub fn set_email(&mut self, email: Option<Email>) -> Result<(), CartError> {
         self.ensure_open()?;
-        if email.is_none() && self.customer.is_some() {
-            return Err(CartError::EmailRequired);
+        if self.customer.is_some() {
+            match &email {
+                None => return Err(CartError::EmailRequired),
+                Some(new) if Some(new) != self.email.as_ref() => {
+                    return Err(CartError::CustomerEmailFixed);
+                }
+                Some(_) => {}
+            }
         }
         self.email = email;
         Ok(())
@@ -558,6 +565,16 @@ mod tests {
         )))
         .unwrap();
         assert_eq!(c.set_email(None), Err(CartError::EmailRequired));
+        assert_eq!(
+            c.set_email(Some(Email::new("other@example.com").unwrap())),
+            Err(CartError::CustomerEmailFixed),
+            "a customer's cart keeps their email (design note 0034)"
+        );
+        assert_eq!(
+            c.set_email(c.email().cloned()),
+            Ok(()),
+            "the same address is fine"
+        );
         assert_eq!(c.email(), Some(&ana));
 
         let mut s = c.snapshot();

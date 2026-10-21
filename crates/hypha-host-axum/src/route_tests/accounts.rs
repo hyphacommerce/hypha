@@ -532,3 +532,127 @@ async fn the_account_lists_its_own_orders_exports_its_data_and_asks_for_erasure(
         (StatusCode::CONFLICT, "erasure_not_requested")
     );
 }
+
+// ---------- the cart and the admin (design note 0034, §4 and §7) ----------
+
+#[tokio::test]
+async fn a_signed_in_shoppers_cart_is_theirs_from_the_start_and_keeps_their_email() {
+    let app = app().await;
+    shop_selling_a_mug(&app).await;
+    let (pk, token) = signed_in(&app, "nina@example.com").await;
+    let (status, cart) = send_signed_in(
+        &app,
+        &pk,
+        &token,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{cart}");
+    assert_eq!(cart["email"], "nina@example.com");
+    assert!(cart["customer"].is_string());
+    let path = format!("/storefront/carts/{}", cart["id"].as_str().unwrap());
+
+    // The email is theirs: another address is refused, the same one is fine.
+    let (status, json) = send_signed_in(
+        &app,
+        &pk,
+        &token,
+        "PUT",
+        &format!("{path}/email"),
+        Some(r#"{"email":"other@example.com"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "cart_email_fixed")
+    );
+    let (status, _) = send_signed_in(
+        &app,
+        &pk,
+        &token,
+        "PUT",
+        &format!("{path}/email"),
+        Some(r#"{"email":"Nina@example.com"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // A guest's cart is nobody's.
+    let (_, guest) = send_as(
+        &app,
+        &pk,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    assert_eq!(guest["customer"], Value::Null);
+}
+
+#[tokio::test]
+async fn the_admin_sees_the_account_and_signs_it_out_everywhere_and_deleting_the_customer_ends_it()
+{
+    let app = app().await;
+    let (pk, token) = signed_in(&app, "nina@example.com").await;
+    let (_, account) = send_signed_in(&app, &pk, &token, "GET", "/storefront/account", None).await;
+    let id = account["id"].as_str().unwrap().to_string();
+
+    let (_, admin) = send(&app, "GET", &format!("/admin/customers/{id}"), None).await;
+    assert_eq!(admin["account"]["active_sessions"], 1, "{admin}");
+    assert!(admin["account"]["last_active_at"].is_string());
+    let (_, guest) = send(
+        &app,
+        "POST",
+        "/admin/customers",
+        Some(r#"{"email":"guest@example.com"}"#),
+    )
+    .await;
+    assert_eq!(guest["account"], Value::Null, "never signed in");
+
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/admin/customers/{id}/sessions/revoke"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, json) =
+        send_signed_in(&app, &pk, &token, "GET", "/storefront/account", None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNAUTHORIZED, "invalid_token")
+    );
+    let (_, admin) = send(&app, "GET", &format!("/admin/customers/{id}"), None).await;
+    assert_eq!(admin["account"]["active_sessions"], 0);
+    assert_eq!(admin["account"]["last_active_at"], Value::Null);
+    // A customer without an account: nothing to do, still 204.
+    let guest_id = guest["id"].as_str().unwrap();
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/admin/customers/{guest_id}/sessions/revoke"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // Signing in again works; deleting the customer takes the account with it (AC10).
+    let (_, token) = signed_in(&app, "nina@example.com").await;
+    let (status, _) = send(&app, "DELETE", &format!("/admin/customers/{id}"), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, json) =
+        send_signed_in(&app, &pk, &token, "GET", "/storefront/account", None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNAUTHORIZED, "invalid_token")
+    );
+    // The address is free: signing in makes a new customer.
+    let (_, token) = signed_in(&app, "nina@example.com").await;
+    let (status, account) =
+        send_signed_in(&app, &pk, &token, "GET", "/storefront/account", None).await;
+    assert_eq!(status, StatusCode::OK, "{account}");
+    assert_ne!(account["id"], id);
+}

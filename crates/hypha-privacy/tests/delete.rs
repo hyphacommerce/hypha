@@ -1,6 +1,8 @@
 //! Deleting a customer (design note 0032, CD7, §7.2).
 
+use hypha_auth::{IdentityRepo as _, SessionRepo as _};
 use hypha_cart::{Cart, CartRepo};
+use hypha_core::Clock as _;
 use hypha_core::{
     Actor, AuthError, CartId, CountryCode, Ctx, Currency, CustomerId, Email, MarketId, Money,
     OrderId, OrderLineId, Price, ProductId, Quantity, Scope, UserId, VariantId,
@@ -14,6 +16,32 @@ use uuid::Uuid;
 
 fn ana_id() -> CustomerId {
     CustomerId::from_uuid(Uuid::from_u128(1))
+}
+
+fn clock() -> hypha_testkit::FixedClock {
+    hypha_testkit::FixedClock::default()
+}
+
+/// Ana has an account (design note 0034): an identity and a live session.
+fn with_account(ports: &InMemoryPorts) -> hypha_auth::Session {
+    use hypha_auth::{Identity, IdentityRepo, Principal, Session, SessionRepo, TokenHash};
+    let mut identity = Identity::with_email_code(
+        hypha_core::IdentityId::from_uuid(Uuid::from_u128(901)),
+        Principal::Customer(ana_id()),
+        Email::new("ana@example.hr").unwrap(),
+    );
+    block_on(ports.identities.insert(&mut identity)).unwrap();
+    let mut session = Session::active(
+        hypha_core::SessionId::from_uuid(Uuid::from_u128(902)),
+        identity.id(),
+        identity.principal(),
+        TokenHash::of("hypha_cs_test"),
+        clock().now(),
+        None,
+        core::time::Duration::from_secs(3600),
+    );
+    block_on(ports.sessions.insert(&mut session)).unwrap();
+    session
 }
 
 fn staff() -> Ctx {
@@ -87,12 +115,21 @@ fn deletes_a_customer_without_orders_and_unlinks_its_carts() {
     let ports = world();
     let mut cart = cart_of(ana_id(), 1);
     block_on(ports.carts.insert(&mut cart)).unwrap();
+    let session = with_account(&ports);
 
     assert_eq!(
-        block_on(delete_customer(&staff(), &ports, ana_id())),
+        block_on(delete_customer(&staff(), &ports, &clock(), ana_id())),
         Ok(())
     );
     assert_eq!(block_on(ports.customers.get(ana_id())), Ok(None));
+    // Their account went with them (design note 0034, AC10).
+    assert_eq!(
+        block_on(ports.identities.get(session.identity())),
+        Ok(None),
+        "the identity is gone"
+    );
+    let ended = block_on(ports.sessions.get(session.id())).unwrap().unwrap();
+    assert!(!ended.is_active(clock().now()), "the session is revoked");
     let unlinked = block_on(ports.carts.get(cart.id())).unwrap().unwrap();
     assert_eq!(unlinked.customer(), None);
     assert_eq!(
@@ -117,7 +154,7 @@ fn a_customer_with_orders_is_refused_even_when_they_are_cancelled() {
         .unwrap();
     block_on(ports.orders.insert(&mut order)).unwrap();
     assert_eq!(
-        block_on(delete_customer(&staff(), &ports, ana_id())),
+        block_on(delete_customer(&staff(), &ports, &clock(), ana_id())),
         Err(CommandError::CustomerHasOrders {
             customer: ana_id(),
             orders: 1
@@ -134,14 +171,14 @@ fn needs_customers_write_and_an_existing_customer() {
         vec![Scope::CustomersRead],
     );
     assert_eq!(
-        block_on(delete_customer(&reader, &ports, ana_id())),
+        block_on(delete_customer(&reader, &ports, &clock(), ana_id())),
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::CustomersWrite
         )))
     );
     let nobody = CustomerId::from_uuid(Uuid::from_u128(77));
     assert_eq!(
-        block_on(delete_customer(&staff(), &ports, nobody)),
+        block_on(delete_customer(&staff(), &ports, &clock(), nobody)),
         Err(CommandError::CustomerNotFound(nobody))
     );
 }

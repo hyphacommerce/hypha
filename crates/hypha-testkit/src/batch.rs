@@ -95,6 +95,7 @@ enum Staged {
     User(User),
     Invite(Invite),
     NewIdentity(Identity),
+    DeletedIdentity(Identity),
     Identity(Identity),
     NewSession(Session),
     Session(Session),
@@ -225,6 +226,10 @@ impl StageIdentities for InMemoryBatch {
     fn update_identity(&mut self, identity: &mut Identity) {
         self.stage(Staged::Identity(identity.clone()));
         identity.set_version(identity.version().next());
+    }
+
+    fn delete_identity(&mut self, identity: &Identity) {
+        self.stage(Staged::DeletedIdentity(identity.clone()));
     }
 }
 
@@ -748,6 +753,13 @@ impl HasBatch for InMemoryPorts {
                         &mut identity,
                         &unique_identity,
                     )?,
+                    Staged::DeletedIdentity(identity) => {
+                        match identities.get(&identity.id()) {
+                            Some(stored) if stored.version() == identity.version() => {}
+                            _ => return Err(RepoError::StaleVersion),
+                        }
+                        identities.remove(&identity.id());
+                    }
                     Staged::NewSession(mut session) => insert_row(
                         &mut sessions,
                         session.id(),

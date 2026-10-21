@@ -188,6 +188,7 @@ impl World {
         let input = CreateCart {
             country: "HR".to_string(),
             idempotency: None,
+            customer: None,
         };
         let cart = block_on(create_cart(
             &self.ports.storefront(),

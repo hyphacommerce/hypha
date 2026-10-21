@@ -1,5 +1,8 @@
 //! Erasing a customer's personal data (design note 0032, §7.3) and exporting it (§7.4).
 
+use hypha_auth::{
+    HasIdentities, Identity, IdentityRepo, Principal, StageIdentities, StageSessions,
+};
 use hypha_cart::{CartRepo, HasCarts, StageCarts};
 use hypha_core::{
     Clock, Ctx, CustomerId, Email, HasBatch, Keyset, OrderId, PageLimit, PageRequest, PendingEvent,
@@ -30,8 +33,15 @@ pub trait ErasurePorts:
     + HasNotifications
     + HasCustomFieldDefinitions
     + HasCustomFieldValues
+    + HasIdentities
     + HasBatch<
-        Batch: StageCustomers + StageCarts + StageOrders + StageCustomFieldValues + StageEvents,
+        Batch: StageCustomers
+                   + StageCarts
+                   + StageOrders
+                   + StageCustomFieldValues
+                   + StageEvents
+                   + StageIdentities
+                   + StageSessions,
     >
 {
 }
@@ -44,10 +54,29 @@ impl<S> ErasurePorts for S where
         + HasNotifications
         + HasCustomFieldDefinitions
         + HasCustomFieldValues
+        + HasIdentities
         + HasBatch<
-            Batch: StageCustomers + StageCarts + StageOrders + StageCustomFieldValues + StageEvents,
+            Batch: StageCustomers
+                       + StageCarts
+                       + StageOrders
+                       + StageCustomFieldValues
+                       + StageEvents
+                       + StageIdentities
+                       + StageSessions,
         >
 {
+}
+
+/// The customer's account, if they have one (design note 0034): their identity, to go
+/// with them (AC10).
+async fn account_of<S: HasIdentities>(
+    ports: &S,
+    id: CustomerId,
+) -> Result<Option<Identity>, RepoError> {
+    ports
+        .identities()
+        .get_by_principal(Principal::Customer(id))
+        .await
 }
 
 async fn load<S: HasCustomers>(ports: &S, id: CustomerId) -> Result<Customer, CommandError> {
@@ -226,9 +255,15 @@ pub async fn erase_customer<S: ErasurePorts>(
         }
     }
     customer.erase(now);
+    let account = account_of(ports, id).await?;
 
     let mut batch = ports.batch();
     batch.update_customer(&mut customer);
+    // Their account goes too (AC10): every session ends, the identity is removed.
+    if let Some(identity) = &account {
+        batch.revoke_sessions(identity.id(), None, now);
+        batch.delete_identity(identity);
+    }
     for order in &mut orders {
         if order.redact(placeholder.clone()) {
             batch.update_order(order);

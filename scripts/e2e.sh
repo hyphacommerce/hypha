@@ -2130,6 +2130,7 @@ if [[ -n $CODE ]]; then
         -H "x-hypha-cart: $ACCOUNT_CART" -d "{\"email\":\"shopper@example.com\",\"code\":\"$CODE\"}"
     contains "the customer was created on the way" '"email":"shopper@example.com"'
     CS=$(token)
+    SHOPPER=$(sed -E 's/.*"customer":\{"id":"([^"]+)".*/\1/' <<<"$BODY")
     step "the code works once" 401 invalid_code -X POST "$BASE/storefront/auth/login" -H "$JSON" \
         -d "{\"email\":\"shopper@example.com\",\"code\":\"$CODE\"}"
     step "the cart is the customer's now" 200 - "$BASE/storefront/carts/$ACCOUNT_CART"
@@ -2156,9 +2157,20 @@ if [[ -n $CODE ]]; then
     contains "with its due date" '"erasure_due_at":'
     step "cancel it" 200 - -X DELETE "$BASE/storefront/account/erasure" -H "authorization: Bearer $CS"
     mail "the erasure confirmation arrived" shopper@example.com "erase your data"
-    step "sign out" 204 - -X POST "$BASE/storefront/account/logout" -H "authorization: Bearer $CS"
-    step "the customer session is over" 401 invalid_token -X POST "$BASE/storefront/account/logout" \
-        -H "authorization: Bearer $CS"
+    step "a cart made while signed in is theirs" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" \
+        -H "authorization: Bearer $CS" -d '{"country":"HR"}'
+    contains "with their email" '"email":"shopper@example.com"'
+    OWN_CART=$(id)
+    step "whose email is theirs to keep" 409 cart_email_fixed -X PUT "$BASE/storefront/carts/$OWN_CART/email" \
+        -H "$JSON" -H "authorization: Bearer $CS" -d '{"email":"other@example.com"}'
+    step "owner logs in again" 200 - -X POST "$BASE/admin/auth/login" -H "$JSON" \
+        -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASSWORD\"}"
+    STAFF=(-H "authorization: Bearer $(token)")
+    step "the admin sees the account" 200 - "${STAFF[@]}" "$BASE/admin/customers/$SHOPPER"
+    contains "signed in on one device" '"active_sessions":1'
+    step "and signs it out everywhere" 204 - -X POST "${STAFF[@]}" "$BASE/admin/customers/$SHOPPER/sessions/revoke"
+    step "so the session is over" 401 invalid_token "$BASE/storefront/account" -H "authorization: Bearer $CS"
+    step "sign out" 401 invalid_token -X POST "$BASE/storefront/account/logout" -H "authorization: Bearer $CS"
     mail "the sign-in code arrived" shopper@example.com "sign-in code"
 fi
 

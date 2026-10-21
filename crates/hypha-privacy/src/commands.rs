@@ -1,5 +1,6 @@
+use hypha_auth::{HasIdentities, IdentityRepo, Principal, StageIdentities, StageSessions};
 use hypha_cart::{CartRepo, HasCarts, StageCarts};
-use hypha_core::{AuthError, Ctx, CustomerId, ErrorCode, HasBatch, RepoError, Scope};
+use hypha_core::{AuthError, Clock, Ctx, CustomerId, ErrorCode, HasBatch, RepoError, Scope};
 use hypha_customers::{Customer, CustomerRepo, HasCustomers, StageCustomers};
 use hypha_orders::{HasOrders, OrderRepo};
 use thiserror::Error;
@@ -38,16 +39,16 @@ impl ErrorCode for CommandError {
 
 /// Everything the privacy workflows read and write, named once so implementors (a
 /// host's ports, the test world) never list it.
-pub trait PrivacyPorts: HasCustomers + HasOrders + HasCarts + HasBatch
+pub trait PrivacyPorts: HasCustomers + HasOrders + HasCarts + HasIdentities + HasBatch
 where
-    Self::Batch: StageCustomers + StageCarts,
+    Self::Batch: StageCustomers + StageCarts + StageIdentities + StageSessions,
 {
 }
 
 impl<S> PrivacyPorts for S
 where
-    S: HasCustomers + HasOrders + HasCarts + HasBatch,
-    S::Batch: StageCustomers + StageCarts,
+    S: HasCustomers + HasOrders + HasCarts + HasIdentities + HasBatch,
+    S::Batch: StageCustomers + StageCarts + StageIdentities + StageSessions,
 {
 }
 
@@ -67,10 +68,11 @@ async fn load<S: HasCustomers>(ports: &S, id: CustomerId) -> Result<Customer, Co
 pub async fn delete_customer<S: PrivacyPorts>(
     ctx: &Ctx,
     ports: &S,
+    clock: &impl Clock,
     id: CustomerId,
 ) -> Result<(), CommandError>
 where
-    S::Batch: StageCustomers + StageCarts,
+    S::Batch: StageCustomers + StageCarts + StageIdentities + StageSessions,
 {
     ctx.require(Scope::CustomersWrite)?;
     let mut customer = load(ports, id).await?;
@@ -88,9 +90,18 @@ where
         cart.set_customer(None)?;
     }
     customer.delete();
+    let account = ports
+        .identities()
+        .get_by_principal(Principal::Customer(id))
+        .await?;
     let mut batch = ports.batch();
     for cart in &mut carts {
         batch.update_cart(cart);
+    }
+    // Their account goes with them (design note 0034, AC10).
+    if let Some(identity) = &account {
+        batch.revoke_sessions(identity.id(), None, clock.now());
+        batch.delete_identity(identity);
     }
     batch.delete_customer(&mut customer);
     ports.commit(batch).await?;

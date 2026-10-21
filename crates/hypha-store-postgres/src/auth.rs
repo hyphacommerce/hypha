@@ -169,6 +169,29 @@ pub(crate) async fn insert_identity(
 }
 
 /// `IdentityRepo::update` inside the caller's transaction; returns the new version.
+/// Removes the identity at `version` with its credentials (they cascade). `StaleVersion`
+/// if it moved or is gone.
+pub(crate) async fn delete_identity(
+    tx: &impl Queries,
+    id: IdentityId,
+    version: Version,
+) -> Result<(), RepoError> {
+    let gone = tx
+        .query_typed_opt(
+            "DELETE FROM identities WHERE id = $1 AND version = $2 RETURNING id",
+            &[
+                (&id.as_uuid(), Type::UUID),
+                (&version_to_db(version)?, Type::INT8),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    match gone {
+        Some(_) => Ok(()),
+        None => Err(RepoError::StaleVersion),
+    }
+}
+
 pub(crate) async fn update_identity(
     tx: &impl Queries,
     s: &IdentitySnapshot,

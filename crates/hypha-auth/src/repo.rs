@@ -95,6 +95,11 @@ pub trait StageIdentities {
     fn insert_identity(&mut self, identity: &mut Identity);
     /// What `IdentityRepo::update` would write; `StaleVersion` on commit if it moved.
     fn update_identity(&mut self, identity: &mut Identity);
+    /// Removes the identity with its credentials at the version it was loaded at (a
+    /// customer erased or deleted, design note 0034, AC10); its sessions are revoked
+    /// apart (`StageSessions::revoke_sessions`). `StaleVersion` on commit if it moved
+    /// or is gone.
+    fn delete_identity(&mut self, identity: &Identity);
 }
 
 /// Stages session writes in a `hypha_core::HasBatch` batch.

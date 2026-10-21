@@ -1317,6 +1317,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/customers/{id}/sessions/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Signs the customer out of every device (design note 0034, §7): every session of their
+         *     account is revoked. Nothing to do for a customer without one.
+         */
+        post: operations["admin.customers.revoke_sessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/events/{id}": {
         parameters: {
             query?: never;
@@ -3099,6 +3119,16 @@ export interface components {
             session: components["schemas"]["SessionResponse"];
             user: components["schemas"]["UserResponse"];
         };
+        /** @description What the admin knows of a customer's account (design note 0034, §7). */
+        AccountFactsResponse: {
+            /**
+             * Format: int32
+             * @description Sessions neither signed out nor expired: the devices they're signed in on.
+             */
+            active_sessions: number;
+            /** @description When any of those was last used, RFC 3339 in UTC; `null` with none active. */
+            last_active_at?: string | null;
+        };
         /** @description A button: run it with `POST /admin/app-extensions/actions/{app}/{id}`. */
         ActionExtension: {
             app: string;
@@ -4255,6 +4285,7 @@ export interface components {
          */
         CustomerId: string;
         CustomerResponse: {
+            account?: components["schemas"]["AccountFactsResponse"] | null;
             addresses: components["schemas"]["AddressResponse"][];
             /**
              * @description Whether `DELETE /admin/customers/{id}` would work: only while the customer has no
@@ -15258,6 +15289,80 @@ export interface operations {
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.customers.revoke_sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

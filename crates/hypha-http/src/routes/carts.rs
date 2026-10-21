@@ -8,6 +8,7 @@ use hypha_core::{
     AssetId, CartId, CountryCode, Currency, CustomerId, Email, ErrorCode, MarketId, Money, OrderId,
     PaymentMethodId, ProductId, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate, VariantId,
 };
+use hypha_customers::{HasCustomers, get_customer};
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_shipping::OfferOutcome;
 use hypha_tax::TaxLine;
@@ -311,9 +312,18 @@ pub async fn create<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     rate_limit::enforce(&state.limiter, Rule::CartCreateIp, &ip).await?;
     let req = req.parse()?;
+    // A signed-in shopper's cart is theirs from the start (design note 0034, §4).
+    let customer = match hypha_customer_accounts::own(&ctx) {
+        Ok(owned) => {
+            let me = get_customer(&owned.ctx, ports.customers(), owned.customer).await?;
+            Some((me.id(), me.email().clone()))
+        }
+        Err(_) => None,
+    };
     let input = CreateCart {
         country: req.body.country,
         idempotency: req.idempotency,
+        customer,
     };
     let created = create_cart(&ctx, &ports, &state.ids, &state.clock, input).await?;
     Ok(idempotent_response(

@@ -713,9 +713,11 @@ impl From<hypha_cart::CommandError> for ApiError {
             // Depends on the stock right now, not on the request: 409 like inventory's.
             E::Line(LineError::OutOfStock { .. }) => StatusCode::CONFLICT,
             // Checked out: the cart's state, not the request, is the problem.
-            E::Cart(CartError::Completed { .. } | CartError::ShippingAddressRequired) => {
-                StatusCode::CONFLICT
-            }
+            E::Cart(
+                CartError::Completed { .. }
+                | CartError::ShippingAddressRequired
+                | CartError::CustomerEmailFixed,
+            ) => StatusCode::CONFLICT,
             // Shipping (design note 0015): the group is in the URL; nothing to ship, no
             // zone and an option not offered right now are the cart's state.
             E::ShippingGroupNotFound(_) => StatusCode::NOT_FOUND,

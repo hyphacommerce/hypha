@@ -43,8 +43,8 @@ use hypha_users::{
 
 use crate::{
     auth::{
-        insert_identity, insert_password_reset, insert_session, revoke_sessions, update_identity,
-        update_password_reset, update_session, use_up_password_resets,
+        delete_identity, insert_identity, insert_password_reset, insert_session, revoke_sessions,
+        update_identity, update_password_reset, update_session, use_up_password_resets,
     },
     carts::{delete_cart, insert_cart, update_cart},
     categories::{
@@ -116,6 +116,7 @@ enum Staged {
     Invite(InviteSnapshot),
     NewIdentity(IdentitySnapshot),
     Identity(IdentitySnapshot),
+    DeletedIdentity(IdentityId, Version),
     NewSession(SessionSnapshot),
     Session(SessionSnapshot),
     SessionRevocation(IdentityId, Option<SessionId>, Timestamp),
@@ -198,7 +199,7 @@ impl Staged {
             Staged::User(_) => 15,
             Staged::Invite(_) => 16,
             Staged::NewIdentity(_) => 17,
-            Staged::Identity(_) => 18,
+            Staged::Identity(_) | Staged::DeletedIdentity(..) => 18,
             Staged::NewSession(_) => 19,
             Staged::Session(_) => 20,
             Staged::SessionRevocation(..) => 21,
@@ -278,6 +279,9 @@ impl Staged {
                 (Staged::Invite(a), Staged::Invite(b)) => a.id.cmp(&b.id),
                 (Staged::NewIdentity(a), Staged::NewIdentity(b))
                 | (Staged::Identity(a), Staged::Identity(b)) => a.id.cmp(&b.id),
+                (Staged::DeletedIdentity(a, _), Staged::DeletedIdentity(b, _)) => a.cmp(b),
+                (Staged::Identity(a), Staged::DeletedIdentity(b, _)) => a.id.cmp(b),
+                (Staged::DeletedIdentity(a, _), Staged::Identity(b)) => a.cmp(&b.id),
                 (Staged::NewSession(a), Staged::NewSession(b))
                 | (Staged::Session(a), Staged::Session(b)) => a.id.cmp(&b.id),
                 (Staged::NewPasswordReset(a), Staged::NewPasswordReset(b))
@@ -390,6 +394,10 @@ impl StageIdentities for PgBatch {
     fn insert_identity(&mut self, identity: &mut Identity) {
         self.stage(Staged::NewIdentity(identity.snapshot()));
         identity.set_version(Version::NEW.next());
+    }
+
+    fn delete_identity(&mut self, identity: &Identity) {
+        self.stage(Staged::DeletedIdentity(identity.id(), identity.version()));
     }
 
     fn update_identity(&mut self, identity: &mut Identity) {
@@ -693,6 +701,9 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     Staged::NewIdentity(s) => insert_identity(&db, &s).await?,
                     Staged::Identity(s) => {
                         update_identity(&db, &s).await?;
+                    }
+                    Staged::DeletedIdentity(id, version) => {
+                        delete_identity(&db, id, version).await?
                     }
                     Staged::NewSession(s) => insert_session(&db, &s).await?,
                     Staged::Session(s) => {

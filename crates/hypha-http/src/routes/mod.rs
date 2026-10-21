@@ -195,6 +195,7 @@ macro_rules! route_table {
             [admin, POST, "/admin/customers/{id}/erasure", customers::request_erasure_handler],
             [admin, DELETE, "/admin/customers/{id}/erasure", customers::cancel_erasure_handler],
             [admin, GET, "/admin/customers/{id}/export", customers::export],
+            [admin, POST, "/admin/customers/{id}/sessions/revoke", customers::revoke_sessions],
             [admin, PUT, "/admin/customers/{id}/marketing/{channel}", customers::set_consent],
             [admin, PUT, "/admin/customers/{id}/groups", customers::set_groups],
             [admin, GET, "/admin/customer-groups", customer_groups::list],
