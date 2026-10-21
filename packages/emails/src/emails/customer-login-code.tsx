@@ -1,6 +1,7 @@
 import { Section, Text } from "react-email";
 import type { Email } from "../email.ts";
-import { v } from "../jinja.tsx";
+import { If, v } from "../jinja.tsx";
+import { PlainLink, PrimaryButton } from "../parts.tsx";
 import { colours, heading, muted, paragraph } from "../styles.ts";
 import * as text from "../text.ts";
 
@@ -38,6 +39,10 @@ export const customerLoginCode: Email = {
           {v("code")}
         </Text>
       </Section>
+      <If test="shop.url">
+        <PrimaryButton href={v("link")}>Sign in</PrimaryButton>
+        <PlainLink href={v("link")} />
+      </If>
       <Text style={{ ...muted, marginTop: "16px" }}>
         If you didn't ask for a code, you can ignore this email: nobody can sign in without it.
       </Text>
@@ -46,6 +51,10 @@ export const customerLoginCode: Email = {
   text: `Enter this code to sign in to {{ shop.name }}. It works for {{ expires_in_minutes }} minutes.
 
     {{ code }}
+{%- if shop.url %}
+
+Or sign in with one click: {{ link }}
+{%- endif %}
 
 If you didn't ask for a code, you can ignore this email: nobody can sign in without it.
 

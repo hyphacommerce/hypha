@@ -220,3 +220,47 @@ Each step a commit series with tests, routes, OpenAPI, SDK and e2e steps:
 4. **Privacy from the account** (AC7): export, erasure request and cancel, the
    confirmation email; erasure revokes sessions.
 5. **The storefront pages** (§7) and the admin's account facts and sign-out-everywhere.
+
+## 12. As built (2026-10-21)
+
+All five steps, on `feat/customer-accounts-0034`, merged to `main`. Where the build
+departs from the sections above:
+
+- **The owned context.** Rather than account commands of their own, every account
+  handler calls `hypha_customer_accounts::own(&ctx)`: the customer from the session
+  (`AccountRequired` otherwise) and a context carrying the scopes their own record needs
+  (`customers:read|write|erase`, `orders:read`, every `customer_data:*`), so the leaf
+  (`update_customer`, the address book, `set_marketing_consent`, `list_orders`) and
+  privacy commands (`request_erasure`, `export_customer`) run unchanged with the
+  customer's ID from `own`, never from input.
+- **The email code's hash** is of `<identity id>:<code>`, so the same six digits hash
+  differently per account. A wrong guess is written even when the write loses a race.
+- **Sessions** are extended about daily while used (`Session::extend` when more than a
+  day of the old life has passed), and their last use is recorded between.
+- **Rate rules** are four: `code_ip`, `code_email_from_ip`, `customer_login_ip`,
+  `customer_login_email_from_ip` (no limit per email from anywhere: the one-code-a-minute
+  window already bounds the email).
+- **The host's env** for the customer flows is the staff flows' `StaffEnv`, which also
+  implements `HasAccountSettings` and `Notifier<CustomerEmail>` (`send_customer`);
+  `HostEnv::with_accounts` carries `[customers]`'s lifetimes.
+- **The sign-in email** carries a one-click link (`<shop.url>/account/login?email=…&code=…`)
+  only when the store has a shop URL (`shop.url` in the template context); without one
+  it shows the code alone. `customer_erasure_requested` may be turned off; the code's
+  template may not.
+- **The cart** is the customer's from `POST /storefront/carts` on (`CreateCart::customer`)
+  and at login; `PUT …/email` with another address is `409 cart_email_fixed`.
+- **Erasure and deletion** take the account along in the same batch through the new
+  `StageIdentities::delete_identity` (sessions revoked beside it; `sessions` has no
+  foreign key to `identities`, so the rows stay until pruned).
+- **The admin** shows `account` on the customer (`active_sessions`, `last_active_at`,
+  `null` without one; there's no "since": identities carry no stamps) and
+  `POST /admin/customers/{id}/sessions/revoke`. The customers list's `has_account`
+  filter isn't built: it needs a join on identities in the customer repository.
+- **The storefront** keeps the session in the `customer_session` httpOnly cookie
+  (`lib/account.ts`); `/account` is the sign-in form without one and the overview with
+  one, `/account/login` takes the email's link, and orders, addresses, profile, marketing
+  and privacy are pages under it (`components/account/`); the export is a route handler
+  (`/account/export`) handing the API's document over as a file. Checkout prefills the
+  default shipping address in the cart's country (or the first one there) and fixes the
+  email field. The order details moved to `components/order-details.tsx`, shared by the
+  confirmation and the account's order page.

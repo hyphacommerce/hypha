@@ -1,6 +1,10 @@
 Enter this code to sign in to {{ shop.name }}. It works for {{ expires_in_minutes }} minutes.
 
     {{ code }}
+{%- if shop.url %}
+
+Or sign in with one click: {{ link }}
+{%- endif %}
 
 If you didn't ask for a code, you can ignore this email: nobody can sign in without it.
 

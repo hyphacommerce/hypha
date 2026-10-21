@@ -41,13 +41,13 @@ export function api(extra: Record<string, string> = {}) {
  * entry, which the API believes from its trusted proxies. Server actions only: it reads
  * the request's headers.
  */
-export async function shopperApi() {
+export async function shopperApi(extra: Record<string, string> = {}) {
   const h = await headers();
   let ip = h.get("cf-connecting-ip")?.trim();
   if (!ip && process.env.STOREFRONT_TRUST_X_FORWARDED_FOR === "true") {
     ip = h.get("x-forwarded-for")?.split(",").at(-1)?.trim();
   }
-  return api(ip ? { "x-forwarded-for": ip } : {});
+  return api(ip ? { ...extra, "x-forwarded-for": ip } : extra);
 }
 
 /**
@@ -246,6 +246,23 @@ export function describe(error: { code: string; error: string }): string {
       return "That product isn't for sale here any more.";
     case "invalid_email":
       return "Enter an email address, like ana@example.com.";
+    case "invalid_code":
+      return "That code is wrong or has expired. Ask for a new one.";
+    case "account_required":
+    case "invalid_token":
+      return "Please sign in again.";
+    case "cart_email_fixed":
+      return "This order goes to your account's email address.";
+    case "consent_needs_phone":
+      return "Add a phone number to your profile first.";
+    case "erasure_already_requested":
+      return "Your data is already set to be erased.";
+    case "erasure_not_requested":
+      return "There's no erasure to cancel.";
+    case "customer_erased":
+      return "This account is closed.";
+    case "rate_limited":
+      return "Too many tries. Wait a moment and try again.";
     case "invalid_address":
     case "field_required":
       return "Fill in your name, street address and city.";

@@ -24,7 +24,7 @@ use hypha_users::{HasUsers, StaffEmail, UserRepo};
 
 use crate::{
     CommandError, MailEnv, MailPorts,
-    context::{CodeMail, ErasureMail, MailContext, StaffMail, user_context},
+    context::{CodeMail, ErasureMail, MailContext, StaffMail, login_link, user_context},
     format::TimeValue,
     handler::{load_fulfillment, load_order, order_context},
     send::{
@@ -601,9 +601,12 @@ where
                 .unix_secs()
                 .saturating_sub(env.clock().now().unix_secs())
                 .max(0);
+            let link = login_link(branding.shop.url.as_deref(), to.as_str(), &code);
             let context = MailContext::Code(CodeMail {
                 shop: branding.shop.clone(),
                 brand: branding.brand.clone(),
+                email: to.as_str().to_string(),
+                link,
                 code,
                 expires_at: TimeValue::of(expires_at, branding.store.timezone()),
                 expires_in_minutes: u64::try_from(left / 60).unwrap_or(0).max(1),

@@ -19,6 +19,7 @@ import { formatRange } from "@/lib/money";
 import { COUNTRY_COOKIE } from "@/lib/routing";
 import { paymentElementModule } from "@/lib/app-elements";
 import { checkOutCart } from "@/lib/checkout";
+import { sessionHeaders } from "@/lib/account";
 import { cartId, forgetCart, link, mode, rememberCart } from "@/lib/site";
 
 /** What a refused action tells its form. */
@@ -42,10 +43,11 @@ function optional(value: string | undefined): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-/** A new cart in `country`, remembered in the shopper's cookies. */
+/** A new cart in `country`, remembered in the shopper's cookies; a signed-in shopper's
+ * is theirs from the start (design note 0034, §4). */
 async function newCart(country: string): Promise<string> {
   const { data, error } = await (
-    await shopperApi()
+    await shopperApi(await sessionHeaders())
   ).POST("/storefront/carts", { body: { country } });
   if (error) throw new Error(`couldn't create a cart: ${error.code}`);
   await rememberCart(country, data.id);

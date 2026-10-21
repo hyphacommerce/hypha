@@ -356,6 +356,12 @@ pub struct CodeMail {
     pub brand: BrandContext,
     /// Six digits.
     pub code: String,
+    /// The address the code went to.
+    pub email: String,
+    /// The storefront's sign-in page with the email and code filled in
+    /// (`<shop.url>/account/login?email=…&code=…`); empty without a shop URL, when the
+    /// template shows the code alone.
+    pub link: String,
     pub expires_at: TimeValue,
     /// How long the code works from now, rounded down, at least 1.
     pub expires_in_minutes: u64,
@@ -450,7 +456,13 @@ impl MailContext {
             TemplateKey::CustomerLoginCode => MailContext::Code(CodeMail {
                 shop: sample_shop(),
                 brand: sample_brand(),
-                code: "481 516".replace(' ', ""),
+                code: "481516".to_string(),
+                email: "marko@fernandfield.example".to_string(),
+                link: login_link(
+                    Some("https://shop.fernandfield.example"),
+                    "marko@fernandfield.example",
+                    "481516",
+                ),
                 expires_at: TimeValue::of(SAMPLE_PLACED_AT.plus_secs(10 * 60), None),
                 expires_in_minutes: 10,
             }),
@@ -563,6 +575,30 @@ impl MailContext {
         *b = brand;
         self
     }
+}
+
+/// The storefront's sign-in link with the email and code filled in (design note 0034,
+/// §7), or empty without a shop URL.
+pub fn login_link(shop_url: Option<&str>, email: &str, code: &str) -> String {
+    let Some(base) = shop_url else {
+        return String::new();
+    };
+    let encode = |s: &str| {
+        s.bytes()
+            .map(|b| match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    (b as char).to_string()
+                }
+                _ => format!("%{b:02X}"),
+            })
+            .collect::<String>()
+    };
+    format!(
+        "{}/account/login?email={}&code={}",
+        base.trim_end_matches('/'),
+        encode(email),
+        encode(code)
+    )
 }
 
 fn thin_branding(shop: &mut ShopContext, brand: &mut BrandContext) {

@@ -37,6 +37,7 @@ export function DetailsForm({
   countryName,
   initial,
   initialOptIn,
+  emailFixed = false,
   saved,
 }: {
   country: string;
@@ -44,6 +45,8 @@ export function DetailsForm({
   initial: Details;
   /** Whether the shopper ticked "Email me with news and offers" (design note 0032, §5). */
   initialOptIn: boolean;
+  /** A signed-in shopper's cart keeps their account's email (design note 0034, §4). */
+  emailFixed?: boolean;
   /** Whether the cart already has them (the button says "Update"). */
   saved: boolean;
 }) {
@@ -73,7 +76,7 @@ export function DetailsForm({
   const field = (
     key: keyof Details,
     label: string,
-    options: { required?: boolean; type?: "email" } = {},
+    options: { required?: boolean; type?: "email"; disabled?: boolean } = {},
   ) => (
     <TextInput
       size="lg"
@@ -81,6 +84,7 @@ export function DetailsForm({
       type={options.type}
       isRequired={options.required}
       isOptional={!options.required}
+      isDisabled={options.disabled}
       value={details[key]}
       onChange={set(key)}
       status={options.required ? required(key) : undefined}
@@ -93,7 +97,12 @@ export function DetailsForm({
         <Text type="large" weight="bold">
           Contact
         </Text>
-        {field("email", "Email", { required: true, type: "email" })}
+        {field("email", "Email", { required: true, type: "email", disabled: emailFixed })}
+        {emailFixed && (
+          <Text type="supporting" color="secondary">
+            Your order goes to your account&apos;s email.
+          </Text>
+        )}
         <CheckboxInput label="Email me with news and offers" value={optIn} onChange={setOptIn} />
       </VStack>
       <VStack gap={3}>

@@ -17,6 +17,7 @@ import { loadCountries, loadCurrencies, loaded, requireStaff, sessionClient } fr
 import { hasScope } from "@/lib/navigation";
 import { wellKnownField, withoutWellKnown } from "@/lib/well-known-fields";
 
+import { AccountCard } from "./account";
 import { AddressesCard } from "./addresses";
 import { ConsentCard } from "./consent";
 import { DeleteCustomer } from "./delete-customer";
@@ -187,6 +188,11 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                 </MetadataList>
               </VStack>
             </Card>
+            <AccountCard
+              customerId={customer.id}
+              account={customer.account}
+              canEdit={hasScope(me.scopes, "customers:write")}
+            />
             <GroupsCard
               customerId={customer.id}
               groups={groups}
