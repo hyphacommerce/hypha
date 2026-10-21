@@ -138,7 +138,13 @@ export function ProductForm({
         <div className="shop-rounded">
           <AspectRatio ratio={4 / 5}>
             {hero ? (
-              <img className="shop-fill" src={hero.url} alt={hero.alt ?? product.title} />
+              <img
+                className="shop-fill"
+                src={hero.url}
+                alt={hero.alt ?? product.title}
+                // The page's largest paint: fetched first.
+                fetchPriority="high"
+              />
             ) : (
               <div />
             )}

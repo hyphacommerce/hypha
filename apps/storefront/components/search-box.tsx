@@ -14,10 +14,13 @@ import { useMemo, useState } from "react";
 
 import { suggest } from "@/app/[country]/actions";
 
+import { useNavigationProgress } from "./navigation-progress";
+
 type Item = SearchableItem<{ href: string }>;
 
 export function SearchBox({ country, searchHref }: { country: string; searchHref: string }) {
   const router = useRouter();
+  const { start } = useNavigationProgress();
   const [value, setValue] = useState<Item | null>(null);
 
   const source = useMemo<SearchSource<Item>>(
@@ -74,7 +77,11 @@ export function SearchBox({ country, searchHref }: { country: string; searchHref
       value={value}
       onChange={(item) => {
         setValue(null);
-        if (item?.auxiliaryData) router.push(item.auxiliaryData.href);
+        if (item?.auxiliaryData) {
+          // Not a link: the navigation bar is started by hand.
+          start();
+          router.push(item.auxiliaryData.href);
+        }
       }}
     />
   );

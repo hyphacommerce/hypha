@@ -5,9 +5,83 @@
 @import "@astryxdesign/core/astryx.css";
 @import "../theme/shop.css";
 
-/* The shop's typefaces, self-hosted from npm (SIL OFL): Fraunces and Instrument Sans. */
-@import "@fontsource-variable/fraunces";
-@import "@fontsource-variable/instrument-sans";
+/* The shop's typefaces (SIL OFL): Fraunces and Instrument Sans, variable, served from
+   public/fonts (the files and subsets of Fontsource's packages, copied so the Latin
+   ones can be preloaded in app/layout.tsx under a known URL). Each subset loads only
+   for text in its range. To add a subset, copy its file and `@font-face` from
+   `@fontsource-variable/<font>/index.css`. */
+@font-face {
+  font-family: "Fraunces Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(/fonts/fraunces-vietnamese-wght-normal.woff2) format("woff2-variations");
+  unicode-range:
+    U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301,
+    U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+@font-face {
+  font-family: "Fraunces Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(/fonts/fraunces-latin-ext-wght-normal.woff2) format("woff2-variations");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+@font-face {
+  font-family: "Fraunces Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(/fonts/fraunces-latin-wght-normal.woff2) format("woff2-variations");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Instrument Sans Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 700;
+  src: url(/fonts/instrument-sans-latin-ext-wght-normal.woff2) format("woff2-variations");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+@font-face {
+  font-family: "Instrument Sans Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 700;
+  src: url(/fonts/instrument-sans-latin-wght-normal.woff2) format("woff2-variations");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Until the typefaces are in, system fonts sized to their metrics (ascent, descent and
+   width adjusted, as computed by capsize from each font's tables), so the text takes the
+   same lines before and after the swap and nothing moves. The theme names them next
+   (theme/shopTheme.ts). */
+@font-face {
+  font-family: "Fraunces Fallback";
+  src: local("Georgia");
+  ascent-override: 92.9623%;
+  descent-override: 24.2386%;
+  size-adjust: 105.2039%;
+}
+@font-face {
+  font-family: "Instrument Sans Fallback";
+  src: local("Arial"), local("ArialMT");
+  ascent-override: 94.4163%;
+  descent-override: 24.3341%;
+  line-gap-override: 0%;
+  size-adjust: 102.7365%;
+}
 
 /* What Astryx's components don't express: image fills, sticky columns and the
    merchant's HTML descriptions. Everything else, the page's frame included, is
@@ -211,4 +285,211 @@ body {
 .shop-choice-detail {
   margin-top: var(--spacing-3);
   cursor: auto;
+}
+
+/* The navigation bar (components/navigation-progress.tsx): a line along the top that
+   creeps towards the end while a page is on its way. It only shows after a moment, so a
+   page that was prefetched (most are) never flashes it. */
+.shop-progress {
+  position: fixed;
+  inset: 0 auto auto 0;
+  z-index: 1000;
+  height: 2px;
+  width: 0;
+  background: var(--color-accent);
+  pointer-events: none;
+  animation: shop-progress-creep 8s cubic-bezier(0.1, 0.8, 0.2, 1) 150ms forwards;
+}
+@keyframes shop-progress-creep {
+  from {
+    width: 0;
+  }
+  to {
+    width: 92%;
+  }
+}
+
+/* A listing (components/listing.tsx): the facets beside the results on wide screens;
+   on phones they're in the toolbar's sheet and the column is gone. By CSS, so the HTML
+   is the same on both and nothing moves once the page is in the browser. */
+.shop-listing {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--spacing-8);
+  align-items: start;
+  scroll-margin-top: var(--spacing-6);
+}
+.shop-listing-facets {
+  display: none;
+}
+@media (min-width: 900px) {
+  .shop-listing {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+  .shop-listing-facets {
+    display: block;
+  }
+  .shop-listing-filters {
+    display: none;
+  }
+}
+/* While the next results are on their way the old ones stay, dimmed. */
+.shop-listing-results {
+  transition: opacity var(--duration-fast);
+}
+.shop-listing-results[data-busy] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* A product card (components/product-grid.tsx): one link around the image and the
+   words, in the page's colours. */
+.shop-product-card {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--radius-container);
+  outline-offset: 4px;
+}
+.shop-product-card:focus-visible {
+  outline: 2px solid var(--color-accent);
+}
+.shop-product-image {
+  overflow: hidden;
+}
+.shop-product-image img {
+  transition: transform var(--duration-medium);
+}
+@media (hover: hover) {
+  .shop-product-card:hover .shop-product-image img {
+    transform: scale(1.03);
+  }
+}
+
+/* The header's categories (components/site-header.tsx, nav-menu.tsx): each a link;
+   one with subcategories has a chevron button disclosing them in a panel under it
+   (`data-open` on the group; the opening and closing delays are the component's). On
+   phones they move to the menu drawer, and the account and the currency go with them. */
+.shop-nav-categories {
+  display: none;
+  gap: var(--spacing-1);
+}
+.shop-nav-account,
+.shop-nav-currency {
+  display: none;
+}
+@media (min-width: 900px) {
+  .shop-nav-categories,
+  .shop-nav-account,
+  .shop-nav-currency {
+    display: flex;
+  }
+  .shop-nav-menu-button {
+    display: none;
+  }
+}
+.shop-nav-group {
+  position: relative;
+}
+.shop-nav-trigger {
+  display: flex;
+  align-items: center;
+}
+.shop-nav-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-inline-start: calc(-1 * var(--spacing-1));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-element);
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.shop-nav-chevron svg {
+  transition: transform var(--duration-fast);
+}
+.shop-nav-chevron:hover,
+.shop-nav-group[data-open] .shop-nav-chevron {
+  color: var(--color-text-primary);
+  background: var(--color-background-muted);
+}
+.shop-nav-group[data-open] .shop-nav-chevron svg {
+  transform: rotate(180deg);
+}
+.shop-nav-chevron:focus-visible {
+  outline: 2px solid var(--color-accent);
+}
+.shop-nav-sub {
+  position: absolute;
+  top: 100%;
+  inset-inline-start: 0;
+  z-index: 100;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--spacing-2);
+  /* Flush with the trigger (the panel's own top padding is the gap), so the pointer
+     never leaves the group on its way down. */
+  background: var(--color-background-popover);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-container);
+  box-shadow: var(--shadow-med);
+  animation: shop-nav-sub-in var(--duration-fast) ease-out;
+}
+.shop-nav-sub[hidden] {
+  display: none;
+}
+@keyframes shop-nav-sub-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shop-nav-sub {
+    animation: none;
+  }
+}
+.shop-nav-sub-link {
+  display: block;
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-element);
+  color: var(--color-text-primary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.shop-nav-sub-link:hover,
+.shop-nav-sub-link[aria-current="page"] {
+  background: var(--color-background-muted);
+}
+.shop-nav-sub-link:focus-visible {
+  outline: 2px solid var(--color-accent);
+}
+
+/* The phones' menu (components/mobile-nav.tsx). */
+.shop-mobile-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+.shop-mobile-nav-link {
+  display: block;
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-element);
+  color: var(--color-text-primary);
+  text-decoration: none;
+}
+.shop-mobile-nav-link[data-level="1"] {
+  font-weight: 600;
+}
+.shop-mobile-nav-link[data-level="2"] {
+  padding-inline-start: var(--spacing-6);
+  color: var(--color-text-secondary);
+}
+.shop-mobile-nav-link:hover {
+  background: var(--color-background-muted);
 }

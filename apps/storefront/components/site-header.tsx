@@ -1,37 +1,36 @@
 "use client";
 
 // The header on every page of a country (design note 0024, §7), Astryx's TopNav: the
-// store's name, its top categories (a menu for one with subcategories), then search, the
-// currency, the account and the cart, which opens the cart drawer. Static pages render
-// it; the cart's count comes from the cart provider once the page is here.
+// store's name, its top categories (each a link; one with subcategories discloses them
+// under it, `NavMenu`, one open at a time), then search, the currency, the
+// account and the cart, which opens the cart drawer. On phones the categories move to a
+// menu drawer (`MobileNav`) with the currency and the account, by CSS. Static pages render it; the cart's count comes from
+// the cart provider once the page is here.
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import { Popover } from "@astryxdesign/core/Popover";
 import { HStack } from "@astryxdesign/core/Stack";
+import { TopNav, TopNavHeading, TopNavItem } from "@astryxdesign/core/TopNav";
 import {
-  TopNav,
-  TopNavHeading,
-  TopNavItem,
-  TopNavMegaMenu,
-  TopNavMegaMenuItem,
-} from "@astryxdesign/core/TopNav";
-import { MagnifyingGlassIcon, ShoppingBagIcon, UserIcon } from "@heroicons/react/24/outline";
-import { usePathname } from "next/navigation";
-import { useState } from "react";
+  Bars3Icon,
+  MagnifyingGlassIcon,
+  ShoppingBagIcon,
+  UserIcon,
+} from "@heroicons/react/24/outline";
+import { Suspense, lazy, useState } from "react";
 
 import { useCart } from "./cart/cart-provider";
 import { CloseOnNavigate } from "./close-on-navigate";
 import { type CountryOption, CurrencySwitcher } from "./currency-switcher";
+import { type NavCategory, NavMenu } from "./nav-menu";
 import { SearchBox } from "./search-box";
 
-export type NavCategory = {
-  id: string;
-  name: string;
-  href: string;
-  children: { id: string; name: string; href: string }[];
-};
+export type { NavCategory };
+
+/** The phones' menu, loaded the first time it opens. */
+const MobileNav = lazy(() => import("./mobile-nav"));
 
 export type HeaderProps = {
   storeName: string;
@@ -44,40 +43,68 @@ export type HeaderProps = {
 };
 
 export function SiteHeader(props: HeaderProps) {
-  const pathname = usePathname();
   const { count, open } = useCart();
   const [isSearching, setIsSearching] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [menuLoaded, setMenuLoaded] = useState(false);
+  // The category whose subcategories are shown: one at a time.
+  const [openCategory, setOpenCategory] = useState<string | null>(null);
   return (
     <>
-      {/* A suggestion or "Search for…" goes to another page: the popover closes. */}
-      <CloseOnNavigate onNavigate={() => setIsSearching(false)} />
+      {/* A suggestion or "Search for…" goes to another page: the popover and the
+          open submenu close. */}
+      <CloseOnNavigate
+        onNavigate={() => {
+          setIsSearching(false);
+          setOpenCategory(null);
+        }}
+      />
       <TopNav
         label="Store"
-        heading={<TopNavHeading heading={props.storeName} headingHref={props.homeHref} />}
-        startContent={props.categories.map((c) =>
-          c.children.length > 0 ? (
-            <TopNavMegaMenu
-              // Keyed by the page too: a mega menu takes no open state, so a new page
-              // remounts it closed.
-              key={`${c.id}:${pathname}`}
-              label={c.name}
-              items={[c, ...c.children].map((item) => (
-                <TopNavMegaMenuItem
-                  key={item.id}
-                  title={item.id === c.id ? `All ${c.name}` : item.name}
-                  href={item.href}
-                />
-              ))}
-            />
-          ) : (
-            <TopNavItem
-              key={c.id}
-              label={c.name}
-              href={c.href}
-              isSelected={pathname.startsWith(c.href)}
-            />
-          ),
-        )}
+        heading={
+          <HStack gap={1} vAlign="center">
+            <div className="shop-nav-menu-button">
+              <Button
+                label="Menu"
+                variant="ghost"
+                isIconOnly
+                icon={<Icon icon={Bars3Icon} />}
+                clickAction={() => {
+                  setMenuLoaded(true);
+                  setMenu(true);
+                }}
+              />
+              {menuLoaded && (
+                <Suspense fallback={null}>
+                  <MobileNav
+                    isOpen={menu}
+                    onOpenChange={setMenu}
+                    categories={props.categories}
+                    searchHref={props.searchHref}
+                    accountHref={props.accountHref}
+                    country={props.country}
+                    countries={props.countries}
+                  />
+                </Suspense>
+              )}
+            </div>
+            <TopNavHeading heading={props.storeName} headingHref={props.homeHref} />
+          </HStack>
+        }
+        startContent={
+          <div className="shop-nav-categories">
+            {props.categories.map((c) => (
+              <NavMenu
+                key={c.id}
+                category={c}
+                isOpen={openCategory === c.id}
+                onOpenChange={(show) =>
+                  setOpenCategory((cur) => (show ? c.id : cur === c.id ? null : cur))
+                }
+              />
+            ))}
+          </div>
+        }
         endContent={
           <HStack gap={1} vAlign="center">
             <Popover
@@ -96,13 +123,17 @@ export function SiteHeader(props: HeaderProps) {
                 icon={<Icon icon={MagnifyingGlassIcon} />}
               />
             </Popover>
-            <CurrencySwitcher current={props.country} countries={props.countries} />
-            <TopNavItem
-              label="Account"
-              href={props.accountHref}
-              isIconOnly
-              icon={<Icon icon={UserIcon} />}
-            />
+            <div className="shop-nav-currency">
+              <CurrencySwitcher current={props.country} countries={props.countries} />
+            </div>
+            <div className="shop-nav-account">
+              <TopNavItem
+                label="Account"
+                href={props.accountHref}
+                isIconOnly
+                icon={<Icon icon={UserIcon} />}
+              />
+            </div>
             <Button
               label="Cart"
               aria-label={count > 0 ? `Cart, ${count} items` : "Cart"}

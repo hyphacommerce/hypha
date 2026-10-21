@@ -149,8 +149,8 @@
     --duration-slow-min: 525ms;
     --duration-slow: 700ms;
     --duration-slow-max: 935ms;
-    --font-family-body: "Instrument Sans Variable", "Instrument Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-family-heading: "Fraunces Variable", Fraunces, Georgia, "Times New Roman", serif;
+    --font-family-body: "Instrument Sans Variable", "Instrument Sans Fallback", "Instrument Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-family-heading: "Fraunces Variable", "Fraunces Fallback", Fraunces, Georgia, "Times New Roman", serif;
     --font-family-code: ui-monospace, SFMono-Regular, Menlo, monospace;
     --color-syntax-keyword: light-dark(#6b187c, #efa8ff);
     --color-syntax-string: light-dark(#0b5615, #a4d6a3);
@@ -703,8 +703,8 @@
     --text-display-3-size: var(--font-size-3xl);
     --text-display-3-weight: var(--font-weight-normal);
     --text-display-3-leading: 1.4667;
-    --font-family-body: "Instrument Sans Variable", "Instrument Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-family-heading: "Fraunces Variable", Fraunces, Georgia, "Times New Roman", serif;
+    --font-family-body: "Instrument Sans Variable", "Instrument Sans Fallback", "Instrument Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-family-heading: "Fraunces Variable", "Fraunces Fallback", Fraunces, Georgia, "Times New Roman", serif;
     --font-family-code: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
   }

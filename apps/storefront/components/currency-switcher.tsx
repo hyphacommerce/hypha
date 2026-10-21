@@ -11,6 +11,8 @@ import { useTransition } from "react";
 
 import { setCountry } from "@/app/[country]/actions";
 
+import { useNavigationProgress } from "./navigation-progress";
+
 export type CountryOption = { code: string; name: string; currency: string };
 
 export function CurrencySwitcher({
@@ -22,6 +24,7 @@ export function CurrencySwitcher({
 }) {
   const path = usePathname();
   const [pending, start] = useTransition();
+  const progress = useNavigationProgress();
   const currency = countries.find((c) => c.code === current)?.currency;
   const currencies = [...new Set(countries.map((c) => c.currency))].toSorted();
   if (currencies.length < 2) return null;
@@ -37,7 +40,11 @@ export function CurrencySwitcher({
       onChange={(picked) => {
         if (!picked || picked === currency) return;
         const target = countries.find((c) => c.currency === picked);
-        if (target) start(() => setCountry({ country: target.code, path }));
+        if (target) {
+          // The action redirects: the navigation bar is started by hand.
+          progress.start();
+          start(() => setCountry({ country: target.code, path }));
+        }
       }}
     />
   );

@@ -127,10 +127,14 @@ export const shopTheme = defineTheme({
   // titles carry the page.
   typography: {
     scale: { base: 15, ratio: 1.25 },
-    body: { family: "Instrument Sans Variable", fallbacks: `"Instrument Sans", ${sans}` },
+    body: {
+      family: "Instrument Sans Variable",
+      // "… Fallback": the system font sized to its metrics (globals.css), until it's in.
+      fallbacks: `"Instrument Sans Fallback", "Instrument Sans", ${sans}`,
+    },
     heading: {
       family: "Fraunces Variable",
-      fallbacks: 'Fraunces, Georgia, "Times New Roman", serif',
+      fallbacks: '"Fraunces Fallback", Fraunces, Georgia, "Times New Roman", serif',
       weights: { 1: "semibold", 2: "semibold", 3: "semibold", 4: "semibold" },
     },
     code: {

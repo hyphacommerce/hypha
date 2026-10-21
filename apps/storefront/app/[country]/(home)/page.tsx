@@ -139,7 +139,12 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
           <Section variant="transparent" padding={0}>
             <div className="shop-rounded">
               <AspectRatio ratio={3 / 1}>
-                <img className="shop-fill" src={hero.url} alt={hero.alt ?? ""} />
+                <img
+                  className="shop-fill"
+                  src={hero.url}
+                  alt={hero.alt ?? ""}
+                  fetchPriority="high"
+                />
               </AspectRatio>
             </div>
           </Section>

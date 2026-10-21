@@ -35,6 +35,24 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     // and Astryx's Theme only sets it there once hydrated, so until then the body showed
     // the default theme's background.
     <html lang={store.default_language} data-astryx-theme="shop">
+      <head>
+        {/* The Latin typefaces (globals.css) fetched with the page, not once the CSS
+          has been parsed: less time in the fallback font. */}
+        <link
+          rel="preload"
+          href="/fonts/fraunces-latin-wght-normal.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="/fonts/instrument-sans-latin-wght-normal.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+      </head>
       <body>
         <Providers>{children}</Providers>
       </body>

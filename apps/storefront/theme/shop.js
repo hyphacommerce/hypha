@@ -82,8 +82,8 @@ export const shopTheme = {
     "--duration-slow-min": "525ms",
     "--duration-slow": "700ms",
     "--duration-slow-max": "935ms",
-    "--font-family-body": "\"Instrument Sans Variable\", \"Instrument Sans\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
-    "--font-family-heading": "\"Fraunces Variable\", Fraunces, Georgia, \"Times New Roman\", serif",
+    "--font-family-body": "\"Instrument Sans Variable\", \"Instrument Sans Fallback\", \"Instrument Sans\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+    "--font-family-heading": "\"Fraunces Variable\", \"Fraunces Fallback\", Fraunces, Georgia, \"Times New Roman\", serif",
     "--font-family-code": "ui-monospace, SFMono-Regular, Menlo, monospace",
     "--color-syntax-keyword": "light-dark(#6b187c, #efa8ff)",
     "--color-syntax-string": "light-dark(#0b5615, #a4d6a3)",
@@ -555,11 +555,11 @@ export const shopTheme = {
       },
       "body": {
         "family": "Instrument Sans Variable",
-        "fallbacks": "\"Instrument Sans\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
+        "fallbacks": "\"Instrument Sans Fallback\", \"Instrument Sans\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
       },
       "heading": {
         "family": "Fraunces Variable",
-        "fallbacks": "Fraunces, Georgia, \"Times New Roman\", serif",
+        "fallbacks": "\"Fraunces Fallback\", Fraunces, Georgia, \"Times New Roman\", serif",
         "weights": {
           "1": "semibold",
           "2": "semibold",

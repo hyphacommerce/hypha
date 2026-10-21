@@ -2,9 +2,11 @@
 
 // A listing's controls (design note 0024, §7): facets as checkbox lists and a price
 // range beside the results (in a bottom sheet on phones), and the sort. Every change
-// goes to a new URL, so the server renders the results and the state can be linked to.
+// goes to a new URL, so the state can be linked to and the back button works. The URL
+// changes in place (`history.pushState`, which Next keeps `useSearchParams` in step
+// with): no page is re-rendered on the server, only the results are read again
+// (`Listing`), so the controls stay put and nothing flashes.
 
-import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxList, CheckboxListItem } from "@astryxdesign/core/CheckboxList";
 import { Divider } from "@astryxdesign/core/Divider";
@@ -14,9 +16,7 @@ import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { AdjustmentsHorizontalIcon } from "@heroicons/react/24/outline";
-import { useMediaQuery } from "@astryxdesign/core/hooks";
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { Suspense, lazy, useState } from "react";
 
 import {
   SORTS,
@@ -28,7 +28,9 @@ import {
   listingHref,
 } from "@/lib/listing";
 
-import { CloseOnNavigate } from "./close-on-navigate";
+/** The phones' filter sheet, loaded the first time it opens: wide screens never need
+ * it, and it's the listing's heaviest piece. */
+const FilterSheet = lazy(() => import("./listing-sheet"));
 
 export type Facet = {
   key: string;
@@ -38,7 +40,7 @@ export type Facet = {
   values: { value: string; label?: string | null; count: number }[];
 };
 
-type Props = {
+export type Props = {
   base: string;
   state: ListingState;
   facets: Facet[];
@@ -57,11 +59,13 @@ function facetLabel(facet: Facet): string {
 /** How many values a facet shows before "Show all". */
 const SHOWN = 8;
 
-function useGo(base: string) {
-  const router = useRouter();
-  const [pending, start] = useTransition();
-  const go = (state: ListingState) => start(() => router.push(listingHref(base, state)));
-  return { go, pending };
+/**
+ * Moves the listing to `state` in place: the URL changes without a navigation, and the
+ * listing reads the new page. Next's router patches `pushState`, so `useSearchParams`
+ * (and the back button) follow.
+ */
+export function go(base: string, state: ListingState) {
+  window.history.pushState(null, "", listingHref(base, state));
 }
 
 function FacetList({
@@ -175,9 +179,8 @@ export function FacetPanel({
 }: Props & {
   onDone?: () => void;
 }) {
-  const { go } = useGo(base);
   const apply = (change: Partial<ListingState>) => {
-    go(changed(state, change));
+    go(base, changed(state, change));
     onDone?.();
   };
   const narrowed = state.filters.length > 0 || state.min || state.max;
@@ -213,11 +216,12 @@ export function FacetPanel({
   );
 }
 
-/** Above the results: the count, the sort, and (on phones) the filters in a sheet. */
-export function ListingToolbar(props: Props & { total: number; sort: Sort }) {
-  const isWide = useMediaQuery("(min-width: 900px)", true);
-  const { go, pending } = useGo(props.base);
+/** Above the results: the count, the sort, and (on phones, by CSS) the filters in a
+ * sheet. */
+export function ListingToolbar(props: Props & { total: number; sort: Sort; isBusy: boolean }) {
   const [sheet, setSheet] = useState(false);
+  // Once opened, the sheet stays mounted (closed), so it opens again at once.
+  const [sheetLoaded, setSheetLoaded] = useState(false);
   const active = props.state.filters.length + (props.state.min || props.state.max ? 1 : 0);
   return (
     <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
@@ -225,33 +229,33 @@ export function ListingToolbar(props: Props & { total: number; sort: Sort }) {
         {props.total} {props.total === 1 ? "product" : "products"}
       </Text>
       <HStack gap={2} vAlign="center">
-        {!isWide && (
-          <>
-            <Button
-              label={active > 0 ? `Filters (${active})` : "Filters"}
-              icon={<Icon icon={AdjustmentsHorizontalIcon} />}
-              clickAction={() => setSheet(true)}
-            />
-            {/* Leaving the listing (a product, another category) closes it; filtering here,
-              which changes only the query, doesn't. */}
-            <CloseOnNavigate pathOnly onNavigate={() => setSheet(false)} />
-            <BottomSheet label="Filters" isOpen={sheet} onOpenChange={setSheet} height="tall">
-              <FacetPanel {...props} onDone={() => setSheet(false)} />
-            </BottomSheet>
-          </>
-        )}
+        <div className="shop-listing-filters">
+          <Button
+            label={active > 0 ? `Filters (${active})` : "Filters"}
+            icon={<Icon icon={AdjustmentsHorizontalIcon} />}
+            clickAction={() => {
+              setSheetLoaded(true);
+              setSheet(true);
+            }}
+          />
+          {sheetLoaded && (
+            <Suspense fallback={null}>
+              <FilterSheet {...props} isOpen={sheet} onOpenChange={setSheet} />
+            </Suspense>
+          )}
+        </div>
         <Selector
           label="Sort"
           isLabelHidden
           variant="secondary"
-          isLoading={pending}
+          isLoading={props.isBusy}
           value={props.sort}
           options={SORTS.filter((s) => s.value !== "relevance" || props.state.q).map((s) => ({
             value: s.value,
             label: s.label,
           }))}
           onChange={(sort) => {
-            if (isSort(sort)) go(changed(props.state, { sort }));
+            if (isSort(sort)) go(props.base, changed(props.state, { sort }));
           }}
         />
       </HStack>
