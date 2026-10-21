@@ -350,6 +350,7 @@ pub async fn order_context<E: MailEnv, P: HasFulfillments>(
         | TemplateKey::Layout
         | TemplateKey::StaffInvite
         | TemplateKey::StaffPasswordReset
-        | TemplateKey::CustomerLoginCode => MailContext::Order(mail),
+        | TemplateKey::CustomerLoginCode
+        | TemplateKey::CustomerErasureRequested => MailContext::Order(mail),
     })
 }

@@ -9,7 +9,7 @@ pub mod commands;
 pub mod settings;
 
 pub use commands::{
-    AccountEnv, AccountPorts, CommandError, CustomerEmail, CustomerSession, LoggedIn,
-    authenticate_customer, login_with_code, logout, logout_all, request_login_code,
+    AccountEnv, AccountPorts, CommandError, CustomerEmail, CustomerSession, LoggedIn, Owned,
+    authenticate_customer, login_with_code, logout, logout_all, own, request_login_code,
 };
 pub use settings::{AccountSettings, HasAccountSettings};

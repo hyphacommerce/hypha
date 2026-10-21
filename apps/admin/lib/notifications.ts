@@ -40,6 +40,11 @@ export const TEMPLATES: Record<string, { name: string; description: string }> = 
     name: "Customer sign-in code",
     description: "Sent to a customer signing in to the storefront, with their six-digit code.",
   },
+  customer_erasure_requested: {
+    name: "Erasure requested",
+    description:
+      "Sent to a customer who asked from their account to have their data erased, with the date it runs.",
+  },
 };
 
 /** A template key as people read it; an unknown one as it is. */

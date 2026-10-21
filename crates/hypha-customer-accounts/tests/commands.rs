@@ -74,7 +74,10 @@ fn asking_for_a_code_creates_the_customer_and_emails_a_six_digit_code() {
         to,
         code,
         expires_at,
-    } = &sent[0];
+    } = &sent[0]
+    else {
+        panic!("not a code: {:?}", sent[0]);
+    };
     assert_eq!(to.as_str(), NINA);
     assert_eq!(code.len(), 6);
     assert!(code.bytes().all(|b| b.is_ascii_digit()), "{code}");
@@ -374,4 +377,31 @@ fn logout_ends_one_session_and_logout_all_every_one() {
     let d = sign_in(&ports, &env, NINA);
     block_on(logout_all(&ports, &env, &d.session)).unwrap();
     assert!(auth(other.token.expose()).is_ok());
+}
+
+#[test]
+fn own_gives_the_customer_their_own_scopes_in_their_channel_and_nobody_else_anything() {
+    use hypha_core::Ctx;
+    use hypha_customer_accounts::own;
+    let me = CustomerId::from_uuid(Uuid::from_u128(5));
+    let ctx = Ctx::in_channel(Actor::Customer(me), Scope::STOREFRONT.to_vec(), channel());
+    let owned = own(&ctx).unwrap();
+    assert_eq!(owned.customer, me);
+    assert_eq!(owned.ctx.actor(), Actor::Customer(me));
+    assert_eq!(owned.ctx.channel(), Some(channel()));
+    for scope in [
+        Scope::CustomersRead,
+        Scope::CustomersWrite,
+        Scope::CustomersErase,
+        Scope::OrdersRead,
+        Scope::CustomerDataProfile,
+        Scope::CartsWrite,
+    ] {
+        assert!(owned.ctx.has_scope(scope), "{scope}");
+    }
+    assert!(!owned.ctx.has_scope(Scope::ProductsWrite));
+    assert_eq!(
+        own(&Ctx::new(Actor::System, Scope::ALL.to_vec())).err(),
+        Some(CommandError::AccountRequired)
+    );
 }

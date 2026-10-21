@@ -5394,7 +5394,7 @@
         "x-hypha-open-enum": true
       },
       "NotificationTemplateKey": {
-        "description": "One of the store's templates. The names are stable.\n\nKnown values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "One of the store's templates. The names are stable.\n\nKnown values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "layout",
           "order_confirmation",
@@ -5404,7 +5404,8 @@
           "staff_new_order",
           "staff_invite",
           "staff_password_reset",
-          "customer_login_code"
+          "customer_login_code",
+          "customer_erasure_requested"
         ],
         "type": "string",
         "x-hypha-open-enum": true
@@ -25732,7 +25733,7 @@
             "name": "template",
             "required": false,
             "schema": {
-              "description": "One of the store's templates. The names are stable.\n\nKnown values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "description": "One of the store's templates. The names are stable.\n\nKnown values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
               "enum": [
                 "layout",
                 "order_confirmation",
@@ -25742,7 +25743,8 @@
                 "staff_new_order",
                 "staff_invite",
                 "staff_password_reset",
-                "customer_login_code"
+                "customer_login_code",
+                "customer_erasure_requested"
               ],
               "type": "string",
               "x-hypha-open-enum": true

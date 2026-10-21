@@ -26,6 +26,9 @@ pub enum CustomerEmail {
         code: String,
         expires_at: Timestamp,
     },
+    /// The person asked from their account for their data to be erased (design note
+    /// 0034, §3): when it runs, so they can still cancel.
+    ErasureRequested { to: Email, due_at: Timestamp },
 }
 
 /// The non-storage ports: auth's, the account settings and the sender.
@@ -75,6 +78,9 @@ pub enum CommandError {
     /// Too many rounds lost to concurrent writes of the same identity.
     #[error("the account changed while signing in; try again")]
     Concurrent,
+    /// An account route called by someone who isn't a signed-in customer.
+    #[error("sign in first")]
+    AccountRequired,
 }
 
 impl ErrorCode for CommandError {
@@ -89,8 +95,44 @@ impl ErrorCode for CommandError {
             CommandError::InvalidToken => "invalid_token",
             CommandError::CustomerNotFound(_) => "customer_not_found",
             CommandError::Concurrent => "concurrent_modification",
+            CommandError::AccountRequired => "account_required",
         }
     }
+}
+
+/// A signed-in customer's own record: the context to read and change it with, and who
+/// they are (design note 0034, §3, AC4). Every account command takes the customer from
+/// here, never from input: the context has the scopes the customer's own record needs
+/// (`customers:read|write|erase`, `orders:read`, every `customer_data:*`, so the person
+/// sees everything about themselves), for this customer only, since the handler passes
+/// `customer` to every command.
+#[derive(Debug, Clone)]
+pub struct Owned {
+    pub ctx: Ctx,
+    pub customer: CustomerId,
+}
+
+/// The customer behind `ctx`, or `AccountRequired`.
+pub fn own(ctx: &Ctx) -> Result<Owned, CommandError> {
+    let Some(customer) = ctx.customer() else {
+        return Err(CommandError::AccountRequired);
+    };
+    let mut scopes = Scope::STOREFRONT.to_vec();
+    scopes.extend([
+        Scope::CustomersRead,
+        Scope::CustomersWrite,
+        Scope::CustomersErase,
+        Scope::OrdersRead,
+    ]);
+    scopes.extend(Scope::CUSTOMER_DATA);
+    let owned = match ctx.channel() {
+        Some(channel) => Ctx::in_channel(ctx.actor(), scopes, channel),
+        None => Ctx::new(ctx.actor(), scopes),
+    };
+    Ok(Owned {
+        ctx: owned,
+        customer,
+    })
 }
 
 /// How many concurrent-write rounds a flow tries before giving up.

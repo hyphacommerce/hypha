@@ -24,7 +24,7 @@ use hypha_users::{HasUsers, StaffEmail, UserRepo};
 
 use crate::{
     CommandError, MailEnv, MailPorts,
-    context::{CodeMail, MailContext, StaffMail, user_context},
+    context::{CodeMail, ErasureMail, MailContext, StaffMail, user_context},
     format::TimeValue,
     handler::{load_fulfillment, load_order, order_context},
     send::{
@@ -293,7 +293,8 @@ async fn preview_context<E: MailEnv, P: MailPorts>(
         TemplateKey::Layout => Some(TemplateKey::OrderConfirmation),
         TemplateKey::StaffInvite
         | TemplateKey::StaffPasswordReset
-        | TemplateKey::CustomerLoginCode => None,
+        | TemplateKey::CustomerLoginCode
+        | TemplateKey::CustomerErasureRequested => None,
         other => Some(other),
     };
     match (order, as_order) {
@@ -571,8 +572,9 @@ where
     }
 }
 
-/// Sends a customer's sign-in code at once (design note 0034, §6), like `send_staff`:
-/// the code is a secret and isn't kept in the record. What a host's
+/// Sends a customer's account email at once (design note 0034, §6), like `send_staff`:
+/// the sign-in code (a secret, not kept in the record) or the confirmation of an erasure
+/// request (which should arrive while the person is there). What a host's
 /// `Notifier<CustomerEmail>` calls.
 pub async fn send_customer<E, P>(
     env: &E,
@@ -588,24 +590,35 @@ where
         + HasNotifications,
 {
     let failed = |e: CommandError| NotifyError(e.to_string());
-    let CustomerEmail::LoginCode {
-        to,
-        code,
-        expires_at,
-    } = message;
-    let template = TemplateKey::CustomerLoginCode;
     let branding = branding(env, ports).await.map_err(failed)?;
-    let left = expires_at
-        .unix_secs()
-        .saturating_sub(env.clock().now().unix_secs())
-        .max(0);
-    let context = MailContext::Code(CodeMail {
-        shop: branding.shop.clone(),
-        brand: branding.brand.clone(),
-        code,
-        expires_at: TimeValue::of(expires_at, branding.store.timezone()),
-        expires_in_minutes: u64::try_from(left / 60).unwrap_or(0).max(1),
-    });
+    let (template, to, context) = match message {
+        CustomerEmail::LoginCode {
+            to,
+            code,
+            expires_at,
+        } => {
+            let left = expires_at
+                .unix_secs()
+                .saturating_sub(env.clock().now().unix_secs())
+                .max(0);
+            let context = MailContext::Code(CodeMail {
+                shop: branding.shop.clone(),
+                brand: branding.brand.clone(),
+                code,
+                expires_at: TimeValue::of(expires_at, branding.store.timezone()),
+                expires_in_minutes: u64::try_from(left / 60).unwrap_or(0).max(1),
+            });
+            (TemplateKey::CustomerLoginCode, to, context)
+        }
+        CustomerEmail::ErasureRequested { to, due_at } => {
+            let context = MailContext::Erasure(ErasureMail {
+                shop: branding.shop.clone(),
+                brand: branding.brand.clone(),
+                due_at: TimeValue::of(due_at, branding.store.timezone()),
+            });
+            (TemplateKey::CustomerErasureRequested, to, context)
+        }
+    };
     let message = Message {
         template,
         to,

@@ -1587,7 +1587,9 @@ impl From<hypha_customer_accounts::CommandError> for ApiError {
             E::Auth(_) => StatusCode::FORBIDDEN,
             // One answer for a wrong, expired or used-up code, and for a session that is
             // unknown, expired, revoked or whose customer is gone.
-            E::InvalidCode | E::InvalidToken | E::CustomerNotFound(_) => StatusCode::UNAUTHORIZED,
+            E::InvalidCode | E::InvalidToken | E::CustomerNotFound(_) | E::AccountRequired => {
+                StatusCode::UNAUTHORIZED
+            }
             // Only `set_email_code` on an identity without the credential: ours are made
             // with it, so this is a stored-data problem.
             E::Identity(_) => return Self::internal(e),

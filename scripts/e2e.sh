@@ -2136,6 +2136,26 @@ if [[ -n $CODE ]]; then
     contains "with their email" '"email":"shopper@example.com"'
     step "the session rides beside the key" 200 - -H "authorization: Bearer $CS" "$BASE/storefront/store"
     step "but isn't admin credentials" 403 admin_credentials_required -H "authorization: Bearer $CS" "$BASE/admin/store"
+    step "the account" 200 - -H "authorization: Bearer $CS" "$BASE/storefront/account"
+    contains "is theirs" '"email":"shopper@example.com"'
+    step "name themselves" 200 - -X PATCH "$BASE/storefront/account" -H "$JSON" \
+        -H "authorization: Bearer $CS" -d '{"first_name":"Sam"}'
+    contains "and it took" '"first_name":"Sam"'
+    step "save an address" 201 - -X POST "$BASE/storefront/account/addresses" -H "$JSON" \
+        -H "authorization: Bearer $CS" \
+        -d '{"last_name":"Shopper","line1":"Ilica 1","city":"Zagreb","country":"HR","default_shipping":true}'
+    contains "as the default" '"default_shipping_address":"addr_'
+    step "subscribe to email marketing" 200 - -X PUT "$BASE/storefront/account/marketing/email" -H "$JSON" \
+        -H "authorization: Bearer $CS" -d '{"state":"subscribed"}'
+    contains "from the storefront" '"source":"storefront"'
+    step "their orders" 200 - -H "authorization: Bearer $CS" "$BASE/storefront/account/orders"
+    contains "none yet" '"items":[]'
+    step "their data" 200 - -H "authorization: Bearer $CS" "$BASE/storefront/account/export"
+    contains "as one document" '"exported_at":'
+    step "ask for erasure" 200 - -X POST "$BASE/storefront/account/erasure" -H "authorization: Bearer $CS"
+    contains "with its due date" '"erasure_due_at":'
+    step "cancel it" 200 - -X DELETE "$BASE/storefront/account/erasure" -H "authorization: Bearer $CS"
+    mail "the erasure confirmation arrived" shopper@example.com "erase your data"
     step "sign out" 204 - -X POST "$BASE/storefront/account/logout" -H "authorization: Bearer $CS"
     step "the customer session is over" 401 invalid_token -X POST "$BASE/storefront/account/logout" \
         -H "authorization: Bearer $CS"

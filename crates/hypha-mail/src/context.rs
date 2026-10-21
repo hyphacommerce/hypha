@@ -361,6 +361,14 @@ pub struct CodeMail {
     pub expires_in_minutes: u64,
 }
 
+/// `customer_erasure_requested` (design note 0034, §3): when the erasure runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ErasureMail {
+    pub shop: ShopContext,
+    pub brand: BrandContext,
+    pub due_at: TimeValue,
+}
+
 /// One template's context, whichever it is: what rendering is given.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
@@ -371,6 +379,7 @@ pub enum MailContext {
     NewOrder(NewOrderMail),
     Staff(StaffMail),
     Code(CodeMail),
+    Erasure(ErasureMail),
 }
 
 impl MailContext {
@@ -432,6 +441,12 @@ impl MailContext {
             TemplateKey::StaffPasswordReset => MailContext::Staff(sample_staff(
                 "https://admin.example.com/reset-password?token=hypha_pwr_sample",
             )),
+            TemplateKey::CustomerErasureRequested => MailContext::Erasure(ErasureMail {
+                shop: sample_shop(),
+                brand: sample_brand(),
+                // Ten days after the sample order.
+                due_at: TimeValue::of(SAMPLE_PLACED_AT.plus_secs(10 * 24 * 3600), None),
+            }),
             TemplateKey::CustomerLoginCode => MailContext::Code(CodeMail {
                 shop: sample_shop(),
                 brand: sample_brand(),
@@ -484,6 +499,7 @@ impl MailContext {
             }
             MailContext::Staff(m) => thin_branding(&mut m.shop, &mut m.brand),
             MailContext::Code(m) => thin_branding(&mut m.shop, &mut m.brand),
+            MailContext::Erasure(m) => thin_branding(&mut m.shop, &mut m.brand),
         }
         context
     }
@@ -516,7 +532,7 @@ impl MailContext {
             }
             MailContext::Cancellation(m) => thin(&mut m.mail),
             MailContext::NewOrder(m) => thin(&mut m.mail),
-            MailContext::Staff(_) | MailContext::Code(_) => {}
+            MailContext::Staff(_) | MailContext::Code(_) | MailContext::Erasure(_) => {}
         }
         context
     }
@@ -541,6 +557,7 @@ impl MailContext {
             MailContext::NewOrder(m) => (&mut m.mail.shop, &mut m.mail.brand),
             MailContext::Staff(m) => (&mut m.shop, &mut m.brand),
             MailContext::Code(m) => (&mut m.shop, &mut m.brand),
+            MailContext::Erasure(m) => (&mut m.shop, &mut m.brand),
         };
         *s = shop;
         *b = brand;

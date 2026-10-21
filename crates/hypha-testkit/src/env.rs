@@ -79,8 +79,9 @@ impl TestEnv {
             .lock()
             .unwrap()
             .last()
-            .map(|m| match m {
-                CustomerEmail::LoginCode { code, .. } => code.clone(),
+            .and_then(|m| match m {
+                CustomerEmail::LoginCode { code, .. } => Some(code.clone()),
+                CustomerEmail::ErasureRequested { .. } => None,
             })
     }
 

@@ -253,7 +253,7 @@ pub struct ConsentResponse {
 }
 
 impl ConsentResponse {
-    fn new(c: MarketingConsent) -> Result<Self, ApiError> {
+    pub(super) fn new(c: MarketingConsent) -> Result<Self, ApiError> {
         Ok(Self {
             state: c.state,
             opt_in_level: c.opt_in_level,

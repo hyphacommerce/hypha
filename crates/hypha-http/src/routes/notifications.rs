@@ -44,6 +44,7 @@ pub enum TemplateKeyDto {
     StaffInvite,
     StaffPasswordReset,
     CustomerLoginCode,
+    CustomerErasureRequested,
 }
 
 impl From<TemplateKey> for TemplateKeyDto {
@@ -58,6 +59,7 @@ impl From<TemplateKey> for TemplateKeyDto {
             TemplateKey::StaffInvite => Self::StaffInvite,
             TemplateKey::StaffPasswordReset => Self::StaffPasswordReset,
             TemplateKey::CustomerLoginCode => Self::CustomerLoginCode,
+            TemplateKey::CustomerErasureRequested => Self::CustomerErasureRequested,
         }
     }
 }
@@ -74,6 +76,7 @@ impl From<TemplateKeyDto> for TemplateKey {
             TemplateKeyDto::StaffInvite => Self::StaffInvite,
             TemplateKeyDto::StaffPasswordReset => Self::StaffPasswordReset,
             TemplateKeyDto::CustomerLoginCode => Self::CustomerLoginCode,
+            TemplateKeyDto::CustomerErasureRequested => Self::CustomerErasureRequested,
         }
     }
 }
