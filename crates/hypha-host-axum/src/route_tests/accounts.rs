@@ -72,7 +72,9 @@ async fn a_customer_signs_in_with_an_emailed_code_and_signs_out() {
     let email = app.emails.lock().unwrap().last().cloned().unwrap();
     assert_eq!(email.to.as_str(), "nina@example.com");
     let digits = last_code(&app);
-    assert!(email.subject.contains(&digits), "{}", email.subject);
+    // The subject is kept in the message record, so the code stays out of it.
+    assert!(!email.subject.contains(&digits), "{}", email.subject);
+    assert!(email.text.contains(&digits), "{}", email.text);
 
     let wrong = if digits == "000000" {
         "000001"

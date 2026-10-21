@@ -166,9 +166,10 @@ mail_token() {
     done
 }
 
-# mail_code TO SUBJECT: prints the six digits in the subject of the latest email to TO
-# whose subject has SUBJECT (a customer's sign-in code, design note 0034), waiting up to
-# 20 s; nothing without the email checks. The email stays for `mail` to find.
+# mail_code TO SUBJECT: prints the six digits in the text of the latest email to TO
+# whose subject has SUBJECT (a customer's sign-in code, design note 0034; the subject
+# never carries it, since the record keeps subjects), waiting up to 20 s; nothing
+# without the email checks. The email stays for `mail` to find.
 mail_code() {
     local query n found message
     ((MAIL_CHECKS)) || return 0
@@ -177,7 +178,7 @@ mail_code() {
         found=$(curl -s -G "$MAILPIT/api/v1/search" --data-urlencode "query=$query")
         message=$(grep -o '"ID":"[^"]*"' <<<"$found" | head -1 | sed -E 's/"ID":"([^"]+)"/\1/')
         if [[ -n $message ]]; then
-            curl -s "$MAILPIT/api/v1/message/$message" | grep -o '"Subject":"[^"]*"' | grep -oE '[0-9]{6}' | head -1
+            curl -s "$MAILPIT/api/v1/message/$message" | grep -o '"Text":"[^"]*"' | grep -oE '[0-9]{6}' | head -1
             return
         fi
         sleep 1

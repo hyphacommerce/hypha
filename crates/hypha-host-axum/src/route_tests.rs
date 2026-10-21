@@ -5471,7 +5471,7 @@ async fn templates_are_listed_read_saved_checked_and_reverted() {
     let (status, list) = send(&app, "GET", "/admin/notification-templates", None).await;
     assert_eq!(status, StatusCode::OK, "{list}");
     let items = list["items"].as_array().unwrap();
-    assert_eq!(items.len(), 8);
+    assert_eq!(items.len(), 10);
     assert_eq!(
         (
             &items[0]["key"],

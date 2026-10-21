@@ -405,3 +405,79 @@ fn own_gives_the_customer_their_own_scopes_in_their_channel_and_nobody_else_anyt
         Some(CommandError::AccountRequired)
     );
 }
+
+#[test]
+fn after_an_email_change_the_old_address_cannot_open_the_account() {
+    let (ports, env) = world();
+    let nina = sign_in(&ports, &env, NINA).customer;
+
+    // Staff change her email; the identity still holds the old lookup.
+    let mut stored = block_on(ports.customers.get(nina.id())).unwrap().unwrap();
+    stored
+        .set_email(Email::new("nina@new.example").unwrap())
+        .unwrap();
+    block_on(ports.customers.update(&mut stored)).unwrap();
+
+    // A code sent to the old address is a newcomer's, not hers.
+    env.advance(120);
+    request(&ports, &env, NINA).unwrap();
+    let code = env.last_code().unwrap();
+    let newcomer = customer_with(&ports, NINA).expect("the old address is a new customer");
+    assert_ne!(newcomer.id(), nina.id());
+    let logged_in = login(&ports, &env, NINA, &code, None).unwrap();
+    assert_eq!(logged_in.customer.id(), newcomer.id());
+    let identity = block_on(
+        ports
+            .identities
+            .get_by_principal(hypha_auth::Principal::Customer(nina.id())),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        identity.code_email().map(Email::as_str),
+        Some("nina@new.example"),
+        "her identity followed her address"
+    );
+}
+
+#[test]
+fn a_code_out_before_an_email_change_opens_nothing() {
+    let (ports, env) = world();
+    let nina = sign_in(&ports, &env, NINA).customer;
+    env.advance(120);
+    request(&ports, &env, NINA).unwrap();
+    let code = env.last_code().unwrap();
+
+    let mut stored = block_on(ports.customers.get(nina.id())).unwrap().unwrap();
+    stored
+        .set_email(Email::new("nina@new.example").unwrap())
+        .unwrap();
+    block_on(ports.customers.update(&mut stored)).unwrap();
+
+    assert_eq!(
+        login(&ports, &env, NINA, &code, None).err(),
+        Some(CommandError::InvalidCode)
+    );
+}
+
+#[test]
+fn a_short_session_lifetime_still_slides_with_use() {
+    let (ports, mut env) = world();
+    env.accounts.session_lifetime = Duration::from_secs(12 * 3600);
+    let token = sign_in(&ports, &env, NINA).token.expose().to_string();
+
+    // Used every four hours, a twelve-hour session never ends.
+    for _ in 0..6 {
+        env.advance(4 * 3600);
+        let me = block_on(authenticate_customer(&ports, &env, channel(), &token)).unwrap();
+        assert_eq!(
+            me.session.expires_at(),
+            env.now().plus(Duration::from_secs(12 * 3600))
+        );
+    }
+    env.advance(12 * 3600);
+    assert_eq!(
+        block_on(authenticate_customer(&ports, &env, channel(), &token)).err(),
+        Some(CommandError::InvalidToken)
+    );
+}

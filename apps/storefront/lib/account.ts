@@ -11,26 +11,48 @@ import { api } from "./api";
 
 export type Account = StorefrontSchemas["AccountResponse"];
 
-const SESSION_COOKIE = "customer_session";
+export const SESSION_COOKIE = "customer_session";
+/** How long the session lasts unused, in seconds (the login's answer), beside the token:
+ * `proxy.ts` sets both cookies again on every request, so the cookie slides with use
+ * like the session does. Not secret. */
+export const SESSION_LIFETIME_COOKIE = "customer_session_ttl";
 
 /** The session token, if the shopper signed in on this browser. */
 export async function sessionToken(): Promise<string | undefined> {
   return (await cookies()).get(SESSION_COOKIE)?.value;
 }
 
-/** Keeps the session for its life (the API extends it while it's used). */
-export async function rememberSession(token: string) {
-  (await cookies()).set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
+/** The cookies' options; `maxAge` in seconds. */
+export function sessionCookie(maxAge: number) {
+  return {
+    sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
-  });
+    maxAge,
+  };
+}
+
+/**
+ * The session's lifetime in seconds from the login's `expires_at`: the configured
+ * `customers.session_lifetime`, never less than a minute (a clock ahead of the API's).
+ */
+export function sessionLifetime(expiresAt: string): number {
+  const seconds = Math.round((Date.parse(expiresAt) - Date.now()) / 1000);
+  return Number.isFinite(seconds) ? Math.max(seconds, 60) : 60 * 60 * 24 * 30;
+}
+
+/** Keeps the session for its life (the API extends it while it's used). */
+export async function rememberSession(token: string, expiresAt: string) {
+  const lifetime = sessionLifetime(expiresAt);
+  const jar = await cookies();
+  jar.set(SESSION_COOKIE, token, { ...sessionCookie(lifetime), httpOnly: true });
+  jar.set(SESSION_LIFETIME_COOKIE, String(lifetime), sessionCookie(lifetime));
 }
 
 export async function forgetSession() {
-  (await cookies()).delete(SESSION_COOKIE);
+  const jar = await cookies();
+  jar.delete(SESSION_COOKIE);
+  jar.delete(SESSION_LIFETIME_COOKIE);
 }
 
 /** The headers that sign a call as the shopper, none without a session. */

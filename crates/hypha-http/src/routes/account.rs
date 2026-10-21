@@ -236,15 +236,13 @@ pub async fn login<S: Storage>(
         cart,
     )
     .await?;
-    let owned = Owned {
-        ctx: hypha_core::Ctx::in_channel(
-            hypha_core::Actor::Customer(customer.id()),
-            hypha_core::Scope::STOREFRONT.to_vec(),
-            channel,
-        ),
-        customer: customer.id(),
-    };
-    let owned = own(&owned.ctx)?;
+    // The session isn't authenticated yet (it was just made): their own context is
+    // built from the storefront one, as `CustomerCaller` builds it per request.
+    let owned = own(&hypha_core::Ctx::in_channel(
+        hypha_core::Actor::Customer(customer.id()),
+        hypha_core::Scope::STOREFRONT.to_vec(),
+        channel,
+    ))?;
     Ok(Json(CustomerLoginResponse {
         token: token.expose().to_string(),
         expires_at: rfc3339(session.expires_at())?,

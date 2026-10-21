@@ -6,6 +6,7 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 
+import { SESSION_COOKIE, SESSION_LIFETIME_COOKIE, sessionCookie } from "@/lib/account";
 import { api } from "@/lib/api";
 import { cartFlagCookie } from "@/lib/cart-flag";
 import { COUNTRY_COOKIE, pickCountry, routing } from "@/lib/routing";
@@ -52,8 +53,23 @@ function flagCarts(request: NextRequest, response: NextResponse): NextResponse {
   return response;
 }
 
+/**
+ * The account session's cookies (`lib/account.ts`) set again with their lifetime, so
+ * they last as long after this visit as the session does after its last use: the API
+ * pushes the session's end out while it's used, and the cookie follows. A session that
+ * ended meanwhile is dropped where it's first found invalid (`loadAccount`, `newCart`).
+ */
+function slideSession(request: NextRequest, response: NextResponse): NextResponse {
+  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  const lifetime = Number(request.cookies.get(SESSION_LIFETIME_COOKIE)?.value);
+  if (!token || !Number.isInteger(lifetime) || lifetime <= 0) return response;
+  response.cookies.set(SESSION_COOKIE, token, { ...sessionCookie(lifetime), httpOnly: true });
+  response.cookies.set(SESSION_LIFETIME_COOKIE, String(lifetime), sessionCookie(lifetime));
+  return response;
+}
+
 export async function proxy(request: NextRequest) {
-  return flagCarts(request, await route(request));
+  return slideSession(request, flagCarts(request, await route(request)));
 }
 
 /** An email's order link (`app/order/[id]/route.ts`): country-less in both modes. */

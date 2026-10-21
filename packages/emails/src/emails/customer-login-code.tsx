@@ -7,7 +7,7 @@ import * as text from "../text.ts";
 
 export const customerLoginCode: Email = {
   key: "customer_login_code",
-  subject: "{{ code }} is your {{ shop.name }} sign-in code",
+  subject: "Your {{ shop.name }} sign-in code",
   preheader: "Enter this code to sign in to {{ shop.name }}.",
   Content: () => (
     <>

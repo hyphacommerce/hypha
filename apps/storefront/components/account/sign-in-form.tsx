@@ -59,16 +59,16 @@ export function SignInForm({
             <Icon icon={step === "email" ? EnvelopeIcon : KeyIcon} size="lg" />
           </div>
           <div className="shop-sign-in-copy">
-          <VStack gap={1} hAlign="center">
-            <Heading level={1} type="display-3">
-              {step === "email" ? `Sign in to ${storeName}` : "Check your email"}
-            </Heading>
-            <Text color="secondary">
-              {step === "email"
-                ? "Enter your email and we'll send you a six-digit code. No password needed."
-                : `We sent a code to ${email.trim()}. It works for ten minutes.`}
-            </Text>
-          </VStack>
+            <VStack gap={1} hAlign="center">
+              <Heading level={1} type="display-3">
+                {step === "email" ? `Sign in to ${storeName}` : "Check your email"}
+              </Heading>
+              <Text color="secondary">
+                {step === "email"
+                  ? "Enter your email and we'll send you a six-digit code. No password needed."
+                  : `We sent a code to ${email.trim()}. The email says how long it works.`}
+              </Text>
+            </VStack>
           </div>
           {step === "email" ? (
             <form
@@ -149,10 +149,10 @@ export function SignInForm({
             </form>
           )}
           <div className="shop-sign-in-note">
-          <Text type="supporting" color="secondary">
-            New here? Signing in creates your account. Your orders, addresses and
-            preferences will be waiting next time.
-          </Text>
+            <Text type="supporting" color="secondary">
+              New here? Signing in creates your account. Your orders, addresses and preferences will
+              be waiting next time.
+            </Text>
           </div>
         </VStack>
       </Card>

@@ -53,7 +53,7 @@ export async function signIn(country: string, email: string, code: string): Prom
     body: { email: email.trim(), code: code.replace(/\s+/g, "") },
   });
   if (error) return refused(error);
-  await rememberSession(data.token);
+  await rememberSession(data.token, data.expires_at);
   redirect(link(country, "/account"));
 }
 

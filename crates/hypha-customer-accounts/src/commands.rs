@@ -220,7 +220,33 @@ async fn find_identity<S: AccountPorts>(
         )
         .await?
     {
-        return Ok(Some(found));
+        return match owner_of(ports, &found).await? {
+            Owner::Current(_) => Ok(Some(found)),
+            // The customer's address changed since (staff edit it; nothing else
+            // touches the identity): the lookup follows it before this address can
+            // be anyone else's, so the old mailbox can't open their account (AC2).
+            Owner::Moved(current) => {
+                let mut stale = found;
+                stale.set_code_email(current)?;
+                match ports.identities().update(&mut stale).await {
+                    Ok(())
+                    | Err(RepoError::StaleVersion | RepoError::Duplicate(keys::IDENTITY_LOGIN)) => {
+                        Ok(None)
+                    }
+                    Err(e) => Err(e.into()),
+                }
+            }
+            // Its customer is gone (the privacy batch takes the identity with it, so
+            // only an older row): dropped, so the address is free.
+            Owner::Gone => {
+                let mut batch = ports.batch();
+                batch.delete_identity(&found);
+                match ports.commit(batch).await {
+                    Ok(()) | Err(RepoError::StaleVersion) => Ok(None),
+                    Err(e) => Err(e.into()),
+                }
+            }
+        };
     }
     let customer = find_or_create_customer(&creator(), ports.customers(), env, email).await?;
     let principal = Principal::Customer(customer.id());
@@ -247,6 +273,31 @@ async fn find_identity<S: AccountPorts>(
                 Err(e) => Err(e.into()),
             }
         }
+    }
+}
+
+/// Whether an identity found by its code email still belongs to a customer with that
+/// address.
+enum Owner {
+    /// The customer, whose email is the identity's (boxed: the other variants are small).
+    Current(Box<Customer>),
+    /// The customer's email is another now: the identity's lookup is stale.
+    Moved(Email),
+    /// No customer, or an erased one (a placeholder address can't sign in).
+    Gone,
+}
+
+async fn owner_of<S: HasCustomers>(ports: &S, identity: &Identity) -> Result<Owner, RepoError> {
+    let Principal::Customer(id) = identity.principal() else {
+        return Ok(Owner::Gone);
+    };
+    let Some(customer) = ports.customers().get(id).await?.filter(|c| !c.is_erased()) else {
+        return Ok(Owner::Gone);
+    };
+    if identity.code_email() == Some(customer.email()) {
+        Ok(Owner::Current(Box::new(customer)))
+    } else {
+        Ok(Owner::Moved(customer.email().clone()))
     }
 }
 
@@ -286,9 +337,12 @@ pub async fn login_with_code<S: AccountPorts>(
         else {
             return Err(CommandError::InvalidCode);
         };
-        let Principal::Customer(customer_id) = identity.principal() else {
+        // A code only opens the account whose customer has this address now: an
+        // identity left behind by an email change answers like an unknown one.
+        let Owner::Current(customer) = owner_of(ports, &identity).await? else {
             return Err(CommandError::InvalidCode);
         };
+        let customer = *customer;
         let now = env.now();
         let check = identity.use_email_code(code_hash(identity.id(), code), now);
         if check != CodeCheck::Right {
@@ -299,12 +353,6 @@ pub async fn login_with_code<S: AccountPorts>(
             }
             return Err(CommandError::InvalidCode);
         }
-        let customer = ports
-            .customers()
-            .get(customer_id)
-            .await?
-            .filter(|c| !c.is_erased())
-            .ok_or(CommandError::InvalidCode)?;
         let token = NewToken::generate(TokenKind::CustomerSession, env);
         let mut session = Session::active(
             hypha_core::SessionId::from_uuid(env.new_uuid()),
@@ -378,8 +426,13 @@ pub struct CustomerSession {
 }
 
 /// How much of a session's life must have passed before a use pushes its end out
-/// again: a busy session is rewritten about daily, not per request.
-const EXTEND_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+/// again: a busy session is rewritten about daily, not per request, and a short
+/// lifetime (under four days) slides a quarter at a time, so every use within it
+/// still starts the count again.
+fn extend_every(lifetime: Duration) -> Duration {
+    const DAILY: Duration = Duration::from_secs(24 * 60 * 60);
+    DAILY.min(lifetime / 4)
+}
 
 /// The customer behind a `hypha_cs_` token in `channel`, or `InvalidToken`. Using the
 /// session keeps it alive (AC5): its end moves to `now + session_lifetime` about daily,
@@ -409,7 +462,8 @@ pub async fn authenticate_customer<S: HasSessions + HasCustomers>(
         .await?
         .filter(|c| !c.is_erased())
         .ok_or(CommandError::CustomerNotFound(id))?;
-    if session.extend(now, env.account_settings().session_lifetime, EXTEND_EVERY) {
+    let lifetime = env.account_settings().session_lifetime;
+    if session.extend(now, lifetime, extend_every(lifetime)) {
         session.record_use(now);
         match ports.sessions().update(&mut session).await {
             // Two requests at once: the other one moved it.

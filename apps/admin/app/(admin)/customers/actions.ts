@@ -71,7 +71,6 @@ export async function setConsent(
   return { applied: data.applied };
 }
 
-/** Asks for the customer's personal data to be erased after the cancel window (§7.3). */
 /** Signs the customer out of every device (design note 0034, §7). */
 export async function revokeSessions(id: string): Promise<Result> {
   const client = await sessionClient();
@@ -83,6 +82,7 @@ export async function revokeSessions(id: string): Promise<Result> {
   return {};
 }
 
+/** Asks for the customer's personal data to be erased after the cancel window (§7.3). */
 export async function requestErasure(id: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.POST("/admin/customers/{id}/erasure", {

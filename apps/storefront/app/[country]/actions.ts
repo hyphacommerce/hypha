@@ -19,7 +19,7 @@ import { formatRange } from "@/lib/money";
 import { COUNTRY_COOKIE } from "@/lib/routing";
 import { paymentElementModule } from "@/lib/app-elements";
 import { checkOutCart } from "@/lib/checkout";
-import { sessionHeaders } from "@/lib/account";
+import { forgetSession, sessionHeaders } from "@/lib/account";
 import { cartId, forgetCart, link, mode, rememberCart } from "@/lib/site";
 
 /** What a refused action tells its form. */
@@ -46,12 +46,17 @@ function optional(value: string | undefined): string | null {
 /** A new cart in `country`, remembered in the shopper's cookies; a signed-in shopper's
  * is theirs from the start (design note 0034, §4). */
 async function newCart(country: string): Promise<string> {
-  const { data, error } = await (
-    await shopperApi(await sessionHeaders())
-  ).POST("/storefront/carts", { body: { country } });
-  if (error) throw new Error(`couldn't create a cart: ${error.code}`);
-  await rememberCart(country, data.id);
-  return data.id;
+  const session = await sessionHeaders();
+  let answer = await (await shopperApi(session)).POST("/storefront/carts", { body: { country } });
+  if (answer.error?.code === "invalid_token" && "authorization" in session) {
+    // The session ended meanwhile (signed out everywhere, expired): the cookie goes,
+    // and the shopper carries on as a guest.
+    await forgetSession();
+    answer = await (await shopperApi()).POST("/storefront/carts", { body: { country } });
+  }
+  if (answer.error) throw new Error(`couldn't create a cart: ${answer.error.code}`);
+  await rememberCart(country, answer.data.id);
+  return answer.data.id;
 }
 
 /** Whether a refusal means the cart can't take changes any more: gone (or another
