@@ -64,7 +64,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
     <Section padding={6}>
       <VStack gap={5} maxWidth={1280}>
         <PageHeader
-          title={name || customer.email}
+          title={isErased ? "Erased customer" : name || customer.email}
           back={{ label: "Customers", href: "/customers" }}
           badges={
             <CustomerLabels
