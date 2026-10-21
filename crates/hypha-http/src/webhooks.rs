@@ -104,6 +104,7 @@ fn subject_id(kind: &str, id: Uuid) -> String {
         "tax_region" => TaxRegionId::PREFIX,
         "inventory_item" => InventoryItemId::PREFIX,
         "customer" => CustomerId::PREFIX,
+        "customer_group" => hypha_core::CustomerGroupId::PREFIX,
         "order" => OrderId::PREFIX,
         "shipping_zone" => ShippingZoneId::PREFIX,
         "app" => AppId::PREFIX,

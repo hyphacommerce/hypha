@@ -23,6 +23,7 @@ pub mod limits;
 pub mod namespace;
 pub mod owner;
 pub mod repo;
+pub mod suggestions;
 pub mod types;
 pub mod value;
 
@@ -50,6 +51,7 @@ pub use repo::{
     StageCustomFieldValues, StoredValue, ValueCount, ValueRepo, ValueRow, item_key, keys,
     list_item, list_items,
 };
+pub use suggestions::{Suggested, Suggestion, suggested_definitions, suggestions};
 pub use types::{
     BaseType, Bound, Choice, Dimension, FieldType, FieldTypeError, Measurement, Pattern,
     RawValidations, Reference, ReferenceKind, Unit, ValidationError, Validations,

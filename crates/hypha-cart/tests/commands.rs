@@ -321,6 +321,7 @@ fn empty_in_croatia(id: CartId, taxes_included: bool) -> PricedCart {
         tax_total: eur(0),
         total: eur(0),
         payment_method: None,
+        marketing_opt_in: false,
     }
 }
 

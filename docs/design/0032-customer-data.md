@@ -1,6 +1,8 @@
 # 0032: Customer data: notes, groups, consent and privacy
 
 - **Status:** Accepted with changes (2026-10-20); Danilo's answers are in §11.
+  **Revised 2026-10-21**, once 0033 (custom fields) was built: §13 says what moved onto
+  custom fields and what that removes from the build (§12).
   - Email stays mandatory, and erasure writes a placeholder.
   - Tags are deferred, likely to become list custom fields.
   - Custom fields get their own note (0033) and are built **before** this one.
@@ -36,9 +38,10 @@ things on top of that, and each is a pattern Shopify got mostly right:
 
 | | Decision |
 | --- | --- |
-| CD1 | **Tags: deferred** (Q4). Labels that apps sync are expected to be a list custom field (§2 says what 0033 must give them) rather than a separate tag system |
-| CD2 | A **staff note** on the customer (at most 5,000 characters). It's free text about a person, so it's personal data (CD9) |
-| CD3 | **Typed custom fields** (0002 §3) in their **own note, built before this one** (Q5): generic over owner types, with customers among the first. §4 lists what customers need from it: definitions as data, a namespace per owner (`custom`, `app_<name>`, `spore_<name>`), per-surface visibility, and a `personal` flag. There's no untyped `metadata` blob |
+| CD1 | **Tags: a list custom field, not a tag system** (Q4, settled by 0033). Labels are the well-known field `custom.tags` (`list.text`, unique items ignoring case, filterable), which 0033's list deltas, delta events, `contains` filter, bulk route and values-in-use already serve (§2) |
+| CD2 | A **staff note** on the customer is the well-known field **`custom.note`** (`multiline_text`, `personal`), not a column (§3, Q8). It's free text about a person, so it's personal data (CD9): 0033's `personal` flag already redacts it, keeps its text out of events and erases it |
+| CD3 | **Typed custom fields** (0002 §3) in their **own note, built before this one** (Q5): generic over owner types, with customers among the first. **Built** (0033): definitions as data, a namespace per owner (`custom`, `app_<name>`, `spore_<name>`), per-surface visibility, and a `personal` flag. There's no untyped `metadata` blob. §4 keeps the customer side's original input and says what of it the build changed |
+| CD11 | **Well-known fields are conventions, not core.** `custom.tags` and `custom.note` are ordinary merchant definitions: the admin offers them as *suggested fields* (one click in Settings → Custom fields, and the customer page offers them where they'd show), `pnpm seed` creates them, and the admin renders them in place (labels under the name, the note as its own card) when they exist. A merchant may rename, delete or never create them; apps read them like any field |
 | CD4 | **Marketing consent** per channel (email, SMS) as a small state machine: state, opt-in level, when, and from where. **The newest consent time wins**, not the newest write, so a delayed sync can't overwrite a newer opt-out |
 | CD5 | **Customer groups** (`cgrp_…`): named, static, many-to-many, written as sets like publications and category membership, with events. In v1 they're filters and a stable ID other domains can point at. Prices per group come with accounts (§6) |
 | CD6 | **Labels, groups and segments are separate things.** Labels (a list custom field) are for integrations. Groups are entities that rules refer to (prices, payment methods). Segments, later, are saved queries. None stands in for another |
@@ -158,40 +161,72 @@ sources are linked inline.
 - Column-per-field custom fields (Vendure).
 - Merchant fields that any app may overwrite (Shopify).
 
-## 2. Tags (CD1: deferred)
+## 2. Tags (CD1: a list field)
 
-There's no separate tag system for now (Q4). What a merchant or an email app uses tags
-for (`vip`, `newsletter`, `wholesale`) should be a **list custom field**, for example
-`custom.tags` (`list.text`). For that to work as well as Shopify's tags, the custom
-fields note must give list fields:
+There's no separate tag system (Q4). What a merchant or an email app uses tags for
+(`vip`, `newsletter`, `wholesale`) is the **list custom field `custom.tags`**
+(`list.text`, `unique_items`, `filterable`, not personal). Everything this note asked of
+0033 for it is built:
 
-- **Item deltas:** `add` and `remove` items as well as replacing the list. They must be
-  idempotent, so adding an item that's already there records nothing. Bulk tagging and
-  concurrent apps need this: two apps each adding a label must not overwrite each other.
-- **Optional case-insensitive uniqueness** of items (Shopify's tags ignore case).
-- **Events that carry the delta** for non-personal fields: `{owner, key, added,
-  removed}`. An email app syncing labels needs the change itself, not just a key.
-- **A `contains` filter** on the owner's list (`GET /admin/customers?field[custom.tags]=vip`)
-  and a store-wide "values in use" listing for autocomplete.
-- **A bulk route** that sets one field on up to 250 owners in one call.
+| Asked (2026-10-20) | Built (0033) |
+| --- | --- |
+| Idempotent item deltas, so concurrent apps don't overwrite each other | `change_list_items` (`POST /admin/custom-fields/{definition}/items`), done in SQL under the row's lock, 1–250 owners |
+| Case-insensitive uniqueness of items | `unique_items` on `list.text` |
+| Events carrying the delta | `customer.custom_fields_updated` with `{key, added, removed}` for non-personal fields |
+| A `contains` filter and values in use | `GET /admin/customers?field[custom.tags]=vip`; `GET /admin/custom-field-definitions/{id}/values-in-use` |
+| A bulk route | the items route above, and `…/values` for one field on 250 owners |
 
-If that turns out awkward, a dedicated tag system can still come later. It would follow
-Shopify: at most 250 tags of 255 characters, case-insensitive, `tags_added`/`_removed`
-events.
+What's left is convention and UI (CD11): the suggested definition (128 items of 255
+characters, 0033's limits; Shopify allows 250), chips under the customer's name with
+values-in-use autocomplete, a "Labels" filter on the customers list, and "add / remove a
+label on selected" on the list through the items route.
+
+A dedicated tag system can still come later if a merchant need appears that a list field
+can't serve; nothing here blocks it.
 
 ## 3. The note (CD2)
 
-- `Customer.note: Option<String>`, at most 5,000 characters, set through `update_customer`.
-- `customer.updated` names the field `note` and never carries its text.
+The staff note is the well-known field **`custom.note`**: `multiline_text`
+(`max_length` 5,000, Shopify's limit), `personal`, admin-only, not filterable.
+
 - Notes say things like "asked us not to call, recovering from surgery". That's personal
-  data in the plain sense, so the note is redacted without `customer_data:profile`
-  (§7.1).
+  data in the plain sense, and `personal` gives it exactly what the column would have
+  needed: redacted without `customer_data:profile` and listed as
+  `custom_fields.custom.note` (§7.1), only its key in `customer.custom_fields_updated`,
+  removed by erasure (§7.3), included in the export (§7.4).
+- **Why a field and not a column (Q8):** the column would add a getter, a `PATCH` field,
+  a `note` entry in `customer.updated`, a redaction rule and an erasure line, all of
+  which 0033 already provides for any personal field; and a merchant who wants two notes
+  (support, sales) or none gets that for free. What it gives up: apps can't *rely* on
+  the key existing. No app needs the note, so that's fine. The same reasoning didn't
+  apply to consent (§5), which is a state machine with a rule of its own.
+- The admin shows it as a "Note" card on the customer page when the definition exists,
+  and offers to create it there when it doesn't (CD11).
 
 ## 4. Custom fields (CD3): what customers need from their note
 
-Custom fields get their own design note (Q5), generic over owner types (products,
-variants, orders, customers, …), built before this one. This section is the customer
-side's starting point for it, not the final model.
+Custom fields have their own design note (Q5), generic over owner types (products,
+variants, orders, customers, …), built before this one. This section was the customer
+side's starting point for it, kept as written; 0033 is the model. Where the build
+differs from the sketch below:
+
+- **Events carry non-personal values** (0033 Q4), not just keys; personal fields and
+  values over 1 KiB carry only the key.
+- **Filterable is explicit** (0033 CF7): a filter on a field not marked `filterable` is
+  refused, not run through a GIN index.
+- **Visibility is `access` per surface** (`admin: read | read_write`, `storefront: none |
+  read`) plus `private` for an app's own fields; `personal` is allowed on `customer` and
+  `order` owners only.
+- **Limits** are 0033 §10's (128 definitions per namespace, 64 KiB values, 128 items).
+- **Reads:** `custom_fields` on the customer response and `GET`/`PATCH
+  /admin/customers/{id}/custom-fields`; the customers list takes `?custom_fields=` and
+  `field[...]`.
+- Apps declare fields in their manifest, spores register them in code, and
+  `CustomFieldCleanup` already wants `customer.deleted` (§7.2), so deleting a customer
+  needs no field work.
+
+Everything in 0032's original step 6 ("custom fields on customers") is therefore built,
+except the suggested definitions and the admin's in-place rendering (CD11).
 
 **Definition** (`cfd_…`, crate `hypha-custom-fields`, a leaf):
 
@@ -325,21 +360,22 @@ pub struct MarketingConsent {
 
 ### 7.1 Redaction (CD9)
 
-`redact.rs` stays the one place that decides. It gains a fifth family:
+`redact.rs` stays the one place that decides. 0033 gave it the fifth family:
 
 | Scope | Unlocks |
 | --- | --- |
 | `customer_data:name`, `:email`, `:phone`, `:address` | as today (0029 §4.2) |
-| **`customer_data:profile`** | the staff note and every custom field marked `personal` |
+| **`customer_data:profile`** | every custom field marked `personal`, the note (`custom.note`) among them |
 
-- **Tags, groups, consent states and non-personal custom fields** need only
+- **Labels, groups, consent states and non-personal custom fields** need only
   `customers:read`.
-- **`Family::Customer`** removes `note` and the personal keys inside `custom_fields`, and
-  lists them in `redacted` (`"custom_fields.custom.birthday"`).
+- **`Family::Customer`** removes the personal keys inside `custom_fields` and lists them
+  in `redacted` (`"custom_fields.custom.birthday"`): built (`redact::one_with_fields`).
 - **Webhooks and extension requests** go through the same rules per the app's grant, as
   now.
-- The route test `no_admin_route_shows_personal_data_without_its_scopes` gains the
-  note and a personal custom field.
+- The route test `no_admin_route_shows_personal_data_without_its_scopes` already covers
+  a personal custom field. Nothing in this note adds a personal field to the customer
+  itself: the consent states (§5) and groups (§6) aren't personal data.
 - **Staff roles (Q2, deferred):** a staff session still sees everything. Roles are
   already named scope sets, so a later step can make them obey `customer_data:*` too:
   - `redact.rs` drops its staff exception.
@@ -378,11 +414,11 @@ writes one batch:
 
 | Where | What happens |
 | --- | --- |
-| Customer | Names, phone, note, addresses and personal custom fields are removed. The email becomes the placeholder below. Consent becomes `redacted`. `erased_at` is set. Groups and non-personal fields stay |
-| Orders | `email` becomes the same placeholder, and the shipping (and later billing) address's personal lines are removed. Country, company, lines, totals, payments and fulfilments stay. Tax and accounting need them, and "placed orders are never deleted" |
+| Customer | Names, phone, addresses and personal custom fields (the note among them) are removed. The email becomes the placeholder below. Consent becomes `redacted`. `erased_at` is set. Groups and non-personal fields (labels) stay |
+| Orders | `email` becomes the same placeholder, the shipping (and later billing) address's personal lines are removed, and the orders' personal custom fields go. Country, company, lines, totals, payments and fulfilments stay. Tax and accounting need them, and "placed orders are never deleted" |
 | Carts | Unplaced carts of the customer are deleted, and placed ones are cleared like orders |
 | Email records | `ntf_…` rows lose `to` and their rendered body |
-| Events | Nothing to do for payloads that carry IDs, not values (0016). If 0033 lets events carry a non-personal field's values (§2), those can still hold what a merchant typed, so erasure clears this customer's such payloads in `outbox_events` |
+| Events | Nothing: payloads carry IDs (0016) or, since 0033, the values of **non-personal** fields only. A merchant who types personal data into a field not marked `personal` has mislabelled it, and the outbox is pruned on the dispatcher's retention anyway. Erasure doesn't rewrite `outbox_events` |
 
 - Then it records **`customer.redacted {customer, orders: [...]}`**: Shopify's
   `customers/redact`. Apps with `customers:read` get it whatever they subscribed to, the
@@ -504,34 +540,83 @@ doesn't need to be faked as a group (Medusa's starter).
 - **Q6. Hold erasure for recent orders? No.** The configurable cancel window is enough.
 - **Q7. Email change resets email consent? Yes** (§5).
 
-## 12. Build order
+## 12. Build order (revised 2026-10-21)
 
-Custom fields come first, from their own note. Then, each step a commit series with its
-tests, routes, OpenAPI, SDK and e2e steps:
+Custom fields came first (0033, on main). Each step is a commit series with its tests,
+routes, OpenAPI, SDK and e2e steps:
 
 1. **Orders by customer:** the `orders.customer_id` index, an orders list `customer`
-   filter, order statistics on the customer response, and the admin customer page using
-   them. It's small and independent of custom fields, so it can go first.
-2. **The note and editing:**
-   - `customer_data:profile` and the note's redaction.
-   - Admin: edit forms for the customer (none exist yet).
-3. **Delete:** `can_delete`, `customer.deleted`, the admin's delete button.
-4. **Marketing consent:**
+   filter, order statistics on the customer response (`orders_count`, `first_order_at`,
+   `last_order_at`, `amount_spent` per currency, over placed orders that aren't
+   cancelled), and the admin customer page using them instead of `/orders?q=<email>`.
+2. **Editing and the well-known fields (CD11)** (built 2026-10-21):
+   - Admin: edit forms for the customer's own fields and addresses (none exist yet).
+   - The suggested definitions `custom.tags` and `custom.note` (a `suggestions` list in
+     `hypha-custom-fields` per owner type, offered by the admin and created through the
+     ordinary definitions route; `pnpm seed` creates them), labels rendered as chips
+     under the name with values-in-use autocomplete, the note as its own card, a
+     "Labels" filter on the list and "add / remove a label on selected".
+   - As built: `hypha_custom_fields::suggestions` (`suggestions.rs`) and
+     `GET /admin/custom-field-definitions/suggestions` (`?owner_type=`), each item the
+     create body plus `why` and `existing`; the admin's Settings → Custom fields shows a
+     "Suggested" card for what's missing, and the customer page offers "Add labels" /
+     "Add a note field" in place to staff with `custom_fields:write`. The admin renders a
+     well-known field in place only when it has the suggested type (`list.text`,
+     `multiline_text`); a merchant's `custom.tags` of another type is an ordinary field.
+     The labels filter is 0033's generic field filter (`field[custom.tags]`), and the
+     bulk action is the items route (`POST /admin/custom-fields/{definition}/items`).
+3. **Delete:** `can_delete`, `customer.deleted`, the admin's delete button
+   (`CustomFieldCleanup` already follows the event). Built 2026-10-21: the workflow is
+   `hypha_privacy::delete_customer` (a new workflow crate, `hypha-privacy`, that §7's
+   erasure and export join), which refuses a customer with any order, cancelled ones
+   included (`OrderStats::cancelled_count`, shown as `orders.cancelled`), unlinks the
+   customer's carts (`CartRepo::of_customer`) and deletes it in one batch
+   (`StageCustomers::delete_customer`, `update_customer` added alongside).
+4. **Marketing consent** (built 2026-10-21):
    - The consent fields and command (newest consent wins); the reset on email change;
      the event.
    - The cart's `marketing_opt_in` and checkout setting it.
    - The storefront's checkbox, and the admin's consent badge and editor.
-5. **Customer groups:** the aggregate, membership, events, the `group` filter, admin
-   pages.
-6. **Custom fields on customers:**
-   - Customers as an owner type; personal fields redacted under
-     `customer_data:profile`.
-   - A `custom.tags`-style list field for labels, the fields on the admin's customer
-     page, and the list filter.
-7. **Privacy:**
+   - As built: `hypha_customers::consent` (`Channel`, `ConsentState`, `OptInLevel`,
+     `ConsentSource`, `MarketingConsent`), `Customer::set_marketing_consent` and
+     `set_marketing_consent` (`PUT /admin/customers/{id}/marketing/{channel}`, answering
+     `{applied, customer}`), `customer.marketing_consent_updated`, migration 0064; the
+     cart's `PUT /storefront/carts/{id}/marketing {opt_in}`, which checkout turns into
+     `subscribed`/`single`/`checkout` on the buyer, staged with the order
+     (`StageCustomers::update_customer`). An app's source is `app:<appid_…>` (the actor
+     carries the ID, not the key). A `PATCH` that changes the email resets email consent
+     whatever else it carries; a consent in the same request isn't supported (set it
+     after).
+5. **Customer groups** (built 2026-10-21): the aggregate, membership, events, the
+   `group` filter, admin pages. As built: `CustomerGroup` (`cgrp_…`, `group.rs`),
+   `CustomerGroupRepo` with set-based membership and `StageCustomerGroups`, the commands
+   in `groups.rs`, routes `/admin/customer-groups` (CRUD, `POST`/`DELETE
+   …/{id}/customers`), `PUT /admin/customers/{id}/groups`, `GET /admin/customers?group=`,
+   `groups` on the customer, migration 0065 (`customer_groups`,
+   `customer_group_members`), events `customer_group.*` under `customers:read`.
+6. ~~Custom fields on customers~~: built by 0033 (§4). Only step 2's conventions remain.
+7. **Privacy** (built 2026-10-21):
    - `hypha-privacy`, `customers:erase`, the erasure request, the job, the placeholder
      email and `customer.redacted`; export and `customer.data_requested`.
-   - The apps docs' "what an app must do on `customer.redacted`".
+   - The apps docs' "what an app must do on `customer.redacted`" (`docs/apps/privacy.md`).
+   - As built: `POST`/`DELETE /admin/customers/{id}/erasure` (`customers:erase`;
+     `Customer::request_erasure`/`cancel_erasure`, `erasure_due_at` on the response),
+     `customers.erasure_delay` in `hypha.config.toml` (`PrivacySettings`, at least an
+     hour, 10 days by default); the erasure runs inside the `prune` job
+     (`hypha_privacy::erase_due`, `CustomerRepo::due_for_erasure`) rather than as a job of
+     its own, since it's data past its time like the rest of what prune removes. One
+     erasure (`erase_customer`) writes the customer (`Customer::erase`: placeholder email,
+     consents `redacted`, address book gone), its orders (`Order::redact`: email and the
+     whole shipping address, company included; the country stays on the order), its
+     placed carts (`Cart::redact`) and the personal custom field values of the customer
+     and its orders in one batch with `customer.redacted {customer, orders}`, deletes its
+     open carts in the same batch, and redacts the orders' email records just before
+     (`Notification::redact`; a queued one becomes `skipped`). `hypha-mail` skips a
+     placeholder recipient (`Email::is_placeholder`). `customer.redacted` reaches every
+     app whose grant has `customers:read` whether or not it subscribed
+     (`App::wants_event`). `GET /admin/customers/{id}/export` answers with the customer,
+     its orders, their payments and emails, and records `customer.data_requested`; a
+     caller that isn't staff needs every `customer_data:*` scope.
 8. **Then, in their own notes:** customer accounts; group prices, payment methods and
    tax exemption (after accounts); segments; merging customers; B2B companies; staff
    roles under `customer_data:*`.
@@ -544,3 +629,31 @@ A Mailchimp-style app is the end-to-end check for steps 4–7:
 - It writes consent back with its own `consented_at`, and stores its member ID in
   `app_mailchimp.member_id`.
 - It deletes its member on `customer.redacted`.
+
+## 13. Revision after 0033 (2026-10-21)
+
+What custom fields take over, now that they exist, and what stays core:
+
+| | Custom field | Why |
+| --- | --- | --- |
+| Labels (CD1) | `custom.tags`, a suggested definition | Everything §2 asked for is built |
+| The note (CD2) | `custom.note`, a suggested definition, `personal` | §3: the column would duplicate what `personal` already does |
+| External IDs | `app_<name>.<key>`, declared in the app's manifest | As planned |
+| Personal data on the customer beyond name, email, phone, address | any `personal` field | `customer_data:profile` is built |
+
+| | Stays core | Why |
+| --- | --- | --- |
+| Marketing consent (CD4) | `Customer.email_marketing` / `sms_marketing` | A state machine with a rule (newest consent wins), written by checkout, reset on email change, set to `redacted` by erasure; apps must find it in one place |
+| Groups (CD5) | `CustomerGroup` | Prices and payment methods will point at them by ID (CD6); a `list.reference` field has no referential integrity |
+| Order statistics | computed on the customer response | Derived data, not stored on the customer |
+| Erasure, export, delete | `hypha-privacy` | Workflows over several crates |
+
+- **Q8. The note as a custom field rather than a column? Proposed yes** (CD2, §3). This
+  is the one choice here that shapes the public API: a column would be
+  `PATCH /admin/customers/{id} {note}`; the field is `PATCH …/custom-fields
+  {"custom.note": …}` and exists only once created. The suggested-fields affordance
+  (CD11) keeps it one click away.
+- **Q9. Suggested fields are created by the merchant, not at first start.** Creating
+  them at setup would miss every existing store and make `custom` hold rows the merchant
+  never asked for. The admin's one click (and `pnpm seed`) is enough, and the customer
+  page points at it where a label or note would appear.

@@ -43,6 +43,8 @@ pub struct Config {
     pub auth: AuthSettings,
     pub email: EmailConfig,
     pub categories: CategorySettings,
+    /// The erasure window (design note 0032, §7.3).
+    pub privacy: hypha_privacy::PrivacySettings,
     pub dispatch: DispatchSettings,
     /// The search sync job's batch and lease (design note 0019).
     pub search_sync: SyncSettings,
@@ -737,6 +739,16 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             );
         }
     }
+    if file.customers.erasure_delay.0 < hypha_privacy::PrivacySettings::MIN_ERASURE_DELAY {
+        p.add(
+            "customers.erasure_delay",
+            Broken::TooShort {
+                value: file.customers.erasure_delay,
+                min: Dur(hypha_privacy::PrivacySettings::MIN_ERASURE_DELAY),
+                because: None,
+            },
+        );
+    }
     let max_depth = file.categories.max_depth;
     if !(1..=CategorySettings::MAX_DEPTH_LIMIT).contains(&max_depth) {
         p.add(
@@ -858,6 +870,9 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
         },
         email,
         categories: CategorySettings { max_depth },
+        privacy: hypha_privacy::PrivacySettings {
+            erasure_delay: file.customers.erasure_delay.0,
+        },
         dispatch: DispatchSettings {
             batch: jobs.dispatch.batch,
             lease: jobs.dispatch.lease.0,

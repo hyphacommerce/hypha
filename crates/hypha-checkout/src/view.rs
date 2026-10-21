@@ -77,6 +77,7 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
         email: cart.email().cloned(),
         customer: cart.customer(),
         order: Some(order.id()),
+        marketing_opt_in: cart.marketing_opt_in(),
         lines,
         taxes_included: order.taxes_included(),
         subtotal: order.subtotal(),

@@ -8,7 +8,7 @@ use hypha_core::{
 };
 use hypha_orders::{
     Cancellation, Order, OrderFilter, OrderLine, OrderNumber, OrderRepo, OrderShippingLine,
-    OrderSnapshot, OrderSort, OrderSummary, OrderTax, OrderTaxSource,
+    OrderSnapshot, OrderSort, OrderStats, OrderSummary, OrderTax, OrderTaxSource,
 };
 use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
@@ -92,7 +92,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
                     .collect()
             });
         let us = |t: Option<Timestamp>| t.map(|t| t.unix_micros());
-        let mut extra = Params::after(13);
+        let mut extra = Params::after(14);
         let fields = field_predicates(filter.fields(), "o.id", &mut extra);
         let mut conn = self.conn().await;
         let rows = conn
@@ -118,6 +118,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
                         OR o.placed_at >= 'epoch'::timestamptz + $12 * interval '1 microsecond')
                    AND ($13::bigint IS NULL
                         OR o.placed_at < 'epoch'::timestamptz + $13 * interval '1 microsecond')
+                   AND ($14::uuid IS NULL OR o.customer_id = $14)
                    {fields}
                  ORDER BY {order} LIMIT $2",
                     placed = micros("o.placed_at"),
@@ -137,6 +138,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
                     (&filter.currency().map(|c| c.as_str()), Type::TEXT),
                     (&us(filter.placed_from()), Type::INT8),
                     (&us(filter.placed_before()), Type::INT8),
+                    (&filter.customer().map(|c| c.as_uuid()), Type::UUID),
                 ]),
             )
             .await
@@ -146,6 +148,61 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
             .map(summary_from_db)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Page::from_overfetch(summaries, page.limit))
+    }
+
+    /// One aggregate query per currency over `orders_by_customer` (migration 0063);
+    /// `sum` of bigints is numeric, read as text and parsed, capped at `Money::MAX_AMOUNT`
+    /// like `OrderStats::of`.
+    async fn stats_for(&self, customer: CustomerId) -> Result<OrderStats, RepoError> {
+        let mut conn = self.conn().await;
+        let rows = conn
+            .db()
+            .query_typed(
+                "SELECT o.currency, count(*)::bigint AS orders_count,
+                        sum(o.total)::text AS amount_spent,
+                        (extract(epoch FROM min(o.placed_at)) * 1000000)::bigint AS first_order_at,
+                        (extract(epoch FROM max(o.placed_at)) * 1000000)::bigint AS last_order_at
+                 FROM orders o
+                 WHERE o.customer_id = $1 AND o.cancelled_at IS NULL
+                 GROUP BY o.currency ORDER BY o.currency",
+                &[(&customer.as_uuid(), Type::UUID)],
+            )
+            .await
+            .map_err(repo_error)?;
+        let cancelled = conn
+            .db()
+            .query_typed_opt(
+                "SELECT count(*)::bigint AS cancelled FROM orders
+                 WHERE customer_id = $1 AND cancelled_at IS NOT NULL",
+                &[(&customer.as_uuid(), Type::UUID)],
+            )
+            .await
+            .map_err(repo_error)?;
+        let mut stats = OrderStats::default();
+        if let Some(row) = cancelled {
+            let count: i64 = col(&row, "cancelled")?;
+            stats.cancelled_count = u64::try_from(count).map_err(|e| corrupt(e.to_string()))?;
+        }
+        for row in &rows {
+            let currency =
+                currency_from_db(&row.try_get::<_, String>("currency").map_err(corrupt)?)?;
+            let count: i64 = col(row, "orders_count")?;
+            stats.orders_count += u64::try_from(count).map_err(|e| corrupt(e.to_string()))?;
+            let sum: String = col(row, "amount_spent")?;
+            let amount = sum
+                .parse::<i128>()
+                .map_err(|e| corrupt(format!("amount spent {sum:?}: {e}")))?;
+            let amount = i64::try_from(amount.min(i128::from(Money::MAX_AMOUNT)))
+                .map_err(|e| corrupt(e.to_string()))?;
+            stats
+                .amount_spent
+                .push(Money::new(amount, currency).map_err(|e| corrupt(e.to_string()))?);
+            let first = Timestamp::from_unix_micros(col(row, "first_order_at")?);
+            let last = Timestamp::from_unix_micros(col(row, "last_order_at")?);
+            stats.first_order_at = Some(stats.first_order_at.map_or(first, |t| t.min(first)));
+            stats.last_order_at = Some(stats.last_order_at.map_or(last, |t| t.max(last)));
+        }
+        Ok(stats)
     }
 
     async fn get_by_number(&self, number: OrderNumber) -> Result<Option<Order>, RepoError> {

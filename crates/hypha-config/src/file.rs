@@ -14,6 +14,7 @@ use hypha_dispatch::DispatchSettings;
 use hypha_extensions::ExtensionSettings;
 use hypha_media::MediaSettings;
 use hypha_notifications::SendSettings;
+use hypha_privacy::PrivacySettings;
 use hypha_search::SyncSettings;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -34,6 +35,7 @@ pub struct File {
     pub auth: Auth,
     pub email: Email,
     pub categories: Categories,
+    pub customers: Customers,
     pub webhooks: Webhooks,
     pub jobs: Jobs,
     pub rate_limits: RateLimits,
@@ -327,6 +329,24 @@ impl Default for Categories {
     fn default() -> Self {
         Self {
             max_depth: CategorySettings::default().max_depth,
+        }
+    }
+}
+
+/// Customers and their personal data (design note 0032).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Customers {
+    /// How long a requested erasure of a customer's personal data can be cancelled
+    /// before the job runs it. At least 1 hour; 10 days by default. A merchant under a
+    /// retention duty sets it longer.
+    pub erasure_delay: Dur,
+}
+
+impl Default for Customers {
+    fn default() -> Self {
+        Self {
+            erasure_delay: Dur(PrivacySettings::default().erasure_delay),
         }
     }
 }

@@ -23,6 +23,7 @@ mod channels;
 mod columns;
 mod config;
 mod custom_fields;
+mod customer_groups;
 mod customers;
 mod endpoints;
 mod error;

@@ -181,6 +181,8 @@ impl Message {
 
 /// Why a template that's off isn't sent, on its record.
 pub(crate) const DISABLED: &str = "the template is turned off";
+/// Why a message to an erased customer's placeholder is skipped (design note 0032, CD10).
+pub(crate) const ERASED: &str = "the customer was erased";
 
 /// Stores `record` (queued or skipped). Answering an event, a `Duplicate` of its (event,
 /// template, recipient) is another run of the same delivery that got there first: its
@@ -229,9 +231,19 @@ pub(crate) async fn skip<E: MailEnv, P: HasNotifications>(
     ports: &P,
     message: &Message,
 ) -> Result<Notification, CommandError> {
+    skip_as(env, ports, message, DISABLED).await
+}
+
+/// `skip` with the reason given: an erased customer's placeholder address, say.
+pub(crate) async fn skip_as<E: MailEnv, P: HasNotifications>(
+    env: &E,
+    ports: &P,
+    message: &Message,
+    reason: &str,
+) -> Result<Notification, CommandError> {
     record_once(
         ports,
-        Notification::skipped(message.record(env, String::new()), DISABLED),
+        Notification::skipped(message.record(env, String::new()), reason),
     )
     .await
 }

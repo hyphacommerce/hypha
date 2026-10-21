@@ -255,7 +255,7 @@ impl OrderResponse {
         Ok(response)
     }
 
-    fn new(order: &Order) -> Result<Self, ApiError> {
+    pub(crate) fn new(order: &Order) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(order.stamps())?;
         Ok(Self {
             created_at,
@@ -722,6 +722,9 @@ pub struct OrderFilters {
     fulfillment_status: Vec<FulfillmentStatusDto>,
     /// Only cancelled orders (`true`), or only those that aren't (`false`).
     cancelled: Option<bool>,
+    /// Only this customer's orders (design note 0032).
+    #[param(value_type = Option<CustomerId>)]
+    customer: Option<CustomerId>,
     /// Only orders placed through this sales channel.
     #[param(value_type = Option<ChannelId>)]
     channel: Option<ChannelId>,
@@ -780,6 +783,7 @@ impl OrderFilters {
                 .map(Into::into)
                 .collect(),
             cancelled: self.cancelled,
+            customer: self.customer,
             channel: self.channel,
             country: self.country.as_deref().map(CountryCode::new).transpose()?,
             currency: self.currency.as_deref().map(Currency::new).transpose()?,

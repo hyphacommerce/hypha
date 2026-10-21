@@ -354,6 +354,7 @@ The owner type comes from the definition, so the row doesn't repeat it.
 | `POST /admin/custom-fields/{definition}/values` | `set_field_values` |
 | `GET`/`POST /admin/custom-field-definitions`, `GET`/`PATCH`/`DELETE …/{id}` | Definitions (`?owner_type=`) |
 | `GET /admin/custom-field-definitions/{id}/values-in-use` | Distinct values with counts, for autocomplete (filterable text, choice and list fields; 0032 §2) |
+| `GET /admin/custom-field-definitions/suggestions` | The well-known fields worth having (0032 CD11: customers' `custom.tags`, `custom.note`), each as the `POST` body that creates it plus `why` and `existing` (the merchant's definition of that key, if any); `?owner_type=` |
 
 Variants use `/admin/variants/{id}` because a variant ID is global. The owner responses
 carry `custom_fields` too (§6.2).

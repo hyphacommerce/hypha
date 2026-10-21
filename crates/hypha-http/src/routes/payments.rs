@@ -571,7 +571,7 @@ impl From<PaymentEventTypeDto> for PaymentEventKind {
 }
 
 /// An RFC 3339 instant in a body.
-fn instant<'de, D: serde::Deserializer<'de>>(
+pub(crate) fn instant<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Option<hypha_core::Timestamp>, D::Error> {
     let text: Option<String> = Option::deserialize(d)?;

@@ -102,3 +102,43 @@ export async function markOrdersPaid(orders: (Item & { pending: boolean })[]): P
   revalidatePath("/orders");
   return result;
 }
+
+/** Adds the customers to `group`, or takes them out of it: one call either way. */
+export async function setCustomersGroup(
+  group: string,
+  customers: Item[],
+  add: boolean,
+): Promise<BulkResult> {
+  const client = await sessionClient();
+  const ids = customers.map((c) => c.id);
+  const options = { params: { path: { id: group } }, body: { customers: ids } };
+  const { error } = add
+    ? await client.POST("/admin/customer-groups/{id}/customers", options)
+    : await client.DELETE("/admin/customer-groups/{id}/customers", options);
+  revalidatePath("/customers", "layout");
+  if (error) return { changed: 0, unchanged: 0, failed: [], error: describe(error) };
+  return { changed: ids.length, unchanged: 0, failed: [] };
+}
+
+/**
+ * Adds `label` to, or removes it from, the customers' labels (`custom.tags`, design note
+ * 0032, CD1): one call, done under each value's lock, so concurrent writers both land
+ * (design note 0033, CF6). A customer that has (or lacks) it already is unchanged.
+ */
+export async function setCustomersLabel(
+  definition: string,
+  customers: Item[],
+  label: string,
+  add: boolean,
+): Promise<BulkResult> {
+  const client = await sessionClient();
+  const owners = customers.map((c) => c.id);
+  const { data, error } = await client.POST("/admin/custom-fields/{definition}/items", {
+    params: { path: { definition } },
+    body: { owners, add: add ? [label] : [], remove: add ? [] : [label] },
+  });
+  revalidatePath("/customers");
+  if (error) return { changed: 0, unchanged: 0, failed: [], error: describe(error) };
+  const changed = data.items.filter((i) => i.added.length > 0 || i.removed.length > 0).length;
+  return { changed, unchanged: owners.length - changed, failed: [] };
+}

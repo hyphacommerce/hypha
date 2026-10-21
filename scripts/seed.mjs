@@ -1052,6 +1052,47 @@ async function main() {
     }
   }
 
+  console.log("Customer labels and notes");
+  // The well-known customer fields (design note 0032, CD11), created from the API's
+  // suggestions as the admin's "Add" would: `custom.tags` (labels) and `custom.note`.
+  const suggested = await admin.get(
+    "/admin/custom-field-definitions/suggestions?owner_type=customer",
+  );
+  for (const { why: _why, existing: taken, field: _field, ...body } of suggested.items) {
+    if (!taken) await admin.post("/admin/custom-field-definitions", body);
+  }
+  // A group (design note 0032, §6): what group prices and payment methods will point at.
+  const wholesale = await admin.post("/admin/customer-groups", {
+    name: "Wholesale",
+    handle: "wholesale",
+    description: "Studios and shops buying in bulk.",
+  });
+  const LABELS = {
+    "ana.horvat@example.com": { tags: ["vip", "newsletter"], note: "Prefers email over phone." },
+    "lukas.weber@example.com": {
+      tags: ["wholesale"],
+      note: "Buys for his studio; asks for invoices with the VAT ID DE123456789.",
+    },
+    "marko.petrovic@example.com": { tags: ["newsletter"] },
+    "sofia.rossi@example.com": {
+      tags: ["vip"],
+      note: "Returned a lamp in 2026-09, replaced without fuss. Keep it that way.",
+    },
+  };
+  for (const [email, { tags, note }] of Object.entries(LABELS)) {
+    const found = await admin.get(`/admin/customers?q=${encodeURIComponent(email)}`);
+    const customer = found.items.find((c) => c.email === email);
+    if (!customer) continue;
+    await admin.patch(`/admin/customers/${customer.id}/custom-fields`, {
+      custom_fields: { "custom.tags": tags, ...(note ? { "custom.note": note } : {}) },
+    });
+    if (tags.includes("wholesale")) {
+      await admin.post(`/admin/customer-groups/${wholesale.id}/customers`, {
+        customers: [customer.id],
+      });
+    }
+  }
+
   console.log("\nDone: Lumen & Loom is set up.");
   console.log(
     `  ${sellable.length} products for sale, 1 draft · ${MARKETS.length} markets · 2 payment methods · ${orders.length} orders`,

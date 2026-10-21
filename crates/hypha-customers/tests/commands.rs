@@ -425,3 +425,139 @@ fn address_commands_reject_unknown_addresses() {
         )))
     );
 }
+
+mod consent {
+    use hypha_core::{AppId, Clock, Timestamp};
+    use hypha_customers::{
+        Channel, ConsentChange, ConsentSource, ConsentState, OptInLevel, set_marketing_consent,
+    };
+    use hypha_testkit::FixedClock;
+
+    use super::*;
+
+    fn admin() -> Ctx {
+        Ctx::new(
+            Actor::User(UserId::from_uuid(Uuid::from_u128(9))),
+            vec![Scope::CustomersWrite],
+        )
+    }
+
+    fn subscribe(at: Option<Timestamp>) -> ConsentChange {
+        ConsentChange {
+            state: ConsentState::Subscribed,
+            opt_in_level: OptInLevel::Single,
+            consented_at: at,
+        }
+    }
+
+    #[test]
+    fn the_source_is_the_caller_and_the_newest_consent_wins() {
+        let repo = InMemoryCustomerRepo::default();
+        let clock = FixedClock::default();
+        let ids = SequentialIds::default();
+        let ana = block_on(create_customer(
+            &admin(),
+            &repo,
+            &ids,
+            CreateCustomer {
+                email: "ana@example.hr".to_string(),
+                first_name: None,
+                last_name: None,
+                phone: None,
+            },
+        ))
+        .unwrap();
+
+        // An app writes a confirmed subscription dated an hour ago.
+        let app = AppId::from_uuid(Uuid::from_u128(77));
+        let app_ctx = Ctx::new(Actor::App(app), vec![Scope::CustomersWrite]);
+        let earlier = clock.now().minus(std::time::Duration::from_secs(3600));
+        let (c, applied) = block_on(set_marketing_consent(
+            &app_ctx,
+            &repo,
+            &clock,
+            ana.id(),
+            Channel::Email,
+            ConsentChange {
+                opt_in_level: OptInLevel::Confirmed,
+                ..subscribe(Some(earlier))
+            },
+        ))
+        .unwrap();
+        assert!(applied);
+        assert_eq!(
+            c.marketing_consent(Channel::Email).source,
+            Some(ConsentSource::App(app))
+        );
+
+        // Staff unsubscribe now: newer, so it wins; the repeat changes nothing.
+        let unsubscribe = ConsentChange {
+            state: ConsentState::Unsubscribed,
+            opt_in_level: OptInLevel::Unknown,
+            consented_at: None,
+        };
+        let (c, applied) = block_on(set_marketing_consent(
+            &admin(),
+            &repo,
+            &clock,
+            ana.id(),
+            Channel::Email,
+            unsubscribe,
+        ))
+        .unwrap();
+        assert!(applied);
+        assert_eq!(
+            c.marketing_consent(Channel::Email).source,
+            Some(ConsentSource::Admin)
+        );
+        let (_, applied) = block_on(set_marketing_consent(
+            &admin(),
+            &repo,
+            &clock,
+            ana.id(),
+            Channel::Email,
+            unsubscribe,
+        ))
+        .unwrap();
+        assert!(!applied);
+
+        // The app replays its old subscribe: too old.
+        let (c, applied) = block_on(set_marketing_consent(
+            &app_ctx,
+            &repo,
+            &clock,
+            ana.id(),
+            Channel::Email,
+            subscribe(Some(earlier)),
+        ))
+        .unwrap();
+        assert!(!applied);
+        assert_eq!(
+            c.marketing_consent(Channel::Email).state,
+            ConsentState::Unsubscribed
+        );
+        let stored = block_on(repo.get(ana.id())).unwrap().unwrap();
+        assert_eq!(
+            stored.marketing_consent(Channel::Email).state,
+            ConsentState::Unsubscribed
+        );
+
+        let reader = Ctx::new(
+            Actor::User(UserId::from_uuid(Uuid::from_u128(9))),
+            vec![Scope::CustomersRead],
+        );
+        assert_eq!(
+            block_on(set_marketing_consent(
+                &reader,
+                &repo,
+                &clock,
+                ana.id(),
+                Channel::Email,
+                subscribe(None),
+            )),
+            Err(CommandError::Auth(AuthError::MissingScope(
+                Scope::CustomersWrite
+            )))
+        );
+    }
+}

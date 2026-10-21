@@ -118,6 +118,8 @@ pub struct PricedCart {
     pub total: Money,
     /// How the buyer chose to pay (design note 0027); checked again at checkout.
     pub payment_method: Option<PaymentMethodId>,
+    /// Whether the buyer ticked "Email me with news and offers" (design note 0032, §5).
+    pub marketing_opt_in: bool,
 }
 
 impl PricedCart {
@@ -261,6 +263,7 @@ pub fn price_cart_with_shipping(
         tax_total: totals.tax_total,
         total: totals.total,
         payment_method: cart.payment_method(),
+        marketing_opt_in: cart.marketing_opt_in(),
     }
 }
 

@@ -3,7 +3,7 @@ use hypha_auth::{
 };
 use hypha_cart::HasCarts;
 use hypha_core::{ActingAs, Actor, HasIdempotency, HasOutbox, RepoError};
-use hypha_customers::HasCustomers;
+use hypha_customers::{HasCustomerGroups, HasCustomers};
 use hypha_fulfillment::HasFulfillments;
 use hypha_inventory::{HasInventoryItems, HasLocations};
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
@@ -43,6 +43,8 @@ pub struct InMemoryPorts {
     pub inventory_items: InMemoryInventoryItemRepo,
     pub locations: InMemoryLocationRepo,
     pub customers: InMemoryCustomerRepo,
+    /// Customer groups and their membership (design note 0032, §6).
+    pub customer_groups: crate::InMemoryCustomerGroupRepo,
     pub idempotency: InMemoryIdempotencyRepo,
     pub orders: InMemoryOrderRepo,
     pub fulfillments: InMemoryFulfillmentRepo,
@@ -96,6 +98,7 @@ impl Default for InMemoryPorts {
         let channels = InMemoryChannelRepo::sharing(&outbox);
         let custom_fields = crate::InMemoryCustomFields::sharing(&outbox);
         let categories = InMemoryCategoryRepo::sharing(&outbox).joining_fields(&custom_fields);
+        let customer_groups = crate::InMemoryCustomerGroupRepo::sharing(&outbox);
         Self {
             carts: InMemoryCartRepo::sharing(&outbox),
             products: InMemoryProductRepo::sharing(&outbox)
@@ -108,7 +111,10 @@ impl Default for InMemoryPorts {
             tax_regions: InMemoryTaxRegionRepo::sharing(&outbox),
             inventory_items: InMemoryInventoryItemRepo::sharing(&outbox),
             locations: InMemoryLocationRepo::sharing(&outbox),
-            customers: InMemoryCustomerRepo::sharing(&outbox).joining_fields(&custom_fields),
+            customers: InMemoryCustomerRepo::sharing(&outbox)
+                .joining_fields(&custom_fields)
+                .joining_groups(&customer_groups),
+            customer_groups,
             idempotency: InMemoryIdempotencyRepo::default(),
             orders: InMemoryOrderRepo::sharing(&outbox).joining_fields(&custom_fields),
             fulfillments: InMemoryFulfillmentRepo::sharing(&outbox),
@@ -284,6 +290,13 @@ impl HasCustomers for InMemoryPorts {
     type Customers = InMemoryCustomerRepo;
     fn customers(&self) -> &InMemoryCustomerRepo {
         &self.customers
+    }
+}
+
+impl HasCustomerGroups for InMemoryPorts {
+    type CustomerGroups = crate::InMemoryCustomerGroupRepo;
+    fn customer_groups(&self) -> &crate::InMemoryCustomerGroupRepo {
+        &self.customer_groups
     }
 }
 

@@ -1,11 +1,15 @@
 use std::collections::HashSet;
 
 use hypha_core::{
-    Address, AddressId, CustomerId, Email, PendingEvent, Recorded, Stamped, Stamps, Version,
-    Versioned, optional_text,
+    Address, AddressId, CustomerId, Email, PendingEvent, Recorded, Stamped, Stamps, Timestamp,
+    Version, Versioned, optional_text,
 };
 
-use crate::{CustomerError, RestoreError, events::Changes};
+use crate::{
+    CustomerError, RestoreError,
+    consent::{Channel, ConsentChange, ConsentSource, ConsentState, MarketingConsent},
+    events::Changes,
+};
 
 /// An address in a customer's address book.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +36,14 @@ pub struct Customer {
     addresses: Vec<SavedAddress>,
     default_shipping: Option<AddressId>,
     default_billing: Option<AddressId>,
+    /// Marketing consent per channel (design note 0032, §5).
+    email_marketing: MarketingConsent,
+    sms_marketing: MarketingConsent,
+    /// When a requested erasure runs (design note 0032, §7.3): the cancel window.
+    erasure_due_at: Option<Timestamp>,
+    /// When the customer's personal data was erased (design note 0032, §7.3): read-only
+    /// from then on.
+    erased_at: Option<Timestamp>,
     /// What changed since it was loaded, for its events (design note 0016).
     changes: Changes,
 }
@@ -77,19 +89,151 @@ impl Customer {
             addresses: Vec::new(),
             default_shipping: None,
             default_billing: None,
+            email_marketing: MarketingConsent::default(),
+            sms_marketing: MarketingConsent::default(),
+            erasure_due_at: None,
+            erased_at: None,
             changes: Changes::created(),
         }
     }
 
-    pub fn set_email(&mut self, email: Email) {
+    /// The channel's consent.
+    pub fn marketing_consent(&self, channel: Channel) -> MarketingConsent {
+        match channel {
+            Channel::Email => self.email_marketing,
+            Channel::Sms => self.sms_marketing,
+        }
+    }
+
+    /// Records the customer's consent for `channel` from `source` (design note 0032, §5):
+    /// the newest `consented_at` (default `now`) wins, so an older write changes nothing
+    /// and answers `false`. `not_subscribed` and `redacted` can't be asked for; SMS
+    /// needs a phone.
+    pub fn set_marketing_consent(
+        &mut self,
+        channel: Channel,
+        change: ConsentChange,
+        source: ConsentSource,
+        now: Timestamp,
+    ) -> Result<bool, CustomerError> {
+        self.ensure_not_erased()?;
+        if matches!(
+            change.state,
+            ConsentState::NotSubscribed | ConsentState::Redacted
+        ) {
+            return Err(CustomerError::ConsentStateNotSettable(change.state));
+        }
+        if channel == Channel::Sms && self.phone.is_none() {
+            return Err(CustomerError::ConsentNeedsPhone);
+        }
+        let consent = match channel {
+            Channel::Email => &mut self.email_marketing,
+            Channel::Sms => &mut self.sms_marketing,
+        };
+        let applied = consent.apply(change, source, now);
+        if applied {
+            let (state, level) = (consent.state, consent.opt_in_level);
+            self.changes.consent(channel, state, level);
+        }
+        Ok(applied)
+    }
+
+    /// When the customer was erased, if it was.
+    pub fn erased_at(&self) -> Option<Timestamp> {
+        self.erased_at
+    }
+
+    /// When a requested erasure runs, if one is.
+    pub fn erasure_due_at(&self) -> Option<Timestamp> {
+        self.erasure_due_at
+    }
+
+    /// Asks for the customer's personal data to go at `due_at` (design note 0032, §7.3),
+    /// recording `customer.erasure_requested`. Refused while one is requested or once
+    /// erased.
+    pub fn request_erasure(&mut self, due_at: Timestamp) -> Result<(), CustomerError> {
+        self.ensure_not_erased()?;
+        if self.erasure_due_at.is_some() {
+            return Err(CustomerError::ErasureAlreadyRequested);
+        }
+        self.erasure_due_at = Some(due_at);
+        self.changes.erasure_requested(self.id, due_at);
+        Ok(())
+    }
+
+    /// Takes a request back within its window, recording `customer.erasure_cancelled`.
+    pub fn cancel_erasure(&mut self) -> Result<(), CustomerError> {
+        self.ensure_not_erased()?;
+        if self.erasure_due_at.is_none() {
+            return Err(CustomerError::ErasureNotRequested);
+        }
+        self.erasure_due_at = None;
+        self.changes.erasure_cancelled(self.id);
+        Ok(())
+    }
+
+    /// Removes the person's data (design note 0032, §7.3): names, phone and the address
+    /// book go, the email becomes the placeholder, consents become `redacted`, and the
+    /// customer is read-only from `now`. Groups stay. Records nothing itself: the
+    /// workflow records `customer.redacted` with the orders it redacted alongside. Doing
+    /// it again changes nothing.
+    pub fn erase(&mut self, now: Timestamp) -> bool {
+        if self.erased_at.is_some() {
+            return false;
+        }
+        self.email = Email::placeholder(self.id.as_uuid());
+        self.first_name = None;
+        self.last_name = None;
+        self.phone = None;
+        self.addresses.clear();
+        self.default_shipping = None;
+        self.default_billing = None;
+        self.email_marketing.redact(now);
+        self.sms_marketing.redact(now);
+        self.erasure_due_at = None;
+        self.erased_at = Some(now);
+        true
+    }
+
+    pub fn is_erased(&self) -> bool {
+        self.erased_at.is_some()
+    }
+
+    fn ensure_not_erased(&self) -> Result<(), CustomerError> {
+        if self.is_erased() {
+            return Err(CustomerError::Erased);
+        }
+        Ok(())
+    }
+
+    /// Marks the customer for removal: `StageCustomers::delete_customer` writes it with
+    /// `customer.deleted`. Only for a customer without orders (design note 0032, CD7),
+    /// which the workflow above checks.
+    pub fn delete(&mut self) {
+        self.changes.deleted();
+    }
+
+    /// A new email resets email consent to never asked (design note 0032, Q7): consent
+    /// was given for an address, not a person.
+    pub fn set_email(&mut self, email: Email) -> Result<(), CustomerError> {
+        self.ensure_not_erased()?;
         if email != self.email {
             self.email = email;
             self.changes.field("email");
+            if self.email_marketing.reset() {
+                self.changes.consent(
+                    Channel::Email,
+                    self.email_marketing.state,
+                    self.email_marketing.opt_in_level,
+                );
+            }
         }
+        Ok(())
     }
 
     /// Trimmed; empty clears it.
     pub fn set_first_name(&mut self, name: Option<String>) -> Result<(), CustomerError> {
+        self.ensure_not_erased()?;
         let name = optional_text("first_name", name)?;
         if name != self.first_name {
             self.first_name = name;
@@ -100,6 +244,7 @@ impl Customer {
 
     /// Trimmed; empty clears it.
     pub fn set_last_name(&mut self, name: Option<String>) -> Result<(), CustomerError> {
+        self.ensure_not_erased()?;
         let name = optional_text("last_name", name)?;
         if name != self.last_name {
             self.last_name = name;
@@ -108,12 +253,21 @@ impl Customer {
         Ok(())
     }
 
-    /// Trimmed; empty clears it. Free text for now (no E.164 check).
+    /// Trimmed; empty clears it. Free text for now (no E.164 check). Clearing it resets
+    /// SMS consent to never asked: there's nowhere to send (design note 0032, §5).
     pub fn set_phone(&mut self, phone: Option<String>) -> Result<(), CustomerError> {
+        self.ensure_not_erased()?;
         let phone = optional_text("phone", phone)?;
         if phone != self.phone {
             self.phone = phone;
             self.changes.field("phone");
+            if self.phone.is_none() && self.sms_marketing.reset() {
+                self.changes.consent(
+                    Channel::Sms,
+                    self.sms_marketing.state,
+                    self.sms_marketing.opt_in_level,
+                );
+            }
         }
         Ok(())
     }
@@ -126,6 +280,7 @@ impl Customer {
         default_shipping: bool,
         default_billing: bool,
     ) -> Result<(), CustomerError> {
+        self.ensure_not_erased()?;
         if self.addresses.iter().any(|a| a.id == id) {
             return Err(CustomerError::DuplicateAddress(id));
         }
@@ -143,6 +298,7 @@ impl Customer {
         default_shipping: bool,
         default_billing: bool,
     ) -> Result<(), CustomerError> {
+        self.ensure_not_erased()?;
         let saved = self
             .addresses
             .iter_mut()
@@ -156,6 +312,7 @@ impl Customer {
 
     /// Removes an address, and any default that pointed at it.
     pub fn remove_address(&mut self, id: AddressId) -> Result<(), CustomerError> {
+        self.ensure_not_erased()?;
         let before = self.addresses.len();
         self.addresses.retain(|a| a.id != id);
         if self.addresses.len() == before {
@@ -233,6 +390,10 @@ pub struct CustomerSnapshot {
     pub addresses: Vec<SavedAddress>,
     pub default_shipping: Option<AddressId>,
     pub default_billing: Option<AddressId>,
+    pub email_marketing: MarketingConsent,
+    pub sms_marketing: MarketingConsent,
+    pub erasure_due_at: Option<Timestamp>,
+    pub erased_at: Option<Timestamp>,
 }
 
 impl Customer {
@@ -248,6 +409,10 @@ impl Customer {
             addresses: self.addresses.clone(),
             default_shipping: self.default_shipping,
             default_billing: self.default_billing,
+            email_marketing: self.email_marketing,
+            sms_marketing: self.sms_marketing,
+            erasure_due_at: self.erasure_due_at,
+            erased_at: self.erased_at,
         }
     }
 
@@ -275,6 +440,10 @@ impl Customer {
         customer.addresses = s.addresses;
         customer.default_shipping = s.default_shipping;
         customer.default_billing = s.default_billing;
+        customer.email_marketing = s.email_marketing;
+        customer.sms_marketing = s.sms_marketing;
+        customer.erasure_due_at = s.erasure_due_at;
+        customer.erased_at = s.erased_at;
         customer.version = s.version;
         customer.stamps = s.stamps;
         // Rebuilt through `new` and the setters; nothing happened, though.
@@ -404,6 +573,137 @@ mod tests {
             c.remove_address(addr_id(1)),
             Err(CustomerError::AddressNotFound(addr_id(1)))
         );
+    }
+
+    fn at(secs: i64) -> Timestamp {
+        Timestamp::from_unix_micros(secs * 1_000_000)
+    }
+
+    fn subscribe() -> ConsentChange {
+        ConsentChange {
+            state: ConsentState::Subscribed,
+            opt_in_level: crate::OptInLevel::Single,
+            consented_at: None,
+        }
+    }
+
+    #[test]
+    fn consent_cannot_be_never_asked_or_redacted_and_sms_needs_a_phone() {
+        let mut c = customer();
+        for state in [ConsentState::NotSubscribed, ConsentState::Redacted] {
+            let change = ConsentChange {
+                state,
+                ..subscribe()
+            };
+            assert_eq!(
+                c.set_marketing_consent(Channel::Email, change, ConsentSource::Admin, at(1)),
+                Err(CustomerError::ConsentStateNotSettable(state))
+            );
+        }
+        assert_eq!(
+            c.set_marketing_consent(Channel::Sms, subscribe(), ConsentSource::Admin, at(1)),
+            Err(CustomerError::ConsentNeedsPhone)
+        );
+        c.set_phone(Some("+385 91".to_string())).unwrap();
+        assert_eq!(
+            c.set_marketing_consent(Channel::Sms, subscribe(), ConsentSource::Admin, at(1)),
+            Ok(true)
+        );
+        assert_eq!(c.marketing_consent(Channel::Sms).consented_at, Some(at(1)));
+        assert_eq!(
+            c.marketing_consent(Channel::Email).state,
+            ConsentState::NotSubscribed
+        );
+    }
+
+    #[test]
+    fn clearing_the_phone_resets_sms_consent() {
+        let mut c = customer();
+        c.set_phone(Some("+385 91".to_string())).unwrap();
+        c.set_marketing_consent(Channel::Sms, subscribe(), ConsentSource::Admin, at(1))
+            .unwrap();
+        c.take_events();
+        c.set_phone(None).unwrap();
+        assert_eq!(
+            c.marketing_consent(Channel::Sms),
+            MarketingConsent::default()
+        );
+        let types: Vec<&str> = c.take_events().iter().map(|e| e.event_type).collect();
+        assert_eq!(
+            types,
+            ["customer.updated", "customer.marketing_consent_updated"]
+        );
+    }
+
+    #[test]
+    fn a_new_email_resets_email_consent_and_records_it() {
+        let mut c = customer();
+        c.set_marketing_consent(Channel::Email, subscribe(), ConsentSource::Checkout, at(1))
+            .unwrap();
+        c.take_events();
+        c.set_email(Email::new("ana2@example.hr").unwrap()).unwrap();
+        assert_eq!(
+            c.marketing_consent(Channel::Email),
+            MarketingConsent::default()
+        );
+        let events = c.take_events();
+        let types: Vec<&str> = events.iter().map(|e| e.event_type).collect();
+        assert_eq!(
+            types,
+            ["customer.updated", "customer.marketing_consent_updated"]
+        );
+        // The same email again: nothing happens.
+        c.set_email(Email::new("ana2@example.hr").unwrap()).unwrap();
+        assert!(c.take_events().is_empty());
+    }
+
+    #[test]
+    fn consent_round_trips_through_restore() {
+        let mut c = customer();
+        c.set_marketing_consent(Channel::Email, subscribe(), ConsentSource::Checkout, at(5))
+            .unwrap();
+        assert_eq!(Customer::restore(c.snapshot()), Ok(c));
+    }
+
+    #[test]
+    fn erasure_is_requested_once_cancelled_and_then_run() {
+        let mut c = customer();
+        c.set_first_name(Some("Ana".to_string())).unwrap();
+        c.add_address(addr_id(1), address("Zagreb"), true, true)
+            .unwrap();
+        c.take_events();
+        assert_eq!(c.cancel_erasure(), Err(CustomerError::ErasureNotRequested));
+        c.request_erasure(at(10)).unwrap();
+        assert_eq!(
+            c.request_erasure(at(11)),
+            Err(CustomerError::ErasureAlreadyRequested)
+        );
+        let events = c.take_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "customer.erasure_requested");
+        c.cancel_erasure().unwrap();
+        assert_eq!(c.erasure_due_at(), None);
+        assert_eq!(c.take_events()[0].event_type, "customer.erasure_cancelled");
+
+        c.request_erasure(at(10)).unwrap();
+        assert!(c.erase(at(10)));
+        assert!(c.is_erased());
+        assert!(c.email().is_placeholder());
+        assert_eq!(c.first_name(), None);
+        assert!(c.addresses().is_empty());
+        assert_eq!(c.default_shipping(), None);
+        assert_eq!(
+            c.marketing_consent(Channel::Email).state,
+            ConsentState::Redacted
+        );
+        assert_eq!(c.erasure_due_at(), None);
+        assert!(!c.erase(at(11)), "a second run changes nothing");
+        assert_eq!(
+            c.set_first_name(Some("Ana".to_string())),
+            Err(CustomerError::Erased)
+        );
+        assert_eq!(c.request_erasure(at(12)), Err(CustomerError::Erased));
+        assert_eq!(Customer::restore(c.snapshot()), Ok(c));
     }
 
     #[test]

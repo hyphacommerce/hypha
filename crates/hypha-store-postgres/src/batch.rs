@@ -8,16 +8,19 @@ use hypha_auth::{
 use hypha_cart::{Cart, CartSnapshot, StageCarts};
 use hypha_categories::{Category, CategorySnapshot, StageCategories};
 use hypha_core::{
-    CatalogId, CategoryId, ChannelId, CustomFieldDefinitionId, HasBatch, IdempotencyRecord,
-    IdentityId, PendingEvent, Price, PriceListId, ProductId, Recorded, RepoError, SessionId,
-    StageEvents, StageIdempotency, TaxClassId, Timestamp, VariantId, Version, Versioned,
-    stamp_insert, stamp_update,
+    CartId, CatalogId, CategoryId, ChannelId, CustomFieldDefinitionId, CustomerGroupId, CustomerId,
+    HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price, PriceListId, ProductId, Recorded,
+    RepoError, SessionId, StageEvents, StageIdempotency, TaxClassId, Timestamp, VariantId, Version,
+    Versioned, stamp_insert, stamp_update,
 };
 use hypha_custom_fields::{
     CustomFieldDefinition, DefinitionSnapshot, StageCustomFieldDefinitions, StageCustomFieldValues,
     ValueRow,
 };
-use hypha_customers::{Customer, CustomerSnapshot, StageCustomers};
+use hypha_customers::{
+    Customer, CustomerGroup, CustomerGroupSnapshot, CustomerSnapshot, StageCustomerGroups,
+    StageCustomers,
+};
 use hypha_fulfillment::{Fulfillment, FulfillmentSnapshot, StageFulfillments};
 use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
 use hypha_markets::{StageCatalogProducts, StageFixedPrices};
@@ -43,12 +46,15 @@ use crate::{
         insert_identity, insert_password_reset, insert_session, revoke_sessions, update_identity,
         update_password_reset, update_session, use_up_password_resets,
     },
-    carts::{insert_cart, update_cart},
+    carts::{delete_cart, insert_cart, update_cart},
     categories::{
         add_category_products, delete_category, insert_category, remove_category_products,
         update_category,
     },
-    customers::insert_customer,
+    customer_groups::{
+        add_group_members, delete_group, insert_group, remove_group_members, update_group,
+    },
+    customers::{delete_customer, insert_customer, update_customer},
     error::repo_error,
     fulfillments::{insert_fulfillment, update_fulfillment},
     idempotency::insert_records,
@@ -88,11 +94,20 @@ enum Staged {
     Payment(PaymentSnapshot),
     NewCart(CartSnapshot),
     Cart(CartSnapshot),
+    /// A cart removed at the version it was loaded at (its lines cascade).
+    DeletedCart(CartId, Version),
     Product(ProductSnapshot),
     /// A product removed at the version it was loaded at.
     DeletedProduct(ProductId, Version),
     AssetUsages(UsageOwner, Vec<(hypha_core::AssetId, UsageRole)>),
     NewCustomer(CustomerSnapshot),
+    Customer(CustomerSnapshot),
+    /// A customer removed at the version it was loaded at (its addresses cascade).
+    DeletedCustomer(CustomerId, Version),
+    NewCustomerGroup(CustomerGroupSnapshot),
+    CustomerGroup(CustomerGroupSnapshot),
+    DeletedCustomerGroup(CustomerGroupId),
+    CustomerGroupMembers(CustomerGroupId, Vec<CustomerId>, bool),
     Idempotency(IdempotencyRecord),
     NewRole(RoleSnapshot),
     Role(RoleSnapshot),
@@ -165,12 +180,18 @@ impl Staged {
             Staged::NewPayment(_) => 4,
             Staged::Payment(_) => 5,
             Staged::NewCart(_) => 6,
-            Staged::Cart(_) => 7,
+            Staged::Cart(_) | Staged::DeletedCart(..) => 7,
             Staged::Product(_) | Staged::DeletedProduct(..) => 8,
             // The one settings row, before the usages staged with it (its logo's).
             Staged::NewNotificationSettings(_) | Staged::NotificationSettings(_) => 9,
             Staged::AssetUsages(..) => 10,
-            Staged::NewCustomer(_) => 11,
+            Staged::NewCustomer(_) | Staged::Customer(_) | Staged::DeletedCustomer(..) => 11,
+            // Groups after their customers (membership references both), before their
+            // membership.
+            Staged::NewCustomerGroup(_)
+            | Staged::CustomerGroup(_)
+            | Staged::DeletedCustomerGroup(_) => 25,
+            Staged::CustomerGroupMembers(..) => 28,
             Staged::NewRole(_) => 12,
             Staged::Role(_) => 13,
             Staged::NewUser(_) => 14,
@@ -235,10 +256,19 @@ impl Staged {
                 (Staged::NewCart(a), Staged::NewCart(b)) | (Staged::Cart(a), Staged::Cart(b)) => {
                     a.id.cmp(&b.id)
                 }
+                (Staged::DeletedCart(a, _), Staged::DeletedCart(b, _)) => a.cmp(b),
                 (Staged::Product(a), Staged::Product(b)) => a.id.cmp(&b.id),
                 (Staged::DeletedProduct(a, _), Staged::DeletedProduct(b, _)) => a.cmp(b),
                 (Staged::AssetUsages(a, _), Staged::AssetUsages(b, _)) => a.cmp(b),
-                (Staged::NewCustomer(a), Staged::NewCustomer(b)) => a.id.cmp(&b.id),
+                (Staged::NewCustomer(a), Staged::NewCustomer(b))
+                | (Staged::Customer(a), Staged::Customer(b)) => a.id.cmp(&b.id),
+                (Staged::DeletedCustomer(a, _), Staged::DeletedCustomer(b, _)) => a.cmp(b),
+                (Staged::NewCustomerGroup(a), Staged::NewCustomerGroup(b))
+                | (Staged::CustomerGroup(a), Staged::CustomerGroup(b)) => a.id.cmp(&b.id),
+                (Staged::DeletedCustomerGroup(a), Staged::DeletedCustomerGroup(b)) => a.cmp(b),
+                (Staged::CustomerGroupMembers(a, ..), Staged::CustomerGroupMembers(b, ..)) => {
+                    a.cmp(b)
+                }
                 (Staged::NewRole(a), Staged::NewRole(b)) | (Staged::Role(a), Staged::Role(b)) => {
                     a.id.cmp(&b.id)
                 }
@@ -412,6 +442,10 @@ impl StageCarts for PgBatch {
         self.stage(Staged::Cart(cart.snapshot()));
         cart.set_version(cart.version().next());
     }
+
+    fn delete_cart(&mut self, cart: &Cart) {
+        self.stage(Staged::DeletedCart(cart.id(), cart.version()));
+    }
 }
 
 impl StageProducts for PgBatch {
@@ -518,6 +552,57 @@ impl StageCustomers for PgBatch {
         self.stage_events_of(customer, Version::NEW.next());
         customer.set_version(Version::NEW.next());
     }
+
+    fn update_customer(&mut self, customer: &mut Customer) {
+        stamp_update(customer, self.now);
+        let version = customer.version().next();
+        self.stage_events_of(customer, version);
+        self.stage(Staged::Customer(customer.snapshot()));
+        customer.set_version(version);
+    }
+
+    fn delete_customer(&mut self, customer: &mut Customer) {
+        self.stage(Staged::DeletedCustomer(customer.id(), customer.version()));
+        self.stage_events_of(customer, customer.version());
+    }
+}
+
+impl StageCustomerGroups for PgBatch {
+    fn insert_group(&mut self, group: &mut CustomerGroup) {
+        stamp_insert(group, self.now);
+        let events = group.take_events();
+        self.stage(Staged::NewCustomerGroup(group.snapshot()));
+        self.stage(Staged::Events(events, Some(Version::NEW.next())));
+        group.set_version(Version::NEW.next());
+    }
+
+    fn update_group(&mut self, group: &mut CustomerGroup) {
+        stamp_update(group, self.now);
+        let version = group.version().next();
+        self.stage_events_of(group, version);
+        self.stage(Staged::CustomerGroup(group.snapshot()));
+        group.set_version(version);
+    }
+
+    fn delete_group(&mut self, group: CustomerGroupId) {
+        self.stage(Staged::DeletedCustomerGroup(group));
+    }
+
+    fn add_group_members(&mut self, group: CustomerGroupId, customers: &[CustomerId]) {
+        self.stage(Staged::CustomerGroupMembers(
+            group,
+            customers.to_vec(),
+            true,
+        ));
+    }
+
+    fn remove_group_members(&mut self, group: CustomerGroupId, customers: &[CustomerId]) {
+        self.stage(Staged::CustomerGroupMembers(
+            group,
+            customers.to_vec(),
+            false,
+        ));
+    }
 }
 
 impl StageIdempotency for PgBatch {
@@ -574,6 +659,7 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     Staged::Cart(s) => {
                         update_cart(&db, &s).await?;
                     }
+                    Staged::DeletedCart(id, version) => delete_cart(&db, id, version).await?,
                     Staged::Product(s) => {
                         update_product(&db, &s).await?;
                     }
@@ -586,6 +672,12 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                         replace_usages(&db, &owner, &usages).await?
                     }
                     Staged::NewCustomer(s) => insert_customer(&db, &s).await?,
+                    Staged::Customer(s) => {
+                        update_customer(&db, &s).await?;
+                    }
+                    Staged::DeletedCustomer(id, version) => {
+                        delete_customer(&db, id, version).await?
+                    }
                     Staged::Idempotency(record) => records.push(record),
                     Staged::NewRole(s) => insert_role(&db, &s).await?,
                     Staged::Role(s) => {
@@ -641,6 +733,17 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     }
                     Staged::CategoryProducts(category, products, false) => {
                         remove_category_products(&db, category, &products).await?
+                    }
+                    Staged::NewCustomerGroup(s) => insert_group(&db, &s).await?,
+                    Staged::CustomerGroup(s) => {
+                        update_group(&db, &s).await?;
+                    }
+                    Staged::DeletedCustomerGroup(id) => delete_group(&db, id).await?,
+                    Staged::CustomerGroupMembers(group, customers, true) => {
+                        add_group_members(&db, group, &customers).await?
+                    }
+                    Staged::CustomerGroupMembers(group, customers, false) => {
+                        remove_group_members(&db, group, &customers).await?
                     }
                     Staged::FixedPrices(list, changes) => {
                         let set: Vec<(VariantId, Price)> = changes

@@ -664,7 +664,7 @@ fn a_linked_customer_who_changed_email_gets_the_order_at_the_new_one() {
     .unwrap();
     // After linking, the customer changes their email; the cart's copy is now stale.
     let new_email = Email::new("marko@novi.hr").unwrap();
-    marko.set_email(new_email.clone());
+    marko.set_email(new_email.clone()).unwrap();
     block_on(world.customers.update(&mut marko)).unwrap();
 
     let order = world.checkout(cart).unwrap();

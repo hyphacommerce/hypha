@@ -928,6 +928,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/custom-field-definitions/suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The well-known fields a merchant may want (design note 0032, CD11: customers' labels
+         *     `custom.tags` and note `custom.note`), each with the body that creates it and the
+         *     merchant's definition of its key when there is one. They're conventions: nothing
+         *     creates them but a click here or `pnpm seed`.
+         */
+        get: operations["admin.custom_fields.suggestions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/custom-field-definitions/{id}": {
         parameters: {
             query?: never;
@@ -1035,6 +1057,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/customer-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every customer group, by name. */
+        get: operations["admin.customer_groups.list"];
+        put?: never;
+        /** Creates a customer group. */
+        post: operations["admin.customer_groups.create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/customer-groups/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A customer group. Its customers: `GET /admin/customers?group={id}`. */
+        get: operations["admin.customer_groups.fetch"];
+        put?: never;
+        post?: never;
+        /**
+         * Deletes a group with its membership; its customers stay. Once prices or payment
+         *     methods point at groups, one in use is refused.
+         */
+        delete: operations["admin.customer_groups.remove"];
+        options?: never;
+        head?: never;
+        /** Renames, re-handles or describes a group (JSON Merge Patch). */
+        patch: operations["admin.customer_groups.update"];
+        trace?: never;
+    };
+    "/admin/customer-groups/{id}/customers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adds customers to a group; ones already in it are ignored. One
+         *     `customer_group.members_added` for what changed.
+         */
+        post: operations["admin.customer_groups.add_customers"];
+        /** Removes customers from a group; ones not in it are ignored. */
+        delete: operations["admin.customer_groups.remove_customers"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/customers": {
         parameters: {
             query?: never;
@@ -1067,7 +1150,13 @@ export interface paths {
         get: operations["admin.customers.fetch"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Deletes a customer that has no orders (design note 0032, CD7): the row, its address
+         *     book and memberships go, its carts are unlinked (email kept), and its custom field
+         *     values follow `customer.deleted`. One with orders, cancelled ones included, is
+         *     refused with `409 customer_has_orders`: request its erasure instead.
+         */
+        delete: operations["admin.customers.remove"];
         options?: never;
         head?: never;
         /** Changes a customer's details (JSON Merge Patch). */
@@ -1132,6 +1221,100 @@ export interface paths {
          *     personal field.
          */
         patch: operations["admin.custom_fields.update_customer"];
+        trace?: never;
+    };
+    "/admin/customers/{id}/erasure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Asks for the customer's personal data to be erased after the cancel window
+         *     (`customers.erasure_delay`, 10 days by default; design note 0032, §7.3), recording
+         *     `customer.erasure_requested`. The job then removes names, contact details, addresses,
+         *     consents and personal custom fields from the customer and its orders, carts and email
+         *     records, keeps the orders themselves, and records `customer.redacted` for apps. Needs
+         *     `customers:erase`; `409 erasure_already_requested` while one is pending, `409
+         *     customer_erased` after.
+         */
+        post: operations["admin.customers.request_erasure"];
+        /**
+         * Cancels a requested erasure while its window is open (`409 erasure_not_requested`
+         *     otherwise), recording `customer.erasure_cancelled`.
+         */
+        delete: operations["admin.customers.cancel_erasure"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/customers/{id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Answers a customer's data request with one JSON document: the customer with its
+         *     addresses, consent and custom fields, its orders, their payments and the emails sent
+         *     about them. Records `customer.data_requested` so apps can answer too. Needs
+         *     `customers:read`, and every `customer_data:*` scope for a caller that isn't a staff
+         *     session.
+         */
+        get: operations["admin.customers.export"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/customers/{id}/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Makes `groups` the customer's groups (design note 0032, §6): one write, an event per
+         *     group whose membership changed.
+         */
+        put: operations["admin.customers.set_groups"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/customers/{id}/marketing/{channel}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Records a customer's marketing consent for a channel (`email` or `sms`; design note
+         *     0032, §5). The newest `consented_at` wins, so a delayed sync can't overwrite a newer
+         *     opt-out: an older write answers `applied: false`. SMS needs a phone (`409
+         *     consent_needs_phone`); an erased customer is read-only (`409 customer_erased`).
+         */
+        put: operations["admin.customers.set_consent"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/admin/events/{id}": {
@@ -3305,6 +3488,11 @@ export interface components {
             lines: components["schemas"]["LineResponse"][];
             /** @description Picked from the country when the cart was created; it sets the currency. */
             market: components["schemas"]["MarketId"];
+            /**
+             * @description Whether the buyer ticked "Email me with news and offers" (`PUT …/marketing`):
+             *     checkout records the consent then (design note 0032, §5).
+             */
+            marketing_opt_in: boolean;
             order?: components["schemas"]["OrderId"] | null;
             payment_method?: components["schemas"]["PaymentMethodId"] | null;
             /**
@@ -3585,6 +3773,29 @@ export interface components {
             scopes: components["schemas"]["Scope"][];
             status: components["schemas"]["OAuthRequestStatus"];
         };
+        /** @description A channel's marketing consent (design note 0032, §5). */
+        ConsentResponse: {
+            /** @description When the customer last said so, RFC 3339 in UTC; absent while never asked. */
+            consented_at?: string | null;
+            /** @description `single`, `confirmed` (double opt-in) or `unknown`. */
+            opt_in_level: string;
+            /**
+             * @description Where it came from: `checkout`, `storefront`, `admin`, `import`, `system`, or
+             *     `app:<appid_…>`; absent while never asked.
+             */
+            source?: string | null;
+            /**
+             * @description `not_subscribed` (never asked), `pending`, `subscribed`, `unsubscribed`, or
+             *     `redacted` (erased).
+             */
+            state: string;
+        };
+        /** @description A consent write's outcome: whether it changed anything, and the customer as it is. */
+        ConsentUpdateResponse: {
+            /** @description `false` when a newer consent is stored, or nothing changed. */
+            applied: boolean;
+            customer: components["schemas"]["CustomerResponse"];
+        };
         /**
          * @description An ISO 3166-1 alpha-2 country code.
          * @example HR
@@ -3695,6 +3906,14 @@ export interface components {
              */
             type: string;
             validations?: components["schemas"]["CustomFieldValidations"] | null;
+        };
+        CreateCustomerGroupRequest: {
+            /** @description Plain text, up to 1,000 characters. */
+            description?: string | null;
+            /** @description Lowercase letters, digits and single dashes; unique among groups. */
+            handle: string;
+            /** @description 1 to 255 characters, trimmed; unique among groups ignoring case. */
+            name: string;
         };
         CreateCustomerRequest: {
             email: string;
@@ -4001,6 +4220,35 @@ export interface components {
                 [key: string]: number;
             };
         };
+        /** @description Everything Hypha holds about a customer, as one document (design note 0032, §7.4). */
+        CustomerExportResponse: {
+            customer: components["schemas"]["CustomerResponse"];
+            /** @description The emails sent about the orders. */
+            emails: components["schemas"]["NotificationResponse"][];
+            /** @description When the export was made, RFC 3339 in UTC. */
+            exported_at: string;
+            orders: components["schemas"]["OrderResponse"][];
+            payments: components["schemas"]["PaymentResponse"][];
+        };
+        /**
+         * @description A CustomerGroupId: `cgrp_` and 32 hex digits.
+         * @example cgrp_0190f1a2b3c47d8e9f00112233445566
+         */
+        CustomerGroupId: string;
+        CustomerGroupList: {
+            /** @description By name, ignoring case. A store has few groups, so they come in one response. */
+            items: components["schemas"]["CustomerGroupResponse"][];
+        };
+        CustomerGroupResponse: {
+            /** @description RFC 3339 in UTC. */
+            created_at: string;
+            description?: string | null;
+            /** @description Lowercase letters, digits and single dashes; unique among groups. */
+            handle: string;
+            id: components["schemas"]["CustomerGroupId"];
+            name: string;
+            updated_at: string;
+        };
         /**
          * @description A CustomerId: `cus_` and 32 hex digits.
          * @example cus_0190f1a2b3c47d8e9f00112233445566
@@ -4008,6 +4256,11 @@ export interface components {
         CustomerId: string;
         CustomerResponse: {
             addresses: components["schemas"]["AddressResponse"][];
+            /**
+             * @description Whether `DELETE /admin/customers/{id}` would work: only while the customer has no
+             *     orders, cancelled ones included (design note 0032, CD7). Otherwise erase it.
+             */
+            can_delete: boolean;
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;
             /**
@@ -4020,9 +4273,31 @@ export interface components {
             default_billing_address?: components["schemas"]["AddressId"] | null;
             default_shipping_address?: components["schemas"]["AddressId"] | null;
             email: components["schemas"]["Email"];
+            /**
+             * @description Consent to marketing by email (design note 0032, §5); `PUT
+             *     /admin/customers/{id}/marketing/email` changes it.
+             */
+            email_marketing: components["schemas"]["ConsentResponse"];
+            /**
+             * @description When the customer's personal data was erased, RFC 3339 in UTC (design note 0032,
+             *     §7.3): the customer is read-only then and its email a placeholder.
+             */
+            erased_at?: string | null;
+            /**
+             * @description When a requested erasure runs, RFC 3339 in UTC; absent without a request. `DELETE
+             *     /admin/customers/{id}/erasure` cancels it until then.
+             */
+            erasure_due_at?: string | null;
             first_name?: string | null;
+            /**
+             * @description The customer groups it's in (design note 0032, §6), sorted; `PUT
+             *     /admin/customers/{id}/groups` sets them.
+             */
+            groups: components["schemas"]["CustomerGroupId"][];
             id: components["schemas"]["CustomerId"];
             last_name?: string | null;
+            /** @description What the customer's orders add up to (design note 0032). */
+            orders: components["schemas"]["OrderStatsResponse"];
             phone?: string | null;
             /**
              * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
@@ -4031,6 +4306,8 @@ export interface components {
              *     object then, whatever the schema says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
+            /** @description Consent to marketing by SMS; needs a phone. */
+            sms_marketing: components["schemas"]["ConsentResponse"];
             /** @description When it last changed, RFC 3339 in UTC. */
             updated_at: string;
         };
@@ -4387,6 +4664,10 @@ export interface components {
             /** @description What the app's tokens may do, at most. */
             scopes: components["schemas"]["Scope"][];
         };
+        GroupCustomersRequest: {
+            /** @description Each must exist (`422 customer_not_found`). */
+            customers: components["schemas"]["CustomerId"][];
+        };
         HeaderResponse: {
             name: string;
             value: string;
@@ -4526,11 +4807,11 @@ export interface components {
              * @description Items to add where they're missing (each once; text ignoring case when the field
              *     has `unique_items`).
              */
-            add?: Record<string, never>[];
+            add?: unknown[];
             /** @description 1 to 250 owners of the definition's owner type (`cus_…` for a customer field). */
             owners: string[];
             /** @description Items to remove where they're present. */
-            remove?: Record<string, never>[];
+            remove?: unknown[];
         };
         ListItemsResponse: {
             /** @description In the call's order, each owner once. */
@@ -4926,6 +5207,29 @@ export interface components {
             service?: string | null;
             tax?: components["schemas"]["OrderTaxResponse"] | null;
         };
+        /**
+         * @description A customer's orders, added up over those that weren't cancelled (design note 0032,
+         *     §8): `GET /admin/orders?customer=` lists them.
+         */
+        OrderStatsResponse: {
+            /** @description Their totals, one per currency the customer paid in, by currency code. */
+            amount_spent: components["schemas"]["Money"][];
+            /**
+             * Format: int64
+             * @description How many of the customer's orders were cancelled: counted apart, since they add
+             *     up to nothing, but they still keep the customer from being deleted.
+             */
+            cancelled: number;
+            /**
+             * Format: int64
+             * @description How many orders the customer placed that weren't cancelled.
+             */
+            count: number;
+            /** @description When the first of them was placed, RFC 3339 in UTC; absent without orders. */
+            first_placed_at?: string | null;
+            /** @description When the last of them was placed, RFC 3339 in UTC; absent without orders. */
+            last_placed_at?: string | null;
+        };
         /** @description A page of a list, newest first (design note 0012). */
         OrderSummaryPage: {
             /** @description Whether there are more after these. */
@@ -4987,9 +5291,9 @@ export interface components {
         /** @description One owner's list after the change. */
         OwnerItemsResponse: {
             /** @description What this call added to its list (empty: nothing changed). */
-            added: Record<string, never>[];
+            added: unknown[];
             owner: string;
-            removed: Record<string, never>[];
+            removed: unknown[];
             /**
              * Format: int64
              * @description The value's version after; `null` when the list is empty (the value is gone).
@@ -5577,7 +5881,7 @@ export interface components {
             };
         };
         /**
-         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `customers:erase`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         Scope: string;
@@ -5670,6 +5974,24 @@ export interface components {
             /** Format: int32 */
             rate_ppm: number;
         };
+        /**
+         * @description What a consent write asks for. The source is the caller's (an app is itself, staff
+         *     and keys are `admin`), never input.
+         */
+        SetConsentRequest: {
+            /**
+             * @description When the customer said so, RFC 3339; default now. The newest consent wins: a
+             *     write older than the stored one changes nothing (`applied: false`).
+             */
+            consented_at?: string | null;
+            /** @description `single`, `confirmed` or `unknown` (the default). */
+            opt_in_level?: string;
+            /**
+             * @description `pending`, `subscribed` or `unsubscribed`: `not_subscribed` is the starting
+             *     state and `redacted` erasure's, so neither can be asked for.
+             */
+            state: string;
+        };
         /** @description A write to an owner's fields: a JSON Merge Patch of its values. */
         SetCustomFieldsRequest: {
             /**
@@ -5687,6 +6009,13 @@ export interface components {
             if_versions?: {
                 [key: string]: number;
             };
+        };
+        SetCustomerGroupsRequest: {
+            /**
+             * @description The groups the customer is in afterwards: added to the new ones, removed from the
+             *     rest. Every group must exist (`422 customer_group_not_found`).
+             */
+            groups: components["schemas"]["CustomerGroupId"][];
         };
         SetCustomerRequest: {
             customer?: components["schemas"]["CustomerId"] | null;
@@ -5924,6 +6253,30 @@ export interface components {
             setup: components["schemas"]["SetupProgressResponse"];
             timezone?: components["schemas"]["Timezone"] | null;
         };
+        SuggestedDefinitionList: {
+            /** @description In the order the admin shows them. */
+            items: components["schemas"]["SuggestedDefinitionResponse"][];
+        };
+        /**
+         * @description A field worth having (design note 0032, CD11): the body `POST
+         *     /admin/custom-field-definitions` takes to create it, and why.
+         */
+        SuggestedDefinitionResponse: {
+            access: components["schemas"]["CustomFieldAccess"];
+            capabilities: components["schemas"]["CustomFieldCapabilities"];
+            description?: string | null;
+            existing?: components["schemas"]["CustomFieldDefinitionId"] | null;
+            /** @description `custom.<key>`: what values, filters and events would name it by. */
+            field: string;
+            key: string;
+            name: string;
+            owner_type: components["schemas"]["OwnerTypeDto"];
+            personal: boolean;
+            type: string;
+            validations: components["schemas"]["CustomFieldValidations"];
+            /** @description One sentence for staff: what the field is for. */
+            why: string;
+        };
         /**
          * @description A TaxClassId: `txc_` and 32 hex digits.
          * @example txc_0190f1a2b3c47d8e9f00112233445566
@@ -6081,6 +6434,12 @@ export interface components {
              *     custom_field_values_invalid` names the owners to fix.
              */
             validations?: components["schemas"]["CustomFieldValidations"];
+        };
+        UpdateCustomerGroupRequest: {
+            /** @description `null` clears it. */
+            description?: string | null;
+            handle?: string;
+            name?: string;
         };
         /**
          * @description JSON Merge Patch (see `patch`): only the fields sent change, `null` clears a name or
@@ -12279,6 +12638,65 @@ export interface operations {
             };
         };
     };
+    "admin.custom_fields.suggestions": {
+        parameters: {
+            query?: {
+                /** @description Only this owner type's. */
+                owner_type?: "product" | "variant" | "category" | "customer" | "order";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuggestedDefinitionList"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.custom_fields.fetch": {
         parameters: {
             query?: never;
@@ -12916,6 +13334,607 @@ export interface operations {
             };
         };
     };
+    "admin.customer_groups.list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerGroupList"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.customer_groups.create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCustomerGroupRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerGroupResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.customer_groups.fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomerGroupId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerGroupResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.customer_groups.remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomerGroupId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.customer_groups.update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomerGroupId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateCustomerGroupRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerGroupResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.customer_groups.add_customers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomerGroupId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupCustomersRequest"];
+            };
+        };
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.customer_groups.remove_customers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomerGroupId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupCustomersRequest"];
+            };
+        };
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.customers.list": {
         parameters: {
             query?: {
@@ -12930,6 +13949,8 @@ export interface operations {
                  *     (sorting by email or name, the matching one).
                  */
                 q?: string;
+                /** @description Only customers in this group (design note 0032, §6). */
+                group?: components["schemas"]["CustomerGroupId"];
                 sort?: "newest" | "oldest" | "email_asc" | "email_desc" | "name_asc" | "name_desc";
                 /** @description Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
                 field?: {
@@ -13152,6 +14173,80 @@ export interface operations {
             };
             /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.customers.remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13658,6 +14753,444 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CustomFieldsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.customers.request_erasure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.customers.cancel_erasure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.customers.export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerExportResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.customers.set_groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCustomerGroupsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.customers.set_consent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CustomerId"];
+                /**
+                 * @description `email` or `sms`
+                 * @example email
+                 */
+                channel: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetConsentRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentUpdateResponse"];
                 };
             };
             /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
@@ -17791,6 +19324,8 @@ export interface operations {
                 fulfillment_status?: components["schemas"]["FulfillmentStatusDto"][];
                 /** @description Only cancelled orders (`true`), or only those that aren't (`false`). */
                 cancelled?: boolean;
+                /** @description Only this customer's orders (design note 0032). */
+                customer?: components["schemas"]["CustomerId"];
                 /** @description Only orders placed through this sales channel. */
                 channel?: components["schemas"]["ChannelId"];
                 /** @description Only orders shipped to (or placed in) this country (ISO 3166-1 alpha-2). */

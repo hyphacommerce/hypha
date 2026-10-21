@@ -1,11 +1,13 @@
 use hypha_core::{
-    Address, AddressError, AddressId, AddressParts, AuthError, Ctx, CustomerId, Email, EmailError,
-    ErrorCode, IdGenerator, Keyset, Page, PageRequest, RepoError, Scope, report_duplicate,
+    Actor, Address, AddressError, AddressId, AddressParts, AuthError, Clock, Ctx, CustomerGroupId,
+    CustomerId, Email, EmailError, ErrorCode, Handle, IdGenerator, Keyset, Page, PageRequest,
+    RepoError, Scope, report_duplicate,
 };
 use thiserror::Error;
 
 use crate::{
     Customer, CustomerError, CustomerFilter, CustomerSort, CustomerSummary,
+    consent::{Channel, ConsentChange, ConsentSource},
     repo::{CustomerRepo, keys},
 };
 
@@ -25,6 +27,12 @@ pub enum CommandError {
     CustomerNotFound(CustomerId),
     #[error("{email} is already customer {customer}")]
     CustomerExists { email: Email, customer: CustomerId },
+    #[error("customer group {0} not found")]
+    GroupNotFound(CustomerGroupId),
+    #[error("a customer group with the handle {0} exists")]
+    GroupHandleTaken(Handle),
+    #[error("a customer group named {0:?} exists")]
+    GroupNameTaken(String),
 }
 
 impl ErrorCode for CommandError {
@@ -37,6 +45,9 @@ impl ErrorCode for CommandError {
             CommandError::Address(e) => e.code(),
             CommandError::CustomerNotFound(_) => "customer_not_found",
             CommandError::CustomerExists { .. } => "customer_exists",
+            CommandError::GroupNotFound(_) => "customer_group_not_found",
+            CommandError::GroupHandleTaken(_) => "customer_group_handle_taken",
+            CommandError::GroupNameTaken(_) => "customer_group_name_taken",
         }
     }
 }
@@ -114,11 +125,12 @@ pub async fn list_customers<R: CustomerRepo>(
     customers: &R,
     q: Option<String>,
     fields: Vec<hypha_core::FieldFilter>,
+    group: Option<CustomerGroupId>,
     sort: CustomerSort,
     page: PageRequest<Keyset<CustomerId>>,
 ) -> Result<Page<CustomerSummary>, CommandError> {
     ctx.require(Scope::CustomersRead)?;
-    let filter = CustomerFilter::new(q)?.with_fields(fields);
+    let filter = CustomerFilter::new(q)?.with_fields(fields).in_group(group);
     Ok(customers.list(&filter, sort, page).await?)
 }
 
@@ -160,7 +172,7 @@ pub async fn update_customer<R: CustomerRepo>(
     if let Some(taken) = email_taken(customers, &email, id).await? {
         return Err(taken);
     }
-    customer.set_email(email.clone());
+    customer.set_email(email.clone())?;
     let written = customers.update(&mut customer).await;
     report_duplicate(
         written,
@@ -169,6 +181,38 @@ pub async fn update_customer<R: CustomerRepo>(
     )
     .await?;
     Ok(customer)
+}
+
+/// Where a consent written through the API comes from: an app is itself, anyone else on
+/// the admin surface is `admin` (design note 0032, §5).
+fn source_of(ctx: &Ctx) -> ConsentSource {
+    match ctx.actor() {
+        Actor::App(id) => ConsentSource::App(id),
+        Actor::System => ConsentSource::System,
+        Actor::User(_) | Actor::Agent(_) | Actor::ApiKey(_) => ConsentSource::Admin,
+    }
+}
+
+/// Records a customer's marketing consent for `channel` (design note 0032, §5): the
+/// newest `consented_at` wins, so a write older than what's stored changes nothing and
+/// answers `applied: false` with the customer as it is. The source is the caller's, never
+/// input.
+pub async fn set_marketing_consent<R: CustomerRepo>(
+    ctx: &Ctx,
+    customers: &R,
+    clock: &impl Clock,
+    id: CustomerId,
+    channel: Channel,
+    change: ConsentChange,
+) -> Result<(Customer, bool), CommandError> {
+    ctx.require(Scope::CustomersWrite)?;
+
+    let mut customer = load(customers, id).await?;
+    let applied = customer.set_marketing_consent(channel, change, source_of(ctx), clock.now())?;
+    if applied {
+        customers.update(&mut customer).await?;
+    }
+    Ok((customer, applied))
 }
 
 /// An address for the address book, and whether it becomes a default.

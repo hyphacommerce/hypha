@@ -60,6 +60,10 @@ pub enum CommandError {
     /// isn't kept. Nor can one about no order.
     #[error("a {template} message can't be resent")]
     NotResendable { template: TemplateKey },
+    /// The customer was erased (design note 0032, CD10): their placeholder address can't
+    /// receive mail, so the message can't be sent again.
+    #[error("the customer was erased: the message can't be resent")]
+    RecipientErased,
     /// An event whose payload isn't what its type promises.
     #[error("event {event} ({event_type}) has an unexpected payload: {reason}")]
     BadEvent {
@@ -91,6 +95,7 @@ impl ErrorCode for CommandError {
             CommandError::EmailNotConfigured => "email_not_configured",
             CommandError::StaffOnly => "staff_only",
             CommandError::NotResendable { .. } => "notification_not_resendable",
+            CommandError::RecipientErased => "customer_erased",
             CommandError::BadEvent { .. } => "event_payload_invalid",
         }
     }

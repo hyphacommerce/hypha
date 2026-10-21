@@ -1,6 +1,6 @@
 use hypha_core::{
-    CustomerId, Email, Keyset, Page, PageRequest, Recorded, RepoError, Versioned, stamp_insert,
-    stamp_update,
+    CustomerId, Email, Keyset, Page, PageRequest, Recorded, RepoError, Timestamp, Versioned,
+    stamp_insert, stamp_update,
 };
 use hypha_customers::{
     Customer, CustomerFilter, CustomerRepo, CustomerSort, CustomerSummary, repo::keys,
@@ -9,6 +9,7 @@ use hypha_customers::{
 use crate::{
     InMemoryOutbox,
     custom_fields::{SharedValues, fields_match, values_for},
+    customer_groups::SharedGroupMembers,
     table::Table,
 };
 
@@ -17,6 +18,7 @@ pub struct InMemoryCustomerRepo {
     pub(crate) customers: Table<CustomerId, Customer>,
     pub(crate) outbox: InMemoryOutbox,
     field_values: SharedValues,
+    group_members: SharedGroupMembers,
 }
 
 impl InMemoryCustomerRepo {
@@ -33,6 +35,14 @@ impl InMemoryCustomerRepo {
     pub fn joining_fields(self, fields: &crate::InMemoryCustomFields) -> Self {
         Self {
             field_values: fields.shared_values(),
+            ..self
+        }
+    }
+
+    /// The same repo, filtering its list by `groups`' membership (design note 0032, §6).
+    pub fn joining_groups(self, groups: &crate::InMemoryCustomerGroupRepo) -> Self {
+        Self {
+            group_members: groups.shared_members(),
             ..self
         }
     }
@@ -73,10 +83,21 @@ impl CustomerRepo for InMemoryCustomerRepo {
             )));
         }
         let values = values_for(&self.field_values, filter.fields());
+        let in_group: Option<std::collections::HashSet<CustomerId>> = filter.group().map(|g| {
+            self.group_members
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&g)
+                .cloned()
+                .unwrap_or_default()
+        });
         Ok(self.customers.page_sorted(
             |c| {
                 filter.matches(c)
                     && fields_match(values.as_ref(), c.id().as_uuid(), filter.fields())
+                    && in_group
+                        .as_ref()
+                        .is_none_or(|members| members.contains(&c.id()))
             },
             &page,
             sort.direction(),
@@ -108,5 +129,29 @@ impl CustomerRepo for InMemoryCustomerRepo {
         self.customers.update(customer.id(), customer, &unique)?;
         self.outbox.write(events, Some(customer.version()));
         Ok(())
+    }
+
+    async fn due_for_erasure(
+        &self,
+        now: Timestamp,
+        limit: u32,
+    ) -> Result<Vec<CustomerId>, RepoError> {
+        let mut due: Vec<(Timestamp, CustomerId)> = self
+            .customers
+            .all()
+            .into_iter()
+            .filter(|c| !c.is_erased())
+            .filter_map(|c| {
+                c.erasure_due_at()
+                    .filter(|at| *at <= now)
+                    .map(|at| (at, c.id()))
+            })
+            .collect();
+        due.sort();
+        Ok(due
+            .into_iter()
+            .take(limit as usize)
+            .map(|(_, id)| id)
+            .collect())
     }
 }

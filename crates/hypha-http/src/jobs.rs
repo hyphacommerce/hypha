@@ -435,7 +435,8 @@ pub async fn media_sweep<S: Storage>(state: &AppState<S>) -> Step {
 }
 
 /// Deletes what's past keeping (`[jobs.prune]`): events, idempotency keys, sessions
-/// that ended, and the extension call log (design note 0029).
+/// that ended, and the extension call log (design note 0029); and runs the customer
+/// erasures that are due (design note 0032, §7.3), since they too are data past its time.
 pub async fn prune<S: Storage>(state: &AppState<S>) -> Step {
     let ports = state
         .public_ports()
@@ -458,18 +459,26 @@ pub async fn prune<S: Storage>(state: &AppState<S>) -> Step {
     )
     .await
     .map_err(|e| e.to_string())?;
-    let done = events.done + keys.done + sessions.done + calls.done;
+    let erasures = hypha_privacy::erase_due(&ports, &state.clock, state.config.dispatch.batch)
+        .await
+        .map_err(|e| e.to_string())?;
+    for (customer, error) in &erasures.failed {
+        tracing::warn!(%customer, %error, "jobs: a customer's erasure failed; tried again next run");
+    }
+    let erased = erasures.progress;
+    let done = events.done + keys.done + sessions.done + calls.done + erased.done;
     if done > 0 {
         tracing::info!(
             events = events.done,
             idempotency_keys = keys.done,
             sessions = sessions.done,
             extension_calls = calls.done,
+            customers_erased = erased.done,
             "jobs: pruned"
         );
     }
     Ok(Ran {
-        more: events.more || keys.more || sessions.more || calls.more,
+        more: events.more || keys.more || sessions.more || calls.more || erased.more,
         idle: done == 0,
         retry_at: None,
     })

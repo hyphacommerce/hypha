@@ -5,7 +5,12 @@ use hypha_core::{
     stamp_insert, stamp_update,
 };
 use hypha_shipping::ProviderKey;
-use tokio_postgres::types::{ToSql, Type};
+use std::collections::HashMap;
+
+use tokio_postgres::{
+    Row,
+    types::{ToSql, Type},
+};
 use uuid::Uuid;
 
 use crate::{
@@ -23,6 +28,11 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
     async fn get(&self, id: CartId) -> Result<Option<Cart>, RepoError> {
         let mut conn = self.conn().await;
         consistent_read!(conn, |tx| load_cart(tx, id).await)
+    }
+
+    async fn of_customer(&self, customer: CustomerId) -> Result<Vec<Cart>, RepoError> {
+        let mut conn = self.conn().await;
+        consistent_read!(conn, |tx| load_carts_of(tx, customer).await)
     }
 
     async fn insert(&self, cart: &mut Cart) -> Result<(), RepoError> {
@@ -46,8 +56,8 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
 pub(crate) async fn insert_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<(), RepoError> {
     tx.query_typed(
         "INSERT INTO carts (id, version, market_id, country, email, customer_id, order_id,
-             channel_id, payment_method_id)
-         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8)",
+             channel_id, payment_method_id, marketing_opt_in)
+         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9)",
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&s.market.as_uuid(), Type::UUID),
@@ -57,6 +67,7 @@ pub(crate) async fn insert_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<(
             (&s.order.map(|o| o.as_uuid()), Type::UUID),
             (&s.channel.as_uuid(), Type::UUID),
             (&s.payment_method.map(|m| m.as_uuid()), Type::UUID),
+            (&s.marketing_opt_in, Type::BOOL),
         ],
     )
     .await
@@ -113,6 +124,26 @@ async fn write_shipping(tx: &impl Queries, s: &CartSnapshot) -> Result<(), RepoE
     Ok(())
 }
 
+/// Removes a cart at `version` (its lines cascade): erasure deleting a customer's open
+/// carts (design note 0032, §7.3).
+pub(crate) async fn delete_cart(
+    tx: &impl Queries,
+    id: CartId,
+    version: Version,
+) -> Result<(), RepoError> {
+    let gone = tx
+        .query_typed_opt(
+            "DELETE FROM carts WHERE id = $1 AND version = $2 RETURNING id",
+            &[
+                (&id.as_uuid(), Type::UUID),
+                (&version_to_db(version)?, Type::INT8),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    gone.map(|_| ()).ok_or(RepoError::StaleVersion)
+}
+
 /// `CartRepo::update` inside the caller's transaction (also used by `PgBatch`). Returns
 /// the new version; on `StaleVersion` the caller drops the transaction, rolling it back.
 pub(crate) async fn update_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<Version, RepoError> {
@@ -120,7 +151,8 @@ pub(crate) async fn update_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<V
     let bumped = tx
         .query_typed_opt(
             "UPDATE carts SET version = version + 1, market_id = $3, country = $4, email = $5,
-                     customer_id = $6, order_id = $7, payment_method_id = $8
+                     customer_id = $6, order_id = $7, payment_method_id = $8,
+                     marketing_opt_in = $9
                  WHERE id = $1 AND version = $2 RETURNING version",
             &[
                 (&s.id.as_uuid(), Type::UUID),
@@ -131,6 +163,7 @@ pub(crate) async fn update_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<V
                 (&s.customer.map(|c| c.as_uuid()), Type::UUID),
                 (&s.order.map(|o| o.as_uuid()), Type::UUID),
                 (&s.payment_method.map(|m| m.as_uuid()), Type::UUID),
+                (&s.marketing_opt_in, Type::BOOL),
             ],
         )
         .await
@@ -181,16 +214,7 @@ async fn write_lines(
 async fn load_cart(client: &impl Queries, id: CartId) -> Result<Option<Cart>, RepoError> {
     let Some(row) = client
         .query_typed_opt(
-            &format!(
-                "SELECT version, market_id, country, email, customer_id, order_id, channel_id,
-                        payment_method_id, {},
-                        shipping_option_id, quote_amount, quote_currency, quote_provider,
-                        quote_service, quote_reference, {}, {}
-                 FROM carts WHERE id = $1",
-                address_columns("shipping_"),
-                micros("quoted_at"),
-                stamp_columns(""),
-            ),
+            &format!("{} WHERE id = $1", select_carts()),
             &[(&id.as_uuid(), Type::UUID)],
         )
         .await
@@ -207,16 +231,81 @@ async fn load_cart(client: &impl Queries, id: CartId) -> Result<Option<Cart>, Re
         .await
         .map_err(repo_error)?
         .iter()
-        .map(|line| {
-            let quantity: i64 = col(line, "quantity")?;
-            Ok(CartLineSnapshot {
-                product: ProductId::from_uuid(col(line, "product_id")?),
-                variant: VariantId::from_uuid(col(line, "variant_id")?),
-                quantity: u32::try_from(quantity)
-                    .map_err(|_| corrupt(format!("cart quantity {quantity}")))?,
-            })
-        })
+        .map(line_from_row)
         .collect::<Result<Vec<_>, RepoError>>()?;
+    cart_from_row(&row, id, lines).map(Some)
+}
+
+/// Every cart of `customer`, oldest first, in 2 queries for all of them (run inside
+/// `consistent_read`): the rows, then every line of theirs.
+async fn load_carts_of(
+    client: &impl Queries,
+    customer: CustomerId,
+) -> Result<Vec<Cart>, RepoError> {
+    let rows = client
+        .query_typed(
+            &format!("{} WHERE customer_id = $1 ORDER BY id", select_carts()),
+            &[(&customer.as_uuid(), Type::UUID)],
+        )
+        .await
+        .map_err(repo_error)?;
+    let ids: Vec<Uuid> = rows
+        .iter()
+        .map(|row| col(row, "id"))
+        .collect::<Result<_, RepoError>>()?;
+    let mut lines: HashMap<Uuid, Vec<CartLineSnapshot>> = HashMap::new();
+    for row in client
+        .query_typed(
+            "SELECT cart_id, product_id, variant_id, quantity FROM cart_lines
+             WHERE cart_id = ANY($1) ORDER BY cart_id, position",
+            &[(&ids, Type::UUID_ARRAY)],
+        )
+        .await
+        .map_err(repo_error)?
+        .iter()
+    {
+        lines
+            .entry(col(row, "cart_id")?)
+            .or_default()
+            .push(line_from_row(row)?);
+    }
+    rows.iter()
+        .map(|row| {
+            let id: Uuid = col(row, "id")?;
+            cart_from_row(
+                row,
+                CartId::from_uuid(id),
+                lines.remove(&id).unwrap_or_default(),
+            )
+        })
+        .collect()
+}
+
+/// The cart columns a load reads, without the `WHERE`.
+fn select_carts() -> String {
+    format!(
+        "SELECT id, version, market_id, country, email, customer_id, order_id, channel_id,
+                payment_method_id, marketing_opt_in, {},
+                shipping_option_id, quote_amount, quote_currency, quote_provider,
+                quote_service, quote_reference, {}, {}
+         FROM carts",
+        address_columns("shipping_"),
+        micros("quoted_at"),
+        stamp_columns(""),
+    )
+}
+
+fn line_from_row(line: &Row) -> Result<CartLineSnapshot, RepoError> {
+    let quantity: i64 = col(line, "quantity")?;
+    Ok(CartLineSnapshot {
+        product: ProductId::from_uuid(col(line, "product_id")?),
+        variant: VariantId::from_uuid(col(line, "variant_id")?),
+        quantity: u32::try_from(quantity)
+            .map_err(|_| corrupt(format!("cart quantity {quantity}")))?,
+    })
+}
+
+fn cart_from_row(row: &Row, id: CartId, lines: Vec<CartLineSnapshot>) -> Result<Cart, RepoError> {
     let country: String = col(&row, "country")?;
     let email: Option<String> = col(&row, "email")?;
     let snapshot = CartSnapshot {
@@ -236,6 +325,7 @@ async fn load_cart(client: &impl Queries, id: CartId) -> Result<Option<Cart>, Re
         order: col::<Option<Uuid>>(&row, "order_id")?.map(OrderId::from_uuid),
         payment_method: col::<Option<Uuid>>(&row, "payment_method_id")?
             .map(PaymentMethodId::from_uuid),
+        marketing_opt_in: col(&row, "marketing_opt_in")?,
         shipping_address: address_from_row(&row, "shipping_")?,
         shipping: match col::<Option<Uuid>>(&row, "shipping_option_id")? {
             None => None,
@@ -260,7 +350,5 @@ async fn load_cart(client: &impl Queries, id: CartId) -> Result<Option<Cart>, Re
             }),
         },
     };
-    Cart::restore(snapshot)
-        .map(Some)
-        .map_err(|e| corrupt(format!("cart {id}: {e}")))
+    Cart::restore(snapshot).map_err(|e| corrupt(format!("cart {id}: {e}")))
 }

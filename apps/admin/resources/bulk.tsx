@@ -13,21 +13,33 @@ import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { Token } from "@astryxdesign/core/Token";
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 import {
   type BulkResult,
   markOrdersPaid,
+  setCustomersGroup,
+  setCustomersLabel,
   setProductsInCategory,
   setProductsPublished,
   setProductsStatus,
 } from "@/app/(admin)/bulk-actions";
+import { labelsInUse } from "@/app/(admin)/customers/actions";
+import type { Group } from "@/app/(admin)/customers/groups/groups";
+import type { Definition } from "@/lib/custom-fields";
+import { customerName } from "@/lib/format";
 import { canMarkPaid } from "@/lib/payments";
 
 type Product = AdminSchemas["ProductSummaryResponse"];
 type Order = AdminSchemas["OrderSummaryResponse"];
+type Customer = AdminSchemas["CustomerSummaryResponse"];
+
+/** No customer groups. */
+const NO_GROUPS: Group[] = [];
 
 /** What a bulk action did, for the banner: `verb` is past tense ("Archived"). */
 export type BulkOutcome = { verb: string; result: BulkResult };
@@ -333,5 +345,166 @@ export function OrderBulkActions({
         />
       )}
     </>
+  );
+}
+
+/**
+ * The selection bar's actions for customers (design note 0032, CD1): add a label to, or
+ * take one off, the selected customers, when the merchant has the labels field.
+ */
+export function CustomerBulkActions({
+  selected,
+  clear,
+  labels,
+  groups = NO_GROUPS,
+  onDone,
+}: {
+  selected: Customer[];
+  clear: () => void;
+  /** The well-known `custom.tags` definition, when the merchant has it. */
+  labels?: Definition;
+  /** The store's customer groups (design note 0032, §6). */
+  groups?: Group[];
+  onDone: (outcome: BulkOutcome) => void;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [mode, setMode] = useState<"add" | "remove">();
+  const items = selected.map((c) => ({ id: c.id, label: customerName(c) || c.email }));
+  const n = count(selected.length, "customer");
+  const run = (verb: string, action: () => Promise<BulkResult>) =>
+    startTransition(async () => {
+      const result = await action();
+      setMode(undefined);
+      clear();
+      onDone({ verb, result });
+      router.refresh();
+    });
+  return (
+    <>
+      {labels && (
+        <DropdownMenu
+          button={{ label: "Labels", variant: "secondary", size: "sm", isLoading: isPending }}
+          items={[
+            { label: "Add a label…", onClick: () => setMode("add") },
+            { label: "Remove a label…", variant: "destructive", onClick: () => setMode("remove") },
+          ]}
+        />
+      )}
+      {groups.length > 0 && (
+        <DropdownMenu
+          button={{ label: "Groups", variant: "secondary", size: "sm", isLoading: isPending }}
+          menuWidth={240}
+          items={[
+            {
+              type: "section",
+              title: "Add to",
+              items: groups.map((g) => ({
+                label: g.name,
+                onClick: () =>
+                  run(`Added to ${g.name}:`, () => setCustomersGroup(g.id, items, true)),
+              })),
+            },
+            {
+              type: "section",
+              title: "Remove from",
+              items: groups.map((g) => ({
+                label: g.name,
+                variant: "destructive" as const,
+                onClick: () =>
+                  run(`Removed from ${g.name}:`, () => setCustomersGroup(g.id, items, false)),
+              })),
+            },
+          ]}
+        />
+      )}
+      {mode && labels && (
+        <LabelDialog
+          mode={mode}
+          definition={labels}
+          customers={n}
+          onClose={() => setMode(undefined)}
+          onPick={(label) =>
+            run(mode === "add" ? `Labelled "${label}":` : `Took "${label}" off`, () =>
+              setCustomersLabel(labels.id, items, label, mode === "add"),
+            )
+          }
+        />
+      )}
+    </>
+  );
+}
+
+function LabelDialog({
+  mode,
+  definition,
+  customers,
+  onClose,
+  onPick,
+}: {
+  mode: "add" | "remove";
+  definition: Definition;
+  /** "3 customers". */
+  customers: string;
+  onClose: () => void;
+  onPick: (label: string) => void;
+}) {
+  const [label, setLabel] = useState("");
+  const [inUse, setInUse] = useState<string[]>();
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const found = await labelsInUse(definition.id);
+      if (!cancelled) setInUse(found);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [definition.id]);
+  const trimmed = label.trim();
+  const submit = () => trimmed !== "" && onPick(trimmed);
+  const title = mode === "add" ? `Label ${customers}` : `Remove a label from ${customers}`;
+  return (
+    <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={480} purpose="form">
+      <DialogHeader
+        title={title}
+        subtitle={
+          mode === "add"
+            ? "Each gets the label unless it has it already."
+            : "Each loses the label if it has it. Nothing else changes."
+        }
+        onOpenChange={(open) => !open && onClose()}
+      />
+      <VStack gap={4} padding={4}>
+        <TextInput
+          label="Label"
+          placeholder={mode === "add" ? "vip, wholesale, newsletter…" : "A label they have"}
+          value={label}
+          onChange={setLabel}
+          onEnter={submit}
+        />
+        {inUse && inUse.length > 0 && (
+          <VStack gap={1}>
+            <Text type="supporting" color="secondary">
+              In use
+            </Text>
+            <HStack gap={1} wrap="wrap">
+              {inUse.slice(0, 30).map((l) => (
+                <Token key={l} label={l} size="sm" onClick={() => setLabel(l)} />
+              ))}
+            </HStack>
+          </VStack>
+        )}
+        <HStack gap={2} hAlign="end">
+          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button
+            label={mode === "add" ? "Add label" : "Remove label"}
+            variant={mode === "add" ? "primary" : "destructive"}
+            isDisabled={trimmed === ""}
+            onClick={submit}
+          />
+        </HStack>
+      </VStack>
+    </Dialog>
   );
 }

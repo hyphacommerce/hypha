@@ -645,6 +645,23 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
         ),
         ("GET", format!("/admin/orders/{order}/custom-fields"), None),
     ];
+    // The export carries everything (design note 0032, §7.4), so it needs every
+    // `customer_data:*` scope rather than redaction: refused outright here.
+    for token in [&app_token, &secret] {
+        let (status, json) = send_as(
+            &app,
+            token,
+            "GET",
+            &format!("/admin/customers/{customer}/export"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{json}");
+        assert!(
+            !json.to_string().contains(&order_email),
+            "the order's email in {json}"
+        );
+    }
     for token in [&app_token, &secret] {
         for (method, path, body) in &routes {
             let (status, json) = send_as(&app, token, method, path, body.as_deref()).await;

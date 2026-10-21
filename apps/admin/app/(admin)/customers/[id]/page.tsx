@@ -1,11 +1,9 @@
-import { Badge } from "@astryxdesign/core/Badge";
 import { Card } from "@astryxdesign/core/Card";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
-import type { AdminSchemas } from "@hypha/sdk/admin";
 
 import { AppSlot } from "@/components/app-extensions/app-slot";
 import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
@@ -16,61 +14,93 @@ import { customerName, formatMoney } from "@/lib/format";
 import { loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
 import { loadCountries, loadCurrencies, loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import { hasScope } from "@/lib/navigation";
+import { wellKnownField, withoutWellKnown } from "@/lib/well-known-fields";
 
-type Address = AdminSchemas["AddressResponse"];
-
-/** An address as it would be written on a parcel. */
-function AddressLines({ address, country }: { address: Address; country: string }) {
-  // Each line by what it holds, which is also its key; blank ones are left out.
-  const lines = Object.entries({
-    name: [address.first_name, address.last_name].filter(Boolean).join(" "),
-    company: address.company,
-    line1: address.line1,
-    line2: address.line2,
-    city: [address.postal_code, address.city].filter(Boolean).join(" "),
-    province: address.province,
-    country,
-    phone: address.phone,
-  }).filter(([, line]) => line);
-  return (
-    <VStack gap={0.5}>
-      {lines.map(([part, line], i) => (
-        <Text key={part} color={i === 0 ? "primary" : "secondary"}>
-          {line}
-        </Text>
-      ))}
-    </VStack>
-  );
-}
+import { AddressesCard } from "./addresses";
+import { ConsentCard } from "./consent";
+import { DeleteCustomer } from "./delete-customer";
+import { EditCustomer } from "./edit-customer";
+import { EraseCustomer, ErasureBanner, ExportCustomer } from "./erasure";
+import { GroupsCard } from "./groups-card";
+import { CustomerLabels } from "./labels";
+import { NoteCard } from "./note";
 
 export default async function CustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = await sessionClient();
-  const [customer, countries, currencies, extensions, definitions, fields, me] = await Promise.all([
-    client.GET("/admin/customers/{id}", { params: { path: { id } } }).then(loaded),
-    loadCountries(),
-    loadCurrencies(),
-    loadExtensions(),
-    // Its custom fields (design note 0033): none shown without `custom_fields:read`.
-    definitionsOf("customer"),
-    client.GET("/admin/customers/{id}/custom-fields", { params: { path: { id } } }),
-    requireStaff(),
-  ]);
-  // Their latest orders: the email search matches parts of addresses too, so keep the
-  // ones with exactly theirs. Needs `orders:read`; without it the card says so.
+  const [customer, countries, currencies, extensions, definitions, fields, me, groups] =
+    await Promise.all([
+      client.GET("/admin/customers/{id}", { params: { path: { id } } }).then(loaded),
+      loadCountries(),
+      loadCurrencies(),
+      loadExtensions(),
+      // Its custom fields (design note 0033): none shown without `custom_fields:read`.
+      definitionsOf("customer"),
+      client.GET("/admin/customers/{id}/custom-fields", { params: { path: { id } } }),
+      requireStaff(),
+      // The store's groups (design note 0032, §6), for the groups card.
+      client.GET("/admin/customer-groups").then((r) => r.data?.items ?? []),
+    ]);
+  // Their latest orders (design note 0032, §12 step 1). Needs `orders:read`; without it
+  // the card says so.
   const recent = await client.GET("/admin/orders", {
-    params: { query: { q: customer.email, limit: 10 } },
+    params: { query: { customer: customer.id, limit: 10 } },
   });
-  const orders = (recent.data?.items ?? []).filter((o) => o.customer === customer.id);
-  const countryName = new Map(countries.map((c) => [c.code, c.name]));
+  const orders = recent.data?.items ?? [];
+  const stats = customer.orders;
   const name = customerName(customer);
+  const isErased = Boolean(customer.erased_at);
+  const canWrite = hasScope(me.scopes, "customers:write") && !isErased;
+  const canErase = hasScope(me.scopes, "customers:erase");
+  const canDefine = hasScope(me.scopes, "custom_fields:write");
+  // The well-known fields (design note 0032, CD11) are rendered in place: labels under
+  // the name, the note as its own card; the rest on the custom fields card.
+  const labels = wellKnownField(definitions, "labels");
+  const note = wellKnownField(definitions, "note");
+  const otherFields = withoutWellKnown(definitions);
 
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1280}>
         <PageHeader
-          title={name || customer.email}
+          title={isErased ? "Erased customer" : name || customer.email}
           back={{ label: "Customers", href: "/customers" }}
+          badges={
+            <CustomerLabels
+              customerId={customer.id}
+              definition={labels}
+              fields={fields.data}
+              canEdit={canWrite}
+              canDefine={canDefine}
+            />
+          }
+          actions={
+            <HStack gap={2}>
+              <ExportCustomer id={customer.id} />
+              <EraseCustomer
+                id={customer.id}
+                name={name || customer.email}
+                canErase={canErase}
+                erasureDueAt={customer.erasure_due_at}
+                isErased={isErased}
+              />
+              {canWrite && (
+                <DeleteCustomer
+                  id={customer.id}
+                  name={name || customer.email}
+                  canDelete={customer.can_delete}
+                />
+              )}
+              {canWrite && <EditCustomer customer={customer} />}
+            </HStack>
+          }
+        />
+        <ErasureBanner
+          id={customer.id}
+          erasureDueAt={customer.erasure_due_at}
+          erasedAt={customer.erased_at}
+          canErase={canErase}
         />
         <div className="detail-columns">
           <div>
@@ -81,7 +111,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                     Orders
                   </Text>
                   {orders.length > 0 && (
-                    <Link href={`/orders?q=${encodeURIComponent(customer.email)}`}>View all</Link>
+                    <Link href={`/orders?customer=${customer.id}`}>View all</Link>
                   )}
                 </HStack>
                 {!recent.data ? (
@@ -115,6 +145,13 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                 )}
               </VStack>
             </Card>
+            <NoteCard
+              customerId={customer.id}
+              definition={note}
+              fields={fields.data}
+              canEdit={canWrite}
+              canDefine={canDefine}
+            />
           </div>
           <div>
             <Card>
@@ -126,6 +163,21 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                   <MetadataListItem label="Email">{customer.email}</MetadataListItem>
                   <MetadataListItem label="Name">{name || "—"}</MetadataListItem>
                   <MetadataListItem label="Phone">{customer.phone ?? "—"}</MetadataListItem>
+                  <MetadataListItem label="Orders">
+                    {stats.count === 0
+                      ? "None"
+                      : `${stats.count} · ${stats.amount_spent.map((m) => formatMoney(m, currencies)).join(" + ")}`}
+                  </MetadataListItem>
+                  {stats.first_placed_at && (
+                    <MetadataListItem label="First order">
+                      <DateTime value={stats.first_placed_at} />
+                    </MetadataListItem>
+                  )}
+                  {stats.last_placed_at && stats.count > 1 && (
+                    <MetadataListItem label="Last order">
+                      <DateTime value={stats.last_placed_at} />
+                    </MetadataListItem>
+                  )}
                   <MetadataListItem label="Customer since">
                     <DateTime value={customer.created_at} />
                   </MetadataListItem>
@@ -135,42 +187,33 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                 </MetadataList>
               </VStack>
             </Card>
-            <Card>
-              <VStack gap={3}>
-                <Text type="display-3" as="h2">
-                  Addresses
-                </Text>
-                {customer.addresses.length === 0 ? (
-                  <Text color="secondary">
-                    No saved addresses. Checkout keeps an order&apos;s address on the order.
-                  </Text>
-                ) : (
-                  <VStack gap={4}>
-                    {customer.addresses.map((address) => (
-                      <VStack key={address.id} gap={2}>
-                        <HStack gap={1}>
-                          {customer.default_shipping_address === address.id && (
-                            <Badge label="Default shipping" />
-                          )}
-                          {customer.default_billing_address === address.id && (
-                            <Badge label="Default billing" />
-                          )}
-                        </HStack>
-                        <AddressLines
-                          address={address}
-                          country={countryName.get(address.country) ?? address.country}
-                        />
-                      </VStack>
-                    ))}
-                  </VStack>
-                )}
-              </VStack>
-            </Card>
-            {definitions.length > 0 && fields.data && (
+            <GroupsCard
+              customerId={customer.id}
+              groups={groups}
+              current={customer.groups}
+              canEdit={canWrite}
+            />
+            <ConsentCard
+              customerId={customer.id}
+              email={customer.email_marketing}
+              sms={customer.sms_marketing}
+              hasPhone={Boolean(customer.phone)}
+              canEdit={canWrite}
+              isErased={Boolean(customer.erased_at)}
+            />
+            <AddressesCard
+              customer={customer.id}
+              addresses={customer.addresses}
+              defaultShipping={customer.default_shipping_address}
+              defaultBilling={customer.default_billing_address}
+              countries={countries}
+              canWrite={canWrite}
+            />
+            {otherFields.length > 0 && fields.data && (
               <CustomFieldsCard
                 ownerType="customer"
                 ownerId={customer.id}
-                definitions={definitions}
+                definitions={otherFields}
                 fields={fields.data}
                 scopes={me.scopes}
               />

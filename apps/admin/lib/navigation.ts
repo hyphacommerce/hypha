@@ -73,7 +73,13 @@ export const MAIN_NAV: NavItem[] = [
     scope: "products:read",
     children: [{ label: "Categories", href: "/products/categories", scope: "products:read" }],
   },
-  { label: "Customers", href: "/customers", icon: UsersIcon, scope: "customers:read" },
+  {
+    label: "Customers",
+    href: "/customers",
+    icon: UsersIcon,
+    scope: "customers:read",
+    children: [{ label: "Groups", href: "/customers/groups", scope: "customers:read" }],
+  },
   { label: "Media", href: "/media", icon: PhotoIcon, scope: "media:read" },
   {
     label: "Markets",

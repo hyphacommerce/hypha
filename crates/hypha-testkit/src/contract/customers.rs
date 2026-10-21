@@ -1,8 +1,11 @@
 use hypha_core::{
     Address, AddressId, AddressParts, CustomerId, Email, Keyset, PageLimit, PageRequest, RepoError,
-    Version, Versioned,
+    Timestamp, Version, Versioned,
 };
-use hypha_customers::{Customer, CustomerFilter, CustomerRepo, CustomerSort, repo::keys};
+use hypha_customers::{
+    Channel, ConsentChange, ConsentSource, ConsentState, Customer, CustomerFilter, CustomerRepo,
+    CustomerSort, OptInLevel, repo::keys,
+};
 use uuid::Uuid;
 
 use super::scenario;
@@ -71,6 +74,48 @@ pub async fn customer_repo<R: CustomerRepo>(make: impl AsyncFn() -> R) {
     stale(&make().await).await;
     scenario("customer: list summaries by text, sorted by email or name in pages");
     listed(&make().await).await;
+    scenario("customer: an erasure request, the due list and the erased state round trip");
+    erasure(&make().await).await;
+}
+
+async fn erasure<R: CustomerRepo>(repo: &R) {
+    let day = |d: i64| Timestamp::from_unix_micros(1_767_225_600_000_000 + d * 86_400_000_000);
+    let mut ana = customer(1, "ana@example.hr");
+    ana.set_first_name(Some("Ana".to_string())).unwrap();
+    ana.add_address(addr_id(1), full_address("Zagreb"), true, false)
+        .unwrap();
+    ana.request_erasure(day(2)).unwrap();
+    let mut ivo = customer(2, "ivo@example.hr");
+    ivo.request_erasure(day(1)).unwrap();
+    let mut zed = customer(3, "zed@example.hr");
+    zed.request_erasure(day(9)).unwrap();
+    let mut done = customer(4, "done@example.hr");
+    done.request_erasure(day(1)).unwrap();
+    done.erase(day(1));
+    for c in [&mut ana, &mut ivo, &mut zed, &mut done] {
+        repo.insert(c).await.unwrap();
+    }
+    assert_eq!(repo.get(ana.id()).await, Ok(Some(ana.clone())));
+    assert_eq!(
+        repo.due_for_erasure(day(2), 10).await,
+        Ok(vec![ivo.id(), ana.id()]),
+        "oldest due first, not the erased one, not the one due later"
+    );
+    assert_eq!(repo.due_for_erasure(day(2), 1).await, Ok(vec![ivo.id()]));
+    assert_eq!(repo.due_for_erasure(day(0), 10).await, Ok(vec![]));
+
+    assert!(ana.erase(day(2)));
+    repo.update(&mut ana).await.unwrap();
+    let stored = repo.get(ana.id()).await.unwrap().unwrap();
+    assert_eq!(stored, ana);
+    assert!(stored.email().is_placeholder());
+    assert_eq!(stored.erased_at(), Some(day(2)));
+    assert_eq!(repo.get_by_email(&email("ana@example.hr")).await, Ok(None));
+    assert_eq!(
+        repo.due_for_erasure(day(9), 10).await,
+        Ok(vec![ivo.id(), zed.id()]),
+        "the erased one is gone from the list; the rest wait their turn"
+    );
 }
 
 /// Every page of `sort`'s list under `filter`, `limit` at a time.
@@ -199,6 +244,30 @@ async fn round_trips<R: CustomerRepo>(repo: &R) {
         .unwrap();
     c.add_address(addr_id(1), full_address("Zagreb"), true, false)
         .unwrap();
+    // Both consents, with a source and a time (design note 0032, §5).
+    let at = Timestamp::from_unix_micros(1_767_225_600_000_000);
+    c.set_marketing_consent(
+        Channel::Email,
+        ConsentChange {
+            state: ConsentState::Subscribed,
+            opt_in_level: OptInLevel::Confirmed,
+            consented_at: Some(at),
+        },
+        ConsentSource::App(hypha_core::AppId::from_uuid(Uuid::from_u128(77))),
+        at,
+    )
+    .unwrap();
+    c.set_marketing_consent(
+        Channel::Sms,
+        ConsentChange {
+            state: ConsentState::Unsubscribed,
+            opt_in_level: OptInLevel::Unknown,
+            consented_at: None,
+        },
+        ConsentSource::Admin,
+        at.plus_secs(60),
+    )
+    .unwrap();
     repo.insert(&mut c).await.unwrap();
     assert_eq!(c.version(), Version::new(1));
     assert_eq!(repo.get(c.id()).await, Ok(Some(c.clone())));
@@ -222,7 +291,23 @@ async fn update<R: CustomerRepo>(repo: &R) {
         .unwrap();
     repo.insert(&mut c).await.unwrap();
 
-    c.set_email(email("ana.horvat@example.hr"));
+    c.set_marketing_consent(
+        Channel::Email,
+        ConsentChange {
+            state: ConsentState::Pending,
+            opt_in_level: OptInLevel::Single,
+            consented_at: None,
+        },
+        ConsentSource::Checkout,
+        Timestamp::from_unix_micros(1_767_225_600_000_000),
+    )
+    .unwrap();
+    c.set_email(email("ana.horvat@example.hr")).unwrap();
+    assert_eq!(
+        c.marketing_consent(Channel::Email).state,
+        ConsentState::NotSubscribed,
+        "a new email resets email consent"
+    );
     c.set_first_name(None).unwrap();
     c.set_last_name(Some("Horvat".to_string())).unwrap();
     c.remove_address(addr_id(1)).unwrap();
@@ -257,7 +342,7 @@ async fn keys<R: CustomerRepo>(repo: &R) {
     // Changing an email to one that's taken breaks the key too.
     let mut other = customer(3, "other@example.hr");
     repo.insert(&mut other).await.unwrap();
-    other.set_email(email("ana@example.hr"));
+    other.set_email(email("ana@example.hr")).unwrap();
     assert_eq!(
         repo.update(&mut other).await,
         Err(RepoError::Duplicate(keys::CUSTOMER_EMAIL))

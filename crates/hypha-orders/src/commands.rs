@@ -1,7 +1,12 @@
-use hypha_core::{AuthError, Ctx, ErrorCode, Keyset, OrderId, Page, PageRequest, RepoError, Scope};
+use hypha_core::{
+    AuthError, Ctx, CustomerId, ErrorCode, Keyset, OrderId, Page, PageRequest, RepoError, Scope,
+};
 use thiserror::Error;
 
-use crate::{Order, OrderError, OrderFilter, OrderFilterInput, OrderRepo, OrderSort, OrderSummary};
+use crate::{
+    Order, OrderError, OrderFilter, OrderFilterInput, OrderRepo, OrderSort, OrderStats,
+    OrderSummary,
+};
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -47,6 +52,18 @@ pub struct ListOrders {
     /// Filters on custom fields (design note 0033, §7), checked by
     /// `hypha-custom-fields` already.
     pub fields: Vec<hypha_core::FieldFilter>,
+}
+
+/// What `customer`'s orders add up to, for the customer's page (design note 0032, §12
+/// step 1). It's about the customer, so it takes `customers:read`: a caller allowed to
+/// read the customer learns how much they've bought, not any order's detail.
+pub async fn customer_order_stats<R: OrderRepo>(
+    ctx: &Ctx,
+    orders: &R,
+    customer: CustomerId,
+) -> Result<OrderStats, CommandError> {
+    ctx.require(Scope::CustomersRead)?;
+    Ok(orders.stats_for(customer).await?)
 }
 
 /// The order a storefront's buyer placed, for its confirmation (design note 0024, §7):

@@ -440,6 +440,9 @@ where
         .await?
         .ok_or(CommandError::NotificationNotFound(id))?;
     let template = earlier.template();
+    if earlier.to().is_placeholder() {
+        return Err(CommandError::RecipientErased);
+    }
     let not_resendable = CommandError::NotResendable { template };
     let order = match (template, earlier.order()) {
         (

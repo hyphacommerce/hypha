@@ -134,9 +134,14 @@ export type Details = {
   phone: string;
 };
 
-/** Checkout's first step: the email and the shipping address, together. One after the
- * other: both write the cart, so at once they'd race for its version. */
-export async function saveDetails(country: string, details: Details): Promise<ActionResult> {
+/** Checkout's first step: the email, the marketing box and the shipping address,
+ * together. One after the other: all write the cart, so at once they'd race for its
+ * version. */
+export async function saveDetails(
+  country: string,
+  details: Details,
+  marketingOptIn: boolean,
+): Promise<ActionResult> {
   const id = await currentCart(country);
   const client = api();
   const email = await client.PUT("/storefront/carts/{id}/email", {
@@ -144,6 +149,15 @@ export async function saveDetails(country: string, details: Details): Promise<Ac
     body: { email: details.email.trim() },
   });
   if (email.error) return refused(email.error);
+  // "Email me with news and offers" (design note 0032, §5): checkout records the
+  // consent when it's ticked; unticked never unsubscribes anyone.
+  if (email.data.marketing_opt_in !== marketingOptIn) {
+    const marketing = await client.PUT("/storefront/carts/{id}/marketing", {
+      params: { path: { id } },
+      body: { opt_in: marketingOptIn },
+    });
+    if (marketing.error) return refused(marketing.error);
+  }
   const address = await client.PUT("/storefront/carts/{id}/shipping-address", {
     params: { path: { id } },
     body: {

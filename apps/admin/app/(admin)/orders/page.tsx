@@ -63,6 +63,8 @@ export default async function OrdersPage({
           fulfillment_status: manyOf(params, "fulfillment_status", FULFILMENT),
           cancelled: cancelled === "true" ? true : cancelled === "false" ? false : undefined,
           channel: one(params, "channel"),
+          // A customer page's "View all" (design note 0032); no chip offers it.
+          customer: one(params, "customer"),
           country: one(params, "country"),
           currency: one(params, "currency"),
           placed_from: placed && startOfDay(placed.start, timeZone),

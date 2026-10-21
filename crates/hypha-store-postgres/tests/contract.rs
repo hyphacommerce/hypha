@@ -340,6 +340,13 @@ async fn product_list() {
 }
 
 #[tokio::test]
+async fn customer_group_repo() {
+    let Some(url) = database_url() else { return };
+    contract::customer_group_repo(async || fresh_store(&url, "contract_customer_groups").await)
+        .await;
+}
+
+#[tokio::test]
 async fn category_repo() {
     let Some(url) = database_url() else { return };
     contract::category_repo(async || fresh_store(&url, "contract_categories").await).await;

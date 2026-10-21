@@ -5,8 +5,8 @@ use hypha_core::{
 };
 use hypha_orders::{
     CancelReason, FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderFilter,
-    OrderFilterInput, OrderLine, OrderNumber, OrderRepo, OrderSort, OrderTax, OrderTaxSource,
-    repo::keys,
+    OrderFilterInput, OrderLine, OrderNumber, OrderRepo, OrderSort, OrderStats, OrderTax,
+    OrderTaxSource, repo::keys,
 };
 use uuid::Uuid;
 
@@ -30,6 +30,8 @@ pub async fn order_repo<R: OrderRepo>(make: impl AsyncFn() -> R) {
     list_sorted(&make().await).await;
     scenario("order: list by number or email, statuses, channel, country, currency, dates");
     list_filtered(&make().await).await;
+    scenario("order: a customer's statistics add up placed orders that weren't cancelled");
+    stats(&make().await).await;
     scenario("order: shipping address and lines round trip, every field");
     shipping_round_trips(&make().await).await;
     scenario("order: fulfilled quantities, the status and a cancellation round trip");
@@ -336,6 +338,73 @@ fn varied(n: u128, amount: i64, currency: Currency, email: &str, country: &str, 
     .unwrap()
 }
 
+/// `varied`, placed by customer `customer` (3000 + n otherwise).
+fn by_customer(n: u128, amount: i64, currency: Currency, day: i64, customer: u128) -> Order {
+    let order = varied(n, amount, currency, "ana@example.hr", "HR", day);
+    let mut s = order.snapshot();
+    s.customer = CustomerId::from_uuid(Uuid::from_u128(customer));
+    Order::restore(s).unwrap()
+}
+
+async fn stats<R: OrderRepo>(repo: &R) {
+    // Ana (customer 1): EUR on days 3 and 1, USD on day 2, and a cancelled one on day 5
+    // that counts for nothing. Ivo (customer 2): one order. Nobody else.
+    let mut orders = vec![
+        by_customer(1, 500, Currency::EUR, 3, 1),
+        by_customer(2, 250, Currency::EUR, 1, 1),
+        by_customer(3, 700, Currency::USD, 2, 1),
+        by_customer(4, 900, Currency::EUR, 5, 1),
+        by_customer(5, 100, Currency::EUR, 4, 2),
+    ];
+    orders[3]
+        .cancel(
+            Timestamp::from_unix_micros(1_767_800_000_000_000),
+            CancelReason::Customer,
+            false,
+        )
+        .unwrap();
+    for o in &mut orders {
+        repo.insert(o).await.unwrap();
+    }
+    let ana = CustomerId::from_uuid(Uuid::from_u128(1));
+    let day = |d: i64| Timestamp::from_unix_micros(1_767_225_600_000_000 + d * 86_400_000_000);
+    let expected = OrderStats {
+        orders_count: 3,
+        cancelled_count: 1,
+        first_order_at: Some(day(1)),
+        last_order_at: Some(day(3)),
+        amount_spent: vec![
+            Money::new(750, Currency::EUR).unwrap(),
+            Money::new(700, Currency::USD).unwrap(),
+        ],
+    };
+    assert_eq!(repo.stats_for(ana).await.unwrap(), expected);
+    assert_eq!(
+        repo.stats_for(ana).await.unwrap(),
+        OrderStats::of(orders.iter().filter(|o| o.customer() == ana)),
+        "storage agrees with the reference"
+    );
+    assert_eq!(
+        repo.stats_for(CustomerId::from_uuid(Uuid::from_u128(2)))
+            .await
+            .unwrap(),
+        OrderStats {
+            orders_count: 1,
+            cancelled_count: 0,
+            first_order_at: Some(day(4)),
+            last_order_at: Some(day(4)),
+            amount_spent: vec![Money::new(100, Currency::EUR).unwrap()],
+        }
+    );
+    assert_eq!(
+        repo.stats_for(CustomerId::from_uuid(Uuid::from_u128(9)))
+            .await
+            .unwrap(),
+        OrderStats::default(),
+        "no orders: zero, nothing, nothing"
+    );
+}
+
 /// Every page of `sort`'s list under `filter`, `limit` at a time.
 pub(crate) async fn all_orders<R: OrderRepo>(
     repo: &R,
@@ -508,6 +577,15 @@ async fn list_filtered<R: OrderRepo>(repo: &R) {
         })
         .await,
         [oid(1), oid(3), oid(4)]
+    );
+    assert_eq!(
+        found(OrderFilterInput {
+            customer: Some(CustomerId::from_uuid(Uuid::from_u128(3003))),
+            ..none()
+        })
+        .await,
+        [oid(3)],
+        "a customer's orders"
     );
     assert_eq!(
         found(OrderFilterInput {

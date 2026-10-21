@@ -16,7 +16,9 @@ use hypha_custom_fields::{
     CustomFieldDefinition, StageCustomFieldDefinitions, StageCustomFieldValues, ValueRow,
     keys as custom_field_keys,
 };
-use hypha_customers::{Customer, StageCustomers, repo::keys as customer_keys};
+use hypha_customers::{
+    Customer, CustomerGroup, StageCustomerGroups, StageCustomers, repo::keys as customer_keys,
+};
 use hypha_fulfillment::{Fulfillment, StageFulfillments, keys as fulfillment_keys};
 use hypha_inventory::{InventoryItem, StageInventoryItems};
 use hypha_markets::{StageCatalogProducts, StageFixedPrices};
@@ -37,6 +39,7 @@ use crate::{
     InMemoryPorts,
     auth::{keep_recorded_use, unique_identity, unique_reset, unique_session},
     categories::{check_parent, unique as unique_category},
+    customer_groups::unique as unique_group,
     customers::unique as unique_customer,
     idempotency::insert_record,
     inventory_items,
@@ -65,6 +68,8 @@ enum Staged {
     Payment(Payment),
     NewCart(Cart),
     Cart(Cart),
+    /// A cart removed at the version it was loaded at.
+    DeletedCart(Cart),
     Product(Product),
     /// A product removed at the version it was loaded at.
     DeletedProduct(Product),
@@ -72,6 +77,17 @@ enum Staged {
     InventoryItem(InventoryItem),
     DeletedInventoryItem(InventoryItem),
     NewCustomer(Customer),
+    Customer(Customer),
+    /// A customer removed at the version it was loaded at.
+    DeletedCustomer(Customer),
+    NewCustomerGroup(CustomerGroup),
+    CustomerGroup(CustomerGroup),
+    DeletedCustomerGroup(hypha_core::CustomerGroupId),
+    CustomerGroupMembers(
+        hypha_core::CustomerGroupId,
+        Vec<hypha_core::CustomerId>,
+        bool,
+    ),
     Idempotency(IdempotencyRecord),
     NewRole(Role),
     Role(Role),
@@ -287,6 +303,10 @@ impl StageCarts for InMemoryBatch {
         self.stage(Staged::Cart(cart.clone()));
         cart.set_version(cart.version().next());
     }
+
+    fn delete_cart(&mut self, cart: &Cart) {
+        self.stage(Staged::DeletedCart(cart.clone()));
+    }
 }
 
 impl StageProducts for InMemoryBatch {
@@ -396,11 +416,71 @@ impl StageCustomers for InMemoryBatch {
         self.stage(Staged::Events(events, Some(Version::NEW.next())));
         customer.set_version(Version::NEW.next());
     }
+
+    fn update_customer(&mut self, customer: &mut Customer) {
+        stamp_update(customer, self.now);
+        let version = customer.version().next();
+        self.stage_events_of(customer, version);
+        self.stage(Staged::Customer(customer.clone()));
+        customer.set_version(version);
+    }
+
+    fn delete_customer(&mut self, customer: &mut Customer) {
+        let version = customer.version();
+        self.stage_events_of(customer, version);
+        self.stage(Staged::DeletedCustomer(customer.clone()));
+    }
 }
 
 impl StageIdempotency for InMemoryBatch {
     fn record_idempotency(&mut self, record: IdempotencyRecord) {
         self.stage(Staged::Idempotency(record));
+    }
+}
+
+impl StageCustomerGroups for InMemoryBatch {
+    fn insert_group(&mut self, group: &mut CustomerGroup) {
+        stamp_insert(group, self.now);
+        let events = group.take_events();
+        self.stage(Staged::NewCustomerGroup(group.clone()));
+        self.stage(Staged::Events(events, Some(Version::NEW.next())));
+        group.set_version(Version::NEW.next());
+    }
+
+    fn update_group(&mut self, group: &mut CustomerGroup) {
+        stamp_update(group, self.now);
+        let version = group.version().next();
+        self.stage_events_of(group, version);
+        self.stage(Staged::CustomerGroup(group.clone()));
+        group.set_version(version);
+    }
+
+    fn delete_group(&mut self, group: hypha_core::CustomerGroupId) {
+        self.stage(Staged::DeletedCustomerGroup(group));
+    }
+
+    fn add_group_members(
+        &mut self,
+        group: hypha_core::CustomerGroupId,
+        customers: &[hypha_core::CustomerId],
+    ) {
+        self.stage(Staged::CustomerGroupMembers(
+            group,
+            customers.to_vec(),
+            true,
+        ));
+    }
+
+    fn remove_group_members(
+        &mut self,
+        group: hypha_core::CustomerGroupId,
+        customers: &[hypha_core::CustomerId],
+    ) {
+        self.stage(Staged::CustomerGroupMembers(
+            group,
+            customers.to_vec(),
+            false,
+        ));
     }
 }
 
@@ -447,6 +527,10 @@ impl HasBatch for InMemoryPorts {
         let categories_before = categories.clone();
         let mut category_members = self.categories.lock_members();
         let category_members_before = category_members.clone();
+        let mut groups = self.customer_groups.groups.lock();
+        let groups_before = groups.clone();
+        let mut group_members = self.customer_groups.lock_members();
+        let group_members_before = group_members.clone();
         let mut fixed_prices = self.price_lists.lock_fixed_prices();
         let fixed_prices_before = fixed_prices.clone();
         let mut tax_classes = self.tax_classes.lock_assignments();
@@ -529,6 +613,13 @@ impl HasBatch for InMemoryPorts {
                     Staged::Cart(mut cart) => {
                         update_row(&mut carts, cart.id(), &mut cart, &no_unique_keys)?
                     }
+                    Staged::DeletedCart(cart) => {
+                        match carts.get(&cart.id()) {
+                            Some(stored) if stored.version() == cart.version() => {}
+                            _ => return Err(RepoError::StaleVersion),
+                        }
+                        carts.remove(&cart.id());
+                    }
                     Staged::Product(mut product) => {
                         update_row(&mut products, product.id(), &mut product, &unique_product)?
                     }
@@ -571,6 +662,55 @@ impl HasBatch for InMemoryPorts {
                         customer_keys::CUSTOMER_ID,
                         &unique_customer,
                     )?,
+                    Staged::Customer(mut customer) => update_row(
+                        &mut customers,
+                        customer.id(),
+                        &mut customer,
+                        &unique_customer,
+                    )?,
+                    Staged::DeletedCustomer(customer) => {
+                        match customers.get(&customer.id()) {
+                            Some(stored) if stored.version() == customer.version() => {}
+                            _ => return Err(RepoError::StaleVersion),
+                        }
+                        customers.remove(&customer.id());
+                        // What Postgres removes with the row: its memberships.
+                        for members in group_members.values_mut() {
+                            members.remove(&customer.id());
+                        }
+                    }
+                    Staged::NewCustomerGroup(mut group) => insert_row(
+                        &mut groups,
+                        group.id(),
+                        &mut group,
+                        customer_keys::CUSTOMER_GROUP_ID,
+                        &unique_group,
+                    )?,
+                    Staged::CustomerGroup(mut group) => {
+                        update_row(&mut groups, group.id(), &mut group, &unique_group)?
+                    }
+                    Staged::DeletedCustomerGroup(id) => {
+                        groups.remove(&id);
+                        group_members.remove(&id);
+                    }
+                    Staged::CustomerGroupMembers(group, members, add) => {
+                        if !groups.contains_key(&group) {
+                            return Err(missing("customer group", group));
+                        }
+                        for customer in &members {
+                            if !customers.contains_key(customer) {
+                                return Err(missing("customer", customer));
+                            }
+                        }
+                        let set = group_members.entry(group).or_default();
+                        for customer in members {
+                            if add {
+                                set.insert(customer);
+                            } else {
+                                set.remove(&customer);
+                            }
+                        }
+                    }
                     Staged::Idempotency(record) => insert_record(&mut records, record)?,
                     Staged::NewRole(mut role) => insert_row(
                         &mut roles,
@@ -854,6 +994,8 @@ impl HasBatch for InMemoryPorts {
             *publications = publications_before;
             *categories = categories_before;
             *category_members = category_members_before;
+            *groups = groups_before;
+            *group_members = group_members_before;
             *fixed_prices = fixed_prices_before;
             *tax_classes = tax_classes_before;
             *notification_settings = notification_settings_before;

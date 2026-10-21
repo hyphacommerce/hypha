@@ -57,6 +57,7 @@ import {
   validationsOf,
 } from "@/lib/custom-fields";
 import { currencyCodes } from "@/lib/format";
+import { type Suggestion, suggestionBody } from "@/lib/well-known-fields";
 
 import {
   type CreateRequest,
@@ -69,11 +70,14 @@ import {
 export function DefinitionsCard({
   owner,
   definitions,
+  suggestions,
   canWrite,
 }: {
   owner: OwnerType;
   /** The owner type's definitions, in their order. */
   definitions: Definition[];
+  /** The well-known fields the merchant doesn't have yet (design note 0032, CD11). */
+  suggestions: Suggestion[];
   /** `custom_fields:write`: the merchant's fields can change. */
   canWrite: boolean;
 }) {
@@ -216,6 +220,9 @@ export function DefinitionsCard({
           )}
         </VStack>
       </Card>
+      {canWrite && suggestions.length > 0 && (
+        <SuggestionsCard suggestions={suggestions} onError={setError} />
+      )}
       {editing && (
         <DefinitionDialog
           owner={owner}
@@ -225,6 +232,71 @@ export function DefinitionsCard({
       )}
       {deleting && <DeleteDialog definition={deleting} onClose={() => setDeleting(undefined)} />}
     </VStack>
+  );
+}
+
+/**
+ * The well-known fields worth having (design note 0032, CD11), each created with one
+ * click from the body the API suggests. Once created they're ordinary fields above.
+ */
+function SuggestionsCard({
+  suggestions,
+  onError,
+}: {
+  suggestions: Suggestion[];
+  onError: (error: string | undefined) => void;
+}) {
+  const [adding, setAdding] = useState<string>();
+  const [, startTransition] = useTransition();
+  const add = (suggestion: Suggestion) => {
+    setAdding(suggestion.key);
+    startTransition(async () => {
+      const result = await createDefinition(suggestionBody(suggestion));
+      onError(result.error);
+      setAdding(undefined);
+    });
+  };
+  return (
+    <Card>
+      <VStack gap={3}>
+        <VStack gap={1}>
+          <Text type="display-3" as="h2">
+            Suggested
+          </Text>
+          <Text type="supporting" color="secondary">
+            Fields Hypha knows what to do with: the admin shows them in place, and apps expect them
+            by these names. Add the ones you want; change or delete them like any other.
+          </Text>
+        </VStack>
+        <VStack gap={3}>
+          {suggestions.map((suggestion) => (
+            <HStack key={suggestion.key} gap={3} hAlign="between" vAlign="center" wrap="wrap">
+              <VStack gap={0.5}>
+                <HStack gap={1} vAlign="center" wrap="wrap">
+                  <Text weight="medium">{suggestion.name}</Text>
+                  <Text type="supporting" color="secondary">
+                    {suggestion.field} · {typeLabel(suggestion.type)}
+                  </Text>
+                  {suggestion.personal && <Badge label="Personal" variant="warning" />}
+                </HStack>
+                <Text type="supporting" color="secondary">
+                  {suggestion.why}
+                </Text>
+              </VStack>
+              <Button
+                label="Add"
+                variant="secondary"
+                size="sm"
+                icon={<PlusIcon />}
+                isLoading={adding === suggestion.key}
+                isDisabled={adding !== undefined && adding !== suggestion.key}
+                onClick={() => add(suggestion)}
+              />
+            </HStack>
+          ))}
+        </VStack>
+      </VStack>
+    </Card>
   );
 }
 
