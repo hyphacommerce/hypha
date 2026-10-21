@@ -12,6 +12,8 @@ pub enum IdentityError {
     MfaSetupNotStarted,
     #[error("this identity has no password")]
     NoPassword,
+    #[error("this identity doesn't sign in with an email code")]
+    NoEmailCode,
 }
 
 impl ErrorCode for IdentityError {
@@ -21,6 +23,7 @@ impl ErrorCode for IdentityError {
             IdentityError::MfaNotEnabled => "mfa_not_enabled",
             IdentityError::MfaSetupNotStarted => "mfa_setup_not_started",
             IdentityError::NoPassword => "no_password",
+            IdentityError::NoEmailCode => "no_email_code",
         }
     }
 }

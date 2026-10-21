@@ -13,6 +13,7 @@ hypha-payments = { path = "../hypha-payments" }
 hypha-stores = { path = "../hypha-stores" }
 hypha-media = { path = "../hypha-media" }
 hypha-users = { path = "../hypha-users" }
+hypha-customer-accounts = { path = "../hypha-customer-accounts" }
 # Times in the store's zone (design note 0028, §11). The bundled time zone database, not
 # the system's, so a time formats the same natively and on Workers (which has none).
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }

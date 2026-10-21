@@ -27,12 +27,16 @@ use crate::{
 fn principal_to_db(p: Principal) -> (&'static str, Uuid) {
     match p {
         Principal::Staff(id) => (p.kind().as_str(), id.as_uuid()),
+        Principal::Customer(id) => (p.kind().as_str(), id.as_uuid()),
     }
 }
 
 fn principal_from_db(kind: &str, id: Uuid) -> Result<Principal, RepoError> {
     match PrincipalKind::parse(kind) {
         Some(PrincipalKind::Staff) => Ok(Principal::Staff(UserId::from_uuid(id))),
+        Some(PrincipalKind::Customer) => {
+            Ok(Principal::Customer(hypha_core::CustomerId::from_uuid(id)))
+        }
         None => Err(corrupt(format!("unknown principal kind {kind:?}"))),
     }
 }

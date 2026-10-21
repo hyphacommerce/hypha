@@ -11,6 +11,7 @@ use hypha_auth::{
 use hypha_core::{
     Clock, Email, IdGenerator, Notifier, NotifyError, OrderId, Random, StoreId, Timestamp,
 };
+use hypha_customer_accounts::{AccountSettings, CustomerEmail, HasAccountSettings};
 use hypha_mail::{MailEnv, StaffMailer};
 use hypha_media::Asset;
 use hypha_users::StaffEmail;
@@ -129,9 +130,10 @@ impl MailEnv for MailHost {
 }
 
 /// The staff flows' environment (`hypha_users::invite_user`,
-/// `request_password_reset`): the host's auth ports, and their emails sent through the
-/// store's templates (`hypha_mail::send_staff`) and recorded in `ports`, right where the
-/// flow notifies, which is after its own writes committed.
+/// `request_password_reset`), and the customer flows' (`hypha_customer_accounts`, design
+/// note 0034): the host's auth ports, and their emails sent through the store's
+/// templates (`hypha_mail::send_staff`, `send_customer`) and recorded in `ports`, right
+/// where the flow notifies, which is after its own writes committed.
 pub struct StaffEnv<'a, P> {
     env: &'a HostEnv,
     mail: StaffMailer<'a, MailHost, P>,
@@ -149,6 +151,12 @@ impl<'a, P> StaffEnv<'a, P> {
 impl<P> HasAuthSettings for StaffEnv<'_, P> {
     fn auth_settings(&self) -> &AuthSettings {
         self.env.auth_settings()
+    }
+}
+
+impl<P> HasAccountSettings for StaffEnv<'_, P> {
+    fn account_settings(&self) -> &AccountSettings {
+        self.env.account_settings()
     }
 }
 
@@ -195,6 +203,21 @@ impl<P> SecretBox for StaffEnv<'_, P> {
 
     fn open(&self, sealed: &Sealed, context: &[u8]) -> Result<Vec<u8>, SealError> {
         self.env.open(sealed, context)
+    }
+}
+
+impl<P> Notifier<CustomerEmail> for StaffEnv<'_, P>
+where
+    P: hypha_stores::StoreRepo
+        + hypha_media::HasAssets
+        + hypha_notifications::HasNotificationTemplates
+        + hypha_notifications::HasNotificationSettings
+        + hypha_notifications::HasNotifications,
+{
+    async fn notify(&self, message: CustomerEmail) -> Result<(), NotifyError> {
+        hypha_mail::send_customer(self.mail.env, self.mail.ports, message)
+            .await
+            .map(drop)
     }
 }
 

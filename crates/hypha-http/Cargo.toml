@@ -24,6 +24,7 @@ hypha-privacy = { path = "../hypha-privacy" }
 hypha-payments = { path = "../hypha-payments" }
 hypha-auth = { path = "../hypha-auth" }
 hypha-users = { path = "../hypha-users" }
+hypha-customer-accounts = { path = "../hypha-customer-accounts" }
 hypha-dispatch = { path = "../hypha-dispatch" }
 hypha-search = { path = "../hypha-search" }
 hypha-search-index = { path = "../hypha-search-index" }

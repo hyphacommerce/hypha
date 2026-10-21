@@ -24,7 +24,10 @@
     "customers": {
       "$ref": "#/$defs/Customers",
       "default": {
-        "erasure_delay": "10d"
+        "erasure_delay": "10d",
+        "login_code_lifetime": "10m",
+        "login_code_resend_after": "1m",
+        "session_lifetime": "30d"
       }
     },
     "database": {
@@ -114,6 +117,22 @@
         "cart_create_ip": {
           "burst": 20,
           "per": "3s"
+        },
+        "code_email_from_ip": {
+          "burst": 3,
+          "per": "5m"
+        },
+        "code_ip": {
+          "burst": 5,
+          "per": "1m"
+        },
+        "customer_login_email_from_ip": {
+          "burst": 5,
+          "per": "1m"
+        },
+        "customer_login_ip": {
+          "burst": 10,
+          "per": "30s"
         },
         "invite_ip": {
           "burst": 10,
@@ -255,6 +274,21 @@
           "description": "How long a requested erasure of a customer's personal data can be cancelled\nbefore the job runs it. At least 1 hour; 10 days by default. A merchant under a\nretention duty sets it longer.",
           "$ref": "#/$defs/Duration",
           "default": "10d"
+        },
+        "login_code_lifetime": {
+          "description": "How long a sign-in code emailed to a customer works. At least 1 minute; 10 minutes\nby default.",
+          "$ref": "#/$defs/Duration",
+          "default": "10m"
+        },
+        "login_code_resend_after": {
+          "description": "While a customer's latest code is younger than this, asking for another sends\nnothing. Shorter than `login_code_lifetime`; 1 minute by default.",
+          "$ref": "#/$defs/Duration",
+          "default": "1m"
+        },
+        "session_lifetime": {
+          "description": "How long a customer stays signed in on the storefront without using the session;\nevery use within it starts the count again (design note 0034). At least 1 minute;\n30 days by default.",
+          "$ref": "#/$defs/Duration",
+          "default": "30d"
         }
       },
       "additionalProperties": false
@@ -572,6 +606,38 @@
           "default": {
             "burst": 20,
             "per": "3s"
+          }
+        },
+        "code_email_from_ip": {
+          "description": "A customer asking for a sign-in code, per email and address.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 3,
+            "per": "5m"
+          }
+        },
+        "code_ip": {
+          "description": "A customer asking for a sign-in code, per client address (design note 0034).",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 5,
+            "per": "1m"
+          }
+        },
+        "customer_login_email_from_ip": {
+          "description": "A customer signing in with a code, per email and address: guesses at one account\nfrom one place (the fifth wrong code voids it anyway).",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 5,
+            "per": "1m"
+          }
+        },
+        "customer_login_ip": {
+          "description": "A customer signing in with a code, per client address.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 10,
+            "per": "30s"
           }
         },
         "invite_ip": {

@@ -306,44 +306,44 @@ fn line_from_row(line: &Row) -> Result<CartLineSnapshot, RepoError> {
 }
 
 fn cart_from_row(row: &Row, id: CartId, lines: Vec<CartLineSnapshot>) -> Result<Cart, RepoError> {
-    let country: String = col(&row, "country")?;
-    let email: Option<String> = col(&row, "email")?;
+    let country: String = col(row, "country")?;
+    let email: Option<String> = col(row, "email")?;
     let snapshot = CartSnapshot {
         id,
-        version: version_from_db(col(&row, "version")?)?,
-        stamps: stamps_from_row(&row)?,
-        market: MarketId::from_uuid(col(&row, "market_id")?),
+        version: version_from_db(col(row, "version")?)?,
+        stamps: stamps_from_row(row)?,
+        market: MarketId::from_uuid(col(row, "market_id")?),
         country: CountryCode::new(&country).map_err(corrupt)?,
-        channel: ChannelId::from_uuid(col(&row, "channel_id")?),
+        channel: ChannelId::from_uuid(col(row, "channel_id")?),
         lines,
         email: email
             .as_deref()
             .map(Email::new)
             .transpose()
             .map_err(corrupt)?,
-        customer: col::<Option<Uuid>>(&row, "customer_id")?.map(CustomerId::from_uuid),
-        order: col::<Option<Uuid>>(&row, "order_id")?.map(OrderId::from_uuid),
-        payment_method: col::<Option<Uuid>>(&row, "payment_method_id")?
+        customer: col::<Option<Uuid>>(row, "customer_id")?.map(CustomerId::from_uuid),
+        order: col::<Option<Uuid>>(row, "order_id")?.map(OrderId::from_uuid),
+        payment_method: col::<Option<Uuid>>(row, "payment_method_id")?
             .map(PaymentMethodId::from_uuid),
-        marketing_opt_in: col(&row, "marketing_opt_in")?,
-        shipping_address: address_from_row(&row, "shipping_")?,
-        shipping: match col::<Option<Uuid>>(&row, "shipping_option_id")? {
+        marketing_opt_in: col(row, "marketing_opt_in")?,
+        shipping_address: address_from_row(row, "shipping_")?,
+        shipping: match col::<Option<Uuid>>(row, "shipping_option_id")? {
             None => None,
             Some(option) => Some(SelectedShipping {
                 option: ShippingOptionId::from_uuid(option),
-                quote: match col::<Option<i64>>(&row, "quote_amount")? {
+                quote: match col::<Option<i64>>(row, "quote_amount")? {
                     None => None,
                     Some(amount) => {
-                        let currency = currency_from_db(col(&row, "quote_currency")?)?;
+                        let currency = currency_from_db(col(row, "quote_currency")?)?;
                         Some(StoredQuote {
                             amount: Money::new(amount, currency)
                                 .and_then(Price::new)
                                 .map_err(corrupt)?,
-                            provider: ProviderKey::new(col(&row, "quote_provider")?)
+                            provider: ProviderKey::new(col(row, "quote_provider")?)
                                 .map_err(corrupt)?,
-                            service: col(&row, "quote_service")?,
-                            reference: col(&row, "quote_reference")?,
-                            quoted_at: Timestamp::from_unix_micros(col(&row, "quoted_at")?),
+                            service: col(row, "quote_service")?,
+                            reference: col(row, "quote_reference")?,
+                            quoted_at: Timestamp::from_unix_micros(col(row, "quoted_at")?),
                         })
                     }
                 },

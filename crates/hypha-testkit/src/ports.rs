@@ -422,7 +422,10 @@ impl StaffSessionRepo for InMemoryPorts {
         let Some(session) = self.sessions.get_by_token(hash).await? else {
             return Ok(None);
         };
-        let Principal::Staff(user_id) = session.principal();
+        // A customer's session is no staff session (design note 0034).
+        let Principal::Staff(user_id) = session.principal() else {
+            return Ok(None);
+        };
         let user = self.users.get(user_id).await?;
         let role = match &user {
             Some(user) => self.roles.get(user.role()).await?,

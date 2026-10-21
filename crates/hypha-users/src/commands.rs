@@ -641,7 +641,10 @@ pub async fn login<S: StaffPorts>(
         password,
     )
     .await?;
-    let Principal::Staff(user) = identity.principal();
+    let Principal::Staff(user) = identity.principal() else {
+        // Staff logins look up staff identities only.
+        return Err(hypha_auth::CommandError::InvalidCredentials.into());
+    };
     const ROUNDS: usize = 3;
     for _ in 0..ROUNDS {
         let Some(mut user) = ports.users().get(user).await?.filter(User::is_active) else {

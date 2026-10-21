@@ -3,9 +3,10 @@
 //! resending a message, and the staff flows' direct emails.
 
 use hypha_core::{
-    Actor, AssetId, Ctx, Email, HasBatch, HasOutbox, IdGenerator, NotificationId, Notifier,
+    Actor, AssetId, Clock, Ctx, Email, HasBatch, HasOutbox, IdGenerator, NotificationId, Notifier,
     NotifyError, OrderId, OutboxRepo, RepoError, Scope, retry_on_conflict,
 };
+use hypha_customer_accounts::CustomerEmail;
 use hypha_media::{
     AssetKind, AssetRepo, AssetStatus, HasAssets, StageAssetUsages, UsageOwner, UsageRole,
     Visibility, repo::keys as media_keys,
@@ -23,7 +24,7 @@ use hypha_users::{HasUsers, StaffEmail, UserRepo};
 
 use crate::{
     CommandError, MailEnv, MailPorts,
-    context::{MailContext, StaffMail, user_context},
+    context::{CodeMail, MailContext, StaffMail, user_context},
     format::TimeValue,
     handler::{load_fulfillment, load_order, order_context},
     send::{
@@ -290,7 +291,9 @@ async fn preview_context<E: MailEnv, P: MailPorts>(
 ) -> Result<MailContext, CommandError> {
     let as_order = match key {
         TemplateKey::Layout => Some(TemplateKey::OrderConfirmation),
-        TemplateKey::StaffInvite | TemplateKey::StaffPasswordReset => None,
+        TemplateKey::StaffInvite
+        | TemplateKey::StaffPasswordReset
+        | TemplateKey::CustomerLoginCode => None,
         other => Some(other),
     };
     match (order, as_order) {
@@ -544,6 +547,64 @@ where
         user: user_context(&to),
         link,
         expires_at: TimeValue::of(expires_at, branding.store.timezone()),
+    });
+    let message = Message {
+        template,
+        to,
+        event: None,
+        order: None,
+    };
+    let sources = Sources::load(ports, template)
+        .await
+        .map_err(|e| failed(e.into()))?;
+    let record = send_now(env, ports, &branding, &sources, message, &context)
+        .await
+        .map_err(failed)?;
+    match record.status() {
+        NotificationStatus::Sent => Ok(record),
+        _ => Err(NotifyError(
+            record
+                .error()
+                .unwrap_or("the email wasn't sent")
+                .to_string(),
+        )),
+    }
+}
+
+/// Sends a customer's sign-in code at once (design note 0034, §6), like `send_staff`:
+/// the code is a secret and isn't kept in the record. What a host's
+/// `Notifier<CustomerEmail>` calls.
+pub async fn send_customer<E, P>(
+    env: &E,
+    ports: &P,
+    message: CustomerEmail,
+) -> Result<Notification, NotifyError>
+where
+    E: MailEnv,
+    P: StoreRepo
+        + HasAssets
+        + HasNotificationTemplates
+        + HasNotificationSettings
+        + HasNotifications,
+{
+    let failed = |e: CommandError| NotifyError(e.to_string());
+    let CustomerEmail::LoginCode {
+        to,
+        code,
+        expires_at,
+    } = message;
+    let template = TemplateKey::CustomerLoginCode;
+    let branding = branding(env, ports).await.map_err(failed)?;
+    let left = expires_at
+        .unix_secs()
+        .saturating_sub(env.clock().now().unix_secs())
+        .max(0);
+    let context = MailContext::Code(CodeMail {
+        shop: branding.shop.clone(),
+        brand: branding.brand.clone(),
+        code,
+        expires_at: TimeValue::of(expires_at, branding.store.timezone()),
+        expires_in_minutes: u64::try_from(left / 60).unwrap_or(0).max(1),
     });
     let message = Message {
         template,

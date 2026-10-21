@@ -1033,6 +1033,7 @@ dependencies = [
  "hypha-auth",
  "hypha-categories",
  "hypha-core",
+ "hypha-customer-accounts",
  "hypha-dispatch",
  "hypha-extensions",
  "hypha-media",
@@ -1074,6 +1075,20 @@ dependencies = [
  "serde_json",
  "thiserror",
  "url",
+ "uuid",
+]
+
+[[package]]
+name = "hypha-customer-accounts"
+version = "0.1.0"
+dependencies = [
+ "hypha-auth",
+ "hypha-cart",
+ "hypha-core",
+ "hypha-customers",
+ "hypha-testkit",
+ "pollster",
+ "thiserror",
  "uuid",
 ]
 
@@ -1237,6 +1252,7 @@ dependencies = [
  "hypha-config",
  "hypha-core",
  "hypha-custom-fields",
+ "hypha-customer-accounts",
  "hypha-customers",
  "hypha-dispatch",
  "hypha-extensions",
@@ -1296,6 +1312,7 @@ name = "hypha-mail"
 version = "0.1.0"
 dependencies = [
  "hypha-core",
+ "hypha-customer-accounts",
  "hypha-fulfillment",
  "hypha-media",
  "hypha-notifications",
@@ -1662,6 +1679,7 @@ dependencies = [
  "hypha-channels",
  "hypha-core",
  "hypha-custom-fields",
+ "hypha-customer-accounts",
  "hypha-customers",
  "hypha-extensions",
  "hypha-fulfillment",

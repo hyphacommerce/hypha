@@ -16,6 +16,8 @@ pub enum TemplateKey {
     StaffNewOrder,
     StaffInvite,
     StaffPasswordReset,
+    /// A customer's sign-in code (design note 0034).
+    CustomerLoginCode,
 }
 
 /// Who a template's messages go to.
@@ -30,12 +32,13 @@ pub enum Audience {
 impl TemplateKey {
     /// Every key: the layout first, then the buyer's templates, then the staff's, the
     /// order the admin lists them in.
-    pub const ALL: [TemplateKey; 8] = [
+    pub const ALL: [TemplateKey; 9] = [
         TemplateKey::Layout,
         TemplateKey::OrderConfirmation,
         TemplateKey::OrderShipped,
         TemplateKey::OrderTrackingUpdated,
         TemplateKey::OrderCancelled,
+        TemplateKey::CustomerLoginCode,
         TemplateKey::StaffNewOrder,
         TemplateKey::StaffInvite,
         TemplateKey::StaffPasswordReset,
@@ -52,12 +55,13 @@ impl TemplateKey {
             TemplateKey::StaffNewOrder => "staff_new_order",
             TemplateKey::StaffInvite => "staff_invite",
             TemplateKey::StaffPasswordReset => "staff_password_reset",
+            TemplateKey::CustomerLoginCode => "customer_login_code",
         }
     }
 
-    /// Whether a merchant may turn it off. The layout isn't a message, and invites and
-    /// password resets are how staff get in: without them nobody could join or recover
-    /// an account.
+    /// Whether a merchant may turn it off. The layout isn't a message; invites and
+    /// password resets are how staff get in, and the sign-in code how customers do:
+    /// without them nobody could join, recover an account or sign in.
     pub fn can_disable(self) -> bool {
         match self {
             TemplateKey::OrderConfirmation
@@ -65,9 +69,10 @@ impl TemplateKey {
             | TemplateKey::OrderTrackingUpdated
             | TemplateKey::OrderCancelled
             | TemplateKey::StaffNewOrder => true,
-            TemplateKey::Layout | TemplateKey::StaffInvite | TemplateKey::StaffPasswordReset => {
-                false
-            }
+            TemplateKey::Layout
+            | TemplateKey::StaffInvite
+            | TemplateKey::StaffPasswordReset
+            | TemplateKey::CustomerLoginCode => false,
         }
     }
 
@@ -78,7 +83,8 @@ impl TemplateKey {
             TemplateKey::OrderConfirmation
             | TemplateKey::OrderShipped
             | TemplateKey::OrderTrackingUpdated
-            | TemplateKey::OrderCancelled => Some(Audience::Buyer),
+            | TemplateKey::OrderCancelled
+            | TemplateKey::CustomerLoginCode => Some(Audience::Buyer),
             TemplateKey::StaffNewOrder
             | TemplateKey::StaffInvite
             | TemplateKey::StaffPasswordReset => Some(Audience::Staff),

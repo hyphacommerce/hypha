@@ -1,6 +1,34 @@
 {
   "components": {
     "schemas": {
+      "AccountCustomer": {
+        "description": "The signed-in customer, as they see themselves.",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "email"
+        ],
+        "type": "object"
+      },
       "AddLineRequest": {
         "additionalProperties": false,
         "properties": {
@@ -426,6 +454,44 @@
         "pattern": "^cus_[0-9a-f]{32}$",
         "type": "string"
       },
+      "CustomerLoginRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "The six digits from the email.",
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "code"
+        ],
+        "type": "object"
+      },
+      "CustomerLoginResponse": {
+        "properties": {
+          "customer": {
+            "$ref": "#/components/schemas/AccountCustomer"
+          },
+          "expires_at": {
+            "description": "When the session ends unused; every use within pushes it out again.",
+            "type": "string"
+          },
+          "token": {
+            "description": "Send as `Authorization: Bearer <token>` beside `X-Publishable-Key`. Shown only now.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "expires_at",
+          "customer"
+        ],
+        "type": "object"
+      },
       "DeliveryEstimateDto": {
         "additionalProperties": false,
         "description": "Delivery in days, from `min_days` to `max_days`.",
@@ -754,6 +820,30 @@
             "type": "object"
           }
         ]
+      },
+      "LoginCodeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "type": "object"
+      },
+      "LoginCodeResponse": {
+        "properties": {
+          "sent": {
+            "description": "Always `true`: the route answers the same whatever the email, so it tells nobody\nwho is a customer. The email goes out only to an address that can take one.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sent"
+        ],
+        "type": "object"
       },
       "MarketId": {
         "description": "A MarketId: `mkt_` and 32 hex digits.",
@@ -2533,7 +2623,7 @@
     },
     "securitySchemes": {
       "publishable_key": {
-        "description": "A publishable API key (`hypha_pk_…`); `Authorization: Bearer` works too.",
+        "description": "A publishable API key (`hypha_pk_…`); `Authorization: Bearer` works too. A signed-in customer sends their session (`hypha_cs_…`, from `POST /storefront/auth/login`) as `Authorization: Bearer` beside the key; the routes marked `x-hypha-customer-session` need one.",
         "in": "header",
         "name": "X-Publishable-Key",
         "type": "apiKey"
@@ -2551,6 +2641,128 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/storefront/account/logout": {
+      "post": {
+        "operationId": "storefront.account.logout",
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No customer session (`account_required`), or one that is invalid or expired (`invalid_token`)"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Ends the customer's session.",
+        "tags": [
+          "account"
+        ],
+        "x-hypha-customer-session": true,
+        "x-hypha-scopes": []
+      }
+    },
+    "/storefront/account/logout-all": {
+      "post": {
+        "operationId": "storefront.account.logout_all",
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No customer session (`account_required`), or one that is invalid or expired (`invalid_token`)"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Ends every session of the customer, on every device, this one included.",
+        "tags": [
+          "account"
+        ],
+        "x-hypha-customer-session": true,
+        "x-hypha-scopes": []
+      }
+    },
     "/storefront/app-extensions": {
       "get": {
         "operationId": "storefront.app_extensions.list",
@@ -3181,6 +3393,284 @@
         "x-hypha-scopes": [
           "stores:read"
         ]
+      }
+    },
+    "/storefront/auth/code": {
+      "post": {
+        "operationId": "storefront.account.request_code",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginCodeResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Over the rate limit (`rate_limited`); see `Retry-After`"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The code could not be emailed (`notification_failed`)"
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Emails a sign-in code. 202 whatever the email: an address that isn't a customer's\nyet becomes one (the customer is created), one that can't take email gets nothing,\nand asking again within a minute sends nothing. 429 `rate_limited` per client\naddress and per email and address.",
+        "tags": [
+          "account"
+        ],
+        "x-hypha-scopes": []
+      }
+    },
+    "/storefront/auth/login": {
+      "post": {
+        "operationId": "storefront.account.login",
+        "parameters": [
+          {
+            "description": "The shopper's cart (`cart_…`), linked to the customer on signing in.",
+            "in": "header",
+            "name": "X-Hypha-Cart",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerLoginResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Wrong, expired or used-up code (`invalid_code`)"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Over the rate limit (`rate_limited`); see `Retry-After`"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Signs in with the emailed code and answers the session token, shown once. 401\n`invalid_code` for a wrong, expired or used-up code, deliberately one answer. With an\n`X-Hypha-Cart: cart_…` header (the shopper's cart in this channel), the cart is\nlinked to the customer.",
+        "tags": [
+          "account"
+        ],
+        "x-hypha-scopes": []
       }
     },
     "/storefront/carts": {

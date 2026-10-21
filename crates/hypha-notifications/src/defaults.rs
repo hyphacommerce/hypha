@@ -48,6 +48,7 @@ pub fn default_template(key: TemplateKey) -> DefaultTemplate {
         TemplateKey::StaffNewOrder => message!("staff_new_order"),
         TemplateKey::StaffInvite => message!("staff_invite"),
         TemplateKey::StaffPasswordReset => message!("staff_password_reset"),
+        TemplateKey::CustomerLoginCode => message!("customer_login_code"),
     }
 }
 

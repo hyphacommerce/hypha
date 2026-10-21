@@ -126,6 +126,7 @@ pub fn actor_of(actor: Actor) -> EventActor {
         Actor::Agent(id) => ("agent", Some(id.to_string())),
         Actor::ApiKey(id) => ("api_key", Some(id.to_string())),
         Actor::App(id) => ("app", Some(id.to_string())),
+        Actor::Customer(id) => ("customer", Some(id.to_string())),
         Actor::System => ("system", None),
     };
     EventActor { kind, id }

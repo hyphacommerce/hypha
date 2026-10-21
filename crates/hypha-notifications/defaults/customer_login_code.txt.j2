@@ -1,0 +1,11 @@
+Enter this code to sign in to {{ shop.name }}. It works for {{ expires_in_minutes }} minutes.
+
+    {{ code }}
+
+If you didn't ask for a code, you can ignore this email: nobody can sign in without it.
+
+--
+{{ shop.name }}{% if shop.email %} · {{ shop.email }}{% endif %}
+{%- if brand.footer %}
+{{ brand.footer }}
+{%- endif %}

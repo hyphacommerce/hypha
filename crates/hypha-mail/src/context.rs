@@ -349,6 +349,18 @@ pub struct StaffMail {
     pub expires_at: TimeValue,
 }
 
+/// `customer_login_code` (design note 0034, §6): the code itself, how long it works.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CodeMail {
+    pub shop: ShopContext,
+    pub brand: BrandContext,
+    /// Six digits.
+    pub code: String,
+    pub expires_at: TimeValue,
+    /// How long the code works from now, rounded down, at least 1.
+    pub expires_in_minutes: u64,
+}
+
 /// One template's context, whichever it is: what rendering is given.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
@@ -358,6 +370,7 @@ pub enum MailContext {
     Cancellation(CancellationMail),
     NewOrder(NewOrderMail),
     Staff(StaffMail),
+    Code(CodeMail),
 }
 
 impl MailContext {
@@ -419,6 +432,13 @@ impl MailContext {
             TemplateKey::StaffPasswordReset => MailContext::Staff(sample_staff(
                 "https://admin.example.com/reset-password?token=hypha_pwr_sample",
             )),
+            TemplateKey::CustomerLoginCode => MailContext::Code(CodeMail {
+                shop: sample_shop(),
+                brand: sample_brand(),
+                code: "481 516".replace(' ', ""),
+                expires_at: TimeValue::of(SAMPLE_PLACED_AT.plus_secs(10 * 60), None),
+                expires_in_minutes: 10,
+            }),
         }
     }
 
@@ -463,6 +483,7 @@ impl MailContext {
                 m.admin_url = None;
             }
             MailContext::Staff(m) => thin_branding(&mut m.shop, &mut m.brand),
+            MailContext::Code(m) => thin_branding(&mut m.shop, &mut m.brand),
         }
         context
     }
@@ -495,7 +516,7 @@ impl MailContext {
             }
             MailContext::Cancellation(m) => thin(&mut m.mail),
             MailContext::NewOrder(m) => thin(&mut m.mail),
-            MailContext::Staff(_) => {}
+            MailContext::Staff(_) | MailContext::Code(_) => {}
         }
         context
     }
@@ -519,6 +540,7 @@ impl MailContext {
             MailContext::Cancellation(m) => (&mut m.mail.shop, &mut m.mail.brand),
             MailContext::NewOrder(m) => (&mut m.mail.shop, &mut m.mail.brand),
             MailContext::Staff(m) => (&mut m.shop, &mut m.brand),
+            MailContext::Code(m) => (&mut m.shop, &mut m.brand),
         };
         *s = shop;
         *b = brand;

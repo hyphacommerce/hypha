@@ -4,6 +4,7 @@
 pub(crate) mod address;
 // Handlers and their request and response types are `pub` so a host's router (`router!`,
 // expanded in its crate) can name them; the types' fields stay private.
+pub mod account;
 pub mod api_keys;
 pub mod app_extensions;
 pub mod apps;
@@ -348,6 +349,10 @@ macro_rules! route_table {
             [storefront, GET, "/storefront/custom-field-definitions", custom_fields::list_storefront],
             [storefront, GET, "/storefront/categories/by-handle/{handle}", categories::fetch_by_handle_storefront],
             [storefront, GET, "/storefront/search", search::storefront_search],
+            [storefront, POST, "/storefront/auth/code", account::request_code],
+            [storefront, POST, "/storefront/auth/login", account::login],
+            [storefront, POST, "/storefront/account/logout", account::logout_handler],
+            [storefront, POST, "/storefront/account/logout-all", account::logout_all_handler],
             [storefront, POST, "/storefront/carts", carts::create],
             [storefront, GET, "/storefront/carts/{id}", carts::fetch],
             [storefront, POST, "/storefront/carts/{id}/lines", carts::add],

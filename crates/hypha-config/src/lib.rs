@@ -45,6 +45,8 @@ pub struct Config {
     pub categories: CategorySettings,
     /// The erasure window (design note 0032, §7.3).
     pub privacy: hypha_privacy::PrivacySettings,
+    /// Customer sessions and sign-in codes (design note 0034).
+    pub accounts: hypha_customer_accounts::AccountSettings,
     pub dispatch: DispatchSettings,
     /// The search sync job's batch and lease (design note 0019).
     pub search_sync: SyncSettings,
@@ -749,6 +751,28 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             },
         );
     }
+    let customers = &file.customers;
+    p.at_least(
+        "customers.session_lifetime",
+        customers.session_lifetime,
+        MINUTE,
+    );
+    p.at_least(
+        "customers.login_code_lifetime",
+        customers.login_code_lifetime,
+        MINUTE,
+    );
+    p.at_least(
+        "customers.login_code_resend_after",
+        customers.login_code_resend_after,
+        SECOND,
+    );
+    p.longer_than(
+        "customers.login_code_lifetime",
+        customers.login_code_lifetime,
+        customers.login_code_resend_after.0,
+        Some("customers.login_code_resend_after"),
+    );
     let max_depth = file.categories.max_depth;
     if !(1..=CategorySettings::MAX_DEPTH_LIMIT).contains(&max_depth) {
         p.add(
@@ -872,6 +896,11 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
         categories: CategorySettings { max_depth },
         privacy: hypha_privacy::PrivacySettings {
             erasure_delay: file.customers.erasure_delay.0,
+        },
+        accounts: hypha_customer_accounts::AccountSettings {
+            session_lifetime: file.customers.session_lifetime.0,
+            login_code_lifetime: file.customers.login_code_lifetime.0,
+            login_code_resend_after: file.customers.login_code_resend_after.0,
         },
         dispatch: DispatchSettings {
             batch: jobs.dispatch.batch,

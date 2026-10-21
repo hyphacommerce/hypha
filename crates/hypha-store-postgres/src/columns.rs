@@ -54,6 +54,7 @@ pub(crate) fn actor_to_db(actor: Actor) -> (&'static str, Uuid) {
         Actor::Agent(id) => ("agent", id.as_uuid()),
         Actor::ApiKey(id) => ("api_key", id.as_uuid()),
         Actor::App(id) => ("app", id.as_uuid()),
+        Actor::Customer(id) => ("customer", id.as_uuid()),
     }
 }
 
@@ -64,6 +65,7 @@ pub(crate) fn actor_from_db(kind: &str, id: Uuid) -> Result<Actor, RepoError> {
         "agent" => Ok(Actor::Agent(AgentId::from_uuid(id))),
         "api_key" => Ok(Actor::ApiKey(ApiKeyId::from_uuid(id))),
         "app" => Ok(Actor::App(hypha_core::AppId::from_uuid(id))),
+        "customer" => Ok(Actor::Customer(hypha_core::CustomerId::from_uuid(id))),
         other => Err(corrupt(format!("unknown actor kind {other:?}"))),
     }
 }

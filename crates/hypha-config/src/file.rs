@@ -341,12 +341,26 @@ pub struct Customers {
     /// before the job runs it. At least 1 hour; 10 days by default. A merchant under a
     /// retention duty sets it longer.
     pub erasure_delay: Dur,
+    /// How long a customer stays signed in on the storefront without using the session;
+    /// every use within it starts the count again (design note 0034). At least 1 minute;
+    /// 30 days by default.
+    pub session_lifetime: Dur,
+    /// How long a sign-in code emailed to a customer works. At least 1 minute; 10 minutes
+    /// by default.
+    pub login_code_lifetime: Dur,
+    /// While a customer's latest code is younger than this, asking for another sends
+    /// nothing. Shorter than `login_code_lifetime`; 1 minute by default.
+    pub login_code_resend_after: Dur,
 }
 
 impl Default for Customers {
     fn default() -> Self {
+        let accounts = hypha_customer_accounts::AccountSettings::default();
         Self {
             erasure_delay: Dur(PrivacySettings::default().erasure_delay),
+            session_lifetime: Dur(accounts.session_lifetime),
+            login_code_lifetime: Dur(accounts.login_code_lifetime),
+            login_code_resend_after: Dur(accounts.login_code_resend_after),
         }
     }
 }
@@ -591,6 +605,15 @@ pub struct RateLimits {
     /// Spores' public routes (`/spores/<name>/…`: a payment provider's webhooks), per
     /// client address, all spores together.
     pub spore_public: Quota,
+    /// A customer asking for a sign-in code, per client address (design note 0034).
+    pub code_ip: Quota,
+    /// A customer asking for a sign-in code, per email and address.
+    pub code_email_from_ip: Quota,
+    /// A customer signing in with a code, per client address.
+    pub customer_login_ip: Quota,
+    /// A customer signing in with a code, per email and address: guesses at one account
+    /// from one place (the fifth wrong code voids it anyway).
+    pub customer_login_email_from_ip: Quota,
 }
 
 /// The starting numbers from design note 0009, section 3.
@@ -617,13 +640,18 @@ impl Default for RateLimits {
                 burst: 120,
                 per: Dur(Duration::from_millis(250)),
             },
+            // Like password resets: an email per request, so few.
+            code_ip: quota(5, 60),
+            code_email_from_ip: quota(3, 5 * 60),
+            customer_login_ip: quota(10, 30),
+            customer_login_email_from_ip: quota(5, 60),
         }
     }
 }
 
 impl RateLimits {
     /// Every limit with its key, for the checks.
-    pub(crate) fn all(&self) -> [(&'static str, Quota); 12] {
+    pub(crate) fn all(&self) -> [(&'static str, Quota); 16] {
         [
             ("login_ip", self.login_ip),
             ("login_email_from_ip", self.login_email_from_ip),
@@ -637,6 +665,13 @@ impl RateLimits {
             ("cart_create_ip", self.cart_create_ip),
             ("oauth_ip", self.oauth_ip),
             ("spore_public", self.spore_public),
+            ("code_ip", self.code_ip),
+            ("code_email_from_ip", self.code_email_from_ip),
+            ("customer_login_ip", self.customer_login_ip),
+            (
+                "customer_login_email_from_ip",
+                self.customer_login_email_from_ip,
+            ),
         ]
     }
 }

@@ -5034,7 +5034,7 @@ export interface components {
         /**
          * @description One of the store's templates. The names are stable.
          *
-         *     Known values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         *     Known values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         NotificationTemplateKey: string;
@@ -18877,7 +18877,7 @@ export interface operations {
                 /** @description Only this order's emails. */
                 order?: components["schemas"]["OrderId"];
                 /** @description Only messages of this template. */
-                template?: "layout" | "order_confirmation" | "order_shipped" | "order_tracking_updated" | "order_cancelled" | "staff_new_order" | "staff_invite" | "staff_password_reset";
+                template?: "layout" | "order_confirmation" | "order_shipped" | "order_tracking_updated" | "order_cancelled" | "staff_new_order" | "staff_invite" | "staff_password_reset" | "customer_login_code";
                 /** @description Only messages in this status. */
                 status?: "queued" | "sending" | "sent" | "failed" | "skipped";
             };

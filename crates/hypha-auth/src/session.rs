@@ -195,6 +195,18 @@ impl Session {
         self.last_used_at = self.last_used_at.max(now);
     }
 
+    /// Pushes the expiry out to `now + lifetime` for a session refreshed on use (design
+    /// note 0034, AC5), when at least `at_most_every` of the old life has gone, so a busy
+    /// session isn't rewritten on every request. Says whether it moved.
+    pub fn extend(&mut self, now: Timestamp, lifetime: Duration, at_most_every: Duration) -> bool {
+        let fresh = now.plus(lifetime);
+        if !self.is_active(now) || fresh <= self.expires_at.plus(at_most_every) {
+            return false;
+        }
+        self.expires_at = fresh;
+        true
+    }
+
     /// Neither revoked nor expired.
     pub fn is_live(&self, now: Timestamp) -> bool {
         self.revoked_at.is_none() && now < self.expires_at
