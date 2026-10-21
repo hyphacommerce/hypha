@@ -561,3 +561,29 @@ body {
   text-decoration: underline;
   text-underline-offset: 0.3em;
 }
+
+/* The sign-in card (design note 0034, §7): centred, narrow, a little off the top. */
+.shop-sign-in {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0 48px;
+}
+.shop-sign-in > * {
+  width: 100%;
+  max-width: 440px;
+}
+.shop-sign-in-form {
+  width: 100%;
+}
+.shop-sign-in-icon {
+  display: inline-flex;
+  padding: 12px;
+  border-radius: 999px;
+  background: var(--color-background-secondary, rgba(127, 127, 127, 0.15));
+}
+.shop-sign-in-copy,
+.shop-sign-in-copy *,
+.shop-sign-in-note,
+.shop-sign-in-note * {
+  text-align: center;
+}

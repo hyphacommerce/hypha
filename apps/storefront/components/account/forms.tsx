@@ -268,11 +268,11 @@ export function AddressBook({
   const [error, setError] = useState<string>();
   const [pending, start] = useTransition();
   return (
-    <VStack gap={4}>
+    <VStack gap={4} maxWidth={760}>
       {addresses.length === 0 && editing !== NEW && (
         <Text color="secondary">No saved addresses yet. Add one to check out faster.</Text>
       )}
-      <Grid columns={{ minWidth: 280, repeat: "fit" }} gap={4}>
+      <Grid columns={{ minWidth: 260, max: 2 }} gap={4}>
         {addresses.map((a) =>
           editing === a.id ? (
             <AddressForm
@@ -322,15 +322,15 @@ export function AddressBook({
             </Card>
           ),
         )}
-        {editing === NEW && (
-          <AddressForm
-            country={country}
-            countryName={countryName}
-            address={null}
-            onDone={() => setEditing(null)}
-          />
-        )}
       </Grid>
+      {editing === NEW && (
+        <AddressForm
+          country={country}
+          countryName={countryName}
+          address={null}
+          onDone={() => setEditing(null)}
+        />
+      )}
       {error && <Banner status="error" title={error} />}
       {editing !== NEW && (
         <div>

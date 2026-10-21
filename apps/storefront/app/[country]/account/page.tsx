@@ -13,7 +13,7 @@ import { CustomFields } from "@/components/custom-fields";
 import { PLACED_DATE } from "@/components/order-details";
 import { SiteLink } from "@/components/site-link";
 import { accountApi, loadAccount } from "@/lib/account";
-import { countryOf, fieldContext } from "@/lib/api";
+import { countryOf, fieldContext, loadStore } from "@/lib/api";
 import { presentFields } from "@/lib/custom-fields";
 import { formatMoney } from "@/lib/money";
 import { link } from "@/lib/site";
@@ -33,14 +33,7 @@ export default async function AccountPage({ params }: { params: Promise<{ countr
   const to = (path: string) => link(code, path);
   const account = await loadAccount();
   if (!account) {
-    return (
-      <VStack gap={6}>
-        <Heading level={1} type="display-2">
-          Sign in
-        </Heading>
-        <SignInForm country={code} />
-      </VStack>
-    );
+    return <SignInForm country={code} storeName={(await loadStore()).name} />;
   }
   const client = (await accountApi())!;
   const [orders, context] = await Promise.all([

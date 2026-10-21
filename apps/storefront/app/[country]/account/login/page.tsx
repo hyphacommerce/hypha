@@ -1,11 +1,9 @@
-import { Heading } from "@astryxdesign/core/Heading";
-import { VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { SignInForm } from "@/components/account/sign-in-form";
 import { sessionToken } from "@/lib/account";
-import { countryOf } from "@/lib/api";
+import { countryOf, loadStore } from "@/lib/api";
 import { link } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
@@ -29,11 +27,11 @@ export default async function LoginPage({
   if (await sessionToken()) redirect(link(country.country, "/account"));
   const q = await searchParams;
   return (
-    <VStack gap={6}>
-      <Heading level={1} type="display-2">
-        Sign in
-      </Heading>
-      <SignInForm country={country.country} initialEmail={one(q.email)} initialCode={one(q.code)} />
-    </VStack>
+    <SignInForm
+      country={country.country}
+      storeName={(await loadStore()).name}
+      initialEmail={one(q.email)}
+      initialCode={one(q.code)}
+    />
   );
 }
