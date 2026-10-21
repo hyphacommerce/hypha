@@ -14,7 +14,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useRef, useState, useTransition } from "react";
+import { Suspense, startTransition, useEffect, useRef, useState, useTransition } from "react";
 
 import { listingPage } from "@/app/[country]/actions";
 import { type ListingState, changed, nextPage, previousPage, sortOf } from "@/lib/listing";
@@ -22,6 +22,7 @@ import type { ListingPage } from "@/lib/listing-data";
 
 import { FacetPanel, ListingToolbar, go } from "./listing-controls";
 import { ProductGrid } from "./product-grid";
+import { WITHIN_PAGE, addTransitionType } from "./view-transition";
 
 /** The URL's listing parameters, in a stable order, to tell one listing from another. */
 function listingQuery(params: URLSearchParams): string {
@@ -92,7 +93,12 @@ export function Listing({
     if (query === shown.query || query === initialQuery) return;
     startLoading(async () => {
       const page = await listingPage({ country, category, query });
-      setShown({ query, page });
+      // The cards animate (their boundaries), the page doesn't cross-fade: the type
+      // goes with the update, after the wait (one added before it is lost).
+      startTransition(() => {
+        addTransitionType(WITHIN_PAGE);
+        setShown({ query, page });
+      });
     });
   }, [query, shown.query, initialQuery, country, category]);
 
@@ -156,6 +162,7 @@ export function Listing({
               productBase={productBase}
               minWidth={180}
               eager={shown.query === initialQuery ? 4 : 0}
+              shared
             />
           )}
         </div>

@@ -493,3 +493,64 @@ body {
 .shop-mobile-nav-link:hover {
   background: var(--color-background-muted);
 }
+
+/* View transitions (React's ViewTransition; components/page-transition.tsx,
+   product-grid.tsx, p/[handle]/product-form.tsx). The classes below are the boundaries'
+   `view-transition-class`es; a browser without the API shows the change at once. */
+/* A page change: a short cross-fade. */
+::view-transition-old(.shop-page),
+::view-transition-new(.shop-page) {
+  animation-duration: 180ms;
+}
+/* A listing's cards when the results change: staying ones slide to their place, new
+   ones fade in, gone ones fade out. */
+::view-transition-group(.shop-card-move) {
+  animation-duration: 280ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+::view-transition-new(.shop-card-in):only-child {
+  animation: shop-vt-in 220ms ease-out;
+}
+::view-transition-old(.shop-card-out):only-child {
+  animation: shop-vt-out 160ms ease-in;
+}
+@keyframes shop-vt-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes shop-vt-out {
+  to {
+    opacity: 0;
+  }
+}
+/* A product's image travelling from its card to the page's hero: the box moves and
+   grows; the images are the same picture, so no cross-fade between them. */
+::view-transition-group(.shop-image-share) {
+  animation-duration: 320ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+::view-transition-old(.shop-image-share),
+::view-transition-new(.shop-image-share) {
+  animation: none;
+  mix-blend-mode: normal;
+  height: 100%;
+  object-fit: cover;
+  overflow: clip;
+}
+::view-transition-old(.shop-image-share) {
+  display: none;
+}
+/* The hero changing to another of the product's images. */
+::view-transition-old(.shop-hero-fade),
+::view-transition-new(.shop-hero-fade) {
+  animation-duration: 240ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}

@@ -6,6 +6,7 @@ import { Text } from "@astryxdesign/core/Text";
 
 import { CartDrawer } from "@/components/cart/cart-drawer";
 import { CartProvider } from "@/components/cart/cart-provider";
+import { PageTransition } from "@/components/page-transition";
 import { SiteHeader } from "@/components/site-header";
 import { countryOf, loadCategories, loadCountries, loadStore } from "@/lib/api";
 import { link } from "@/lib/site";
@@ -82,7 +83,9 @@ export default async function CountryLayout({
         }
         content={
           <LayoutContent>
-            <VStack gap={8}>{children}</VStack>
+            <PageTransition>
+              <VStack gap={8}>{children}</VStack>
+            </PageTransition>
           </LayoutContent>
         }
         footer={

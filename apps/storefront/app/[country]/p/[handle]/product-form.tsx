@@ -20,10 +20,12 @@ import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { MinusIcon, PlusIcon } from "@heroicons/react/24/outline";
 import type { StorefrontSchemas } from "@hypha/sdk/storefront";
-import { useState, useTransition } from "react";
+import { startTransition, useState, useTransition } from "react";
 
 import { useCart } from "@/components/cart/cart-provider";
 import { CustomFields } from "@/components/custom-fields";
+import { productImageName } from "@/components/product-grid";
+import { ViewTransition, WITHIN_PAGE, addTransitionType } from "@/components/view-transition";
 import { type FieldEntry, withVariant } from "@/lib/custom-fields";
 import { formatMoney } from "@/lib/money";
 
@@ -86,6 +88,12 @@ export function ProductForm({
     ),
   );
   const hero = images[shown] ?? images[0];
+  // In a transition, within the page: the hero cross-fades to the image (its boundary).
+  const showImage = (index: number) =>
+    startTransition(() => {
+      addTransitionType(WITHIN_PAGE);
+      setShown(index);
+    });
 
   const pick = (index: number, value: string) => {
     let next = [...selections];
@@ -103,7 +111,8 @@ export function ProductForm({
     const image = images.findIndex(
       (m) => m.asset_id === variantWith(product, next)?.media_asset_id,
     );
-    if (image >= 0) setShown(image);
+    // In a transition: the hero cross-fades to the new image (its ViewTransition).
+    if (image >= 0) showImage(image);
   };
 
   const add = () => {
@@ -135,21 +144,30 @@ export function ProductForm({
   return (
     <Grid columns={{ minWidth: 340, repeat: "fit" }} gap={8}>
       <VStack gap={3}>
-        <div className="shop-rounded">
-          <AspectRatio ratio={4 / 5}>
-            {hero ? (
-              <img
-                className="shop-fill"
-                src={hero.url}
-                alt={hero.alt ?? product.title}
-                // The page's largest paint: fetched first.
-                fetchPriority="high"
-              />
-            ) : (
-              <div />
-            )}
-          </AspectRatio>
-        </div>
+        {/* The card's image travels here from the listing (the shared name), and another
+            image cross-fades in when a thumbnail or a variant picks it. */}
+        <ViewTransition
+          name={productImageName(product.handle)}
+          default="none"
+          share="shop-image-share"
+          update="shop-hero-fade"
+        >
+          <div className="shop-rounded">
+            <AspectRatio ratio={4 / 5}>
+              {hero ? (
+                <img
+                  className="shop-fill"
+                  src={hero.url}
+                  alt={hero.alt ?? product.title}
+                  // The page's largest paint: fetched first.
+                  fetchPriority="high"
+                />
+              ) : (
+                <div />
+              )}
+            </AspectRatio>
+          </div>
+        </ViewTransition>
         {images.length > 1 && (
           <Grid columns={5} gap={2}>
             {images.map((m, i) => (
@@ -157,7 +175,7 @@ export function ProductForm({
                 <SelectableCard
                   label={m.alt ?? `Image ${i + 1}`}
                   isSelected={i === shown}
-                  onChange={() => setShown(i)}
+                  onChange={() => showImage(i)}
                   variant="transparent"
                   padding={0}
                   width="100%"
