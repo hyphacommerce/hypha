@@ -96,6 +96,8 @@ export function personalDataLabel(scope: string): string {
 
 /** An area of scopes (`orders`), as people say it. */
 const AREAS: Record<string, string> = {
+  agents: "agents",
+  api_keys: "API keys",
   apps: "apps",
   carts: "carts",
   catalogs: "catalogs and price lists",
@@ -104,6 +106,7 @@ const AREAS: Record<string, string> = {
   checkout: "checkout",
   custom_fields: "custom fields",
   customers: "customers",
+  fulfillments: "fulfilments",
   inventory: "inventory",
   keys: "API keys",
   markets: "markets",

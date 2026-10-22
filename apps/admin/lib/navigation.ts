@@ -7,6 +7,7 @@ import {
   BuildingStorefrontIcon,
   CodeBracketIcon,
   Cog6ToothIcon,
+  CpuChipIcon,
   CubeIcon,
   EnvelopeIcon,
   GlobeEuropeAfricaIcon,
@@ -128,6 +129,13 @@ export const NAV_SECTIONS: NavSection[] = [
     title: "Manage",
     items: [
       { label: "Apps", href: "/apps", icon: PuzzlePieceIcon, scope: "apps:read" },
+      {
+        label: "Agents",
+        href: "/agents",
+        icon: CpuChipIcon,
+        scope: "agents:read",
+        children: [{ label: "Proposals", href: "/agents/proposals", scope: "agents:read" }],
+      },
       SETTINGS_NAV,
     ],
   },

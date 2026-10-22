@@ -594,6 +594,27 @@ export function describe(error: ApiError): string {
     case "validation_not_allowed":
     case "description_too_long":
       return `${error.error.charAt(0).toUpperCase()}${error.error.slice(1)}.`;
+    case "agent_scope_not_grantable":
+    case "unknown_scope":
+    case "invalid_grant":
+    case "invalid_write_mode":
+    case "invalid_operation_id":
+    case "not_allowed_to_grant_apply":
+      return `${error.error.charAt(0).toUpperCase()}${error.error.slice(1)}.`;
+    case "too_many_operations":
+      return "An allowlist names at most 1,000 operations.";
+    case "agent_revoked":
+      return "This agent is revoked: it can't change any more.";
+    case "agent_not_found":
+      return "That agent no longer exists. Reload the page.";
+    case "proposal_not_found":
+      return "That proposal no longer exists. Reload the page.";
+    case "proposal_decided":
+      return "Someone already decided this proposal. Reload the page.";
+    case "proposal_expired":
+      return "This proposal expired before anyone decided it.";
+    case "preview_stale":
+      return "The store changed since the agent proposed this: approving now would do something else, so nothing was applied.";
     case "rate_limited": {
       const secs = numberDetail(error.details, "retry_after_secs");
       return secs ? `Too many attempts. Try again in ${secs} seconds.` : "Too many attempts.";
@@ -610,6 +631,15 @@ export async function channelNames(
 ): Promise<Map<string, string>> {
   const { data } = await client.GET("/admin/channels");
   return new Map((data?.items ?? []).map((c) => [c.id, c.name]));
+}
+
+/** Staff members' names by user ID. Empty without `users:read`, so a page that only names
+ * people still shows, with their IDs. */
+export async function staffNames(
+  client: Awaited<ReturnType<typeof sessionClient>>,
+): Promise<Map<string, string>> {
+  const { data } = await client.GET("/admin/users");
+  return new Map((data?.items ?? []).map((u) => [u.id, u.name]));
 }
 
 /** Locations' names by ID. Empty without `inventory:read`. */
