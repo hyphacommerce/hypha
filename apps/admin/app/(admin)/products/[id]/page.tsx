@@ -4,10 +4,12 @@ import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList"
 import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 import type { AdminSchemas } from "@hypha/sdk/admin";
+import { Suspense } from "react";
 
 import { AppSlot } from "@/components/app-extensions/app-slot";
 import { DateTime } from "@/components/date-time";
-import { PageHeader } from "@/components/page-header";
+import { type Crumb, PageHeader } from "@/components/page-header";
+import { DetailSkeleton } from "@/components/skeletons";
 import { ProductStatusBadge } from "@/components/status";
 import { type Currencies, formatMoney } from "@/lib/format";
 import { loadExtensions } from "@/lib/app-extensions";
@@ -25,13 +27,28 @@ type Product = AdminSchemas["ProductResponse"];
  * page's one read stays small. */
 const STOCK_PRELOAD = 500;
 
+const BACK: Crumb = { label: "Products", href: "/products" };
+
 /**
  * A product. Details, content, publishing, categories, options and variants are one draft
  * saved with a bar; status, stock and media act at once. The media section, which has
- * uploads running, takes each new list while staying mounted.
+ * uploads running, takes each new list while staying mounted. The way back renders at
+ * once; the product streams in behind a skeleton of the page.
  */
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  return (
+    <Section padding={6}>
+      <VStack gap={5} maxWidth={1320}>
+        <Suspense fallback={<DetailSkeleton back={BACK} />}>
+          <ProductDetail id={id} />
+        </Suspense>
+      </VStack>
+    </Section>
+  );
+}
+
+async function ProductDetail({ id }: { id: string }) {
   const client = await sessionClient();
   const [
     product,
@@ -68,63 +85,61 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   const stock = locations.data ? stockOf(product, inventory.data?.items ?? []) : undefined;
 
   return (
-    <Section padding={6}>
-      <VStack gap={5} maxWidth={1320}>
-        <PageHeader
-          title={product.title}
-          back={{ label: "Products", href: "/products" }}
-          badges={<ProductStatusBadge status={product.status} />}
-          actions={<StatusActions id={product.id} title={product.title} status={product.status} />}
-        />
+    <>
+      <PageHeader
+        title={product.title}
+        back={BACK}
+        badges={<ProductStatusBadge status={product.status} />}
+        actions={<StatusActions id={product.id} title={product.title} status={product.status} />}
+      />
 
-        <ProductEditor
-          product={product}
-          summary={<SummaryCard product={product} currencies={currencies} />}
-          channels={channels.data?.items}
-          media={<MediaSection id={product.id} media={product.media} />}
-          identifiers={
-            <Card>
-              <MetadataList title="Identifiers">
-                <MetadataListItem label="Product ID">
-                  <Text type="supporting" color="secondary">
-                    {product.id}
-                  </Text>
-                </MetadataListItem>
-                <MetadataListItem label="Created">
-                  <Text type="supporting">
-                    <DateTime value={product.created_at} />
-                  </Text>
-                </MetadataListItem>
-                <MetadataListItem label="Last changed">
-                  <Text type="supporting">
-                    <DateTime value={product.updated_at} />
-                  </Text>
-                </MetadataListItem>
-              </MetadataList>
-            </Card>
-          }
-          categoryTree={categories.data?.items}
-          stock={stock}
-          locations={locations.data?.items ?? []}
-          customFields={
-            productDefinitions.length > 0 && fields.data
-              ? { definitions: productDefinitions, fields: fields.data, scopes: me.scopes }
-              : undefined
-          }
-          variantFields={
-            variantDefinitions.length > 0
-              ? { definitions: variantDefinitions, scopes: me.scopes }
-              : undefined
-          }
-        />
+      <ProductEditor
+        product={product}
+        summary={<SummaryCard product={product} currencies={currencies} />}
+        channels={channels.data?.items}
+        media={<MediaSection id={product.id} media={product.media} />}
+        identifiers={
+          <Card>
+            <MetadataList title="Identifiers">
+              <MetadataListItem label="Product ID">
+                <Text type="supporting" color="secondary">
+                  {product.id}
+                </Text>
+              </MetadataListItem>
+              <MetadataListItem label="Created">
+                <Text type="supporting">
+                  <DateTime value={product.created_at} />
+                </Text>
+              </MetadataListItem>
+              <MetadataListItem label="Last changed">
+                <Text type="supporting">
+                  <DateTime value={product.updated_at} />
+                </Text>
+              </MetadataListItem>
+            </MetadataList>
+          </Card>
+        }
+        categoryTree={categories.data?.items}
+        stock={stock}
+        locations={locations.data?.items ?? []}
+        customFields={
+          productDefinitions.length > 0 && fields.data
+            ? { definitions: productDefinitions, fields: fields.data, scopes: me.scopes }
+            : undefined
+        }
+        variantFields={
+          variantDefinitions.length > 0
+            ? { definitions: variantDefinitions, scopes: me.scopes }
+            : undefined
+        }
+      />
 
-        <AppSlot
-          extensions={extensions}
-          target="product.details"
-          context={{ product_id: product.id }}
-        />
-      </VStack>
-    </Section>
+      <AppSlot
+        extensions={extensions}
+        target="product.details"
+        context={{ product_id: product.id }}
+      />
+    </>
   );
 }
 

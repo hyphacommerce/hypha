@@ -1,5 +1,7 @@
 import { Section } from "@astryxdesign/core/Section";
+import { Suspense } from "react";
 
+import { FormSkeleton } from "@/components/skeletons";
 import {
   loadCountries,
   loadPaymentMethods,
@@ -14,7 +16,8 @@ import { type WizardData, SetupWizard } from "./setup-wizard";
 /**
  * The setup wizard: the home page's checklist as one guided flow. Each step is done
  * when the data says so; the store remembers the step the merchant is on and opens
- * there (or on `?step=`, or the first one that isn't done).
+ * there (or on `?step=`, or the first one that isn't done). The whole wizard needs the
+ * store's data, so it streams in as one.
  */
 export default async function SetupPage({
   searchParams,
@@ -22,6 +25,18 @@ export default async function SetupPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
+  const step = typeof params.step === "string" ? Number(params.step) : undefined;
+
+  return (
+    <Section padding={6}>
+      <Suspense fallback={<FormSkeleton cards={2} />}>
+        <Wizard initialStep={Number.isInteger(step) ? step : undefined} />
+      </Suspense>
+    </Section>
+  );
+}
+
+async function Wizard({ initialStep }: { initialStep: number | undefined }) {
   const client = await sessionClient();
   const [done, store, markets, zones, locations, channels, products, countries, methods] =
     await Promise.all([
@@ -49,15 +64,6 @@ export default async function SetupPage({
     products: products.items,
     countries,
   };
-  const step = typeof params.step === "string" ? Number(params.step) : undefined;
 
-  return (
-    <Section padding={6}>
-      <SetupWizard
-        data={data}
-        initialStep={Number.isInteger(step) ? step : undefined}
-        savedStep={store.setup.step}
-      />
-    </Section>
-  );
+  return <SetupWizard data={data} initialStep={initialStep} savedStep={store.setup.step} />;
 }

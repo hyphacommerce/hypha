@@ -28,6 +28,8 @@ import { type BulkOutcome, BulkOutcomeBanner, ProductBulkActions } from "./bulk"
 
 /** No filterable custom fields. */
 const NO_FIELDS: Definition[] = [];
+const NO_NAMES: Record<string, string> = {};
+const NO_CURRENCIES: Currencies = {};
 
 type Product = AdminSchemas["ProductSummaryResponse"];
 
@@ -106,19 +108,20 @@ function FeaturedImage({ media }: { media?: AdminSchemas["ProductMediaResponse"]
 
 export function ProductsTable({
   page,
-  currencies,
-  channels,
-  categories,
+  currencies = NO_CURRENCIES,
+  channels = NO_NAMES,
+  categories = NO_NAMES,
   fieldFilters = NO_FIELDS,
 }: {
-  page: { items: Product[]; next_cursor: string | null; error?: string };
-  currencies: Currencies;
+  /** The page of rows; absent while it loads (the table shows its toolbar meanwhile). */
+  page?: { items: Product[]; next_cursor: string | null; error?: string };
+  currencies?: Currencies;
   /** Filterable custom fields, offered as filters. */
   fieldFilters?: Definition[];
   /** Channel names by ID. */
-  channels: Record<string, string>;
+  channels?: Record<string, string>;
   /** Category paths by ID ("Clothing › Shirts"). */
-  categories: Record<string, string>;
+  categories?: Record<string, string>;
 }) {
   const [outcome, setOutcome] = useState<BulkOutcome>();
   const shortName = Object.fromEntries(
@@ -229,8 +232,9 @@ export function ProductsTable({
           />
         )}
         rowLabel={(p) => p.title}
-        rows={page.items}
-        nextCursor={page.next_cursor}
+        rows={page?.items}
+        nextCursor={page?.next_cursor}
+        isLoading={!page}
         columns={columns}
         idKey="id"
         rowHref={(p) => `/products/${p.id}`}
@@ -239,7 +243,7 @@ export function ProductsTable({
         sorts={SORTS}
         sortOptions={SORT_OPTIONS}
         defaultSort="newest"
-        error={page.error}
+        error={page?.error}
         empty={{
           icon: <CubeIcon width={32} />,
           title: "No products yet",

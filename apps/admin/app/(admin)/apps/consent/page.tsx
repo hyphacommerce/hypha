@@ -9,10 +9,11 @@ import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 import { ExclamationTriangleIcon, PuzzlePieceIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hypha/sdk/admin";
-import type { ReactNode } from "react";
+import { type ReactNode, Suspense } from "react";
 
 import { DateTime } from "@/components/date-time";
-import { PageHeader } from "@/components/page-header";
+import { type Crumb, PageHeader } from "@/components/page-header";
+import { FormSkeleton } from "@/components/skeletons";
 import { areaLabel, personalDataLabel, scopeLabel } from "@/lib/apps";
 import { isMissingScope, requireStaff, sessionClient } from "@/lib/hypha";
 
@@ -20,27 +21,47 @@ import { ConsentButtons } from "./consent-buttons";
 
 type Request = AdminSchemas["ConsentRequestResponse"];
 
+const BACK: Crumb = { label: "Apps", href: "/apps" };
+
 /**
  * The consent page: where Hypha's `/oauth/authorize` sends staff (`?request=oareq_…`),
  * and where an uploaded private app's manifest waits. It shows who the app is, what it
  * asks for in plain words, the personal data it would see with the app's reasons, and
  * what changes compared with its current access; staff who may approve answer, and the
  * browser goes where the API says. Signed out, the login comes first and returns here
- * (`proxy.ts`).
+ * (`proxy.ts`). A link without a request is answered at once; with one, the way back
+ * renders at once and the request streams in behind a skeleton of the page.
  */
 export default async function ConsentPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [{ request: id }, client, me] = await Promise.all([
-    searchParams,
-    sessionClient(),
-    requireStaff(),
-  ]);
-  if (typeof id !== "string" || !id.startsWith("oareq_")) {
-    return <Problem title="No request to answer" description={NO_REQUEST} />;
-  }
+  const { request: id } = await searchParams;
+  return (
+    <Section padding={6}>
+      <VStack gap={5} maxWidth={760}>
+        {typeof id !== "string" || !id.startsWith("oareq_") ? (
+          <Problem title="No request to answer" description={NO_REQUEST} />
+        ) : (
+          <Suspense
+            fallback={
+              <>
+                <PageHeader back={BACK} />
+                <FormSkeleton cards={2} />
+              </>
+            }
+          >
+            <ConsentRequest id={id} />
+          </Suspense>
+        )}
+      </VStack>
+    </Section>
+  );
+}
+
+async function ConsentRequest({ id }: { id: string }) {
+  const [client, me] = await Promise.all([sessionClient(), requireStaff()]);
   const result = await client.GET("/admin/oauth/requests/{id}", { params: { path: { id } } });
   if (isMissingScope(result)) {
     return (
@@ -63,141 +84,139 @@ export default async function ConsentPage({
       : undefined;
 
   return (
-    <Section padding={6}>
-      <VStack gap={5} maxWidth={760}>
-        <PageHeader
-          title={
-            request.app.installed
-              ? `${request.app.name} asks for more`
-              : `Install ${request.app.name}`
-          }
-          back={{ label: "Apps", href: "/apps" }}
-          badges={<StatusBadge status={request.status} />}
-          description={
-            request.app.private ? (
-              "A private app: its manifest was uploaded to this store."
-            ) : (
-              <>
-                Asked <DateTime value={request.created_at} short />
-              </>
-            )
-          }
+    <>
+      <PageHeader
+        title={
+          request.app.installed
+            ? `${request.app.name} asks for more`
+            : `Install ${request.app.name}`
+        }
+        back={BACK}
+        badges={<StatusBadge status={request.status} />}
+        description={
+          request.app.private ? (
+            "A private app: its manifest was uploaded to this store."
+          ) : (
+            <>
+              Asked <DateTime value={request.created_at} short />
+            </>
+          )
+        }
+      />
+
+      <AppIdentity request={request} />
+
+      {request.status === "expired" && (
+        <Banner
+          status="warning"
+          title="This request expired"
+          description="Requests wait ten minutes for an answer. Start the installation again from the app."
         />
+      )}
+      {(request.status === "approved" || request.status === "denied") && (
+        <Banner
+          status="info"
+          title={request.status === "approved" ? "Already approved" : "Already denied"}
+          description="Each request is answered once."
+          endContent={<Link href={`/apps/${request.app.key}`}>Open the app</Link>}
+        />
+      )}
 
-        <AppIdentity request={request} />
+      {request.app.installed && <Changes changes={request.changes} />}
 
-        {request.status === "expired" && (
-          <Banner
-            status="warning"
-            title="This request expired"
-            description="Requests wait ten minutes for an answer. Start the installation again from the app."
-          />
-        )}
-        {(request.status === "approved" || request.status === "denied") && (
-          <Banner
-            status="info"
-            title={request.status === "approved" ? "Already approved" : "Already denied"}
-            description="Each request is answered once."
-            endContent={<Link href={`/apps/${request.app.key}`}>Open the app</Link>}
-          />
-        )}
-
-        {request.app.installed && <Changes changes={request.changes} />}
-
-        <Card>
-          <VStack gap={4}>
-            <Text type="display-3" as="h2">
-              What it may do
-            </Text>
-            {request.groups.length === 0 ? (
-              <Text color="secondary">Nothing beyond receiving the events it subscribes to.</Text>
-            ) : (
-              request.groups.map((group) => (
-                <VStack key={group.area} gap={1}>
-                  <Text type="label">{areaLabel(group.area)}</Text>
-                  <List>
-                    {group.scopes.map((scope) => (
-                      <ListItem
-                        key={scope}
-                        label={scopeLabel(scope)}
-                        description={scope}
-                        endContent={
-                          request.app.installed && request.changes.added.includes(scope) ? (
-                            <Badge label="New" variant="info" />
-                          ) : undefined
-                        }
-                      />
-                    ))}
-                  </List>
-                </VStack>
-              ))
-            )}
-          </VStack>
-        </Card>
-
-        <Card>
-          <VStack gap={3}>
-            <Text type="display-3" as="h2">
-              Customers&apos; personal data
-            </Text>
-            {request.personal_data.length === 0 ? (
-              <Text color="secondary">
-                None: Hypha leaves names, emails, phone numbers and addresses out of everything this
-                app reads or receives.
-              </Text>
-            ) : (
-              <>
-                <Text color="secondary">
-                  The app will see these fields of your customers. It gives these reasons:
-                </Text>
-                <List hasDividers>
-                  {request.personal_data.map((item) => (
+      <Card>
+        <VStack gap={4}>
+          <Text type="display-3" as="h2">
+            What it may do
+          </Text>
+          {request.groups.length === 0 ? (
+            <Text color="secondary">Nothing beyond receiving the events it subscribes to.</Text>
+          ) : (
+            request.groups.map((group) => (
+              <VStack key={group.area} gap={1}>
+                <Text type="label">{areaLabel(group.area)}</Text>
+                <List>
+                  {group.scopes.map((scope) => (
                     <ListItem
-                      key={item.scope}
-                      label={personalDataLabel(item.scope)}
-                      description={`“${item.reason}”`}
-                      endContent={<Badge label={item.scope} variant="warning" />}
+                      key={scope}
+                      label={scopeLabel(scope)}
+                      description={scope}
+                      endContent={
+                        request.app.installed && request.changes.added.includes(scope) ? (
+                          <Badge label="New" variant="info" />
+                        ) : undefined
+                      }
                     />
                   ))}
                 </List>
-                <Text type="supporting" color="secondary">
-                  What the app receives is its own to keep: read its{" "}
-                  <Link href={request.app.privacy_url} isExternalLink>
-                    privacy policy
-                  </Link>
-                  .
-                </Text>
-              </>
-            )}
-          </VStack>
-        </Card>
+              </VStack>
+            ))
+          )}
+        </VStack>
+      </Card>
 
-        <CustomFields request={request} />
-
-        {/* Always here, so a private app's credentials stay shown once the page re-renders
-            with the request approved. */}
-        <ConsentButtons
-          id={request.id}
-          appKey={request.app.key}
-          appName={request.app.name}
-          isPending={request.status === "pending"}
-          canApprove={!blocked}
-          canDeny={canWrite}
-          intro={
-            blocked ? (
-              <Banner status="warning" title="You can't approve this" description={blocked} />
-            ) : (
+      <Card>
+        <VStack gap={3}>
+          <Text type="display-3" as="h2">
+            Customers&apos; personal data
+          </Text>
+          {request.personal_data.length === 0 ? (
+            <Text color="secondary">
+              None: Hypha leaves names, emails, phone numbers and addresses out of everything this
+              app reads or receives.
+            </Text>
+          ) : (
+            <>
               <Text color="secondary">
-                {request.app.private
-                  ? "Approving installs the app and shows its credentials once."
-                  : `Approving sends you back to ${hostOf(request.redirect_uri)}.`}{" "}
-                The request waits until <DateTime value={request.expires_at} short />.
+                The app will see these fields of your customers. It gives these reasons:
               </Text>
-            )
-          }
-        />
-      </VStack>
-    </Section>
+              <List hasDividers>
+                {request.personal_data.map((item) => (
+                  <ListItem
+                    key={item.scope}
+                    label={personalDataLabel(item.scope)}
+                    description={`“${item.reason}”`}
+                    endContent={<Badge label={item.scope} variant="warning" />}
+                  />
+                ))}
+              </List>
+              <Text type="supporting" color="secondary">
+                What the app receives is its own to keep: read its{" "}
+                <Link href={request.app.privacy_url} isExternalLink>
+                  privacy policy
+                </Link>
+                .
+              </Text>
+            </>
+          )}
+        </VStack>
+      </Card>
+
+      <CustomFields request={request} />
+
+      {/* Always here, so a private app's credentials stay shown once the page re-renders
+          with the request approved. */}
+      <ConsentButtons
+        id={request.id}
+        appKey={request.app.key}
+        appName={request.app.name}
+        isPending={request.status === "pending"}
+        canApprove={!blocked}
+        canDeny={canWrite}
+        intro={
+          blocked ? (
+            <Banner status="warning" title="You can't approve this" description={blocked} />
+          ) : (
+            <Text color="secondary">
+              {request.app.private
+                ? "Approving installs the app and shows its credentials once."
+                : `Approving sends you back to ${hostOf(request.redirect_uri)}.`}{" "}
+              The request waits until <DateTime value={request.expires_at} short />.
+            </Text>
+          )
+        }
+      />
+    </>
   );
 }
 
@@ -212,18 +231,15 @@ function hostOf(url: string): string {
   }
 }
 
+/** Why there's nothing to answer, in place of the page's body. */
 function Problem({ title, description }: { title: string; description: string }) {
   return (
-    <Section padding={6}>
-      <VStack gap={5} maxWidth={760}>
-        <EmptyState
-          icon={<ExclamationTriangleIcon width={32} />}
-          title={title}
-          description={description}
-          actions={<Link href="/apps">Back to apps</Link>}
-        />
-      </VStack>
-    </Section>
+    <EmptyState
+      icon={<ExclamationTriangleIcon width={32} />}
+      title={title}
+      description={description}
+      actions={<Link href="/apps">Back to apps</Link>}
+    />
   );
 }
 

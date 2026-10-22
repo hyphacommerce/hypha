@@ -1,8 +1,10 @@
 import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
-import { PageHeader } from "@/components/page-header";
+import { type Crumb, PageHeader } from "@/components/page-header";
+import { DetailSkeleton } from "@/components/skeletons";
 import { loadCountries, loaded, sessionClient } from "@/lib/hypha";
 import { takenCountries } from "@/lib/regions";
 
@@ -10,9 +12,12 @@ import { CatalogCard } from "./catalog-card";
 import { MarketEditor } from "./market-editor";
 import { PriceListCard } from "./price-list-card";
 
+const BACK: Crumb = { label: "Markets", href: "/markets" };
+
 /**
  * A market: its details and countries, the catalog of what it sells, and that
- * catalog's price list. Two lists page here, by `products` and `prices` cursors.
+ * catalog's price list. Two lists page here, by `products` and `prices` cursors. The
+ * way back renders at once; the market streams in behind a skeleton of the page.
  */
 export default async function MarketPage({
   params,
@@ -26,6 +31,26 @@ export default async function MarketPage({
   const productsCursor = typeof query.products === "string" ? query.products : undefined;
   const pricesCursor = typeof query.prices === "string" ? query.prices : undefined;
 
+  return (
+    <Section padding={6}>
+      <VStack gap={5} maxWidth={1280}>
+        <Suspense fallback={<DetailSkeleton back={BACK} />}>
+          <Market id={id} productsCursor={productsCursor} pricesCursor={pricesCursor} />
+        </Suspense>
+      </VStack>
+    </Section>
+  );
+}
+
+async function Market({
+  id,
+  productsCursor,
+  pricesCursor,
+}: {
+  id: string;
+  productsCursor: string | undefined;
+  pricesCursor: string | undefined;
+}) {
   const client = await sessionClient();
   // Price lists need `pricing:read`; without it the card says so instead.
   const [market, countries, markets, lists] = await Promise.all([
@@ -61,39 +86,37 @@ export default async function MarketPage({
   if (prices?.response.status === 400) redirect(`/markets/${id}`);
 
   return (
-    <Section padding={6}>
-      <VStack gap={5} maxWidth={1280}>
-        <PageHeader title={market.name} back={{ label: "Markets", href: "/markets" }} />
-        <MarketEditor
-          key={[market.name, market.prices_include_tax, ...market.countries].join("|")}
-          market={market}
-          countries={countries}
-          taken={takenCountries(markets.items, market.id)}
-          main={
-            <>
-              <CatalogCard
+    <>
+      <PageHeader title={market.name} back={BACK} />
+      <MarketEditor
+        key={[market.name, market.prices_include_tax, ...market.countries].join("|")}
+        market={market}
+        countries={countries}
+        taken={takenCountries(markets.items, market.id)}
+        main={
+          <>
+            <CatalogCard
+              market={market}
+              catalog={catalog}
+              page={products?.data}
+              isFirstPage={!productsCursor}
+              pricesCursor={pricesCursor}
+            />
+            {catalog && (
+              <PriceListCard
                 market={market}
                 catalog={catalog}
-                page={products?.data}
-                isFirstPage={!productsCursor}
-                pricesCursor={pricesCursor}
+                canRead={lists.data !== undefined}
+                lists={(lists.data?.items ?? []).filter((l) => l.currency === market.currency)}
+                list={list?.data}
+                page={prices?.data}
+                isFirstPage={!pricesCursor}
+                productsCursor={productsCursor}
               />
-              {catalog && (
-                <PriceListCard
-                  market={market}
-                  catalog={catalog}
-                  canRead={lists.data !== undefined}
-                  lists={(lists.data?.items ?? []).filter((l) => l.currency === market.currency)}
-                  list={list?.data}
-                  page={prices?.data}
-                  isFirstPage={!pricesCursor}
-                  productsCursor={productsCursor}
-                />
-              )}
-            </>
-          }
-        />
-      </VStack>
-    </Section>
+            )}
+          </>
+        }
+      />
+    </>
   );
 }

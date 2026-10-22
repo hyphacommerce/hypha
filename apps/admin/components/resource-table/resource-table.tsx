@@ -34,6 +34,8 @@ import { AdjustmentsHorizontalIcon, MagnifyingGlassIcon } from "@heroicons/react
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState, useTransition } from "react";
 
+import { RowsSkeleton } from "@/components/skeletons";
+
 import { CURSOR, PREV, encodePrevious, href, previous, withChanges } from "./params";
 
 export type Row = Record<string, unknown>;
@@ -67,8 +69,15 @@ export type SortOption = { value: string; label: string; unavailable?: string };
 export type EmptyText = { title: string; description?: string; action?: ReactNode };
 
 type Props<T extends Row> = {
-  rows: T[];
-  nextCursor: string | null;
+  /** The page's rows; none while they load (`isLoading`). */
+  rows?: T[];
+  nextCursor?: string | null;
+  /**
+   * The rows are still on their way: the card shows its toolbar, so views, search,
+   * sort and filters work meanwhile, with a skeleton where the rows go. A page renders
+   * the table this way as the fallback of the rows' `Suspense`.
+   */
+  isLoading?: boolean;
   columns: TableColumn<T>[];
   idKey: keyof T & string;
   /** Where a row leads; the whole row is then a link (its first link cell for keyboards). */
@@ -198,6 +207,7 @@ function isDay(value: string | undefined): value is ISODateString {
 // (and break the memos that depend on it).
 const NO_FILTERS: FilterDef[] = [];
 const NO_SORTS: Record<string, SortDef> = {};
+const NO_ROWS: never[] = [];
 const NO_REQUIREMENTS: Record<string, string> = {};
 const NO_COMPARE: Record<string, never> = {};
 
@@ -230,8 +240,9 @@ function columnSort(sorts: Record<string, SortDef>, sort: string | undefined): T
 
 export function ResourceTable<T extends Row>(props: Props<T>) {
   const {
-    rows,
-    nextCursor,
+    rows = NO_ROWS,
+    nextCursor = null,
+    isLoading = false,
     columns,
     idKey,
     rowHref,
@@ -563,7 +574,7 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
         </div>
       )}
 
-      {selectionState.hasSelection && (
+      {!isLoading && selectionState.hasSelection && (
         <div className="rt-selection">
           <Text weight="medium">{selected.length} selected</Text>
           {renderBulkActions?.(selected, selectionState.clearSelection)}
@@ -573,7 +584,11 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
       )}
 
       <div className="rt-body">
-        {renderRows ? (
+        {isLoading ? (
+          <div className="rt-rows-skeleton">
+            <RowsSkeleton />
+          </div>
+        ) : renderRows ? (
           rows.length === 0 ? (
             <div className="rt-empty">{emptyState}</div>
           ) : (
@@ -593,7 +608,14 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
         )}
       </div>
 
-      <Pages page={pageNumber} count={rows.length} hasMore={Boolean(nextCursor)} toPage={toPage} />
+      {!isLoading && (
+        <Pages
+          page={pageNumber}
+          count={rows.length}
+          hasMore={Boolean(nextCursor)}
+          toPage={toPage}
+        />
+      )}
     </div>
   );
 }

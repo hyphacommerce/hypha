@@ -1,6 +1,7 @@
 import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 import type { AdminSchemas } from "@hypha/sdk/admin";
+import { Suspense } from "react";
 
 import { PageHeader } from "@/components/page-header";
 import {
@@ -38,12 +39,26 @@ const FULFILMENT: AdminSchemas["FulfillmentStatusDto"][] = [
 ];
 const SORTS = ["newest", "oldest", "total_desc", "total_asc"] as const;
 
+/** The header and the table's toolbar render at once; the rows stream in. */
 export default async function OrdersPage({
   searchParams,
 }: {
   searchParams: Promise<SearchParams>;
 }) {
   const params = await searchParams;
+  return (
+    <Section padding={6}>
+      <VStack gap={5}>
+        <PageHeader title="Orders" />
+        <Suspense fallback={<OrdersTable />}>
+          <OrderRows params={params} />
+        </Suspense>
+      </VStack>
+    </Section>
+  );
+}
+
+async function OrderRows({ params }: { params: SearchParams }) {
   const client = await sessionClient();
   const placed = dateRange(params, "placed");
   const cancelled = one(params, "cancelled");
@@ -79,7 +94,6 @@ export default async function OrdersPage({
     loadCurrencies(),
     loadCountries(),
   ]);
-  const page = listPage(result, "/orders", params);
 
   const sold = markets.data?.items ?? [];
   const countryName = new Map(countries.map((c) => [c.code, c.name]));
@@ -88,18 +102,13 @@ export default async function OrdersPage({
     .toSorted((a, b) => a.label.localeCompare(b.label));
 
   return (
-    <Section padding={6}>
-      <VStack gap={5}>
-        <PageHeader title="Orders" />
-        <OrdersTable
-          page={page}
-          currencies={currencies}
-          channels={Object.fromEntries(channelName)}
-          countries={soldTo}
-          orderCurrencies={[...new Set(sold.map((m) => m.currency))].toSorted()}
-          fieldFilters={fieldFilters}
-        />
-      </VStack>
-    </Section>
+    <OrdersTable
+      page={listPage(result, "/orders", params)}
+      currencies={currencies}
+      channels={Object.fromEntries(channelName)}
+      countries={soldTo}
+      orderCurrencies={[...new Set(sold.map((m) => m.currency))].toSorted()}
+      fieldFilters={fieldFilters}
+    />
   );
 }

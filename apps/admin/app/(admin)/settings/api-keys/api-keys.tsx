@@ -25,20 +25,24 @@ import { ResourceTable } from "@/components/resource-table/resource-table";
 
 import { createApiKey, revokeApiKey } from "./actions";
 
+const NO_NAMES: Record<string, string> = {};
+const NO_SCOPES: string[] = [];
+
 type ApiKey = AdminSchemas["ApiKeyResponse"];
 
 export function ApiKeys({
   page,
-  channels,
-  scopes,
-  canWrite,
+  channels = NO_NAMES,
+  scopes = NO_SCOPES,
+  canWrite = false,
 }: {
-  page: { items: ApiKey[]; next_cursor: string | null; error?: string };
+  /** The page of keys; absent while it loads (the table shows its toolbar meanwhile). */
+  page?: { items: ApiKey[]; next_cursor: string | null; error?: string };
   /** Channel names by ID. */
-  channels: Record<string, string>;
+  channels?: Record<string, string>;
   /** The scopes the signed-in user holds: the most a new secret key may have. */
-  scopes: string[];
-  canWrite: boolean;
+  scopes?: string[];
+  canWrite?: boolean;
 }) {
   const [isCreating, setIsCreating] = useState(false);
   const [revoking, setRevoking] = useState<ApiKey>();
@@ -100,12 +104,13 @@ export function ApiKeys({
         </HStack>
       )}
       <ResourceTable<ApiKey>
-        rows={page.items}
-        nextCursor={page.next_cursor}
+        rows={page?.items}
+        nextCursor={page?.next_cursor}
+        isLoading={!page}
         columns={columns}
         idKey="id"
         isSelectable={false}
-        error={page.error}
+        error={page?.error}
         empty={{
           icon: <KeyIcon width={32} />,
           title: "No API keys",

@@ -14,14 +14,15 @@ import {
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import type { AdminSchemas } from "@hypha/sdk/admin";
-import type { ReactNode } from "react";
+import { type ReactNode, Suspense } from "react";
 
 import { Link } from "@astryxdesign/core/Link";
 
 import { AppActions, AppSlot } from "@/components/app-extensions/app-slot";
 import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
 import { DateTime } from "@/components/date-time";
-import { PageHeader } from "@/components/page-header";
+import { type Crumb, PageHeader } from "@/components/page-header";
+import { DetailSkeleton } from "@/components/skeletons";
 import {
   CancelledBadge,
   FulfillmentBadge,
@@ -47,6 +48,8 @@ import { MarkPaid } from "./mark-paid";
 
 const RATE = new Intl.NumberFormat("en-IE", { maximumFractionDigits: 4 });
 
+const BACK: Crumb = { label: "Orders", href: "/orders" };
+
 /** "25%" from parts per million (250000). */
 function percent(ppm: number): string {
   return `${RATE.format(ppm / 10_000)}%`;
@@ -71,8 +74,25 @@ function TotalRow({ label, children }: { label: ReactNode; children: ReactNode }
   );
 }
 
+/**
+ * An order: its items and totals, payment, shipments, emails and timeline beside its
+ * summary, customer and address. The way back renders at once; the order streams in
+ * behind a skeleton of the page.
+ */
 export default async function OrderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  return (
+    <Section padding={6}>
+      <VStack gap={5} maxWidth={1280}>
+        <Suspense fallback={<DetailSkeleton back={BACK} />}>
+          <Order id={id} />
+        </Suspense>
+      </VStack>
+    </Section>
+  );
+}
+
+async function Order({ id }: { id: string }) {
   const client = await sessionClient();
   // All at once; a missing order still goes to the 404 page (`loaded`). Shipments and
   // locations need their own scopes; without them the page shows the order alone. The
@@ -114,279 +134,275 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
     !cancelled && order.unfulfilled.length > 0 && places.length > 0 && shipments.data;
 
   return (
-    <Section padding={6}>
-      <VStack gap={5} maxWidth={1280}>
-        <PageHeader
-          title={`Order #${order.number}`}
-          description={
-            <>
-              Placed <DateTime value={order.placed_at} /> ·{" "}
-              {channelName.get(order.channel) ?? order.channel}
-            </>
-          }
-          back={{ label: "Orders", href: "/orders" }}
-          badges={
-            <HStack gap={1}>
-              {cancelled && <CancelledBadge />}
-              <PaymentBadge status={order.financial_status} />
-              <FulfillmentBadge status={order.fulfillment_status} />
-            </HStack>
-          }
-          actions={
-            <>
-              {!cancelled && <CancelOrderButton order={order} />}
-              {canMarkPaid(order) && (
-                <MarkPaid
-                  id={order.id}
-                  number={order.number}
-                  hasPayment={order.payments.some((p) => p.status === "pending")}
-                />
-              )}
-              {canFulfil && <FulfilButton order={order} places={places} />}
-            </>
-          }
+    <>
+      <PageHeader
+        title={`Order #${order.number}`}
+        description={
+          <>
+            Placed <DateTime value={order.placed_at} /> ·{" "}
+            {channelName.get(order.channel) ?? order.channel}
+          </>
+        }
+        back={BACK}
+        badges={
+          <HStack gap={1}>
+            {cancelled && <CancelledBadge />}
+            <PaymentBadge status={order.financial_status} />
+            <FulfillmentBadge status={order.fulfillment_status} />
+          </HStack>
+        }
+        actions={
+          <>
+            {!cancelled && <CancelOrderButton order={order} />}
+            {canMarkPaid(order) && (
+              <MarkPaid
+                id={order.id}
+                number={order.number}
+                hasPayment={order.payments.some((p) => p.status === "pending")}
+              />
+            )}
+            {canFulfil && <FulfilButton order={order} places={places} />}
+          </>
+        }
+      />
+
+      {cancelled && (
+        <Banner
+          status="warning"
+          title="Cancelled"
+          description={`${CANCEL_REASONS[order.cancel_reason ?? ""] ?? order.cancel_reason ?? "No reason given"}. Its stock was released.`}
         />
+      )}
 
-        {cancelled && (
-          <Banner
-            status="warning"
-            title="Cancelled"
-            description={`${CANCEL_REASONS[order.cancel_reason ?? ""] ?? order.cancel_reason ?? "No reason given"}. Its stock was released.`}
-          />
-        )}
-
-        <div className="detail-columns">
-          <div>
-            <Card>
-              <VStack gap={3}>
-                <Text type="display-3" as="h2">
-                  Items
-                </Text>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHeaderCell>Product</TableHeaderCell>
-                      <TableHeaderCell>Price</TableHeaderCell>
-                      <TableHeaderCell>Quantity</TableHeaderCell>
-                      <TableHeaderCell>Shipped</TableHeaderCell>
-                      <TableHeaderCell>Tax</TableHeaderCell>
-                      <TableHeaderCell>Total</TableHeaderCell>
+      <div className="detail-columns">
+        <div>
+          <Card>
+            <VStack gap={3}>
+              <Text type="display-3" as="h2">
+                Items
+              </Text>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHeaderCell>Product</TableHeaderCell>
+                    <TableHeaderCell>Price</TableHeaderCell>
+                    <TableHeaderCell>Quantity</TableHeaderCell>
+                    <TableHeaderCell>Shipped</TableHeaderCell>
+                    <TableHeaderCell>Tax</TableHeaderCell>
+                    <TableHeaderCell>Total</TableHeaderCell>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {order.lines.map((line) => (
+                    <TableRow key={line.id}>
+                      <TableCell>
+                        <VStack gap={0.5}>
+                          <Link href={`/products/${line.product}`}>
+                            <Text type="body" weight="medium">
+                              {line.product_title}
+                            </Text>
+                          </Link>
+                          {(line.variant_title || line.sku) && (
+                            <Text type="supporting" color="secondary">
+                              {[line.variant_title, line.sku && `SKU ${line.sku}`]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </Text>
+                          )}
+                        </VStack>
+                      </TableCell>
+                      <TableCell>{formatMoney(line.unit_price, currencies)}</TableCell>
+                      <TableCell>{line.quantity}</TableCell>
+                      <TableCell>
+                        {line.fulfilled_quantity} of {line.quantity}
+                      </TableCell>
+                      <TableCell>
+                        {line.tax
+                          ? `${formatMoney(line.tax.amount, currencies)} (${percent(line.tax.rate_ppm)})`
+                          : "—"}
+                      </TableCell>
+                      <TableCell>{formatMoney(line.total, currencies)}</TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {order.lines.map((line) => (
-                      <TableRow key={line.id}>
-                        <TableCell>
-                          <VStack gap={0.5}>
-                            <Link href={`/products/${line.product}`}>
-                              <Text type="body" weight="medium">
-                                {line.product_title}
-                              </Text>
-                            </Link>
-                            {(line.variant_title || line.sku) && (
-                              <Text type="supporting" color="secondary">
-                                {[line.variant_title, line.sku && `SKU ${line.sku}`]
-                                  .filter(Boolean)
-                                  .join(" · ")}
-                              </Text>
-                            )}
-                          </VStack>
-                        </TableCell>
-                        <TableCell>{formatMoney(line.unit_price, currencies)}</TableCell>
-                        <TableCell>{line.quantity}</TableCell>
-                        <TableCell>
-                          {line.fulfilled_quantity} of {line.quantity}
-                        </TableCell>
-                        <TableCell>
-                          {line.tax
-                            ? `${formatMoney(line.tax.amount, currencies)} (${percent(line.tax.rate_ppm)})`
-                            : "—"}
-                        </TableCell>
-                        <TableCell>{formatMoney(line.total, currencies)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                  <TableFooter>
-                    <TotalRow label="Subtotal">{formatMoney(order.subtotal, currencies)}</TotalRow>
-                    {order.shipping_lines.map((shipping) => (
-                      <TableRow key={shipping.group}>
-                        <TableCell>
-                          <VStack gap={0.5}>
-                            <Text>Shipping: {shipping.name}</Text>
-                            {shipping.provider && (
-                              <Text type="supporting" color="secondary">
-                                {[shipping.provider, shipping.service, shipping.reference]
-                                  .filter(Boolean)
-                                  .join(" · ")}
-                              </Text>
-                            )}
-                          </VStack>
-                        </TableCell>
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell>
-                          {shipping.tax
-                            ? `${formatMoney(shipping.tax.amount, currencies)} (${percent(shipping.tax.rate_ppm)})`
-                            : "—"}
-                        </TableCell>
-                        <TableCell>{formatMoney(shipping.amount, currencies)}</TableCell>
-                      </TableRow>
-                    ))}
-                    <TotalRow label={order.taxes_included ? "Tax (included)" : "Tax"}>
-                      {formatMoney(order.tax_total, currencies)}
-                    </TotalRow>
-                    <TotalRow
-                      label={
-                        <Text type="body" weight="bold">
-                          Total
-                        </Text>
-                      }
-                    >
+                  ))}
+                </TableBody>
+                <TableFooter>
+                  <TotalRow label="Subtotal">{formatMoney(order.subtotal, currencies)}</TotalRow>
+                  {order.shipping_lines.map((shipping) => (
+                    <TableRow key={shipping.group}>
+                      <TableCell>
+                        <VStack gap={0.5}>
+                          <Text>Shipping: {shipping.name}</Text>
+                          {shipping.provider && (
+                            <Text type="supporting" color="secondary">
+                              {[shipping.provider, shipping.service, shipping.reference]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </Text>
+                          )}
+                        </VStack>
+                      </TableCell>
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                      <TableCell>
+                        {shipping.tax
+                          ? `${formatMoney(shipping.tax.amount, currencies)} (${percent(shipping.tax.rate_ppm)})`
+                          : "—"}
+                      </TableCell>
+                      <TableCell>{formatMoney(shipping.amount, currencies)}</TableCell>
+                    </TableRow>
+                  ))}
+                  <TotalRow label={order.taxes_included ? "Tax (included)" : "Tax"}>
+                    {formatMoney(order.tax_total, currencies)}
+                  </TotalRow>
+                  <TotalRow
+                    label={
                       <Text type="body" weight="bold">
-                        {formatMoney(order.total, currencies)}
+                        Total
                       </Text>
-                    </TotalRow>
-                  </TableFooter>
-                </Table>
-              </VStack>
-            </Card>
+                    }
+                  >
+                    <Text type="body" weight="bold">
+                      {formatMoney(order.total, currencies)}
+                    </Text>
+                  </TotalRow>
+                </TableFooter>
+              </Table>
+            </VStack>
+          </Card>
 
-            <PaymentCard order={order} currencies={currencies} extensions={extensions} />
+          <PaymentCard order={order} currencies={currencies} extensions={extensions} />
 
-            {fulfillments.length > 0 && (
-              <ShipmentsCard order={order} fulfillments={fulfillments} places={places} />
-            )}
-            {fulfillments.map((f) => (
-              <AppSlot
-                key={f.id}
-                extensions={extensions}
-                target="order.fulfillment"
-                context={{ order_id: order.id, fulfillment_id: f.id }}
-              />
-            ))}
-
-            {emails.data && (
-              <EmailsCard
-                orderId={order.id}
-                messages={emails.data.items}
-                canResend={me.scopes.includes("notifications:write")}
-              />
-            )}
-
-            <TimelineCard
-              events={[
-                {
-                  at: order.placed_at,
-                  what: `Placed through ${channelName.get(order.channel) ?? "a channel"}`,
-                },
-                ...fulfillments.map((f) => ({
-                  at: f.created_at,
-                  what: `Fulfilled ${items(f.lines.reduce((n, l) => n + l.quantity, 0))}${f.cancelled_at ? " (cancelled since)" : ""}`,
-                })),
-                ...order.payments.flatMap((p) => [
-                  ...(p.paid_at
-                    ? [
-                        {
-                          at: p.paid_at,
-                          what: `Paid ${formatMoney(p.amount, currencies)}${p.method_name ? ` by ${p.method_name}` : ""}`,
-                        },
-                      ]
-                    : []),
-                  ...(p.voided_at
-                    ? [
-                        {
-                          at: p.voided_at,
-                          what: `Payment voided${p.method_name ? ` (${p.method_name})` : ""}`,
-                        },
-                      ]
-                    : []),
-                ]),
-                ...(order.cancelled_at ? [{ at: order.cancelled_at, what: "Cancelled" }] : []),
-              ]}
-            />
-          </div>
-          <div>
-            <Card>
-              <MetadataList title="Summary">
-                <MetadataListItem label="Total">
-                  <Text weight="bold">{formatMoney(order.total, currencies)}</Text>
-                </MetadataListItem>
-                <MetadataListItem label="Payment">
-                  <PaymentBadge status={order.financial_status} />
-                </MetadataListItem>
-                <MetadataListItem label="Fulfilment">
-                  <FulfillmentBadge status={order.fulfillment_status} />
-                </MetadataListItem>
-                <MetadataListItem label="Items">
-                  {order.lines.reduce((n, l) => n + l.quantity, 0)}
-                </MetadataListItem>
-              </MetadataList>
-            </Card>
-
-            <Card>
-              <MetadataList title="Customer">
-                <MetadataListItem label="Email">
-                  <Link href={`/customers/${order.customer}`}>{order.email}</Link>
-                </MetadataListItem>
-                <MetadataListItem label="Country">{countryName(order.country)}</MetadataListItem>
-                <MetadataListItem label="Currency">{order.currency}</MetadataListItem>
-                <MetadataListItem label="Channel">
-                  {channelName.get(order.channel) ?? order.channel}
-                </MetadataListItem>
-              </MetadataList>
-            </Card>
-
-            {order.shipping_address && (
-              <Card>
-                <MetadataList title="Ships to">
-                  <MetadataListItem label="Name">
-                    {[order.shipping_address.first_name, order.shipping_address.last_name]
-                      .filter(Boolean)
-                      .join(" ")}
-                  </MetadataListItem>
-                  <MetadataListItem label="Address">
-                    {[
-                      order.shipping_address.company,
-                      order.shipping_address.line1,
-                      order.shipping_address.line2,
-                      [order.shipping_address.postal_code, order.shipping_address.city]
-                        .filter(Boolean)
-                        .join(" "),
-                      order.shipping_address.province,
-                      countryName(order.shipping_address.country),
-                    ]
-                      .filter(Boolean)
-                      .join(", ")}
-                  </MetadataListItem>
-                  {order.shipping_address.phone && (
-                    <MetadataListItem label="Phone">
-                      {order.shipping_address.phone}
-                    </MetadataListItem>
-                  )}
-                </MetadataList>
-              </Card>
-            )}
-
-            {definitions.length > 0 && fields.data && (
-              <CustomFieldsCard
-                ownerType="order"
-                ownerId={order.id}
-                definitions={definitions}
-                fields={fields.data}
-                scopes={me.scopes}
-                currency={order.currency}
-              />
-            )}
+          {fulfillments.length > 0 && (
+            <ShipmentsCard order={order} fulfillments={fulfillments} places={places} />
+          )}
+          {fulfillments.map((f) => (
             <AppSlot
+              key={f.id}
               extensions={extensions}
-              target="order.details"
-              context={{ order_id: order.id }}
+              target="order.fulfillment"
+              context={{ order_id: order.id, fulfillment_id: f.id }}
             />
-          </div>
+          ))}
+
+          {emails.data && (
+            <EmailsCard
+              orderId={order.id}
+              messages={emails.data.items}
+              canResend={me.scopes.includes("notifications:write")}
+            />
+          )}
+
+          <TimelineCard
+            events={[
+              {
+                at: order.placed_at,
+                what: `Placed through ${channelName.get(order.channel) ?? "a channel"}`,
+              },
+              ...fulfillments.map((f) => ({
+                at: f.created_at,
+                what: `Fulfilled ${items(f.lines.reduce((n, l) => n + l.quantity, 0))}${f.cancelled_at ? " (cancelled since)" : ""}`,
+              })),
+              ...order.payments.flatMap((p) => [
+                ...(p.paid_at
+                  ? [
+                      {
+                        at: p.paid_at,
+                        what: `Paid ${formatMoney(p.amount, currencies)}${p.method_name ? ` by ${p.method_name}` : ""}`,
+                      },
+                    ]
+                  : []),
+                ...(p.voided_at
+                  ? [
+                      {
+                        at: p.voided_at,
+                        what: `Payment voided${p.method_name ? ` (${p.method_name})` : ""}`,
+                      },
+                    ]
+                  : []),
+              ]),
+              ...(order.cancelled_at ? [{ at: order.cancelled_at, what: "Cancelled" }] : []),
+            ]}
+          />
         </div>
-      </VStack>
-    </Section>
+        <div>
+          <Card>
+            <MetadataList title="Summary">
+              <MetadataListItem label="Total">
+                <Text weight="bold">{formatMoney(order.total, currencies)}</Text>
+              </MetadataListItem>
+              <MetadataListItem label="Payment">
+                <PaymentBadge status={order.financial_status} />
+              </MetadataListItem>
+              <MetadataListItem label="Fulfilment">
+                <FulfillmentBadge status={order.fulfillment_status} />
+              </MetadataListItem>
+              <MetadataListItem label="Items">
+                {order.lines.reduce((n, l) => n + l.quantity, 0)}
+              </MetadataListItem>
+            </MetadataList>
+          </Card>
+
+          <Card>
+            <MetadataList title="Customer">
+              <MetadataListItem label="Email">
+                <Link href={`/customers/${order.customer}`}>{order.email}</Link>
+              </MetadataListItem>
+              <MetadataListItem label="Country">{countryName(order.country)}</MetadataListItem>
+              <MetadataListItem label="Currency">{order.currency}</MetadataListItem>
+              <MetadataListItem label="Channel">
+                {channelName.get(order.channel) ?? order.channel}
+              </MetadataListItem>
+            </MetadataList>
+          </Card>
+
+          {order.shipping_address && (
+            <Card>
+              <MetadataList title="Ships to">
+                <MetadataListItem label="Name">
+                  {[order.shipping_address.first_name, order.shipping_address.last_name]
+                    .filter(Boolean)
+                    .join(" ")}
+                </MetadataListItem>
+                <MetadataListItem label="Address">
+                  {[
+                    order.shipping_address.company,
+                    order.shipping_address.line1,
+                    order.shipping_address.line2,
+                    [order.shipping_address.postal_code, order.shipping_address.city]
+                      .filter(Boolean)
+                      .join(" "),
+                    order.shipping_address.province,
+                    countryName(order.shipping_address.country),
+                  ]
+                    .filter(Boolean)
+                    .join(", ")}
+                </MetadataListItem>
+                {order.shipping_address.phone && (
+                  <MetadataListItem label="Phone">{order.shipping_address.phone}</MetadataListItem>
+                )}
+              </MetadataList>
+            </Card>
+          )}
+
+          {definitions.length > 0 && fields.data && (
+            <CustomFieldsCard
+              ownerType="order"
+              ownerId={order.id}
+              definitions={definitions}
+              fields={fields.data}
+              scopes={me.scopes}
+              currency={order.currency}
+            />
+          )}
+          <AppSlot
+            extensions={extensions}
+            target="order.details"
+            context={{ order_id: order.id }}
+          />
+        </div>
+      </div>
+    </>
   );
 }
 

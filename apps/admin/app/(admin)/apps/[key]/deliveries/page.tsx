@@ -14,10 +14,12 @@ import {
 import { Text } from "@astryxdesign/core/Text";
 import { InboxIcon } from "@heroicons/react/24/outline";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
 import { DateTime } from "@/components/date-time";
-import { PageHeader } from "@/components/page-header";
+import { type Crumb, PageHeader } from "@/components/page-header";
 import { Pager } from "@/components/pager";
+import { TableSkeleton } from "@/components/skeletons";
 
 import { loaded, sessionClient } from "@/lib/hypha";
 
@@ -29,7 +31,15 @@ const STATUSES: Record<string, { label: string; variant: "success" | "warning" |
   failed: { label: "Failed", variant: "error" },
 };
 
-/** An app's webhook deliveries, newest event first. */
+const TITLE = "Webhook deliveries";
+
+const APPS: Crumb = { label: "Apps", href: "/apps" };
+
+/**
+ * An app's webhook deliveries, newest event first. The title and the way back render at
+ * once; the app (which names the crumb above this page) and its deliveries stream in
+ * behind a skeleton of the table.
+ */
 export default async function AppDeliveriesPage({
   params,
   searchParams,
@@ -41,6 +51,34 @@ export default async function AppDeliveriesPage({
   const cursor = typeof query.cursor === "string" ? query.cursor : undefined;
   const status =
     typeof query.status === "string" && query.status in STATUSES ? query.status : undefined;
+
+  return (
+    <Section padding={6}>
+      <VStack gap={5} maxWidth={960}>
+        <Suspense
+          fallback={
+            <>
+              <PageHeader title={TITLE} back={APPS} />
+              <TableSkeleton />
+            </>
+          }
+        >
+          <Deliveries appKey={key} cursor={cursor} status={status} />
+        </Suspense>
+      </VStack>
+    </Section>
+  );
+}
+
+async function Deliveries({
+  appKey: key,
+  cursor,
+  status,
+}: {
+  appKey: string;
+  cursor: string | undefined;
+  status: string | undefined;
+}) {
   const path = `/apps/${key}/deliveries`;
 
   const client = await sessionClient();
@@ -55,108 +93,101 @@ export default async function AppDeliveriesPage({
   const page = loaded(result);
 
   return (
-    <Section padding={6}>
-      <VStack gap={5} maxWidth={960}>
-        <PageHeader
-          title="Webhook deliveries"
-          back={[
-            { label: "Apps", href: "/apps" },
-            { label: app.name, href: `/apps/${key}` },
-          ]}
-          description={
-            app.webhook
-              ? `Events go to ${app.webhook.url}. Failed ones are retried for about 3 days.`
-              : "This app has no webhook, so it gets no events."
-          }
-        />
-        <HStack gap={3}>
-          <Link href={path} weight={status ? "normal" : "medium"}>
-            All
+    <>
+      <PageHeader
+        title={TITLE}
+        back={[APPS, { label: app.name, href: `/apps/${key}` }]}
+        description={
+          app.webhook
+            ? `Events go to ${app.webhook.url}. Failed ones are retried for about 3 days.`
+            : "This app has no webhook, so it gets no events."
+        }
+      />
+      <HStack gap={3}>
+        <Link href={path} weight={status ? "normal" : "medium"}>
+          All
+        </Link>
+        {Object.entries(STATUSES).map(([value, { label }]) => (
+          <Link
+            key={value}
+            href={`${path}?status=${value}`}
+            weight={status === value ? "medium" : "normal"}
+          >
+            {label}
           </Link>
-          {Object.entries(STATUSES).map(([value, { label }]) => (
-            <Link
-              key={value}
-              href={`${path}?status=${value}`}
-              weight={status === value ? "medium" : "normal"}
-            >
-              {label}
-            </Link>
-          ))}
-        </HStack>
+        ))}
+      </HStack>
 
-        {page.items.length === 0 ? (
-          <EmptyState
-            icon={<InboxIcon width={32} />}
-            title={cursor ? "No more deliveries" : "No deliveries"}
-            description="Each event the app subscribes to shows up here, kept for 30 days."
-          />
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell>Event</TableHeaderCell>
-                <TableHeaderCell>Occurred</TableHeaderCell>
-                <TableHeaderCell>Status</TableHeaderCell>
-                <TableHeaderCell>
-                  <span />
-                </TableHeaderCell>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {page.items.map((delivery) => {
-                const shown = STATUSES[delivery.status] ?? {
-                  label: delivery.status,
-                  variant: "warning" as const,
-                };
-                return (
-                  <TableRow key={delivery.id}>
-                    <TableCell>
-                      <VStack gap={0}>
-                        <Text type="code">{delivery.event_type}</Text>
+      {page.items.length === 0 ? (
+        <EmptyState
+          icon={<InboxIcon width={32} />}
+          title={cursor ? "No more deliveries" : "No deliveries"}
+          description="Each event the app subscribes to shows up here, kept for 30 days."
+        />
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHeaderCell>Event</TableHeaderCell>
+              <TableHeaderCell>Occurred</TableHeaderCell>
+              <TableHeaderCell>Status</TableHeaderCell>
+              <TableHeaderCell>
+                <span />
+              </TableHeaderCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {page.items.map((delivery) => {
+              const shown = STATUSES[delivery.status] ?? {
+                label: delivery.status,
+                variant: "warning" as const,
+              };
+              return (
+                <TableRow key={delivery.id}>
+                  <TableCell>
+                    <VStack gap={0}>
+                      <Text type="code">{delivery.event_type}</Text>
+                      <Text type="supporting" color="secondary">
+                        {delivery.event_id}
+                      </Text>
+                    </VStack>
+                  </TableCell>
+                  <TableCell>
+                    <DateTime value={delivery.occurred_at} short />
+                  </TableCell>
+                  <TableCell>
+                    <VStack gap={1}>
+                      <HStack gap={1}>
+                        <Badge label={shown.label} variant={shown.variant} />
                         <Text type="supporting" color="secondary">
-                          {delivery.event_id}
+                          {delivery.attempts === 1 ? "1 attempt" : `${delivery.attempts} attempts`}
                         </Text>
-                      </VStack>
-                    </TableCell>
-                    <TableCell>
-                      <DateTime value={delivery.occurred_at} short />
-                    </TableCell>
-                    <TableCell>
-                      <VStack gap={1}>
-                        <HStack gap={1}>
-                          <Badge label={shown.label} variant={shown.variant} />
-                          <Text type="supporting" color="secondary">
-                            {delivery.attempts === 1
-                              ? "1 attempt"
-                              : `${delivery.attempts} attempts`}
-                          </Text>
-                        </HStack>
-                        {delivery.last_error && (
-                          <Text type="supporting" color="secondary">
-                            {delivery.last_error}
-                          </Text>
-                        )}
-                        {delivery.status === "pending" && delivery.attempts > 0 && (
-                          <Text type="supporting" color="secondary">
-                            Next try <DateTime value={delivery.next_attempt_at} short />
-                          </Text>
-                        )}
-                      </VStack>
-                    </TableCell>
-                    <TableCell>
-                      {delivery.status !== "succeeded" && (
-                        <RetryButton appKey={key} id={delivery.id} />
+                      </HStack>
+                      {delivery.last_error && (
+                        <Text type="supporting" color="secondary">
+                          {delivery.last_error}
+                        </Text>
                       )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
+                      {delivery.status === "pending" && delivery.attempts > 0 && (
+                        <Text type="supporting" color="secondary">
+                          Next try <DateTime value={delivery.next_attempt_at} short />
+                        </Text>
+                      )}
+                    </VStack>
+                  </TableCell>
+                  <TableCell>
+                    {delivery.status !== "succeeded" && (
+                      <RetryButton appKey={key} id={delivery.id} />
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
 
-        <Pager path={path} query={{ status }} isFirstPage={!cursor} nextCursor={page.next_cursor} />
-      </VStack>
-    </Section>
+      <Pager path={path} query={{ status }} isFirstPage={!cursor} nextCursor={page.next_cursor} />
+    </>
   );
 }

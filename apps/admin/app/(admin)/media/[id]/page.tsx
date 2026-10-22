@@ -5,9 +5,11 @@ import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList"
 import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 import type { AdminSchemas } from "@hypha/sdk/admin";
+import { Suspense } from "react";
 
 import { DateTime } from "@/components/date-time";
-import { PageHeader } from "@/components/page-header";
+import { type Crumb, PageHeader } from "@/components/page-header";
+import { DetailSkeleton } from "@/components/skeletons";
 import { formatBytes } from "@/lib/format";
 import { loaded, sessionClient } from "@/lib/hypha";
 
@@ -15,6 +17,8 @@ import { AssetForm } from "./asset-form";
 import { DeleteAsset } from "./delete-asset";
 
 type Asset = AdminSchemas["AssetResponse"];
+
+const BACK: Crumb = { label: "Media", href: "/media" };
 
 /** The file itself, as large as the column allows. */
 function FilePreview({ asset }: { asset: Asset }) {
@@ -41,8 +45,24 @@ function FilePreview({ asset }: { asset: Asset }) {
   }
 }
 
+/**
+ * A file: its preview beside its form, what uses it and its details. The way back
+ * renders at once; the file streams in behind a skeleton of the page.
+ */
 export default async function AssetPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  return (
+    <Section padding={6}>
+      <VStack gap={5}>
+        <Suspense fallback={<DetailSkeleton back={BACK} />}>
+          <Asset id={id} />
+        </Suspense>
+      </VStack>
+    </Section>
+  );
+}
+
+async function Asset({ id }: { id: string }) {
   const client = await sessionClient();
   const [assetResult, usagesResult] = await Promise.all([
     client.GET("/admin/assets/{id}", { params: { path: { id } } }),
@@ -65,75 +85,73 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   );
 
   return (
-    <Section padding={6}>
-      <VStack gap={5}>
-        <PageHeader
-          title={asset.title ?? asset.filename}
-          back={{ label: "Media", href: "/media" }}
-          actions={<DeleteAsset id={asset.id} />}
-        />
-        <HStack gap={5} vAlign="start" wrap="wrap">
+    <>
+      <PageHeader
+        title={asset.title ?? asset.filename}
+        back={BACK}
+        actions={<DeleteAsset id={asset.id} />}
+      />
+      <HStack gap={5} vAlign="start" wrap="wrap">
+        <Card padding={4}>
+          <FilePreview asset={asset} />
+        </Card>
+        <VStack gap={5} width={360}>
           <Card padding={4}>
-            <FilePreview asset={asset} />
+            <AssetForm
+              id={asset.id}
+              alt={asset.alt ?? ""}
+              title={asset.title ?? ""}
+              hasAlt={asset.kind === "image"}
+            />
           </Card>
-          <VStack gap={5} width={360}>
-            <Card padding={4}>
-              <AssetForm
-                id={asset.id}
-                alt={asset.alt ?? ""}
-                title={asset.title ?? ""}
-                hasAlt={asset.kind === "image"}
-              />
-            </Card>
-            <Card padding={4}>
-              <VStack gap={2}>
-                <Text type="label">Used by</Text>
-                {usages.items.length === 0 ? (
-                  <Text type="supporting" color="secondary">
-                    Nothing yet. Files in use can&apos;t be deleted.
-                  </Text>
-                ) : (
-                  <>
-                    {usages.items.map((u) =>
-                      u.owner.kind === "product" ? (
-                        <Link key={u.owner.id} href={`/products/${u.owner.id}`}>
-                          {titles.get(u.owner.id)}
-                          {u.role === "featured" ? " (featured)" : ""}
-                        </Link>
-                      ) : (
-                        <Text key={`${u.owner.kind}:${u.owner.id}`}>
-                          {u.owner.kind} {u.owner.id}
-                        </Text>
-                      ),
-                    )}
-                    {usages.has_more && (
-                      <Text type="supporting" color="secondary">
-                        And more.
+          <Card padding={4}>
+            <VStack gap={2}>
+              <Text type="label">Used by</Text>
+              {usages.items.length === 0 ? (
+                <Text type="supporting" color="secondary">
+                  Nothing yet. Files in use can&apos;t be deleted.
+                </Text>
+              ) : (
+                <>
+                  {usages.items.map((u) =>
+                    u.owner.kind === "product" ? (
+                      <Link key={u.owner.id} href={`/products/${u.owner.id}`}>
+                        {titles.get(u.owner.id)}
+                        {u.role === "featured" ? " (featured)" : ""}
+                      </Link>
+                    ) : (
+                      <Text key={`${u.owner.kind}:${u.owner.id}`}>
+                        {u.owner.kind} {u.owner.id}
                       </Text>
-                    )}
-                  </>
-                )}
-              </VStack>
-            </Card>
-            <MetadataList title="Details">
-              <MetadataListItem label="File">{asset.filename}</MetadataListItem>
-              <MetadataListItem label="Type">{asset.mime_type}</MetadataListItem>
-              <MetadataListItem label="Size">{formatBytes(asset.byte_size)}</MetadataListItem>
-              {asset.width && asset.height ? (
-                <MetadataListItem label="Dimensions">
-                  {asset.width} × {asset.height} px
-                </MetadataListItem>
-              ) : null}
-              <MetadataListItem label="Visibility">
-                {asset.visibility === "public" ? "Public" : "Private"}
+                    ),
+                  )}
+                  {usages.has_more && (
+                    <Text type="supporting" color="secondary">
+                      And more.
+                    </Text>
+                  )}
+                </>
+              )}
+            </VStack>
+          </Card>
+          <MetadataList title="Details">
+            <MetadataListItem label="File">{asset.filename}</MetadataListItem>
+            <MetadataListItem label="Type">{asset.mime_type}</MetadataListItem>
+            <MetadataListItem label="Size">{formatBytes(asset.byte_size)}</MetadataListItem>
+            {asset.width && asset.height ? (
+              <MetadataListItem label="Dimensions">
+                {asset.width} × {asset.height} px
               </MetadataListItem>
-              <MetadataListItem label="Uploaded">
-                <DateTime value={asset.created_at} />
-              </MetadataListItem>
-            </MetadataList>
-          </VStack>
-        </HStack>
-      </VStack>
-    </Section>
+            ) : null}
+            <MetadataListItem label="Visibility">
+              {asset.visibility === "public" ? "Public" : "Private"}
+            </MetadataListItem>
+            <MetadataListItem label="Uploaded">
+              <DateTime value={asset.created_at} />
+            </MetadataListItem>
+          </MetadataList>
+        </VStack>
+      </HStack>
+    </>
   );
 }

@@ -151,7 +151,8 @@ export function MediaLibrary({
   page,
   view,
 }: {
-  page: { items: Asset[]; next_cursor: string | null; error?: string };
+  /** The page of rows; absent while it loads (the table shows its toolbar meanwhile). */
+  page?: { items: Asset[]; next_cursor: string | null; error?: string };
   view: "grid" | "table";
 }) {
   const columns: TableColumn<Asset>[] = [
@@ -191,8 +192,9 @@ export function MediaLibrary({
   ];
   return (
     <ResourceTable<Asset>
-      rows={page.items}
-      nextCursor={page.next_cursor}
+      rows={page?.items}
+      nextCursor={page?.next_cursor}
+      isLoading={!page}
       columns={columns}
       idKey="id"
       rowHref={(a) => `/media/${a.id}`}
@@ -201,7 +203,7 @@ export function MediaLibrary({
       sorts={SORTS}
       sortOptions={SORT_OPTIONS}
       defaultSort="newest"
-      error={page.error}
+      error={page?.error}
       empty={{
         icon: <PhotoIcon width={32} />,
         title: "No media yet",

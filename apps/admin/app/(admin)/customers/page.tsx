@@ -1,5 +1,6 @@
 import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
+import { Suspense } from "react";
 
 import { PageHeader } from "@/components/page-header";
 import { type SearchParams, one, oneOf } from "@/components/resource-table/params";
@@ -13,16 +14,30 @@ import { CustomersTable } from "@/resources/customers";
 
 const SORTS = ["newest", "oldest", "email_asc", "email_desc", "name_asc", "name_desc"] as const;
 
+/** The header and the table's toolbar render at once; the rows stream in. */
 export default async function CustomersPage({
   searchParams,
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const params = await searchParams;
+  const [params, me] = await Promise.all([searchParams, requireStaff()]);
+  const canLabel = hasScope(me.scopes, "customers:write");
+  return (
+    <Section padding={6}>
+      <VStack gap={5}>
+        <PageHeader title="Customers" />
+        <Suspense fallback={<CustomersTable canLabel={canLabel} />}>
+          <CustomerRows params={params} canLabel={canLabel} />
+        </Suspense>
+      </VStack>
+    </Section>
+  );
+}
+
+async function CustomerRows({ params, canLabel }: { params: SearchParams; canLabel: boolean }) {
   const client = await sessionClient();
-  const [definitions, me, groups] = await Promise.all([
+  const [definitions, groups] = await Promise.all([
     definitionsOf("customer"),
-    requireStaff(),
     client.GET("/admin/customer-groups").then((r) => r.data?.items ?? []),
   ]);
   const group = one(params, "group");
@@ -42,20 +57,13 @@ export default async function CustomersPage({
       },
     },
   });
-  const page = listPage(result, "/customers", params);
-
   return (
-    <Section padding={6}>
-      <VStack gap={5}>
-        <PageHeader title="Customers" />
-        <CustomersTable
-          page={page}
-          fieldFilters={fieldFilters}
-          labels={labels}
-          groups={groups}
-          canLabel={hasScope(me.scopes, "customers:write")}
-        />
-      </VStack>
-    </Section>
+    <CustomersTable
+      page={listPage(result, "/customers", params)}
+      fieldFilters={fieldFilters}
+      labels={labels}
+      groups={groups}
+      canLabel={canLabel}
+    />
   );
 }

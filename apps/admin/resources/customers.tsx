@@ -69,7 +69,8 @@ export function CustomersTable({
   groups = NO_GROUPS,
   canLabel = false,
 }: {
-  page: { items: Customer[]; next_cursor: string | null; error?: string };
+  /** The page of rows; absent while it loads (the table shows its toolbar meanwhile). */
+  page?: { items: Customer[]; next_cursor: string | null; error?: string };
   /** Filterable custom fields, offered as filters. */
   fieldFilters?: Definition[];
   /** The well-known labels field, when the merchant has it: a column and bulk actions. */
@@ -164,8 +165,9 @@ export function CustomersTable({
         />
       )}
       <ResourceTable<Customer>
-        rows={page.items}
-        nextCursor={page.next_cursor}
+        rows={page?.items}
+        nextCursor={page?.next_cursor}
+        isLoading={!page}
         columns={columns}
         idKey="id"
         rowHref={(c) => `/customers/${c.id}`}
@@ -188,7 +190,7 @@ export function CustomersTable({
         sorts={SORTS}
         sortOptions={SORT_OPTIONS}
         defaultSort="newest"
-        error={page.error}
+        error={page?.error}
         empty={{
           icon: <UsersIcon width={32} />,
           title: "No customers yet",

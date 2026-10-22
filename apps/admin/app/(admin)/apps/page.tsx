@@ -15,8 +15,10 @@ import {
 import { Text } from "@astryxdesign/core/Text";
 import { LockClosedIcon, PuzzlePieceIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hypha/sdk/admin";
+import { Suspense } from "react";
 
 import { PageHeader } from "@/components/page-header";
+import { TableSkeleton } from "@/components/skeletons";
 import { appState, isBuiltIn, isPersonalDataScope } from "@/lib/apps";
 import { loaded, publicApiUrl, requireStaff, sessionClient } from "@/lib/hypha";
 
@@ -24,11 +26,11 @@ import { InstallButtons } from "./install";
 
 /**
  * Apps: everything connected to the store, installed through OAuth or made by hand. Each
- * opens its own page, where the apps platform's pages for it will live too.
+ * opens its own page, where the apps platform's pages for it will live too. The header
+ * renders at once; the apps stream in.
  */
 export default async function AppsPage() {
-  const [client, me] = await Promise.all([sessionClient(), requireStaff()]);
-  const result = await client.GET("/admin/apps");
+  const me = await requireStaff();
 
   return (
     <Section padding={6}>
@@ -43,18 +45,27 @@ export default async function AppsPage() {
             </>
           }
         />
-        {result.response.status === 403 ? (
-          <EmptyState
-            icon={<LockClosedIcon width={32} />}
-            title="You can't see apps"
-            description="Your role doesn't include apps:read. Ask the store owner for access."
-          />
-        ) : (
-          <AppsTable apps={loaded(result).items} />
-        )}
+        <Suspense fallback={<TableSkeleton rows={4} />}>
+          <AppRows />
+        </Suspense>
       </VStack>
     </Section>
   );
+}
+
+async function AppRows() {
+  const client = await sessionClient();
+  const result = await client.GET("/admin/apps");
+  if (result.response.status === 403) {
+    return (
+      <EmptyState
+        icon={<LockClosedIcon width={32} />}
+        title="You can't see apps"
+        description="Your role doesn't include apps:read. Ask the store owner for access."
+      />
+    );
+  }
+  return <AppsTable apps={loaded(result).items} />;
 }
 
 function AppsTable({ apps }: { apps: AdminSchemas["AppResponse"][] }) {

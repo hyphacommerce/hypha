@@ -28,6 +28,10 @@ import { type BulkOutcome, BulkOutcomeBanner, OrderBulkActions } from "./bulk";
 
 /** No filterable custom fields. */
 const NO_FIELDS: Definition[] = [];
+const NO_NAMES: Record<string, string> = {};
+const NO_OPTIONS: { value: string; label: string }[] = [];
+const NO_CODES: string[] = [];
+const NO_CURRENCIES: Currencies = {};
 
 type Order = AdminSchemas["OrderSummaryResponse"];
 
@@ -55,20 +59,21 @@ const SORTS: Record<string, SortDef> = {
 
 export function OrdersTable({
   page,
-  currencies,
-  channels,
-  countries,
-  orderCurrencies,
+  currencies = NO_CURRENCIES,
+  channels = NO_NAMES,
+  countries = NO_OPTIONS,
+  orderCurrencies = NO_CODES,
   fieldFilters = NO_FIELDS,
 }: {
-  page: { items: Order[]; next_cursor: string | null; error?: string };
-  currencies: Currencies;
+  /** The page of rows; absent while it loads (the table shows its toolbar meanwhile). */
+  page?: { items: Order[]; next_cursor: string | null; error?: string };
+  currencies?: Currencies;
   /** Channel names by ID. */
-  channels: Record<string, string>;
+  channels?: Record<string, string>;
   /** The countries markets sell to: code and name. */
-  countries: { value: string; label: string }[];
+  countries?: { value: string; label: string }[];
   /** The currencies markets sell in. */
-  orderCurrencies: string[];
+  orderCurrencies?: string[];
   /** Filterable custom fields, offered as filters. */
   fieldFilters?: Definition[];
 }) {
@@ -212,8 +217,9 @@ export function OrdersTable({
           <OrderBulkActions selected={selected} clear={clear} onDone={setOutcome} />
         )}
         rowLabel={(o) => `Order #${o.number}`}
-        rows={page.items}
-        nextCursor={page.next_cursor}
+        rows={page?.items}
+        nextCursor={page?.next_cursor}
+        isLoading={!page}
         columns={columns}
         idKey="id"
         rowHref={(o) => `/orders/${o.id}`}
@@ -223,7 +229,7 @@ export function OrdersTable({
         sortOptions={SORT_OPTIONS}
         defaultSort="newest"
         sortRequires={{ total_asc: "currency", total_desc: "currency" }}
-        error={page.error}
+        error={page?.error}
         empty={{
           icon: <ShoppingBagIcon width={32} />,
           title: "No orders yet",

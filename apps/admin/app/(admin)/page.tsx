@@ -9,14 +9,21 @@ import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 import { CheckCircleIcon as CheckCircleOutline } from "@heroicons/react/24/outline";
 import { CheckCircleIcon } from "@heroicons/react/24/solid";
+import type { AdminSchemas } from "@hypha/sdk/admin";
+import { Suspense } from "react";
 
+import { CardSkeleton } from "@/components/skeletons";
 import { loadSetup, requireStaff } from "@/lib/hypha";
 
 import { type SetupStep, setupSteps } from "./setup-checklist";
 
-/** The signed-in home: what's left to set up, who you are and what you may do. */
+/**
+ * The signed-in home: what's left to set up, who you are and what you may do. The
+ * welcome, the account and the scopes render at once; the setup's state streams in.
+ */
 export default async function HomePage() {
-  const [me, steps, setup] = await Promise.all([requireStaff(), setupSteps(), loadSetup()]);
+  const [me, setup] = await Promise.all([requireStaff(), loadSetup()]);
+  const showChecklist = setup !== null && !setup.isFinished;
 
   return (
     <Section padding={6}>
@@ -39,21 +46,12 @@ export default async function HomePage() {
           />
         )}
 
-        {/* Only for staff who can see methods: without payments:read the checklist's
-            step reads as not done whatever the store has. */}
-        {(me.scopes.includes("payments:read") || me.scopes.includes("payments:write")) &&
-          steps.some((step) => step.key === "payment" && !step.isDone) && (
-            <Banner
-              status="warning"
-              title="Checkout is refused until a payment method is enabled"
-              description="Shoppers can't place orders with something to pay."
-              endContent={
-                <Button label="Set up payments" variant="secondary" href="/settings/payments" />
-              }
-            />
-          )}
-
-        {setup && !setup.isFinished && <SetupChecklist steps={steps} />}
+        {/* Only the setup's state needs the store's data; nothing else waits for it. */}
+        {(showChecklist || hasPaymentsRead(me)) && (
+          <Suspense fallback={<CardSkeleton lines={4} />}>
+            <SetupState me={me} showChecklist={showChecklist} />
+          </Suspense>
+        )}
 
         <MetadataList title="Your account">
           <MetadataListItem label="Email">{me.user.email}</MetadataListItem>
@@ -76,6 +74,39 @@ export default async function HomePage() {
         </VStack>
       </VStack>
     </Section>
+  );
+}
+
+function hasPaymentsRead(me: AdminSchemas["MeResponse"]): boolean {
+  return me.scopes.includes("payments:read") || me.scopes.includes("payments:write");
+}
+
+/** The payments banner and the checklist: what the store's data says is left to do. */
+async function SetupState({
+  me,
+  showChecklist,
+}: {
+  me: AdminSchemas["MeResponse"];
+  showChecklist: boolean;
+}) {
+  const steps = await setupSteps();
+  return (
+    <>
+      {/* Only for staff who can see methods: without payments:read the checklist's
+          step reads as not done whatever the store has. */}
+      {hasPaymentsRead(me) && steps.some((step) => step.key === "payment" && !step.isDone) && (
+        <Banner
+          status="warning"
+          title="Checkout is refused until a payment method is enabled"
+          description="Shoppers can't place orders with something to pay."
+          endContent={
+            <Button label="Set up payments" variant="secondary" href="/settings/payments" />
+          }
+        />
+      )}
+
+      {showChecklist && <SetupChecklist steps={steps} />}
+    </>
   );
 }
 

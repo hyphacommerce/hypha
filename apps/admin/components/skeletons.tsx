@@ -1,38 +1,33 @@
-// Loading states: every route renders the admin's frame at once and, while its data
-// loads, a skeleton of its page with the title already in place. Each route's
-// `loading.tsx` picks one of these.
+// Loading states. A page renders what it knows without the API at once (its title,
+// description, breadcrumbs, actions, tabs, a table's toolbar) and streams the parts
+// that need data behind `Suspense`, each with a skeleton of its own shape from here.
+// Nothing above a page suspends: the admin has no `loading.tsx`, since one would wrap
+// the whole page, static parts included, and nest a second boundary around the page's
+// own.
 
 import { Card } from "@astryxdesign/core/Card";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
-import { Section } from "@astryxdesign/core/Section";
+import { VStack } from "@astryxdesign/core/Layout";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
-import { Text } from "@astryxdesign/core/Text";
 
-function Title({ title, back }: { title?: string; back?: string }) {
+import { type Crumb, PageHeader } from "./page-header";
+
+/** A table's rows: the header line and `rows` lines, inside a table's card. */
+export function RowsSkeleton({ rows = 8 }: { rows?: number }) {
   return (
-    <VStack gap={2}>
-      {back !== undefined && <Skeleton width={120} height={14} />}
-      {title ? (
-        <Text type="display-1" as="h1">
-          {title}
-        </Text>
-      ) : (
-        <Skeleton width={260} height={36} />
-      )}
+    <VStack gap={3}>
+      {Array.from({ length: rows + 1 }, (_, i) => (
+        <Skeleton key={i} index={i} height={32} />
+      ))}
     </VStack>
   );
 }
 
-/** A table's rows: the toolbar, the header and `rows` lines. */
+/** A whole table card: the toolbar, the header and `rows` lines. */
 export function TableSkeleton({ rows = 8 }: { rows?: number }) {
   return (
     <div className="table-skeleton">
       <Skeleton height={36} />
-      <VStack gap={3}>
-        {Array.from({ length: rows }, (_, i) => (
-          <Skeleton key={i} index={i} height={32} />
-        ))}
-      </VStack>
+      <RowsSkeleton rows={rows} />
     </div>
   );
 }
@@ -51,57 +46,35 @@ export function CardSkeleton({ lines = 4 }: { lines?: number }) {
   );
 }
 
-/** A list page: its title (and its add button, when it has one), then a table. */
-export function ListPageSkeleton({
-  title,
-  hasAction = false,
-}: {
-  title: string;
-  hasAction?: boolean;
-}) {
+/** A form or settings body: a column of `cards` cards. */
+export function FormSkeleton({ cards = 2 }: { cards?: number }) {
   return (
-    <Section padding={6}>
-      <VStack gap={5}>
-        <HStack hAlign="between" vAlign="center">
-          <Title title={title} />
-          {hasAction && <Skeleton width={120} height={36} />}
-        </HStack>
-        <TableSkeleton />
-      </VStack>
-    </Section>
+    <VStack gap={5}>
+      {Array.from({ length: cards }, (_, i) => (
+        <CardSkeleton key={i} lines={i === 0 ? 5 : 4} />
+      ))}
+    </VStack>
   );
 }
 
-/** A detail page: breadcrumb and title, the main cards beside the side ones. */
-export function DetailPageSkeleton({ title }: { title?: string }) {
+/**
+ * A record's page while the record loads: its header with the way `back` and a line
+ * for the title, then the main cards beside the side ones.
+ */
+export function DetailSkeleton({ back }: { back?: Crumb | Crumb[] }) {
   return (
-    <Section padding={6}>
-      <VStack gap={5} maxWidth={1280}>
-        <Title title={title} back="" />
-        <div className="detail-columns">
-          <div>
-            <CardSkeleton lines={6} />
-            <CardSkeleton lines={4} />
-          </div>
-          <div>
-            <CardSkeleton lines={3} />
-            <CardSkeleton lines={3} />
-          </div>
+    <VStack gap={5}>
+      <PageHeader back={back} />
+      <div className="detail-columns">
+        <div>
+          <CardSkeleton lines={6} />
+          <CardSkeleton lines={4} />
         </div>
-      </VStack>
-    </Section>
-  );
-}
-
-/** A settings or form page: its title and a column of cards. */
-export function FormPageSkeleton({ title }: { title: string }) {
-  return (
-    <Section padding={6}>
-      <VStack gap={5} maxWidth={960}>
-        <Title title={title} />
-        <CardSkeleton lines={5} />
-        <CardSkeleton lines={4} />
-      </VStack>
-    </Section>
+        <div>
+          <CardSkeleton lines={3} />
+          <CardSkeleton lines={3} />
+        </div>
+      </div>
+    </VStack>
   );
 }

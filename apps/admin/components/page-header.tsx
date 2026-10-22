@@ -1,12 +1,17 @@
 import { Breadcrumbs, BreadcrumbItem } from "@astryxdesign/core/Breadcrumbs";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Text } from "@astryxdesign/core/Text";
 import type { ReactNode } from "react";
 
 /** A page above this one, shown as a breadcrumb. */
 export type Crumb = { label: string; href: string };
 
-/** A page's title, with the way back above it and its actions on the right. */
+/**
+ * A page's title, with the way back above it and its actions on the right. Without a
+ * `title` (a record's page while the record loads) the trail still shows, with a line
+ * where the title will be: the way back is known before the record is.
+ */
 export function PageHeader({
   title,
   description,
@@ -14,7 +19,7 @@ export function PageHeader({
   badges,
   actions,
 }: {
-  title: string;
+  title?: string;
   description?: ReactNode;
   /** The parent page, or the pages above this one from the top, shown as breadcrumbs. */
   back?: Crumb | Crumb[];
@@ -31,14 +36,18 @@ export function PageHeader({
               {crumb.label}
             </BreadcrumbItem>
           ))}
-          <BreadcrumbItem>{title}</BreadcrumbItem>
+          {title !== undefined && <BreadcrumbItem>{title}</BreadcrumbItem>}
         </Breadcrumbs>
       )}
       <HStack gap={4} vAlign="center" hAlign="between" wrap="wrap">
         <HStack gap={3} vAlign="center" wrap="wrap">
-          <Text type="display-1" as="h1">
-            {title}
-          </Text>
+          {title === undefined ? (
+            <Skeleton width={260} height={36} />
+          ) : (
+            <Text type="display-1" as="h1">
+              {title}
+            </Text>
+          )}
           {badges}
         </HStack>
         {actions && (
