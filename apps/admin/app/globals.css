@@ -410,3 +410,32 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* An agent's grant (agents/grant-fields.tsx): an area per row, whether the agent may see
+   it, change it, and how (propose or apply); the mode under the row on narrow screens. */
+.grant-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px 64px 200px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+}
+.grant-row + .grant-row {
+  border-top: var(--border-width, 1px) solid var(--color-border);
+}
+@media (max-width: 640px) {
+  .grant-row {
+    grid-template-columns: minmax(0, 1fr) 56px 56px;
+  }
+  .grant-row > .grant-mode {
+    grid-column: 1 / -1;
+  }
+}
+
+/* A preview's change list (components/agents/preview-view.tsx): one change per row. */
+.change-row {
+  padding: 8px 0;
+}
+.change-row + .change-row {
+  border-top: var(--border-width, 1px) solid var(--color-border);
+}
