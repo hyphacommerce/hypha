@@ -35,7 +35,9 @@ pub async fn payment_repo<R: PaymentRepo>(make: impl AsyncFn() -> R) {
     refund_references_round_trip(&make().await).await;
     scenario("payment: unique ID");
     payment_unique_id(&make().await).await;
-    scenario("payment: an order's payments, newest first, and no other order's");
+    scenario(
+        "payment: an order's payments, newest first, and no other order's; or several orders'",
+    );
     lists_for_order(&make().await).await;
     scenario("payment: a cart's payments before the order, newest first; attached later");
     cart_payments(&make().await).await;
@@ -305,6 +307,18 @@ async fn lists_for_order<R: PaymentRepo>(repo: &R) {
     repo.update(&mut voided).await.unwrap();
     let listed = repo.list_for_order(oid(1)).await.unwrap();
     assert_eq!(listed[1], voided);
+
+    // Several orders at once: by order, then newest first; an order without any adds none.
+    let ids: Vec<PaymentId> = repo
+        .list_for_orders(&[oid(2), oid(9), oid(1)])
+        .await
+        .unwrap()
+        .iter()
+        .map(Payment::id)
+        .collect();
+    assert_eq!(ids, [pid(4), pid(2), pid(1), pid(3)]);
+    assert_eq!(repo.list_for_orders(&[]).await, Ok(vec![]));
+    assert_eq!(repo.list_for_orders(&[oid(9)]).await, Ok(vec![]));
 }
 
 /// Payment `n` started for cart `cart` before its order.
