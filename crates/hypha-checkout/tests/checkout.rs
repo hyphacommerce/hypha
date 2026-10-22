@@ -1098,6 +1098,8 @@ struct CardApp {
     /// Can't say where a payment is (Stripe down).
     status_down: std::cell::Cell<bool>,
     state: std::cell::Cell<ProviderState>,
+    /// The attempt its status answers are about, when not the payment's own.
+    status_attempt: std::cell::RefCell<Option<String>>,
     started: std::cell::RefCell<Vec<hypha_core::PaymentId>>,
     acted: std::cell::RefCell<Vec<(hypha_core::PaymentId, PaymentAction)>>,
 }
@@ -1109,6 +1111,7 @@ impl Default for CardApp {
             refuse: std::cell::Cell::new(false),
             status_down: std::cell::Cell::new(false),
             state: std::cell::Cell::new(ProviderState::Open),
+            status_attempt: std::cell::RefCell::default(),
             started: std::cell::RefCell::default(),
             acted: std::cell::RefCell::default(),
         }
@@ -1179,10 +1182,15 @@ impl hypha_payments::PaymentProvider for &CardApp {
                 reason: "Stripe is down".to_string(),
             });
         }
+        let attempt = self
+            .status_attempt
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| attempt_of(request.payment));
         Ok(hypha_payments::ProviderStatus {
             state: self.state.get(),
-            reference: Some(attempt_of(request.payment)),
-            attempt: Some(attempt_of(request.payment)),
+            reference: Some(attempt.clone()),
+            attempt: Some(attempt),
         })
     }
 }
@@ -1656,6 +1664,123 @@ fn a_restart_its_provider_cancelled_makes_a_new_payment() {
     assert_ne!(replaced.payment.id(), payment.id());
     let old = block_on(world.payments.get(payment.id())).unwrap().unwrap();
     assert_eq!(old.status(), PaymentStatus::Voided);
+}
+
+/// Marks `payment` authorized, as the provider's report would.
+fn hold(world: &World, payment: hypha_core::PaymentId) {
+    let mut held = block_on(world.payments.get(payment)).unwrap().unwrap();
+    held.authorize(None).unwrap();
+    block_on(world.payments.update(&mut held)).unwrap();
+}
+
+#[test]
+fn a_held_payment_for_another_total_is_refused_and_given_back() {
+    let world = World::new();
+    let app = CardApp::default();
+    let (cart, payment) = started_cart(&world, &app);
+    hold(&world, payment.id());
+    world.add(cart, "cup", 1);
+    assert_eq!(
+        check_out_by(&world, cart, &app).map(|_| ()),
+        Err(CommandError::TotalChanged {
+            expected: eur(3000),
+            actual: eur(3500)
+        })
+    );
+    assert_eq!(world.mug_reserved(), 0);
+    let stored = block_on(world.payments.get(payment.id())).unwrap().unwrap();
+    assert_eq!(
+        (stored.order(), stored.status()),
+        (None, PaymentStatus::Voided)
+    );
+}
+
+#[test]
+fn starting_again_while_a_payment_is_held_is_refused_without_asking_the_provider() {
+    let world = World::new();
+    let app = CardApp::default();
+    let (cart, payment) = started_cart(&world, &app);
+    hold(&world, payment.id());
+    assert_eq!(
+        start_paying(&world, cart, &app).map(|_| ()),
+        Err(CommandError::CartPaymentCommitted {
+            cart,
+            payment: payment.id()
+        })
+    );
+    assert_eq!(app.started.borrow().as_slice(), [payment.id()]);
+}
+
+#[test]
+fn a_held_payment_cant_pay_for_another_online_method() {
+    let world = World::new();
+    let app = CardApp::default();
+    let (cart, payment) = started_cart(&world, &app);
+    hold(&world, payment.id());
+    let mut wallet = PaymentMethod::new(NewPaymentMethod {
+        id: PaymentMethodId::from_uuid(Uuid::from_u128(1301)),
+        provider: ProviderKey::new("app_card").unwrap(),
+        name: "Wallet".to_string(),
+        instructions: None,
+        markets: vec![],
+        channels: vec![],
+        enabled: true,
+        position: 2,
+        settings: serde_json::json!({}),
+    })
+    .unwrap();
+    block_on(world.payment_methods.insert(&mut wallet)).unwrap();
+    let mut stored = block_on(world.carts.get(cart)).unwrap().unwrap();
+    stored.set_payment_method(Some(wallet.id())).unwrap();
+    block_on(world.carts.update(&mut stored)).unwrap();
+    assert_eq!(
+        check_out_by(&world, cart, &app).map(|_| ()),
+        Err(CommandError::CartPaymentCommitted {
+            cart,
+            payment: payment.id()
+        })
+    );
+    assert_eq!(world.mug_reserved(), 0);
+    let kept = block_on(world.payments.get(payment.id())).unwrap().unwrap();
+    assert_eq!(
+        (kept.order(), kept.status()),
+        (None, PaymentStatus::Authorized)
+    );
+}
+
+/// Checks `cart` out while the provider says `state` about an attempt other than its
+/// payment's: the payment doesn't move.
+fn another_attempt_says(state: ProviderState) {
+    let world = World::new();
+    let app = CardApp::default();
+    let (cart, payment) = started_cart(&world, &app);
+    app.state.set(state);
+    *app.status_attempt.borrow_mut() = Some("pi_other".to_string());
+    assert_eq!(
+        check_out_by(&world, cart, &app).map(|_| ()),
+        Err(CommandError::PaymentPending {
+            cart,
+            payment: payment.id()
+        })
+    );
+    let stored = block_on(world.payments.get(payment.id())).unwrap().unwrap();
+    assert_eq!(stored.status(), PaymentStatus::Pending);
+    assert_eq!(world.mug_reserved(), 0);
+}
+
+#[test]
+fn another_attempt_paid_doesnt_pay_the_payment() {
+    another_attempt_says(ProviderState::Paid);
+}
+
+#[test]
+fn another_attempt_failed_doesnt_fail_the_payment() {
+    another_attempt_says(ProviderState::Failed);
+}
+
+#[test]
+fn another_attempt_cancelled_doesnt_void_the_payment() {
+    another_attempt_says(ProviderState::Canceled);
 }
 
 #[test]
