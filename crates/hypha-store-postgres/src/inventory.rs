@@ -2,12 +2,13 @@ use std::collections::HashMap;
 
 use futures_util::future::{try_join, try_join3};
 use hypha_core::{
-    InventoryItemId, LocationId, MarketId, PendingEvent, Quantity, Recorded, RepoError, VariantId,
-    Version, Versioned, stamp_insert, stamp_update,
+    InventoryItemId, Keyset, LocationId, MarketId, Page, PageRequest, PendingEvent, Quantity,
+    Recorded, RepoError, SortKey, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_inventory::{
-    InventoryItem, InventoryItemRepo, InventoryItemSnapshot, Level, Location, LocationRepo,
-    LocationSnapshot, Reservation, ReservationRef,
+    InventoryFilter, InventoryItem, InventoryItemRepo, InventoryItemSnapshot, InventoryItemSummary,
+    Level, LevelSummary, Location, LocationRepo, LocationSnapshot, Reservation, ReservationRef,
+    stock_by_location,
 };
 use tokio_postgres::types::{ToSql, Type};
 use uuid::Uuid;
@@ -262,6 +263,99 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
         consistent_read!(conn, |tx| load_items(tx, "variant_id", &ids).await)
     }
 
+    /// One statement: the page by `inventory_items_by_available`, or at a location by
+    /// `inventory_stock_by_location` (migration 0068), joined to the page's stock rows.
+    async fn list(
+        &self,
+        filter: &InventoryFilter,
+        page: PageRequest<Keyset<InventoryItemId>>,
+    ) -> Result<Page<InventoryItemSummary>, RepoError> {
+        let (after_key, after_id) = match &page.after {
+            None => (None, None),
+            Some(Keyset {
+                key: SortKey::Int(key),
+                id,
+            }) => (Some(*key), Some(id.as_uuid())),
+            Some(Keyset { key, .. }) => {
+                return Err(RepoError::Backend(format!(
+                    "a {key:?} position for an inventory list"
+                )));
+            }
+        };
+        let location = filter.location.map(|l| l.as_uuid());
+        let variants: Option<Vec<Uuid>> = filter
+            .variants
+            .as_ref()
+            .map(|v| v.iter().map(|v| v.as_uuid()).collect());
+        let fetch = i64::from(page.limit.get()) + 1;
+        // At a location the key is that location's row; across them, the item's total.
+        let (source, key) = match location {
+            Some(_) => (
+                "inventory_items i JOIN inventory_stock k
+                     ON k.item_id = i.id AND k.location_id = $6",
+                "k.available",
+            ),
+            None => ("inventory_items i", "i.available"),
+        };
+        let mut conn = self.conn().await;
+        let rows = conn
+            .db()
+            .query_typed(
+                &format!(
+                    "WITH page AS (
+                         SELECT i.id, i.variant_id, i.tracked, i.continue_selling,
+                                i.available, {key} AS sort_key
+                         FROM {source}
+                         WHERE NOT i.retired
+                           AND ($1::bigint IS NULL OR (i.tracked AND {key} < $1))
+                           AND ($2::uuid[] IS NULL OR i.variant_id = ANY($2))
+                           AND ($3::uuid IS NULL OR ({key}, i.id) > ($4, $3))
+                         ORDER BY {key}, i.id LIMIT $5
+                     )
+                     SELECT p.id, p.variant_id, p.tracked, p.continue_selling, p.available,
+                            s.location_id, s.on_hand, s.reserved,
+                            s.available AS location_available
+                     FROM page p LEFT JOIN inventory_stock s ON s.item_id = p.id
+                     ORDER BY p.sort_key, p.id, s.location_id"
+                ),
+                &[
+                    (&filter.below, Type::INT8),
+                    (&variants, Type::UUID_ARRAY),
+                    (&after_id, Type::UUID),
+                    (&after_key, Type::INT8),
+                    (&fetch, Type::INT8),
+                    (&location, Type::UUID),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+        let mut items: Vec<InventoryItemSummary> = Vec::new();
+        for r in &rows {
+            let id = InventoryItemId::from_uuid(col(r, "id")?);
+            if items.last().is_none_or(|last| last.id != id) {
+                items.push(InventoryItemSummary {
+                    id,
+                    variant: VariantId::from_uuid(col(r, "variant_id")?),
+                    tracked: col(r, "tracked")?,
+                    continue_selling: col(r, "continue_selling")?,
+                    levels: Vec::new(),
+                    available: col(r, "available")?,
+                });
+            }
+            if let (Some(location), Some(item)) =
+                (col::<Option<Uuid>>(r, "location_id")?, items.last_mut())
+            {
+                item.levels.push(LevelSummary {
+                    location: LocationId::from_uuid(location),
+                    on_hand: col(r, "on_hand")?,
+                    reserved: col(r, "reserved")?,
+                    available: col(r, "location_available")?,
+                });
+            }
+        }
+        Ok(Page::from_overfetch(items, page.limit))
+    }
+
     async fn insert(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
         stamp_insert(item, self.now());
         let s = item.snapshot();
@@ -336,14 +430,15 @@ pub(crate) async fn insert_item(
 ) -> Result<(), RepoError> {
     tx.query_typed(
         "INSERT INTO inventory_items (id, version, variant_id, tracked, continue_selling,
-             retired)
-         VALUES ($1, 1, $2, $3, $4, $5)",
+             retired, available)
+         VALUES ($1, 1, $2, $3, $4, $5, $6)",
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&s.variant.as_uuid(), Type::UUID),
             (&s.tracked, Type::BOOL),
             (&s.continue_selling, Type::BOOL),
             (&s.retired, Type::BOOL),
+            (&total_available(s), Type::INT8),
         ],
     )
     .await
@@ -431,6 +526,7 @@ pub(crate) async fn update_items(
     let tracked: Vec<bool> = snapshots.iter().map(|s| s.tracked).collect();
     let continue_selling: Vec<bool> = snapshots.iter().map(|s| s.continue_selling).collect();
     let retired: Vec<bool> = snapshots.iter().map(|s| s.retired).collect();
+    let available: Vec<i64> = snapshots.iter().map(total_available).collect();
 
     // Lock the rows in ID order first. Two checkouts touching overlapping items then
     // queue instead of deadlocking, whatever order their callers listed the items in;
@@ -440,10 +536,11 @@ pub(crate) async fn update_items(
         .query_typed(
             "UPDATE inventory_items AS i
              SET version = i.version + 1, variant_id = t.variant_id, tracked = t.tracked,
-                 continue_selling = t.continue_selling, retired = t.retired
+                 continue_selling = t.continue_selling, retired = t.retired,
+                 available = t.available
              FROM unnest($1::uuid[], $2::bigint[], $3::uuid[], $4::boolean[], $5::boolean[],
-                         $6::boolean[])
-                 AS t (id, version, variant_id, tracked, continue_selling, retired)
+                         $6::boolean[], $7::bigint[])
+                 AS t (id, version, variant_id, tracked, continue_selling, retired, available)
              WHERE i.id = t.id AND i.version = t.version
              RETURNING i.id, i.version",
             &[
@@ -453,6 +550,7 @@ pub(crate) async fn update_items(
                 (&tracked, Type::BOOL_ARRAY),
                 (&continue_selling, Type::BOOL_ARRAY),
                 (&retired, Type::BOOL_ARRAY),
+                (&available, Type::INT8_ARRAY),
             ],
         )
         .await
@@ -466,14 +564,15 @@ pub(crate) async fn update_items(
         .map(|r| Ok((col::<Uuid>(r, "id")?, version_from_db(col(r, "version")?)?)))
         .collect::<Result<HashMap<Uuid, Version>, RepoError>>()?;
 
-    for table in ["inventory_levels", "inventory_reservations"] {
-        tx.query_typed(
-            &format!("DELETE FROM {table} WHERE item_id = ANY($1)"),
-            &[(&ids, Type::UUID_ARRAY)],
-        )
-        .await
-        .map_err(repo_error)?;
-    }
+    // The children, and the stock derived from them, in one statement.
+    tx.query_typed(
+        "WITH levels AS (DELETE FROM inventory_levels WHERE item_id = ANY($1)),
+              held AS (DELETE FROM inventory_reservations WHERE item_id = ANY($1))
+         DELETE FROM inventory_stock WHERE item_id = ANY($1)",
+        &[(&ids, Type::UUID_ARRAY)],
+    )
+    .await
+    .map_err(repo_error)?;
     write_children(tx, &snapshots).await?;
     // Their stamps, one statement for all.
     let stamped: Vec<&InventoryItemSnapshot> =
@@ -506,8 +605,9 @@ pub(crate) async fn update_items(
     Ok(new_versions)
 }
 
-/// The levels and reservations of `items`, one statement each. Positions are counted
-/// per item, so each item's order survives.
+/// The levels and reservations of `items`, with the stock per location derived from them
+/// (`inventory_stock`), in one statement. Positions are counted per item, so each item's
+/// order survives.
 async fn write_children(
     tx: &impl Queries,
     items: &[InventoryItemSnapshot],
@@ -521,7 +621,19 @@ async fn write_children(
     let mut references = Vec::new();
     let mut held_locations = Vec::new();
     let mut quantities = Vec::new();
+    let mut stock_items = Vec::new();
+    let mut stock_locations = Vec::new();
+    let mut stock_on_hand = Vec::new();
+    let mut stock_reserved = Vec::new();
+    let mut stock_available = Vec::new();
     for item in items {
+        for level in stock_by_location(&item.levels, &item.reservations).0 {
+            stock_items.push(item.id.as_uuid());
+            stock_locations.push(level.location.as_uuid());
+            stock_on_hand.push(level.on_hand);
+            stock_reserved.push(level.reserved);
+            stock_available.push(level.available);
+        }
         for (position, level) in (0..).zip(&item.levels) {
             level_items.push(item.id.as_uuid());
             level_positions.push(position);
@@ -537,31 +649,43 @@ async fn write_children(
         }
     }
     tx.query_typed(
-        "INSERT INTO inventory_levels (item_id, position, location_id, on_hand)
-         SELECT * FROM unnest($1::uuid[], $2::integer[], $3::uuid[], $4::bigint[])",
+        "WITH levels AS (
+             INSERT INTO inventory_levels (item_id, position, location_id, on_hand)
+             SELECT * FROM unnest($1::uuid[], $2::integer[], $3::uuid[], $4::bigint[])
+         ), held AS (
+             INSERT INTO inventory_reservations
+                 (item_id, position, reference, location_id, quantity)
+             SELECT * FROM unnest($5::uuid[], $6::integer[], $7::text[], $8::uuid[],
+                                  $9::bigint[])
+         )
+         INSERT INTO inventory_stock (item_id, location_id, on_hand, reserved, available)
+         SELECT * FROM unnest($10::uuid[], $11::uuid[], $12::bigint[], $13::bigint[],
+                              $14::bigint[])",
         &[
             (&level_items, Type::UUID_ARRAY),
             (&level_positions, Type::INT4_ARRAY),
             (&level_locations, Type::UUID_ARRAY),
             (&on_hand, Type::INT8_ARRAY),
-        ],
-    )
-    .await
-    .map_err(repo_error)?;
-    tx.query_typed(
-        "INSERT INTO inventory_reservations (item_id, position, reference, location_id, quantity)
-         SELECT * FROM unnest($1::uuid[], $2::integer[], $3::text[], $4::uuid[], $5::bigint[])",
-        &[
             (&held_items, Type::UUID_ARRAY),
             (&held_positions, Type::INT4_ARRAY),
             (&references, Type::TEXT_ARRAY),
             (&held_locations, Type::UUID_ARRAY),
             (&quantities, Type::INT8_ARRAY),
+            (&stock_items, Type::UUID_ARRAY),
+            (&stock_locations, Type::UUID_ARRAY),
+            (&stock_on_hand, Type::INT8_ARRAY),
+            (&stock_reserved, Type::INT8_ARRAY),
+            (&stock_available, Type::INT8_ARRAY),
         ],
     )
     .await
     .map_err(repo_error)?;
     Ok(())
+}
+
+/// What the item's row stores to sort by: available across its locations.
+fn total_available(s: &InventoryItemSnapshot) -> i64 {
+    stock_by_location(&s.levels, &s.reservations).1
 }
 
 /// The items whose `column` (`id` or `variant_id`) is in `values`, with their levels

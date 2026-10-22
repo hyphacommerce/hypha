@@ -11,6 +11,7 @@ hypha-fulfillment = { path = "../hypha-fulfillment" }
 hypha-inventory = { path = "../hypha-inventory" }
 hypha-orders = { path = "../hypha-orders" }
 hypha-payments = { path = "../hypha-payments" }
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 thiserror.workspace = true
 
 [dev-dependencies]

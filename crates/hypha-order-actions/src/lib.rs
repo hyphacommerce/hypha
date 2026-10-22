@@ -1,6 +1,6 @@
 //! What staff and apps do to orders after checkout: fulfil them, take a fulfilment back,
-//! cancel them, record money received and what a payment's provider reports. Later, refunds
-//! and order edits.
+//! cancel them, record money received and what a payment's provider reports; and the sales
+//! report, which reads orders and their payments together. Later, refunds and order edits.
 //!
 //! A workflow: it composes orders, fulfilments and inventory, and writes each action's
 //! aggregates in one batch, retried when another request committed first (like
@@ -8,6 +8,7 @@
 
 pub mod commands;
 pub mod payment_events;
+pub mod report;
 pub mod view;
 
 pub use commands::{
@@ -16,5 +17,8 @@ pub use commands::{
 };
 pub use payment_events::{
     PAYMENT_EVENT, PaymentEvent, PaymentEventKind, PaymentReport, record_payment_event,
+};
+pub use report::{
+    Interval, ReportError, SalesBucket, SalesReport, SalesReportInput, SalesRow, sales_report,
 };
 pub use view::{OrderView, Unfulfilled, order_view, view_of};

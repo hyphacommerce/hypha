@@ -34,6 +34,9 @@ pub trait PaymentRepo {
     async fn get(&self, id: PaymentId) -> Result<Option<Payment>, RepoError>;
     /// Every payment of `order`, newest first (by ID). An order has a handful.
     async fn list_for_order(&self, order: OrderId) -> Result<Vec<Payment>, RepoError>;
+    /// Every payment of any of `orders`, by order and then newest first (by ID), in one
+    /// read however many orders.
+    async fn list_for_orders(&self, orders: &[OrderId]) -> Result<Vec<Payment>, RepoError>;
     /// Every payment started for `cart`, newest first (by ID): the ones checkout started
     /// before the order, and the order's own once placed. A cart has a handful.
     async fn list_for_cart(&self, cart: CartId) -> Result<Vec<Payment>, RepoError>;

@@ -753,6 +753,14 @@ step "a total sort without a currency" 422 sort_needs_currency "$BASE/admin/orde
 step "orders placed before 2000" 200 - "$BASE/admin/orders?placed_before=2000-01-01T00:00:00Z"
 contains "none" '"items":[]'
 step "a date that isn't one" 400 invalid_query "$BASE/admin/orders?placed_from=yesterday"
+step "this week's sales" 200 - "$BASE/admin/reports/sales?interval=week"
+contains "in euros" '"currency":"EUR","orders_count":'
+contains "with the mug among the top products" "\"top_products\":{\"by_units\":[{\"product\":\""
+step "sales in 2000" 200 - "$BASE/admin/reports/sales?from=2000-01-01T00:00:00Z&to=2000-01-08T00:00:00Z"
+contains "sold nothing" '"total":{"start":"2000-01-01T00:00:00Z","end":"2000-01-08T00:00:00Z","sales":[],"cancelled_count":0}'
+step "a period backwards" 422 invalid_period \
+    "$BASE/admin/reports/sales?from=2000-01-08T00:00:00Z&to=2000-01-01T00:00:00Z"
+step "a top list too long" 422 invalid_top "$BASE/admin/reports/sales?top=21"
 step "the admin sees the pending payment" 200 - "$BASE/admin/orders/$ORDER"
 contains "with its method and instructions" '"status":"pending","refunded":{"amount":0,"currency":"EUR"},"reference":null,"attempt":null,"instructions":"IBAN HR12 3456 7890. Quote the order number."'
 step "a method a pending payment uses" 409 payment_method_in_use -X DELETE "$METHODS/$BANK"
@@ -1019,6 +1027,12 @@ contains "and is left out of the total" '"total":{"amount":0,"currency":"EUR"},"
 step "delivery of 4" 200 - -X POST "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" \
     -H "$JSON" -d '{"delta":4}'
 contains "5 on hand" '"on_hand":5'
+step "what runs low at the warehouse" 200 - "$BASE/admin/inventory-items?below=6&location=$WAREHOUSE"
+contains "the lamp runs low" "\"id\":\"$LAMP_ITEM\",\"variant\":\"$LAMP_VAR\",\"product\":\"$LAMP\""
+step "no lamp below zero" 200 - "$BASE/admin/inventory-items?below=0&product=$LAMP"
+contains "an empty page" '"items":[],"has_more":false'
+step "low stock at an unknown location" 422 location_not_found \
+    "$BASE/admin/inventory-items?location=loc_00000000000000000000000000000063"
 step "get stock cart" 200 - "$BASE/storefront/carts/$STOCK_CART"
 contains "lamps are back" '"fully_available":true'
 step "raise lamps beyond stock" 409 out_of_stock -X PUT "$BASE/storefront/carts/$STOCK_CART/lines/$LAMP_VAR" \

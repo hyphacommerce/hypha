@@ -1557,7 +1557,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Inventory items across products, lowest available first (at `location` when given),
+         *     then by ID: what's running low. Items whose variant was removed are left out.
+         */
+        get: operations["admin.inventory.list_items"];
         put?: never;
         /** Creates the inventory item that tracks a variant's stock. */
         post: operations["admin.inventory.create_item"];
@@ -2806,6 +2810,27 @@ export interface paths {
         get?: never;
         /** Which image of its product's media a variant shows. */
         put: operations["admin.products.set_variant_media"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/reports/sales": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the period's orders add up to, per day, week or month in the store's time zone
+         *     and per currency, with what their payments gave back and the products that sold most.
+         *     Cancelled orders are counted apart and add nothing.
+         */
+        get: operations["admin.reports.sales"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -4346,6 +4371,11 @@ export interface components {
              */
             name: string;
         };
+        /** @description The products that brought the most in one currency. */
+        CurrencyTopResponse: {
+            currency: components["schemas"]["Currency"];
+            products: components["schemas"]["ProductRevenueResponse"][];
+        };
         /** @description Who sees and writes a field's values. */
         CustomFieldAccess: {
             admin: components["schemas"]["CustomFieldAdminAccess"];
@@ -4966,10 +4996,57 @@ export interface components {
             url: string;
         };
         /**
+         * @description How long each bucket is, in the store's time zone. Weeks start on Monday.
+         *
+         *     Known values: `day`, `week`, `month`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        IntervalDto: string;
+        /**
          * @description A InventoryItemId: `invi_` and 32 hex digits.
          * @example invi_0190f1a2b3c47d8e9f00112233445566
          */
         InventoryItemId: string;
+        /** @description A page of a list, newest first. */
+        InventoryItemSummaryPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["InventoryItemSummaryResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        /**
+         * @description An inventory item in a list across products: what it stocks, and the product and
+         *     variant it belongs to.
+         */
+        InventoryItemSummaryResponse: {
+            /**
+             * Format: int64
+             * @description Available across locations.
+             */
+            available: number;
+            continue_selling: boolean;
+            id: components["schemas"]["InventoryItemId"];
+            /** @description Every location with a count or a reservation, by location ID. */
+            levels: components["schemas"]["LevelResponse"][];
+            /**
+             * Format: int64
+             * @description On hand across locations.
+             */
+            on_hand: number;
+            product?: components["schemas"]["ProductId"] | null;
+            product_title?: string | null;
+            /**
+             * Format: int64
+             * @description Reserved across locations.
+             */
+            reserved: number;
+            sku?: string | null;
+            tracked: boolean;
+            variant: components["schemas"]["VariantId"];
+            /** @description The variant's option values ("M / Blue"); `null` for a simple product. */
+            variant_title?: string | null;
+        };
         /**
          * @description A variant's stock. `id` is `null` when stock was never set up for the variant,
          *     which means untracked (always sellable).
@@ -6063,6 +6140,14 @@ export interface components {
             variants: components["schemas"]["VariantResponse"][];
             vendor?: string | null;
         };
+        ProductRevenueResponse: {
+            product: components["schemas"]["ProductId"];
+            /** @description Its line totals. */
+            revenue: components["schemas"]["Money"];
+            title: string;
+            /** Format: int64 */
+            units: number;
+        };
         /**
          * @description `ProductStatus` on the wire: snake_case strings. A DTO of its own, so the domain
          *     enum carries no serde and renaming a variant can't silently change the API.
@@ -6110,6 +6195,13 @@ export interface components {
             /** Format: int64 */
             variant_count: number;
             vendor?: string | null;
+        };
+        /** @description A product in a top list, named as its line in the newest order counted. */
+        ProductUnitsResponse: {
+            product: components["schemas"]["ProductId"];
+            title: string;
+            /** Format: int64 */
+            units: number;
         };
         /**
          * @description A ProposalId: `prop_` and 32 hex digits.
@@ -6261,6 +6353,63 @@ export interface components {
             input?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /** @description A stretch of the period. */
+        SalesBucketResponse: {
+            /**
+             * Format: int64
+             * @description Orders placed in it and cancelled since: in no sum.
+             */
+            cancelled_count: number;
+            /** @description Where the next bucket starts; the last one's is `to`. */
+            end: string;
+            /** @description Per currency, by currency code; empty when nothing sold. */
+            sales: components["schemas"]["SalesRowResponse"][];
+            /**
+             * @description RFC 3339 in UTC; a bucket starts at a start of day, week or month in the store's
+             *     time zone, except the first, which starts at `from`.
+             */
+            start: string;
+        };
+        SalesReportResponse: {
+            /** @description Every bucket in order, empty ones too. */
+            buckets: components["schemas"]["SalesBucketResponse"][];
+            /** @description RFC 3339 in UTC. */
+            from: string;
+            interval: components["schemas"]["IntervalDto"];
+            time_zone?: components["schemas"]["Timezone"] | null;
+            to: string;
+            top_products: components["schemas"]["TopProductsResponse"];
+            /** @description The whole period. */
+            total: components["schemas"]["SalesBucketResponse"];
+        };
+        /**
+         * @description One currency's sales. Amounts never mix currencies: a period sold in two has a row
+         *     for each.
+         */
+        SalesRowResponse: {
+            currency: components["schemas"]["Currency"];
+            /**
+             * @description The line totals before shipping (tax included where the market's prices include
+             *     it). Orders have no discounts yet, so there's no discount column.
+             */
+            gross_sales: components["schemas"]["Money"];
+            /** @description `total` less `refunded`. */
+            net: components["schemas"]["Money"];
+            /**
+             * Format: int64
+             * @description Orders placed, cancelled ones left out.
+             */
+            orders_count: number;
+            /**
+             * @description What the orders' payments gave back so far, counted with the orders (when they
+             *     were placed), not when the money went back.
+             */
+            refunded: components["schemas"]["Money"];
+            shipping: components["schemas"]["Money"];
+            taxes: components["schemas"]["Money"];
+            /** @description What the orders came to. */
+            total: components["schemas"]["Money"];
         };
         /** @description A template's sources (all of them: this replaces the stored ones). */
         SaveNotificationTemplateRequest: {
@@ -6750,6 +6899,12 @@ export interface components {
          * @example Europe/Belgrade
          */
         Timezone: string;
+        TopProductsResponse: {
+            /** @description Per currency, by currency code: most revenue first, then by product ID. */
+            by_revenue: components["schemas"]["CurrencyTopResponse"][];
+            /** @description Most units first, then by product ID; units count in every currency. */
+            by_units: components["schemas"]["ProductUnitsResponse"][];
+        };
         TotpSetupResponse: {
             /** @description Base32, for typing into the app. */
             secret: string;
@@ -17502,6 +17657,93 @@ export interface operations {
             };
         };
     };
+    "admin.inventory.list_items": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+                /**
+                 * @description Only tracked items with less than this many available (strictly below): across
+                 *     locations, or at `location` when given. Untracked stock never runs low.
+                 */
+                below?: number;
+                /**
+                 * @description Only items with stock or a reservation at this location; `below` and the order then
+                 *     count this location alone. An unknown one is `422 location_not_found`.
+                 */
+                location?: components["schemas"]["LocationId"];
+                /** @description Only this product's variants. An unknown one is `422 product_not_found`. */
+                product?: components["schemas"]["ProductId"];
+                /**
+                 * @description Only the variant with exactly this SKU (case-sensitive, no prefix match); when no
+                 *     variant has it, the list is empty.
+                 */
+                sku?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryItemSummaryPage"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.inventory.create_item": {
         parameters: {
             query?: never;
@@ -25632,6 +25874,81 @@ export interface operations {
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.reports.sales": {
+        parameters: {
+            query?: {
+                /** @description The period's start (RFC 3339); 7 days before `to` when absent. */
+                from?: string;
+                /**
+                 * @description The period's end (RFC 3339), left out; the start of tomorrow in the store's time
+                 *     zone when absent, so the default period is the last 7 days, today included.
+                 */
+                to?: string;
+                /**
+                 * @description `day` (the default), `week` or `month`. At most 366 buckets
+                 *     (`422 period_too_long`).
+                 */
+                interval?: "day" | "week" | "month";
+                /** @description Only orders placed through this sales channel. */
+                channel?: components["schemas"]["ChannelId"];
+                /** @description Only orders placed in this market. */
+                market?: components["schemas"]["MarketId"];
+                /** @description How many products each top list holds: 1 to 20, default 5 (`422 invalid_top`). */
+                top?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesReportResponse"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

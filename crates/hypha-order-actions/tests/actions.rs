@@ -8,8 +8,9 @@ use hypha_core::{
 use hypha_fulfillment::{FulfillmentError, FulfillmentRepo, FulfillmentState, TrackingInput};
 use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo, ReservationRef};
 use hypha_order_actions::{
-    CancelOrder, CommandError, Fulfil, FulfilLine, Fulfilled, MarkPaid, OrderPayments, OrderView,
-    Unfulfilled, cancel_fulfillment, cancel_order, fulfill, mark_paid, order_view,
+    CancelOrder, CommandError, Fulfil, FulfilLine, Fulfilled, Interval, MarkPaid, OrderPayments,
+    OrderView, ReportError, SalesReport, SalesReportInput, SalesRow, Unfulfilled,
+    cancel_fulfillment, cancel_order, fulfill, mark_paid, order_view, sales_report,
 };
 use hypha_orders::{
     CancelReason, FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderError, OrderLine,
@@ -1990,4 +1991,130 @@ fn a_partial_refund_without_an_amount_is_refused() {
             reported: PaymentStatus::PartiallyRefunded,
         }))
     );
+}
+
+// ---- sales report ----
+
+fn report(world: &World, ctx: &Ctx, input: SalesReportInput) -> Result<SalesReport, ReportError> {
+    block_on(sales_report(ctx, &world.ports, &world.clock, input))
+}
+
+fn reader() -> Ctx {
+    user_with(vec![Scope::OrdersRead])
+}
+
+#[test]
+fn the_report_covers_the_last_seven_days_and_nets_out_refunds() {
+    let world = World::new();
+    stored_payment(&world, 1, 2000, PaymentStatus::PartiallyRefunded, 300);
+    let report = report(&world, &reader(), SalesReportInput::default()).unwrap();
+
+    // The clock reads the first instant of 2026 (UTC): today is the last of 7 days.
+    let day = |d: i64| {
+        hypha_core::Timestamp::from_unix_micros(
+            FixedClock::DEFAULT.unix_micros() + d * 86_400_000_000,
+        )
+    };
+    assert_eq!((report.from, report.to), (day(-6), day(1)));
+    assert_eq!(report.buckets.len(), 7);
+    assert!(report.buckets[..6].iter().all(|b| b.sales.is_empty()));
+    let row = SalesRow {
+        currency: Currency::EUR,
+        orders_count: 1,
+        gross_sales: eur(2000),
+        shipping: eur(0),
+        taxes: eur(0),
+        total: eur(2000),
+        refunded: eur(300),
+        net: eur(1700),
+    };
+    assert_eq!(
+        (report.buckets[6].start, report.buckets[6].end),
+        (day(0), day(1))
+    );
+    assert_eq!(report.buckets[6].sales, vec![row.clone()]);
+    assert_eq!(report.total.sales, vec![row]);
+    assert_eq!(report.total.cancelled_count, 0);
+    let units: Vec<(ProductId, u64)> = report
+        .top_by_units
+        .iter()
+        .map(|p| (p.product, p.units))
+        .collect();
+    assert_eq!(
+        units,
+        [
+            (ProductId::from_uuid(Uuid::from_u128(2101)), 3),
+            (ProductId::from_uuid(Uuid::from_u128(2102)), 1),
+        ]
+    );
+    assert_eq!(report.top_by_revenue[0].products[0].revenue, eur(1500));
+}
+
+#[test]
+fn a_cancelled_order_is_counted_apart_and_sells_nothing() {
+    let world = World::new();
+    let mut order = world.order();
+    order
+        .cancel(FixedClock::DEFAULT, CancelReason::Customer, false)
+        .unwrap();
+    block_on(world.orders.update(&mut order)).unwrap();
+    let report = report(&world, &reader(), SalesReportInput::default()).unwrap();
+    assert!(report.total.sales.is_empty());
+    assert_eq!(report.total.cancelled_count, 1);
+    assert_eq!(report.buckets[6].cancelled_count, 1);
+    assert!(report.top_by_units.is_empty());
+}
+
+#[test]
+fn a_report_in_weeks_follows_the_store_zone() {
+    let world = World::new();
+    // 1 January 2026 is a Thursday: the week from Monday 29 December holds the order.
+    let input = SalesReportInput {
+        interval: Interval::Week,
+        zone: Some(hypha_core::Timezone::new("Europe/Belgrade").unwrap()),
+        ..SalesReportInput::default()
+    };
+    let report = report(&world, &reader(), input).unwrap();
+    assert_eq!(report.buckets.len(), 2);
+    // Midnight in Belgrade is 23:00 UTC the day before, in winter.
+    let monday = hypha_core::Timestamp::from_unix_micros(
+        FixedClock::DEFAULT.unix_micros() - 3 * 86_400_000_000 - 3_600_000_000,
+    );
+    assert_eq!(report.buckets[1].start, monday);
+    assert_eq!(report.buckets[1].sales[0].orders_count, 1);
+}
+
+#[test]
+fn the_report_checks_its_period_and_top() {
+    let world = World::new();
+    for top in [0, 21] {
+        let input = SalesReportInput {
+            top: Some(top),
+            ..SalesReportInput::default()
+        };
+        assert_eq!(
+            report(&world, &reader(), input),
+            Err(ReportError::TopOutOfRange { max: 20 })
+        );
+    }
+    let input = SalesReportInput {
+        from: Some(FixedClock::DEFAULT),
+        to: Some(FixedClock::DEFAULT),
+        ..SalesReportInput::default()
+    };
+    assert_eq!(
+        report(&world, &reader(), input),
+        Err(ReportError::InvalidPeriod)
+    );
+}
+
+#[test]
+fn the_report_needs_orders_read() {
+    let world = World::new();
+    let result = report(
+        &world,
+        &user_with(vec![Scope::ProductsRead]),
+        SalesReportInput::default(),
+    );
+    assert!(matches!(result, Err(ReportError::Auth(_))), "{result:?}");
 }

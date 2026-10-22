@@ -127,6 +127,17 @@ impl PaymentRepo for InMemoryPaymentRepo {
         Ok(found)
     }
 
+    async fn list_for_orders(&self, orders: &[OrderId]) -> Result<Vec<Payment>, RepoError> {
+        let mut found: Vec<Payment> = self
+            .payments
+            .all()
+            .into_iter()
+            .filter(|p| p.order().is_some_and(|o| orders.contains(&o)))
+            .collect();
+        found.sort_by_key(|p| (p.order(), std::cmp::Reverse(p.id().as_uuid())));
+        Ok(found)
+    }
+
     async fn list_for_cart(&self, cart: CartId) -> Result<Vec<Payment>, RepoError> {
         let mut found: Vec<Payment> = self
             .payments

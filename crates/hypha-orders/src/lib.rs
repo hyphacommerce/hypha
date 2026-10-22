@@ -9,6 +9,7 @@ pub mod events;
 pub mod filter;
 pub mod order;
 pub mod repo;
+pub mod sales;
 pub mod stats;
 pub mod summary;
 
@@ -23,5 +24,9 @@ pub use order::{
     OrderNumber, OrderShippingLine, OrderSnapshot, OrderTax, OrderTaxSource,
 };
 pub use repo::{HasOrders, OrderRepo, StageOrders};
+pub use sales::{
+    BucketFigures, CurrencySales, CurrencyTop, ProductRevenue, ProductUnits, SalesFigures,
+    SalesQuery,
+};
 pub use stats::OrderStats;
 pub use summary::OrderSummary;

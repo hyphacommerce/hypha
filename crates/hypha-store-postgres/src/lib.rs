@@ -43,6 +43,7 @@ mod outbox;
 mod payments;
 mod preview_tokens;
 mod products;
+mod sales;
 mod search;
 mod shipping;
 pub mod spore_check;

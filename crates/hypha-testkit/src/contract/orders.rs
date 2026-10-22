@@ -36,6 +36,8 @@ pub async fn order_repo<R: OrderRepo>(make: impl AsyncFn() -> R) {
     shipping_round_trips(&make().await).await;
     scenario("order: fulfilled quantities, the status and a cancellation round trip");
     fulfilment_round_trips(&make().await).await;
+    scenario("order: sales add up a period's orders per bucket and currency, with top products");
+    sales(&make().await).await;
 }
 
 fn eur(amount: i64) -> Money {
@@ -733,4 +735,347 @@ async fn fulfilment_round_trips<R: OrderRepo>(repo: &R) {
         .unwrap();
     repo.update(&mut other).await.unwrap();
     assert_eq!(repo.get(other.id()).await, Ok(Some(other)));
+}
+
+/// An order for the sales scenario: `lines` as (product, quantity, unit price, title),
+/// tax on the first line and shipping on top.
+struct Sale {
+    n: u128,
+    currency: Currency,
+    at: i64,
+    channel: u128,
+    market: u128,
+    lines: Vec<(u128, u32, i64, &'static str)>,
+    tax: i64,
+    shipping: i64,
+}
+
+fn sale(s: Sale) -> Order {
+    use hypha_core::{Address, AddressParts, ShippingGroupId, ShippingOptionId};
+    use hypha_orders::OrderShippingLine;
+
+    let money = |amount: i64| Money::new(amount, s.currency).unwrap();
+    let lines: Vec<OrderLine> = s
+        .lines
+        .iter()
+        .enumerate()
+        .map(|(i, (product, quantity, unit, title))| OrderLine {
+            id: OrderLineId::from_uuid(Uuid::from_u128(s.n * 100 + i as u128)),
+            product: ProductId::from_uuid(Uuid::from_u128(*product)),
+            variant: VariantId::from_uuid(Uuid::from_u128(product + 10_000)),
+            quantity: Quantity::new(*quantity).unwrap(),
+            product_title: title.to_string(),
+            variant_title: None,
+            sku: None,
+            unit_price: Price::new(money(*unit)).unwrap(),
+            total: money(unit * i64::from(*quantity)),
+            tax: (i == 0 && s.tax > 0).then(|| OrderTax {
+                rate: TaxRate::new(250_000).unwrap(),
+                class: None,
+                amount: money(s.tax),
+                source: OrderTaxSource::RateTable {
+                    region: TaxRegionId::from_uuid(Uuid::from_u128(9)),
+                },
+            }),
+            fulfilled_quantity: 0,
+        })
+        .collect();
+    let subtotal: i64 = lines.iter().map(|l| l.total.amount()).sum();
+    let mut snapshot = order(s.n).snapshot();
+    snapshot.version = Version::NEW;
+    snapshot.placed_at = Timestamp::from_unix_micros(s.at);
+    snapshot.currency = s.currency;
+    snapshot.channel = ChannelId::from_uuid(Uuid::from_u128(s.channel));
+    snapshot.market = MarketId::from_uuid(Uuid::from_u128(s.market));
+    snapshot.lines = lines;
+    if s.shipping > 0 {
+        snapshot.shipping_address = Some(
+            Address::new(AddressParts {
+                first_name: None,
+                last_name: "Horvat".to_string(),
+                company: None,
+                line1: "Ilica 1".to_string(),
+                line2: None,
+                city: "Zagreb".to_string(),
+                province: None,
+                postal_code: None,
+                country: "HR".to_string(),
+                phone: None,
+            })
+            .unwrap(),
+        );
+        snapshot.shipping_lines = vec![OrderShippingLine {
+            group: ShippingGroupId::from_uuid(Uuid::from_u128(s.n * 100 + 99)),
+            lines: vec![],
+            option: ShippingOptionId::from_uuid(Uuid::from_u128(7)),
+            code: "standard".to_string(),
+            name: "Standard".to_string(),
+            provider: None,
+            service: None,
+            reference: None,
+            amount: Price::new(money(s.shipping)).unwrap(),
+            estimate_days: None,
+            tax: None,
+        }];
+    }
+    snapshot.subtotal = money(subtotal);
+    snapshot.shipping_total = money(s.shipping);
+    snapshot.tax_total = money(s.tax);
+    snapshot.total = money(subtotal + s.shipping + s.tax);
+    Order::restore(snapshot).unwrap()
+}
+
+async fn sales<R: OrderRepo>(repo: &R) {
+    use hypha_orders::{
+        BucketFigures, CurrencySales, CurrencyTop, ProductRevenue, ProductUnits, SalesFigures,
+        SalesQuery,
+    };
+
+    const DAY: i64 = 86_400_000_000;
+    const HOUR: i64 = 3_600_000_000;
+    let t0: i64 = 1_767_225_600_000_000;
+    let at = Timestamp::from_unix_micros;
+    let query = |top: u32, channel: Option<u128>, market: Option<u128>| SalesQuery {
+        starts: vec![at(t0), at(t0 + DAY), at(t0 + 2 * DAY)],
+        end: at(t0 + 3 * DAY),
+        channel: channel.map(|c| ChannelId::from_uuid(Uuid::from_u128(c))),
+        market: market.map(|m| MarketId::from_uuid(Uuid::from_u128(m))),
+        top,
+    };
+    let empty = repo.sales(&query(5, None, None)).await.unwrap();
+    assert_eq!(
+        empty,
+        SalesFigures {
+            buckets: vec![BucketFigures::default(); 3],
+            ..SalesFigures::default()
+        }
+    );
+
+    let (mug, shirt, lamp) = (1u128, 2u128, 3u128);
+    let sale_of = |n, currency, at, channel, market, lines, tax, shipping| {
+        sale(Sale {
+            n,
+            currency,
+            at,
+            channel,
+            market,
+            lines,
+            tax,
+            shipping,
+        })
+    };
+    let mut orders = vec![
+        sale_of(
+            1,
+            Currency::EUR,
+            t0 + HOUR,
+            1,
+            1,
+            vec![(mug, 2, 500, "Mug"), (shirt, 1, 1000, "Shirt")],
+            150,
+            400,
+        ),
+        // Later than 1: its title is the mug's newest.
+        sale_of(
+            2,
+            Currency::EUR,
+            t0 + 2 * HOUR,
+            2,
+            1,
+            vec![(mug, 1, 500, "Mug v2")],
+            0,
+            0,
+        ),
+        sale_of(
+            3,
+            Currency::USD,
+            t0 + DAY,
+            1,
+            2,
+            vec![(shirt, 3, 700, "Shirt")],
+            0,
+            0,
+        ),
+        // Cancelled: counted apart, in no sum or top list.
+        sale_of(
+            4,
+            Currency::EUR,
+            t0 + DAY + HOUR,
+            1,
+            1,
+            vec![(mug, 5, 500, "Mug")],
+            0,
+            0,
+        ),
+        // At the last start exactly: the last bucket.
+        sale_of(
+            5,
+            Currency::EUR,
+            t0 + 2 * DAY,
+            1,
+            1,
+            vec![(lamp, 1, 9000, "Lamp")],
+            0,
+            0,
+        ),
+        // Just before the period, and at its end: left out.
+        sale_of(
+            6,
+            Currency::EUR,
+            t0 - 1,
+            1,
+            1,
+            vec![(lamp, 9, 9000, "Lamp")],
+            0,
+            0,
+        ),
+        sale_of(
+            7,
+            Currency::EUR,
+            t0 + 3 * DAY,
+            1,
+            1,
+            vec![(lamp, 9, 9000, "Lamp")],
+            0,
+            0,
+        ),
+    ];
+    orders[2].set_financial_status(FinancialStatus::Refunded);
+    orders[4].set_financial_status(FinancialStatus::PartiallyRefunded);
+    orders[3]
+        .cancel(at(t0 + 2 * DAY), CancelReason::Customer, false)
+        .unwrap();
+    for o in &mut orders {
+        repo.insert(o).await.unwrap();
+    }
+
+    let eur = |n: i64| Money::new(n, Currency::EUR).unwrap();
+    let usd = |n: i64| Money::new(n, Currency::USD).unwrap();
+    let product = |n: u128| ProductId::from_uuid(Uuid::from_u128(n));
+    let figures = repo.sales(&query(2, None, None)).await.unwrap();
+    assert_eq!(
+        figures.buckets,
+        vec![
+            BucketFigures {
+                sales: vec![CurrencySales {
+                    currency: Currency::EUR,
+                    orders_count: 2,
+                    subtotal: eur(2500),
+                    shipping: eur(400),
+                    taxes: eur(150),
+                    total: eur(3050),
+                }],
+                cancelled_count: 0,
+            },
+            BucketFigures {
+                sales: vec![CurrencySales {
+                    currency: Currency::USD,
+                    orders_count: 1,
+                    subtotal: usd(2100),
+                    shipping: usd(0),
+                    taxes: usd(0),
+                    total: usd(2100),
+                }],
+                cancelled_count: 1,
+            },
+            BucketFigures {
+                sales: vec![CurrencySales {
+                    currency: Currency::EUR,
+                    orders_count: 1,
+                    subtotal: eur(9000),
+                    shipping: eur(0),
+                    taxes: eur(0),
+                    total: eur(9000),
+                }],
+                cancelled_count: 0,
+            },
+        ]
+    );
+    assert_eq!(
+        figures.top_by_units,
+        vec![
+            ProductUnits {
+                product: product(shirt),
+                title: "Shirt".to_string(),
+                units: 4,
+            },
+            ProductUnits {
+                product: product(mug),
+                title: "Mug v2".to_string(),
+                units: 3,
+            },
+        ]
+    );
+    assert_eq!(
+        figures.top_by_revenue,
+        vec![
+            CurrencyTop {
+                currency: Currency::EUR,
+                products: vec![
+                    ProductRevenue {
+                        product: product(lamp),
+                        title: "Lamp".to_string(),
+                        units: 1,
+                        revenue: eur(9000),
+                    },
+                    ProductRevenue {
+                        product: product(mug),
+                        title: "Mug v2".to_string(),
+                        units: 3,
+                        revenue: eur(1500),
+                    },
+                ],
+            },
+            CurrencyTop {
+                currency: Currency::USD,
+                products: vec![ProductRevenue {
+                    product: product(shirt),
+                    title: "Shirt".to_string(),
+                    units: 3,
+                    revenue: usd(2100),
+                }],
+            },
+        ]
+    );
+    assert_eq!(figures.refunded, vec![(oid(3), 1), (oid(5), 2)]);
+    assert_eq!(
+        figures,
+        SalesFigures::of(&orders, &query(2, None, None)),
+        "storage agrees with the reference"
+    );
+
+    // A channel's or a market's orders only.
+    for q in [
+        query(5, Some(2), None),
+        query(5, None, Some(2)),
+        query(1, Some(1), Some(1)),
+        query(20, None, None),
+    ] {
+        assert_eq!(
+            repo.sales(&q).await.unwrap(),
+            SalesFigures::of(&orders, &q),
+            "{q:?}"
+        );
+    }
+    let only_two = repo.sales(&query(5, Some(2), None)).await.unwrap();
+    assert_eq!(only_two.buckets[0].sales[0].total, eur(500));
+    assert_eq!(only_two.top_by_units.len(), 1);
+
+    // One bucket for the whole period; a query that breaks the rules.
+    let whole = SalesQuery {
+        starts: vec![at(t0)],
+        ..query(5, None, None)
+    };
+    let figures = repo.sales(&whole).await.unwrap();
+    assert_eq!(figures, SalesFigures::of(&orders, &whole));
+    assert_eq!(figures.buckets[0].cancelled_count, 1);
+    assert_eq!(figures.refunded, vec![(oid(3), 0), (oid(5), 0)]);
+    let backwards = SalesQuery {
+        starts: vec![at(t0 + DAY), at(t0)],
+        ..query(5, None, None)
+    };
+    assert!(matches!(
+        repo.sales(&backwards).await,
+        Err(RepoError::Backend(_))
+    ));
 }

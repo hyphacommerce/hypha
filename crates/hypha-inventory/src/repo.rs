@@ -1,6 +1,8 @@
-use hypha_core::{InventoryItemId, LocationId, MarketId, RepoError, VariantId};
+use hypha_core::{
+    InventoryItemId, Keyset, LocationId, MarketId, Page, PageRequest, RepoError, VariantId,
+};
 
-use crate::{InventoryItem, Location};
+use crate::{InventoryFilter, InventoryItem, InventoryItemSummary, Location};
 
 pub mod keys {
     pub const LOCATION_ID: &str = "location_id";
@@ -26,6 +28,16 @@ pub trait InventoryItemRepo {
     async fn get_by_variant(&self, variant: VariantId) -> Result<Option<InventoryItem>, RepoError>;
     /// The items of `variants` that have one, in any order.
     async fn for_variants(&self, variants: &[VariantId]) -> Result<Vec<InventoryItem>, RepoError>;
+    /// A page of item summaries, lowest available first: the items `filter` matches
+    /// (`InventoryFilter::matches`) after `page.after` by `InventoryFilter::key` and then
+    /// ID, both ascending. Each equals `InventoryItem::summary` of the stored item; an
+    /// adapter may compute them without loading reservations. A position whose key
+    /// doesn't fit (`InventoryFilter::fits`) is a `Backend` error.
+    async fn list(
+        &self,
+        filter: &InventoryFilter,
+        page: PageRequest<Keyset<InventoryItemId>>,
+    ) -> Result<Page<InventoryItemSummary>, RepoError>;
     async fn insert(&self, item: &mut InventoryItem) -> Result<(), RepoError>;
     async fn update(&self, item: &mut InventoryItem) -> Result<(), RepoError>;
     /// Updates several items **all or nothing**: if any of them is stale (or gone), nothing

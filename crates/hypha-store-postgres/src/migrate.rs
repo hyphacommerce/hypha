@@ -360,6 +360,16 @@ pub const CORE: MigrationSet = MigrationSet {
             sql: include_str!("../migrations/0067_agents.sql"),
         },
         Migration {
+            version: 68,
+            name: "inventory_stock",
+            sql: include_str!("../migrations/0068_inventory_stock.sql"),
+        },
+        Migration {
+            version: 69,
+            name: "orders_by_placed_at",
+            sql: include_str!("../migrations/0069_orders_by_placed_at.sql"),
+        },
+        Migration {
             version: 70,
             name: "preview_tokens",
             sql: include_str!("../migrations/0070_preview_tokens.sql"),

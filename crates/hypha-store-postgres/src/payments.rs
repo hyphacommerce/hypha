@@ -285,6 +285,28 @@ impl<C: PgConnection> PaymentRepo for PgStore<C> {
             .collect()
     }
 
+    async fn list_for_orders(&self, orders: &[OrderId]) -> Result<Vec<Payment>, RepoError> {
+        if orders.is_empty() {
+            return Ok(Vec::new());
+        }
+        let orders: Vec<uuid::Uuid> = orders.iter().map(|o| o.as_uuid()).collect();
+        let mut conn = self.conn().await;
+        conn.db()
+            .query_typed(
+                &format!(
+                    "SELECT {} FROM payments WHERE order_id = ANY($1)
+                     ORDER BY order_id, id DESC",
+                    payment_columns()
+                ),
+                &[(&orders, Type::UUID_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(payment_from_row)
+            .collect()
+    }
+
     async fn list_for_cart(&self, cart: CartId) -> Result<Vec<Payment>, RepoError> {
         let mut conn = self.conn().await;
         conn.db()
