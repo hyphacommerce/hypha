@@ -59,12 +59,14 @@ seeing precisely what will change before it does.
   review of writes.
 - **Saleor:** an official read-only remote server. **Brink:** role-scoped actions in its
   merchant portal. **Stripe:** its own MCP for payment data.
-- **The protocol** (2026-07-28 revision; checked against secondary sources only: verify
-  against the spec before M5): a stateless core (no initialize handshake; version and
-  client info per request), OAuth with **Client ID Metadata Documents** preferred over
-  dynamic registration, Protected Resource Metadata (RFC 9728) and resource indicators
-  (RFC 8707) required, Tasks and MCP Apps (`io.modelcontextprotocol/ui`) as extensions,
-  elicitation in flux.
+- **The protocol** (2026-07-28 revision, the current one; checked against the
+  specification on 2026-10-22, see "As built: hypha-mcp"): a stateless core (no
+  initialize handshake and no sessions; version and client capabilities in every
+  request's `_meta`, client info recommended, a mandatory `server/discover`), OAuth with
+  **Client ID Metadata Documents** preferred over dynamic registration (now deprecated),
+  Protected Resource Metadata (RFC 9728) and resource indicators (RFC 8707) required,
+  Tasks and MCP Apps (`io.modelcontextprotocol/ui`) as extensions, elicitation through
+  multi round-trip results (`input_required`) instead of server-sent requests.
 
 What we take: commercetools' per-agent tool choice and its two modes (one agent per
 person, one per job); Shopify's "stage changes for confirmation", made generic; Medusa's
@@ -286,7 +288,9 @@ hour") are a natural next step on the grant; §12.
 ## 6. The MCP server (MC7)
 
 - **Endpoint:** `POST /mcp` (Streamable HTTP; JSON responses, no SSE needed for v1),
-  stateless: every request carries its credential and protocol version.
+  stateless: every request carries its credential and protocol version. Clients still on
+  the handshake revisions (2025-11-25 and before) are served too: their `initialize` is
+  answered and forgotten, with no session (see "As built: hypha-mcp").
 - **`hypha-mcp`** is the protocol, and only that: JSON-RPC envelopes, the MCP messages
   (`tools/list`, `tools/call`, the versions it speaks), the fixed tools of §7 (ranking
   for `find_operations`, `describe_operation`'s shape, `call`'s modes) and the mapping
@@ -491,3 +495,66 @@ Sources for §1: [Medusa MCP](https://medusajs.com/blog/announcing-medusa-mcp),
 [commercetools managed MCP servers](https://docs.commercetools.com/api/managed-mcp-servers-overview),
 [Saleor MCP](https://glama.ai/mcp/servers/@saleor/saleor-mcp),
 [MCP 2026-07-28 (WorkOS)](https://workos.com/blog/mcp-2026-spec-agent-authentication).
+
+## As built: hypha-mcp
+
+`crates/hypha-mcp` (M5's protocol half), serde and `hypha-core` only, builds for wasm.
+
+**What the specification says** (read 2026-10-22). 2026-07-28 is the current revision
+([versioning](https://modelcontextprotocol.io/specification/versioning)); 2025-11-25 the
+previous, last of the handshake era.
+
+- *Stateless* ([changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog),
+  [basic](https://modelcontextprotocol.io/specification/2026-07-28/basic/index)): no
+  `initialize`, no sessions, no `ping`. Every request's `params._meta` carries
+  `io.modelcontextprotocol/protocolVersion` and `…/clientCapabilities` (required: missing
+  is `-32602`, HTTP 400) and should carry `…/clientInfo`; results carry `resultType:
+  "complete"` and should carry `_meta["io.modelcontextprotocol/serverInfo"]`. Servers
+  **must** answer `server/discover`
+  ([discover](https://modelcontextprotocol.io/specification/2026-07-28/server/discover)).
+- *Versions* ([versioning](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)):
+  an unsupported one is `-32022` with `data: {supported, requested}`. A dual-era server
+  serves a request with modern `_meta` statelessly and an `initialize` under the legacy
+  revision. Legacy negotiation ([2025-11-25 lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)):
+  answer the client's version when supported, else our latest.
+- *Streamable HTTP* ([2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http),
+  [2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)):
+  POST only (GET and DELETE `405`; ignore `Mcp-Session-Id` and `Last-Event-ID`), one
+  message per POST (no batches), a notification answered `202` with no body, a request
+  with `application/json` or SSE. Modern requests mirror the body in headers:
+  `MCP-Protocol-Version` (must equal `_meta`'s), `Mcp-Method` on every request, `Mcp-Name`
+  on `tools/call` (`=?base64?…?=` for unsafe values); missing or different is `400` with
+  `-32020 HeaderMismatch`. An unknown method is `404` with `-32601`. Without the version
+  header a server may assume 2025-03-26. `Origin` must be checked (`403`).
+- *Tools* ([tools](https://modelcontextprotocol.io/specification/2026-07-28/server/tools)):
+  names should be 1–128 of `A-Z a-z 0-9 _ - .` (`admin.tools.list` is the spec's own
+  example), so **tool names are operation IDs unchanged**, no mapping. The list may vary
+  by authorization, in a deterministic order; `tools/list` results must carry `ttlMs` and
+  `cacheScope` ([caching](https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/caching):
+  `private` when it varies per caller). Pagination is optional; an invalid cursor is
+  `-32602` ([pagination](https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/pagination)).
+  An unknown tool or a malformed call is a protocol error (`-32602`); input validation
+  and business errors are results with `isError: true`. `structuredContent` should be
+  mirrored as text; 2026-07-28 allows any JSON value there, 2025-11-25 only an object.
+
+**What was built.** `Server::handle(&impl Operations, McpRequest {body, headers}) ->
+McpResponse {status, body}`; transport concerns (auth, `Origin`, `405`) stay in
+`hypha-http`. Modern: `server/discover`, `tools/list`, `tools/call`. Legacy (2025-11-25,
+2025-06-18, 2025-03-26, by the header or its absence): `initialize`, `ping`, `tools/list`,
+`tools/call`, no session minted. The `Operations` port grew from §6's three methods to
+six: `visible`, `describe`, `call` (with `CallMode` `preview`/`apply`/`propose`, default
+`apply`, answering `OperationResult::Response {status, body}` or `Proposed {proposal,
+url}`), `whoami`, `proposal`, `proposals`; the last three answer HTTP-shaped like `call`,
+so `hypha-http` implements them over its own routes. Tool results keep Hypha's body as
+is (the error body too, `isError: true`), the status in `_meta["hypha/status"]`, and
+`structuredContent` only for objects. `tools/list` is never paged (6 + at most the
+curated tools), so any cursor is invalid; its `ttlMs` is `ServerConfig::list_ttl_ms`
+(60 s), `private`. A curated tool appears, and can be called, only while `visible`
+reports its operation; otherwise it's `Unknown tool`.
+
+**Open for M5's host half.** Clients that forward tool names to a model API may refuse
+dots: the Anthropic and OpenAI APIs take `^[a-zA-Z0-9_-]{1,…}$` names, and some MCP
+clients pass names through rather than mapping them. If a client we target breaks on
+`admin.orders.list`, a reversible mapping (`.` → `__`, since IDs never hold `__`) can be
+a `ServerConfig` switch; the fixed tools are unaffected. Check Claude, ChatGPT and Cursor
+in M8's e2e before the names are a contract.
