@@ -126,3 +126,40 @@ export async function rejectProposal(id: string, note: string): Promise<Result> 
   revalidatePath("/agents/proposals");
   return {};
 }
+
+/** What answering a client's connection gave: where the browser goes now. */
+export type ConnectResult = SaveResult & { redirectTo?: string };
+
+/**
+ * Connects an MCP client as an agent acting for the signed-in staff member, with
+ * `grant`: the API answers the client's redirect URI with its code, for the browser.
+ */
+export async function approveConnection(
+  id: string,
+  name: string,
+  grant: Grant,
+): Promise<ConnectResult> {
+  const client = await sessionClient();
+  const { data, error } = await client.POST("/admin/agent-connections/{id}/approve", {
+    params: { path: { id } },
+    body: { name, grant },
+  });
+  if (error?.code === "oauth_request_expired") {
+    return {
+      error: "This request expired: requests wait ten minutes. Connect again from the client.",
+    };
+  }
+  if (error) return placed(error);
+  revalidatePath("/agents");
+  return { redirectTo: data.redirect_to };
+}
+
+/** Declines a client's connection: the client is told `access_denied`. */
+export async function denyConnection(id: string): Promise<ConnectResult> {
+  const client = await sessionClient();
+  const { data, error } = await client.POST("/admin/agent-connections/{id}/deny", {
+    params: { path: { id } },
+  });
+  if (error) return { error: describe(error) };
+  return { redirectTo: data.redirect_to };
+}
