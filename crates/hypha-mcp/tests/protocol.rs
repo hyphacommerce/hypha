@@ -92,7 +92,7 @@ impl Operations for FakeOps {
             }),
             output: Some(json!({"type": "object"})),
             errors: vec![ErrorDoc {
-                code: "insufficient_stock".into(),
+                code: Some("insufficient_stock".into()),
                 status: 409,
                 description: None,
             }],
@@ -724,4 +724,25 @@ fn a_batch_is_refused() {
     );
     assert_eq!(response.status, 400);
     assert_eq!(body(&response)["error"]["code"], -32600);
+}
+
+#[test]
+fn a_writes_key_and_preview_token_reach_the_operation() {
+    let ops = FakeOps::new();
+    let result = call_tool(
+        &ops,
+        "call",
+        json!({
+            "operation": "admin.inventory.adjust_level",
+            "params": {"id": "inv_1"},
+            "body": {"delta": 2},
+            "mode": "apply",
+            "idempotency_key": "k-1",
+            "preview_token": "hypha_pv_x",
+        }),
+    );
+    assert!(result.get("isError").is_some(), "{result}");
+    let call = ops.calls().pop().unwrap();
+    assert_eq!(call.idempotency_key.as_deref(), Some("k-1"));
+    assert_eq!(call.preview_token.as_deref(), Some("hypha_pv_x"));
 }

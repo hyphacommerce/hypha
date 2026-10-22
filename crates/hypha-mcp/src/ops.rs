@@ -54,10 +54,11 @@ pub struct BodySchema {
     pub required: bool,
 }
 
-/// An error code an operation can answer, with its HTTP status.
+/// An error an operation can answer: its HTTP status, and its code where the
+/// documentation names one (otherwise the description says which).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ErrorDoc {
-    pub code: String,
+    pub code: Option<String>,
     pub status: u16,
     pub description: Option<String>,
 }
@@ -87,6 +88,11 @@ pub struct OperationCall {
     pub query: Map<String, Value>,
     pub body: Option<Value>,
     pub mode: CallMode,
+    /// The agent's key for this write: the same key again replays the first answer
+    /// instead of writing twice.
+    pub idempotency_key: Option<String>,
+    /// A preview's token: apply exactly what that preview showed, or nothing.
+    pub preview_token: Option<String>,
 }
 
 /// An HTTP-shaped answer: the status and the JSON body the route sent, untouched.

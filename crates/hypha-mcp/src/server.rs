@@ -441,6 +441,8 @@ async fn run<O: Operations>(ops: &O, operation: OperationId, inputs: DirectArgs)
         query: inputs.query,
         body: inputs.body,
         mode: inputs.mode.unwrap_or(CallMode::Apply),
+        idempotency_key: inputs.idempotency_key,
+        preview_token: inputs.preview_token,
     };
     Ok(match ops.call(call).await? {
         OperationResult::Response(response) => tools::response_result(response),

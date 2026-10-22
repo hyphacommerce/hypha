@@ -74,6 +74,26 @@ fn mode_schema() -> Value {
     })
 }
 
+fn idempotency_key_schema() -> Value {
+    json!({
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 255,
+        "description": "Your key for this write (a UUID you make). Send the same key when you \
+    retry it: the first answer is replayed and nothing is written twice. Without one, a retry \
+    of a call that timed out may write again.",
+    })
+}
+
+fn preview_token_schema() -> Value {
+    json!({
+        "type": "string",
+        "description": "With mode \"apply\": the token a preview of this same call answered \
+    (preview.token). The write then commits only if it does exactly what the preview showed \
+    (else preview_stale, with the new preview).",
+    })
+}
+
 fn read_only(title: &str) -> Value {
     json!({"title": title, "readOnlyHint": true, "openWorldHint": false})
 }
@@ -153,6 +173,8 @@ pub fn fixed_definitions() -> Vec<Value> {
                     "description": "The request body, for operations that take one.",
                 },
                 "mode": mode_schema(),
+                "idempotency_key": idempotency_key_schema(),
+                "preview_token": preview_token_schema(),
             }), &["operation"]),
             "annotations": {
                 "title": "Call an operation",
@@ -226,6 +248,8 @@ pub fn direct_definition(schema: &OperationSchema) -> Value {
     }
     if summary.access == Access::Write {
         properties.insert("mode".into(), mode_schema());
+        properties.insert("idempotency_key".into(), idempotency_key_schema());
+        properties.insert("preview_token".into(), preview_token_schema());
     }
 
     let mut description = summary.summary.clone();
@@ -302,6 +326,10 @@ pub struct CallArgs {
     pub body: Option<Value>,
     #[serde(default)]
     pub mode: Option<CallMode>,
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
+    #[serde(default)]
+    pub preview_token: Option<String>,
 }
 
 impl CallArgs {
@@ -311,6 +339,8 @@ impl CallArgs {
             query: self.query,
             body: self.body,
             mode: self.mode,
+            idempotency_key: self.idempotency_key,
+            preview_token: self.preview_token,
         };
         (self.operation, inputs)
     }
@@ -328,6 +358,10 @@ pub struct DirectArgs {
     pub body: Option<Value>,
     #[serde(default)]
     pub mode: Option<CallMode>,
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
+    #[serde(default)]
+    pub preview_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
