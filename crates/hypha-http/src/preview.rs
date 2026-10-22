@@ -537,9 +537,15 @@ impl Apply {
             Err(e) => Err(ApiError::internal(format!("an applied response: {e}"))),
         };
         match stale {
-            Ok((preview, token)) => match finish_all(stores, false, token).await {
+            Ok((preview, ids, digest, token)) => match finish_all(stores, false, token).await {
                 Ok(()) => match serde_json::to_value(&preview) {
-                    Ok(preview) => ApiError::preview_stale(preview).into_response(),
+                    Ok(preview) => {
+                        // What a stale proposal keeps to be approved again.
+                        let mut answer = ApiError::preview_stale(preview).into_response();
+                        answer.extensions_mut().insert(PreviewIds(ids));
+                        answer.extensions_mut().insert(PreviewDigest(digest));
+                        answer
+                    }
                     Err(e) => ApiError::internal(e).into_response(),
                 },
                 Err(e) => ApiError::internal(format!("ending an apply: {e}")).into_response(),
@@ -552,15 +558,15 @@ impl Apply {
     }
 
     /// What a stale apply did instead, as a preview, with a token for it: the write as it
-    /// would be now. Its effects outside the database weren't recorded (they ran), so its
-    /// `emails` and `calls` are empty.
+    /// would be now, with the IDs it was handed and its events' digest. Its effects outside
+    /// the database weren't recorded (they ran), so its `emails` and `calls` are empty.
     fn stale(
         &self,
         status: StatusCode,
         bytes: &[u8],
         events: &[StoredEvent],
         digest: String,
-    ) -> Result<(PreviewBody, Option<PreviewToken>), ApiError> {
+    ) -> Result<(PreviewBody, Vec<Uuid>, String, Option<PreviewToken>), ApiError> {
         let viewer = lock(&self.viewer).take();
         let mut preview = PreviewBody::build(
             status,
@@ -575,14 +581,20 @@ impl Apply {
         let ids = std::mem::take(&mut *lock(&self.handed));
         let token = match (host, &viewer) {
             (Some(host), Some(viewer)) => {
-                let issued = issue(&host, viewer.ctx.actor(), self.request, ids, digest)?;
+                let issued = issue(
+                    &host,
+                    viewer.ctx.actor(),
+                    self.request,
+                    ids.clone(),
+                    digest.clone(),
+                )?;
                 preview.token = Some(issued.token);
                 preview.expires_at = Some(issued.expires_at);
                 Some(issued.record)
             }
             _ => None,
         };
-        Ok((preview, token))
+        Ok((preview, ids, digest, token))
     }
 }
 

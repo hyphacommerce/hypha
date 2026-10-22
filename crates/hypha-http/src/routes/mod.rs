@@ -357,6 +357,7 @@ macro_rules! route_table {
             [admin, PATCH, "/admin/agents/{id}", agents::update],
             [admin, POST, "/admin/agents/{id}/revoke", agents::revoke],
             [admin, GET, "/admin/agents/{id}/calls", agents::calls],
+            [admin, GET, "/admin/agent-settings", agents::settings],
             [admin, GET, "/admin/agent-proposals", agents::list_proposals],
             [admin, GET, "/admin/agent-proposals/{id}", agents::fetch_proposal],
             [admin, POST, "/admin/agent-proposals/{id}/approve", agents::approve],

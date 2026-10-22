@@ -338,9 +338,9 @@ impl ApiError {
         .with_details(Some(json!({ "preview": preview })))
     }
 
-    /// An approved proposal's write that would no longer do what was previewed: recorded
-    /// `failed`; `details.preview` is what it would do now, `details.proposal` the
-    /// proposal.
+    /// An approved proposal's write that would no longer do what was previewed: nothing
+    /// written, and the proposal (`details.proposal`) now holds what it would do today
+    /// (`details.preview`), still pending, for a person to review and approve again.
     pub fn proposal_stale(preview: Value, proposal: Value) -> Self {
         Self::preview_stale(Value::Null).with_details(Some(json!({
             "preview": preview,
@@ -1579,8 +1579,33 @@ impl From<hypha_agents::CommandError> for ApiError {
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,
         };
-        Self::domain(status, e)
+        let details = grant_problem(&e);
+        Self::domain(status, e).with_details(details)
     }
+}
+
+/// Where in a grant an agent's error is, for a form to place it: `{field, scope?,
+/// operation?}`, `field` being `read`, `write`, `customer_data` or `operations`.
+fn grant_problem(e: &hypha_agents::CommandError) -> Option<Value> {
+    use hypha_agents::{AgentError as A, CommandError as E, GrantField};
+    let (field, scope, operation) = match e {
+        E::Grant(g) | E::Agent(A::Grant(g)) => {
+            (g.field(), g.scope(), g.operation().map(str::to_string))
+        }
+        E::CannotGrant(s) => (GrantField::of(*s), Some(s.as_str().to_string()), None),
+        E::CannotGrantApply(s) => (GrantField::Write, Some(s.as_str().to_string()), None),
+        E::Operation(op) => (GrantField::Operations, None, Some(op.0.clone())),
+        _ => return None,
+    };
+    let mut details = serde_json::Map::new();
+    details.insert("field".to_string(), json!(field.as_str()));
+    if let Some(scope) = scope {
+        details.insert("scope".to_string(), json!(scope));
+    }
+    if let Some(operation) = operation {
+        details.insert("operation".to_string(), json!(operation));
+    }
+    Some(Value::Object(details))
 }
 
 impl From<hypha_shipping::CommandError> for ApiError {

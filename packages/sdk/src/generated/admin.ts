@@ -110,9 +110,12 @@ export interface paths {
          * Approves a pending proposal: its write is sent again as its agent, exactly as
          *     previewed (the preview's IDs; committed only if it records the same events). Takes a
          *     staff session holding every scope the proposal names. Answers the proposal, `applied`
-         *     or `failed` with the write's answer in `response`; a write that would no longer do
-         *     what was previewed is recorded `failed` and answered `409 preview_stale`, with what it
-         *     would do now in `details.preview` and the proposal in `details.proposal`. A proposal
+         *     or `failed` with the write's answer in `response`. A write that would no longer do
+         *     what was previewed (the store changed meanwhile) writes nothing and answers `409
+         *     preview_stale`: the proposal stays `pending`, now holding what the write would do today
+         *     (its preview, IDs and digest replaced, `refreshes` counted, `proposal.updated`
+         *     recorded), in `details.proposal`, with that preview in `details.preview`; review it and
+         *     approve again. A proposal
          *     whose preview stopped at an effect it couldn't run (`complete: false`) is sent as a
          *     plain write.
          */
@@ -137,6 +140,26 @@ export interface paths {
          *     holding every scope the proposal names. The body is optional.
          */
         post: operations["admin.agents.reject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/agent-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The deployment's settings for agents, as the operator set them (`[agents]` in
+         *     `hypha.config.toml`); not editable through the API.
+         */
+        get: operations["admin.agents.settings"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3535,6 +3558,11 @@ export interface components {
              * @description The HTTP status it answered.
              */
             status: number;
+            /**
+             * @description The operation's summary (`List orders`); `null` when this build has no such
+             *     operation any more.
+             */
+            summary?: string | null;
         };
         /** @description The client a staff member connected (its metadata document's URL and name). */
         AgentClientResponse: {
@@ -3632,6 +3660,29 @@ export interface components {
              *     `propose` or `off`. It wins over the grant.
              */
             writes_cap: string;
+        };
+        /** @description What the operator set for agents in `hypha.config.toml` (`[agents]`): read-only here. */
+        AgentSettingsResponse: {
+            /**
+             * @description `false`: no agent acts in this deployment (`/mcp` and every agent credential are
+             *     refused).
+             */
+            enabled: boolean;
+            /**
+             * Format: int64
+             * @description How long a preview's token can apply it.
+             */
+            preview_token_lifetime_seconds: number;
+            /**
+             * Format: int64
+             * @description How long a proposal waits for a decision.
+             */
+            proposal_lifetime_seconds: number;
+            /**
+             * @description The most any agent may write, whatever its grant: `apply` (grants decide),
+             *     `propose` (every write becomes a proposal) or `off` (agents only read).
+             */
+            writes: string;
         };
         /**
          * @description A ApiKeyId: `key_` and 32 hex digits.
@@ -6370,6 +6421,11 @@ export interface components {
              *     without a token): its response, events, emails and calls, or what blocked it.
              */
             preview: Record<string, never>;
+            /**
+             * Format: int32
+             * @description How many times approving found the store changed and previewed it again.
+             */
+            refreshes: number;
             request: components["schemas"]["ProposalRequestResponse"];
             response?: components["schemas"]["ProposalOutcomeResponse"] | null;
             /** @description Every scope approving it takes. */
@@ -6379,6 +6435,11 @@ export interface components {
              *     failed: stale, a conflict, an app's refusal; `response` says why).
              */
             status: string;
+            /**
+             * @description The operation's summary (`Update a product`); `null` when this build has no such
+             *     operation any more.
+             */
+            summary?: string | null;
             updated_at: string;
         };
         /** @description How an option's price is found: one of a provider's services, or a built-in rate. */
@@ -8034,6 +8095,53 @@ export interface operations {
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.agents.settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSettingsResponse"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

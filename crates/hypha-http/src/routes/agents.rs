@@ -32,6 +32,7 @@ use super::{
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId, StaffCaller},
+    operations::Operations,
     patch,
     state::{SharedState, Storage},
 };
@@ -344,6 +345,9 @@ pub struct AgentCallResponse {
     id: AgentCallId,
     /// The operation's ID (`admin.orders.list`).
     operation: String,
+    /// The operation's summary (`List orders`); `null` when this build has no such
+    /// operation any more.
+    summary: Option<String>,
     /// `read`, `preview`, `propose` or `apply`.
     mode: &'static str,
     /// The HTTP status it answered.
@@ -355,10 +359,11 @@ pub struct AgentCallResponse {
 }
 
 impl AgentCallResponse {
-    fn new(call: &AgentCall) -> Result<Self, ApiError> {
+    fn new(call: &AgentCall, operations: &Operations) -> Result<Self, ApiError> {
         Ok(Self {
             id: call.id(),
             operation: call.operation().as_str().to_string(),
+            summary: summary_of(operations, call.operation()),
             mode: call.mode().as_str(),
             status: call.status(),
             error_code: call.error_code().map(str::to_string),
@@ -392,7 +397,7 @@ pub async fn calls<S: Storage>(
         page,
         &scope,
         |c| c.id(),
-        |c| AgentCallResponse::new(&c),
+        |c| AgentCallResponse::new(&c, state.operations()),
     )?))
 }
 
@@ -422,6 +427,9 @@ pub struct ProposalResponse {
     agent: AgentId,
     /// The operation it would call (`admin.products.update`).
     operation: String,
+    /// The operation's summary (`Update a product`); `null` when this build has no such
+    /// operation any more.
+    summary: Option<String>,
     request: ProposalRequestResponse,
     idempotency_key: Option<String>,
     /// The write's preview when it was proposed (`#/components/schemas/PreviewBody`,
@@ -438,13 +446,20 @@ pub struct ProposalResponse {
     /// Why it was rejected, for the agent.
     note: Option<String>,
     response: Option<ProposalOutcomeResponse>,
+    /// How many times approving found the store changed and previewed it again.
+    refreshes: u32,
     expires_at: String,
     created_at: String,
     updated_at: String,
 }
 
+/// The summary of `operation`, if this build has it.
+fn summary_of(operations: &Operations, operation: &hypha_agents::OperationId) -> Option<String> {
+    operations.get(operation).and_then(|op| op.summary.clone())
+}
+
 impl ProposalResponse {
-    pub(crate) fn new(proposal: &Proposal) -> Result<Self, ApiError> {
+    pub(crate) fn new(proposal: &Proposal, operations: &Operations) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(proposal.stamps())?;
         let mut preview = proposal.preview().clone();
         // The IDs the approval reuses: the host's, not the reader's.
@@ -455,6 +470,7 @@ impl ProposalResponse {
             id: proposal.id(),
             agent: proposal.agent(),
             operation: proposal.operation().as_str().to_string(),
+            summary: summary_of(operations, proposal.operation()),
             request: ProposalRequestResponse {
                 params: proposal.request().params.clone(),
                 query: proposal.request().query.clone(),
@@ -471,6 +487,7 @@ impl ProposalResponse {
                 status: r.status(),
                 body: r.body().clone(),
             }),
+            refreshes: proposal.refreshes(),
             expires_at: rfc3339(proposal.expires_at())?,
             created_at,
             updated_at,
@@ -540,7 +557,7 @@ pub async fn list_proposals<S: Storage>(
         page,
         &scope,
         |p| p.id(),
-        |p| ProposalResponse::new(&p),
+        |p| ProposalResponse::new(&p, state.operations()),
     )?))
 }
 
@@ -559,15 +576,18 @@ pub async fn fetch_proposal<S: Storage>(
 ) -> Result<Json<ProposalResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let proposal = hypha_agents::get_proposal(&ctx, &ports, id).await?;
-    Ok(Json(ProposalResponse::new(&proposal)?))
+    Ok(Json(ProposalResponse::new(&proposal, state.operations())?))
 }
 
 /// Approves a pending proposal: its write is sent again as its agent, exactly as
 /// previewed (the preview's IDs; committed only if it records the same events). Takes a
 /// staff session holding every scope the proposal names. Answers the proposal, `applied`
-/// or `failed` with the write's answer in `response`; a write that would no longer do
-/// what was previewed is recorded `failed` and answered `409 preview_stale`, with what it
-/// would do now in `details.preview` and the proposal in `details.proposal`. A proposal
+/// or `failed` with the write's answer in `response`. A write that would no longer do
+/// what was previewed (the store changed meanwhile) writes nothing and answers `409
+/// preview_stale`: the proposal stays `pending`, now holding what the write would do today
+/// (its preview, IDs and digest replaced, `refreshes` counted, `proposal.updated`
+/// recorded), in `details.proposal`, with that preview in `details.preview`; review it and
+/// approve again. A proposal
 /// whose preview stopped at an effect it couldn't run (`complete: false`) is sent as a
 /// plain write.
 #[utoipa::path(
@@ -597,17 +617,29 @@ pub async fn approve<S: Storage>(
         status: answer.status,
         body: answer.body.clone(),
     };
+    // The store moved since the preview: the proposal takes what the write would do now
+    // and waits for a person to look again, rather than failing.
+    if answer.code() == Some("preview_stale")
+        && let Some((ids, digest)) = &answer.previewed
+    {
+        let mut fresh = answer.body["details"]["preview"].clone();
+        let kept = crate::agents::kept_preview(Some(&fresh), ids);
+        // Its token is the agent's: a person approves the proposal, never the token.
+        if let Value::Object(fields) = &mut fresh {
+            fields.remove("token");
+            fields.remove("expires_at");
+        }
+        let refreshed =
+            hypha_agents::record_refreshed(&staff.ctx, &ports, id, kept, digest.clone()).await?;
+        let response = ProposalResponse::new(&refreshed, state.operations())?;
+        let proposal = serde_json::to_value(&response).map_err(ApiError::internal)?;
+        return Ok(ApiError::proposal_stale(fresh, proposal).into_response());
+    }
     let decided = match (200..300).contains(&answer.status) {
         true => hypha_agents::record_applied(&staff.ctx, &ports, &state.clock, id, outcome).await?,
         false => hypha_agents::record_failed(&staff.ctx, &ports, &state.clock, id, outcome).await?,
     };
-    let response = ProposalResponse::new(&decided)?;
-    if answer.code() == Some("preview_stale") {
-        let preview = answer.body["details"]["preview"].clone();
-        let proposal = serde_json::to_value(&response).map_err(ApiError::internal)?;
-        return Ok(ApiError::proposal_stale(preview, proposal).into_response());
-    }
-    Ok(Json(response).into_response())
+    Ok(Json(ProposalResponse::new(&decided, state.operations())?).into_response())
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -637,7 +669,7 @@ pub async fn reject<S: Storage>(
     let note = body.parse_optional()?.and_then(|r| r.note);
     let proposal =
         hypha_agents::reject_proposal(&staff.ctx, &ports, &state.clock, id, note).await?;
-    Ok(Json(ProposalResponse::new(&proposal)?))
+    Ok(Json(ProposalResponse::new(&proposal, state.operations())?))
 }
 
 // ---------- connecting an MCP client ----------
@@ -841,5 +873,46 @@ pub async fn deny_connection<S: Storage>(
     Ok(Json(ConnectionAnswer {
         redirect_to: with_iss(&location, &issuer),
         agent: None,
+    }))
+}
+
+// ---------- the deployment's settings ----------
+
+/// What the operator set for agents in `hypha.config.toml` (`[agents]`): read-only here.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct AgentSettingsResponse {
+    /// `false`: no agent acts in this deployment (`/mcp` and every agent credential are
+    /// refused).
+    enabled: bool,
+    /// The most any agent may write, whatever its grant: `apply` (grants decide),
+    /// `propose` (every write becomes a proposal) or `off` (agents only read).
+    writes: &'static str,
+    /// How long a proposal waits for a decision.
+    proposal_lifetime_seconds: u64,
+    /// How long a preview's token can apply it.
+    preview_token_lifetime_seconds: u64,
+}
+
+/// The deployment's settings for agents, as the operator set them (`[agents]` in
+/// `hypha.config.toml`); not editable through the API.
+#[utoipa::path(
+    get,
+    path = "/admin/agent-settings",
+    responses((status = 200, description = "OK", body = AgentSettingsResponse)),
+    extensions(("x-hypha-scopes" = json!(["agents:read"]))),
+)]
+pub async fn settings<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+) -> Result<Json<AgentSettingsResponse>, ApiError> {
+    let (_, ctx) = caller.authenticate(&state).await?;
+    ctx.require(Scope::AgentsRead)
+        .map_err(hypha_agents::CommandError::from)?;
+    let agents = &state.config.agents;
+    Ok(Json(AgentSettingsResponse {
+        enabled: agents.enabled,
+        writes: agents.writes.as_str(),
+        proposal_lifetime_seconds: agents.settings.proposal_lifetime.as_secs(),
+        preview_token_lifetime_seconds: agents.preview_token_lifetime.as_secs(),
     }))
 }

@@ -67,6 +67,9 @@ async fn calls_of(app: &TestApp, agent: &str) -> Vec<(String, String, u64)> {
         .unwrap()
         .iter()
         .map(|c| {
+            // An operation of this build has a summary; one that isn't, none.
+            let known = c["operation"] != "admin.nothing.here";
+            assert_eq!(c["summary"].is_string(), known, "{c}");
             (
                 c["operation"].as_str().unwrap().to_string(),
                 c["mode"].as_str().unwrap().to_string(),
@@ -161,6 +164,10 @@ async fn nobody_grants_an_agent_what_they_may_not() {
         (status, code(&json)),
         (StatusCode::FORBIDDEN, "not_allowed_to_grant_apply")
     );
+    assert_eq!(
+        json["details"],
+        json!({"field": "write", "scope": "products:write"})
+    );
     let (status, json) = send(
         &app,
         "POST",
@@ -183,6 +190,32 @@ async fn nobody_grants_an_agent_what_they_may_not() {
             "agent_scope_not_grantable"
         )
     );
+    assert_eq!(
+        json["details"],
+        json!({"field": "write", "scope": "agents:write"})
+    );
+    for (g, details) in [
+        (
+            json!({"read": ["orders:reed"]}),
+            json!({"field": "read", "scope": "orders:reed"}),
+        ),
+        (
+            json!({"write": {"orders:write": "always"}}),
+            json!({"field": "write", "scope": "orders:write"}),
+        ),
+        (
+            json!({"customer_data": ["orders:read"]}),
+            json!({"field": "customer_data", "scope": "orders:read"}),
+        ),
+        (
+            json!({"operations": ["Not an ID"]}),
+            json!({"field": "operations", "operation": "Not an ID"}),
+        ),
+    ] {
+        let (status, json) = send(&app, "POST", "/admin/agents", Some(&grant(g))).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{json}");
+        assert_eq!(json["details"], details, "{json}");
+    }
     let reader = key(
         &app,
         json!({"kind": "secret", "name": "R", "scopes": ["agents:read"]}),
@@ -562,6 +595,7 @@ async fn a_proposal_is_approved_and_applied_as_previewed() {
     let proposal = &proposed.body["proposal"];
     assert_eq!(proposal["status"], "pending");
     assert_eq!(proposal["operation"], "admin.products.create");
+    assert!(proposal["summary"].is_string(), "{proposal}");
     assert_eq!(proposal["scopes"], json!(["products:write"]));
     assert!(proposal["preview"].get("token").is_none());
     assert!(proposal["preview"].get("ids").is_none());
@@ -622,7 +656,7 @@ async fn a_proposal_is_approved_and_applied_as_previewed() {
 }
 
 #[tokio::test]
-async fn a_stale_proposal_fails_and_writes_nothing() {
+async fn a_stale_proposal_is_previewed_again_for_a_second_look() {
     let app = app().await;
     let product = create_product(&app, "mug").await;
     let (_, json) = send(&app, "GET", &format!("/admin/products/{product}"), None).await;
@@ -655,17 +689,58 @@ async fn a_stale_proposal_fails_and_writes_nothing() {
         "{json}"
     );
     assert_eq!(json["details"]["preview"]["events"], json!([]));
-    assert_eq!(json["details"]["proposal"]["status"], "failed");
-    assert_eq!(json["details"]["proposal"]["response"]["status"], 409);
+    assert!(
+        json["details"]["preview"].get("token").is_none(),
+        "the agent's"
+    );
+    let refreshed = &json["details"]["proposal"];
+    assert_eq!(refreshed["status"], "pending", "a person looks again");
+    assert_eq!(refreshed["refreshes"], 1);
+    assert_eq!(refreshed["preview"]["events"], json!([]));
+    assert!(refreshed["response"].is_null());
     let changes = outbox_events(&app).await;
     assert_eq!(
         changes[events..]
             .iter()
             .map(|e| e.event_type.as_str())
             .collect::<Vec<_>>(),
-        ["proposal.decided"],
-        "only the decision"
+        ["proposal.updated"],
+        "nothing written but the proposal"
     );
+    // The new version is what's approved now.
+    let (status, json) = send_as(&app, &session, "POST", &approve, None).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        (json["status"].as_str(), json["refreshes"].as_u64()),
+        (Some("applied"), Some(1))
+    );
+}
+
+#[tokio::test]
+async fn a_stale_proposal_whose_write_now_fails_is_failed() {
+    let app = app().await;
+    let product = create_product(&app, "mug").await;
+    let agent = proposer(&app).await;
+    let change = op(
+        "admin.products.update",
+        json!({"id": product}),
+        Some(json!({"title": "Big mug"})),
+        Mode::Propose,
+    );
+    let proposed = call(&app, &agent, change).await;
+    assert_eq!(proposed.status, 202, "{:?}", proposed.body);
+    let id = proposed.body["proposal"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // Meanwhile the product is gone: the write would fail, not just differ.
+    send(&app, "DELETE", &format!("/admin/products/{product}"), None).await;
+    let session = owner_session(&app).await;
+    let approve = format!("/admin/agent-proposals/{id}/approve");
+    let (status, json) = send_as(&app, &session, "POST", &approve, None).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["status"], "failed");
+    assert_eq!(json["response"]["status"], 404);
 }
 
 #[tokio::test]
@@ -793,4 +868,30 @@ async fn the_prune_job_expires_proposals_and_forgets_old_calls() {
     assert_eq!(one["status"], "expired");
     assert_eq!(calls_of(&app, &agent).await, []);
     assert_eq!(rows(&app, "preview_tokens").await, 0);
+}
+
+#[tokio::test]
+async fn the_deployments_agent_settings_are_read_only_here() {
+    let app = app_configured("[agents]\nwrites = \"propose\"\nproposal_lifetime = \"2d\"").await;
+    let (status, json) = send(&app, "GET", "/admin/agent-settings", None).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        json,
+        json!({
+            "enabled": true,
+            "writes": "propose",
+            "proposal_lifetime_seconds": 172_800,
+            "preview_token_lifetime_seconds": 900,
+        })
+    );
+    let stranger = key(
+        &app,
+        json!({"kind": "secret", "name": "S", "scopes": ["orders:read"]}),
+    )
+    .await;
+    let (status, json) = send_as(&app, &stranger, "GET", "/admin/agent-settings", None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::FORBIDDEN, "missing_scope")
+    );
 }

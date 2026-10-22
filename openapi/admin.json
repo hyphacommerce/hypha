@@ -605,6 +605,13 @@
             "format": "int32",
             "minimum": 0,
             "type": "integer"
+          },
+          "summary": {
+            "description": "The operation's summary (`List orders`); `null` when this build has no such\noperation any more.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -869,6 +876,38 @@
           "enabled",
           "created_at",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "AgentSettingsResponse": {
+        "description": "What the operator set for agents in `hypha.config.toml` (`[agents]`): read-only here.",
+        "properties": {
+          "enabled": {
+            "description": "`false`: no agent acts in this deployment (`/mcp` and every agent credential are\nrefused).",
+            "type": "boolean"
+          },
+          "preview_token_lifetime_seconds": {
+            "description": "How long a preview's token can apply it.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "proposal_lifetime_seconds": {
+            "description": "How long a proposal waits for a decision.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "writes": {
+            "description": "The most any agent may write, whatever its grant: `apply` (grants decide),\n`propose` (every write becomes a proposal) or `off` (agents only read).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "writes",
+          "proposal_lifetime_seconds",
+          "preview_token_lifetime_seconds"
         ],
         "type": "object"
       },
@@ -8457,6 +8496,12 @@
             "description": "The write's preview when it was proposed (`#/components/schemas/PreviewBody`,\nwithout a token): its response, events, emails and calls, or what blocked it.",
             "type": "object"
           },
+          "refreshes": {
+            "description": "How many times approving found the store changed and previewed it again.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
           "request": {
             "$ref": "#/components/schemas/ProposalRequestResponse"
           },
@@ -8481,6 +8526,13 @@
             "description": "`pending`, `applied`, `rejected`, `expired` or `failed` (approved, but its write\nfailed: stale, a conflict, an app's refusal; `response` says why).",
             "type": "string"
           },
+          "summary": {
+            "description": "The operation's summary (`Update a product`); `null` when this build has no such\noperation any more.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "updated_at": {
             "type": "string"
           }
@@ -8493,6 +8545,7 @@
           "preview",
           "scopes",
           "status",
+          "refreshes",
           "expires_at",
           "created_at",
           "updated_at"
@@ -12014,7 +12067,7 @@
             "bearer": []
           }
         ],
-        "summary": "Approves a pending proposal: its write is sent again as its agent, exactly as\npreviewed (the preview's IDs; committed only if it records the same events). Takes a\nstaff session holding every scope the proposal names. Answers the proposal, `applied`\nor `failed` with the write's answer in `response`; a write that would no longer do\nwhat was previewed is recorded `failed` and answered `409 preview_stale`, with what it\nwould do now in `details.preview` and the proposal in `details.proposal`. A proposal\nwhose preview stopped at an effect it couldn't run (`complete: false`) is sent as a\nplain write.",
+        "summary": "Approves a pending proposal: its write is sent again as its agent, exactly as\npreviewed (the preview's IDs; committed only if it records the same events). Takes a\nstaff session holding every scope the proposal names. Answers the proposal, `applied`\nor `failed` with the write's answer in `response`. A write that would no longer do\nwhat was previewed (the store changed meanwhile) writes nothing and answers `409\npreview_stale`: the proposal stays `pending`, now holding what the write would do today\n(its preview, IDs and digest replaced, `refreshes` counted, `proposal.updated`\nrecorded), in `details.proposal`, with that preview in `details.preview`; review it and\napprove again. A proposal\nwhose preview stopped at an effect it couldn't run (`complete: false`) is sent as a\nplain write.",
         "tags": [
           "agents"
         ],
@@ -12170,6 +12223,65 @@
         },
         "x-hypha-scopes": [],
         "x-hypha-staff-session": true
+      }
+    },
+    "/admin/agent-settings": {
+      "get": {
+        "operationId": "admin.agents.settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSettingsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The deployment's settings for agents, as the operator set them (`[agents]` in\n`hypha.config.toml`); not editable through the API.",
+        "tags": [
+          "agents"
+        ],
+        "x-hypha-scopes": [
+          "agents:read"
+        ]
       }
     },
     "/admin/agents": {

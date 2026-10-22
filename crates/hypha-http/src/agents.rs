@@ -77,6 +77,9 @@ pub struct OperationCall {
 pub struct Answer {
     pub status: u16,
     pub body: Value,
+    /// For a preview, or a stale apply's fresh one: the IDs its run was handed and its
+    /// events' digest, which a proposal keeps.
+    pub(crate) previewed: Option<(Vec<uuid::Uuid>, String)>,
 }
 
 impl Answer {
@@ -471,21 +474,11 @@ async fn propose<S: Storage>(
     call: &OperationCall,
     response: Response,
 ) -> Result<Answer, ApiError> {
-    let ids = response.extensions().get::<PreviewIds>().cloned();
-    let digest = response.extensions().get::<PreviewDigest>().cloned();
     let answer = answer_of(response).await;
-    let (Some(PreviewIds(ids)), Some(PreviewDigest(digest)), 200) = (ids, digest, answer.status)
-    else {
+    let (Some((ids, digest)), 200) = (answer.previewed.clone(), answer.status) else {
         return Ok(answer);
     };
-    let mut preview = answer.body.get("preview").cloned().unwrap_or(Value::Null);
-    if let Value::Object(fields) = &mut preview {
-        // The approval makes its own token, from these IDs.
-        fields.remove("token");
-        fields.remove("expires_at");
-        let ids = ids.iter().map(|id| Value::String(id.to_string())).collect();
-        fields.insert("ids".to_string(), Value::Array(ids));
-    }
+    let preview = kept_preview(answer.body.get("preview"), &ids);
     let ports = state.public_ports().await?;
     let input = Propose {
         operation: operation.id.as_str().to_string(),
@@ -508,21 +501,45 @@ async fn propose<S: Storage>(
         input,
     )
     .await?;
-    let dto = crate::routes::agents::ProposalResponse::new(&proposal.value)?;
+    let dto = crate::routes::agents::ProposalResponse::new(&proposal.value, state.operations())?;
     Ok(Answer {
         status: StatusCode::ACCEPTED.as_u16(),
         body: json!({ "proposal": dto }),
+        previewed: None,
     })
+}
+
+/// A preview as a proposal keeps it: without its token (the approval makes its own), with
+/// the IDs the run was handed (`ids`, hidden from readers), which approving reuses.
+pub(crate) fn kept_preview(preview: Option<&Value>, ids: &[uuid::Uuid]) -> Value {
+    let mut preview = preview.cloned().unwrap_or(Value::Null);
+    if let Value::Object(fields) = &mut preview {
+        fields.remove("token");
+        fields.remove("expires_at");
+        let ids = ids.iter().map(|id| Value::String(id.to_string())).collect();
+        fields.insert("ids".to_string(), Value::Array(ids));
+    }
+    preview
 }
 
 /// A response as an `Answer`: its status and JSON body (`null` when empty or not JSON).
 pub(crate) async fn answer_of(response: Response) -> Answer {
+    let ids = response.extensions().get::<PreviewIds>().cloned();
+    let digest = response.extensions().get::<PreviewDigest>().cloned();
+    let previewed = match (ids, digest) {
+        (Some(PreviewIds(ids)), Some(PreviewDigest(digest))) => Some((ids, digest)),
+        _ => None,
+    };
     let status = response.status().as_u16();
     let body = match axum::body::to_bytes(response.into_body(), usize::MAX).await {
         Ok(bytes) if !bytes.is_empty() => serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         _ => Value::Null,
     };
-    Answer { status, body }
+    Answer {
+        status,
+        body,
+        previewed,
+    }
 }
 
 /// Logs the call; a log that can't be written is only reported, never the call's
@@ -586,11 +603,13 @@ mod tests {
         let failed = Answer {
             status: 403,
             body: json!({"code": "missing_scope"}),
+            previewed: None,
         };
         assert_eq!(failed.code(), Some("missing_scope"));
         let ok = Answer {
             status: 200,
             body: json!({"code": "x"}),
+            previewed: None,
         };
         assert_eq!(ok.code(), None);
     }
