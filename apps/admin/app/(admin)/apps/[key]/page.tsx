@@ -74,10 +74,9 @@ function Panel({
 }
 
 /**
- * One app (design note 0029): what it may do, which personal data it sees, where its
- * events go, and how it was authorized. A spore built into the API (design note 0030)
- * shows its switch and its settings form instead of uninstalling and webhooks. The app's own pages (`apps.page`,
- * `settings.app`, §5) are linked above, each at `/apps/{key}/pages/{id}`.
+ * One app: what it may do, which personal data it sees, where its events go, and how it was authorized. A spore
+ * built into the API shows its switch and its settings form instead of uninstalling and webhooks. The app's own
+ * pages (`apps.page`, `settings.app`) are linked above, each at `/apps/{key}/pages/{id}`.
  */
 export default async function AppPage({ params }: { params: Promise<{ key: string }> }) {
   const [{ key }, client, me, extensions] = await Promise.all([
@@ -88,7 +87,7 @@ export default async function AppPage({ params }: { params: Promise<{ key: strin
   ]);
   const app = loaded(await client.GET("/admin/apps/{key}", { params: { path: { key } } }));
   const builtIn = isBuiltIn(app);
-  // A spore's settings (design note 0030, §8); one that takes none answers 404.
+  // A spore's settings; one that takes none answers 404.
   const settings = builtIn
     ? (await client.GET("/admin/apps/{key}/settings", { params: { path: { key } } })).data
     : undefined;

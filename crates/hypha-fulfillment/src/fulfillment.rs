@@ -24,8 +24,8 @@ pub struct FulfillmentLine {
     pub stock_taken: bool,
 }
 
-/// A tracking number, with the carrier and a URL to follow it when known (design note
-/// 0018, FU6). Entered by staff or an app; carriers' own updates come later.
+/// A tracking number, with the carrier and a URL to follow it when known. Entered by staff
+/// or an app; carriers' own updates come later.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tracking {
     carrier: Option<String>,
@@ -95,12 +95,11 @@ pub struct NewFulfillment {
     pub lines: Vec<FulfillmentLine>,
     pub tracking: Vec<Tracking>,
     /// Whether the buyer is emailed a shipping confirmation: carried in
-    /// `fulfillment.created` (design note 0028, NT7), not stored.
+    /// `fulfillment.created`, not stored.
     pub notify_customer: bool,
 }
 
-/// What left one location for one order (design note 0018, FU1): its lines, how many
-/// of each, and its tracking.
+/// What left one location for one order: its lines, how many of each, and its tracking.
 ///
 /// Invariants, checked by `new` and `restore`: at least one line, each order line once,
 /// at most `MAX_TRACKING` tracking numbers. What was ordered and what's left to ship are
@@ -109,8 +108,8 @@ pub struct NewFulfillment {
 pub struct Fulfillment {
     id: FulfillmentId,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016);
-    /// `created_at` is when it was recorded.
+    /// When it was stored and last changed, set by the adapter; `created_at` is when it was
+    /// recorded.
     stamps: Option<Stamps>,
     order: OrderId,
     location: LocationId,
@@ -192,8 +191,8 @@ impl Fulfillment {
     }
 
     /// Replaces the tracking; returns whether it changed (`fulfillment.updated` then,
-    /// carrying `notify_customer`: whether the buyer is emailed, design note 0028).
-    /// A cancelled fulfilment keeps what it had.
+    /// carrying `notify_customer`: whether the buyer is emailed). A cancelled fulfilment
+    /// keeps what it had.
     pub fn set_tracking(
         &mut self,
         tracking: Vec<Tracking>,
@@ -270,7 +269,7 @@ fn check_tracking(tracking: &[Tracking]) -> Result<(), FulfillmentError> {
     Ok(())
 }
 
-/// Plain-data form of a `Fulfillment` for storage adapters (design note 0001, 3.4).
+/// Plain-data form of a `Fulfillment` for storage adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FulfillmentSnapshot {
     pub id: FulfillmentId,

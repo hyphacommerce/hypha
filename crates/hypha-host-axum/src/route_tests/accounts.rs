@@ -1,5 +1,4 @@
-//! Customer accounts (design note 0034): a code emailed, a session beside the publishable
-//! key, signing out.
+//! Customer accounts: a code emailed, a session beside the publishable key, signing out.
 
 use serde_json::json;
 
@@ -93,7 +92,7 @@ async fn a_customer_signs_in_with_an_emailed_code_and_signs_out() {
     assert_eq!(json["customer"]["email"], "nina@example.com");
     assert!(json["expires_at"].is_string());
     let customer = json["customer"]["id"].as_str().unwrap().to_string();
-    // The customer was created at the first request (AC2), and the admin sees them.
+    // The customer was created at the first request, and the admin sees them.
     let (status, admin) = send(&app, "GET", &format!("/admin/customers/{customer}"), None).await;
     assert_eq!(status, StatusCode::OK, "{admin}");
     assert_eq!(admin["email"], "nina@example.com");
@@ -231,7 +230,7 @@ async fn asking_for_a_code_answers_the_same_for_any_address_and_is_rate_limited(
     );
 }
 
-// ---------- the account (design note 0034, §3) ----------
+// ---------- the account ----------
 
 /// Signs `email` in and answers (the publishable key, the session token).
 async fn signed_in(app: &TestApp, email: &str) -> (String, String) {
@@ -535,7 +534,7 @@ async fn the_account_lists_its_own_orders_exports_its_data_and_asks_for_erasure(
     );
 }
 
-// ---------- the cart and the admin (design note 0034, §4 and §7) ----------
+// ---------- the cart and the admin ----------
 
 #[tokio::test]
 async fn a_signed_in_shoppers_cart_is_theirs_from_the_start_and_keeps_their_email() {
@@ -641,7 +640,7 @@ async fn the_admin_sees_the_account_and_signs_it_out_everywhere_and_deleting_the
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    // Signing in again works; deleting the customer takes the account with it (AC10).
+    // Signing in again works; deleting the customer takes the account with it.
     let (_, token) = signed_in(&app, "nina@example.com").await;
     let (status, _) = send(&app, "DELETE", &format!("/admin/customers/{id}"), None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);

@@ -1,5 +1,5 @@
-//! Customer group commands (design note 0032, §6): the groups themselves, and who's in
-//! them, written as sets with one event per group.
+//! Customer group commands: the groups themselves, and who's in them, written as sets with
+//! one event per group.
 
 use std::collections::{BTreeSet, HashMap};
 

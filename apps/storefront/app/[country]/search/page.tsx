@@ -8,7 +8,7 @@ import type { ListingParams } from "@/lib/listing";
 import { readListingPage } from "@/lib/listing-data";
 import { link } from "@/lib/site";
 
-/** Per request: it reads the shopper's query (design note 0024, §7). */
+/** Per request: it reads the shopper's query. */
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "Search" };
@@ -25,7 +25,7 @@ function queryOf(params: ListingParams): string {
   return kept.toString();
 }
 
-/** Search (design note 0023, §3): the same listing as a category, by words. */
+/** Search: the same listing as a category, by words. */
 export default async function SearchPage({
   params,
   searchParams,

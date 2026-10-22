@@ -230,8 +230,8 @@ impl NotificationRepo for InMemoryNotificationRepo {
     }
 }
 
-/// An `EmailSender` that keeps what it's given (design note 0028, §6), and fails the
-/// next sends with the errors it's told to.
+/// An `EmailSender` that keeps what it's given, and fails the next sends with the errors
+/// it's told to.
 #[derive(Default)]
 pub struct InMemoryEmailSender {
     sent: Mutex<Vec<OutgoingEmail>>,

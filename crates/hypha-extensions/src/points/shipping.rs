@@ -1,6 +1,5 @@
-//! `shipping.rates` v1 (design note 0029, AP9): the rate callback of design note 0015
-//! §5, unchanged on the wire. These types are that callback's body and answer, moved
-//! here from the HTTP host.
+//! `shipping.rates` v1: the shipping rate callback, unchanged on the wire.
+//! These types are that callback's body and answer, moved here from the HTTP host.
 
 use core::time::Duration;
 
@@ -18,7 +17,7 @@ impl ExtensionPoint for ShippingRates {
     /// A provider's `timeout_ms` (100 to 10000, 3000 by default) takes its place.
     const TIMEOUT: Duration = Duration::from_secs(5);
     /// The app's options are hidden (`provider_failed`); a zone's backups show when no
-    /// regular option is left (0015, SH7).
+    /// regular option is left.
     const ON_FAILURE: OnFailure = OnFailure::Fallback;
     /// The rate settings it answers for are shipping's. The destination's street and
     /// postal code are personal data besides (`customer_data:address`, AP10).
@@ -92,11 +91,11 @@ pub struct RateItemBody {
     pub weight_grams: Option<u32>,
 }
 
-/// A postal address as Hypha sends it to an app (0015 §5's shape). Personal fields
-/// (names, phone, street, postal code, city, province) are left out without the app's
-/// `customer_data:name` / `:phone` / `:address` scopes (design note 0029, AP10) and
-/// listed in `redacted`: the ones every address has (`last_name`, `line1`, `city`) are
-/// then absent, the optional ones `null`. Country and company always come.
+/// A postal address as Hypha sends it to an app. Personal fields (names, phone, street,
+/// postal code, city, province) are left out without the app's `customer_data:name` /
+/// `:phone` / `:address` scopes and listed in `redacted`: the ones every address has
+/// (`last_name`, `line1`, `city`) are then absent, the optional ones `null`. Country and
+/// company always come.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "openapi",
@@ -219,7 +218,7 @@ mod tests {
 
     #[test]
     fn the_request_keeps_the_callbacks_wire_format() {
-        // 0015 §5's body, field for field and in that order.
+        // The rate callback's body, field for field and in that order.
         assert_eq!(
             serde_json::to_string(&request()).unwrap(),
             r#"{"id":"rreq_1","sent_at":"2026-10-15T10:00:00Z","request":{"currency":"EUR","origin":null,"destination":{"first_name":null,"last_name":"Horvat","company":null,"line1":"Ilica 1","line2":null,"city":"Zagreb","province":null,"postal_code":null,"country":"HR","phone":null},"items":[{"variant":"var_00000000000000000000000000000001","sku":null,"quantity":2,"unit_price":{"amount":1000,"currency":"EUR"},"weight_grams":350}],"subtotal":{"amount":2000,"currency":"EUR"}}}"#

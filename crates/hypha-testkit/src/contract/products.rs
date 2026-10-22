@@ -58,8 +58,8 @@ pub async fn product_repo<R: ProductRepo>(make: impl AsyncFn() -> R) {
     sku_key(&make().await).await;
 }
 
-/// Runs the scenarios of product lists filtered by other domains' membership (design
-/// note 0024, AU5): categories and channels, as the adapter stores them.
+/// Runs the scenarios of product lists filtered by other domains' membership: categories
+/// and channels, as the adapter stores them.
 pub async fn product_list<S>(make: impl AsyncFn() -> S)
 where
     S: HasProducts + HasCategories + HasChannels,

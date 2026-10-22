@@ -56,17 +56,17 @@ pub enum CommandError {
         order: OrderId,
         status: hypha_core::FinancialStatus,
     },
-    /// An authorized payment holds money only its provider can capture or release, and
-    /// a `processing` one is on its way (design note 0031): marking the order paid or
-    /// cancelling it waits for the provider.
+    /// An authorized payment holds money only its provider can capture or release, and a
+    /// `processing` one is on its way: marking the order paid or cancelling it waits for
+    /// the provider.
     #[error(
         "payment {payment} of order {order} is authorized or processing; only its provider can settle it"
     )]
     PaymentAuthorized { order: OrderId, payment: PaymentId },
     #[error("payment {0} not found")]
     PaymentNotFound(PaymentId),
-    /// An app reported on a payment another provider collects (design note 0029,
-    /// §3.1: only the payment's own app may).
+    /// An app reported on a payment another provider collects (only the payment's own app
+    /// may).
     #[error("payment {payment} isn't collected by {app}")]
     PaymentNotYours {
         payment: PaymentId,
@@ -80,13 +80,13 @@ pub enum CommandError {
         expected: i64,
         reported: i64,
     },
-    /// An app reported a refund without its provider's ID for it (`reference`): the ID
-    /// is what makes a refund reported twice count once (design note 0029).
+    /// An app reported a refund without its provider's ID for it (`reference`): the ID is
+    /// what makes a refund reported twice count once.
     #[error(
         "a refund reported on payment {0} by an app needs the provider's refund ID as its reference"
     )]
     RefundReferenceRequired(PaymentId),
-    /// Cancelling an order with standing fulfilments: these, to cancel first (FU7).
+    /// Cancelling an order with standing fulfilments: these, to cancel first.
     #[error("order {order} has {} standing fulfilments; cancel them first", .fulfillments.len())]
     HasFulfillments {
         order: OrderId,
@@ -164,12 +164,12 @@ pub struct FulfilLine {
 
 pub struct Fulfil {
     pub order: OrderId,
-    /// Where the units leave from (design note 0018, FU5).
+    /// Where the units leave from.
     pub location: LocationId,
     pub lines: Vec<FulfilLine>,
     pub tracking: Vec<TrackingInput>,
-    /// Email the buyer a shipping confirmation: carried in `fulfillment.created`, which
-    /// the `Mailer` answers (design note 0028, NT7).
+    /// Email the buyer a shipping confirmation: carried in `fulfillment.created`, which the
+    /// `Mailer` answers.
     pub notify_customer: bool,
     /// A retry with the same key returns the fulfilment the first request recorded.
     pub idempotency: Option<IdempotencyRequest>,
@@ -182,7 +182,7 @@ pub struct Fulfilled {
     pub order: Order,
 }
 
-/// Records that `lines` of the order left `location` (design note 0018, section 3).
+/// Records that `lines` of the order left `location`.
 ///
 /// Refuses a cancelled order (`order_cancelled`), a line the order doesn't have
 /// (`unknown_order_line`), a line listed twice, more than a line has left to ship
@@ -303,11 +303,10 @@ impl Attempt<'_> {
     }
 }
 
-/// Takes back a fulfilment recorded by mistake (design note 0018, section 3): its lines
-/// count as unfulfilled again, and the units that came off stock when it shipped are
-/// back on hand at its location (and reserved there for their lines while tracked);
-/// lines that took no stock put none back. One batch, retried like `fulfill`.
-/// Cancelling it again changes nothing.
+/// Takes back a fulfilment recorded by mistake: its lines count as unfulfilled again, and
+/// the units that came off stock when it shipped are back on hand at its location (and
+/// reserved there for their lines while tracked); lines that took no stock put none back.
+/// One batch, retried like `fulfill`. Cancelling it again changes nothing.
 pub async fn cancel_fulfillment<S: OrderActionPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -366,7 +365,7 @@ pub struct CancelOrder {
     pub order: OrderId,
     pub reason: CancelReason,
     /// Email the buyer that it's cancelled: carried in `order.cancelled`, which the
-    /// `Mailer` answers (design note 0028, NT7).
+    /// `Mailer` answers.
     pub notify_customer: bool,
 }
 
@@ -377,15 +376,13 @@ pub struct OrderPayments {
     pub payments: Vec<Payment>,
 }
 
-/// Cancels an order (design note 0018, FU7): every line's reservation is released, and
-/// its pending payments are voided (design note 0027, PA8: cash never collected, a
-/// transfer never sent), in the same batch as the order, whose payment status follows
-/// (`voided` once every payment is). Refused while fulfilments stand
-/// (`order_has_fulfillments`, listing them), and while a payment is authorized
-/// (`payment_authorized`: the held money is its provider's to release, which no
-/// provider can yet). A paid payment stays paid until refunds exist. Cancelling it
-/// again changes nothing, and says so (`false`): no second `order.cancelled`, so the
-/// buyer is told once.
+/// Cancels an order: every line's reservation is released, and its pending payments are
+/// voided (cash never collected, a transfer never sent), in the same batch as the order,
+/// whose payment status follows (`voided` once every payment is). Refused while fulfilments
+/// stand (`order_has_fulfillments`, listing them), and while a payment is authorized
+/// (`payment_authorized`: the held money is its provider's to release, which no provider
+/// can yet). A paid payment stays paid until refunds exist. Cancelling it again changes
+/// nothing, and says so (`false`): no second `order.cancelled`, so the buyer is told once.
 pub async fn cancel_order<S: OrderActionPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -434,7 +431,7 @@ async fn cancel_order_once<S: OrderActionPorts>(
     let mut payments = ports.payments().list_for_order(order.id()).await?;
     if let Some(held) = payments
         .iter()
-        // Held, or on its way (`processing`, design note 0031): only the provider moves it.
+        // Held, or on its way (`processing`): only the provider moves it.
         .find(|p| {
             matches!(
                 p.status(),
@@ -473,16 +470,15 @@ async fn cancel_order_once<S: OrderActionPorts>(
     Ok((OrderPayments { order, payments }, true))
 }
 
-/// Recording money staff received by hand (design note 0027, §5).
+/// Recording money staff received by hand.
 pub struct MarkPaid {
     pub order: OrderId,
     /// What staff typed: a bank reference, the courier's receipt.
     pub reference: Option<String>,
 }
 
-/// Records money staff received by hand (design note 0027, §5), with `reference`, in
-/// one batch with the order, whose payment status follows (`paid` records
-/// `order.paid`):
+/// Records money staff received by hand, with `reference`, in one batch with the order,
+/// whose payment status follows (`paid` records `order.paid`):
 ///
 /// - an order with open payments: its `pending` ones become `paid` (an `authorized` one
 ///   is refused, `payment_authorized`: only its provider can capture it);
@@ -529,7 +525,7 @@ async fn mark_paid_once<S: OrderActionPorts>(
     order.refuse_if_cancelled()?;
     if let Some(held) = payments
         .iter()
-        // Held, or on its way (`processing`, design note 0031): only the provider moves it.
+        // Held, or on its way (`processing`): only the provider moves it.
         .find(|p| {
             matches!(
                 p.status(),
@@ -595,7 +591,7 @@ pub(crate) async fn load_order<S: HasOrders>(
         .ok_or(CommandError::OrderNotFound(id))
 }
 
-/// The reservation reference of an order line (design note 0004, I8).
+/// The reservation reference of an order line.
 fn reference(line: OrderLineId) -> Result<ReservationRef, InventoryError> {
     ReservationRef::new(&line.to_string())
 }
@@ -668,8 +664,8 @@ impl Stock {
         Ok(())
     }
 
-    /// Stages every changed item: deleted when it's retired and nothing is reserved on
-    /// it any more (design note 0016, Q5), updated otherwise.
+    /// Stages every changed item: deleted when it's retired and nothing is reserved on it
+    /// any more, updated otherwise.
     fn stage(mut self, batch: &mut impl StageInventoryItems) -> Result<(), CommandError> {
         for variant in &self.changed {
             let Some(item) = self.items.get_mut(variant) else {

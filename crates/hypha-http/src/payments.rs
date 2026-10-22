@@ -1,9 +1,8 @@
-//! The host's payment providers (design note 0029, §3.1, §10 item 5): the ones it was
-//! built with (`Storage::Payments`, `manual`), and every installed app answering
-//! `payments.start` under its own key (`app_stripe`). An app's start, status, capture,
-//! void and refund are its extension points, called through `call::<P>` (signed, capped, parsed
-//! and recorded in its call log with the payment), failing closed: an app that gives no
-//! usable answer is `app_unavailable`.
+//! The host's payment providers: the ones it was built with (`Storage::Payments`,
+//! `manual`), and every installed app answering `payments.start` under its own key
+//! (`app_stripe`). An app's start, status, capture, void and refund are its extension points,
+//! called through `call::<P>` (signed, capped, parsed and recorded in its call log with the
+//! payment), failing closed: an app that gives no usable answer is `app_unavailable`.
 
 use hypha_apps::{HasApps, HasExtensionEndpoints};
 use hypha_core::{AppKey, AppPoints, RepoError, optional_text};
@@ -38,9 +37,9 @@ impl<P, B> HostPayments<'_, P, B>
 where
     P: HasApps + HasExtensionEndpoints + HasExtensionCalls + hypha_apps::HasSporeSettings,
 {
-    /// Whether `key` is a spore's provider whose spore staff have disabled (design note
-    /// 0030, §3): it then reports unavailable and collects nothing, as a disabled app's.
-    /// The spore is the one the key belongs to (`spore_stripe` or `spore_stripe_…`).
+    /// Whether `key` is a spore's provider whose spore staff have disabled: it then reports
+    /// unavailable and collects nothing, as a disabled app's. The spore is the one the key
+    /// belongs to (`spore_stripe` or `spore_stripe_…`).
     async fn spore_disabled(&self, key: &ProviderKey) -> Result<bool, RepoError> {
         if key.is_manual() || key.app().is_some() {
             return Ok(false);
@@ -48,10 +47,10 @@ where
         Ok(!hypha_apps::spore_enabled(self.ports.apps(), key.as_str()).await?)
     }
 
-    /// A spore provider's store settings (design note 0030, §8): its spore's, secret
-    /// fields opened, for the provider (`PaymentRequest::store_settings`); empty before
-    /// the merchant saves any. `None` while the spore is off or not set up (it then
-    /// collects nothing, as a disabled app).
+    /// A spore provider's store settings: its spore's, secret fields opened, for the
+    /// provider (`PaymentRequest::store_settings`); empty before the merchant saves any.
+    /// `None` while the spore is off or not set up (it then collects nothing, as a disabled
+    /// app).
     async fn spore_settings(
         &self,
         key: &ProviderKey,
@@ -159,7 +158,7 @@ where
         settings: &serde_json::Value,
     ) -> Result<(), PaymentError> {
         match key.app() {
-            // An app keeps its own settings (design note 0029, §4.2).
+            // An app keeps its own settings.
             Some(_) => no_settings(key, settings),
             None => self.built_in.check_settings(key, settings),
         }
@@ -198,8 +197,7 @@ where
             market: payment.market,
             country: payment.country,
             return_url: payment.return_url.clone(),
-            // Personal data goes to an app only when its grant has
-            // `customer_data:email` (design note 0029, AP10).
+            // Personal data goes to an app only when its grant has `customer_data:email`.
             customer_email: if endpoint.redaction.removes_email() {
                 None
             } else {

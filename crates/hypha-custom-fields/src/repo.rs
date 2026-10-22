@@ -1,5 +1,5 @@
-//! The module's ports (design note 0033, §4): definitions, and values stored one row
-//! per (definition, owner) outside the owners' aggregates (CF5).
+//! The module's ports: definitions, and values stored one row per (definition, owner)
+//! outside the owners' aggregates.
 
 use std::collections::HashSet;
 
@@ -44,7 +44,7 @@ pub struct StoredValue {
     pub stamps: Option<Stamps>,
 }
 
-/// A value row to write: the value and its derived index columns (§4), computed by
+/// A value row to write: the value and its derived index columns, computed by
 /// `ValueRow::new` so every adapter stores the same thing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValueRow {
@@ -106,7 +106,7 @@ pub fn list_items(value: &Value) -> Option<Value> {
 }
 
 /// A distinct value (or list item) of a definition and how many owners hold it, for
-/// autocomplete (`values-in-use`, §4).
+/// autocomplete (`values-in-use`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValueCount {
     pub value: Value,
@@ -122,9 +122,9 @@ pub fn item_key(item: &Value, case_insensitive: bool) -> String {
     }
 }
 
-/// Items added to and removed from one owner's list (CF6), applied by the adapter under
-/// the rows' locks (`ValueRepo::change_items`). Its rules are here, in `apply`, so every
-/// adapter applies them the same way.
+/// Items added to and removed from one owner's list, applied by the adapter under the rows'
+/// locks (`ValueRepo::change_items`). Its rules are here, in `apply`, so every adapter
+/// applies them the same way.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemsChange {
     pub definition: CustomFieldDefinitionId,
@@ -309,7 +309,7 @@ pub trait ValueRepo {
         definitions: Option<&[CustomFieldDefinitionId]>,
     ) -> Result<Vec<StoredValue>, RepoError>;
     /// A page of the definition's values by owner ID, ascending, after `after`: for
-    /// checking a tightened validation against every stored value (§2).
+    /// checking a tightened validation against every stored value.
     async fn page(
         &self,
         definition: CustomFieldDefinitionId,
@@ -332,18 +332,18 @@ pub trait ValueRepo {
     ) -> Result<Vec<ValueCount>, RepoError>;
     /// Values of `definitions` that are one of `targets` or hold one as an item (a
     /// reference's prefixed ID), each value once, in one query: what the cleanup clears
-    /// when targets are deleted (§6.3).
+    /// when targets are deleted.
     async fn referencing(
         &self,
         definitions: &[CustomFieldDefinitionId],
         targets: &[String],
     ) -> Result<Vec<StoredValue>, RepoError>;
-    /// Applies a list delta to each owner's row (CF6) in one transaction, under the rows'
-    /// locks, so concurrent changes both land: `ItemsChange::apply` per owner, then, if
-    /// any owner's list breaks `ItemsChange::problem`, nothing is written and the first
-    /// such owner is `Refused`. Otherwise rows are inserted (version 1), updated (one
-    /// more) or deleted (empty), with `ItemsChange::event` per changed owner written to
-    /// the outbox in the same transaction.
+    /// Applies a list delta to each owner's row in one transaction, under the rows' locks,
+    /// so concurrent changes both land: `ItemsChange::apply` per owner, then, if any
+    /// owner's list breaks `ItemsChange::problem`, nothing is written and the first such
+    /// owner is `Refused`. Otherwise rows are inserted (version 1), updated (one more) or
+    /// deleted (empty), with `ItemsChange::event` per changed owner written to the outbox
+    /// in the same transaction.
     async fn change_items(&self, change: &ItemsChange) -> Result<ItemsResult, RepoError>;
     /// Deletes every value the owners hold (they were deleted), recording nothing.
     /// Returns how many rows went. Running it again deletes nothing.
@@ -387,8 +387,8 @@ pub trait StageCustomFieldDefinitions {
     fn delete_custom_field_definition(&mut self, definition: &mut CustomFieldDefinition);
 }
 
-/// Whether references' targets exist (§3: checked when a value is written). The leaf
-/// can't see products or assets: the host answers from their repositories.
+/// Whether references' targets exist (checked when a value is written). The leaf can't see
+/// products or assets: the host answers from their repositories.
 #[allow(async_fn_in_trait)]
 pub trait ReferenceTargets {
     /// Which of `references` exist, with their kind.

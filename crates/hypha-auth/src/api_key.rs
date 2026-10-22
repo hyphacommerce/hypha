@@ -1,4 +1,4 @@
-//! API keys (design note 0008, A8): how scripts, integrations and storefronts call.
+//! API keys: how scripts, integrations and storefronts call.
 
 use hypha_core::{Actor, ApiKeyId, ChannelId, Scope, Timestamp, Version, Versioned, required_text};
 
@@ -38,8 +38,7 @@ pub struct ApiKey {
     token_hash: TokenHash,
     last_four: String,
     scopes: Vec<Scope>,
-    /// The sales channel a publishable key sells through (design note 0020, CH4); a
-    /// secret key has none.
+    /// The sales channel a publishable key sells through; a secret key has none.
     channel: Option<ChannelId>,
     created_by: Actor,
     created_at: Timestamp,

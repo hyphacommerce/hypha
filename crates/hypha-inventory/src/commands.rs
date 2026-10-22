@@ -99,10 +99,10 @@ pub async fn list_locations<L: LocationRepo>(
 pub const DEFAULT_LOCATION_NAME: &str = "Default";
 
 /// Creates a location named `DEFAULT_LOCATION_NAME`, serving no market yet, if the store
-/// has none (design note 0018): a fulfilment leaves from a location, so a store that
-/// never set up stock can ship too. Hosts call it at startup, as the system; returns the
-/// new location, or `None` when there was one already. Two instances starting at once
-/// may each create one; the merchant renames or keeps both.
+/// has none: a fulfilment leaves from a location, so a store that never set up stock can
+/// ship too. Hosts call it at startup, as the system; returns the new location, or `None`
+/// when there was one already. Two instances starting at once may each create one; the
+/// merchant renames or keeps both.
 pub async fn ensure_default_location<L: LocationRepo, I: IdGenerator>(
     ctx: &Ctx,
     locations: &L,
@@ -235,8 +235,7 @@ pub async fn get_inventory_item<R: InventoryItemRepo>(
     load_item(items, id).await
 }
 
-/// The variant's item, or `None` if stock was never set up for it, which means
-/// untracked (design note 0004, I3).
+/// The variant's item, or `None` if stock was never set up for it, which means untracked.
 pub async fn get_variant_inventory<R: InventoryItemRepo>(
     ctx: &Ctx,
     items: &R,
@@ -287,7 +286,7 @@ pub struct SetOnHand {
     pub item: InventoryItemId,
     pub location: LocationId,
     pub quantity: i64,
-    /// The count the caller last saw; the change is refused if it moved since (I10).
+    /// The count the caller last saw; the change is refused if it moved since.
     pub expected: Option<i64>,
 }
 
@@ -365,13 +364,13 @@ pub struct ReserveStock {
 }
 
 pub struct ReserveLine {
-    /// Identifies this reservation (later the order line), so a retry is a no-op (I8).
+    /// Identifies this reservation (later the order line), so a retry is a no-op.
     pub reference: String,
     pub variant: VariantId,
     pub quantity: u32,
 }
 
-/// Reserves stock for every line, **all or nothing** (design note 0004, section 3).
+/// Reserves stock for every line, **all or nothing**.
 ///
 /// Reads the items and the market's locations without locks, allocates in domain code,
 /// then writes every changed item in one `update_many`. If another checkout changed one
@@ -421,9 +420,9 @@ pub async fn reserve_stock<R: InventoryItemRepo, L: LocationRepo>(
 }
 
 /// Reserves every line on `stock` (items by variant) from the `serving` locations, in
-/// memory, and returns the variants whose items changed; the caller writes those. A
-/// variant without an item is untracked and skipped, and a reference already reserved
-/// changes nothing (I8).
+/// memory, and returns the variants whose items changed; the caller writes those. A variant
+/// without an item is untracked and skipped, and a reference already reserved changes
+/// nothing.
 ///
 /// All or nothing for the caller: if any line is short, the result is `OutOfStock`
 /// listing every short line, and `stock` may be partly changed, so the caller discards
@@ -470,10 +469,10 @@ pub struct ReleaseLine {
     pub variant: VariantId,
 }
 
-/// Gives back what `reserve_stock` reserved for each line, all or nothing, retried
-/// like `reserve_stock`. Releasing something that isn't reserved is not an error, so a
-/// retried or duplicate release is harmless. A retired item left with nothing reserved
-/// is deleted (design note 0016, Q5), as every path that releases stock does.
+/// Gives back what `reserve_stock` reserved for each line, all or nothing, retried like
+/// `reserve_stock`. Releasing something that isn't reserved is not an error, so a retried
+/// or duplicate release is harmless. A retired item left with nothing reserved is deleted,
+/// as every path that releases stock does.
 pub async fn release_stock<R: InventoryItemRepo>(
     ctx: &Ctx,
     items: &R,
@@ -574,8 +573,8 @@ async fn write_changed<R: InventoryItemRepo>(
     Ok(())
 }
 
-/// A stock write lost a race (design note 0004, section 3): the attempt runs again on
-/// fresh data, up to `MAX_ATTEMPTS` times.
+/// A stock write lost a race: the attempt runs again on fresh data, up to `MAX_ATTEMPTS`
+/// times.
 fn lost_a_race(e: &CommandError) -> bool {
     matches!(e, CommandError::Repo(RepoError::StaleVersion))
 }

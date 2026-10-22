@@ -32,8 +32,8 @@ pub enum LineStatus {
     Unavailable(LineError),
 }
 
-/// Which products a cart may sell (design note 0020, CH6): those its channel publishes.
-/// There's no "every product": pricing a cart always asks its channel.
+/// Which products a cart may sell: those its channel publishes. There's no "every product":
+/// pricing a cart always asks its channel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Publication(HashSet<ProductId>);
 
@@ -48,8 +48,8 @@ impl Publication {
     }
 }
 
-/// What a line is called, read from its product as it is now. An order copies it, so
-/// the order still reads the same after the product changes (design note 0007, O4).
+/// What a line is called, read from its product as it is now. An order copies it, so the
+/// order still reads the same after the product changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LineDetails {
     pub product_title: String,
@@ -59,8 +59,8 @@ pub struct LineDetails {
     /// The product's handle, to link to its page; `None` for a cart already checked out,
     /// whose lines are read from the order (which keeps no handle).
     pub handle: Option<String>,
-    /// What to show for the line: the variant's image, else the product's first media
-    /// item (design note 0014); `None` without one, or once checked out.
+    /// What to show for the line: the variant's image, else the product's first media item;
+    /// `None` without one, or once checked out.
     pub image: Option<AssetId>,
 }
 
@@ -76,7 +76,7 @@ pub struct PricedLine {
     pub status: LineStatus,
     /// How many of the variant the market's locations can supply now; `None` without a
     /// limit (untracked, or selling past zero). A storefront caps the line's quantity at
-    /// it (design note 0024, §7).
+    /// it.
     pub sellable: Option<u64>,
 }
 
@@ -104,10 +104,10 @@ pub struct PricedCart {
     /// Sum of the available lines' totals, as priced. All amounts are in the market's
     /// currency and count the available lines only.
     pub subtotal: Money,
-    /// Where the cart ships (design note 0015).
+    /// Where the cart ships.
     pub shipping_address: Option<Address>,
-    /// The groups of lines that need shipping, with the buyer's choice; empty when
-    /// nothing in the cart is shipped. One group for now (SH8).
+    /// The groups of lines that need shipping, with the buyer's choice; empty when nothing
+    /// in the cart is shipped. One group for now.
     pub shipping_groups: Vec<PricedShippingGroup>,
     /// The chosen options' prices, as priced (inclusive of tax as the lines are).
     pub shipping_total: Money,
@@ -116,9 +116,9 @@ pub struct PricedCart {
     pub tax_total: Money,
     /// What the buyer pays.
     pub total: Money,
-    /// How the buyer chose to pay (design note 0027); checked again at checkout.
+    /// How the buyer chose to pay; checked again at checkout.
     pub payment_method: Option<PaymentMethodId>,
-    /// Whether the buyer ticked "Email me with news and offers" (design note 0032, §5).
+    /// Whether the buyer ticked "Email me with news and offers".
     pub marketing_opt_in: bool,
 }
 
@@ -180,9 +180,9 @@ pub fn price_line(
 /// lines unavailable with `ProductNotFound`. `pricing`, `tax` and `stock` must have
 /// been built for all of the cart's products and variants.
 ///
-/// The buyer's shipping choice is priced and taxed too (design note 0015, section 7).
-/// Like lines, a choice that can't be priced now is reported on its group and left out
-/// of the totals. Only products `published` allows are sold (design note 0020).
+/// The buyer's shipping choice is priced and taxed too. Like lines, a choice that can't be
+/// priced now is reported on its group and left out of the totals. Only products
+/// `published` allows are sold.
 pub fn price_cart_with_shipping(
     cart: &Cart,
     products: &[Product],

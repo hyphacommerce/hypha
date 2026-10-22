@@ -13,7 +13,7 @@ export interface webhooks {
         get?: never;
         put?: never;
         /**
-         * Run one of the app's admin actions, pressed by staff (design note 0029, §6.1).
+         * Run one of the app's admin actions, pressed by staff.
          * @description `POST` to the URL the app registered for `admin.action` v1. Answer within 10000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the flow stops with `app_unavailable` (502, `details: {app, point}`). Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).
          */
         post: operations["admin.action.v1"];
@@ -73,7 +73,7 @@ export interface webhooks {
         get?: never;
         put?: never;
         /**
-         * Start paying for a cart at checkout, before its order exists (design note 0031): what the buyer does next.
+         * Start paying for a cart at checkout, before its order exists: what the buyer does next.
          * @description `POST` to the URL the app registered for `payments.start` v2. Answer within 15000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the flow stops with `app_unavailable` (502, `details: {app, point}`). Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).
          */
         post: operations["payments.start.v2"];
@@ -153,7 +153,7 @@ export interface webhooks {
         get?: never;
         put?: never;
         /**
-         * Price a cart's shipping group (design note 0015, §5's rate callback).
+         * Price a cart's shipping group.
          * @description `POST` to the URL the app registered for `shipping.rates` v1. Answer within 5000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: Hypha falls back to its own default. Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).
          */
         post: operations["shipping.rates.v1"];
@@ -338,8 +338,8 @@ export interface components {
          */
         PaymentMethodId: string;
         /**
-         * @description What Hypha sends to start a payment. Settings for the method stay with the app (it
-         *     keeps its own, design note 0029, §4.2): the method's ID is enough to find them.
+         * @description What Hypha sends to start a payment. Settings for the method stay with the app (it keeps
+         *     its own): the method's ID is enough to find them.
          */
         PaymentStartRequest: {
             /** @description What to collect: the cart's total, in its currency. */
@@ -405,11 +405,11 @@ export interface components {
             state: components["schemas"]["PaymentState"];
         };
         /**
-         * @description A postal address as Hypha sends it to an app (0015 §5's shape). Personal fields
-         *     (names, phone, street, postal code, city, province) are left out without the app's
-         *     `customer_data:name` / `:phone` / `:address` scopes (design note 0029, AP10) and
-         *     listed in `redacted`: the ones every address has (`last_name`, `line1`, `city`) are
-         *     then absent, the optional ones `null`. Country and company always come.
+         * @description A postal address as Hypha sends it to an app. Personal fields (names, phone, street,
+         *     postal code, city, province) are left out without the app's `customer_data:name` /
+         *     `:phone` / `:address` scopes and listed in `redacted`: the ones every address has
+         *     (`last_name`, `line1`, `city`) are then absent, the optional ones `null`. Country and
+         *     company always come.
          */
         PostalAddressResponse: {
             city?: string | null;

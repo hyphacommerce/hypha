@@ -1,8 +1,7 @@
-//! What installed apps contribute to admins and storefronts (design note 0029, §6–§8):
-//! discovery per target, and finding one contribution to use (an action to run, a
-//! block to fetch, a proxy to forward to, a session token to sign). Only apps installed
-//! through OAuth, enabled, contribute, and only where their grant reads the target's
-//! object (`Target::scope`).
+//! What installed apps contribute to admins and storefronts: discovery per target, and
+//! finding one contribution to use (an action to run, a block to fetch, a proxy to forward
+//! to, a session token to sign). Only apps installed through OAuth, enabled, contribute,
+//! and only where their grant reads the target's object (`Target::scope`).
 
 use hypha_core::{AuthError, Ctx, Scope};
 
@@ -190,15 +189,15 @@ async fn installed<R: AppRepo>(apps: &R, key: &str) -> Result<App, CommandError>
     Ok(app)
 }
 
-/// Whether the spore `app` (design note 0030) contributes to `target` for discovery: its
-/// grant (its declared scopes) reads the target's object, as an app's must.
+/// Whether the spore `app` contributes to `target` for discovery: its grant (its declared
+/// scopes) reads the target's object, as an app's must.
 pub fn spore_contributes(app: &App, target: Target) -> bool {
     app.enabled() && granted(app, target)
 }
 
-/// The spore under `key`, for using one of its blocks or actions (design note 0030,
-/// §7): the caller needs `apps:read`; a key that's no spore of this store is
-/// `app_not_found`; one staff disabled is `app_disabled`.
+/// The spore under `key`, for using one of its blocks or actions: the caller needs
+/// `apps:read`; a key that's no spore of this store is `app_not_found`; one staff disabled
+/// is `app_disabled`.
 pub async fn spore_for_ui<R: AppRepo>(ctx: &Ctx, apps: &R, key: &str) -> Result<App, CommandError> {
     ctx.require(Scope::AppsRead)?;
     let not_found = || CommandError::AppNotFound(key.to_string());
@@ -333,8 +332,8 @@ pub async fn find_proxy<R: AppRepo>(
     Ok((app, url))
 }
 
-/// The app a staff member opens an embedded page of (a session token, §6.3), and the
-/// scopes the token carries: the app's grant as far as the caller holds it.
+/// The app a staff member opens an embedded page of (a session token), and the scopes the
+/// token carries: the app's grant as far as the caller holds it.
 pub async fn session_app<R: AppRepo>(
     ctx: &Ctx,
     apps: &R,

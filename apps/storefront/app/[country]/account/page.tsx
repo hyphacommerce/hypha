@@ -18,14 +18,14 @@ import { presentFields } from "@/lib/custom-fields";
 import { formatMoney } from "@/lib/money";
 import { link } from "@/lib/site";
 
-/** Per request: the shopper's own account (design note 0034, §7). */
+/** Per request: the shopper's own account. */
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "Account" };
 
 /**
- * The account (design note 0034, §7): the sign-in form without a session, otherwise the
- * overview with the latest orders and the way to each section.
+ * The account: the sign-in form without a session, otherwise the overview with the
+ * latest orders and the way to each section.
  */
 export default async function AccountPage({ params }: { params: Promise<{ country: string }> }) {
   const country = await countryOf((await params).country);

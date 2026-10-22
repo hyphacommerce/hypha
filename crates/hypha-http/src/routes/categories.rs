@@ -1,5 +1,5 @@
-//! Product categories (design note 0022): the tree, its membership, a category's image,
-//! and what storefronts see of them.
+//! Product categories: the tree, its membership, a category's image, and what storefronts
+//! see of them.
 
 use std::collections::HashMap;
 
@@ -42,8 +42,7 @@ pub struct CategoryNode {
     position: u32,
     #[schema(no_recursion)]
     children: Vec<CategoryNode>,
-    /// The custom field values `?custom_fields=` asked for (design note 0033); absent
-    /// without it.
+    /// The custom field values `?custom_fields=` asked for; absent without it.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<std::collections::HashMap<String, serde_json::Value>>, required = false)]
     custom_fields: Option<CustomFieldValues>,
@@ -71,9 +70,9 @@ pub struct CategoryTreeResponse {
     items: Vec<CategoryNode>,
 }
 
-/// Every category, as a tree. With `field[…]` filters on custom fields (design note
-/// 0033, §7), only the matching categories, flat (each without `children`), in tree
-/// order. `custom_fields` adds those values to each node.
+/// Every category, as a tree. With `field[…]` filters on custom fields, only the matching
+/// categories, flat (each without `children`), in tree order. `custom_fields` adds those
+/// values to each node.
 #[utoipa::path(
     get,
     path = "/admin/categories",
@@ -175,7 +174,7 @@ pub struct CategoryResponse {
     ancestors: Vec<CategoryRef>,
     /// In order.
     children: Vec<CategoryRef>,
-    /// Its custom field values the caller may read (design note 0033); `PATCH
+    /// Its custom field values the caller may read; `PATCH
     /// /admin/categories/{id}/custom-fields` writes them.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     custom_fields: CustomFieldValues,
@@ -252,7 +251,7 @@ pub struct CreateCategoryRequest {
     /// Among its siblings, from 0; absent or past the end: last.
     #[serde(default)]
     position: Option<u32>,
-    /// Whether the storefront shows it. Required: there's no default (CA10).
+    /// Whether the storefront shows it. Required: there's no default.
     visible: bool,
 }
 
@@ -625,16 +624,14 @@ pub struct StorefrontCategoryResponse {
     ancestors: Vec<CategoryRef>,
     /// Its shown children, in order.
     children: Vec<CategoryRef>,
-    /// The custom field values the merchant shows storefronts (`access.storefront:
-    /// read`, design note 0033).
+    /// The custom field values the merchant shows storefronts (`access.storefront: read`).
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     custom_fields: CustomFieldValues,
 }
 
-/// A category page (design note 0022, section 4): the category by handle, with its
-/// ancestors and shown children. Its products come through
-/// `/storefront/search?category=…`. A hidden category (or one under a hidden one) is
-/// `404 category_not_found`.
+/// A category page: the category by handle, with its ancestors and shown children. Its
+/// products come through `/storefront/search?category=…`. A hidden category (or one under a
+/// hidden one) is `404 category_not_found`.
 #[utoipa::path(
     get,
     path = "/storefront/categories/by-handle/{handle}",

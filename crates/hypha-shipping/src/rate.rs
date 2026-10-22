@@ -1,4 +1,4 @@
-//! Built-in rates (design note 0015, SH4): computed by Hypha, no I/O.
+//! Built-in rates: computed by Hypha, no I/O.
 //!
 //! One shape covers the four kinds the admin offers: a table of tiers per currency over a
 //! basis (the group's subtotal or its weight). Flat is one open tier; free over a

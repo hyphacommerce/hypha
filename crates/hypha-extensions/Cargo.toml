@@ -3,7 +3,7 @@ name = "hypha-extensions"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
-description = "Extension points (design note 0029, AP3): the contracts Hypha calls apps through, the call log, and the call itself."
+description = "Extension points: the contracts Hypha calls apps through, the call log, and the call itself."
 
 [dependencies]
 hypha-core.workspace = true

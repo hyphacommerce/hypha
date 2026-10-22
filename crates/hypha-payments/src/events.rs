@@ -1,19 +1,18 @@
-//! What happens to payments, as events (design note 0027, §6). Contract types: a
-//! reshaped field is a new `VERSION`, never an edit.
+//! What happens to payments, as events. Contract types: a reshaped field is a new
+//! `VERSION`, never an edit.
 
 use hypha_core::{CartId, Event, Money, OrderId, PaymentId, PaymentMethodId};
 use serde::Serialize;
 
 pub const PAYMENT: &str = "payment";
 
-/// `payment.created`: checkout started collecting `amount` for a cart (an online
-/// method, before the order: design note 0031) or an order (a manual method), or staff
-/// recorded money on an order without a payment.
+/// `payment.created`: checkout started collecting `amount` for a cart (an online method,
+/// before the order) or an order (a manual method), or staff recorded money on an order
+/// without a payment.
 #[derive(Debug, Serialize)]
 pub struct PaymentCreated {
     pub payment: PaymentId,
-    /// The cart it was started for (design note 0031); `null` for money staff recorded
-    /// on an order by hand.
+    /// The cart it was started for; `null` for money staff recorded on an order by hand.
     pub cart: Option<CartId>,
     /// `null` until checkout placed the order (an online payment is started for the
     /// cart, before the order exists).
@@ -34,8 +33,7 @@ impl Event for PaymentCreated {
 #[derive(Debug, Serialize)]
 pub struct PaymentPaid {
     pub payment: PaymentId,
-    /// The cart it was started for (design note 0031); `null` for money staff recorded
-    /// on an order by hand.
+    /// The cart it was started for; `null` for money staff recorded on an order by hand.
     pub cart: Option<CartId>,
     /// `null` until checkout placed the order (an online payment is started for the
     /// cart, before the order exists).
@@ -56,8 +54,7 @@ impl Event for PaymentPaid {
 #[derive(Debug, Serialize)]
 pub struct PaymentVoided {
     pub payment: PaymentId,
-    /// The cart it was started for (design note 0031); `null` for money staff recorded
-    /// on an order by hand.
+    /// The cart it was started for; `null` for money staff recorded on an order by hand.
     pub cart: Option<CartId>,
     /// `null` until checkout placed the order (an online payment is started for the
     /// cart, before the order exists).
@@ -77,8 +74,7 @@ impl Event for PaymentVoided {
 #[derive(Debug, Serialize)]
 pub struct PaymentAuthorized {
     pub payment: PaymentId,
-    /// The cart it was started for (design note 0031); `null` for money staff recorded
-    /// on an order by hand.
+    /// The cart it was started for; `null` for money staff recorded on an order by hand.
     pub cart: Option<CartId>,
     /// `null` until checkout placed the order (an online payment is started for the
     /// cart, before the order exists).
@@ -118,8 +114,7 @@ impl Event for PaymentProcessing {
 #[derive(Debug, Serialize)]
 pub struct PaymentFailed {
     pub payment: PaymentId,
-    /// The cart it was started for (design note 0031); `null` for money staff recorded
-    /// on an order by hand.
+    /// The cart it was started for; `null` for money staff recorded on an order by hand.
     pub cart: Option<CartId>,
     /// `null` until checkout placed the order (an online payment is started for the
     /// cart, before the order exists).
@@ -140,8 +135,7 @@ impl Event for PaymentFailed {
 #[derive(Debug, Serialize)]
 pub struct PaymentRefunded {
     pub payment: PaymentId,
-    /// The cart it was started for (design note 0031); `null` for money staff recorded
-    /// on an order by hand.
+    /// The cart it was started for; `null` for money staff recorded on an order by hand.
     pub cart: Option<CartId>,
     /// `null` until checkout placed the order (an online payment is started for the
     /// cart, before the order exists).

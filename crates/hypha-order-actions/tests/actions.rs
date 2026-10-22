@@ -436,7 +436,7 @@ fn a_cancelled_order_cant_be_fulfilled() {
 #[test]
 fn fulfilling_needs_fulfillments_write() {
     let world = World::new();
-    // Changing orders isn't shipping them (FU9).
+    // Changing orders isn't shipping them.
     let ctx = user_with(vec![Scope::OrdersWrite]);
     assert_eq!(
         world
@@ -722,8 +722,8 @@ fn whats_left_is_where_it_was_reserved() {
 #[test]
 fn a_split_reservation_shows_at_each_location() {
     let world = World::new();
-    // Re-reserve the mugs with 1 at the warehouse and 2 at the shop: neither covers
-    // all 3, so the line is split (design note 0004, I9).
+    // Re-reserve the mugs with 1 at the warehouse and 2 at the shop: neither covers all 3,
+    // so the line is split.
     let mut item = world.item().unwrap();
     item.release(&reference(mugs()));
     item.set_on_hand(warehouse(), 1, None).unwrap();
@@ -834,7 +834,7 @@ fn only_the_request_that_cancels_says_it_changed_the_order() {
     assert!(!world.cancel_and_changed(CancelReason::Customer).unwrap().1);
 }
 
-// ---- payments (design note 0027) ----
+// ---- payments ----
 
 /// A pending payment of the order's total, as checkout leaves it.
 fn pending_payment(world: &World) -> Payment {
@@ -1203,7 +1203,7 @@ fn an_order_with_an_authorized_payment_isnt_cancelled() {
     assert_eq!((world.order(), world.stock()), before);
 }
 
-// ---- payment events (design note 0029, §3.1) ----
+// ---- payment events ----
 
 impl World {
     fn report(
@@ -1714,7 +1714,7 @@ fn an_unknown_payment_is_reported() {
     );
 }
 
-// ---- who may report (design note 0029, §3.1, §15) ----
+// ---- who may report ----
 
 fn app_id(n: u128) -> hypha_core::AppId {
     hypha_core::AppId::from_uuid(Uuid::from_u128(n))
@@ -1854,7 +1854,7 @@ fn staff_report_on_an_apps_payment() {
     assert_eq!(world.report_as(staff, K::Paid), Ok(PaymentStatus::Paid));
 }
 
-/// A payment started for a cart before its order (design note 0031).
+/// A payment started for a cart before its order.
 fn cart_payment(world: &World) -> Payment {
     let mut payment = Payment::new(NewPayment {
         id: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),

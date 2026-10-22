@@ -1,6 +1,5 @@
-//! Custom field commands (design note 0033, §2, §4, §7, §8). Definitions in `custom`
-//! need `custom_fields:*`; values are governed by their owner's scopes and `access`
-//! (§5). Owners come in already checked to exist (§6.1).
+//! Custom field commands. Definitions in `custom` need `custom_fields:*`; values are
+//! governed by their owner's scopes and `access`. Owners come in already checked to exist.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -205,8 +204,8 @@ fn key_taken(definition: &CustomFieldDefinition) -> CommandError {
     }
 }
 
-/// The limits on how many definitions an owner type holds (§10), for `definition` about
-/// to be added (or made filterable) among `existing` (its owner type's, itself excluded).
+/// The limits on how many definitions an owner type holds, for `definition` about to be
+/// added (or made filterable) among `existing` (its owner type's, itself excluded).
 fn check_limits(
     existing: &[CustomFieldDefinition],
     definition: &CustomFieldDefinition,
@@ -236,9 +235,9 @@ fn check_limits(
     Ok(())
 }
 
-/// Checks every stored value of `current` against `next` (§2), page by page: values
-/// that fail its validations, and with `unique` turned on every owner after the first
-/// holding a value. `ValuesInvalid` names the first 20.
+/// Checks every stored value of `current` against `next`, page by page: values that fail
+/// its validations, and with `unique` turned on every owner after the first holding a
+/// value. `ValuesInvalid` names the first 20.
 async fn check_stored_values<S: HasCustomFieldValues>(
     ports: &S,
     current: &CustomFieldDefinition,
@@ -358,8 +357,8 @@ pub async fn storefront_definitions<S: HasCustomFieldDefinitions>(
         .collect())
 }
 
-/// The definitions of `owner_type`, without a scope check: for routes that read or
-/// write an owner's values (loaded once per request, §6.2), whose own checks apply.
+/// The definitions of `owner_type`, without a scope check: for routes that read or write an
+/// owner's values (loaded once per request), whose own checks apply.
 pub async fn definitions_for<S: HasCustomFieldDefinitions>(
     ports: &S,
     owner_type: OwnerType,
@@ -515,8 +514,8 @@ where
     Ok(definition)
 }
 
-/// Deletes a `custom` definition and every value of it (§2), renumbering the rest of
-/// its owner type's form.
+/// Deletes a `custom` definition and every value of it, renumbering the rest of its owner
+/// type's form.
 pub async fn delete_definition<S>(
     ctx: &Ctx,
     ports: &S,
@@ -595,9 +594,9 @@ impl SyncPlan {
     }
 }
 
-/// What syncing `specs` into a namespace holding `existing` would do (§8), checking
-/// every spec builds a valid definition and none changes an existing key's type
-/// (`TypeChanged`, naming the key). Pure, so a manifest's consent screen can show it.
+/// What syncing `specs` into a namespace holding `existing` would do, checking every spec
+/// builds a valid definition and none changes an existing key's type (`TypeChanged`, naming
+/// the key). Pure, so a manifest's consent screen can show it.
 pub fn plan_sync(
     namespace: &Namespace,
     existing: &[CustomFieldDefinition],
@@ -662,11 +661,11 @@ fn change_to(spec: &DefinitionSpec) -> DefinitionChange {
     }
 }
 
-/// Makes an app's or a spore's namespace hold exactly `specs` (§8): new keys created,
-/// changed ones updated (a tightening checked against stored values like any other),
-/// missing ones deleted with their values, in one batch. A changed type is
-/// `TypeChanged`. Run by hosts for spores at startup; an app's manifest is synced in the
-/// batch that applies it (`stage_managed_definitions`).
+/// Makes an app's or a spore's namespace hold exactly `specs`: new keys created, changed
+/// ones updated (a tightening checked against stored values like any other), missing ones
+/// deleted with their values, in one batch. A changed type is `TypeChanged`. Run by hosts
+/// for spores at startup; an app's manifest is synced in the batch that applies it
+/// (`stage_managed_definitions`).
 pub async fn sync_managed_definitions<S>(
     ctx: &Ctx,
     ports: &S,
@@ -698,10 +697,9 @@ where
     }
 }
 
-/// `sync_managed_definitions`' reads and checks, its writes staged in `batch` rather
-/// than committed: for a write that must land with them or not at all (an app's
-/// manifest applied with its fields, design note 0033, §8). Map the commit's error with
-/// `sync_commit_error`.
+/// `sync_managed_definitions`' reads and checks, its writes staged in `batch` rather than
+/// committed: for a write that must land with them or not at all (an app's manifest applied
+/// with its fields). Map the commit's error with `sync_commit_error`.
 pub async fn stage_managed_definitions<S>(
     ctx: &Ctx,
     ports: &S,
@@ -856,8 +854,8 @@ impl FieldEntry {
     }
 }
 
-/// An owner's values as one caller sees them (§6.2): the ones it may read, by position,
-/// and the personal ones it may not (`redacted`, so responses list them).
+/// An owner's values as one caller sees them: the ones it may read, by position, and the
+/// personal ones it may not (`redacted`, so responses list them).
 #[derive(Debug, Clone, PartialEq)]
 pub struct OwnerFields {
     pub owner: Uuid,
@@ -940,7 +938,7 @@ fn assemble(
     Ok(result)
 }
 
-/// The values `owner` holds that `caller` may read (§5), with versions.
+/// The values `owner` holds that `caller` may read, with versions.
 pub async fn get_custom_fields<S>(
     caller: &FieldCaller<'_>,
     ports: &S,
@@ -963,10 +961,10 @@ where
     }))
 }
 
-/// What a response shows of some owners' fields (§6.2): each owner's values the caller
-/// may read, and the personal keys hidden from it (`custom_fields.<key>` in the
-/// response's `redacted`): every such key of the definitions read, held or not, so the
-/// list doesn't tell which owners have a value (§5.2).
+/// What a response shows of some owners' fields: each owner's values the caller may read,
+/// and the personal keys hidden from it (`custom_fields.<key>` in the response's
+/// `redacted`): every such key of the definitions read, held or not, so the list doesn't
+/// tell which owners have a value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldsRead {
     pub owners: HashMap<Uuid, OwnerFields>,
@@ -984,9 +982,9 @@ impl FieldsRead {
 }
 
 /// The values of `owners` (each of one of `owner_types`) that `caller` may read, in one
-/// read of the definitions and one of the values (§6.2): every field for a single
-/// owner's response, or only `keys` (at most 10, `?custom_fields=`) for a list. A key
-/// the caller can't see at all is `Unknown`, as for filters.
+/// read of the definitions and one of the values: every field for a single owner's
+/// response, or only `keys` (at most 10, `?custom_fields=`) for a list. A key the caller
+/// can't see at all is `Unknown`, as for filters.
 pub async fn read_custom_fields<S>(
     caller: &FieldCaller<'_>,
     ports: &S,
@@ -1188,10 +1186,10 @@ async fn taken_values<S: HasCustomFieldValues>(
     Ok(problems)
 }
 
-/// Writes an owner's fields (§4): every key checked for access and parsed, every
-/// problem reported at once (`FieldsInvalid`), then the changed rows and one
-/// `<owner>.custom_fields_updated` event staged in one batch. At most 50 keys. Returns
-/// the owner's fields as `caller` sees them after.
+/// Writes an owner's fields: every key checked for access and parsed, every problem
+/// reported at once (`FieldsInvalid`), then the changed rows and one
+/// `<owner>.custom_fields_updated` event staged in one batch. At most 50 keys. Returns the
+/// owner's fields as `caller` sees them after.
 pub async fn set_custom_fields<S>(
     caller: &FieldCaller<'_>,
     ports: &S,
@@ -1427,10 +1425,10 @@ async fn bulk_target<S: HasCustomFieldDefinitions>(
     }
 }
 
-/// Adds and removes items of one list field on 1 to 250 owners (CF6, §4): idempotent
-/// (adding what's there or removing what isn't changes nothing and records nothing),
-/// done by the repository under the rows' locks so concurrent writers both land. An
-/// owner whose list would break `max_items` (or `min_items`) fails the whole call.
+/// Adds and removes items of one list field on 1 to 250 owners: idempotent (adding what's
+/// there or removing what isn't changes nothing and records nothing), done by the
+/// repository under the rows' locks so concurrent writers both land. An owner whose list
+/// would break `max_items` (or `min_items`) fails the whole call.
 pub async fn change_list_items<S>(
     caller: &FieldCaller<'_>,
     ports: &S,
@@ -1508,8 +1506,8 @@ where
     }
 }
 
-/// Sets (or, with `None`, removes) one field on 1 to 250 owners (§4): imports and the
-/// admin's "set on selected". All or nothing, one event per owner that changed.
+/// Sets (or, with `None`, removes) one field on 1 to 250 owners: imports and the admin's
+/// "set on selected". All or nothing, one event per owner that changed.
 pub async fn set_field_values<S>(
     caller: &FieldCaller<'_>,
     ports: &S,
@@ -1629,8 +1627,8 @@ where
     }
 }
 
-/// The distinct values (list items, for a list) of a filterable field with how many
-/// owners hold each, most held first: autocomplete for filters and labels (§4).
+/// The distinct values (list items, for a list) of a filterable field with how many owners
+/// hold each, most held first: autocomplete for filters and labels.
 pub async fn values_in_use<S>(
     caller: &FieldCaller<'_>,
     ports: &S,
@@ -1661,8 +1659,8 @@ where
 // Filters
 // ---------------------------------------------------------------------------------
 
-/// A list filter as a query string spells it (§7): `field[custom.material]=wool,cotton`
-/// is `Eq` with two operands, `field[custom.weight][gte]=1.5kg` is `Gte`,
+/// A list filter as a query string spells it: `field[custom.material]=wool,cotton` is `Eq`
+/// with two operands, `field[custom.weight][gte]=1.5kg` is `Gte`,
 /// `field[custom.erp_id][exists]=false` is `Exists`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RawFilterOp {
@@ -1689,11 +1687,11 @@ impl RawFilterOp {
     }
 }
 
-/// Turns a query's filter into a `FieldFilter` (§7, CF7), or refuses it: an unknown or
-/// hidden key (`custom_field_unknown`), a field that isn't filterable
-/// (`custom_field_not_filterable`), a personal one without `customer_data:profile`, an
-/// operator or operand the type doesn't take (`invalid_custom_field_filter`). Never
-/// ignored. `definitions` are the list's owner type's.
+/// Turns a query's filter into a `FieldFilter`, or refuses it: an unknown or hidden key
+/// (`custom_field_unknown`), a field that isn't filterable (`custom_field_not_filterable`),
+/// a personal one without `customer_data:profile`, an operator or operand the type doesn't
+/// take (`invalid_custom_field_filter`). Never ignored. `definitions` are the list's owner
+/// type's.
 pub fn field_filter(
     caller: &FieldCaller<'_>,
     definitions: &[CustomFieldDefinition],

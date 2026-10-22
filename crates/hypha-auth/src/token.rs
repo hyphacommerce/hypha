@@ -1,4 +1,4 @@
-//! Secret tokens: sessions, API keys, invites, password resets (design note 0008, A9).
+//! Secret tokens: sessions, API keys, invites, password resets.
 //!
 //! A token is a prefix that says what it is for, then 32 random bytes as hex. Only its
 //! SHA-256 (`TokenHash`) is stored: the bytes are random and long enough that a fast
@@ -18,13 +18,13 @@ pub enum TokenKind {
     PublishableKey,
     Invite,
     PasswordReset,
-    /// An OAuth authorization code (design note 0029, §15): 60 seconds, single use.
+    /// An OAuth authorization code: 60 seconds, single use.
     AuthorizationCode,
     /// An app's OAuth access token: an hour, with the grant's scopes.
     AccessToken,
     /// An app's OAuth refresh token: 30 days, replaced on every use.
     RefreshToken,
-    /// A customer's session on the storefront (design note 0034, AC3).
+    /// A customer's session on the storefront.
     CustomerSession,
 }
 

@@ -1,6 +1,6 @@
-//! The configured email sender (design note 0028, §5): the log or Resend, its HTTP
-//! through `fetch`. SMTP is native only (a Worker can't open SMTP connections through
-//! our host layer), so `email.sender = "smtp"` stops setup.
+//! The configured email sender: the log or Resend, its HTTP through `fetch`. SMTP is native
+//! only (a Worker can't open SMTP connections through our host layer), so `email.sender =
+//! "smtp"` stops setup.
 
 use std::pin::pin;
 use std::sync::Arc;

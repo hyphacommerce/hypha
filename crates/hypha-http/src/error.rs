@@ -23,8 +23,7 @@ use hypha_core::{
 };
 use serde_json::{Value, json};
 
-/// Every error body, for the OpenAPI documents (design note 0010, S9). `ApiError`
-/// serializes as this shape.
+/// Every error body, for the OpenAPI documents. `ApiError` serializes as this shape.
 #[derive(serde::Serialize, utoipa::ToSchema)]
 #[schema(as = Error)]
 pub struct ApiErrorBody {
@@ -108,8 +107,8 @@ impl ApiError {
         }
     }
 
-    /// Over a rate limit (design note 0009, R6). The wait is rounded up to whole
-    /// seconds, at least one, so a client that waits that long gets through.
+    /// Over a rate limit. The wait is rounded up to whole seconds, at least one, so a
+    /// client that waits that long gets through.
     pub fn rate_limited(retry_after: std::time::Duration) -> Self {
         let secs = retry_after.as_secs() + u64::from(retry_after.subsec_nanos() > 0);
         let secs = secs.max(1);
@@ -136,8 +135,8 @@ impl ApiError {
         )
     }
 
-    /// `/oauth/authorize` without `server.admin_url`: there is no consent page to send
-    /// the browser to (design note 0029, §4.1).
+    /// `/oauth/authorize` without `server.admin_url`: there is no consent page to send the
+    /// browser to.
     pub fn admin_url_missing() -> Self {
         Self::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -146,7 +145,7 @@ impl ApiError {
         )
     }
 
-    /// No credentials at all (design note 0008, section 3).
+    /// No credentials at all.
     pub fn unauthenticated() -> Self {
         Self::new(
             StatusCode::UNAUTHORIZED,
@@ -155,7 +154,7 @@ impl ApiError {
         )
     }
 
-    /// An admin route called with a publishable key (design note 0010, S3).
+    /// An admin route called with a publishable key.
     pub fn admin_credentials_required() -> Self {
         Self::new(
             StatusCode::FORBIDDEN,
@@ -173,7 +172,7 @@ impl ApiError {
         )
     }
 
-    /// An account route called without a customer session (design note 0034).
+    /// An account route called without a customer session.
     pub fn account_required() -> Self {
         Self::new(
             StatusCode::UNAUTHORIZED,
@@ -216,8 +215,8 @@ impl ApiError {
         self.code
     }
 
-    /// An app proxy path with a segment that would climb out of the app's proxy URL
-    /// (`.`, `..`, in any encoding) or a backslash (design note 0029, §8).
+    /// An app proxy path with a segment that would climb out of the app's proxy URL (`.`,
+    /// `..`, in any encoding) or a backslash.
     pub fn invalid_proxy_path() -> Self {
         Self::new(
             StatusCode::BAD_REQUEST,
@@ -226,7 +225,7 @@ impl ApiError {
         )
     }
 
-    /// `X-Hypha-Cart` that isn't a cart ID (the app proxy, design note 0029, §8).
+    /// `X-Hypha-Cart` that isn't a cart ID (the app proxy).
     pub fn invalid_cart_header() -> Self {
         Self::new(
             StatusCode::BAD_REQUEST,
@@ -261,7 +260,7 @@ impl ApiError {
         )
     }
 
-    /// A spore's route while staff have the spore disabled (design note 0030, §3).
+    /// A spore's route while staff have the spore disabled.
     pub fn app_disabled(key: &hypha_core::AppKey) -> Self {
         Self::new(
             StatusCode::FORBIDDEN,
@@ -283,8 +282,8 @@ impl ApiError {
         )
     }
 
-    /// The search engine failed: logged, and the client is told only that search is down
-    /// (design note 0019), since the engine's message can name its internals.
+    /// The search engine failed: logged, and the client is told only that search is down,
+    /// since the engine's message can name its internals.
     pub(crate) fn search_unavailable(error: impl std::fmt::Display) -> Self {
         tracing::error!(%error, "search engine failed");
         Self::new(
@@ -311,7 +310,7 @@ impl ApiError {
         )
     }
 
-    /// Owners in a bulk custom fields body that don't exist (design note 0033, §6.1).
+    /// Owners in a bulk custom fields body that don't exist.
     pub fn owners_not_found(owners: Vec<String>) -> Self {
         Self::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -596,10 +595,10 @@ impl From<hypha_categories::CommandError> for ApiError {
     }
 }
 
-/// Custom fields (design note 0033): a definition in the URL is 404; a managed field,
-/// a stale version, a taken key, a changed type, stored values a change would break or
-/// a list that would outgrow its limits are 409; a field the caller may not write is
-/// 403; the rest is invalid input (422).
+/// Custom fields: a definition in the URL is 404; a managed field, a stale version, a taken
+/// key, a changed type, stored values a change would break or a list that would outgrow its
+/// limits are 409; a field the caller may not write is 403; the rest is invalid input
+/// (422).
 impl From<hypha_custom_fields::CommandError> for ApiError {
     fn from(e: hypha_custom_fields::CommandError) -> Self {
         use hypha_custom_fields::CommandError as E;
@@ -690,7 +689,7 @@ impl From<hypha_search::CommandError> for ApiError {
             E::Search(_) | E::Country(_) | E::NoMarketForCountry(_) => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
-            // A hidden category reads as missing (design note 0022, CA4).
+            // A hidden category reads as missing.
             E::CategoryNotFound(_) => StatusCode::NOT_FOUND,
             E::Index(error) => return Self::search_unavailable(error),
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
@@ -718,8 +717,8 @@ impl From<hypha_cart::CommandError> for ApiError {
                 | CartError::ShippingAddressRequired
                 | CartError::CustomerEmailFixed,
             ) => StatusCode::CONFLICT,
-            // Shipping (design note 0015): the group is in the URL; nothing to ship, no
-            // zone and an option not offered right now are the cart's state.
+            // Shipping: the group is in the URL; nothing to ship, no zone and an option not
+            // offered right now are the cart's state.
             E::ShippingGroupNotFound(_) => StatusCode::NOT_FOUND,
             E::NothingToShip | E::NoShippingToCountry(_) | E::ShippingOptionNotOffered { .. } => {
                 StatusCode::CONFLICT
@@ -1088,8 +1087,7 @@ impl From<hypha_media::CommandError> for ApiError {
     }
 }
 
-/// A payment rule's status (design note 0027), or `None` for one only a bug or bad stored
-/// data breaks (a 500).
+/// A payment rule's status, or `None` for one only a bug or bad stored data breaks (a 500).
 fn payment_error_status(e: &hypha_payments::PaymentError) -> Option<StatusCode> {
     use hypha_payments::PaymentError as P;
     match e {
@@ -1228,9 +1226,9 @@ impl From<hypha_checkout::CommandError> for ApiError {
     }
 }
 
-/// An app's extension point gave no usable answer (design note 0029, §15): 502
-/// `app_unavailable` with the app and point. Why (a timeout, a status, a malformed
-/// answer) is in the call log for staff, not in a response a shopper may see.
+/// An app's extension point gave no usable answer: 502 `app_unavailable` with the app and
+/// point. Why (a timeout, a status, a malformed answer) is in the call log for staff, not
+/// in a response a shopper may see.
 impl From<hypha_extensions::ExtensionError> for ApiError {
     fn from(e: hypha_extensions::ExtensionError) -> Self {
         let message = format!("the app {} couldn't answer {}", e.app(), e.point());
@@ -1269,9 +1267,8 @@ impl From<hypha_apps::CommandError> for ApiError {
             | E::SettingsNotFound(_) => StatusCode::NOT_FOUND,
             E::AppExists(_) | E::ActionHasPoint { .. } => StatusCode::CONFLICT,
             E::InvalidContext(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            // A spore's settings (design note 0030, §8): every problem in
-            // `details.errors` (`[{"path", "message"}]`, the field as the path), as a
-            // manifest's.
+            // A spore's settings: every problem in `details.errors` (`[{"path",
+            // "message"}]`, the field as the path), as a manifest's.
             E::SettingsInvalid(problems) => {
                 let details = json!({
                     "errors": problems
@@ -1294,11 +1291,10 @@ impl From<hypha_apps::CommandError> for ApiError {
 }
 
 impl ApiError {
-    /// An app's own rules (design notes 0016, 0029): bad input is 422, with every
-    /// manifest problem in `details.errors` (`[{"path", "message"}]`); an app that isn't
-    /// installed through OAuth, for uninstalling or narrowing, staff setting the
-    /// endpoints of one whose manifest registers them, and changing a spore beyond
-    /// enabling it (design note 0030), 409.
+    /// An app's own rules: bad input is 422, with every manifest problem in
+    /// `details.errors` (`[{"path", "message"}]`); an app that isn't installed through
+    /// OAuth, for uninstalling or narrowing, staff setting the endpoints of one whose
+    /// manifest registers them, and changing a spore beyond enabling it, 409.
     fn from_app(e: hypha_apps::AppError) -> Self {
         use hypha_apps::AppError as E;
         let status = match &e {
@@ -1349,7 +1345,7 @@ impl From<hypha_oauth::CommandError> for ApiError {
         let status = match &e {
             E::Auth(_) | E::CannotGrant(_) => StatusCode::FORBIDDEN,
             E::App(inner) => return Self::from_app(inner.clone()),
-            // Refreshing (§15: 422 with `details.errors` when invalid).
+            // Refreshing (422 with `details.errors` when invalid).
             E::Manifest(inner) => {
                 return Self::manifest(StatusCode::UNPROCESSABLE_ENTITY, inner.clone());
             }

@@ -37,7 +37,7 @@ export type NavItem = {
 
 /**
  * Whether `scopes` (the signed-in staff member's, from `GET /admin/me`) include `scope`.
- * A write scope implies its read scope, as in the API (design note 0008, A7).
+ * A write scope implies its read scope, as in the API.
  */
 export function hasScope(scopes: readonly string[], scope: string): boolean {
   return (

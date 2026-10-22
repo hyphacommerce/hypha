@@ -1,5 +1,5 @@
-//! The Resend sender (design note 0028, §5): `hypha_notifications::EmailSender` over
-//! Resend's HTTP API, `POST https://api.resend.com/emails`.
+//! The Resend sender: `hypha_notifications::EmailSender` over Resend's HTTP API, `POST
+//! https://api.resend.com/emails`.
 //!
 //! It opens no connections itself: HTTP goes through this crate's `HttpClient` port,
 //! which the host implements (`reqwest` natively, `fetch` on Workers), so the crate stays

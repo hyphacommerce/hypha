@@ -1,6 +1,5 @@
-//! The configured email sender (design note 0028, §5): the log, SMTP (`SmtpSender`, on
-//! `lettre` with rustls, here only: Workers can't open SMTP connections) or Resend over
-//! `reqwest`, as one `HostMail`.
+//! The configured email sender: the log, SMTP (`SmtpSender`, on `lettre` with rustls, here
+//! only: Workers can't open SMTP connections) or Resend over `reqwest`, as one `HostMail`.
 
 use std::time::Duration;
 

@@ -1,7 +1,6 @@
-//! Product categories (design note 0022): a plain tree of categories, products in any
-//! number of them, and the rules of the tree (no cycles, a depth limit, unique handles).
-//! A leaf crate on core: search reads membership through it, and `hypha-merchandising`
-//! sets a category's image.
+//! Product categories: a plain tree of categories, products in any number of them, and the
+//! rules of the tree (no cycles, a depth limit, unique handles). A leaf crate on core:
+//! search reads membership through it, and `hypha-merchandising` sets a category's image.
 
 pub mod category;
 pub mod commands;

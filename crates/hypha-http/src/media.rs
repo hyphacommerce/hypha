@@ -1,6 +1,6 @@
-//! Media in the host (design note 0013): the file store (`[media.s3]`, with the keys in
-//! `HYPHA_S3_ACCESS_KEY_ID` and `HYPHA_S3_SECRET_ACCESS_KEY`) and how asset URLs are
-//! built (`media.public_url`, `media.transforms`).
+//! Media in the host: the file store (`[media.s3]`, with the keys in
+//! `HYPHA_S3_ACCESS_KEY_ID` and `HYPHA_S3_SECRET_ACCESS_KEY`) and how asset URLs are built
+//! (`media.public_url`, `media.transforms`).
 
 use hypha_core::{Clock, Timestamp};
 use hypha_media::{Asset, AssetKind, AssetStatus, BlobStore, MediaSettings, Visibility};
@@ -20,14 +20,14 @@ pub struct Media {
     /// For signed URLs' expiry.
     clock: HostClock,
     pub urls: MediaUrls,
-    /// URL lifetimes and the sweep's age (`[media]`, design note 0017).
+    /// URL lifetimes and the sweep's age (`[media]`).
     pub settings: MediaSettings,
 }
 
 /// How a thumbnail is made from a public image URL (`media.transforms`).
 pub use hypha_config::Transforms;
 
-/// Where clients fetch files from (design note 0013, section 4).
+/// Where clients fetch files from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MediaUrls {
     /// `media.public_url`, e.g. `https://cdn.mystore.com`: public files are served from

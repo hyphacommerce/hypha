@@ -9,7 +9,7 @@ use crate::events::{TAX_CLASS, TaxClassChanged};
 pub struct TaxClass {
     id: TaxClassId,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016).
+    /// When it was stored and last changed, set by the adapter.
     stamps: Option<Stamps>,
     name: String,
     events: Recorder,

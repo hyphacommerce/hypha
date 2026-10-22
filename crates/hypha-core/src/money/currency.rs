@@ -5,8 +5,8 @@ use thiserror::Error;
 
 use crate::tables::CURRENCIES;
 
-/// An ISO 4217 currency a shop can charge in (design note 0021, SU1): any code in core's
-/// table, which leaves out funds, precious metals and test codes (XDR, XAU, XXX).
+/// An ISO 4217 currency a shop can charge in: any code in core's table, which leaves out
+/// funds, precious metals and test codes (XDR, XAU, XXX).
 ///
 /// The three ASCII letters themselves, so it's `Copy`, compares by code and needs no
 /// allocation. Every `Currency` holds a code from the table: `new` checks it, and the

@@ -1,6 +1,6 @@
-// Server-only: one admin target's app contributions in place (design note 0029, §5):
-// the blocks' trees fetched now (an app that fails shows a note, never an error), and
-// the apps' action buttons for the target.
+// Server-only: one admin target's app contributions in place: the blocks' trees
+// fetched now (an app that fails shows a note, never an error), and the apps' action
+// buttons for the target.
 
 import { VStack } from "@astryxdesign/core/Layout";
 

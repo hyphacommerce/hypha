@@ -72,8 +72,8 @@ impl<T: HasTaxRegions + ?Sized> HasTaxRegions for &T {
     }
 }
 
-/// Tax-class assignments as a batch writes them (design note 0016, EV3), so the change
-/// and its events commit together.
+/// Tax-class assignments as a batch writes them, so the change and its events commit
+/// together.
 pub trait StageTaxAssignments {
     fn assign_tax_class(&mut self, products: &[ProductId], class: Option<TaxClassId>);
 }

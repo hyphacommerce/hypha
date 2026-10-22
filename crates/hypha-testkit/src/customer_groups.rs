@@ -14,8 +14,8 @@ use crate::{
     table::{Table, missing, page_of},
 };
 
-/// Membership: each group's customers. Shared with the customer repo, whose list filters
-/// by group (design note 0032, §6), as a database joins the tables.
+/// Membership: each group's customers. Shared with the customer repo, whose list filters by
+/// group, as a database joins the tables.
 pub(crate) type GroupMembers = HashMap<CustomerGroupId, HashSet<CustomerId>>;
 
 pub(crate) type SharedGroupMembers = Arc<Mutex<GroupMembers>>;

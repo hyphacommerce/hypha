@@ -1,9 +1,9 @@
-// The Cloudflare API token a deployment runs on (design note 0026, §5): one token, kept
-// in the deployment's `.env`, for wrangler (the API Worker, Hyperdrive, KV, R2) and `cf`
-// (the admin and storefront Workers), so neither tool's own login matters and everything
-// lands in the token's account. The CLI can't create the token (no login may create
-// tokens), so `hypha init` opens Cloudflare's form filled in with what Hypha needs, and
-// checks the token it's given against the account and the domain.
+// The Cloudflare API token a deployment runs on: one token, kept in the deployment's
+// `.env`, for wrangler (the API Worker, Hyperdrive, KV, R2) and `cf` (the admin and
+// storefront Workers), so neither tool's own login matters and everything lands in the
+// token's account. The CLI can't create the token (no login may create tokens), so
+// `hypha init` opens Cloudflare's form filled in with what Hypha needs, and checks the
+// token it's given against the account and the domain.
 
 import { createHash } from "node:crypto";
 
@@ -58,7 +58,7 @@ export const PERMISSIONS: { key: string; type: "read" | "edit"; why: string }[] 
   { key: "zone", type: "read", why: "finding the domain" },
   { key: "workers_routes", type: "edit", why: "the Workers' custom domains" },
   { key: "dns", type: "edit", why: "the custom domains' records" },
-  { key: "d1", type: "edit", why: "the co-located apps' databases (design note 0029, §9)" },
+  { key: "d1", type: "edit", why: "the co-located apps' databases" },
 ];
 
 /** The permissions as the form names them, for telling the person what to add. */

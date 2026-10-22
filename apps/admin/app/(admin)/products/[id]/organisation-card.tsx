@@ -18,8 +18,8 @@ const firstWithLabel = (items: SearchableItem[], label: string) =>
   items.findIndex((item) => item.label.toLowerCase() === label.toLowerCase());
 
 /**
- * How the product is organised (design note 0019, section 2): vendor, product type and
- * tags, which shoppers filter by. Part of the editor's draft.
+ * How the product is organised: vendor, product type and tags, which shoppers filter
+ * by. Part of the editor's draft.
  */
 export function OrganisationCard({
   draft,

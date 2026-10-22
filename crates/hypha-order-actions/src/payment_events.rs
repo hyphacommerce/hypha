@@ -1,11 +1,10 @@
-//! What a payment's provider reports (design note 0029, §3.1): an app learns that a
-//! card was authorized, captured, declined, released or refunded (from its own
-//! provider's webhooks, Stripe's), and tells Hypha through
-//! `POST /admin/payments/{id}/events`. Each report moves the payment and its order's
-//! `financial_status` in one batch, under 0027's rules (the moves `PaymentStatus`
-//! allows). A payment started for a cart before its order (design note 0031) has no
-//! order yet: the report moves the payment alone, and the host completes the checkout
-//! once it says the money is committed (`hypha_checkout::complete_paid_checkout`).
+//! What a payment's provider reports: an app learns that a card was authorized, captured,
+//! declined, released or refunded (from its own provider's webhooks, Stripe's), and tells
+//! Hypha through `POST /admin/payments/{id}/events`. Each report moves the payment and its
+//! order's `financial_status` in one batch, under 0027's rules (the moves `PaymentStatus`
+//! allows). A payment started for a cart before its order has no order yet: the report
+//! moves the payment alone, and the host completes the checkout once it says the money is
+//! committed (`hypha_checkout::complete_paid_checkout`).
 
 use hypha_apps::{AppRepo, HasApps};
 use hypha_core::{
@@ -26,7 +25,7 @@ pub const PAYMENT_EVENT: &str = "payment_event";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PaymentEventKind {
     Authorized,
-    /// Taken and being collected (SEPA Direct Debit: days; design note 0031, Q3).
+    /// Taken and being collected (SEPA Direct Debit: days).
     Processing,
     Paid,
     Failed,
@@ -38,7 +37,7 @@ pub enum PaymentEventKind {
 }
 
 /// What a report left: the payment, and its order with all its payments once it has one
-/// (`None` for a cart's payment before checkout placed the order: design note 0031).
+/// (`None` for a cart's payment before checkout placed the order).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentReport {
     pub payment: Payment,
@@ -78,10 +77,9 @@ pub struct PaymentEvent {
 }
 
 /// Whether `ctx` may report on `payment`. An app calling with its own OAuth token
-/// (`Actor::App`, design note 0029, §15), or a spore acting as its app (design note
-/// 0030, §3), only on the payments it collects: their provider belongs to it
-/// (`ProviderKey::belongs_to`). Staff, API keys and the system may report on any payment
-/// with `payments:write`.
+/// (`Actor::App`), or a spore acting as its app, only on the payments it collects: their
+/// provider belongs to it (`ProviderKey::belongs_to`). Staff, API keys and the system may
+/// report on any payment with `payments:write`.
 async fn check_reporter<S: HasApps>(
     ctx: &Ctx,
     ports: &S,

@@ -1,6 +1,5 @@
-// Countries as the admin shows them (design note 0021, SU2): a flag and the local name
-// (`Intl.DisplayNames`), falling back to the API's English name. Shared by server and
-// client components.
+// Countries as the admin shows them: a flag and the local name (`Intl.DisplayNames`),
+// falling back to the API's English name. Shared by server and client components.
 
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
@@ -54,7 +53,7 @@ export function takenCountries(
   );
 }
 
-/** Groups of countries for picking many at once (design note 0024, section 6). */
+/** Groups of countries for picking many at once. */
 export const REGIONS: { key: string; label: string; codes: string[] }[] = [
   {
     key: "eu",

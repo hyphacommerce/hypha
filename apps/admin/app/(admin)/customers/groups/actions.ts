@@ -1,6 +1,6 @@
 "use server";
 
-// Customer groups (design note 0032, §6): the groups themselves and who's in them.
+// Customer groups: the groups themselves and who's in them.
 
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { revalidatePath } from "next/cache";

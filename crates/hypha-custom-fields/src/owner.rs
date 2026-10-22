@@ -1,19 +1,18 @@
-//! What custom fields belong to (design note 0033, §6.1). The leaf can't see products
-//! or customers: routes and workflows check an owner exists through its own repository
-//! before passing it here.
+//! What custom fields belong to. The leaf can't see products or customers: routes and
+//! workflows check an owner exists through its own repository before passing it here.
 
 use std::{fmt, str::FromStr};
 
 use hypha_core::{CategoryId, CustomerId, OrderId, ProductId, Scope, VariantId};
 use uuid::Uuid;
 
-/// The kinds of record that hold custom fields in v1 (Q3). More later (markets,
-/// locations, carts) with no model change: a value row names only its owner's ID.
+/// The kinds of record that hold custom fields in v1. More later (markets, locations,
+/// carts) with no model change: a value row names only its owner's ID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OwnerType {
     Product,
     Variant,
-    /// Product categories (design note 0022).
+    /// Product categories.
     Category,
     Customer,
     Order,
@@ -38,8 +37,8 @@ impl OwnerType {
         }
     }
 
-    /// The scope that reads an owner of this type, and so its `custom.*` fields (§5.1).
-    /// Categories are part of the catalog, like their commands.
+    /// The scope that reads an owner of this type, and so its `custom.*` fields. Categories
+    /// are part of the catalog, like their commands.
     pub fn read_scope(self) -> Scope {
         match self {
             OwnerType::Product | OwnerType::Variant | OwnerType::Category => Scope::ProductsRead,
@@ -68,12 +67,12 @@ impl OwnerType {
         }
     }
 
-    /// Whether its definitions may be `personal` (§2: only customers and orders).
+    /// Whether its definitions may be `personal` (only customers and orders).
     pub fn allows_personal(self) -> bool {
         matches!(self, OwnerType::Customer | OwnerType::Order)
     }
 
-    /// The event its writes record (§6.4). Variants report on their product's.
+    /// The event its writes record. Variants report on their product's.
     pub fn event_type(self) -> &'static str {
         match self {
             OwnerType::Product | OwnerType::Variant => "product.custom_fields_updated",
@@ -102,9 +101,8 @@ impl FromStr for OwnerType {
     }
 }
 
-/// One owner: its type and ID, and for a variant its product (the event is the
-/// product's, §6.4). Built from the typed IDs, so a value can't be given to the wrong
-/// kind of record.
+/// One owner: its type and ID, and for a variant its product (the event is the product's).
+/// Built from the typed IDs, so a value can't be given to the wrong kind of record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Owner {
     kind: OwnerType,

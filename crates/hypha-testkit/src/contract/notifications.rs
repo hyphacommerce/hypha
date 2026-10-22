@@ -1,6 +1,6 @@
-//! Notifications (design note 0028): stored templates by (key, locale), the store's
-//! one settings record (also in a batch with the logo's asset usage), and the record of
-//! messages with its (event, template, recipient) key.
+//! Notifications: stored templates by (key, locale), the store's one settings record (also
+//! in a batch with the logo's asset usage), and the record of messages with its (event,
+//! template, recipient) key.
 
 use hypha_core::{
     AssetId, Email, EventId, HasBatch, Language, NotificationId, OrderId, PageLimit, PageRequest,

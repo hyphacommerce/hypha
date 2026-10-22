@@ -1,7 +1,7 @@
-//! Batches that update and delete inventory items lock them in one order (review fix,
-//! design note 0018): a batch that updates X and deletes Y racing one that updates Y and
-//! X must queue, never deadlock. A deadlock is retried like a stale write, but Postgres
-//! only finds it after `deadlock_timeout` (1 s by default), so every one costs a second.
+//! Batches that update and delete inventory items lock them in one order (review fix): a
+//! batch that updates X and deletes Y racing one that updates Y and X must queue, never
+//! deadlock. A deadlock is retried like a stale write, but Postgres only finds it after
+//! `deadlock_timeout` (1 s by default), so every one costs a second.
 //!
 //! Needs `DATABASE_URL` like the contract tests; skips itself without it.
 

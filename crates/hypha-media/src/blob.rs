@@ -1,5 +1,5 @@
-//! Where files live (design note 0013, section 8): the `BlobStore` port. The S3 adapter
-//! (`hypha-store-s3`) serves R2, S3 and MinIO; the testkit has one in memory.
+//! Where files live: the `BlobStore` port. The S3 adapter (`hypha-store-s3`) serves R2, S3
+//! and MinIO; the testkit has one in memory.
 //!
 //! Files never pass through Hypha: a client uploads straight to storage with a presigned
 //! request (to an `uploads/…` key), and Hypha signs it, checks what was stored, and

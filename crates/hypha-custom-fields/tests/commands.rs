@@ -1,4 +1,4 @@
-//! Custom field commands (design note 0033) over a store in memory.
+//! Custom field commands over a store in memory.
 
 use std::{
     cell::RefCell,

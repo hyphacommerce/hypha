@@ -20,9 +20,9 @@ pub enum SearchError {
     /// `field.<namespace>.<key>`.
     #[error("unknown facet {0:?}")]
     UnknownFacet(String),
-    /// A `field.<namespace>.<key>` facet whose field can't be one (design note 0033, §9):
-    /// no product or variant field has that key, or it isn't `filterable`, shown on
-    /// storefronts, and of type text, choice, boolean, integer or a list of those.
+    /// A `field.<namespace>.<key>` facet whose field can't be one: no product or variant
+    /// field has that key, or it isn't `filterable`, shown on storefronts, and of type
+    /// text, choice, boolean, integer or a list of those.
     #[error(
         "custom field {0} can't be a search facet: it must be a filterable product or variant field shown on storefronts, of type text, choice, boolean or integer (or a list of them)"
     )]

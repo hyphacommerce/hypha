@@ -1,5 +1,5 @@
-//! Notifications (design note 0028): stored templates, the store's one settings row,
-//! and the record of messages. One row each, no child tables.
+//! Notifications: stored templates, the store's one settings row, and the record of
+//! messages. One row each, no child tables.
 
 use hypha_core::{
     AssetId, Email, EventId, Language, NotificationId, OrderId, Page, PageRequest, RepoError,

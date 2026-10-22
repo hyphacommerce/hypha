@@ -85,20 +85,17 @@ export type SaveResult = {
   categories?: string[];
   /** The product's channels as stored, when the save set them. */
   channels?: string[];
-  /** The product's custom fields as stored, when the save set them (design note 0033). */
+  /** The product's custom fields as stored, when the save set them. */
   customFields?: FieldsResponse;
   /** A refused custom fields write's problems by field key. */
   fieldProblems?: Record<string, string>;
 };
 
 /**
- * Saves the product editor's draft (design note 0021, section 8): the product's PATCH,
- * then its options, then its whole variant list (`PUT …/variants`), then its categories
- * (`PUT …/categories`, design note 0022), then its channels (`PUT …/channels`, design
- * note 0020), each only when its part changed; categories and channels together, after
- * the rest; then its custom fields (`PATCH …/custom-fields`, design note 0033). Values created by the options step are found by option name and label for
- * the variants that select them. Stops at the first failure: what came before it stays
- * saved.
+ * Saves the product editor's draft: the product's PATCH, then its options, then its whole variant list (`PUT …/variants`), then its categories (`PUT
+ * …/categories`), then its channels (`PUT …/channels`), each only when its part changed; categories and channels together, after the rest; then its
+ * custom fields (`PATCH …/custom-fields`). Values created by the options step are found by option name and label for the variants that select them. Stops
+ * at the first failure: what came before it stays saved.
  */
 export async function saveProduct(
   id: string,
@@ -249,7 +246,7 @@ export async function libraryPage(
   return { items: [], next };
 }
 
-/** A variant's stock (design note 0004): `id` is `null` while it isn't tracked. */
+/** A variant's stock: `id` is `null` while it isn't tracked. */
 export type Stock = AdminSchemas["InventoryResponse"];
 
 /** What the stock dialog saves: tracking, and the count on hand per location with the

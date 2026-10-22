@@ -1,11 +1,11 @@
 "use server";
 
-// Every change a shopper makes, as server actions (design note 0023, SF5): the cart ID
-// stays in an httpOnly cookie and the publishable key on the server. Pages other than
-// search, cart, checkout and account are static (ISR), so they never read the cookie:
-// the header and the cart drawer read the cart through `loadCart` once the page is in
-// the browser, and the cart's actions answer with the cart, for the drawer to show.
-// The forms take typed input and get the shopper's message back when the API refused.
+// Every change a shopper makes, as server actions: the cart ID stays in an httpOnly
+// cookie and the publishable key on the server. Pages other than search, cart,
+// checkout and account are static (ISR), so they never read the cookie: the header and
+// the cart drawer read the cart through `loadCart` once the page is in the browser,
+// and the cart's actions answer with the cart, for the drawer to show. The forms take
+// typed input and get the shopper's message back when the API refused.
 
 import { refresh } from "next/cache";
 import { cookies } from "next/headers";
@@ -44,7 +44,7 @@ function optional(value: string | undefined): string | null {
 }
 
 /** A new cart in `country`, remembered in the shopper's cookies; a signed-in shopper's
- * is theirs from the start (design note 0034, §4). */
+ * is theirs from the start. */
 async function newCart(country: string): Promise<string> {
   const session = await sessionHeaders();
   let answer = await (await shopperApi(session)).POST("/storefront/carts", { body: { country } });
@@ -156,8 +156,8 @@ export async function saveDetails(
     body: { email: details.email.trim() },
   });
   if (email.error) return refused(email.error);
-  // "Email me with news and offers" (design note 0032, §5): checkout records the
-  // consent when it's ticked; unticked never unsubscribes anyone.
+  // "Email me with news and offers": checkout records the consent when it's
+  // ticked; unticked never unsubscribes anyone.
   if (email.data.marketing_opt_in !== marketingOptIn) {
     const marketing = await client.PUT("/storefront/carts/{id}/marketing", {
       params: { path: { id } },
@@ -202,8 +202,7 @@ export async function selectShipping(input: {
   refresh();
 }
 
-/** Checkout's third step, when there's something to pay: how the shopper pays (design
- * note 0027, §4). */
+/** Checkout's third step, when there's something to pay: how the shopper pays. */
 export async function selectPaymentMethod(input: {
   country: string;
   method: string;
@@ -225,10 +224,10 @@ export type PlaceOrderResult = { error: string; step?: "payment"; pending?: bool
  * Places the order at the total the shopper saw, with the payment method they chose: a
  * total that moved since is refused (`total_changed`) rather than charged. The
  * idempotency key (one per render of the checkout) makes a double click place one order.
- * A method paid online needs its money committed first (design note 0031: the card form
- * on the checkout, `startCartPayment`); until the provider says so the answer is
- * `pending`. A cart checked out already (the provider's webhook got there first) is
- * answered with its order.
+ * A method paid online needs its money committed first (the card form on the checkout,
+ * `startCartPayment`); until the provider says so the answer is `pending`. A cart
+ * checked out already (the provider's webhook got there first) is answered with its
+ * order.
  */
 export async function placeOrder(input: {
   country: string;
@@ -255,7 +254,7 @@ export async function placeOrder(input: {
   redirect(link(input.country, `/order/${result.order}/confirmed`));
 }
 
-/** What starting the cart's payment answered (design note 0031). */
+/** What starting the cart's payment answered. */
 export type CartPaymentResult = {
   nextAction: StorefrontSchemas["NextActionResponse"] | null;
   /** The shopper's message when it couldn't start. */
@@ -267,11 +266,10 @@ export type CartPaymentResult = {
 };
 
 /**
- * Starts paying for the cart with its online method, before the order exists (design
- * note 0031): the provider's card form (mounted on the checkout) or its page. Started
- * again (the page reloaded), the provider resumes the same payment. `returnUrl` is where
- * a provider's page sends the shopper back (`/checkout/complete`), made absolute in the
- * browser.
+ * Starts paying for the cart with its online method, before the order exists: the
+ * provider's card form (mounted on the checkout) or its page. Started again (the page
+ * reloaded), the provider resumes the same payment. `returnUrl` is where a provider's
+ * page sends the shopper back (`/checkout/complete`), made absolute in the browser.
  */
 export async function startCartPayment(input: {
   country: string;
@@ -330,7 +328,7 @@ export type Suggestion = {
   image: string | null;
 };
 
-/** The header's suggestions: the first five search results for `q` (0024, §7). */
+/** The header's suggestions: the first five search results for `q`. */
 export async function suggest(country: string, q: string): Promise<Suggestion[]> {
   const text = q.trim();
   if (text === "") return [];
@@ -350,8 +348,8 @@ export async function suggest(country: string, q: string): Promise<Suggestion[]>
 
 /**
  * A listing's page for a query string, when a static category page is filtered, sorted
- * or paged in the browser (design note 0024, §7): the page itself can't read the URL's
- * query without becoming dynamic.
+ * or paged in the browser: the page itself can't read the URL's query without becoming
+ * dynamic.
  */
 export async function listingPage(input: {
   country: string;

@@ -1,7 +1,6 @@
-//! The event handlers the Worker runs (design note 0019, section 5): the composition
-//! root for core's in-process destinations. A spore contributes its own
-//! (`Spore::Handlers`), joined to these by `WorkersStorage` (design note 0030, §4); the
-//! dispatcher runs whatever it's given and knows none of them.
+//! The event handlers the Worker runs: the composition root for core's in-process
+//! destinations. A spore contributes its own (`Spore::Handlers`), joined to these by
+//! `WorkersStorage`; the dispatcher runs whatever it's given and knows none of them.
 
 use std::sync::Arc;
 

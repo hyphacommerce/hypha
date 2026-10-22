@@ -1,7 +1,6 @@
-//! Customer groups (design note 0032, §6, CD5): named, static sets of customers with a
-//! stable ID other domains point at (prices, payment methods, later). A plain aggregate,
-//! not a hierarchy; who's in it is its membership, kept apart like a category's
-//! products (`CustomerGroupRepo::add_members`).
+//! Customer groups: named, static sets of customers with a stable ID other domains point at
+//! (prices, payment methods, later). A plain aggregate, not a hierarchy; who's in it is its
+//! membership, kept apart like a category's products (`CustomerGroupRepo::add_members`).
 
 use std::collections::BTreeSet;
 

@@ -1,7 +1,7 @@
-//! Concurrent checkouts against a real Postgres, each request on its own connection
-//! (design note 0007, section 2): carts racing for the last units never oversell, a cart
-//! checked out twice at once becomes one order, and retries with the same idempotency
-//! key all get that one order back (and, the same way, add a line only once).
+//! Concurrent checkouts against a real Postgres, each request on its own connection: carts
+//! racing for the last units never oversell, a cart checked out twice at once becomes one
+//! order, and retries with the same idempotency key all get that one order back (and, the
+//! same way, add a line only once).
 //!
 //! Needs `DATABASE_URL` like the contract tests; skips itself without it.
 
@@ -322,9 +322,8 @@ async fn one_cart_checked_out_at_once_becomes_one_order() {
     }))
     .await;
 
-    // One checkout places the order; the others are answered with it (design note
-    // 0031: the shopper's browser and the provider's webhook may both complete a cart),
-    // or ran out of retries.
+    // One checkout places the order; the others are answered with it (the shopper's browser
+    // and the provider's webhook may both complete a cart), or ran out of retries.
     let placed: Vec<_> = results
         .iter()
         .filter_map(|r| r.as_ref().ok())

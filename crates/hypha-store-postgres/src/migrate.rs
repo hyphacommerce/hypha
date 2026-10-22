@@ -381,9 +381,9 @@ pub enum MigrateError {
         module: String,
         version: i32,
     },
-    /// A spore's migration created something not named `spore_<name>_*`, touched a
-    /// table outside its prefix, or added a foreign key that could block a core delete
-    /// (design note 0030, §5). It was rolled back.
+    /// A spore's migration created something not named `spore_<name>_*`, touched a table
+    /// outside its prefix, or added a foreign key that could block a core delete. It was
+    /// rolled back.
     SporeObjects {
         module: String,
         version: i32,
@@ -598,8 +598,8 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
                     }
                 }
                 None => {
-                    // A spore's migration may only touch what's its own (design note
-                    // 0030, §5): the catalog before and after says what it did.
+                    // A spore's migration may only touch what's its own: the catalog before
+                    // and after says what it did.
                     let spore = set.module.starts_with("spore_");
                     let before = match spore {
                         true => Some(crate::spore_check::snapshot(&tx).await?),
@@ -641,8 +641,7 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
 }
 
 /// Ends a migration's transaction explicitly: COMMIT after `result` succeeded, else an
-/// awaited ROLLBACK, never a drop (design note 0026, §8), as `end_transaction` does for
-/// the repositories.
+/// awaited ROLLBACK, never a drop, as `end_transaction` does for the repositories.
 async fn finish(
     tx: tokio_postgres::Transaction<'_>,
     result: Result<(), MigrateError>,

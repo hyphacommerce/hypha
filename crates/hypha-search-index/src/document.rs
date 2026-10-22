@@ -1,6 +1,6 @@
-//! Search documents (design note 0019, section 3): one per variant per market, with
-//! its product's fields, priced and stocked as a shopper in that market sees it. Built
-//! by `hypha_search::build_documents`; engines store them as they like.
+//! Search documents: one per variant per market, with its product's fields, priced and
+//! stocked as a shopper in that market sees it. Built by `hypha_search::build_documents`;
+//! engines store them as they like.
 
 use hypha_core::{
     AssetId, CategoryId, ChannelId, MarketId, Money, ProductId, Timestamp, VariantId,
@@ -45,12 +45,12 @@ pub struct SearchDocument {
     /// What `group=listing` collapses on: the product ID, followed by the split
     /// options' values when the merchant splits listings (`prod_…|color=Red`).
     pub listing: String,
-    /// The channels the product is published to, sorted (design note 0020): the same on
-    /// every document of the product.
+    /// The channels the product is published to, sorted: the same on every document of the
+    /// product.
     pub channels: Vec<ChannelId>,
-    /// The product's shown categories and all their ancestors, sorted (design note
-    /// 0022, CA3, CA4): a filter on "Clothing" finds what's in "Shirts" too, and nothing
-    /// that's only in a hidden category.
+    /// The product's shown categories and all their ancestors, sorted: a filter on
+    /// "Clothing" finds what's in "Shirts" too, and nothing that's only in a hidden
+    /// category.
     pub categories: Vec<CategoryId>,
     pub handle: String,
     pub title: String,
@@ -64,12 +64,11 @@ pub struct SearchDocument {
     pub sku: Option<String>,
     /// Option name and value label, in option order (`("Color", "Red")`).
     pub options: Vec<(String, String)>,
-    /// Custom field values a storefront may filter by (design note 0033, §9): the
-    /// field's full key and one facet value (`("custom.material", "wool")`), the
-    /// variant's value where it has one, else the product's. A `choice` gives its key
-    /// (labels come from the definition), a list one entry per item, a boolean
-    /// `true`/`false`, an integer its digits. Sorted by key, then in the list's order;
-    /// no (key, value) twice.
+    /// Custom field values a storefront may filter by: the field's full key and one facet
+    /// value (`("custom.material", "wool")`), the variant's value where it has one, else
+    /// the product's. A `choice` gives its key (labels come from the definition), a list
+    /// one entry per item, a boolean `true`/`false`, an integer its digits. Sorted by key,
+    /// then in the list's order; no (key, value) twice.
     pub fields: Vec<(String, String)>,
     /// In the market's currency.
     pub price: Money,
@@ -85,7 +84,7 @@ pub struct SearchDocument {
     pub position: u32,
 }
 
-/// The fields' terms by weight, for engines that rank (design note 0019, section 4).
+/// The fields' terms by weight, for engines that rank.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WeightedTerms {
     /// Title and variant title.

@@ -1,7 +1,6 @@
-// Server-only: how the storefront talks to the Hypha storefront API (design note 0023,
-// SF2). The publishable key stays here; pages render on the server and changes go
-// through server actions, so the browser never needs it. Never import this from a
-// "use client" file.
+// Server-only: how the storefront talks to the Hypha storefront API. The publishable
+// key stays here; pages render on the server and changes go through server actions, so
+// the browser never needs it. Never import this from a "use client" file.
 
 import { apiFetch } from "#api-fetch";
 import { type StorefrontSchemas, createStorefrontClient } from "@hypha/sdk/storefront";
@@ -33,13 +32,12 @@ export function api(extra: Record<string, string> = {}) {
 
 /**
  * A client that passes the shopper's address on, for the calls Hypha limits per address
- * (creating a cart; design note 0009), so the limit counts the shopper, not this server.
- * Only from a source the browser can't forge, as the admin's (`apps/admin/lib/hypha.ts`):
- * Cloudflare's `cf-connecting-ip` on Workers (the API believes it through its own Service
- * Binding, design note 0026), or, behind this deployment's own proxy
- * (`STOREFRONT_TRUST_X_FORWARDED_FOR=true`, a VPS's Caddy), the last `x-forwarded-for`
- * entry, which the API believes from its trusted proxies. Server actions only: it reads
- * the request's headers.
+ * (creating a cart), so the limit counts the shopper, not this server. Only from a source
+ * the browser can't forge, as the admin's (`apps/admin/lib/hypha.ts`): Cloudflare's
+ * `cf-connecting-ip` on Workers (the API believes it through its own Service Binding),
+ * or, behind this deployment's own proxy (`STOREFRONT_TRUST_X_FORWARDED_FOR=true`, a
+ * VPS's Caddy), the last `x-forwarded-for` entry, which the API believes from its trusted
+ * proxies. Server actions only: it reads the request's headers.
  */
 export async function shopperApi(extra: Record<string, string> = {}) {
   const h = await headers();
@@ -81,7 +79,7 @@ export const loadStore = cache(
   }),
 );
 
-/** Every country a market sells to, with its currency and minor units (SF6). */
+/** Every country a market sells to, with its currency and minor units. */
 export const loadCountries = cache(
   unstable_cache(
     async (): Promise<Country[]> => loaded(await api().GET("/storefront/countries")).items,
@@ -149,9 +147,9 @@ export const loadProduct = cache((handle: string, country: string) =>
 );
 
 /**
- * The custom fields storefronts are given (design note 0033, §6.2), to name, order and
- * label values: once per request, cached and tagged `custom-fields` (the webhook expires
- * it when a definition changes).
+ * The custom fields storefronts are given, to name, order and label values: once per
+ * request, cached and tagged `custom-fields` (the webhook expires it when a definition
+ * changes).
  */
 export const loadFieldDefinitions = cache(
   unstable_cache(
@@ -187,11 +185,11 @@ function flatten(nodes: CategoryNode[]): CategoryNode[] {
 }
 
 /**
- * What custom fields need to be shown on a page (design note 0033, §6.2): the store's
- * language, the country's currency, and the product and category references among
- * `values` as links to their pages (categories from the shown tree; products read by ID,
- * at most `MAX_REFERENCES`). A reference that can't be read isn't shown: a field is
- * decoration, so its failure never fails the page.
+ * What custom fields need to be shown on a page: the store's language, the country's
+ * currency, and the product and category references among `values` as links to their
+ * pages (categories from the shown tree; products read by ID, at most `MAX_REFERENCES`).
+ * A reference that can't be read isn't shown: a field is decoration, so its failure
+ * never fails the page.
  */
 export async function fieldContext(
   country: Country,

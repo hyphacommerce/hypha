@@ -1,5 +1,5 @@
-//! An identity and its credentials (design note 0008, A2): how one principal (a staff
-//! member; later a customer) can prove who they are.
+//! An identity and its credentials: how one principal (a staff member; later a customer)
+//! can prove who they are.
 
 use core::time::Duration;
 
@@ -18,7 +18,7 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Principal {
     Staff(UserId),
-    /// A shopper with an account (design note 0034).
+    /// A shopper with an account.
     Customer(CustomerId),
 }
 
@@ -76,9 +76,9 @@ pub enum Credential {
     },
     /// The unused recovery codes, hashed.
     RecoveryCodes { hashes: Vec<TokenHash> },
-    /// A customer's way in (design note 0034, AC1): the email a code was sent to, the
-    /// code's hash, when it stops working and how many wrong guesses it took. One live
-    /// code at a time; a new request replaces it. `None` hash: no code is out.
+    /// A customer's way in: the email a code was sent to, the code's hash, when it stops
+    /// working and how many wrong guesses it took. One live code at a time; a new request
+    /// replaces it. `None` hash: no code is out.
     EmailCode {
         email: Email,
         hash: Option<TokenHash>,
@@ -174,8 +174,7 @@ impl Identity {
         }
     }
 
-    /// An identity that signs in with a code emailed to `email` (design note 0034): no
-    /// code is out yet.
+    /// An identity that signs in with a code emailed to `email`: no code is out yet.
     pub fn with_email_code(id: IdentityId, principal: Principal, email: Email) -> Self {
         Self {
             id,
@@ -190,7 +189,7 @@ impl Identity {
         }
     }
 
-    /// Wrong email codes before the code is void (design note 0034, AC1).
+    /// Wrong email codes before the code is void.
     pub const MAX_CODE_ATTEMPTS: u32 = 5;
 
     /// The email codes go to, if this identity signs in with one.
@@ -517,8 +516,8 @@ impl Identity {
 
 // ---------- storage ----------
 
-/// One credential as storage keeps it (design note 0008, A2): a kind, the lookup a
-/// login finds it by, and the rest as JSON. A new credential kind needs no new column.
+/// One credential as storage keeps it: a kind, the lookup a login finds it by, and the rest
+/// as JSON. A new credential kind needs no new column.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredCredential {
     pub kind: String,
@@ -526,7 +525,7 @@ pub struct StoredCredential {
     pub data: serde_json::Value,
 }
 
-/// Plain-data form of an `Identity` for storage adapters (design note 0001, 3.4).
+/// Plain-data form of an `Identity` for storage adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdentitySnapshot {
     pub id: IdentityId,

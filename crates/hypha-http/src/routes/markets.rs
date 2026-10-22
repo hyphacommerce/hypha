@@ -503,7 +503,7 @@ pub async fn assign_price_list_handler<S: Storage>(
     Ok(Json(CatalogResponse::from(&catalog)))
 }
 
-// ---------- reads (design note 0021, SU3) ----------
+// ---------- reads ----------
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct PriceListListResponse {
@@ -722,7 +722,7 @@ pub async fn list_catalog_products_handler<S: Storage>(
     )?))
 }
 
-// ---------- storefront (design note 0021, SU6) ----------
+// ---------- storefront ----------
 
 /// A country a market sells to, with what a storefront needs to show prices there.
 #[derive(Serialize, utoipa::ToSchema)]
@@ -744,8 +744,8 @@ pub struct StorefrontCountryListResponse {
     items: Vec<StorefrontCountryResponse>,
 }
 
-/// Where the store sells: each country with its market's currency (design note 0021,
-/// SU6). What a country picker and a storefront's routing need.
+/// Where the store sells: each country with its market's currency. What a country picker
+/// and a storefront's routing need.
 #[utoipa::path(
     get,
     path = "/storefront/countries",

@@ -1,7 +1,6 @@
-// Server-only: the shopper's account session (design note 0034). The session token
-// lives in an httpOnly cookie, like the cart's ID, and rides beside the publishable key
-// on the API calls the account pages and actions make. Never import this from a
-// "use client" file.
+// Server-only: the shopper's account session. The session token lives in an httpOnly
+// cookie, like the cart's ID, and rides beside the publishable key on the API calls the
+// account pages and actions make. Never import this from a "use client" file.
 
 import { cookies } from "next/headers";
 

@@ -1,4 +1,4 @@
-//! Erasing a customer's personal data and exporting it (design note 0032, §7.3, §7.4).
+//! Erasing a customer's personal data and exporting it.
 
 use hypha_auth::{IdentityRepo as _, SessionRepo as _};
 use std::time::Duration;
@@ -139,7 +139,7 @@ fn world() -> (InMemoryPorts, FixedClock) {
     let mut open = cart_of(ana_id(), 2);
     block_on(ports.carts.insert(&mut open)).unwrap();
 
-    // Ana has an account (design note 0034): an identity and a live session.
+    // Ana has an account: an identity and a live session.
     let mut identity = hypha_auth::Identity::with_email_code(
         hypha_core::IdentityId::from_uuid(Uuid::from_u128(901)),
         hypha_auth::Principal::Customer(ana_id()),
@@ -280,7 +280,7 @@ fn erasing_removes_the_person_and_keeps_the_orders() {
         None
     );
 
-    // Her account went too (design note 0034, AC10): no identity, the session ended.
+    // Her account went too: no identity, the session ended.
     {
         assert_eq!(
             block_on(

@@ -30,8 +30,8 @@ impl CartLine {
     }
 }
 
-/// The buyer's shipping choice for the cart's group (design note 0015, SH8): an option,
-/// and for one priced by a provider, the quote they were shown (SH9).
+/// The buyer's shipping choice for the cart's group: an option, and for one priced by a
+/// provider, the quote they were shown.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectedShipping {
     pub option: ShippingOptionId,
@@ -50,7 +50,7 @@ pub struct StoredQuote {
 }
 
 impl StoredQuote {
-    /// How long a quote holds before checkout asks the provider again (SH9).
+    /// How long a quote holds before checkout asks the provider again.
     pub const VALID_FOR_SECS: i64 = 15 * 60;
 
     pub fn expires_at(&self) -> Timestamp {
@@ -58,7 +58,7 @@ impl StoredQuote {
     }
 }
 
-/// Whether a cart can still change (design note 0007, O6).
+/// Whether a cart can still change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CartStatus {
     Open,
@@ -71,32 +71,31 @@ pub enum CartStatus {
 /// A cart ships to one country, which picked its market (and so its currency) when the
 /// cart was created, and picks its tax rates.
 ///
-/// Its buyer is an optional `email` and `customer`, like Shopify's `buyerIdentity`
-/// (design note 0005, C5); checkout needs at least the email.
+/// Its buyer is an optional `email` and `customer`, like Shopify's `buyerIdentity`;
+/// checkout needs at least the email.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cart {
     id: CartId,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016).
+    /// When it was stored and last changed, set by the adapter.
     stamps: Option<Stamps>,
     market: MarketId,
     country: CountryCode,
-    /// The sales channel it was made in (design note 0020): its storefront's. It sells
-    /// only what that channel publishes, and its order records it.
+    /// The sales channel it was made in: its storefront's. It sells only what that channel
+    /// publishes, and its order records it.
     channel: ChannelId,
     lines: Vec<CartLine>,
     email: Option<Email>,
     customer: Option<CustomerId>,
     status: CartStatus,
-    /// In `country` (design note 0015, Q5).
+    /// In `country`.
     shipping_address: Option<Address>,
-    /// The choice for the cart's one group of shippable lines (SH8).
+    /// The choice for the cart's one group of shippable lines.
     shipping: Option<SelectedShipping>,
-    /// How the buyer will pay (design note 0027, PA6): checked when chosen and again
-    /// at checkout.
+    /// How the buyer will pay: checked when chosen and again at checkout.
     payment_method: Option<PaymentMethodId>,
-    /// "Email me with news and offers" (design note 0032, §5): checkout records the
-    /// consent when it's ticked; unticked never unsubscribes anyone.
+    /// "Email me with news and offers": checkout records the consent when it's ticked;
+    /// unticked never unsubscribes anyone.
     marketing_opt_in: bool,
 }
 
@@ -140,9 +139,9 @@ impl Cart {
         }
     }
 
-    /// Erasure (design note 0032, §7.3) of a cart that was checked out: the buyer's email
-    /// becomes `placeholder` and the address goes; the lines, totals and link to the
-    /// customer stay. Open carts are deleted instead. Not bound to the cart being open.
+    /// Erasure of a cart that was checked out: the buyer's email becomes `placeholder` and
+    /// the address goes; the lines, totals and link to the customer stay. Open carts are
+    /// deleted instead. Not bound to the cart being open.
     pub fn redact(&mut self, placeholder: Email) -> bool {
         let mut changed = false;
         if self.email.as_ref().is_some_and(|e| *e != placeholder) {
@@ -157,7 +156,7 @@ impl Cart {
         changed
     }
 
-    /// Ticks or unticks the marketing box (design note 0032, §5).
+    /// Ticks or unticks the marketing box.
     pub fn set_marketing_opt_in(&mut self, opt_in: bool) -> Result<(), CartError> {
         self.ensure_open()?;
         self.marketing_opt_in = opt_in;
@@ -185,9 +184,9 @@ impl Cart {
         Ok(())
     }
 
-    /// A linked customer is who the order is for, so their cart keeps their email:
-    /// clearing it fails until the customer is unlinked, and changing it is refused
-    /// (design note 0034, §4; setting the same address again is fine).
+    /// A linked customer is who the order is for, so their cart keeps their email: clearing
+    /// it fails until the customer is unlinked, and changing it is refused (setting the
+    /// same address again is fine).
     pub fn set_email(&mut self, email: Option<Email>) -> Result<(), CartError> {
         self.ensure_open()?;
         if self.customer.is_some() {
@@ -331,7 +330,7 @@ impl Cart {
     }
 
     /// Whether a caller in `channel` may use the cart: a storefront only its own channel's
-    /// carts (design note 0020); staff and secret keys, in no channel, every cart.
+    /// carts; staff and secret keys, in no channel, every cart.
     pub fn visible_in(&self, channel: Option<ChannelId>) -> bool {
         channel.is_none_or(|c| c == self.channel)
     }
@@ -378,7 +377,7 @@ impl Cart {
     }
 }
 
-/// Plain-data form of a `Cart` for storage adapters (design note 0001, 3.4).
+/// Plain-data form of a `Cart` for storage adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CartSnapshot {
     pub id: CartId,
@@ -568,7 +567,7 @@ mod tests {
         assert_eq!(
             c.set_email(Some(Email::new("other@example.com").unwrap())),
             Err(CartError::CustomerEmailFixed),
-            "a customer's cart keeps their email (design note 0034)"
+            "a customer's cart keeps their email"
         );
         assert_eq!(
             c.set_email(c.email().cloned()),

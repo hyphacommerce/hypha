@@ -356,8 +356,8 @@ fn a_checked_out_cart_answers_with_its_order() {
     let world = World::new();
     let cart = world.cart();
     let order = world.checkout(cart).unwrap();
-    // The shopper's browser and the provider's webhook may both complete a cart
-    // (design note 0031): the second gets the order, and nothing is reserved twice.
+    // The shopper's browser and the provider's webhook may both complete a cart: the second
+    // gets the order, and nothing is reserved twice.
     let again = world.checkout_as(&Ctx::system(), cart, None, None).unwrap();
     assert_eq!(again.value.id(), order.id());
     assert!(again.replayed);
@@ -734,7 +734,7 @@ fn not_shipped(product: &mut Product, variant: VariantId) {
         .unwrap();
 }
 
-// ---- payments (design note 0027) ----
+// ---- payments ----
 
 fn bank_transfer() -> hypha_core::PaymentMethodId {
     hypha_core::PaymentMethodId::from_uuid(Uuid::from_u128(InMemoryPorts::BANK_TRANSFER))

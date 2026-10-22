@@ -1,6 +1,6 @@
-// Loading and mounting an app's storefront element (design note 0029, §7): the app hosts
-// an ES module that defines a custom element; `GET /storefront/app-extensions?target=…`
-// lists `{ app, tag, module, props }`. Framework-free.
+// Loading and mounting an app's storefront element: the app hosts an ES module that
+// defines a custom element; `GET /storefront/app-extensions?target=…` lists `{ app, tag,
+// module, props }`. Framework-free.
 
 export interface ElementRef {
   /** The ES module's absolute URL. */

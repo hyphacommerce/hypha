@@ -1,6 +1,5 @@
-// Jinja in React Email (design note 0028, NT6). The templates are JSX, but what the API
-// stores is Jinja, so the JSX carries markers that survive React's rendering and become
-// Jinja afterwards:
+// Jinja in React Email. The templates are JSX, but what the API stores is Jinja, so the
+// JSX carries markers that survive React's rendering and become Jinja afterwards:
 //
 // - `v("order.number")` is a variable: it returns a placeholder (`__JV0__`) usable as
 //   text and in attributes (an `href`, an `src`, a style's colour). Placeholders are

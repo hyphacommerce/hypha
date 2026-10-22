@@ -1,9 +1,9 @@
-// Pages other sites send the browser to (design note 0029, §4.1: an app sends staff to
-// the consent page, `/apps/consent?request=…`). Signed out, the page would lose its
-// address on the way through the login, so it goes to `/session-expired` with itself
-// as `next`; signed in, the page's address travels with the request
-// (`x-hypha-admin-page`), so a session that turns out to be expired comes back here
-// too (`sessionExpired` in lib/hypha.ts: such a navigation has no referer of ours).
+// Pages other sites send the browser to (an app sends staff to the consent page,
+// `/apps/consent?request=…`). Signed out, the page would lose its address on the way
+// through the login, so it goes to `/session-expired` with itself as `next`; signed
+// in, the page's address travels with the request (`x-hypha-admin-page`), so a session
+// that turns out to be expired comes back here too (`sessionExpired` in lib/hypha.ts:
+// such a navigation has no referer of ours).
 
 import { type NextRequest, NextResponse } from "next/server";
 

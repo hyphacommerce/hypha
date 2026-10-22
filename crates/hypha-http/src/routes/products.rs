@@ -106,13 +106,12 @@ pub struct ProductResponse {
     variants: Vec<VariantResponse>,
     /// In order; the first is the featured item. At most 250.
     media: Vec<ProductMediaResponse>,
-    /// The sales channels it is published to, sorted (design note 0020); a new product
-    /// is in none.
+    /// The sales channels it is published to, sorted; a new product is in none.
     channels: Vec<ChannelId>,
-    /// The categories it's directly in, sorted (design note 0022).
+    /// The categories it's directly in, sorted.
     categories: Vec<CategoryId>,
-    /// Its custom field values the caller may read, `{"custom.material": "wool", …}`
-    /// (design note 0033); `PATCH /admin/products/{id}/custom-fields` writes them.
+    /// Its custom field values the caller may read, `{"custom.material": "wool", …}`;
+    /// `PATCH /admin/products/{id}/custom-fields` writes them.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     custom_fields: CustomFieldValues,
     /// When it was created, RFC 3339 in UTC.
@@ -121,8 +120,8 @@ pub struct ProductResponse {
     updated_at: String,
 }
 
-/// One item of a product's media list (design note 0014, section 7): what a page needs
-/// to render it. The asset's own route has the rest.
+/// One item of a product's media list: what a page needs to render it. The asset's own
+/// route has the rest.
 #[derive(Clone, Serialize, utoipa::ToSchema)]
 pub struct ProductMediaResponse {
     asset_id: AssetId,
@@ -228,8 +227,8 @@ pub struct VariantResponse {
     weight_grams: Option<u32>,
     /// `false` for what is never shipped (downloads, gift cards).
     requires_shipping: bool,
-    /// Its own custom field values the caller may read (variant fields, design note
-    /// 0033); `PATCH /admin/variants/{id}/custom-fields` writes them.
+    /// Its own custom field values the caller may read (variant fields); `PATCH
+    /// /admin/variants/{id}/custom-fields` writes them.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     custom_fields: CustomFieldValues,
 }
@@ -363,9 +362,8 @@ pub struct ProductFilters {
     sort: Option<ProductSortDto>,
 }
 
-/// The order of a product list (design note 0024, AU1). Default `newest`. Titles
-/// compare lowercased, character by character (accented letters after `z`); ties go by
-/// creation, in the same direction.
+/// The order of a product list. Default `newest`. Titles compare lowercased, character by
+/// character (accented letters after `z`); ties go by creation, in the same direction.
 #[derive(Debug, Clone, Copy, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProductSortDto {
@@ -402,8 +400,8 @@ impl SortedFilters for ProductFilters {
     }
 }
 
-/// A product in a list: what a table of products shows, without options or variants
-/// (design note 0012, L7). `GET /admin/products/{id}` has the rest.
+/// A product in a list: what a table of products shows, without options or variants. `GET
+/// /admin/products/{id}` has the rest.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct ProductSummaryResponse {
     id: ProductId,
@@ -418,12 +416,11 @@ pub struct ProductSummaryResponse {
     price_ranges: Vec<PriceRangeResponse>,
     /// The first item of the product's media, if it has any.
     featured_media: Option<ProductMediaResponse>,
-    /// The sales channels it is published to, sorted (design note 0020).
+    /// The sales channels it is published to, sorted.
     channels: Vec<ChannelId>,
-    /// The categories it's directly in, sorted (design note 0022).
+    /// The categories it's directly in, sorted.
     categories: Vec<CategoryId>,
-    /// The custom field values `?custom_fields=` asked for (design note 0033); absent
-    /// without it.
+    /// The custom field values `?custom_fields=` asked for; absent without it.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<std::collections::HashMap<String, serde_json::Value>>, required = false)]
     custom_fields: Option<CustomFieldValues>,
@@ -601,14 +598,13 @@ pub async fn fetch<S: Storage>(
     respond_view(&state, &ports, &ctx, &view).await
 }
 
-/// A product as a storefront sees it (design note 0010, S5): active products only, without
-/// admin fields. A draft or archived product is `404 product_not_found`, the same as one
-/// that doesn't exist, so a storefront can't tell them apart.
+/// A product as a storefront sees it: active products only, without admin fields. A draft
+/// or archived product is `404 product_not_found`, the same as one that doesn't exist, so a
+/// storefront can't tell them apart.
 ///
-/// Prices and stock are the shopper's: with `country`, each variant carries its price
-/// in that country's market and whether it can be bought now (design note 0021, SU7),
-/// priced as a cart prices it. Without `country`, there are none: a product's base price
-/// isn't what any shopper pays.
+/// Prices and stock are the shopper's: with `country`, each variant carries its price in
+/// that country's market and whether it can be bought now, priced as a cart prices it.
+/// Without `country`, there are none: a product's base price isn't what any shopper pays.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct StorefrontProductResponse {
     id: ProductId,
@@ -632,8 +628,8 @@ pub struct StorefrontProductResponse {
     currency: Option<Currency>,
     /// Whether the prices include tax (the market's rule); `null` when there are none.
     prices_include_tax: Option<bool>,
-    /// The custom field values the merchant shows storefronts (`access.storefront:
-    /// read`, design note 0033), `{"custom.material": "wool", …}`.
+    /// The custom field values the merchant shows storefronts (`access.storefront: read`),
+    /// `{"custom.material": "wool", …}`.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     custom_fields: CustomFieldValues,
 }
@@ -720,8 +716,8 @@ pub struct ProductCountryParams {
     country: Option<String>,
 }
 
-/// The storefront's response for `view`, after the checks every storefront read makes:
-/// a draft, archived or unpublished product reads as missing (0020, CH6).
+/// The storefront's response for `view`, after the checks every storefront read makes: a
+/// draft, archived or unpublished product reads as missing.
 async fn storefront_product<P>(
     state: &AppState<impl Storage>,
     ports: &P,
@@ -779,8 +775,8 @@ pub async fn fetch_storefront<S: Storage>(
     storefront_product(&state, &ports, &ctx, view, params.country).await
 }
 
-/// A product page in one read (design note 0021, SU7): the product by its handle,
-/// priced in `country`, with the same rules as the read by ID.
+/// A product page in one read: the product by its handle, priced in `country`, with the
+/// same rules as the read by ID.
 #[utoipa::path(
     get,
     path = "/storefront/products/by-handle/{handle}",
@@ -915,7 +911,7 @@ pub struct OptionValueRequest {
     label: String,
 }
 
-/// Replaces a product's options and their values (design note 0014, section 3).
+/// Replaces a product's options and their values.
 ///
 /// Options and values sent with their `id` are kept; the rest are new. A variant that
 /// uses a removed value must be listed in `remove_variants` (else `409
@@ -1049,8 +1045,8 @@ pub struct SetVariantsRequest {
     variants: Vec<SetVariantRequest>,
 }
 
-/// Sets a product's whole variant list in one write (design note 0021, Q1): all or
-/// nothing, with one set of events. A variant keeps its media.
+/// Sets a product's whole variant list in one write: all or nothing, with one set of
+/// events. A variant keeps its media.
 #[utoipa::path(
     put,
     path = "/admin/products/{id}/variants",
@@ -1154,11 +1150,11 @@ pub async fn remove_variant<S: Storage>(
     respond(&state, &ports, &ctx, product).await
 }
 
-/// Deletes a product with its variants and options, whatever its status (design note
-/// 0033, section 6.3). Its media stay in the library; its catalog, channel and category
-/// membership go with it, and its fixed prices, stock records and search listings
-/// shortly after (`product.deleted`). Orders keep their lines; carts show its lines as
-/// unavailable until they're removed. Archive instead to keep it.
+/// Deletes a product with its variants and options, whatever its status. Its media stay in
+/// the library; its catalog, channel and category membership go with it, and its fixed
+/// prices, stock records and search listings shortly after (`product.deleted`). Orders keep
+/// their lines; carts show its lines as unavailable until they're removed. Archive instead
+/// to keep it.
 #[utoipa::path(
     delete,
     path = "/admin/products/{id}",

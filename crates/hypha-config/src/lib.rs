@@ -1,9 +1,9 @@
-//! Hypha's configuration (design note 0017): `hypha.config.toml`, the environment
-//! variables that win over it, the checks, and the settings each crate takes.
+//! Hypha's configuration: `hypha.config.toml`, the environment variables that win over it,
+//! the checks, and the settings each crate takes.
 //!
-//! It parses a string and reads the environment through a function it's given, so it
-//! builds for wasm: the native host passes the file's text and `std::env::var`, a
-//! Workers host its bindings, tests a map. Only hosts depend on it (CF3).
+//! It parses a string and reads the environment through a function it's given, so it builds
+//! for wasm: the native host passes the file's text and `std::env::var`, a Workers host its
+//! bindings, tests a map. Only hosts depend on it.
 //!
 //! ```text
 //! defaults ─► hypha.config.toml ─► environment ─► checks ─► Config
@@ -43,22 +43,21 @@ pub struct Config {
     pub auth: AuthSettings,
     pub email: EmailConfig,
     pub categories: CategorySettings,
-    /// The erasure window (design note 0032, §7.3).
+    /// The erasure window.
     pub privacy: hypha_privacy::PrivacySettings,
-    /// Customer sessions and sign-in codes (design note 0034).
+    /// Customer sessions and sign-in codes.
     pub accounts: hypha_customer_accounts::AccountSettings,
     pub dispatch: DispatchSettings,
-    /// The search sync job's batch and lease (design note 0019).
+    /// The search sync job's batch and lease.
     pub search_sync: SyncSettings,
-    /// The send job's batch, lease and retries (design note 0028, §4).
+    /// The send job's batch, lease and retries.
     pub send_notifications: SendSettings,
-    /// How long the extension call log is kept (design note 0029).
+    /// How long the extension call log is kept.
     pub extensions: ExtensionSettings,
     pub jobs: JobsConfig,
     pub rate_limits: RateLimits,
-    /// Each spore's section, `[spores.<name>]` (design note 0030, §8), as written: the
-    /// spore reads its own when the host builds it, and the host refuses a section for a
-    /// spore it wasn't built with.
+    /// Each spore's section, `[spores.<name>]`, as written: the spore reads its own when
+    /// the host builds it, and the host refuses a section for a spore it wasn't built with.
     pub spores: BTreeMap<String, toml::Table>,
     /// The file with the environment applied, for `Config::to_toml`.
     effective: File,
@@ -102,8 +101,8 @@ pub struct S3Config {
     pub create_bucket: bool,
 }
 
-/// How emails go out (design note 0028, §5). The secrets (`HYPHA_SMTP_PASSWORD`,
-/// `HYPHA_RESEND_API_KEY`) aren't here: the hosts read them when they build the sender.
+/// How emails go out. The secrets (`HYPHA_SMTP_PASSWORD`, `HYPHA_RESEND_API_KEY`) aren't
+/// here: the hosts read them when they build the sender.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmailConfig {
     pub sender: SenderConfig,
@@ -322,7 +321,7 @@ impl Config {
     }
 }
 
-/// The JSON Schema of `hypha.config.toml` (CF7), pretty-printed with a final newline.
+/// The JSON Schema of `hypha.config.toml`, pretty-printed with a final newline.
 pub fn schema_json() -> String {
     let schema = schemars::schema_for!(File);
     let mut json = serde_json::to_string_pretty(&schema).unwrap_or_default();
@@ -403,8 +402,8 @@ fn apply_env(
     if let Some(create) = flag("HYPHA_S3_CREATE_BUCKET", problems) {
         file.media.s3.create_bucket = create;
     }
-    // Email (design note 0028): what `.cargo/config.toml` points development at Mailpit
-    // with, and what a container sets without a file.
+    // Email: what `.cargo/config.toml` points development at Mailpit with, and what a
+    // container sets without a file.
     match env("HYPHA_EMAIL_SENDER").as_deref() {
         None => {}
         Some("log") => file.email.sender = EmailSender::Log,
@@ -458,9 +457,9 @@ const PRESIGN_MAX: Duration = Duration::from_secs(7 * 24 * 3600);
 /// near enough that every expiry stays a date clients can read.
 const LONGEST: Duration = Duration::from_secs(365 * 24 * 3600);
 /// The largest and smallest request body limits; files go to storage directly, so the
-/// largest is generous. Values valid before stay valid (key names and accepted values
-/// are a contract with operators): below 256 KiB, a product's longest description (64
-/// KiB, escaped in JSON) may be refused with `413 body_too_large` (design note 0019).
+/// largest is generous. Values valid before stay valid (key names and accepted values are a
+/// contract with operators): below 256 KiB, a product's longest description (64 KiB,
+/// escaped in JSON) may be refused with `413 body_too_large`.
 const BODY_MIN: u64 = 1 << 10;
 const BODY_MAX: u64 = 64 << 20;
 /// How long a run gets past a delivery's longest, to record what happened.

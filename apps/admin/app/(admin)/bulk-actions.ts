@@ -1,9 +1,9 @@
 "use server";
 
-// Bulk actions on a list's selected rows (design note 0024, section 6). Where the API
-// has a set-based route (publications, category membership) one call does them all;
-// otherwise each row is its own call, a few at a time, and every failure is reported
-// with the row it belongs to.
+// Bulk actions on a list's selected rows. Where the API has a set-based route
+// (publications, category membership) one call does them all; otherwise each row is
+// its own call, a few at a time, and every failure is reported with the row it
+// belongs to.
 
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { revalidatePath } from "next/cache";
@@ -121,9 +121,9 @@ export async function setCustomersGroup(
 }
 
 /**
- * Adds `label` to, or removes it from, the customers' labels (`custom.tags`, design note
- * 0032, CD1): one call, done under each value's lock, so concurrent writers both land
- * (design note 0033, CF6). A customer that has (or lacks) it already is unchanged.
+ * Adds `label` to, or removes it from, the customers' labels (`custom.tags`): one call,
+ * done under each value's lock, so concurrent writers both land. A customer that has (or
+ * lacks) it already is unchanged.
  */
 export async function setCustomersLabel(
   definition: string,

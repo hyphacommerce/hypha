@@ -1,7 +1,7 @@
 //! UUIDv7 IDs from the runtime's clock and randomness. Within one millisecond the IDs an
-//! isolate makes still sort in the order they were made (the 12 bits after the time are
-//! a counter, RFC 9562's method 1), as `Uuid::now_v7` keeps them natively: lists are
-//! newest first by ID (design note 0012). Portable, so its tests run natively.
+//! isolate makes still sort in the order they were made (the 12 bits after the time are a
+//! counter, RFC 9562's method 1), as `Uuid::now_v7` keeps them natively: lists are newest
+//! first by ID. Portable, so its tests run natively.
 
 use std::sync::Mutex;
 

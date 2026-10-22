@@ -1,10 +1,9 @@
-// Caching the API's answers in the admin (design note 0024, section 6). Reads repeat a
-// lot (going back to a list, flipping a filter, the layout and the page reading the
-// same store), so a staff session's GETs are cached briefly, keyed by the session and
-// the URL. Every write the session makes expires its whole cache at once, so nobody
-// sees their own change missing. What others change (another staff member, a storefront
-// order) shows within the read's lifetime: a few seconds for live lists, half a minute
-// for the rest.
+// Caching the API's answers in the admin. Reads repeat a lot (going back to a list,
+// flipping a filter, the layout and the page reading the same store), so a staff
+// session's GETs are cached briefly, keyed by the session and the URL. Every write the
+// session makes expires its whole cache at once, so nobody sees their own change
+// missing. What others change (another staff member, a storefront order) shows within
+// the read's lifetime: a few seconds for live lists, half a minute for the rest.
 //
 // Server only: the session token never leaves the admin's server, and the cache key
 // holds its hash, not the token.
@@ -14,8 +13,8 @@ import { revalidateTag, unstable_cache, updateTag } from "next/cache";
 /** Seconds a read stays fresh, by path: live lists briefly, never what must be current. */
 function lifetime(path: string): number | null {
   if (/\/(status|me)$/.test(path) || path.includes("/auth/")) return null;
-  // An app's block is its answer now (design note 0029, §6.2: nothing cached), and a
-  // consent request's state must be current.
+  // An app's block is its answer now (nothing cached), and a consent request's state
+  // must be current.
   if (/^\/admin\/(app-extensions\/blocks|oauth\/requests)\//.test(path)) return null;
   if (/^\/admin\/(orders|fulfillments|apps\/[^/]+\/deliveries)/.test(path)) return 5;
   if (/^\/admin\/(currencies|countries)$/.test(path)) return 3600;
@@ -24,8 +23,8 @@ function lifetime(path: string): number | null {
 
 /**
  * The reads kept across requests on Workers, where an isolate doesn't see the writes
- * other isolates make (design note 0025, §4): only the API's reference tables
- * (currencies, countries), which no write changes. Everything else is read fresh.
+ * other isolates make: only the API's reference tables (currencies, countries),
+ * which no write changes. Everything else is read fresh.
  */
 export function referenceLifetime(path: string): number | null {
   return /^\/admin\/(currencies|countries)$/.test(path) ? 3600 : null;

@@ -476,7 +476,7 @@ where
     Ok(ports.commit(batch).await?)
 }
 
-// ---------- reads (design note 0021, SU3) ----------
+// ---------- reads ----------
 
 /// A market as the admin reads it: the market and the ID of its catalog, if it has one.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -486,7 +486,7 @@ pub struct MarketView {
 }
 
 /// Every market, oldest first, without their catalogs: what a storefront's country list
-/// needs (design note 0021, SU6), in one read.
+/// needs, in one read.
 pub async fn list_markets_only<M: MarketRepo>(
     ctx: &Ctx,
     markets: &M,

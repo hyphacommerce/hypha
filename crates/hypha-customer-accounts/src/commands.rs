@@ -1,4 +1,4 @@
-//! Signing in with an email code and being signed in (design note 0034, §2).
+//! Signing in with an email code and being signed in.
 
 use core::time::Duration;
 
@@ -26,8 +26,8 @@ pub enum CustomerEmail {
         code: String,
         expires_at: Timestamp,
     },
-    /// The person asked from their account for their data to be erased (design note
-    /// 0034, §3): when it runs, so they can still cancel.
+    /// The person asked from their account for their data to be erased: when it runs, so
+    /// they can still cancel.
     ErasureRequested { to: Email, due_at: Timestamp },
 }
 
@@ -100,12 +100,11 @@ impl ErrorCode for CommandError {
     }
 }
 
-/// A signed-in customer's own record: the context to read and change it with, and who
-/// they are (design note 0034, §3, AC4). Every account command takes the customer from
-/// here, never from input: the context has the scopes the customer's own record needs
-/// (`customers:read|write|erase`, `orders:read`, every `customer_data:*`, so the person
-/// sees everything about themselves), for this customer only, since the handler passes
-/// `customer` to every command.
+/// A signed-in customer's own record: the context to read and change it with, and who they
+/// are. Every account command takes the customer from here, never from input: the context
+/// has the scopes the customer's own record needs (`customers:read|write|erase`,
+/// `orders:read`, every `customer_data:*`, so the person sees everything about themselves),
+/// for this customer only, since the handler passes `customer` to every command.
 #[derive(Debug, Clone)]
 pub struct Owned {
     pub ctx: Ctx,
@@ -156,10 +155,10 @@ fn creator() -> Ctx {
     Ctx::new(Actor::System, vec![Scope::CustomersWrite])
 }
 
-/// Emails a sign-in code to `email`, creating the customer and their identity if there
-/// are none (AC2). Does nothing for an address that isn't one, a placeholder (an erased
-/// customer's), or while the latest code is younger than `login_code_resend_after`:
-/// the route answers the same in every case, so nobody can probe for accounts.
+/// Emails a sign-in code to `email`, creating the customer and their identity if there are
+/// none. Does nothing for an address that isn't one, a placeholder (an erased customer's),
+/// or while the latest code is younger than `login_code_resend_after`: the route answers
+/// the same in every case, so nobody can probe for accounts.
 pub async fn request_login_code<S: AccountPorts>(
     ports: &S,
     env: &impl AccountEnv,
@@ -222,9 +221,9 @@ async fn find_identity<S: AccountPorts>(
     {
         return match owner_of(ports, &found).await? {
             Owner::Current(_) => Ok(Some(found)),
-            // The customer's address changed since (staff edit it; nothing else
-            // touches the identity): the lookup follows it before this address can
-            // be anyone else's, so the old mailbox can't open their account (AC2).
+            // The customer's address changed since (staff edit it; nothing else touches the
+            // identity): the lookup follows it before this address can be anyone else's, so
+            // the old mailbox can't open their account.
             Owner::Moved(current) => {
                 let mut stale = found;
                 stale.set_code_email(current)?;
@@ -309,10 +308,10 @@ pub struct LoggedIn {
     pub customer: Customer,
 }
 
-/// Signs in with the code emailed to `email`: the code is used up (right or wrong, so
-/// every guess counts, AC1) and an active session starts, lasting
-/// `session_lifetime`. `cart` (the request's, in `channel`) is linked to the customer
-/// in the same batch (AC8); a cart that isn't theirs to use is left alone.
+/// Signs in with the code emailed to `email`: the code is used up (right or wrong, so every
+/// guess counts, AC1) and an active session starts, lasting `session_lifetime`. `cart` (the
+/// request's, in `channel`) is linked to the customer in the same batch; a cart that isn't
+/// theirs to use is left alone.
 pub async fn login_with_code<S: AccountPorts>(
     ports: &S,
     env: &impl AccountEnv,
@@ -435,8 +434,8 @@ fn extend_every(lifetime: Duration) -> Duration {
 }
 
 /// The customer behind a `hypha_cs_` token in `channel`, or `InvalidToken`. Using the
-/// session keeps it alive (AC5): its end moves to `now + session_lifetime` about daily,
-/// and its last use is recorded between.
+/// session keeps it alive: its end moves to `now + session_lifetime` about daily, and its
+/// last use is recorded between.
 pub async fn authenticate_customer<S: HasSessions + HasCustomers>(
     ports: &S,
     env: &(impl Clock + HasAccountSettings),

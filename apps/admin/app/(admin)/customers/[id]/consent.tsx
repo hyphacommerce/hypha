@@ -1,8 +1,7 @@
 "use client";
 
-// Marketing consent (design note 0032, §5): each channel's state, how it was given and
-// from where, with a dialog to change it. The newest consent wins: a change the API
-// didn't apply says so.
+// Marketing consent: each channel's state, how it was given and from where, with a
+// dialog to change it. The newest consent wins: a change the API didn't apply says so.
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";

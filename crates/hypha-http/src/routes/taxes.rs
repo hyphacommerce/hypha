@@ -266,7 +266,7 @@ pub struct TaxClassListResponse {
     items: Vec<TaxClassResponse>,
 }
 
-/// Every tax class, oldest first (design note 0021, SU3).
+/// Every tax class, oldest first.
 #[utoipa::path(
     get,
     path = "/admin/tax-classes",

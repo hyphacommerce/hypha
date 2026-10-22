@@ -1,7 +1,7 @@
-// The extension points' request and response bodies by name (design note 0029, §3.1).
-// The contract is hypha-extensions' DTOs, published as `openapi/extensions.json` and
-// generated into `generated/extensions.ts` (`pnpm --filter @hypha/app generate`); these
-// names alias the generated types, so they can't drift from what Hypha sends.
+// The extension points' request and response bodies by name. The contract is
+// hypha-extensions' DTOs, published as `openapi/extensions.json` and generated into
+// `generated/extensions.ts` (`pnpm --filter @hypha/app generate`); these names alias
+// the generated types, so they can't drift from what Hypha sends.
 
 import type { components } from "./generated/extensions.ts";
 import type { PointRequest, PointResponse } from "./extensions.ts";
@@ -10,13 +10,13 @@ type Schemas = components["schemas"];
 
 /** Integer minor units and an ISO 4217 code, as everywhere in Hypha's API. */
 export type Money = Schemas["Money"];
-/** A postal address as Hypha sends it; personal fields are absent without their scopes (AP10). */
+/** A postal address as Hypha sends it; personal fields are absent without their scopes. */
 export type PostalAddress = Schemas["PostalAddressResponse"];
 
 export type ShippingRatesRequest = PointRequest<"shipping.rates">;
 export type ShippingRatesResponse = PointResponse<"shipping.rates">;
 
-/** Version 2: a cart's payment, started before its order exists (design note 0031). */
+/** Version 2: a cart's payment, started before its order exists. */
 export type PaymentsStartRequest = PointRequest<"payments.start">;
 export type PaymentsStartResponse = PointResponse<"payments.start">;
 /** Where a payment the app started is, asked when the shopper says they paid. */

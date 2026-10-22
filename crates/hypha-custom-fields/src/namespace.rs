@@ -1,6 +1,6 @@
-//! Who owns a field (CF4): `custom` (the merchant's), `app_<name>` (only that app),
-//! `spore_<name>` (only that spore). One spelling everywhere, and a field is addressed
-//! as `namespace.key`, `custom.material`.
+//! Who owns a field: `custom` (the merchant's), `app_<name>` (only that app),
+//! `spore_<name>` (only that spore). One spelling everywhere, and a field is addressed as
+//! `namespace.key`, `custom.material`.
 
 use std::{fmt, str::FromStr};
 

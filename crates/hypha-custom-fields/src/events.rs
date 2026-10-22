@@ -1,5 +1,5 @@
-//! What happens to custom fields, as events (design note 0033, §2, §6.4). Contract
-//! types: a renamed or reshaped field is a new `VERSION`, never an edit.
+//! What happens to custom fields, as events. Contract types: a renamed or reshaped field is
+//! a new `VERSION`, never an edit.
 
 use hypha_core::{
     CategoryId, CustomFieldDefinitionId, CustomerId, Event, OrderId, PendingEvent, ProductId,
@@ -94,10 +94,10 @@ impl Event for CustomFieldDefinitionDeleted {
     const VERSION: u16 = 1;
 }
 
-/// One field's change in a `<owner>.custom_fields_updated` event (§6.4):
-/// `{"key": "custom.material", "value": "wool"}` (`null` when removed),
-/// `{"key": "custom.tags", "added": [...], "removed": [...]}` for list operations, or
-/// `{"key": "custom.birthday"}` alone for personal fields and values over 1 KiB.
+/// One field's change in a `<owner>.custom_fields_updated` event: `{"key":
+/// "custom.material", "value": "wool"}` (`null` when removed), `{"key": "custom.tags",
+/// "added": [...], "removed": [...]}` for list operations, or `{"key": "custom.birthday"}`
+/// alone for personal fields and values over 1 KiB.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldChange {
     pub key: String,
@@ -217,9 +217,9 @@ impl Event for OrderCustomFieldsUpdated {
     const VERSION: u16 = 1;
 }
 
-/// The one event a write records for `owner` (§6.4): about the owner (a variant's
-/// product), listing every change. `None` when nothing changed: a write that changes
-/// nothing records nothing.
+/// The one event a write records for `owner`: about the owner (a variant's product),
+/// listing every change. `None` when nothing changed: a write that changes nothing records
+/// nothing.
 pub fn fields_updated(owner: &Owner, changes: Vec<FieldChange>) -> Option<PendingEvent> {
     if changes.is_empty() {
         return None;

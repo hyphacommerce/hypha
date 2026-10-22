@@ -1,5 +1,5 @@
-//! What an extension point is (design note 0029, AP3): a published, versioned contract
-//! with a timeout and a failure policy.
+//! What an extension point is: a published, versioned contract with a timeout and a failure
+//! policy.
 
 use core::time::Duration;
 
@@ -23,10 +23,9 @@ pub trait ExtensionPoint {
     /// (a shipping provider's `timeout_ms`).
     const TIMEOUT: Duration;
     const ON_FAILURE: OnFailure;
-    /// The scope an app installed through OAuth must have been granted for Hypha to
-    /// call it here (design note 0029, §4.1 step 5: a point needing a scope the grant
-    /// lacks isn't called). Apps made by hand, with no grant, are called on what staff
-    /// registered for them.
+    /// The scope an app installed through OAuth must have been granted for Hypha to call it
+    /// here (a point needing a scope the grant lacks isn't called). Apps made by hand, with
+    /// no grant, are called on what staff registered for them.
     const SCOPE: Scope;
     /// The body Hypha sends.
     type Request: Serialize;

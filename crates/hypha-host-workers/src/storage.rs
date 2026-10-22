@@ -1,6 +1,6 @@
-//! Postgres through Hyperdrive (design note 0026, W4): a connection per `ports()` call,
-//! which Hyperdrive's pool next to the database makes cheap; no statement cache (each
-//! connection is used once). Migrations aren't run here (W9: `setup` from the CLI).
+//! Postgres through Hyperdrive: a connection per `ports()` call, which Hyperdrive's pool
+//! next to the database makes cheap; no statement cache (each connection is used once).
+//! Migrations aren't run here (`setup` from the CLI).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -42,7 +42,7 @@ pub type ProvidersOf<D> = Union<(
 /// handlers and payment providers its spores join.
 pub struct WorkersStorage<D: Deployment> {
     env: Env,
-    /// What the stores stamp writes with (design note 0016, Q3).
+    /// What the stores stamp writes with.
     clock: HostClock,
     /// Built at setup: the `Mailer` holds the host's mail environment.
     handlers: HandlersOf<D>,

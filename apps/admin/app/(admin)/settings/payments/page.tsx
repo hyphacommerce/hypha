@@ -9,8 +9,8 @@ import type { PaymentApp } from "@/lib/payments";
 
 import { PaymentMethodsCard } from "./methods";
 
-/** Settings → Payments (design note 0027): how shoppers can pay, in the order they
- * see the methods at checkout. */
+/** Settings → Payments: how shoppers can pay, in the order they see the methods at
+ * checkout. */
 export default async function PaymentsSettingsPage() {
   const client = await sessionClient();
   const [me, methods, markets, channelName, paymentApps] = await Promise.all([

@@ -1,7 +1,6 @@
-//! When a failed delivery is tried again (design note 0016, Q6). By default: after 1
-//! minute, 5 minutes, 30 minutes, 2 hours and 6 hours, then every 12 hours, for about 3
-//! days in all; then it fails for good, and can be retried from the admin. Configurable
-//! as `[webhooks]` (design note 0017).
+//! When a failed delivery is tried again. By default: after 1 minute, 5 minutes, 30
+//! minutes, 2 hours and 6 hours, then every 12 hours, for about 3 days in all; then it
+//! fails for good, and can be retried from the admin. Configurable as `[webhooks]`.
 
 use core::time::Duration;
 

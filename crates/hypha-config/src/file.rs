@@ -1,9 +1,8 @@
-//! `hypha.config.toml` as written (design note 0017, section 3): plain data, every key
-//! optional, unknown keys refused. The doc comments are the schema's descriptions, which
-//! editors show on hover. Defaults come from the domain crates' settings, so each value
-//! has one source.
+//! `hypha.config.toml` as written: plain data, every key optional, unknown keys refused.
+//! The doc comments are the schema's descriptions, which editors show on hover. Defaults
+//! come from the domain crates' settings, so each value has one source.
 //!
-//! Key names are a contract with operators (CF6): never rename one once released.
+//! Key names are a contract with operators: never rename one once released.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -39,9 +38,9 @@ pub struct File {
     pub webhooks: Webhooks,
     pub jobs: Jobs,
     pub rate_limits: RateLimits,
-    /// Settings for the spores this API is built with (design note 0030, §8): one table
-    /// per spore, `[spores.<name>]`, read by the spore itself; its keys are the spore's
-    /// to document. A table for a spore the build doesn't have stops startup.
+    /// Settings for the spores this API is built with: one table per spore,
+    /// `[spores.<name>]`, read by the spore itself; its keys are the spore's to document. A
+    /// table for a spore the build doesn't have stops startup.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     #[schemars(with = "BTreeMap<String, serde_json::Map<String, serde_json::Value>>")]
     pub spores: BTreeMap<String, toml::Table>,
@@ -234,8 +233,8 @@ impl Default for Auth {
     }
 }
 
-/// How emails go out (design note 0028): order confirmations, shipping updates, staff
-/// invites and password resets.
+/// How emails go out: order confirmations, shipping updates, staff invites and password
+/// resets.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Email {
@@ -316,7 +315,7 @@ pub enum SmtpTls {
     Tls,
 }
 
-/// The product category tree (design note 0022).
+/// The product category tree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Categories {
@@ -333,7 +332,7 @@ impl Default for Categories {
     }
 }
 
-/// Customers and their personal data (design note 0032).
+/// Customers and their personal data.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Customers {
@@ -342,8 +341,7 @@ pub struct Customers {
     /// retention duty sets it longer.
     pub erasure_delay: Dur,
     /// How long a customer stays signed in on the storefront without using the session;
-    /// every use within it starts the count again (design note 0034). At least 1 minute;
-    /// 30 days by default.
+    /// every use within it starts the count again. At least 1 minute; 30 days by default.
     pub session_lifetime: Dur,
     /// How long a sign-in code emailed to a customer works. At least 1 minute; 10 minutes
     /// by default.
@@ -470,7 +468,7 @@ impl Default for DispatchJob {
     }
 }
 
-/// Keeping search up to date (design note 0019): rebuilding the products events marked.
+/// Keeping search up to date: rebuilding the products events marked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct SearchSyncJob {
@@ -495,9 +493,8 @@ impl Default for SearchSyncJob {
     }
 }
 
-/// Sending the emails the store queued (design note 0028, §4): order emails and
-/// resends. Staff invites and password resets are sent by their request, not by this
-/// job.
+/// Sending the emails the store queued: order emails and resends. Staff invites and
+/// password resets are sent by their request, not by this job.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct SendNotificationsJob {
@@ -541,7 +538,7 @@ pub struct PruneJob {
     pub idempotency_keys_after: Dur,
     /// How long a session is kept after it ended (expired or revoked).
     pub sessions_after: Dur,
-    /// How long the log of calls to apps' extension points is kept (design note 0029).
+    /// How long the log of calls to apps' extension points is kept.
     pub extension_calls_after: Dur,
 }
 
@@ -575,8 +572,8 @@ const fn quota(burst: u32, secs: u64) -> Quota {
     }
 }
 
-/// Limits on the routes that need no credentials, and on the storefront routes that
-/// call rate apps (design notes 0009 and 0015). Counted per instance.
+/// Limits on the routes that need no credentials, and on the storefront routes that call
+/// rate apps. Counted per instance.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct RateLimits {
@@ -605,7 +602,7 @@ pub struct RateLimits {
     /// Spores' public routes (`/spores/<name>/…`: a payment provider's webhooks), per
     /// client address, all spores together.
     pub spore_public: Quota,
-    /// A customer asking for a sign-in code, per client address (design note 0034).
+    /// A customer asking for a sign-in code, per client address.
     pub code_ip: Quota,
     /// A customer asking for a sign-in code, per email and address.
     pub code_email_from_ip: Quota,
@@ -616,7 +613,7 @@ pub struct RateLimits {
     pub customer_login_email_from_ip: Quota,
 }
 
-/// The starting numbers from design note 0009, section 3.
+/// The starting quotas.
 impl Default for RateLimits {
     fn default() -> Self {
         Self {

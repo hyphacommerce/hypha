@@ -1,12 +1,10 @@
-//! Custom fields (design note 0033): definitions in the merchant's `custom` namespace,
-//! an owner's values (products, variants, categories, customers, orders), the bulk list
-//! and value writes, and what the other routes share: who the caller is to the fields
-//! (`field_caller`), their values on owner responses (`read`) and the `field[…]` list
-//! filters (`list_fields`).
+//! Custom fields: definitions in the merchant's `custom` namespace, an owner's values
+//! (products, variants, categories, customers, orders), the bulk list and value writes, and
+//! what the other routes share: who the caller is to the fields (`field_caller`), their
+//! values on owner responses (`read`) and the `field[…]` list filters (`list_fields`).
 //!
-//! Owners are checked here, through their own commands, before the leaf sees them
-//! (§6.1): one that doesn't exist is the owner's own 404 in a URL, and
-//! `422 owner_not_found` in a bulk body.
+//! Owners are checked here, through their own commands, before the leaf sees them: one that
+//! doesn't exist is the owner's own 404 in a URL, and `422 owner_not_found` in a bulk body.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -46,9 +44,9 @@ use crate::{
 
 // ---------- who is calling, and what it sees ----------
 
-/// What the caller is to custom fields (§5.1): an app by its key (its OAuth token names
-/// its ID), a spore's own app (`spore_<name>`) as the spore, anyone else on the admin
-/// surface as the merchant.
+/// What the caller is to custom fields: an app by its key (its OAuth token names its ID), a
+/// spore's own app (`spore_<name>`) as the spore, anyone else on the admin surface as the
+/// merchant.
 pub(crate) async fn caller_kind<P: HasApps>(ctx: &Ctx, ports: &P) -> Result<CallerKind, ApiError> {
     let Actor::App(id) = ctx.actor() else {
         return Ok(CallerKind::Merchant);
@@ -86,18 +84,18 @@ where
     Ok(read_custom_fields(&caller, ports, owner_types, owners, keys).await?)
 }
 
-/// What a list asked of its owners' custom fields (§6.2, §7): the filters, checked
-/// against `owner_type`'s definitions, and the keys to include (`None`: none).
+/// What a list asked of its owners' custom fields: the filters, checked against
+/// `owner_type`'s definitions, and the keys to include (`None`: none).
 pub(crate) struct ListFields {
     pub filters: Vec<FieldFilter>,
     pub keys: Option<Vec<FieldKey>>,
     pub kind: CallerKind,
 }
 
-/// Checks a list's `field[…]` filters and `custom_fields` keys (`FieldQuery`): an
-/// unknown or hidden key is `422 custom_field_unknown`, one that isn't filterable `422
+/// Checks a list's `field[…]` filters and `custom_fields` keys (`FieldQuery`): an unknown
+/// or hidden key is `422 custom_field_unknown`, one that isn't filterable `422
 /// custom_field_not_filterable`, a personal one without `customer_data:profile` a 403;
-/// never ignored (CF7). Reads nothing when the list asked for neither.
+/// never ignored. Reads nothing when the list asked for neither.
 pub(crate) async fn list_fields<P>(
     ctx: &Ctx,
     ports: &P,
@@ -142,8 +140,8 @@ where
     })
 }
 
-/// `field[…]` and `custom_fields` in the documents: the keys are data, so the pattern
-/// is documented once per list route (§7).
+/// `field[…]` and `custom_fields` in the documents: the keys are data, so the pattern is
+/// documented once per list route.
 pub struct FieldParams;
 
 impl utoipa::IntoParams for FieldParams {
@@ -166,7 +164,7 @@ impl utoipa::IntoParams for FieldParams {
                 .style(Some(ParameterStyle::DeepObject))
                 .explode(Some(true))
                 .description(Some(
-                    "Filters on custom fields (design note 0033, §7), only `filterable` ones: \
+                    "Filters on custom fields, only `filterable` ones: \
                      `field[custom.material]=wool,cotton` (any of these; a list field holds \
                      any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: \
                      numbers, money in minor units, measurements like `1.5kg`, dates and \
@@ -198,7 +196,7 @@ impl utoipa::IntoParams for FieldParams {
 }
 
 /// `custom_fields.<key>` for each hidden personal key, as a response's `redacted` names
-/// them (design note 0033, §5.2).
+/// them.
 pub(crate) fn redacted_names(keys: &[FieldKey]) -> Vec<String> {
     keys.iter().map(|k| format!("custom_fields.{k}")).collect()
 }
@@ -252,8 +250,7 @@ pub struct ChoiceDto {
     label: String,
 }
 
-/// A definition's validations; which apply depends on its type (design note 0033, §3).
-/// Absent ones don't apply.
+/// A definition's validations; which apply depends on its type. Absent ones don't apply.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = CustomFieldValidations)]
 #[serde(deny_unknown_fields)]
@@ -384,7 +381,7 @@ pub enum StorefrontAccessDto {
     Read,
 }
 
-/// Who sees and writes a field's values (design note 0033, §5).
+/// Who sees and writes a field's values.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = CustomFieldAccess)]
 #[serde(deny_unknown_fields)]
@@ -423,7 +420,7 @@ impl From<Access> for AccessDto {
     }
 }
 
-/// What a field's values can be used for (§7).
+/// What a field's values can be used for.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = CustomFieldCapabilities)]
 #[serde(deny_unknown_fields)]
@@ -467,7 +464,7 @@ pub struct CustomFieldDefinitionResponse {
     field: String,
     name: String,
     description: Option<String>,
-    /// `text`, `integer`, `choice`, `list.text`, … (design note 0033, §3).
+    /// `text`, `integer`, `choice`, `list.text`, ….
     #[serde(rename = "type")]
     field_type: String,
     validations: ValidationsDto,
@@ -552,8 +549,8 @@ pub async fn list<S: Storage>(
     }))
 }
 
-/// A field worth having (design note 0032, CD11): the body `POST
-/// /admin/custom-field-definitions` takes to create it, and why.
+/// A field worth having: the body `POST /admin/custom-field-definitions` takes to create
+/// it, and why.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct SuggestedDefinitionResponse {
     owner_type: OwnerTypeDto,
@@ -581,10 +578,10 @@ pub struct SuggestedDefinitionList {
     items: Vec<SuggestedDefinitionResponse>,
 }
 
-/// The well-known fields a merchant may want (design note 0032, CD11: customers' labels
-/// `custom.tags` and note `custom.note`), each with the body that creates it and the
-/// merchant's definition of its key when there is one. They're conventions: nothing
-/// creates them but a click here or `pnpm seed`.
+/// The well-known fields a merchant may want (customers' labels `custom.tags` and note
+/// `custom.note`), each with the body that creates it and the merchant's definition of its
+/// key when there is one. They're conventions: nothing creates them but a click here or
+/// `pnpm seed`.
 #[utoipa::path(
     get,
     path = "/admin/custom-field-definitions/suggestions",
@@ -624,9 +621,9 @@ pub async fn suggestions<S: Storage>(
     }))
 }
 
-/// A field a storefront reads values of: what to call it, where it goes and how to show
-/// its values (design note 0033, §6.2). Values arrive on products', variants' and
-/// categories' `custom_fields`, keyed by `field`.
+/// A field a storefront reads values of: what to call it, where it goes and how to show its
+/// values. Values arrive on products', variants' and categories' `custom_fields`, keyed by
+/// `field`.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct StorefrontCustomFieldDefinitionResponse {
     owner_type: OwnerTypeDto,
@@ -635,7 +632,7 @@ pub struct StorefrontCustomFieldDefinitionResponse {
     /// What to call it.
     name: String,
     description: Option<String>,
-    /// `text`, `integer`, `choice`, `list.text`, … (design note 0033, §3).
+    /// `text`, `integer`, `choice`, `list.text`, ….
     #[serde(rename = "type")]
     field_type: String,
     /// On its owner type's form, from 0: the merchant's order.
@@ -1155,10 +1152,10 @@ owner_routes!(
 
 // ---------- bulk ----------
 
-/// The owners `ids` name, as the definition's owner type, each checked to exist (§6.1):
-/// a string that isn't that type's ID is `422 invalid_owner`, one that names nothing
-/// `422 owner_not_found`, each listing the owners. Needs the owner type's write scope
-/// first, so a caller without it learns nothing about which exist.
+/// The owners `ids` name, as the definition's owner type, each checked to exist: a string
+/// that isn't that type's ID is `422 invalid_owner`, one that names nothing `422
+/// owner_not_found`, each listing the owners. Needs the owner type's write scope first, so
+/// a caller without it learns nothing about which exist.
 async fn bulk_owners<S: Storage>(
     ports: &S::Ports<'_>,
     ctx: &Ctx,
@@ -1328,12 +1325,11 @@ pub struct ListItemsResponse {
     items: Vec<OwnerItemsResponse>,
 }
 
-/// Adds and removes items of one list field on 1 to 250 owners (design note 0033, CF6):
-/// done in the database under each value's lock, so concurrent writers both land.
-/// Adding what's there or removing what isn't changes nothing and records nothing. An
-/// owner whose list would break `max_items`/`min_items` fails the whole call (`409
-/// too_many_items` / `too_few_items`, naming it). Needs the field's owner type's write
-/// scope.
+/// Adds and removes items of one list field on 1 to 250 owners: done in the database under
+/// each value's lock, so concurrent writers both land. Adding what's there or removing what
+/// isn't changes nothing and records nothing. An owner whose list would break
+/// `max_items`/`min_items` fails the whole call (`409 too_many_items` / `too_few_items`,
+/// naming it). Needs the field's owner type's write scope.
 #[utoipa::path(
     post,
     path = "/admin/custom-fields/{definition}/items",

@@ -1,7 +1,6 @@
-//! What staff and apps do to orders after checkout (design note 0018): fulfil them,
-//! take a fulfilment back, cancel them, record money received (design note 0027) and
-//! what a payment's provider reports (design note 0029, §3.1).
-//! Later, refunds and order edits.
+//! What staff and apps do to orders after checkout: fulfil them, take a fulfilment back,
+//! cancel them, record money received and what a payment's provider reports. Later, refunds
+//! and order edits.
 //!
 //! A workflow: it composes orders, fulfilments and inventory, and writes each action's
 //! aggregates in one batch, retried when another request committed first (like

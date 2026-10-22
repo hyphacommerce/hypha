@@ -1,9 +1,9 @@
-//! `<stripe-payment>`, the storefront's payment widget (design note 0029, §7;
-//! `docs/apps/elements.md`): the Stripe app's element as is (`element/payment-element.ts`,
-//! bundled into `element/payment-element.js`), served from a public route so any
-//! storefront can load it as an ES module from the API's address. It loads Stripe.js from
-//! js.stripe.com, mounts the Payment Element, confirms with `redirect: "if_required"` and
-//! emits `hypha:payment-confirmed {paymentId}` or `hypha:error {message}`.
+//! `<stripe-payment>`, the storefront's payment widget (`docs/apps/elements.md`): the
+//! Stripe app's element as is (`element/payment-element.ts`, bundled into
+//! `element/payment-element.js`), served from a public route so any storefront can load it
+//! as an ES module from the API's address. It loads Stripe.js from js.stripe.com, mounts
+//! the Payment Element, confirms with `redirect: "if_required"` and emits
+//! `hypha:payment-confirmed {paymentId}` or `hypha:error {message}`.
 
 use hypha_spore::http::axum::http::{HeaderValue, header};
 use hypha_spore::http::axum::response::{IntoResponse, Response};

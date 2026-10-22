@@ -24,7 +24,7 @@ pub trait UserRepo {
     async fn get_by_email(&self, email: &Email) -> Result<Option<User>, RepoError>;
     /// Whether any user exists (first start: create the owner).
     async fn any(&self) -> Result<bool, RepoError>;
-    /// Every user, oldest first: a store's staff is a short list (design note 0024, AU6).
+    /// Every user, oldest first: a store's staff is a short list.
     async fn list_all(&self) -> Result<Vec<User>, RepoError>;
     /// How many active users have `role` (the last-owner guard).
     async fn count_active_with_role(&self, role: RoleId) -> Result<usize, RepoError>;
@@ -64,8 +64,8 @@ pub trait InviteRepo {
     async fn delete(&self, invite: &Invite) -> Result<(), RepoError>;
 }
 
-/// A session found by its token, with its staff user and that user's role when they
-/// exist: what every staff request reads (design note 0008, A3).
+/// A session found by its token, with its staff user and that user's role when they exist:
+/// what every staff request reads.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StaffSessionRecord {
     pub session: Session,

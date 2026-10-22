@@ -1,6 +1,6 @@
-//! `CustomFieldDefinition` (design note 0033, §2): what a field is, on which owner
-//! type, in which namespace, and who sees it. Identity (owner type, namespace, key,
-//! type) is immutable (CF3); the rest changes through `change`.
+//! `CustomFieldDefinition`: what a field is, on which owner type, in which namespace, and
+//! who sees it. Identity (owner type, namespace, key, type) is immutable; the rest changes
+//! through `change`.
 
 use hypha_core::{
     CustomFieldDefinitionId, PendingEvent, Recorded, Recorder, Stamped, Stamps, Subject, TextError,
@@ -20,8 +20,8 @@ use crate::{
     types::{FieldType, RawValidations, Validations},
 };
 
-/// What staff may do with an app's or a spore's field in the admin (§5.1). The
-/// merchant's own `custom` fields are always `read_write`.
+/// What staff may do with an app's or a spore's field in the admin. The merchant's own
+/// `custom` fields are always `read_write`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AdminAccess {
@@ -30,7 +30,7 @@ pub enum AdminAccess {
 }
 
 /// Whether the storefront surface sees the field (opt-in, CF8). `read_write` is reserved
-/// for cart fields (§11).
+/// for cart fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StorefrontAccess {
@@ -54,7 +54,7 @@ impl Default for Access {
     }
 }
 
-/// What a field's values can be used for (§7).
+/// What a field's values can be used for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Capabilities {
@@ -77,9 +77,9 @@ pub struct DefinitionSpec {
     pub description: Option<String>,
     pub validations: RawValidations,
     pub access: Access,
-    /// Only the namespace's app (and staff) read it (§5.1); app and spore namespaces only.
+    /// Only the namespace's app (and staff) read it; app and spore namespaces only.
     pub private: bool,
-    /// About a person (§5.2); customer and order owners only.
+    /// About a person; customer and order owners only.
     pub personal: bool,
     pub capabilities: Capabilities,
 }
@@ -286,9 +286,8 @@ impl CustomFieldDefinition {
         self.events.record(self.subject(), &event);
     }
 
-    /// Whether going from this definition to `next` may reject values valid now (§2): a
-    /// tighter validation, or `unique` turned on. Then the stored values are checked
-    /// first.
+    /// Whether going from this definition to `next` may reject values valid now: a tighter
+    /// validation, or `unique` turned on. Then the stored values are checked first.
     pub fn tightened_by(&self, next: &CustomFieldDefinition) -> bool {
         self.validations.tightened_by(&next.validations)
             || (next.capabilities.unique && !self.capabilities.unique)

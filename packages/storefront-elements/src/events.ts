@@ -1,7 +1,6 @@
-// The events an app's storefront element may send (design note 0029, §7;
-// docs/apps/elements.md). Each is a `CustomEvent` that bubbles and crosses shadow roots,
-// its data in `detail`. Elements talk to the storefront only through these and the app's
-// proxy.
+// The events an app's storefront element may send (docs/apps/elements.md). Each is a
+// `CustomEvent` that bubbles and crosses shadow roots, its data in `detail`. Elements
+// talk to the storefront only through these and the app's proxy.
 
 export interface ElementEvents {
   /** The element can be submitted (a payment form loaded): a storefront paying with its own button (`submit_mode: "external"`) enables it now. */

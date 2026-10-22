@@ -1,7 +1,6 @@
-//! Managing the payment methods a store offers (design note 0027, §7): settings, so
-//! `payments:*`; and asking a payment's provider to capture, void or refund it (design
-//! note 0029, §3.1). Recording payments on orders is the workflows'
-//! (`hypha-order-actions`, `hypha-checkout`).
+//! Managing the payment methods a store offers: settings, so `payments:*`; and asking a
+//! payment's provider to capture, void or refund it. Recording payments on orders is the
+//! workflows' (`hypha-order-actions`, `hypha-checkout`).
 
 use hypha_core::{
     AuthError, ChannelId, Ctx, ErrorCode, IdGenerator, MarketId, Money, PaymentId, PaymentMethodId,
@@ -91,8 +90,7 @@ pub async fn get_payment_method<S: HasPaymentMethods>(
 }
 
 /// One payment, as the order shows it (`orders:read`: reading an order's payments is
-/// reading the order, design note 0027, PA9). A payment app looks up the payment it was
-/// asked to start or act on.
+/// reading the order). A payment app looks up the payment it was asked to start or act on.
 pub async fn get_payment<S: HasPayments>(
     ctx: &Ctx,
     ports: &S,
@@ -339,7 +337,7 @@ pub async fn act_on_payment<S: HasPayments, P: PaymentProviders>(
         reference: payment.reference().map(str::to_string),
         attempt: payment.attempt().map(str::to_string),
         idempotency_key,
-        // The host fills a spore provider's (design note 0030, §8).
+        // The host fills a spore provider's.
         store_settings: serde_json::Map::new(),
     };
     match providers.act(payment.provider(), &request).await? {

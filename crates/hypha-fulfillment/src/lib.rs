@@ -1,5 +1,4 @@
-//! Fulfilments (design note 0018): what left a location for an order, with its
-//! tracking.
+//! Fulfilments: what left a location for an order, with its tracking.
 //!
 //! A leaf domain: it depends on core only. A fulfilment names its order, its lines and
 //! its location by ID and knows nothing about what was ordered or what's in stock; those

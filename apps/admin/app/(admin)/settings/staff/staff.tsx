@@ -1,7 +1,7 @@
 "use client";
 
-// Staff, their pending invites and the roles (design note 0024, AU6): whole lists, so
-// they sort and filter here.
+// Staff, their pending invites and the roles: whole lists, so they sort and filter
+// here.
 
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Badge } from "@astryxdesign/core/Badge";

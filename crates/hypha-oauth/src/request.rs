@@ -1,6 +1,6 @@
-//! A pending authorization (design note 0029, §4.1 step 2): what an app asked for at
-//! `/oauth/authorize`, waiting ten minutes for a staff member's answer on the consent
-//! page. Kept after the answer, as the app's request history.
+//! A pending authorization: what an app asked for at `/oauth/authorize`, waiting ten
+//! minutes for a staff member's answer on the consent page. Kept after the answer, as the
+//! app's request history.
 
 use hypha_apps::{AppManifest, ManifestSource, is_private_client, normalize};
 use hypha_core::{Actor, AppKey, OAuthRequestId, Scope, Timestamp, Version, Versioned};

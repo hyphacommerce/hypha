@@ -1,11 +1,11 @@
 "use client";
 
-// A listing's controls (design note 0024, §7): facets as checkbox lists and a price
-// range beside the results (in a bottom sheet on phones), and the sort. Every change
-// goes to a new URL, so the state can be linked to and the back button works. The URL
-// changes in place (`history.pushState`, which Next keeps `useSearchParams` in step
-// with): no page is re-rendered on the server, only the results are read again
-// (`Listing`), so the controls stay put and nothing flashes.
+// A listing's controls: facets as checkbox lists and a price range beside the results
+// (in a bottom sheet on phones), and the sort. Every change goes to a new URL, so the
+// state can be linked to and the back button works. The URL changes in place
+// (`history.pushState`, which Next keeps `useSearchParams` in step with): no page is
+// re-rendered on the server, only the results are read again (`Listing`), so the
+// controls stay put and nothing flashes.
 
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxList, CheckboxListItem } from "@astryxdesign/core/CheckboxList";
@@ -49,8 +49,8 @@ export type Props = {
   currency?: string;
 };
 
-/** A facet's heading: the merchant's label for an option or a custom field (design note
- * 0033, §9), else its name. */
+/** A facet's heading: the merchant's label for an option or a custom field, else its name.
+ * */
 function facetLabel(facet: Facet): string {
   const labelled = facet.key.startsWith("option.") || facet.key.startsWith("field.");
   return labelled && facet.label ? facet.label : facetName(facet.key);

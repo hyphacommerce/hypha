@@ -1,5 +1,5 @@
-//! Shipping (design note 0015): where a store ships (zones), what it offers there
-//! (options and their prices), and the port providers calculate rates behind.
+//! Shipping: where a store ships (zones), what it offers there (options and their prices),
+//! and the port providers calculate rates behind.
 //!
 //! A leaf domain: it depends on core only. It never reads products or carts; the cart,
 //! a composing crate, hands it plain values (`RateRequest`).

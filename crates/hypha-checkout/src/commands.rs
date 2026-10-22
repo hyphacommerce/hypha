@@ -49,7 +49,7 @@ pub enum CommandError {
     Idempotency(#[from] IdempotencyError),
     #[error(transparent)]
     Payment(#[from] PaymentError),
-    /// Recording the buyer's marketing consent (design note 0032, §5).
+    /// Recording the buyer's marketing consent.
     #[error(transparent)]
     Customer(#[from] hypha_customers::CustomerError),
     #[error("cart {0} not found")]
@@ -70,7 +70,7 @@ pub enum CommandError {
         .actual.amount(), .actual.currency(), .expected.amount(), .expected.currency()
     )]
     TotalChanged { expected: Money, actual: Money },
-    /// Lines need shipping and the cart has no address (design note 0015, section 7).
+    /// Lines need shipping and the cart has no address.
     #[error("cart {0} needs a shipping address")]
     ShippingAddressRequired(CartId),
     /// A group of lines that need shipping has no option chosen.
@@ -79,7 +79,7 @@ pub enum CommandError {
     /// The chosen option can't be charged now: gone, disabled, not offered on renewal.
     #[error("the cart's shipping option can't be used now: {}", .0.code())]
     ShippingUnavailable(ShippingProblem),
-    /// Something to pay and no payment method chosen (design note 0027, Q2).
+    /// Something to pay and no payment method chosen.
     #[error("choose how to pay for cart {0}")]
     PaymentMethodRequired(CartId),
     /// The chosen method isn't offered to the cart (any more): deleted, disabled, not in
@@ -89,14 +89,14 @@ pub enum CommandError {
     #[error("payment method {0} not found")]
     PaymentMethodNotFound(PaymentMethodId),
     /// A manual method (cash on delivery, bank transfer) has nothing to pay before the
-    /// order (design note 0031): place it.
+    /// order: place it.
     #[error("payment method {0} is paid after the order: place the order")]
     PaymentMethodOffline(PaymentMethodId),
     /// The cart's total is zero: no payment to start.
     #[error("cart {0} has nothing to pay")]
     NothingToPay(CartId),
-    /// The cart's money is committed already (design note 0031): check out instead of
-    /// starting again (or choose that payment's method again, if another was chosen).
+    /// The cart's money is committed already: check out instead of starting again (or
+    /// choose that payment's method again, if another was chosen).
     #[error("cart {cart}'s payment {payment} is committed: check out")]
     CartPaymentCommitted { cart: CartId, payment: PaymentId },
     /// An online method and no payment started for the cart with it.
@@ -183,12 +183,11 @@ impl<T> CheckoutPorts for T where
 {
 }
 
-/// What checkout placed (design notes 0027 §4, 0031): the order, its payment (none when
-/// there was nothing to pay), and, for a manual method, what the shopper does next (its
-/// instructions). `next_action` is `None` without a payment, for one paid online (paid
-/// before the order), and once the payment isn't open any more (a replay after staff
-/// recorded it); `Some(Err(…))` when a manual provider couldn't start, which leaves the
-/// order placed and the payment pending.
+/// What checkout placed: the order, its payment (none when there was nothing to pay), and,
+/// for a manual method, what the shopper does next (its instructions). `next_action` is
+/// `None` without a payment, for one paid online (paid before the order), and once the
+/// payment isn't open any more (a replay after staff recorded it); `Some(Err(…))` when a
+/// manual provider couldn't start, which leaves the order placed and the payment pending.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Placed {
     pub order: Order,
@@ -208,22 +207,21 @@ pub struct Checkout {
     pub return_url: Option<String>,
 }
 
-/// Turns a cart into an order (design notes 0007 §2, 0031).
+/// Turns a cart into an order.
 ///
-/// Refuses a cart that's empty, without an email, with any line that can't be bought
-/// now, whose total isn't `expected_total`, or with something to pay and no payment
-/// method offered to it (`payment_method_required`, `payment_method_unavailable`; design
-/// note 0027). An online method's money must be committed first (design note 0031): the
-/// cart's payment started with it (`start_cart_payment`; none is `payment_required`) is
-/// `authorized`, `processing` or `paid`, its provider asked first while it's `pending`
-/// (still pending: `payment_pending`; declined or released: `payment_failed`), and of
-/// the cart's total (`total_changed`). Then reserves stock for every line (the order
-/// line ID is the reservation's reference) and writes, in one batch: the order, its
-/// payment (the online one attached, or a manual method's new pending one, its
-/// instructions copied), the order's payment status, the cart marked completed, the
-/// changed inventory items, a new customer when the buyer is a guest without one, and
-/// the idempotency key. A manual method's provider is asked to start after the commit
-/// (`Placed::next_action`).
+/// Refuses a cart that's empty, without an email, with any line that can't be bought now,
+/// whose total isn't `expected_total`, or with something to pay and no payment method
+/// offered to it (`payment_method_required`, `payment_method_unavailable`). An online
+/// method's money must be committed first: the cart's payment started with it
+/// (`start_cart_payment`; none is `payment_required`) is `authorized`, `processing` or
+/// `paid`, its provider asked first while it's `pending` (still pending: `payment_pending`;
+/// declined or released: `payment_failed`), and of the cart's total (`total_changed`). Then
+/// reserves stock for every line (the order line ID is the reservation's reference) and
+/// writes, in one batch: the order, its payment (the online one attached, or a manual
+/// method's new pending one, its instructions copied), the order's payment status, the cart
+/// marked completed, the changed inventory items, a new customer when the buyer is a guest
+/// without one, and the idempotency key. A manual method's provider is asked to start after
+/// the commit (`Placed::next_action`).
 ///
 /// A cart checked out already is answered with its order (replayed): the shopper's
 /// browser and the provider's webhook may both complete it. When an online payment's
@@ -253,12 +251,12 @@ pub async fn checkout<
     run_checkout(ctx, ports, ids, clock, rates, payments, input).await
 }
 
-/// Completes the checkout a committed cart payment is for (design note 0031, §1.5):
-/// what the host runs after a provider reports a cart's payment `authorized`,
-/// `processing` or `paid` (`payments:write`, the reporter's scope), so the order exists
-/// though the shopper never came back. `None` when there's nothing to complete: the
-/// payment isn't a cart's, is attached to its order already, or isn't committed. The
-/// same command as the shopper's checkout: whichever comes second gets the order.
+/// Completes the checkout a committed cart payment is for: what the host runs after a
+/// provider reports a cart's payment `authorized`, `processing` or `paid`
+/// (`payments:write`, the reporter's scope), so the order exists though the shopper never
+/// came back. `None` when there's nothing to complete: the payment isn't a cart's, is
+/// attached to its order already, or isn't committed. The same command as the shopper's
+/// checkout: whichever comes second gets the order.
 #[allow(clippy::too_many_arguments)]
 pub async fn complete_paid_checkout<
     S: CheckoutPorts,
@@ -421,12 +419,12 @@ fn lost_a_race(e: &CommandError) -> bool {
 }
 
 impl CommandError {
-    /// Whether this error means the order can't be placed as the shopper paid for it,
-    /// so money the cart's payment committed goes back (design note 0031, §3): a line
-    /// sold out, the total changed, the cart can't be checked out as it is. Not for
-    /// errors that may pass (storage, a race, a shipping option whose provider is down:
-    /// the provider's report delivered again, or the shopper choosing again, completes
-    /// it) or that are about the payment itself.
+    /// Whether this error means the order can't be placed as the shopper paid for it, so
+    /// money the cart's payment committed goes back: a line sold out, the total changed,
+    /// the cart can't be checked out as it is. Not for errors that may pass (storage, a
+    /// race, a shipping option whose provider is down: the provider's report delivered
+    /// again, or the shopper choosing again, completes it) or that are about the payment
+    /// itself.
     pub fn gives_money_back(&self) -> bool {
         match self {
             CommandError::Cart(hypha_cart::CommandError::Repo(_))
@@ -533,7 +531,7 @@ pub(crate) async fn ready<S: CheckoutPorts, C: Clock, P: RateProvider, Q: Paymen
         .carts()
         .get(id)
         .await?
-        // Another channel's cart reads as missing (design note 0020).
+        // Another channel's cart reads as missing.
         .filter(|cart| cart.visible_in(ctx.channel()))
         .ok_or(CommandError::CartNotFound(id))?;
     if let CartStatus::Completed { order } = cart.status() {
@@ -584,8 +582,8 @@ pub(crate) async fn ready<S: CheckoutPorts, C: Clock, P: RateProvider, Q: Paymen
     })
 }
 
-/// The cart's committed payment an online `method` pays with (design note 0031, §3),
-/// its provider asked first while it's pending.
+/// The cart's committed payment an online `method` pays with, its provider asked first
+/// while it's pending.
 async fn committed_payment<S: HasPayments, Q: PaymentProviders>(
     ports: &S,
     providers: &Q,
@@ -673,8 +671,7 @@ async fn attempt<
         .email
         .clone()
         .ok_or(CommandError::MissingEmail(cart.id()))?;
-    // An online method's money first (design note 0031): nothing is reserved or placed
-    // without it.
+    // An online method's money first: nothing is reserved or placed without it.
     let mut paid = match method.as_ref().filter(|m| !m.provider().is_manual()) {
         Some(online) => {
             Some(committed_payment(ports, payments, clock, cart.id(), online, priced.total).await?)
@@ -719,9 +716,9 @@ async fn attempt<
         .collect::<Result<Vec<_>, CommandError>>()?;
     let changed = reserve_lines(&mut stock_items, &locations, &reservations)?;
 
-    // The buyer (0007, O10): the linked customer, at the email they have now (the cart
-    // keeps a copy from when it was linked, which goes stale if they change it); else
-    // the customer with the cart's email; else a new one created with the order.
+    // The buyer: the linked customer, at the email they have now (the cart keeps a copy
+    // from when it was linked, which goes stale if they change it); else the customer with
+    // the cart's email; else a new one created with the order.
     let mut new_customer = None;
     let mut known_customer = None;
     let (customer, email) = match priced.customer {
@@ -749,9 +746,9 @@ async fn attempt<
             }
         },
     };
-    // The marketing box (design note 0032, §5): ticked, the buyer subscribes from
-    // checkout, unless a newer consent is stored; unticked never unsubscribes anyone. An
-    // erased customer can't consent: the order still goes through.
+    // The marketing box: ticked, the buyer subscribes from checkout, unless a newer consent
+    // is stored; unticked never unsubscribes anyone. An erased customer can't consent: the
+    // order still goes through.
     if priced.marketing_opt_in {
         let change = ConsentChange {
             state: ConsentState::Subscribed,
@@ -914,10 +911,10 @@ pub(crate) struct Renewal {
     selection: SelectedShipping,
 }
 
-/// A provider's quote holds 15 minutes (design note 0015, SH9). Past that, the provider
-/// is asked again: the new quote replaces the old on the cart, and a changed price
-/// fails with `total_changed` when the buyer confirmed a total, after storing the new
-/// quote, so the client shows the new total and retries with it.
+/// A provider's quote holds 15 minutes. Past that, the provider is asked again: the new
+/// quote replaces the old on the cart, and a changed price fails with `total_changed` when
+/// the buyer confirmed a total, after storing the new quote, so the client shows the new
+/// total and retries with it.
 async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
     ports: &S,
     rates: &P,
@@ -1012,8 +1009,8 @@ async fn ask_again<P: RateProvider>(
     }))
 }
 
-/// The groups' choices as the order keeps them (design note 0015, SH12), each naming the
-/// order lines it ships. `check_shipping` made sure every group has one.
+/// The groups' choices as the order keeps them, each naming the order lines it ships.
+/// `check_shipping` made sure every group has one.
 fn shipping_lines(
     priced: &PricedCart,
     lines: &[OrderLine],
@@ -1062,7 +1059,7 @@ fn order_tax(t: TaxLine) -> OrderTax {
     }
 }
 
-/// An available line as the order keeps it: names, prices and tax copied (0007, O4).
+/// An available line as the order keeps it: names, prices and tax copied.
 fn order_line(line: &PricedLine, id: OrderLineId) -> Result<OrderLine, CommandError> {
     // Unavailable lines were refused above, so these always match; checked anyway.
     let unavailable = || CommandError::Unavailable {

@@ -1,7 +1,7 @@
 "use client";
 
-// The customer list's table (design note 0024, §3), with the labels field's column and
-// bulk actions when the merchant has it (design note 0032, CD1).
+// The customer list's table, with the labels field's column and bulk actions when the
+// merchant has it.
 
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
@@ -70,11 +70,11 @@ export function CustomersTable({
   canLabel = false,
 }: {
   page: { items: Customer[]; next_cursor: string | null; error?: string };
-  /** Filterable custom fields (design note 0033, §7), offered as filters. */
+  /** Filterable custom fields, offered as filters. */
   fieldFilters?: Definition[];
   /** The well-known labels field, when the merchant has it: a column and bulk actions. */
   labels?: Definition;
-  /** The store's customer groups (design note 0032, §6): a filter and bulk actions. */
+  /** The store's customer groups: a filter and bulk actions. */
   groups?: Group[];
   /** `customers:write`: labels and groups can be changed on the selection. */
   canLabel?: boolean;

@@ -70,8 +70,8 @@ pub trait CatalogRepo {
         catalog: CatalogId,
         products: &[ProductId],
     ) -> Result<(), RepoError>;
-    /// A page of the catalog's products, newest first by product ID (design note 0012).
-    /// An unknown catalog has none.
+    /// A page of the catalog's products, newest first by product ID. An unknown catalog has
+    /// none.
     async fn product_page(
         &self,
         catalog: CatalogId,
@@ -118,8 +118,8 @@ pub trait PriceListRepo {
         list: PriceListId,
         variants: &[VariantId],
     ) -> Result<(), RepoError>;
-    /// The price lists with a fixed price for `variant`, by ID: what to clean up when
-    /// the variant is removed (design note 0014, section 4).
+    /// The price lists with a fixed price for `variant`, by ID: what to clean up when the
+    /// variant is removed.
     async fn lists_pricing(&self, variant: VariantId) -> Result<Vec<PriceListId>, RepoError>;
     /// A page of the list's fixed prices, newest variant first (by variant ID). An
     /// unknown list has none.
@@ -184,9 +184,8 @@ impl<T: HasPriceLists + ?Sized> HasPriceLists for &T {
     }
 }
 
-/// Catalog membership as a batch writes it (design note 0016, EV3), so the change and
-/// its event commit together. Same preconditions as `CatalogRepo::add_products` and
-/// `remove_products`.
+/// Catalog membership as a batch writes it, so the change and its event commit together.
+/// Same preconditions as `CatalogRepo::add_products` and `remove_products`.
 pub trait StageCatalogProducts {
     fn add_catalog_products(&mut self, catalog: CatalogId, products: &[ProductId]);
     fn remove_catalog_products(&mut self, catalog: CatalogId, products: &[ProductId]);

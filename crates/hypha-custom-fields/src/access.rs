@@ -1,6 +1,6 @@
-//! Who reads and writes which fields (design note 0033, §5). One function each, used by
-//! the commands here and by the HTTP layer (responses, redaction, filters, webhook
-//! entries), so the rules live in one place.
+//! Who reads and writes which fields. One function each, used by the commands here and by
+//! the HTTP layer (responses, redaction, filters, webhook entries), so the rules live in
+//! one place.
 
 use hypha_core::{Actor, AppKey, Ctx, Scope};
 
@@ -52,8 +52,8 @@ impl<'a> FieldCaller<'a> {
         }
     }
 
-    /// Whether the caller sees personal values (§5.2): staff sessions and the system
-    /// always (AP10), others with `customer_data:profile`.
+    /// Whether the caller sees personal values: staff sessions and the system always,
+    /// others with `customer_data:profile`.
     pub fn sees_personal(&self) -> bool {
         self.ctx.is_staff()
             || self.ctx.actor() == Actor::System
@@ -106,7 +106,7 @@ pub enum WriteDenied {
     Personal,
 }
 
-/// What `caller` sees of `definition`'s values (§5.1, §5.2).
+/// What `caller` sees of `definition`'s values.
 pub fn read_access(definition: &CustomFieldDefinition, caller: &FieldCaller<'_>) -> ReadAccess {
     let read_scope = definition.owner_type().read_scope();
     if !caller.ctx.has_scope(read_scope) {
@@ -128,7 +128,7 @@ pub fn read_access(definition: &CustomFieldDefinition, caller: &FieldCaller<'_>)
     ReadAccess::Visible
 }
 
-/// Whether `caller` may write `definition`'s values (§5.1).
+/// Whether `caller` may write `definition`'s values.
 pub fn write_access(
     definition: &CustomFieldDefinition,
     caller: &FieldCaller<'_>,

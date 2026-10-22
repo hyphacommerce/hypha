@@ -1,5 +1,5 @@
-//! The dispatcher's settings (design note 0017): `[jobs.dispatch]`, `[jobs.prune]` and
-//! `[webhooks]` in `hypha.config.toml`, defaults here.
+//! The dispatcher's settings: `[jobs.dispatch]`, `[jobs.prune]` and `[webhooks]` in
+//! `hypha.config.toml`, defaults here.
 
 use core::time::Duration;
 
@@ -17,9 +17,9 @@ pub struct DispatchSettings {
     /// least `LONGEST_RUN`, or no delivery ever starts (the configuration checks it).
     pub lease: Duration,
     pub retry: RetrySchedule,
-    /// How long events (and their deliveries) are kept (0016, Q7).
+    /// How long events (and their deliveries) are kept.
     pub keep_events: Duration,
-    /// How long an idempotency key is honoured (design note 0007, section 5).
+    /// How long an idempotency key is honoured.
     pub keep_idempotency_keys: Duration,
     /// How long a session is kept after it ended (expired or revoked).
     pub keep_ended_sessions: Duration,

@@ -263,7 +263,7 @@
             "type": "object"
           },
           {
-            "description": "Mount the app's storefront element (a custom element, design note 0029, §7)\nwith these properties (a Stripe client secret, …), and wait for its\n`hypha:payment-confirmed` event.",
+            "description": "Mount the app's storefront element (a custom element) with these properties (a\nStripe client secret, …), and wait for its `hypha:payment-confirmed` event.",
             "properties": {
               "element": {
                 "type": "string"
@@ -344,7 +344,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/CartId",
-                "description": "The cart it was started for, and its order once placed: absent when Hypha gives\nback the money of a cart whose order it couldn't place (design note 0031, §3)."
+                "description": "The cart it was started for, and its order once placed: absent when Hypha gives back\nthe money of a cart whose order it couldn't place."
               },
               {
                 "type": "null"
@@ -440,7 +440,7 @@
         "type": "string"
       },
       "PaymentStartRequest": {
-        "description": "What Hypha sends to start a payment. Settings for the method stay with the app (it\nkeeps its own, design note 0029, §4.2): the method's ID is enough to find them.",
+        "description": "What Hypha sends to start a payment. Settings for the method stay with the app (it keeps\nits own): the method's ID is enough to find them.",
         "properties": {
           "amount": {
             "$ref": "#/components/schemas/Money",
@@ -461,7 +461,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/Email",
-                "description": "The buyer's email (for the provider's receipt). Personal data (design note 0029,\nAP10): absent unless the app's grant has `customer_data:email`."
+                "description": "The buyer's email (for the provider's receipt). Personal data: absent unless the\napp's grant has `customer_data:email`."
               },
               {
                 "type": "null"
@@ -613,7 +613,7 @@
         "type": "object"
       },
       "PostalAddressResponse": {
-        "description": "A postal address as Hypha sends it to an app (0015 §5's shape). Personal fields\n(names, phone, street, postal code, city, province) are left out without the app's\n`customer_data:name` / `:phone` / `:address` scopes (design note 0029, AP10) and\nlisted in `redacted`: the ones every address has (`last_name`, `line1`, `city`) are\nthen absent, the optional ones `null`. Country and company always come.",
+        "description": "A postal address as Hypha sends it to an app. Personal fields (names, phone, street,\npostal code, city, province) are left out without the app's `customer_data:name` /\n`:phone` / `:address` scopes and listed in `redacted`: the ones every address has\n(`last_name`, `line1`, `city`) are then absent, the optional ones `null`. Country and\ncompany always come.",
         "properties": {
           "city": {
             "type": [
@@ -1131,7 +1131,7 @@
     }
   },
   "info": {
-    "description": "The synchronous calls Hypha makes to apps mid-flow (design note 0029): each is a versioned contract an app implements by registering a URL for it. A reshaped request or response is a new version.",
+    "description": "The synchronous calls Hypha makes to apps mid-flow: each is a versioned contract an app implements by registering a URL for it. A reshaped request or response is a new version.",
     "license": {
       "identifier": "MIT OR Apache-2.0",
       "name": "MIT OR Apache-2.0"
@@ -1218,7 +1218,7 @@
             "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
           }
         },
-        "summary": "Run one of the app's admin actions, pressed by staff (design note 0029, §6.1).",
+        "summary": "Run one of the app's admin actions, pressed by staff.",
         "tags": [
           "admin"
         ],
@@ -1485,7 +1485,7 @@
             "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
           }
         },
-        "summary": "Start paying for a cart at checkout, before its order exists (design note 0031): what the buyer does next.",
+        "summary": "Start paying for a cart at checkout, before its order exists: what the buyer does next.",
         "tags": [
           "payments"
         ],
@@ -1841,7 +1841,7 @@
             "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
           }
         },
-        "summary": "Price a cart's shipping group (design note 0015, §5's rate callback).",
+        "summary": "Price a cart's shipping group.",
         "tags": [
           "shipping"
         ],

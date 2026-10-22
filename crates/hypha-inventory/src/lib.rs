@@ -1,4 +1,4 @@
-//! Stock per location, and reservations against it (design note 0004).
+//! Stock per location, and reservations against it.
 //!
 //! A leaf domain: it depends on core only and links to variants and markets by ID.
 

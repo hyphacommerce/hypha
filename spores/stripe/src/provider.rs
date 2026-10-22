@@ -1,6 +1,6 @@
-//! The payment provider `spore_stripe` (design note 0027, PA5; 0030, SP1): what
-//! checkout and staff's payment actions call. Its settings arrive in the request
-//! (`store_settings`, filled by the host from what the merchant saved).
+//! The payment provider `spore_stripe`: what checkout and staff's payment actions call. Its
+//! settings arrive in the request (`store_settings`, filled by the host from what the
+//! merchant saved).
 //!
 //! Results don't come back here: Stripe tells the webhook (`webhook.rs`), which records
 //! them. A capture Stripe completes is still reported there (`payment_intent.succeeded`):
@@ -144,8 +144,8 @@ fn intent_params(
         CaptureMode::Automatic => "automatic",
         CaptureMode::Manual => "manual",
     };
-    // A cart's payment has no order yet (design note 0031): its metadata names the
-    // cart, and the order is Hypha's once the money is committed.
+    // A cart's payment has no order yet: its metadata names the cart, and the order is
+    // Hypha's once the money is committed.
     let mut metadata: Vec<(&'static str, Form)> = vec![
         ("hypha_payment", payment.payment.to_string().into()),
         ("hypha_cart", payment.cart.to_string().into()),
@@ -303,8 +303,8 @@ impl PaymentProvider for StripeProvider {
         }
     }
 
-    /// Where the payment's PaymentIntent is (design note 0031, §4): checkout asks when
-    /// the shopper's browser says they paid before the webhook arrived.
+    /// Where the payment's PaymentIntent is: checkout asks when the shopper's browser says
+    /// they paid before the webhook arrived.
     async fn status(&self, request: &StatusRequest) -> Result<ProviderStatus, PaymentError> {
         let settings = Settings::from_map(&request.store_settings);
         let Some(secret_key) = &settings.secret_key else {

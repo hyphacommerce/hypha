@@ -537,7 +537,7 @@ fn the_sweep_deletes_uploads_abandoned_for_a_day() {
     assert_eq!(world.outbox.types(), ["asset.deleted"]);
 }
 
-// ---- usages (design note 0014, section 6) ----
+// ---- usages ----
 
 /// A world with batches, to record usages the way merchandising does.
 struct UsageWorld {

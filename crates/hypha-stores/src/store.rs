@@ -5,13 +5,13 @@ use hypha_core::{
 
 use crate::error::StoreError;
 
-/// A merchant's store and its details (design note 0021, SU4). Store-wide settings
-/// (policies, custom field definitions; design note 0002) will hang off it.
+/// A merchant's store and its details. Store-wide settings (policies, custom field
+/// definitions) will hang off it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Store {
     id: StoreId,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016).
+    /// When it was stored and last changed, set by the adapter.
     stamps: Option<Stamps>,
     name: String,
     contact_email: Option<Email>,
@@ -23,9 +23,9 @@ pub struct Store {
     setup: SetupProgress,
 }
 
-/// How far the merchant got through the admin's setup guide (design note 0024, AU11):
-/// the step they were last on, and when they finished it or put it away. The admin
-/// shows the guide until then, and reopens it on the step they left.
+/// How far the merchant got through the admin's setup guide: the step they were last on,
+/// and when they finished it or put it away. The admin shows the guide until then, and
+/// reopens it on the step they left.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SetupProgress {
     pub step: Option<SetupStep>,
@@ -65,7 +65,7 @@ impl Store {
 
     /// The name is trimmed; it must not be empty or longer than `MAX_NAME_CHARS`. Every
     /// other detail starts empty, and the content language is English (`en`) until the
-    /// merchant says otherwise (design note 0021, SU5).
+    /// merchant says otherwise.
     pub fn new(id: StoreId, name: &str) -> Result<Self, StoreError> {
         Ok(Self {
             id,
@@ -231,9 +231,8 @@ impl Stamped for Store {
     }
 }
 
-/// Plain-data form of a `Store` for storage adapters (design note 0001, 3.4). Values
-/// with their own types (email, timezone, language) are parsed by the adapter; the
-/// rest `restore` checks.
+/// Plain-data form of a `Store` for storage adapters. Values with their own types (email,
+/// timezone, language) are parsed by the adapter; the rest `restore` checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoreSnapshot {
     pub id: StoreId,

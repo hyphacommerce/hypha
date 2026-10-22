@@ -1,16 +1,16 @@
-//! Custom fields (design note 0033): typed fields on core resources (products, variants,
-//! categories, customers, orders), defined at runtime as data, in the merchant's
-//! `custom` namespace or an app's or spore's own. A leaf crate on core: it never sees the
-//! owners, which routes and workflows check exist before handing them over (§6.1).
+//! Custom fields: typed fields on core resources (products, variants, categories,
+//! customers, orders), defined at runtime as data, in the merchant's `custom` namespace or
+//! an app's or spore's own. A leaf crate on core: it never sees the owners, which routes
+//! and workflows check exist before handing them over.
 //!
 //! - Definitions (`CustomFieldDefinition`): owner type, namespace, key and type are
-//!   immutable (CF3); validations, access and capabilities may change, and a change that
-//!   tightens validations is checked against the stored values first (§2).
-//! - Values (`FieldValue`): one row per (definition, owner), typed JSON with derived
-//!   index columns (`ValueRow`), written through a batch with one
-//!   `<owner>.custom_fields_updated` event per owner (§4, §6.4).
-//! - Access (`access`): who reads and writes what, per namespace, surface and
-//!   personal data (§5).
+//!   immutable; validations, access and capabilities may change, and a change that tightens
+//!   validations is checked against the stored values first.
+//! - Values (`FieldValue`): one row per (definition, owner), typed JSON with derived index
+//!   columns (`ValueRow`), written through a batch with one `<owner>.custom_fields_updated`
+//!   event per owner.
+//! - Access (`access`): who reads and writes what, per namespace, surface and personal
+//!   data.
 
 pub mod access;
 pub mod commands;

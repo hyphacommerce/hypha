@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "Privacy" };
 
-/** The person's data: download it, or ask for it to be erased (design note 0034, §3). */
+/** The person's data: download it, or ask for it to be erased. */
 export default async function PrivacyPage({ params }: { params: Promise<{ country: string }> }) {
   const country = await countryOf((await params).country);
   const code = country.country;

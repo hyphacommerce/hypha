@@ -1,7 +1,7 @@
-//! What a search means, as a plain function over documents (design note 0019, section
-//! 4): the in-memory engine runs it, and the `search_index` contract holds every engine
-//! to it, relevance ranking included. An engine with a ranking of its own (Meilisearch)
-//! will need an allowance for relevance order and facet counts (note 0019, Q3).
+//! What a search means, as a plain function over documents: the in-memory engine runs it,
+//! and the `search_index` contract holds every engine to it, relevance ranking included. An
+//! engine with a ranking of its own (Meilisearch) will need an allowance for relevance
+//! order and facet counts.
 //!
 //! 1. **Match:** the market's documents whose terms contain every query term as a
 //!    prefix (`terms::matches_all`), within the price bounds, availability and every

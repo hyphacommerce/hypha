@@ -1,6 +1,6 @@
-//! The catalog of extension points this build knows (design note 0029, §3.1). A new
-//! point is a type implementing `ExtensionPoint` here, with its request and response,
-//! and a line in the extensions document's list (`hypha-http`'s `openapi.rs`).
+//! The catalog of extension points this build knows. A new point is a type implementing
+//! `ExtensionPoint` here, with its request and response, and a line in the extensions
+//! document's list (`hypha-http`'s `openapi.rs`).
 
 pub mod admin;
 pub mod payments;
@@ -45,8 +45,7 @@ const fn known<P: ExtensionPoint>() -> Known {
     }
 }
 
-/// Every point this build knows: what an app may register (design note 0029, §3,
-/// "Registering").
+/// Every point this build knows: what an app may register ("Registering").
 pub const KNOWN: &[Known] = &[
     known::<ShippingRates>(),
     known::<PaymentsStart>(),

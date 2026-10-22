@@ -101,28 +101,27 @@ fn is_json(content_type: Option<&HeaderValue>) -> bool {
 #[from_request(via(axum::extract::Path), rejection(ApiError))]
 pub struct PathId<T>(pub T);
 
-/// Who is calling: the credentials a request carries (design note 0008, section 3).
-/// The extractor only reads headers; the handler's first step is `authenticate`, which
-/// opens the request's ports (one pooled connection per request) and resolves the
-/// `Ctx` every command checks its scopes against. Ports come only from there (or from
-/// `AppState::public_ports`, named for the few routes that need no credentials), so a
-/// handler can't reach storage without authenticating.
+/// Who is calling: the credentials a request carries. The extractor only reads headers; the
+/// handler's first step is `authenticate`, which opens the request's ports (one pooled
+/// connection per request) and resolves the `Ctx` every command checks its scopes against.
+/// Ports come only from there (or from `AppState::public_ports`, named for the few routes
+/// that need no credentials), so a handler can't reach storage without authenticating.
 ///
 /// - `Authorization: Bearer hypha_sess_…`: a staff session, with the scopes of the
 ///   user's role, read fresh on every request;
 /// - `Authorization: Bearer hypha_sk_…` or `hypha_pk_…`: an API key with its scopes;
-/// - `Authorization: Bearer hypha_at_…`: an app's OAuth access token (design note 0029),
-///   with its grant's scopes, read fresh on every request;
+/// - `Authorization: Bearer hypha_at_…`: an app's OAuth access token, with its grant's
+///   scopes, read fresh on every request;
 /// - `X-Publishable-Key: hypha_pk_…`: a publishable key, for storefronts that will later
 ///   send a customer's session in `Authorization` beside it.
 ///
 /// Nothing at all is `401 unauthenticated` (from the extractor); anything unknown,
 /// expired or revoked is `401 invalid_token` (from `authenticate`).
 ///
-/// Each surface takes its own kind of credential (design note 0010, S3): `Caller` (that
-/// is, `Caller<Admin>`) a staff session or a secret key, `Caller<Storefront>` a
-/// publishable key. The wrong kind is a 403 before anything is looked up, so a
-/// publishable key never reaches an admin command, whatever its scopes.
+/// Each surface takes its own kind of credential: `Caller` (that is, `Caller<Admin>`) a
+/// staff session or a secret key, `Caller<Storefront>` a publishable key. The wrong kind is
+/// a 403 before anything is looked up, so a publishable key never reaches an admin command,
+/// whatever its scopes.
 pub struct Caller<A: Surface = Admin>(Credential, PhantomData<A>);
 
 /// A staff member's session, for the routes about "me" (password, 2FA, logout), on the
@@ -140,8 +139,7 @@ pub trait Surface {
 /// `/admin/*`: staff sessions and secret keys.
 pub struct Admin;
 
-/// `/storefront/*`: publishable keys, with a customer's session beside one (design note
-/// 0034).
+/// `/storefront/*`: publishable keys, with a customer's session beside one.
 pub struct Storefront;
 
 impl Surface for Admin {
@@ -181,8 +179,8 @@ struct Credential {
     /// Sent as `X-Publishable-Key`, where only publishable keys are accepted.
     publishable_header: bool,
     /// A customer's session (`Authorization: Bearer hypha_cs_…`) sent beside the
-    /// publishable key (design note 0034): the key decides the store and channel, the
-    /// session adds who the shopper is.
+    /// publishable key: the key decides the store and channel, the session adds who the
+    /// shopper is.
     customer_session: Option<String>,
 }
 
@@ -256,8 +254,8 @@ impl Credential {
             Some(TokenKind::SecretKey) if !self.publishable_header => Ok(Authenticated::Key(
                 authenticate_api_key(ports.api_keys(), token).await?,
             )),
-            // An app's OAuth access token (design note 0029): the grant's scopes, read
-            // fresh on every request, as `Actor::App`.
+            // An app's OAuth access token: the grant's scopes, read fresh on every request,
+            // as `Actor::App`.
             Some(TokenKind::AccessToken) if !self.publishable_header => Ok(Authenticated::Key(
                 authenticate_access_token(ports, clock, token).await?,
             )),
@@ -274,7 +272,7 @@ impl Credential {
                 let Some(session) = &self.customer_session else {
                     return Ok(Authenticated::Key(ctx));
                 };
-                // A publishable key always has a channel (design note 0020).
+                // A publishable key always has a channel.
                 let channel = ctx
                     .channel()
                     .ok_or(hypha_auth::CommandError::InvalidToken)?;
@@ -305,7 +303,7 @@ impl<A: Surface> Caller<A> {
             Authenticated::Key(ctx) => ctx,
             Authenticated::Customer(me) => me.ctx,
         };
-        // Every event these ports write from here on is the caller's (design note 0016).
+        // Every event these ports write from here on is the caller's.
         ports.act_as(ctx.actor());
         Ok((ports, ctx))
     }
@@ -334,8 +332,8 @@ impl StaffCaller {
     }
 }
 
-/// A storefront route for a signed-in customer (design note 0034, §3): the publishable
-/// key and the customer's session, both. Without the session, `401 account_required`.
+/// A storefront route for a signed-in customer: the publishable key and the customer's
+/// session, both. Without the session, `401 account_required`.
 pub struct CustomerCaller(Credential);
 
 impl CustomerCaller {
@@ -387,12 +385,12 @@ impl<S: Send + Sync> FromRequestParts<S> for StaffCaller {
     }
 }
 
-/// A JSON body like `JsonBody`, plus the request's `Idempotency-Key` header (design
-/// note 0007, section 5); `parse` (after authenticating) returns both. The key goes to
-/// the command as sent, which checks it; the fingerprint is SHA-256 over the method, the
-/// path (lowercased: IDs are case-insensitive) with its query string, and the body in
-/// canonical JSON, so the same key with a different request is caught but a retry that
-/// re-serialized its body (other whitespace or key order) is not.
+/// A JSON body like `JsonBody`, plus the request's `Idempotency-Key` header; `parse` (after
+/// authenticating) returns both. The key goes to the command as sent, which checks it; the
+/// fingerprint is SHA-256 over the method, the path (lowercased: IDs are case-insensitive)
+/// with its query string, and the body in canonical JSON, so the same key with a different
+/// request is caught but a retry that re-serialized its body (other whitespace or key
+/// order) is not.
 pub struct KeyedJson<T> {
     body: JsonBody<T>,
     key: Option<String>,

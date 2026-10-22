@@ -1,6 +1,5 @@
-//! OAuth's requests, codes and tokens (design note 0029): round trips, unique hashes,
-//! versions, the references (a code's request, a token's app) and revocation; and the
-//! batch that installs an app.
+//! OAuth's requests, codes and tokens: round trips, unique hashes, versions, the references
+//! (a code's request, a token's app) and revocation; and the batch that installs an app.
 
 use hypha_apps::{AppRepo, StageApps};
 use hypha_auth::TokenHash;

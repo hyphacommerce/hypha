@@ -1,8 +1,8 @@
-//! A host built with the Stripe spore (design note 0030, SP9), against a fake Stripe on
-//! localhost: settings, the cart's payment started before its order and checkout
-//! completing once Stripe holds the money (design note 0031), from the shopper or from
-//! Stripe's webhook, the storefront element, staff's capture and refund, the admin block,
-//! and money a replaced or second intent took given back.
+//! A host built with the Stripe spore, against a fake Stripe on localhost: settings, the
+//! cart's payment started before its order and checkout completing once Stripe holds the
+//! money, from the shopper or from Stripe's webhook, the storefront element, staff's
+//! capture and refund, the admin block, and money a replaced or second intent took given
+//! back.
 
 use std::collections::BTreeMap;
 
@@ -242,7 +242,7 @@ async fn payment_status(app: &TestApp<WithStripe>, payment: &str) -> String {
     json["status"].as_str().unwrap_or_default().to_string()
 }
 
-/// The shopper starts paying for the cart (design note 0031): the answer.
+/// The shopper starts paying for the cart: the answer.
 async fn start_paying(app: &TestApp<WithStripe>, pk: &str, cart_path: &str) -> Value {
     let (status, json) =
         send_as(app, pk, "POST", &format!("{cart_path}/payment"), Some("{}")).await;

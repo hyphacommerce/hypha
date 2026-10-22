@@ -1,12 +1,12 @@
-//! The store's search app as a search engine (design note 0029, §3.1, `search.query`):
-//! `/storefront/search` asks the app, then shows Hypha's own documents for the
-//! products and variants it found (priced and stocked as carts are, only what the
-//! storefront's channel sells), so an app chooses and orders hits but can't put a price
-//! or a product on the page. The point falls back: when the app fails, the built-in
-//! engine answers and the failure is logged (and in the app's call log).
+//! The store's search app as a search engine (`search.query`): `/storefront/search` asks
+//! the app, then shows Hypha's own documents for the products and variants it found (priced
+//! and stocked as carts are, only what the storefront's channel sells), so an app chooses
+//! and orders hits but can't put a price or a product on the page. The point falls back:
+//! when the app fails, the built-in engine answers and the failure is logged (and in the
+//! app's call log).
 //!
-//! Writes, option names and counts are always the built-in engine's: it stays in sync
-//! (it's the fallback), and an app keeps its own index from webhooks (§9).
+//! Writes, option names and counts are always the built-in engine's: it stays in sync (it's
+//! the fallback), and an app keeps its own index from webhooks.
 
 use std::collections::{BTreeMap, BTreeSet};
 

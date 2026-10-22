@@ -2,7 +2,7 @@
   "name": "@hypha/sdk",
   "version": "0.1.0",
   "private": true,
-  "description": "Typed clients for the Hypha admin and storefront APIs, generated from openapi/ (design note 0011, P5).",
+  "description": "Typed clients for the Hypha admin and storefront APIs, generated from openapi/.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",

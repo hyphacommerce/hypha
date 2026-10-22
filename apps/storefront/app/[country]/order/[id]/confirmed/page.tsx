@@ -13,7 +13,7 @@ import { OrderDetails } from "@/components/order-details";
 import { api, countryOf } from "@/lib/api";
 import { link, orderTokenCookie } from "@/lib/site";
 
-/** Per request: it reads the shopper's order with their token (design note 0024, §7). */
+/** Per request: it reads the shopper's order with their token. */
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "Order confirmed" };
@@ -24,10 +24,10 @@ type Props = {
 };
 
 /**
- * An order's confirmation (design note 0024, §7): read with the order's access token,
- * kept in an httpOnly cookie when it was placed here or opened from an email's link
- * (`/order/<id>?token=`, `app/order/[id]/route.ts`). Without the right token the order
- * isn't shown: its ID alone reads nothing.
+ * An order's confirmation: read with the order's access token, kept in an httpOnly
+ * cookie when it was placed here or opened from an email's link (`/order/<id>?token=`,
+ * `app/order/[id]/route.ts`). Without the right token the order isn't shown: its ID
+ * alone reads nothing.
  */
 export default async function OrderConfirmedPage({ params, searchParams }: Props) {
   const { country: folder, id } = await params;

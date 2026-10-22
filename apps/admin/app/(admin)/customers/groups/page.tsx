@@ -7,7 +7,7 @@ import { hasScope } from "@/lib/navigation";
 
 import { GroupsCard } from "./groups";
 
-/** Customers → Groups (design note 0032, §6). */
+/** Customers → Groups. */
 export default async function CustomerGroupsPage() {
   const client = await sessionClient();
   const [groups, me] = await Promise.all([

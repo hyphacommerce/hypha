@@ -22,7 +22,7 @@ pub(crate) type Members = HashMap<CategoryId, HashSet<ProductId>>;
 pub struct InMemoryCategoryRepo {
     pub(crate) categories: Table<CategoryId, Category>,
     /// Stored apart from the categories, like a separate table would be; shared with the
-    /// product repo, whose list filters by category (design note 0024, AU5).
+    /// product repo, whose list filters by category.
     pub(crate) members: Arc<Mutex<Members>>,
     pub(crate) outbox: InMemoryOutbox,
     field_values: SharedValues,
@@ -37,8 +37,8 @@ impl InMemoryCategoryRepo {
         }
     }
 
-    /// The same repo, filtering its list by the custom field values `fields` holds
-    /// (design note 0033, §7), as a database joins them.
+    /// The same repo, filtering its list by the custom field values `fields` holds, as a
+    /// database joins them.
     pub fn joining_fields(self, fields: &crate::InMemoryCustomFields) -> Self {
         Self {
             field_values: fields.shared_values(),
@@ -52,7 +52,7 @@ impl InMemoryCategoryRepo {
     }
 }
 
-/// Handles are unique store-wide (CA6).
+/// Handles are unique store-wide.
 pub(crate) fn unique(new: &Category, other: &Category) -> Option<&'static str> {
     (new.handle() == other.handle()).then_some(keys::CATEGORY_HANDLE)
 }

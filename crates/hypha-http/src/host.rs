@@ -1,15 +1,14 @@
-//! What a host provides that this crate can't do portably (design note 0026, §1): time,
-//! IDs, randomness, CPU-heavy work, work after the response, rate limits, calls to
-//! merchant URLs, the media storage's HTTP, sending email, and a signal after each
-//! write. The native
-//! host (`hypha-host-axum`) gives Tokio's and the operating system's; a Workers host
-//! gives the runtime's (`Date.now()`, `crypto.getRandomValues`, `fetch`, `waitUntil`).
+//! What a host provides that this crate can't do portably: time, IDs, randomness, CPU-heavy
+//! work, work after the response, rate limits, calls to merchant URLs, the media storage's
+//! HTTP, sending email, and a signal after each write. The native host (`hypha-host-axum`)
+//! gives Tokio's and the operating system's; a Workers host gives the runtime's
+//! (`Date.now()`, `crypto.getRandomValues`, `fetch`, `waitUntil`).
 //!
-//! Each is a small wrapper around a shared function whose futures are boxed and
-//! `Send`. That keeps one concrete `AppState` per storage and one `Media` type, and the
-//! compiler still proves every handler's future `Send` (a boxed `Send` future is). The
-//! repositories stay statically dispatched (CLAUDE.md); only these host capabilities are
-//! boxed, as `PgStore` already takes its clock.
+//! Each is a small wrapper around a shared function whose futures are boxed and `Send`.
+//! That keeps one concrete `AppState` per storage and one `Media` type, and the compiler
+//! still proves every handler's future `Send` (a boxed `Send` future is). The repositories
+//! stay statically dispatched; only these host capabilities are boxed, as `PgStore` already
+//! takes its clock.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -170,8 +169,8 @@ impl HostBackground {
     }
 }
 
-/// The host's rate limiter (design note 0009): counts in memory natively, Cloudflare's
-/// Rate Limiting binding on Workers.
+/// The host's rate limiter: counts in memory natively, Cloudflare's Rate Limiting binding
+/// on Workers.
 #[derive(Clone)]
 pub struct HostLimiter(Arc<CheckLimit>);
 
@@ -227,7 +226,7 @@ impl HostCalls {
     }
 
     /// `send_signed`, giving back the answer whatever its status: for extension points,
-    /// which record the status (design note 0029).
+    /// which record the status.
     pub async fn exchange_signed(
         &self,
         policy: OutboundPolicy,
@@ -258,9 +257,9 @@ impl HttpClient for HostHttp {
     }
 }
 
-/// The email sender the operator picked (`email.sender`, design note 0028, §5): the log
-/// (`crate::email::LogSender`), SMTP (native only) or Resend, each host building its
-/// own. One concrete `EmailSender` for this crate and `hypha-mail`, whichever it is.
+/// The email sender the operator picked (`email.sender`): the log
+/// (`crate::email::LogSender`), SMTP (native only) or Resend, each host building its own.
+/// One concrete `EmailSender` for this crate and `hypha-mail`, whichever it is.
 #[derive(Clone)]
 pub struct HostMail {
     name: &'static str,
@@ -302,8 +301,8 @@ impl EmailSender for HostMail {
 /// Called when a write gives the dispatcher work: the request's ports call it after
 /// committing events or retrying a delivery (`hypha_core::SignalsDispatch`, set by
 /// `AppState::public_ports`), so a write that recorded none (a cart's) wakes nothing.
-/// Natively it wakes the dispatcher (design note 0025, §6); on Workers it marks the
-/// event, whose dispatch step then runs in `waitUntil` after the response (0026, W6).
+/// Natively it wakes the dispatcher; on Workers it marks the event, whose dispatch step
+/// then runs in `waitUntil` after the response.
 #[derive(Clone)]
 pub struct AfterWrites(hypha_core::DispatchHook);
 
@@ -327,9 +326,9 @@ impl AfterWrites {
     }
 }
 
-/// Called when emails were queued (`hypha_mail::MailEnv::queued`: the `Mailer`
-/// handler, a resend), so the send job runs soon. Natively it wakes the job's runner; on
-/// Workers it marks the event, whose after-write run then sends (design note 0028, §4).
+/// Called when emails were queued (`hypha_mail::MailEnv::queued`: the `Mailer` handler, a
+/// resend), so the send job runs soon. Natively it wakes the job's runner; on Workers it
+/// marks the event, whose after-write run then sends.
 #[derive(Clone)]
 pub struct MailQueued(Arc<dyn Fn() + Send + Sync>);
 

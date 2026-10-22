@@ -1,6 +1,6 @@
-//! Rendering a template (design note 0028, §2, NT1): minijinja, the same natively and on
-//! Workers. One `Environment` per render, holding the layout and the template's
-//! sources, so a template can only reach the layout and itself (no files, no I/O).
+//! Rendering a template: minijinja, the same natively and on Workers. One `Environment` per
+//! render, holding the layout and the template's sources, so a template can only reach the
+//! layout and itself (no files, no I/O).
 
 use minijinja::{
     AutoEscape, Environment, ErrorKind, Output, State, UndefinedBehavior, escape_formatter,

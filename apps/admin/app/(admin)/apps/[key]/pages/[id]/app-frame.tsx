@@ -1,10 +1,10 @@
 "use client";
 
-// An app's embedded page (design note 0029, §6.3; docs/apps/bridge.md): the app's own
-// URL in a sandboxed iframe, answered through `@hypha/app-bridge-host`. Session tokens
-// come from the admin's server (the staff session never reaches the app), navigation
-// stays within the app's page here, toasts are the admin's, the product picker is the
-// admin's own, and the frame takes the page's height.
+// An app's embedded page (docs/apps/bridge.md): the app's own URL in a sandboxed
+// iframe, answered through `@hypha/app-bridge-host`. Session tokens come from the
+// admin's server (the staff session never reaches the app), navigation stays within
+// the app's page here, toasts are the admin's, the product picker is the admin's own,
+// and the frame takes the page's height.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { useToast } from "@astryxdesign/core/Toast";
@@ -40,9 +40,9 @@ function frameTarget(
 }
 
 /**
- * The bridge's contract (docs/apps/bridge.md, design note 0029 §6.3). Scripts and the
- * same origin together are safe here because the page is the app's own origin, never
- * the admin's: same-origin gives it its own storage and cookies (its login), not ours.
+ * The bridge's contract (docs/apps/bridge.md). Scripts and the same origin together
+ * are safe here because the page is the app's own origin, never the admin's:
+ * same-origin gives it its own storage and cookies (its login), not ours.
  */
 const SANDBOX = "allow-scripts allow-forms allow-same-origin allow-popups";
 

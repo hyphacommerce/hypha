@@ -1,7 +1,7 @@
 "use client";
 
-// The media library (design note 0024, §3): a grid of previews, or a table, on the same
-// URL-driven list as every other.
+// The media library: a grid of previews, or a table, on the same URL-driven list as
+// every other.
 
 import { AspectRatio } from "@astryxdesign/core/AspectRatio";
 import { ClickableCard } from "@astryxdesign/core/ClickableCard";
@@ -54,7 +54,7 @@ const VIEWS: View[] = [
   { label: "Files", params: { kind: ["file"] } },
 ];
 
-// Keyed by string: the API may add kinds (design note 0016 §9); those show as files.
+// Keyed by string: the API may add kinds; those show as files.
 const KIND_ICONS: Record<string, typeof DocumentIcon | undefined> = {
   image: PhotoIcon,
   video: FilmIcon,
@@ -65,7 +65,7 @@ const KIND_ICONS: Record<string, typeof DocumentIcon | undefined> = {
 function Preview({ asset, size }: { asset: Asset; size?: number }) {
   const KindIcon = KIND_ICONS[asset.kind] ?? DocumentIcon;
   const body = asset.thumbnail_url ? (
-    // A plain <img>: the media URLs resize, so no Next.js image pipeline (0011 §2).
+    // A plain <img>: the media URLs resize, so no Next.js image pipeline.
     <img src={asset.thumbnail_url} alt={asset.alt ?? ""} loading="lazy" />
   ) : (
     <Text color="secondary">

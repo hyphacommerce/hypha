@@ -1,6 +1,6 @@
-//! Authorization codes (`hypha_ac_…`, design note 0029, §15): what staff's approval
-//! sends back to the app's redirect URI. Valid 60 seconds, once, and only with the
-//! client ID, redirect URI and PKCE verifier it was issued for. Stored as SHA-256 only.
+//! Authorization codes (`hypha_ac_…`): what staff's approval sends back to the app's
+//! redirect URI. Valid 60 seconds, once, and only with the client ID, redirect URI and PKCE
+//! verifier it was issued for. Stored as SHA-256 only.
 
 use hypha_apps::normalize;
 use hypha_auth::TokenHash;

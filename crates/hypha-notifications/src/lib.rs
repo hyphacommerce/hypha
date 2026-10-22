@@ -1,7 +1,6 @@
-//! Notifications (design note 0028): the emails a store sends, their Jinja templates
-//! (the build's defaults until a merchant edits one), the store's branding and sender
-//! settings, the record of every message, rendering with minijinja, and the
-//! `EmailSender` port.
+//! Notifications: the emails a store sends, their Jinja templates (the build's defaults
+//! until a merchant edits one), the store's branding and sender settings, the record of
+//! every message, rendering with minijinja, and the `EmailSender` port.
 //!
 //! A leaf domain: it depends on core only. The context each template gets, built from
 //! orders, fulfilments, payments and the store, and the handler that sends on events are

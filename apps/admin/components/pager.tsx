@@ -2,9 +2,9 @@ import { Button } from "@astryxdesign/core/Button";
 import { HStack } from "@astryxdesign/core/Layout";
 
 /**
- * Forward-only paging for cursor lists (design note 0012): back to the first page, or on
- * to the next. `query` is the list's other parameters (filters), kept on both links;
- * `param` names the cursor's, for a page with more than one list.
+ * Forward-only paging for cursor lists: back to the first page, or on to the next.
+ * `query` is the list's other parameters (filters), kept on both links; `param` names
+ * the cursor's, for a page with more than one list.
  */
 export function Pager({
   path,

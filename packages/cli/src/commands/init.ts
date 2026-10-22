@@ -419,9 +419,9 @@ type CloudflareArgs = {
 } & EmailArgs;
 
 /**
- * `--target cloudflare` (design note 0026, §5): the API, the admin and the storefront as
- * Workers on your account, the API over Hyperdrive to the Postgres you give (any
- * provider), all deployed with one API token.
+ * `--target cloudflare`: the API, the admin and the storefront as Workers on your
+ * account, the API over Hyperdrive to the Postgres you give (any provider), all deployed
+ * with one API token.
  */
 async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> {
   const databaseUrl = (
@@ -632,9 +632,9 @@ function required(value: string, flag: string, why: string): string {
 }
 
 /**
- * How the API sends email (design note 0028, §5): the log (nothing is sent; the
- * default), Resend with its API key, or an SMTP server (a server's own, not Workers').
- * `domain` suggests the from address.
+ * How the API sends email: the log (nothing is sent; the default), Resend with its API
+ * key, or an SMTP server (a server's own, not Workers'). `domain` suggests the from
+ * address.
  */
 export async function askEmail(
   args: EmailArgs,
@@ -750,9 +750,8 @@ function emailLine(email: EmailSettings): string {
   }
 }
 
-/** The spores to compile into the API (design note 0030, §9): `--spores` (`none` for
- * none), else the earlier list with `--force`, else none. Not asked: `hypha spores add`
- * adds one later. */
+/** The spores to compile into the API: `--spores` (`none` for none), else the earlier list
+ * with `--force`, else none. Not asked: `hypha spores add` adds one later. */
 export function chooseSpores(
   args: { spores?: string },
   earlier: SporeEntry[] | undefined,
@@ -782,10 +781,10 @@ function keepAppKeys(earlier: EnvFile | undefined, env: EnvFile): void {
 }
 
 /**
- * The first-party apps to deploy alongside (design note 0029, §9): `--apps`, else asked
- * (none by default), each pinned to its repository's head and on `<name>.<domain>`
- * unless another domain is given. With `--force`, the earlier list stays unless `--apps`
- * replaces it (an app kept keeps its commit, domain and resources). `undefined`: none.
+ * The first-party apps to deploy alongside: `--apps`, else asked (none by default), each
+ * pinned to its repository's head and on `<name>.<domain>` unless another domain is
+ * given. With `--force`, the earlier list stays unless `--apps` replaces it (an app kept
+ * keeps its commit, domain and resources). `undefined`: none.
  */
 async function askApps(
   args: { apps?: string; yes?: boolean },

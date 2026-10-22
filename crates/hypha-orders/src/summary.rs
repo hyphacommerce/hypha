@@ -1,7 +1,6 @@
-//! What a list of orders shows (design note 0012, L7): no lines, so a page costs the
-//! same however many lines its orders have. A read model, not an aggregate: adapters
-//! may compute it in storage, and the repository contract checks it equals
-//! `Order::summary`.
+//! What a list of orders shows: no lines, so a page costs the same however many lines its
+//! orders have. A read model, not an aggregate: adapters may compute it in storage, and the
+//! repository contract checks it equals `Order::summary`.
 
 use hypha_core::{ChannelId, CountryCode, CustomerId, Email, Money, OrderId, Timestamp};
 
@@ -12,14 +11,14 @@ pub struct OrderSummary {
     pub id: OrderId,
     pub number: OrderNumber,
     pub placed_at: Timestamp,
-    /// The sales channel it was placed through (design note 0020).
+    /// The sales channel it was placed through.
     pub channel: ChannelId,
     pub customer: CustomerId,
     pub email: Email,
     pub country: CountryCode,
     pub financial_status: FinancialStatus,
     pub fulfillment_status: FulfillmentStatus,
-    /// When it was cancelled, if it was (design note 0018).
+    /// When it was cancelled, if it was.
     pub cancelled_at: Option<Timestamp>,
     pub total: Money,
     /// How many items, adding up line quantities.

@@ -1,8 +1,8 @@
 "use client";
 
-// A template's editor (design note 0028, §7): the subject, the HTML and the plain text,
-// a live preview of the unsaved sources (against the sample or a chosen order), Save,
-// Revert to default and Send test. Problems from a preview or a save point at their line.
+// A template's editor: the subject, the HTML and the plain text, a live preview of the
+// unsaved sources (against the sample or a chosen order), Save, Revert to default and
+// Send test. Problems from a preview or a save point at their line.
 
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Badge } from "@astryxdesign/core/Badge";

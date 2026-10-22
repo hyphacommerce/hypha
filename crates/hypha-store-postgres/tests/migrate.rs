@@ -240,7 +240,7 @@ async fn a_database_from_a_newer_hypha_is_refused() {
     );
 }
 
-/// Core up to migration 0018, before the product editing rules (design note 0014).
+/// Core up to migration 0018, before the product editing rules.
 const BEFORE_PRODUCT_EDITING: MigrationSet = MigrationSet {
     module: "core",
     migrations: CORE.migrations.split_at(18).0,
@@ -347,7 +347,7 @@ async fn product_editing_refuses_rows_that_would_stop_loading() {
     );
 }
 
-/// Core before sales channels (design note 0020): migrations 0001 to 0035.
+/// Core before sales channels: migrations 0001 to 0035.
 const BEFORE_CHANNELS: MigrationSet = MigrationSet {
     module: "core",
     migrations: CORE.migrations.split_at(35).0,
@@ -383,7 +383,7 @@ async fn existing_products_stay_sold_in_the_online_store() {
     assert_eq!(published, 2);
 }
 
-/// Core before the ISO tables (design note 0021): migrations 0001 to 0039.
+/// Core before the ISO tables: migrations 0001 to 0039.
 const BEFORE_REFERENCE_CODES: MigrationSet = MigrationSet {
     module: "core",
     migrations: CORE.migrations.split_at(39).0,
@@ -447,7 +447,7 @@ fn every_code_0040_accepts_is_still_in_core() {
     }
 }
 
-/// Core before payments (design note 0027): migrations 0001 to 0046.
+/// Core before payments: migrations 0001 to 0046.
 const BEFORE_PAYMENTS: MigrationSet = MigrationSet {
     module: "core",
     migrations: CORE.migrations.split_at(46).0,
@@ -559,7 +559,7 @@ async fn orders_marked_paid_before_payments_get_their_payment() {
     assert!(below);
 }
 
-// ---------- what a spore's migrations may do (design note 0030, §5) ----------
+// ---------- what a spore's migrations may do ----------
 
 /// A spore that keeps to its own: tables, an index, a sequence, a function, a trigger on
 /// its table, and keys into core's that cascade or set null.

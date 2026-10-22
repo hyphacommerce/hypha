@@ -1,5 +1,5 @@
-//! Choosing how to pay (design note 0027, §4): the methods a cart is offered, the
-//! buyer's choice, and the check checkout repeats.
+//! Choosing how to pay: the methods a cart is offered, the buyer's choice, and the check
+//! checkout repeats.
 //!
 //! Here rather than in `hypha-cart` because it reads payment methods, which the cart
 //! crate doesn't depend on: the cart stores only the method's ID.
@@ -36,7 +36,7 @@ pub async fn cart_payment_methods<S: HasCarts + HasPaymentMethods, P: PaymentPro
         .carts()
         .get(id)
         .await?
-        // Another channel's cart reads as missing (design note 0020).
+        // Another channel's cart reads as missing.
         .filter(|cart| cart.visible_in(ctx.channel()))
         .ok_or(CommandError::CartNotFound(id))?;
     let methods = ports.payment_methods().list().await?;
@@ -110,9 +110,9 @@ pub async fn set_payment_method<S: CartPorts + HasPaymentMethods, P: PaymentProv
 }
 
 /// The method checkout charges with: the cart's choice, still offered
-/// (`payment_method_unavailable` otherwise: gone, disabled, moved out of the market).
-/// A cart that chose none is refused (`payment_method_required`) unless there's nothing
-/// to pay (design note 0027, Q2); then no payment is made, whatever was chosen.
+/// (`payment_method_unavailable` otherwise: gone, disabled, moved out of the market). A
+/// cart that chose none is refused (`payment_method_required`) unless there's nothing to
+/// pay; then no payment is made, whatever was chosen.
 pub(crate) async fn checkout_method<S: HasPaymentMethods, P: PaymentProviders>(
     ports: &S,
     providers: &P,

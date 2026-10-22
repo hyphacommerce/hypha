@@ -1,7 +1,6 @@
-//! Talking to a payment's provider (design notes 0027 §4, 0029 §3.1, 0031): starting a
-//! payment (a cart's, before its order, for an online method; a manual method's, with
-//! its order), asking where a started one is, and giving back money a checkout that
-//! couldn't complete took.
+//! Talking to a payment's provider: starting a payment (a cart's, before its order, for an
+//! online method; a manual method's, with its order), asking where a started one is, and
+//! giving back money a checkout that couldn't complete took.
 //!
 //! A provider that fails to start leaves the payment `pending`: the answer carries the
 //! error, and starting again starts the same payment (the provider sees the same
@@ -68,7 +67,7 @@ pub(crate) async fn start<S: HasPayments, Q: PaymentProviders>(
         attempt: payment.attempt().map(str::to_string),
         instructions: payment.instructions().map(str::to_string),
         settings,
-        // The host fills a spore provider's (design note 0030, §8).
+        // The host fills a spore provider's.
         store_settings: serde_json::Map::new(),
     };
     let started = providers.start(payment.provider(), &request).await?;
@@ -156,9 +155,9 @@ pub(crate) async fn restart<S: HasPayments + HasPaymentMethods, Q: PaymentProvid
     .await)
 }
 
-/// Asks the provider where a pending cart payment is (design note 0031, §4) and records
-/// what it says on the payment: whether it moved. A provider that can't tell, or doesn't
-/// answer, leaves it as it was (checkout then waits for its report: `payment_pending`).
+/// Asks the provider where a pending cart payment is and records what it says on the
+/// payment: whether it moved. A provider that can't tell, or doesn't answer, leaves it as
+/// it was (checkout then waits for its report: `payment_pending`).
 pub(crate) async fn refresh<S: HasPayments, Q: PaymentProviders>(
     ports: &S,
     providers: &Q,
@@ -180,7 +179,7 @@ pub(crate) async fn refresh<S: HasPayments, Q: PaymentProviders>(
         }
     };
     // Only the attempt the payment collects through moves it (another one's state isn't
-    // this payment's: design note 0030).
+    // this payment's).
     if let (Some(held), Some(said)) = (payment.attempt(), status.attempt.as_deref())
         && held != said
     {
@@ -203,10 +202,10 @@ pub(crate) async fn refresh<S: HasPayments, Q: PaymentProviders>(
 }
 
 /// Gives back what a cart's committed `payment` holds, when checkout couldn't place its
-/// order (design note 0031, §3): an authorized one voided, a paid one refunded in full,
-/// through its provider; what the provider says it did is recorded at once. A
-/// `processing` one can't be yet (logged for staff). Never fails: the shopper's error is
-/// what the caller answers, and the provider's own report records the rest.
+/// order: an authorized one voided, a paid one refunded in full, through its provider; what
+/// the provider says it did is recorded at once. A `processing` one can't be yet (logged
+/// for staff). Never fails: the shopper's error is what the caller answers, and the
+/// provider's own report records the rest.
 pub(crate) async fn release<S: HasPayments, Q: PaymentProviders>(
     ports: &S,
     providers: &Q,

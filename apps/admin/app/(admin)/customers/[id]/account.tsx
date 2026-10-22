@@ -1,7 +1,7 @@
 "use client";
 
-// The customer's storefront account (design note 0034, §7): whether they have one, where
-// they're signed in, and signing them out everywhere.
+// The customer's storefront account: whether they have one, where they're signed in, and
+// signing them out everywhere.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

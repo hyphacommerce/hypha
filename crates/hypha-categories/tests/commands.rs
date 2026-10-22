@@ -1,5 +1,5 @@
-//! The category commands (design note 0022): the tree's rules, sibling positions,
-//! membership and what the storefront sees.
+//! The category commands: the tree's rules, sibling positions, membership and what the
+//! storefront sees.
 
 use hypha_categories::{
     Category, CategoryError, CategoryRepo, CategorySettings, CommandError, CreateCategory,

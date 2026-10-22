@@ -1,5 +1,5 @@
-//! The media library (design note 0013): assets, their uploads and their URLs. Files go
-//! straight between the client and storage; these routes sign and check.
+//! The media library: assets, their uploads and their URLs. Files go straight between the
+//! client and storage; these routes sign and check.
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::{AssetId, Keyset, SortKey};
@@ -285,8 +285,8 @@ pub struct AssetFilters {
     sort: Option<AssetSortDto>,
 }
 
-/// The order of the library (design note 0024, AU1). Default `newest`. Names compare
-/// lowercased, character by character; ties go by upload, in the same direction.
+/// The order of the library. Default `newest`. Names compare lowercased, character by
+/// character; ties go by upload, in the same direction.
 #[derive(Debug, Clone, Copy, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AssetSortDto {

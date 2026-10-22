@@ -8,8 +8,8 @@ import { Providers } from "./providers";
 /**
  * The store's name and language, or defaults when the API can't be read: at build time
  * (nothing is prerendered then, but the not-found page is) or during an outage, a page
- * still renders. Pages under a country are static with ISR (design note 0024, §7);
- * search, cart, checkout and account render per request.
+ * still renders. Pages under a country are static with ISR; search, cart, checkout and
+ * account render per request.
  */
 async function storeOrDefaults() {
   try {
@@ -28,7 +28,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // The language the store's content is written in (design note 0021, SU5).
+  // The language the store's content is written in.
   const store = await storeOrDefaults();
   return (
     // `data-astryx-theme` on <html> from the server: the theme's tokens are scoped to it,

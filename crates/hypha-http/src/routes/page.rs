@@ -1,13 +1,12 @@
-//! What every list route shares (design note 0012): the `cursor` and `limit` query
-//! parameters, the cursor itself, and the page response. A new list takes a
-//! `ListQuery<Filters>` (or `ListQuery` without filters), lists `PageParams` and its
-//! filters in `params(...)`, and answers with a `PageResponse<ItemDto>`.
+//! What every list route shares: the `cursor` and `limit` query parameters, the cursor
+//! itself, and the page response. A new list takes a `ListQuery<Filters>` (or `ListQuery`
+//! without filters), lists `PageParams` and its filters in `params(...)`, and answers with
+//! a `PageResponse<ItemDto>`.
 //!
-//! Cursors are opaque to clients (design note 0016, section 9): base64url of a small
-//! JSON object with a version, the last item's ID, its sort key in a sorted list
-//! (design note 0024, AU2) and the list's filters (`sort` among them), so a cursor only
-//! continues the list it came from. A sorted list parses with `parse_sorted` and
-//! answers with `PageResponse::sorted`.
+//! Cursors are opaque to clients: base64url of a small JSON object with a version, the last
+//! item's ID, its sort key in a sorted list and the list's filters (`sort` among them), so
+//! a cursor only continues the list it came from. A sorted list parses with `parse_sorted`
+//! and answers with `PageResponse::sorted`.
 
 use std::{borrow::Cow, fmt::Display, marker::PhantomData, str::FromStr};
 
@@ -151,8 +150,8 @@ impl Cursor {
     }
 }
 
-/// A cursor that continues `scope`'s list after `after`, for lists that page by
-/// something other than their items' IDs (search pages by offset, design note 0019).
+/// A cursor that continues `scope`'s list after `after`, for lists that page by something
+/// other than their items' IDs (search pages by offset).
 pub(crate) fn cursor_at(scope: &ListScope, after: impl Display) -> Result<String, ApiError> {
     Cursor {
         v: Cursor::VERSION,
@@ -183,8 +182,8 @@ fn next_cursor<U, Id: Display>(
     .map(Some)
 }
 
-/// The filters of a sorted list (design note 0024): whether a cursor's sort key is the
-/// kind the requested sort uses, so a cursor can't be replayed under another sort.
+/// The filters of a sorted list: whether a cursor's sort key is the kind the requested sort
+/// uses, so a cursor can't be replayed under another sort.
 pub trait SortedFilters {
     fn fits(&self, key: &SortKey) -> bool;
 }
@@ -195,7 +194,7 @@ pub trait SortedFilters {
 impl<T: ToSchema> PartialSchema for PageResponse<T> {
     fn schema() -> RefOr<Schema> {
         ObjectBuilder::new()
-            .description(Some("A page of a list, newest first (design note 0012)."))
+            .description(Some("A page of a list, newest first."))
             .property(
                 "items",
                 ArrayBuilder::new().items(Ref::from_schema_name(T::name())),
@@ -272,8 +271,8 @@ impl<F: DeserializeOwned + SortedFilters> ListQuery<F> {
         Ok((page, filters, scope))
     }
 
-    /// `parse_sorted` for a list of custom field owners (design note 0033, §7): the
-    /// `field[…]` filters and `custom_fields` are read apart from `F`.
+    /// `parse_sorted` for a list of custom field owners: the `field[…]` filters and
+    /// `custom_fields` are read apart from `F`.
     pub(crate) fn parse_sorted_with_fields<Id: FromStr>(
         self,
     ) -> Result<SortedWithFields<Id, F>, ApiError> {
@@ -289,11 +288,11 @@ impl<F: DeserializeOwned + SortedFilters> ListQuery<F> {
 /// the custom field parameters.
 pub(crate) type SortedWithFields<Id, F> = (PageRequest<Keyset<Id>>, F, ListScope, FieldQuery);
 
-/// A list's custom field parameters (design note 0033, §6.2, §7), as the query spells
-/// them: `field[custom.material]=wool,cotton` (any of these),
-/// `field[custom.weight][gte]=1.5` (`eq`, `gt`, `gte`, `lt`, `lte`, `exists`), and
-/// `custom_fields=custom.material,custom.tags` (the values to include). Checked against
-/// the definitions by the route (`custom_fields::filters`).
+/// A list's custom field parameters, as the query spells them:
+/// `field[custom.material]=wool,cotton` (any of these), `field[custom.weight][gte]=1.5`
+/// (`eq`, `gt`, `gte`, `lt`, `lte`, `exists`), and
+/// `custom_fields=custom.material,custom.tags` (the values to include). Checked against the
+/// definitions by the route (`custom_fields::filters`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FieldQuery {
     pub filters: Vec<RawFieldFilter>,

@@ -75,11 +75,10 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
   const { id } = await params;
   const client = await sessionClient();
   // All at once; a missing order still goes to the 404 page (`loaded`). Shipments and
-  // locations need their own scopes; without them the page shows the order alone.
-  // The emails need `notifications:read` and `orders:read` (they name the buyer); without
+  // locations need their own scopes; without them the page shows the order alone. The
+  // emails need `notifications:read` and `orders:read` (they name the buyer); without
   // them the request is refused and the card isn't shown. The staff member is the
-  // layout's read too.
-  // What installed apps add here (design note 0029, §5) is one more read.
+  // layout's read too. What installed apps add here is one more read.
   const [
     found,
     shipments,
@@ -102,7 +101,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
     client.GET("/admin/notifications", { params: { query: { order: id } } }),
     requireStaff(),
     loadExtensions(),
-    // Its custom fields (design note 0033): none shown without `custom_fields:read`.
+    // Its custom fields: none shown without `custom_fields:read`.
     definitionsOf("order"),
     client.GET("/admin/orders/{id}/custom-fields", { params: { path: { id } } }),
   ]);
@@ -393,7 +392,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
 
 type Order = AdminSchemas["AdminOrderResponse"];
 
-/** How the order is paid for (design note 0027): each payment, newest first. */
+/** How the order is paid for: each payment, newest first. */
 function PaymentCard({
   order,
   currencies,

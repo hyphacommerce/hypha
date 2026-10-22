@@ -29,12 +29,10 @@ function emptyFields(owner: string): FieldsResponse {
 }
 
 /**
- * The product's details, content, publishing, categories, options and variants as one
- * draft (design notes 0021, section 8, and 0022, section 5): edits change only the draft,
- * and a bar at the top saves or discards them together. Media and stock act at once, as
- * before: an upload can't wait for Save. Two columns
- * (design note 0024, section 6): what the product is on the left, how it's sold and
- * organised on the right.
+ * The product's details, content, publishing, categories, options and variants as one draft:
+ * edits change only the draft, and a bar at the top saves or discards them together.
+ * Media and stock act at once, as before: an upload can't wait for Save. Two columns: what
+ * the product is on the left, how it's sold and organised on the right.
  *
  * When the saved product changes under the editor (after a save, an upload, a status change),
  * the draft follows it unless it has unsaved changes of its own.
@@ -64,8 +62,8 @@ export function ProductEditor({
   stock?: Record<string, Stock>;
   locations: AdminSchemas["LocationResponse"][];
   /**
-   * The product's custom fields (design note 0033), saved with the bar; `undefined`
-   * without `custom_fields:read` or with no product definitions: no card then.
+   * The product's custom fields, saved with the bar; `undefined` without
+   * `custom_fields:read` or with no product definitions: no card then.
    */
   customFields?: {
     definitions: Definition[];

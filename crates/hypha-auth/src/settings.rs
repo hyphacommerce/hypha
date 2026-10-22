@@ -1,5 +1,5 @@
-//! How long auth's tokens last (design note 0017): set from `hypha.config.toml`'s `[auth]`
-//! by the host, defaults here.
+//! How long auth's tokens last: set from `hypha.config.toml`'s `[auth]` by the host,
+//! defaults here.
 
 use core::time::Duration;
 

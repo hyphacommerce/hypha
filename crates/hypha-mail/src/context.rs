@@ -1,6 +1,6 @@
-//! What each template gets (design note 0028, §3, §11, NT3): typed serde structs, the
-//! contract of the templates' variables. Fields are added, never renamed or removed.
-//! `null` where a value is absent; money and times arrive formatted (`format.rs`).
+//! What each template gets: typed serde structs, the contract of the templates' variables.
+//! Fields are added, never renamed or removed. `null` where a value is absent; money and
+//! times arrive formatted (`format.rs`).
 //!
 //! Each kind of email has a `sample()`, a made-up order (or staff message) for
 //! previews, test sends, the editor's variable list and checking a template on save.
@@ -349,7 +349,7 @@ pub struct StaffMail {
     pub expires_at: TimeValue,
 }
 
-/// `customer_login_code` (design note 0034, §6): the code itself, how long it works.
+/// `customer_login_code`: the code itself, how long it works.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CodeMail {
     pub shop: ShopContext,
@@ -367,7 +367,7 @@ pub struct CodeMail {
     pub expires_in_minutes: u64,
 }
 
-/// `customer_erasure_requested` (design note 0034, §3): when the erasure runs.
+/// `customer_erasure_requested`: when the erasure runs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ErasureMail {
     pub shop: ShopContext,
@@ -577,8 +577,8 @@ impl MailContext {
     }
 }
 
-/// The storefront's sign-in link with the email and code filled in (design note 0034,
-/// §7), or empty without a shop URL.
+/// The storefront's sign-in link with the email and code filled in, or empty without a shop
+/// URL.
 pub fn login_link(shop_url: Option<&str>, email: &str, code: &str) -> String {
     let Some(base) = shop_url else {
         return String::new();

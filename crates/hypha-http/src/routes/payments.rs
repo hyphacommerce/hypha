@@ -1,6 +1,6 @@
-//! Payment methods (design note 0027, §7): how shoppers can pay, as settings; the
-//! payments shown on orders; and what happens to an app's payments (design note 0029,
-//! §3.1): the app reporting results, staff asking it to capture, void or refund.
+//! Payment methods: how shoppers can pay, as settings; the payments shown on orders; and
+//! what happens to an app's payments: the app reporting results, staff asking it to
+//! capture, void or refund.
 
 use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_core::{
@@ -102,9 +102,9 @@ pub async fn list<S: Storage>(
 pub enum ProviderKindDto {
     /// Built in: staff record the money (`manual`).
     Manual,
-    /// A spore built into the API (design note 0030).
+    /// A spore built into the API.
     Spore,
-    /// An installed app answering `payments.start` (design note 0029, §3.1).
+    /// An installed app answering `payments.start`.
     App,
 }
 
@@ -123,9 +123,9 @@ pub struct PaymentProviderListResponse {
     items: Vec<PaymentProviderResponse>,
 }
 
-/// The providers a payment method may name now: `manual`, each enabled spore's (design
-/// note 0030), and each installed, enabled app answering `payments.start`. What an
-/// admin offers when creating a method.
+/// The providers a payment method may name now: `manual`, each enabled spore's, and each
+/// installed, enabled app answering `payments.start`. What an admin offers when creating a
+/// method.
 #[utoipa::path(
     get,
     path = "/admin/payment-providers",
@@ -363,13 +363,13 @@ pub async fn delete<S: Storage>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `PaymentStatus` on the wire (design note 0027, PA7).
+/// `PaymentStatus` on the wire.
 #[derive(Clone, Copy, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PaymentStatusDto {
     Pending,
     Authorized,
-    /// Taken and being collected (SEPA: days; design note 0031): not paid yet.
+    /// Taken and being collected (SEPA: days): not paid yet.
     Processing,
     Paid,
     Failed,
@@ -399,8 +399,8 @@ pub struct PaymentResponse {
     id: PaymentId,
     /// The cart it was started for; `null` for money staff recorded by hand.
     cart: Option<CartId>,
-    /// The order it collects for; `null` while it's a cart's, before checkout placed
-    /// the order (design note 0031).
+    /// The order it collects for; `null` while it's a cart's, before checkout placed the
+    /// order.
     order: Option<OrderId>,
     /// The method it was made with; `null` for money staff recorded on an order placed
     /// without one.
@@ -486,7 +486,7 @@ impl PlacedPaymentResponse {
     }
 }
 
-/// What the shopper must do next to pay (design note 0027, §3; 0029, §7).
+/// What the shopper must do next to pay.
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NextActionResponse {
@@ -543,7 +543,7 @@ impl CartPaymentMethodResponse {
     }
 }
 
-// ---------- an app's payments (design note 0029, §3.1) ----------
+// ---------- an app's payments ----------
 
 /// What a payment's provider reports (`type`): the status the payment is in now.
 #[derive(Clone, Copy, Deserialize, utoipa::ToSchema)]
@@ -625,22 +625,19 @@ pub struct PaymentEventRequest {
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct PaymentEventResponse {
     payment: PaymentResponse,
-    /// Its order; `null` while it's a cart's and the checkout isn't complete (design
-    /// note 0031). A report that commits a cart's payment completes its checkout: the
-    /// order placed then.
+    /// Its order; `null` while it's a cart's and the checkout isn't complete. A report that
+    /// commits a cart's payment completes its checkout: the order placed then.
     order: Option<OrderId>,
     /// The order's payment status, derived from its payments; `null` without an order.
     financial_status: Option<FinancialStatusDto>,
 }
 
-/// What a payment's provider reports (design note 0029, §3.1): a payment app tells
-/// Hypha what its provider did (Stripe's webhook landed on the app). Moves the payment
-/// and its order's payment status in one batch, recording `payment.authorized`,
-/// `.paid`, `.failed`, `.voided` or `.refunded` (and `order.paid`). Reporting the
-/// status a payment is in already changes nothing. Send an `Idempotency-Key` (the
-/// provider's event ID): a retry with it answers as the first did. A refund is counted
-/// once per `reference` (the provider's refund ID), whatever the key. A move the payment's status doesn't allow is `409
-/// invalid_payment_transition`; a refund that doesn't fit, `422 invalid_refund_amount`.
+/// What a payment's provider reports: a payment app tells Hypha what its provider did (Stripe's webhook landed on the
+/// app). Moves the payment and its order's payment status in one batch, recording `payment.authorized`, `.paid`,
+/// `.failed`, `.voided` or `.refunded` (and `order.paid`). Reporting the status a payment is in already changes
+/// nothing. Send an `Idempotency-Key` (the provider's event ID): a retry with it answers as the first did. A refund is
+/// counted once per `reference` (the provider's refund ID), whatever the key. A move the payment's status doesn't allow
+/// is `409 invalid_payment_transition`; a refund that doesn't fit, `422 invalid_refund_amount`.
 #[utoipa::path(
     post,
     path = "/admin/payments/{id}/events",
@@ -668,7 +665,7 @@ pub async fn report_event<S: Storage>(
     };
     let done = record_payment_event(&ctx, &ports, &state.clock, input).await?;
     let mut report = done.value;
-    // A cart's money committed: its checkout completes now (design note 0031, §1.5).
+    // A cart's money committed: its checkout completes now.
     let completed = match state
         .complete_paid_checkout(&ports, &ctx, &report.payment)
         .await
@@ -791,10 +788,10 @@ async fn act<S: Storage>(
 }
 
 /// What a spore's provider did already (`ActionAnswer::Completed`: Stripe's capture
-/// answered `succeeded`), recorded at once as its spore (design note 0030), so staff
-/// see the payment move now; the provider's own report later changes nothing (the same
-/// state, or the refund's ID counted). The payment as it is after; `None` (logged) when
-/// it couldn't be recorded: the provider's report is the backstop.
+/// answered `succeeded`), recorded at once as its spore, so staff see the payment move now;
+/// the provider's own report later changes nothing (the same state, or the refund's ID
+/// counted). The payment as it is after; `None` (logged) when it couldn't be recorded: the
+/// provider's report is the backstop.
 async fn record_completed<S: Storage>(
     state: &SharedState<S>,
     ports: &S::Ports<'_>,
@@ -853,16 +850,15 @@ async fn record_completed<S: Storage>(
     }
 }
 
-/// Asks the payment's app to capture an authorized payment (`payments.capture`). 202:
-/// the app accepted; the payment becomes `paid` when the app reports it, or at once (in
-/// the answer's `payment`) when a provider built into the API says it's done (a spore,
-/// design note 0030). Refused by the
-/// provider: `409 payment_refused` with its `reason`. Not authorized: `409
+/// Asks the payment's app to capture an authorized payment (`payments.capture`). 202: the
+/// app accepted; the payment becomes `paid` when the app reports it, or at once (in the
+/// answer's `payment`) when a provider built into the API says it's done (a spore). Refused
+/// by the provider: `409 payment_refused` with its `reason`. Not authorized: `409
 /// invalid_payment_transition`; a `manual` payment: `409 payment_action_unsupported`; the
-/// app gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent,
-/// is passed to the app (retry a timed-out request with the same one); without it each
-/// request is a new attempt with its own key, so asking again after a refusal is asked
-/// anew, not answered with the refusal.
+/// app gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent, is
+/// passed to the app (retry a timed-out request with the same one); without it each request
+/// is a new attempt with its own key, so asking again after a refusal is asked anew, not
+/// answered with the refusal.
 #[utoipa::path(
     post,
     path = "/admin/payments/{id}/capture",

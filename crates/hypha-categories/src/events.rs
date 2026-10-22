@@ -1,5 +1,5 @@
-//! What happens to categories, as events (design note 0022, section 2). Contract types:
-//! a renamed or reshaped field is a new `VERSION`, never an edit.
+//! What happens to categories, as events. Contract types: a renamed or reshaped field is a
+//! new `VERSION`, never an edit.
 
 use std::collections::BTreeSet;
 

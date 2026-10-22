@@ -75,9 +75,9 @@ impl Webhook {
     }
 }
 
-/// The scopes staff approved for an app installed through OAuth (design note 0029,
-/// AP5): every access token the app holds acts with these at most, read fresh on each
-/// request, so narrowing a grant takes effect at once.
+/// The scopes staff approved for an app installed through OAuth: every access token the app
+/// holds acts with these at most, read fresh on each request, so narrowing a grant takes
+/// effect at once.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Grant {
     /// In `Scope::ALL` order, each once.
@@ -130,9 +130,9 @@ pub struct InstalledManifest {
     pub fetched_at: Timestamp,
 }
 
-/// The read scope an event's subject kind needs, for apps with a grant: an app is only
-/// sent events about what it may read (design note 0029, §4.1 step 5). `None` for a
-/// kind no scope covers, which granted apps aren't sent.
+/// The read scope an event's subject kind needs, for apps with a grant: an app is only sent
+/// events about what it may read. `None` for a kind no scope covers, which granted apps
+/// aren't sent.
 pub fn event_scope(subject_kind: &str) -> Option<Scope> {
     Some(match subject_kind {
         "product" | "category" | "search_settings" => Scope::ProductsRead,
@@ -146,26 +146,24 @@ pub fn event_scope(subject_kind: &str) -> Option<Scope> {
         "fulfillment" => Scope::FulfillmentsRead,
         "shipping_zone" => Scope::ShippingRead,
         "asset" => Scope::MediaRead,
-        // Definitions (design note 0033); `<owner>.custom_fields_updated` events are
-        // about their owner (`product`, `category`, `customer`, `order`) and go by its
-        // read scope.
+        // Definitions; `<owner>.custom_fields_updated` events are about their owner
+        // (`product`, `category`, `customer`, `order`) and go by its read scope.
         "custom_field_definition" => Scope::CustomFieldsRead,
         _ => return None,
     })
 }
 
-/// An external app (design note 0016, EV11). Made by hand (`create_app`, webhooks
-/// only) or installed through OAuth from its manifest (design note 0029), which gives
-/// it a grant. Or a spore (design note 0030, SP3): Rust built into the API, registered
-/// by the host at startup with the scopes it declares as its grant; staff may enable
-/// or disable it, nothing else (`AppError::BuiltIn`).
+/// An external app. Made by hand (`create_app`, webhooks only) or installed through OAuth
+/// from its manifest, which gives it a grant. Or a spore: Rust built into the API,
+/// registered by the host at startup with the scopes it declares as its grant; staff may
+/// enable or disable it, nothing else (`AppError::BuiltIn`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct App {
     key: AppKey,
     /// What it acts as (`Actor::App`): `Copy`, unlike the key.
     id: AppId,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016).
+    /// When it was stored and last changed, set by the adapter.
     stamps: Option<Stamps>,
     name: String,
     enabled: bool,
@@ -210,8 +208,7 @@ impl Recorded for App {
     }
 }
 
-/// A spore as the host registers it at startup (design note 0030, §3): what the build
-/// says about it.
+/// A spore as the host registers it at startup: what the build says about it.
 pub struct NewSpore<'a> {
     /// `stripe`, for `spore_stripe`.
     pub name: &'a str,
@@ -221,7 +218,7 @@ pub struct NewSpore<'a> {
     /// Never handed out: a spore takes no webhooks and signs nothing. Kept so every
     /// app has one (the column, and a later use such as session tokens).
     pub secret: Sealed,
-    /// What it acts with (SP2).
+    /// What it acts with.
     pub scopes: &'a [Scope],
     pub at: Timestamp,
 }
@@ -352,9 +349,8 @@ impl App {
     }
 
     /// Records `app.installed`, with the grant's scopes: when the app has exchanged an
-    /// installation's first code, so it holds the secret that signs the delivery (design
-    /// note 0029, §4.1). Sent at approval, it would arrive before the app could verify
-    /// it.
+    /// installation's first code, so it holds the secret that signs the delivery. Sent at
+    /// approval, it would arrive before the app could verify it.
     pub fn installed(&mut self) -> Result<(), AppError> {
         let grant = self.grant.as_ref().ok_or(AppError::NotInstalled)?;
         let event = AppInstalled {
@@ -373,8 +369,8 @@ impl App {
                 manifest.manifest.key().clone(),
             ));
         }
-        // A custom field's type is part of its identity (design note 0033, CF3): the
-        // app's definitions outlive an uninstall, so this holds for a reinstall too.
+        // A custom field's type is part of its identity: the app's definitions outlive an
+        // uninstall, so this holds for a reinstall too.
         if let Some(previous) = &self.manifest {
             crate::custom_fields::check_retypes(&previous.manifest, &manifest.manifest)?;
         }
@@ -408,8 +404,8 @@ impl App {
         self.grant = Some(grant);
     }
 
-    /// Narrows the grant to `scopes` (each one it has), at once: tokens act with the
-    /// grant as it is on each request. Staff do it from the admin (§4.1).
+    /// Narrows the grant to `scopes` (each one it has), at once: tokens act with the grant
+    /// as it is on each request. Staff do it from the admin.
     pub fn narrow_grant(
         &mut self,
         scopes: &[Scope],
@@ -443,9 +439,9 @@ impl App {
         );
     }
 
-    /// Uninstalls it (design note 0029, §4.1): the grant goes, it takes no more events
-    /// but `app.uninstalled`, which it's sent last. Its webhook and secret stay for that
-    /// delivery; deleting it afterwards removes it for good.
+    /// Uninstalls it: the grant goes, it takes no more events but `app.uninstalled`, which
+    /// it's sent last. Its webhook and secret stay for that delivery; deleting it
+    /// afterwards removes it for good.
     pub fn uninstall(&mut self, at: Timestamp) -> Result<(), AppError> {
         self.require_external()?;
         if self.grant.is_none() || self.uninstalled_at.is_some() {
@@ -522,8 +518,8 @@ impl App {
                 && (route.event_type == AppUninstalled::TYPE
                     || (self.enabled && self.uninstalled_at.is_none()));
         }
-        // `customer.redacted` (design note 0032, §7.3) reaches every app that reads
-        // customers, subscribed or not: it's how Hypha asks them to delete their copies.
+        // `customer.redacted` reaches every app that reads customers, subscribed or not:
+        // it's how Hypha asks them to delete their copies.
         if route.event_type == "customer.redacted" {
             return self.enabled
                 && self.uninstalled_at.is_none()
@@ -544,7 +540,7 @@ impl App {
             (Some(grant), _) => event_scope(route.subject_kind).is_some_and(|s| grant.has(s)),
             // Installed from a manifest but not granted: nothing.
             (None, Some(_)) => false,
-            // Made by hand (webhooks only, design note 0016): as subscribed.
+            // Made by hand (webhooks only): as subscribed.
             (None, None) => true,
         }
     }
@@ -584,10 +580,10 @@ impl App {
         self.grant.is_some() && self.uninstalled_at.is_none()
     }
 
-    /// Whether Hypha calls it at an extension point that needs `scope` (design note
-    /// 0029, §4.1 step 5): enabled, and either made by hand (staff registered its
-    /// endpoints, as they did its webhook) or installed with a grant that has `scope`.
-    /// Uninstalled, or installed from a manifest but not granted: never.
+    /// Whether Hypha calls it at an extension point that needs `scope`: enabled, and either
+    /// made by hand (staff registered its endpoints, as they did its webhook) or installed
+    /// with a grant that has `scope`. Uninstalled, or installed from a manifest but not
+    /// granted: never.
     pub fn may_answer(&self, scope: Scope) -> bool {
         if !self.enabled {
             return false;

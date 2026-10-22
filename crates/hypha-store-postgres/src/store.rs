@@ -25,10 +25,10 @@ pub trait PgConnection {
     }
 
     /// Whether a read-only snapshot that succeeded may end without waiting
-    /// (`consistent_read!`): its ROLLBACK is queued, and the next query on the
-    /// connection follows it, which saves a round trip per load. `false`, the default,
-    /// waits: through Hyperdrive a transaction ended without waiting stalled the next
-    /// query (design note 0026, §8). A host's direct connection says `true`.
+    /// (`consistent_read!`): its ROLLBACK is queued, and the next query on the connection
+    /// follows it, which saves a round trip per load. `false`, the default, waits: through
+    /// Hyperdrive a transaction ended without waiting stalled the next query. A host's
+    /// direct connection says `true`.
     fn ends_reads_unawaited(&self) -> bool {
         false
     }
@@ -40,11 +40,11 @@ pub trait PgConnection {
     }
 }
 
-/// The statements one connection has prepared, by SQL and parameter types (design note
-/// 0025, §6). An unprepared query is planned on every call, and planning cost Postgres
-/// about four times what running the storefront's queries did; a prepared one is
-/// planned once per connection. Kept with the connection (a statement belongs to it),
-/// so only a host with long-lived connections keeps one.
+/// The statements one connection has prepared, by SQL and parameter types. An unprepared
+/// query is planned on every call, and planning cost Postgres about four times what running
+/// the storefront's queries did; a prepared one is planned once per connection. Kept with
+/// the connection (a statement belongs to it), so only a host with long-lived connections
+/// keeps one.
 ///
 /// At most `CAPACITY` statements: past it a query runs unprepared, so SQL built per
 /// call (a batch insert's rows) can't grow it without bound.
@@ -228,12 +228,12 @@ impl PgConnection for &mut Client {
 /// store is shared. Transactions need `&mut Client`, which the mutex hands out.
 pub struct PgStore<C> {
     conn: Mutex<C>,
-    /// Who the events this store writes are stamped with (`ActingAs`, design note 0016,
-    /// Q1): `Actor::System` until the host sets the caller. A plain mutex: it's held
-    /// only to copy an `Actor`, never across an `.await`.
+    /// Who the events this store writes are stamped with (`ActingAs`): `Actor::System`
+    /// until the host sets the caller. A plain mutex: it's held only to copy an `Actor`,
+    /// never across an `.await`.
     actor: std::sync::Mutex<Actor>,
-    /// What aggregates are stamped with when written (design note 0016, Q3): the host's
-    /// clock, so a batch's aggregates carry their stamps before it commits.
+    /// What aggregates are stamped with when written: the host's clock, so a batch's
+    /// aggregates carry their stamps before it commits.
     clock: Arc<dyn Clock + Send + Sync>,
     /// Whether the open transaction has given the dispatcher work (`insert_events`, a
     /// retried delivery): when it commits, the dispatch hook is told. Transactions don't overlap on one store (the
@@ -262,8 +262,8 @@ impl<C: PgConnection> PgStore<C> {
 
     /// The request's connection, for a query: `conn.db()` (`PgConnection::db`) queries
     /// outside a transaction through its statement cache. Public for spores' own
-    /// repositories over their own tables (design note 0030, §5), which implement their
-    /// accessor traits for `PgStore`.
+    /// repositories over their own tables, which implement their accessor traits for
+    /// `PgStore`.
     pub async fn conn(&self) -> MutexGuard<'_, C> {
         self.conn.lock().await
     }
@@ -435,14 +435,13 @@ pub(crate) async fn begin_consistent_read(
         .map_err(repo_error)
 }
 
-/// Runs a repository write as a batch of one (design note 0016, EV2): `body` (which
-/// returns `Result<_, RepoError>`) gets `tx: &Transaction` and calls the same
-/// `insert_x` / `update_x` functions `PgBatch::commit` does, then the transaction
-/// commits. On an error it's rolled back (`end_transaction`, awaited: never by dropping
-/// it), so a write that fails half-way (a stale version after some child rows) leaves
-/// nothing behind. A commit that wrote events tells the dispatch hook
-/// (`PgStore::transaction_ended`).
-/// A macro for the same reason as `consistent_read!`.
+/// Runs a repository write as a batch of one: `body` (which returns `Result<_, RepoError>`)
+/// gets `tx: &Transaction` and calls the same `insert_x` / `update_x` functions
+/// `PgBatch::commit` does, then the transaction commits. On an error it's rolled back
+/// (`end_transaction`, awaited: never by dropping it), so a write that fails half-way (a
+/// stale version after some child rows) leaves nothing behind. A commit that wrote events
+/// tells the dispatch hook (`PgStore::transaction_ended`). A macro for the same reason as
+/// `consistent_read!`.
 ///
 /// `in_transaction!(store, |tx| body)`.
 macro_rules! in_transaction {
@@ -482,9 +481,9 @@ pub(crate) async fn end_read<T>(
 }
 
 /// Ends a transaction explicitly, waiting for it: COMMIT if `value` succeeded, else
-/// ROLLBACK (which a failed write needs anyway). Never by dropping it: tokio-postgres
-/// then queues a ROLLBACK without waiting, which works against Postgres directly but
-/// stalled the next query through Hyperdrive (design note 0026, §8).
+/// ROLLBACK (which a failed write needs anyway). Never by dropping it: tokio-postgres then
+/// queues a ROLLBACK without waiting, which works against Postgres directly but stalled the
+/// next query through Hyperdrive.
 pub(crate) async fn end_transaction<T>(
     tx: Transaction<'_>,
     value: Result<T, RepoError>,

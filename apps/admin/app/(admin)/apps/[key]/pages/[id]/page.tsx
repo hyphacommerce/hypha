@@ -9,8 +9,8 @@ import { AppPageTabs } from "../../app-pages";
 import { AppFrame } from "./app-frame";
 
 /**
- * One of an app's embedded pages (`apps.page`, `settings.app`; design note 0029, §6.3),
- * at `?path=` within it when the app navigated there.
+ * One of an app's embedded pages (`apps.page`, `settings.app`), at `?path=` within it
+ * when the app navigated there.
  */
 export default async function AppEmbeddedPage({
   params,

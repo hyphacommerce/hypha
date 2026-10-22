@@ -1,6 +1,6 @@
-//! What happens to customers, as events (design note 0016, section 4). Payloads name
-//! the customer and which fields changed, never their values: an email or an address is
-//! personal data, and a consumer with `customers:read` fetches it (Q2).
+//! What happens to customers, as events. Payloads name the customer and which fields
+//! changed, never their values: an email or an address is personal data, and a consumer
+//! with `customers:read` fetches it.
 
 use std::collections::BTreeSet;
 
@@ -35,9 +35,8 @@ impl Event for CustomerUpdated {
     const VERSION: u16 = 1;
 }
 
-/// `customer.deleted`: a customer without orders removed for good (design note 0032,
-/// §7.2). Its custom field values follow (`CustomFieldCleanup`); its carts are unlinked
-/// in the same write.
+/// `customer.deleted`: a customer without orders removed for good. Its custom field values
+/// follow (`CustomFieldCleanup`); its carts are unlinked in the same write.
 #[derive(Debug, Serialize)]
 pub struct CustomerDeleted {
     pub customer: CustomerId,
@@ -48,9 +47,8 @@ impl Event for CustomerDeleted {
     const VERSION: u16 = 1;
 }
 
-/// `customer.marketing_consent_updated` (design note 0032, §5): a channel's consent
-/// state after a write that changed it. States aren't personal data, and they're what a
-/// sync needs.
+/// `customer.marketing_consent_updated`: a channel's consent state after a write that
+/// changed it. States aren't personal data, and they're what a sync needs.
 #[derive(Debug, Serialize)]
 pub struct MarketingConsentUpdated {
     pub customer: CustomerId,
@@ -64,8 +62,8 @@ impl Event for MarketingConsentUpdated {
     const VERSION: u16 = 1;
 }
 
-/// `customer.erasure_requested` (design note 0032, §7.3): the customer's personal data
-/// goes at `due_at` unless the request is cancelled.
+/// `customer.erasure_requested`: the customer's personal data goes at `due_at` unless the
+/// request is cancelled.
 #[derive(Debug, Serialize)]
 pub struct CustomerErasureRequested {
     pub customer: CustomerId,
@@ -89,10 +87,9 @@ impl Event for CustomerErasureCancelled {
     const VERSION: u16 = 1;
 }
 
-/// `customer.redacted` (design note 0032, §7.3; Shopify's `customers/redact`): the
-/// person's data was removed from the customer and these orders. Every app with
-/// `customers:read` gets it, subscribed or not, and must delete what it holds
-/// (`docs/apps/privacy.md`).
+/// `customer.redacted` (Shopify's `customers/redact`): the person's data was removed from
+/// the customer and these orders. Every app with `customers:read` gets it, subscribed or
+/// not, and must delete what it holds (`docs/apps/privacy.md`).
 #[derive(Debug, Serialize)]
 pub struct CustomerRedacted {
     pub customer: CustomerId,
@@ -104,9 +101,8 @@ impl Event for CustomerRedacted {
     const VERSION: u16 = 1;
 }
 
-/// `customer.data_requested` (design note 0032, §7.4; Shopify's
-/// `customers/data_request`): staff exported the customer's data, answering a request
-/// to see what's held.
+/// `customer.data_requested` (Shopify's `customers/data_request`): staff exported the
+/// customer's data, answering a request to see what's held.
 #[derive(Debug, Serialize)]
 pub struct CustomerDataRequested {
     pub customer: CustomerId,

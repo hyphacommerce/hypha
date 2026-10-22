@@ -190,7 +190,7 @@
       }
     },
     "spores": {
-      "description": "Settings for the spores this API is built with (design note 0030, §8): one table\nper spore, `[spores.<name>]`, read by the spore itself; its keys are the spore's\nto document. A table for a spore the build doesn't have stops startup.",
+      "description": "Settings for the spores this API is built with: one table per spore,\n`[spores.<name>]`, read by the spore itself; its keys are the spore's to document. A\ntable for a spore the build doesn't have stops startup.",
       "type": "object",
       "additionalProperties": {
         "type": "object",
@@ -252,7 +252,7 @@
       "additionalProperties": false
     },
     "Categories": {
-      "description": "The product category tree (design note 0022).",
+      "description": "The product category tree.",
       "type": "object",
       "properties": {
         "max_depth": {
@@ -267,7 +267,7 @@
       "additionalProperties": false
     },
     "Customers": {
-      "description": "Customers and their personal data (design note 0032).",
+      "description": "Customers and their personal data.",
       "type": "object",
       "properties": {
         "erasure_delay": {
@@ -286,7 +286,7 @@
           "default": "1m"
         },
         "session_lifetime": {
-          "description": "How long a customer stays signed in on the storefront without using the session;\nevery use within it starts the count again (design note 0034). At least 1 minute;\n30 days by default.",
+          "description": "How long a customer stays signed in on the storefront without using the session;\nevery use within it starts the count again. At least 1 minute; 30 days by default.",
           "$ref": "#/$defs/Duration",
           "default": "30d"
         }
@@ -358,7 +358,7 @@
       "pattern": "^\\s*[0-9]+(ms|s|m|h|d)\\s*$"
     },
     "Email": {
-      "description": "How emails go out (design note 0028): order confirmations, shipping updates, staff\ninvites and password resets.",
+      "description": "How emails go out: order confirmations, shipping updates, staff invites and password\nresets.",
       "type": "object",
       "properties": {
         "from": {
@@ -555,7 +555,7 @@
           "default": "30d"
         },
         "extension_calls_after": {
-          "description": "How long the log of calls to apps' extension points is kept (design note 0029).",
+          "description": "How long the log of calls to apps' extension points is kept.",
           "$ref": "#/$defs/Duration",
           "default": "30d"
         },
@@ -597,7 +597,7 @@
       ]
     },
     "RateLimits": {
-      "description": "Limits on the routes that need no credentials, and on the storefront routes that\ncall rate apps (design notes 0009 and 0015). Counted per instance.",
+      "description": "Limits on the routes that need no credentials, and on the storefront routes that call\nrate apps. Counted per instance.",
       "type": "object",
       "properties": {
         "cart_create_ip": {
@@ -617,7 +617,7 @@
           }
         },
         "code_ip": {
-          "description": "A customer asking for a sign-in code, per client address (design note 0034).",
+          "description": "A customer asking for a sign-in code, per client address.",
           "$ref": "#/$defs/Quota",
           "default": {
             "burst": 5,
@@ -763,7 +763,7 @@
       "additionalProperties": false
     },
     "SearchSyncJob": {
-      "description": "Keeping search up to date (design note 0019): rebuilding the products events marked.",
+      "description": "Keeping search up to date: rebuilding the products events marked.",
       "type": "object",
       "properties": {
         "batch": {
@@ -790,7 +790,7 @@
       "additionalProperties": false
     },
     "SendNotificationsJob": {
-      "description": "Sending the emails the store queued (design note 0028, §4): order emails and\nresends. Staff invites and password resets are sent by their request, not by this\njob.",
+      "description": "Sending the emails the store queued: order emails and resends. Staff invites and\npassword resets are sent by their request, not by this job.",
       "type": "object",
       "properties": {
         "batch": {

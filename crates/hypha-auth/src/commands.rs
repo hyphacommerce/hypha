@@ -1,5 +1,5 @@
-//! Authentication building blocks (design note 0008). `hypha-users` composes them into
-//! the staff flows (login, invites); hosts call the API key ones directly.
+//! Authentication building blocks. `hypha-users` composes them into the staff flows (login,
+//! invites); hosts call the API key ones directly.
 //!
 //! The commands acting on "my own" identity (`start_totp`, `change_password`, …) take
 //! the identity or session the host resolved from the request's token, never one from
@@ -27,8 +27,8 @@ use crate::{
     totp,
 };
 
-/// The non-storage ports auth commands use, as one bound (design note 0008, section 8).
-/// Like `hypha_cart::CartPorts`, the blanket impl means nobody implements it by hand.
+/// The non-storage ports auth commands use, as one bound. Like `hypha_cart::CartPorts`, the
+/// blanket impl means nobody implements it by hand.
 pub trait AuthEnv:
     IdGenerator + Clock + Random + PasswordHasher + SecretBox + HasAuthSettings
 {
@@ -71,7 +71,7 @@ pub enum CommandError {
     ApiKeyRevoked(ApiKeyId),
     #[error("identity {0} not found")]
     IdentityNotFound(IdentityId),
-    /// Granting a scope the caller doesn't hold (design note 0008, section 4).
+    /// Granting a scope the caller doesn't hold.
     #[error("you can't grant {0}, which you don't have")]
     CannotGrant(Scope),
     #[error("channel {0} not found")]
@@ -147,7 +147,7 @@ impl MfaMethod {
     }
 }
 
-/// Where a login stands after the password (design note 0008, section 3).
+/// Where a login stands after the password.
 #[derive(Debug)]
 pub enum LoginStep {
     /// Logged in.
@@ -803,9 +803,9 @@ pub struct CreateApiKey {
     pub channel: Option<ChannelId>,
 }
 
-/// Whether a sales channel exists (design note 0020): what creating a publishable key
-/// asks, without `hypha-auth` depending on `hypha-channels`. Storage adapters, which
-/// see both, implement it.
+/// Whether a sales channel exists: what creating a publishable key asks, without
+/// `hypha-auth` depending on `hypha-channels`. Storage adapters, which see both, implement
+/// it.
 #[allow(async_fn_in_trait)]
 pub trait ChannelDirectory {
     async fn channel_exists(&self, channel: ChannelId) -> Result<bool, RepoError>;
@@ -887,8 +887,8 @@ pub async fn revoke_api_key<R: ApiKeyRepo>(
     Ok(key)
 }
 
-/// The `Ctx` for a request carrying an API key: the key as the actor, with its scopes,
-/// and a publishable key's channel (design note 0020, CH5).
+/// The `Ctx` for a request carrying an API key: the key as the actor, with its scopes, and
+/// a publishable key's channel.
 pub async fn authenticate_api_key<R: ApiKeyRepo>(
     keys: &R,
     token: &str,

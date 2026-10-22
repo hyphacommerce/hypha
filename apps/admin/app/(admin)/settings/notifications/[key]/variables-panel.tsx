@@ -1,7 +1,7 @@
 "use client";
 
-// What a template can print (design note 0028, §11): every path of its sample context,
-// with the sample's value. Clicking one copies the Jinja that prints it.
+// What a template can print: every path of its sample context, with the sample's
+// value. Clicking one copies the Jinja that prints it.
 
 import { Card } from "@astryxdesign/core/Card";
 import { VStack } from "@astryxdesign/core/Layout";

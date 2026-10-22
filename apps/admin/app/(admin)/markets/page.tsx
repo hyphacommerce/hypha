@@ -7,7 +7,7 @@ import { loadCountries, loaded, sessionClient } from "@/lib/hypha";
 import { countryLabel } from "@/lib/regions";
 import { MarketsTable } from "@/resources/markets";
 
-/** Markets (design note 0021, section 8): who the store sells to, in which currency. */
+/** Markets: who the store sells to, in which currency. */
 export default async function MarketsPage() {
   const client = await sessionClient();
   const [markets, countries] = await Promise.all([

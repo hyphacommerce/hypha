@@ -1,8 +1,8 @@
-//! Where an app implements extension points (design note 0029, §3, "Registering"):
-//! one URL per point it answers, with the version it speaks. Staff set them for a
-//! private app (one without a manifest); an app installed from its manifest gets them
-//! from it. Which app a flow calls is per-object configuration (a payment method's
-//! provider, the store's search app); this is where Hypha finds the URL.
+//! Where an app implements extension points ("Registering"): one URL per point it answers,
+//! with the version it speaks. Staff set them for a private app (one without a manifest);
+//! an app installed from its manifest gets them from it. Which app a flow calls is
+//! per-object configuration (a payment method's provider, the store's search app); this is
+//! where Hypha finds the URL.
 
 use std::fmt;
 
@@ -72,12 +72,12 @@ impl<T: HasExtensionEndpoints + ?Sized> HasExtensionEndpoints for &T {
     }
 }
 
-/// Where `app` answers `point`, and the app (design note 0029, §3 "Registering",
-/// §4.1 step 5): the one rule every flow calling apps goes through. An app installed
-/// from its manifest answers where the manifest says, only while its grant has
-/// `point.scope`; an app made by hand where staff set (`set_extension_endpoints`). The
-/// version must be the one this build calls. `None` when the app is missing,
-/// disabled, uninstalled, not granted the point's scope, or doesn't answer it.
+/// Where `app` answers `point`, and the app: the one rule every flow calling apps goes
+/// through. An app installed from its manifest answers where the manifest says, only while
+/// its grant has `point.scope`; an app made by hand where staff set
+/// (`set_extension_endpoints`). The version must be the one this build calls. `None` when
+/// the app is missing, disabled, uninstalled, not granted the point's scope, or doesn't
+/// answer it.
 pub async fn find_endpoint<S: HasApps + HasExtensionEndpoints>(
     ports: &S,
     app: &AppKey,

@@ -1,5 +1,5 @@
-//! Idempotency keys (design note 0007, O7): a caller that retries a request with the
-//! same key gets the first request's result instead of running it twice.
+//! Idempotency keys: a caller that retries a request with the same key gets the first
+//! request's result instead of running it twice.
 //!
 //! A command that takes a key first asks `earlier_result` whether this caller already
 //! ran it. If not, it stages an `IdempotencyRecord` in the same `HasBatch` commit as its
@@ -133,9 +133,8 @@ pub trait IdempotencyRepo {
         actor: Actor,
         key: &IdempotencyKey,
     ) -> Result<Option<IdempotencyRecord>, RepoError>;
-    /// Deletes up to `limit` records created before `before`; returns how many. A key
-    /// is honoured for a day (design note 0007, section 5); after that a retry is a new
-    /// request.
+    /// Deletes up to `limit` records created before `before`; returns how many. A key is
+    /// honoured for a day; after that a retry is a new request.
     async fn prune(&self, before: Timestamp, limit: u32) -> Result<u32, RepoError>;
 }
 

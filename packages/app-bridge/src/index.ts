@@ -1,4 +1,4 @@
-// @hypha/app-bridge: the app's side of the admin bridge (design note 0029, §6.3).
+// @hypha/app-bridge: the app's side of the admin bridge.
 
 export {
   createBridge,

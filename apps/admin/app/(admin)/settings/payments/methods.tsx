@@ -1,7 +1,7 @@
 "use client";
 
-// Payment methods (design note 0027): the list in the order shoppers see it, adding one
-// from a preset, editing, switching on and off, moving up and down, and deleting.
+// Payment methods: the list in the order shoppers see it, adding one from a preset,
+// editing, switching on and off, moving up and down, and deleting.
 
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Badge } from "@astryxdesign/core/Badge";

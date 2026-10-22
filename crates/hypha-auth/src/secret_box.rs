@@ -1,6 +1,5 @@
-//! Encryption for secrets that must be read back, like TOTP seeds (design note 0008,
-//! A5). Passwords and tokens are hashed instead; a TOTP seed can't be, because checking
-//! a code needs the seed itself.
+//! Encryption for secrets that must be read back, like TOTP seeds. Passwords and tokens are
+//! hashed instead; a TOTP seed can't be, because checking a code needs the seed itself.
 
 use std::fmt;
 
@@ -10,7 +9,7 @@ use chacha20poly1305::{
 };
 
 // The port and its types live in `hypha-core` (other leaf crates seal secrets too:
-// shipping's callback secrets, design note 0015); this crate keeps the cipher.
+// shipping's callback secrets); this crate keeps the cipher.
 pub use hypha_core::{SealError, Sealed, SecretBox};
 
 /// XChaCha20-Poly1305 under one 32-byte key. Its 24-byte nonce is long enough to pick at

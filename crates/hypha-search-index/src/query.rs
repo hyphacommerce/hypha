@@ -1,4 +1,4 @@
-//! What a search asks and answers (design note 0019, section 4), engine-neutral.
+//! What a search asks and answers, engine-neutral.
 
 use std::{fmt, str::FromStr};
 
@@ -8,7 +8,7 @@ use crate::SearchDocument;
 
 /// What a facet counts, and a filter narrows by. As a string (the API's form):
 /// `option.<name>` (name lowercased), `vendor`, `product_type`, `tag`,
-/// `field.<namespace>.<key>` (design note 0033, §9).
+/// `field.<namespace>.<key>`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum FacetKey {
     /// An option, by its name ignoring case ("Color" and "color" are one facet).
@@ -17,8 +17,8 @@ pub enum FacetKey {
     ProductType,
     Tag,
     /// A custom field, by its full key (`custom.material`): the storefront-visible,
-    /// filterable product and variant fields (design note 0033, §9). This leaf can't see
-    /// definitions: the settings command checks the field is allowed.
+    /// filterable product and variant fields. This leaf can't see definitions: the settings
+    /// command checks the field is allowed.
     Field(String),
 }
 
@@ -91,7 +91,7 @@ pub enum Sort {
     Title,
 }
 
-/// What one hit stands for (design note 0019, SE4).
+/// What one hit stands for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Group {
     /// A product, or a product split by the merchant's options.
@@ -116,7 +116,7 @@ pub struct SearchQuery {
     /// Only documents published to this channel (a storefront's); `None` searches them
     /// all (staff).
     pub channel: Option<ChannelId>,
-    /// Only documents in this category or one below it (design note 0022, CA3).
+    /// Only documents in this category or one below it.
     pub category: Option<CategoryId>,
     /// From `terms::terms`; empty lists everything.
     pub terms: Vec<String>,

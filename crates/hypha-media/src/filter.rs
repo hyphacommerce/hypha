@@ -1,4 +1,4 @@
-//! What the library list is narrowed to and how it is ordered (design note 0024, §2).
+//! What the library list is narrowed to and how it is ordered.
 
 use hypha_core::{Direction, SortKey, optional_text};
 
@@ -43,8 +43,8 @@ impl AssetFilter {
     }
 }
 
-/// How the library is ordered (design note 0024, AU1); names compare as `SortKey::text`
-/// does, ties by ID in the same direction.
+/// How the library is ordered; names compare as `SortKey::text` does, ties by ID in the
+/// same direction.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AssetSort {
     #[default]

@@ -2,9 +2,9 @@
 
 // The application frame, from Astryx's `shell-nav` template: a top bar with the brand,
 // the command palette and the user's menu, and a side nav with the admin's sections. A
-// section's pages nest under it and show while you're in it, as in Shopify (design note
-// 0024, section 6). Settings is one entry, leading to its own index page, so the nav
-// stays short however many settings there are.
+// section's pages nest under it and show while you're in it, as in Shopify. Settings is
+// one entry, leading to its own index page, so the nav stays short however many
+// settings there are.
 
 import { AppShell } from "@astryxdesign/core/AppShell";
 import { DropdownMenu, DropdownMenuItem } from "@astryxdesign/core/DropdownMenu";

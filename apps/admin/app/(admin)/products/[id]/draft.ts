@@ -1,6 +1,6 @@
-// The product editor's draft (design note 0021, section 8): every edit to details,
-// content, options and variants lands here first, and one Save sends it. Plain data and
-// pure functions, shared by the editor's cards and the save action's input.
+// The product editor's draft: every edit to details, content, options and variants
+// lands here first, and one Save sends it. Plain data and pure functions, shared by the
+// editor's cards and the save action's input.
 
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
@@ -45,9 +45,9 @@ export type Draft = {
   tags: string[];
   options: OptionDraft[];
   variants: VariantDraft[];
-  /** The categories it's directly in (design note 0022), sorted. */
+  /** The categories it's directly in, sorted. */
   categories: string[];
-  /** The sales channels it's published to (design note 0020), sorted. */
+  /** The sales channels it's published to, sorted. */
   channels: string[];
 };
 

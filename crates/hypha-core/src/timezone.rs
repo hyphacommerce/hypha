@@ -5,10 +5,9 @@ use thiserror::Error;
 
 use crate::tables::TIMEZONES;
 
-/// An IANA time zone name such as `Europe/Belgrade` (design note 0021, Q4), checked
-/// against the compiled list of names; core has no rules data, so conversions happen in
-/// clients. Old names (`Europe/Kiev`) are accepted and kept as given, as browsers still
-/// report some of them.
+/// An IANA time zone name such as `Europe/Belgrade`, checked against the compiled list of
+/// names; core has no rules data, so conversions happen in clients. Old names
+/// (`Europe/Kiev`) are accepted and kept as given, as browsers still report some of them.
 ///
 /// It borrows the name from the `'static` table, so it's `Copy` without allocating.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

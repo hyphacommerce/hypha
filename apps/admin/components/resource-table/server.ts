@@ -1,5 +1,5 @@
-// Server-only: reading a list page's URL into an API query, and its answer into a page
-// (design note 0024, AU7). Never import this from a "use client" file.
+// Server-only: reading a list page's URL into an API query, and its answer into a
+// page. Never import this from a "use client" file.
 
 import type { ApiError } from "@hypha/sdk/admin";
 import { forbidden, redirect } from "next/navigation";

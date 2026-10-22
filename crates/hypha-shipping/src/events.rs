@@ -1,5 +1,5 @@
-//! What happens to shipping settings, as events (design note 0016, section 4).
-//! Contract types: a reshaped field is a new `VERSION`, never an edit.
+//! What happens to shipping settings, as events. Contract types: a reshaped field is a new
+//! `VERSION`, never an edit.
 
 use hypha_core::{Event, ShippingZoneId};
 use serde::Serialize;

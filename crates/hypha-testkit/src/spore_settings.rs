@@ -1,4 +1,4 @@
-//! Spores' settings in memory (design note 0030, §8).
+//! Spores' settings in memory.
 
 use std::collections::HashMap;
 use std::sync::Mutex;

@@ -1,6 +1,5 @@
-# Local development services: Postgres (design note 0001), an S3 server for media
-# files (design note 0013) and Mailpit, which catches the emails the API sends (design
-# note 0028).
+# Local development services: Postgres, an S3 server for media files and Mailpit,
+# which catches the emails the API sends.
 #
 #   docker compose up -d          # start them in the background
 #   docker compose down           # stop them (data is kept in the named volumes)

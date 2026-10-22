@@ -24,7 +24,7 @@ pub enum CommandError {
     Language(#[from] LanguageError),
     #[error("store {0} not found")]
     StoreNotFound(StoreId),
-    /// One store per deployment (design note 0006, model A) found more than one.
+    /// One store per deployment (model A) found more than one.
     #[error("expected exactly one store in this deployment, found {0}")]
     MultipleStores(usize),
 }
@@ -79,7 +79,7 @@ pub struct UpdateStore {
     pub timezone: Option<Option<String>>,
     /// A BCP 47 tag (`en`, `sr-Latn`).
     pub default_language: Option<String>,
-    /// The setup guide's step the merchant is on (design note 0024, AU11).
+    /// The setup guide's step the merchant is on.
     pub setup_step: Option<Option<String>>,
     /// `true` marks the guide done (now, the first time); `false` shows it again.
     pub setup_finished: Option<bool>,
@@ -139,9 +139,9 @@ pub async fn update_store<R: StoreRepo>(
     Ok(store)
 }
 
-/// Startup rule for one store per deployment (design note 0006, model A): returns the
-/// deployment's store, creating it with `default_name` on first start. More than one
-/// store means the deployment isn't model A: an error, not something to guess about.
+/// Startup rule for one store per deployment (model A): returns the deployment's store,
+/// creating it with `default_name` on first start. More than one store means the deployment
+/// isn't model A: an error, not something to guess about.
 pub async fn ensure_single_store<R: StoreRepo, I: IdGenerator>(
     ctx: &Ctx,
     repo: &R,

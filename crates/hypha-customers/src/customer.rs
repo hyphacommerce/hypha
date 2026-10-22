@@ -18,8 +18,8 @@ pub struct SavedAddress {
     pub address: Address,
 }
 
-/// Someone who buys, identified by email: one customer per email (design note 0005,
-/// C2). A guest becomes a customer on their first order; logging in comes later.
+/// Someone who buys, identified by email: one customer per email. A guest becomes a
+/// customer on their first order; logging in comes later.
 ///
 /// The customer owns its address book, the way a product owns its variants. The default
 /// shipping and billing addresses always point into it.
@@ -27,7 +27,7 @@ pub struct SavedAddress {
 pub struct Customer {
     id: CustomerId,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016).
+    /// When it was stored and last changed, set by the adapter.
     stamps: Option<Stamps>,
     email: Email,
     first_name: Option<String>,
@@ -36,15 +36,14 @@ pub struct Customer {
     addresses: Vec<SavedAddress>,
     default_shipping: Option<AddressId>,
     default_billing: Option<AddressId>,
-    /// Marketing consent per channel (design note 0032, §5).
+    /// Marketing consent per channel.
     email_marketing: MarketingConsent,
     sms_marketing: MarketingConsent,
-    /// When a requested erasure runs (design note 0032, §7.3): the cancel window.
+    /// When a requested erasure runs: the cancel window.
     erasure_due_at: Option<Timestamp>,
-    /// When the customer's personal data was erased (design note 0032, §7.3): read-only
-    /// from then on.
+    /// When the customer's personal data was erased: read-only from then on.
     erased_at: Option<Timestamp>,
-    /// What changed since it was loaded, for its events (design note 0016).
+    /// What changed since it was loaded, for its events.
     changes: Changes,
 }
 
@@ -105,10 +104,9 @@ impl Customer {
         }
     }
 
-    /// Records the customer's consent for `channel` from `source` (design note 0032, §5):
-    /// the newest `consented_at` (default `now`) wins, so an older write changes nothing
-    /// and answers `false`. `not_subscribed` and `redacted` can't be asked for; SMS
-    /// needs a phone.
+    /// Records the customer's consent for `channel` from `source`: the newest
+    /// `consented_at` (default `now`) wins, so an older write changes nothing and answers
+    /// `false`. `not_subscribed` and `redacted` can't be asked for; SMS needs a phone.
     pub fn set_marketing_consent(
         &mut self,
         channel: Channel,
@@ -148,9 +146,8 @@ impl Customer {
         self.erasure_due_at
     }
 
-    /// Asks for the customer's personal data to go at `due_at` (design note 0032, §7.3),
-    /// recording `customer.erasure_requested`. Refused while one is requested or once
-    /// erased.
+    /// Asks for the customer's personal data to go at `due_at`, recording
+    /// `customer.erasure_requested`. Refused while one is requested or once erased.
     pub fn request_erasure(&mut self, due_at: Timestamp) -> Result<(), CustomerError> {
         self.ensure_not_erased()?;
         if self.erasure_due_at.is_some() {
@@ -172,11 +169,10 @@ impl Customer {
         Ok(())
     }
 
-    /// Removes the person's data (design note 0032, §7.3): names, phone and the address
-    /// book go, the email becomes the placeholder, consents become `redacted`, and the
-    /// customer is read-only from `now`. Groups stay. Records nothing itself: the
-    /// workflow records `customer.redacted` with the orders it redacted alongside. Doing
-    /// it again changes nothing.
+    /// Removes the person's data: names, phone and the address book go, the email becomes
+    /// the placeholder, consents become `redacted`, and the customer is read-only from
+    /// `now`. Groups stay. Records nothing itself: the workflow records `customer.redacted`
+    /// with the orders it redacted alongside. Doing it again changes nothing.
     pub fn erase(&mut self, now: Timestamp) -> bool {
         if self.erased_at.is_some() {
             return false;
@@ -207,14 +203,14 @@ impl Customer {
     }
 
     /// Marks the customer for removal: `StageCustomers::delete_customer` writes it with
-    /// `customer.deleted`. Only for a customer without orders (design note 0032, CD7),
-    /// which the workflow above checks.
+    /// `customer.deleted`. Only for a customer without orders, which the workflow above
+    /// checks.
     pub fn delete(&mut self) {
         self.changes.deleted();
     }
 
-    /// A new email resets email consent to never asked (design note 0032, Q7): consent
-    /// was given for an address, not a person.
+    /// A new email resets email consent to never asked: consent was given for an address,
+    /// not a person.
     pub fn set_email(&mut self, email: Email) -> Result<(), CustomerError> {
         self.ensure_not_erased()?;
         if email != self.email {
@@ -253,8 +249,8 @@ impl Customer {
         Ok(())
     }
 
-    /// Trimmed; empty clears it. Free text for now (no E.164 check). Clearing it resets
-    /// SMS consent to never asked: there's nowhere to send (design note 0032, §5).
+    /// Trimmed; empty clears it. Free text for now (no E.164 check). Clearing it resets SMS
+    /// consent to never asked: there's nowhere to send.
     pub fn set_phone(&mut self, phone: Option<String>) -> Result<(), CustomerError> {
         self.ensure_not_erased()?;
         let phone = optional_text("phone", phone)?;
@@ -377,7 +373,7 @@ impl Customer {
     }
 }
 
-/// Plain-data form of a `Customer` for storage adapters (design note 0001, 3.4).
+/// Plain-data form of a `Customer` for storage adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomerSnapshot {
     pub id: CustomerId,

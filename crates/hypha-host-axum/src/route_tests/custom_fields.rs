@@ -1,6 +1,5 @@
-//! Custom fields (design note 0033): definitions, an owner's values, the bulk routes,
-//! list filters, redaction of personal fields, storefront visibility and the webhook
-//! entries an app may read.
+//! Custom fields: definitions, an owner's values, the bulk routes, list filters, redaction
+//! of personal fields, storefront visibility and the webhook entries an app may read.
 
 use serde_json::{Value, json};
 
@@ -1116,8 +1115,8 @@ async fn webhooks_carry_only_the_entries_the_app_may_read() {
     );
 }
 
-/// Design note 0032, CD11: the well-known customer fields are offered with the body that
-/// creates them, and marked taken once the merchant has a definition of their key.
+/// The well-known customer fields are offered with the body that creates them, and marked
+/// taken once the merchant has a definition of their key.
 #[tokio::test]
 async fn suggested_fields_are_offered_until_created() {
     let app = app().await;

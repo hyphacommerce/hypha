@@ -1,6 +1,6 @@
-// Server-only: one page of a listing, read through search (design notes 0023, SF7, and
-// 0024, §7). The category and search pages render it on the server, and the listing's
-// server action reads it when a static category page is filtered in the browser.
+// Server-only: one page of a listing, read through search. The category and
+// search pages render it on the server, and the listing's server action reads it when
+// a static category page is filtered in the browser.
 
 import type { StorefrontPaths, StorefrontSchemas } from "@hypha/sdk/storefront";
 import { unstable_cache } from "next/cache";

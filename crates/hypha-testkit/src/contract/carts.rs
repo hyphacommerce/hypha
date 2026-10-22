@@ -19,7 +19,7 @@ pub async fn cart_repo<R: CartRepo>(make: impl AsyncFn() -> R) {
     buyer_cleared(&make().await).await;
     scenario("cart: a customer's carts, oldest first, open or completed");
     of_customer(&make().await).await;
-    scenario("cart: the marketing opt-in round trips (design note 0032, §5)");
+    scenario("cart: the marketing opt-in round trips");
     marketing_round_trips(&make().await).await;
     scenario("cart: shipping address, choice and quote round trip, and clear");
     shipping_round_trips(&make().await).await;

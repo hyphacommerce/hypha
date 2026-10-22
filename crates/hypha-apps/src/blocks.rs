@@ -1,8 +1,8 @@
-//! The declarative block format, version 1 (design note 0029, §6.2): the UI tree an
-//! app's block URL answers, which Hypha checks before handing it to an admin, so every
-//! admin renders the same checked shapes. The rules are `packages/app-blocks`'
-//! (`schema/block.v1.json` and `src/validate.ts`), ported: the tests below run that
-//! package's fixtures, so the two can't drift.
+//! The declarative block format, version 1: the UI tree an app's block URL answers, which
+//! Hypha checks before handing it to an admin, so every admin renders the same checked
+//! shapes. The rules are `packages/app-blocks`' (`schema/block.v1.json` and
+//! `src/validate.ts`), ported: the tests below run that package's fixtures, so the two
+//! can't drift.
 //!
 //! Elements of a type version 1 doesn't know are warnings, not errors (a newer app on
 //! an older Hypha): hosts skip them.

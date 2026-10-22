@@ -16,20 +16,20 @@ pub mod keys {
 pub trait OrderRepo {
     async fn get(&self, id: OrderId) -> Result<Option<Order>, RepoError>;
     async fn get_by_number(&self, number: OrderNumber) -> Result<Option<Order>, RepoError>;
-    /// A page of order summaries in `sort`'s order (design notes 0012 and 0024): the
-    /// orders after `page.after` by `OrderSort::key` and then ID, only those `filter`
-    /// matches (`OrderFilter::matches`). Each equals `Order::summary` of the stored order;
-    /// an adapter may compute them without loading lines. The caller passes a sort the
-    /// filter allows (`OrderSort::check`) and a position whose key fits it
-    /// (`OrderSort::fits`); one that doesn't is a `Backend` error.
+    /// A page of order summaries in `sort`'s order: the orders after `page.after` by
+    /// `OrderSort::key` and then ID, only those `filter` matches (`OrderFilter::matches`).
+    /// Each equals `Order::summary` of the stored order; an adapter may compute them
+    /// without loading lines. The caller passes a sort the filter allows
+    /// (`OrderSort::check`) and a position whose key fits it (`OrderSort::fits`); one that
+    /// doesn't is a `Backend` error.
     async fn list(
         &self,
         filter: &OrderFilter,
         sort: OrderSort,
         page: PageRequest<Keyset<OrderId>>,
     ) -> Result<Page<OrderSummary>, RepoError>;
-    /// What `customer`'s orders add up to: equals `OrderStats::of` the stored orders
-    /// with that customer (design note 0032, §12 step 1). An adapter may sum in storage.
+    /// What `customer`'s orders add up to: equals `OrderStats::of` the stored orders with
+    /// that customer. An adapter may sum in storage.
     async fn stats_for(&self, customer: CustomerId) -> Result<OrderStats, RepoError>;
     /// Stores a new order (version 1). Enforces every key in `keys`. Checkout inserts
     /// through `StageOrders` instead, together with its other writes.

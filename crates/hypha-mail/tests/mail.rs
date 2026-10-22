@@ -1,4 +1,4 @@
-//! The mailer and the mail commands on the in-memory world (design note 0028, §4, §6).
+//! The mailer and the mail commands on the in-memory world.
 
 use hypha_core::{
     Actor, Address, AddressParts, ApiKeyId, AssetId, AuthError, CartId, ChannelId, CountryCode,

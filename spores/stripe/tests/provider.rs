@@ -77,7 +77,7 @@ fn request(store_settings: Map<String, Value>) -> PaymentRequest {
         cart: "cart_01a15646d13071e4b9168f3555dd4cd8"
             .parse::<CartId>()
             .unwrap(),
-        // A cart's payment: no order yet (design note 0031).
+        // A cart's payment: no order yet.
         order: None,
         order_number: None,
         method: "pm_01a15646d13071e4b9168f3555dd4cd5"
@@ -151,7 +151,7 @@ fn a_start_creates_one_intent_keyed_by_the_payment_and_answers_the_element() {
         "capture_method=manual",
         "receipt_email=buyer%40example.com",
         "metadata%5Bhypha_payment%5D=pay_",
-        // A cart's payment (design note 0031): the cart, no order yet.
+        // A cart's payment: the cart, no order yet.
         "metadata%5Bhypha_cart%5D=cart_",
     ] {
         assert!(body.contains(part), "{part} in {body}");

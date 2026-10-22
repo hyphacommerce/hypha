@@ -1,5 +1,5 @@
-//! Apps' extension endpoints (design note 0029, `0051_app_endpoints.sql`): one row per
-//! point an app answers, replaced all at once.
+//! Apps' extension endpoints (`0051_app_endpoints.sql`): one row per point an app answers,
+//! replaced all at once.
 
 use hypha_apps::{ExtensionEndpoint, ExtensionEndpointRepo};
 use hypha_core::{AppKey, CallbackUrl, RepoError};

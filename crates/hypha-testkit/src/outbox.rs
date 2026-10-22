@@ -12,16 +12,16 @@ use uuid::Uuid;
 
 use crate::FixedClock;
 
-/// The outbox in memory (design note 0016). A handle: clones share the same events, so
-/// `InMemoryPorts` gives one to every repo that writes events and to its batches, and
-/// tests read them all here. A repo made on its own has a private one.
+/// The outbox in memory. A handle: clones share the same events, so `InMemoryPorts` gives
+/// one to every repo that writes events and to its batches, and tests read them all here. A
+/// repo made on its own has a private one.
 ///
 /// Event IDs are `Uuid::from_u128(seq)` and `occurred_at` is the shared clock's time
 /// (below): deterministic, like the database's transaction time.
 ///
-/// It also carries the clock the repos stamp what they write with (design note 0016,
-/// Q3), `FixedClock::DEFAULT` unless a test moves it (`clock()`): the in-memory store's
-/// shared state, like `PgStore`'s actor and clock.
+/// It also carries the clock the repos stamp what they write with, `FixedClock::DEFAULT`
+/// unless a test moves it (`clock()`): the in-memory store's shared state, like `PgStore`'s
+/// actor and clock.
 #[derive(Clone, Default)]
 pub struct InMemoryOutbox {
     inner: Arc<Mutex<State>>,

@@ -21,9 +21,9 @@ export async function retryDelivery(key: string, id: string): Promise<Result> {
 }
 
 /**
- * Uninstalls an app (design note 0029): its grant ends at once and it gets only
- * `app.uninstalled`. Removing an app that is already uninstalled, or one made by hand,
- * deletes it, and then the page it was on is gone.
+ * Uninstalls an app: its grant ends at once and it gets only `app.uninstalled`.
+ * Removing an app that is already uninstalled, or one made by hand, deletes it, and
+ * then the page it was on is gone.
  */
 export async function removeApp(key: string, isDelete: boolean): Promise<Result> {
   const client = await sessionClient();
@@ -36,8 +36,7 @@ export async function removeApp(key: string, isDelete: boolean): Promise<Result>
 }
 
 /**
- * Narrows an installed app's grant to `scopes` (design note 0029, §4.1): the others stop
- * working at once.
+ * Narrows an installed app's grant to `scopes`: the others stop working at once.
  */
 export async function narrowGrant(key: string, scopes: AdminSchemas["Scope"][]): Promise<Result> {
   const client = await sessionClient();
@@ -69,8 +68,8 @@ function fieldProblems(details: unknown): Record<string, string> {
 export type SettingsResult = Result & { fields?: Record<string, string> };
 
 /**
- * Saves a built-in spore's settings (design note 0030, §8). A secret field left out keeps
- * what's stored; the API seals it and never answers it.
+ * Saves a built-in spore's settings. A secret field left out keeps what's stored; the API
+ * seals it and never answers it.
  */
 export async function saveSporeSettings(
   key: string,

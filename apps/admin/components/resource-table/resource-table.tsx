@@ -1,12 +1,11 @@
 "use client";
 
-// One table for every list in the admin (design note 0024, AU7, section 6): one bordered
-// card holding a toolbar (saved views, one search box, sort, and a filters button that
-// opens the other filters in a row below it), the active filters as removable chips, the
-// table with a shaded header and row checkboxes, and the pages in its footer. Driven by
-// the URL: the server page reads it into an API query and passes the page here; this
-// component changes the URL when a view, header, filter or page changes, and the page
-// renders again on the server.
+// One table for every list in the admin: one bordered card holding a toolbar (saved
+// views, one search box, sort, and a filters button that opens the other filters in a
+// row below it), the active filters as removable chips, the table with a shaded header
+// and row checkboxes, and the pages in its footer. Driven by the URL: the server page
+// reads it into an API query and passes the page here; this component changes the URL
+// when a view, header, filter or page changes, and the page renders again on the server.
 //
 // Lists the API returns whole (markets, roles: AU6) use `ClientResourceTable`, which
 // sorts and searches the rows it has, in the same card.
@@ -637,7 +636,7 @@ function Pages({
   );
 }
 
-// ---------- whole lists (AU6) ----------
+// ---------- whole lists ----------
 
 /** Compares rows by the text `pick` reads, for `ClientResourceTable`'s `compare`. */
 export function byText<T>(pick: (row: T) => string): (a: T, b: T) => number {
@@ -659,8 +658,8 @@ type ClientProps<T extends Row> = {
 };
 
 /**
- * A table of a whole list (design note 0024, AU6): small lists the API returns at once
- * sort and filter here, in the browser, in the same card as the paged ones.
+ * A table of a whole list: small lists the API returns at once sort and filter here,
+ * in the browser, in the same card as the paged ones.
  */
 export function ClientResourceTable<T extends Row>(props: ClientProps<T>) {
   const {

@@ -1,4 +1,4 @@
-//! App commands (design note 0016, section 8).
+//! App commands.
 
 use hypha_apps::{
     AppError, AppKey, CommandError, CreateApp, SECRET_PREFIX, UpdateApp, WebhookInput, create_app,
@@ -80,7 +80,7 @@ fn bad_input_is_refused_before_anything_is_stored() {
             },
             "invalid_app_key",
         ),
-        // Spores are built into the API (design note 0030, SP3), never registered.
+        // Spores are built into the API, never registered.
         (
             CreateApp {
                 key: "spore_erp".to_string(),

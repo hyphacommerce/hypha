@@ -1,4 +1,4 @@
-//! Channels and their publications (design note 0020).
+//! Channels and their publications.
 
 use std::collections::{HashMap, HashSet};
 

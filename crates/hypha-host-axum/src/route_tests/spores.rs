@@ -1,6 +1,5 @@
-//! A host built with a spore (design note 0030): `deployment!` with the test spore
-//! (`crate::test_spore`), its migrations, app, handler, configuration, settings and
-//! routes. The stock build has none.
+//! A host built with a spore: `deployment!` with the test spore (`crate::test_spore`), its
+//! migrations, app, handler, configuration, settings and routes. The stock build has none.
 
 use hypha_apps::{AppKind, AppRepo, HasApps};
 use hypha_core::{AppKey, EventHandlers};

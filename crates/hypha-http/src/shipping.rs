@@ -1,12 +1,11 @@
-//! The host's `RateProvider` (design note 0015, section 5): `app_*` keys go to external
-//! apps through the extension point `shipping.rates` v1 (design note 0029, AP9; the
-//! callback's body unchanged on the wire, and every call recorded in the call log),
-//! `spore_*` keys to the spores this host was built with. Static dispatch, a branch per
-//! kind, so futures stay provably `Send`.
+//! The host's `RateProvider`: `app_*` keys go to external apps through the extension point
+//! `shipping.rates` v1 (the callback's body unchanged on the wire, and every call recorded
+//! in the call log), `spore_*` keys to the spores this host was built with. Static
+//! dispatch, a branch per kind, so futures stay provably `Send`.
 //!
-//! The rate request's JSON is `hypha_extensions::shipping`'s; listing a provider's
-//! services (`GET <callback_url>/services`, admin-side, not an extension point) stays
-//! here. Each host sends the calls through its `HostCalls` (design note 0026).
+//! The rate request's JSON is `hypha_extensions::shipping`'s; listing a provider's services
+//! (`GET <callback_url>/services`, admin-side, not an extension point) stays here. Each
+//! host sends the calls through its `HostCalls`.
 
 use std::time::Duration;
 
@@ -32,8 +31,8 @@ use crate::{
 };
 
 /// The ID of one rate request (`rreq_…`, the body's `id` too), for the app's logs and
-/// de-duplication. Sent besides `Idempotency-Key`, which carries the same ID, since
-/// rate apps were written against it (0015 §5).
+/// de-duplication. Sent besides `Idempotency-Key`, which carries the same ID, since rate
+/// apps were written against it.
 pub const REQUEST_ID_HEADER: &str = "Hypha-Request-Id";
 
 /// One `RateProvider` per request: the store's apps and their rate settings, the call
@@ -89,16 +88,16 @@ impl<P: HasAppProviders + HasApps + HasExtensionCalls> RateProvider for HostRate
         match key.kind() {
             ProviderKind::App => {
                 let (provider, app) = self.app(key).await?;
-                // Called only as its grant allows (design note 0029, §4.1 step 5).
+                // Called only as its grant allows.
                 if !app.may_answer(ShippingRates::SCOPE) {
                     return Err(ProviderError::Disabled(key.clone()));
                 }
                 let secret = open_secret(self.env, &app).map_err(|e| failed(key, e.to_string()))?;
                 let id = request_id(self.ids);
                 let mut body = wire_request(request);
-                // The shopper's address as far as the app's grant allows (AP10): without
-                // `customer_data:address` only the country (and company) go, so a rate
-                // app quoting by postal code needs it. The origin is the store's own.
+                // The shopper's address as far as the app's grant allows: without
+                // `customer_data:address` only the country (and company) go, so a rate app
+                // quoting by postal code needs it. The origin is the store's own.
                 Redaction::for_app(&app).postal_address(&mut body.destination);
                 let payload = RateCallbackRequest {
                     id: id.clone(),
@@ -262,7 +261,7 @@ fn into_rate(key: &ProviderKey, rate: QuotedRate) -> Result<Rate, ProviderError>
     })
 }
 
-// ---------- the services answer (0015 §5) ----------
+// ---------- the services answer ----------
 
 #[derive(Deserialize)]
 struct ServicesResponse {

@@ -1,8 +1,7 @@
-// `hypha apps`: the apps deployed alongside Hypha (design note 0029, §9). `add` lists one
-// in `hypha.json` pinned to its repository's head, `update` moves the pin, `remove`
-// takes it out, `status` says whether each answers and is installed in the store, and
-// `install` opens the install links of those that aren't. `hypha deploy` builds and runs
-// them.
+// `hypha apps`: the apps deployed alongside Hypha. `add` lists one in `hypha.json` pinned
+// to its repository's head, `update` moves the pin, `remove` takes it out, `status` says
+// whether each answers and is installed in the store, and `install` opens the install
+// links of those that aren't. `hypha deploy` builds and runs them.
 
 import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
@@ -70,7 +69,7 @@ export function ensureEncryptionKeys(d: Deployment, env: EnvFile): boolean {
 /**
  * For each co-located app the store hasn't installed: its install link, printed and
  * (in a terminal, unless `quiet`) opened. A staff member approves it on the consent
- * page; nothing installs silently (§4.1).
+ * page; nothing installs silently.
  */
 export async function offerInstalls(
   d: Deployment,

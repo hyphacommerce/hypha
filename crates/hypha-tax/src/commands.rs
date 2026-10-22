@@ -226,7 +226,7 @@ async fn load_region<R: TaxRegionRepo>(
         .ok_or(CommandError::TaxRegionNotFound(id))
 }
 
-/// Every tax class, oldest first (design note 0021, SU3).
+/// Every tax class, oldest first.
 pub async fn list_tax_classes<C: TaxClassRepo>(
     ctx: &Ctx,
     classes: &C,

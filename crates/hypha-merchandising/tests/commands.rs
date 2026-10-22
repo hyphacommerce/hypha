@@ -410,7 +410,7 @@ fn a_list_carries_each_products_featured_asset() {
     assert_eq!(featured, vec![(pid(2), None), (pid(1), Some(aid(3)))]);
 }
 
-// ---------- a category's image (design note 0022, CA9) ----------
+// ---------- a category's image ----------
 
 fn category(ports: &InMemoryPorts) -> hypha_core::CategoryId {
     use hypha_categories::{CategoryRepo, NewCategory};
@@ -504,7 +504,7 @@ fn a_deleted_categorys_image_is_released() {
     assert_eq!(usages(&ports, 1), []);
 }
 
-// ---------- deleting a product (design note 0033, section 6.3) ----------
+// ---------- deleting a product ----------
 
 #[test]
 fn deleting_a_product_removes_it_and_its_usages_and_records_the_event() {

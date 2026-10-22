@@ -29,8 +29,8 @@ export default async function ProductsPage({
 }) {
   const params = await searchParams;
   const client = await sessionClient();
-  // Filterable custom fields (design note 0033, §7): read before the list, which only
-  // passes on filters of fields that exist and are filterable.
+  // Filterable custom fields: read before the list, which only passes on filters of
+  // fields that exist and are filterable.
   const fieldFilters = (await definitionsOf("product")).filter(isFilterOffered);
   const [result, channelName, currencies, categories] = await Promise.all([
     client.GET("/admin/products", {

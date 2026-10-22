@@ -1,8 +1,8 @@
-//! `search.query` v1 (design note 0029, §3.1): `/storefront/search` answered by the
-//! store's search app (Meilisearch's, §9) instead of the built-in engine. Hypha sends
-//! the shopper's query as the storefront gave it, already checked; the app answers
-//! with IDs, which Hypha loads, prices and stocks itself, so an app can't put a price
-//! or a product the shopper may not see on the page.
+//! `search.query` v1: `/storefront/search` answered by the store's search app
+//! (Meilisearch's) instead of the built-in engine. Hypha sends the shopper's query as the
+//! storefront gave it, already checked; the app answers with IDs, which Hypha loads, prices
+//! and stocks itself, so an app can't put a price or a product the shopper may not see on
+//! the page.
 
 use core::time::Duration;
 

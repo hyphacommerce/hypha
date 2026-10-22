@@ -1,7 +1,7 @@
-// Custom fields (design note 0033) as the admin shows and edits them: owner types, field
-// types and their validations, an input's state for each type and the JSON value it
-// stands for, and the `field[…]` list filters. Plain data and pure functions, shared by
-// server pages and client components.
+// Custom fields as the admin shows and edits them: owner types, field types and their
+// validations, an input's state for each type and the JSON value it stands for, and the
+// `field[…]` list filters. Plain data and pure functions, shared by server pages and
+// client components.
 
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
@@ -22,13 +22,13 @@ export function jsonObject(value: unknown): Record<string, never> {
   return value as Record<string, never>;
 }
 
-/** The records fields belong to (§2). */
+/** The records fields belong to. */
 export type OwnerType = "product" | "variant" | "category" | "customer" | "order";
 
 export const OWNER_TYPES: {
   value: OwnerType;
   label: string;
-  /** The owner's read and write scopes: values follow them (§5.1). */
+  /** The owner's read and write scopes: values follow them. */
   read: string;
   write: string;
 }[] = [
@@ -47,7 +47,7 @@ export function ownerOf(type: OwnerType) {
   return OWNER_TYPES.find((o) => o.value === type) ?? OWNER_TYPES[0];
 }
 
-/** Only customers' and orders' fields can be about a person (§5.2). */
+/** Only customers' and orders' fields can be about a person. */
 export function allowsPersonal(type: OwnerType): boolean {
   return type === "customer" || type === "order";
 }
@@ -85,7 +85,7 @@ export const BASE_TYPES: { value: BaseType; label: string; description: string }
   { value: "json", label: "JSON", description: "Any JSON, for integrations." },
 ];
 
-/** Types that can't be listed (§3). */
+/** Types that can't be listed. */
 const NOT_LISTABLE = new Set<BaseType>(["boolean", "rich_text", "multiline_text", "json"]);
 
 export function isListable(base: BaseType): boolean {
@@ -189,8 +189,8 @@ export function managerLabel(definition: Definition): string | null {
 }
 
 /**
- * Whether the signed-in staff member may change values of `definition` (§5.1): the
- * owner's write scope, and for an app's or spore's field, `access.admin` `read_write`.
+ * Whether the signed-in staff member may change values of `definition`: the owner's
+ * write scope, and for an app's or spore's field, `access.admin` `read_write`.
  */
 export function isWritable(
   definition: Definition,
@@ -416,7 +416,7 @@ function canonical(value: unknown): string {
 const same = (a: unknown, b: unknown) => canonical(a) === canonical(b);
 
 /**
- * What saving `inputs` sends (§4): the merge patch of the fields that changed from
+ * What saving `inputs` sends: the merge patch of the fields that changed from
  * `saved`, each guarded by the version it was read at, or the problems by key.
  */
 export function fieldsPatch(
@@ -499,7 +499,7 @@ export function problemsOf(code: string | undefined, details: unknown): Record<s
   return problems;
 }
 
-// ---------- list filters (§7) ----------
+// ---------- list filters ----------
 
 /** A list filter's URL parameter for a field: `field[custom.material]`. */
 export function filterParam(definition: Definition): string {

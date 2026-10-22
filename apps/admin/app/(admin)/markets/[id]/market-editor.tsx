@@ -18,10 +18,10 @@ import { setMarketCountries, updateMarket } from "../actions";
 type Market = AdminSchemas["MarketResponse"];
 
 /**
- * A market's page (design note 0024, section 6): what it sells (`main`: the catalog and
- * its prices, which save as they change) beside its settings, the name, tax rule and
- * countries, which are one draft saved by the bar at the top. The page keys it by the
- * saved settings, so a save starts a fresh draft from them.
+ * A market's page: what it sells (`main`: the catalog and its prices, which save as
+ * they change) beside its settings, the name, tax rule and countries, which are one
+ * draft saved by the bar at the top. The page keys it by the saved settings, so a save
+ * starts a fresh draft from them.
  */
 export function MarketEditor({
   market,

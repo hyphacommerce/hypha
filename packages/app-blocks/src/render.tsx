@@ -1,6 +1,6 @@
-// The reference renderer for blocks (design note 0029, §6.2), on Astryx, the components
-// our admin uses: a block looks like the rest of the admin and runs no app code. A host
-// with another design system writes its own from schema/block.v1.json.
+// The reference renderer for blocks, on Astryx, the components our admin uses: a block
+// looks like the rest of the admin and runs no app code. A host with another design
+// system writes its own from schema/block.v1.json.
 
 /* oxlint-disable react/no-array-index-key -- a block is a fixed tree the app answered, never reordered or edited in place: a child's position is its identity, and elements carry no IDs */
 

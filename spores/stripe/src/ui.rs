@@ -1,8 +1,8 @@
-//! The admin's view of a Stripe payment (design note 0030, §7): an `order.payment`
-//! block with Stripe's status, the amounts and a link to the dashboard, and Capture,
-//! Void and Refund. Those three stand for the payment points (`point`), so admins run
-//! them through the payment's own routes (`POST /admin/payments/{id}/capture`, …), which
-//! reach the provider, and show each only when the payment's status allows.
+//! The admin's view of a Stripe payment: an `order.payment` block with Stripe's status, the
+//! amounts and a link to the dashboard, and Capture, Void and Refund. Those three stand for
+//! the payment points (`point`), so admins run them through the payment's own routes (`POST
+//! /admin/payments/{id}/capture`, …), which reach the provider, and show each only when the
+//! payment's status allows.
 
 use hypha_spore::core::{Money, PaymentId};
 use hypha_spore::payments::{HasPayments, Payment, PaymentRepo};

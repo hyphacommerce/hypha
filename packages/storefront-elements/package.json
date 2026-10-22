@@ -2,7 +2,7 @@
   "name": "@hypha/storefront-elements",
   "version": "0.1.0",
   "private": true,
-  "description": "Loading apps' storefront elements (web components) into any storefront (design note 0029, §7; docs/apps/elements.md): a loader, the documented events, and a React wrapper.",
+  "description": "Loading apps' storefront elements (web components) into any storefront (docs/apps/elements.md): a loader, the documented events, and a React wrapper.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",

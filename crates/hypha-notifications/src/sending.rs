@@ -1,5 +1,5 @@
-//! The send job's settings (design note 0028, §4; 0017): `[jobs.send_notifications]` in
-//! `hypha.config.toml`, defaults here.
+//! The send job's settings: `[jobs.send_notifications]` in `hypha.config.toml`, defaults
+//! here.
 
 use core::time::Duration;
 

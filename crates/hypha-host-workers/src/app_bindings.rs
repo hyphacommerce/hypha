@@ -1,10 +1,10 @@
-//! Calls to co-located apps through Service Bindings (design note 0029, §9). `hypha
-//! deploy` runs a first-party app (Stripe, Meilisearch) as its own Worker next to the
-//! API, binds the API to it and names the pair in `HYPHA_APP_BINDINGS`
-//! (`stripe.example.com=APP_STRIPE,search.example.com=APP_MEILISEARCH`). A call to a URL
-//! on one of those hosts (an extension point, a webhook, a block, the proxy) then goes
-//! through the binding instead of the public internet: no request leaves Cloudflare's
-//! network, and none is billed as a subrequest to the internet.
+//! Calls to co-located apps through Service Bindings. `hypha deploy` runs a first-party app
+//! (Stripe, Meilisearch) as its own Worker next to the API, binds the API to it and names
+//! the pair in `HYPHA_APP_BINDINGS`
+//! (`stripe.example.com=APP_STRIPE,search.example.com=APP_MEILISEARCH`). A call to a URL on
+//! one of those hosts (an extension point, a webhook, a block, the proxy) then goes through
+//! the binding instead of the public internet: no request leaves Cloudflare's network, and
+//! none is billed as a subrequest to the internet.
 //!
 //! Only the transport changes: the call is checked and signed exactly as before
 //! (`outbound::prepare`, `Hypha-Signature`), its URL (and so the `Host` the app sees) is

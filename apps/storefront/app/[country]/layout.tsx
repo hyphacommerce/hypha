@@ -11,9 +11,9 @@ import { SiteHeader } from "@/components/site-header";
 import { countryOf, loadCategories, loadCountries, loadStore } from "@/lib/api";
 import { link } from "@/lib/site";
 
-/** Pages under a country are static and regenerated in the background (design note
- * 0024, §7): none is built ahead, since there's no API to read at build time; each is
- * rendered on its first visit and kept, then refreshed at most every five minutes. */
+/** Pages under a country are static and regenerated in the background: none is built ahead,
+ * since there's no API to read at build time; each is rendered on its first visit and kept,
+ * then refreshed at most every five minutes. */
 export const revalidate = 300;
 export const dynamicParams = true;
 export function generateStaticParams() {

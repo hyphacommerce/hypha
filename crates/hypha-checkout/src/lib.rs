@@ -1,5 +1,5 @@
-//! Checkout (design notes 0007, 0031): turns a cart into an order, once an online
-//! payment's money is committed (`start_cart_payment`, then `checkout`).
+//! Checkout: turns a cart into an order, once an online payment's money is committed
+//! (`start_cart_payment`, then `checkout`).
 //!
 //! The top domain layer: it composes the cart (composing) with orders, inventory and
 //! customers and payments (leaves), and writes everything a checkout changes in one

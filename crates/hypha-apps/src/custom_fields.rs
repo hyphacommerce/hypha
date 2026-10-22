@@ -1,6 +1,6 @@
-//! The custom fields an app declares in its manifest (design note 0033, §8): always in
-//! the app's own namespace (`app_<name>.<key>`), created when staff approve the app and
-//! updated when they approve a refreshed manifest.
+//! The custom fields an app declares in its manifest: always in the app's own namespace
+//! (`app_<name>.<key>`), created when staff approve the app and updated when they approve a
+//! refreshed manifest.
 //!
 //! This crate is a leaf and can't see `hypha-custom-fields`, so it holds its own plain,
 //! checked description of each field (`AppCustomField`); the host turns it into the
@@ -14,12 +14,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::manifest::{AppManifest, Checker, ManifestError, ManifestProblem};
 
-/// The scope a manifest with a personal field must ask for (design note 0032, CD9).
-/// Matched by name, so the check doesn't depend on core's `Scope` naming it yet.
+/// The scope a manifest with a personal field must ask for. Matched by name, so the check
+/// doesn't depend on core's `Scope` naming it yet.
 pub const PROFILE_SCOPE: &str = "customer_data:profile";
 
-/// The most fields a manifest declares per owner type (design note 0033, §10:
-/// definitions per owner type, per namespace).
+/// The most fields a manifest declares per owner type (definitions per owner type, per
+/// namespace).
 pub const MAX_FIELDS_PER_OWNER: usize = 128;
 pub const MAX_FIELD_NAME_LEN: usize = 255;
 pub const MAX_FIELD_DESCRIPTION_LEN: usize = 1000;
@@ -45,7 +45,7 @@ pub struct ManifestCustomField {
     /// Help text on forms, at most 1,000 characters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// The type's validations (`max_length`, `choices`, …), design note 0033 §3.
+    /// The type's validations (`max_length`, `choices`, …).
     #[serde(default = "empty_object", skip_serializing_if = "is_empty_object")]
     #[cfg_attr(test, schemars(with = "serde_json::Map<String, serde_json::Value>"))]
     pub validations: serde_json::Value,
@@ -98,7 +98,7 @@ pub struct ManifestFieldCapabilities {
     pub unique: bool,
 }
 
-/// What a field is on (design note 0033, Q3).
+/// What a field is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
@@ -146,7 +146,7 @@ impl std::fmt::Display for CustomFieldOwnerType {
     }
 }
 
-/// A value type without its list (design note 0033, §3).
+/// A value type without its list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BaseFieldType {
     Text,
@@ -248,7 +248,7 @@ impl std::fmt::Display for CustomFieldType {
     }
 }
 
-/// Whether staff may write an app's field (design note 0033, §5.1).
+/// Whether staff may write an app's field.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
@@ -268,7 +268,7 @@ pub enum StorefrontAccess {
     Read,
 }
 
-/// A custom field's type (design note 0033, §3): one value, or `list.<type>`.
+/// A custom field's type: one value, or `list.<type>`.
 // For the JSON Schema only.
 #[cfg(test)]
 #[derive(schemars::JsonSchema)]
@@ -505,8 +505,8 @@ impl From<&AppCustomField> for CustomFieldSummary {
     }
 }
 
-/// A field whose type a manifest changed: such a manifest can't be applied (the type
-/// is part of a field's identity, design note 0033, CF3).
+/// A field whose type a manifest changed: such a manifest can't be applied (the type is
+/// part of a field's identity).
 #[derive(Debug, Clone, PartialEq)]
 pub struct RetypedField {
     pub owner_type: CustomFieldOwnerType,

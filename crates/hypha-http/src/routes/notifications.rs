@@ -1,6 +1,5 @@
-//! Notifications (design note 0028, §7): the store's email settings, its templates (the
-//! merchant's or the build's defaults), previews and test sends, and the record of every
-//! message with resending.
+//! Notifications: the store's email settings, its templates (the merchant's or the build's
+//! defaults), previews and test sends, and the record of every message with resending.
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::{AssetId, EventId, NotificationId, OrderId, Scope, Stamped};
@@ -583,8 +582,8 @@ pub async fn preview<S: Storage>(
     let req = body.parse()?;
     let key = template_key(&key)?;
     let (input, order) = req.into_parts();
-    // A preview of an order's email shows the buyer's details: only for callers who may
-    // see all of them (design note 0029, AP10).
+    // A preview of an order's email shows the buyer's details: only for callers who may see
+    // all of them.
     if order.is_some() {
         redact::require_fields(&ctx, &Scope::CUSTOMER_DATA)?;
     }
@@ -678,9 +677,9 @@ pub struct NotificationResponse {
     id: NotificationId,
     template: TemplateKeyDto,
     to: String,
-    /// Personal fields left out for this caller (design note 0029, AP10): an API key or
-    /// app without the matching `customer_data:*` scope. They are absent from the
-    /// object then, whatever the schema says. Never sent to staff or storefronts.
+    /// Personal fields left out for this caller: an API key or app without the matching
+    /// `customer_data:*` scope. They are absent from the object then, whatever the schema
+    /// says. Never sent to staff or storefronts.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(required = false)]
     redacted: Option<Vec<String>>,

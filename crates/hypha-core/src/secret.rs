@@ -1,6 +1,6 @@
-//! Encryption for secrets that must be read back (design note 0008, A5): TOTP seeds,
-//! shipping callback secrets (0015). Passwords and tokens are hashed instead. This is
-//! the port; `hypha_auth::XChaChaBox` is the cipher hosts use.
+//! Encryption for secrets that must be read back: TOTP seeds, shipping callback secrets.
+//! Passwords and tokens are hashed instead. This is the port; `hypha_auth::XChaChaBox` is
+//! the cipher hosts use.
 
 use std::fmt;
 

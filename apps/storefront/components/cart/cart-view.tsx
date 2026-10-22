@@ -1,7 +1,7 @@
 "use client";
 
-// The cart page's body (design note 0024, §7): the same lines as the drawer, with the
-// totals and the way to checkout beside them.
+// The cart page's body: the same lines as the drawer, with the totals and the way to
+// checkout beside them.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

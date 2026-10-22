@@ -1,4 +1,4 @@
-// An order's link from its emails (design note 0028, §7): the store's `order_url` is
+// An order's link from its emails: the store's `order_url` is
 // `https://<storefront>/order/{order}?token={token}` (`hypha deploy` and `pnpm seed`
 // set it so). Pages can't set cookies while rendering, so this handler checks the token
 // against the order, keeps it in the order's httpOnly cookie (as checkout does), and

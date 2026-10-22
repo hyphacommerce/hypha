@@ -31,7 +31,7 @@ import { libraryPage, setProductMedia } from "../actions";
 type Item = AdminSchemas["ProductMediaResponse"];
 type Asset = AdminSchemas["AssetResponse"];
 
-/** Shopify's limit, and the API's (design note 0013, section 5). */
+/** Shopify's limit, and the API's. */
 const MAX_ITEMS = 250;
 
 /** A square preview: the thumbnail of an image, the first frame of a video. */
@@ -60,9 +60,9 @@ function moved<T>(list: T[], from: number, to: number): T[] {
 }
 
 /**
- * The product's media list (design note 0014, section 8): drag to reorder, or use the
- * arrows; the first item is featured. Every change saves the whole list at once.
- * Removing an item detaches it; the file stays in the library.
+ * The product's media list: drag to reorder, or use the arrows; the first item is
+ * featured. Every change saves the whole list at once. Removing an item detaches it;
+ * the file stays in the library.
  */
 export function MediaSection({ id, media }: { id: string; media: Item[] }) {
   const [items, setItems] = useState(media);

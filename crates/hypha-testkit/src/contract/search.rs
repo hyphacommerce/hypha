@@ -1,4 +1,4 @@
-//! What every search engine, queue and settings store must do (design note 0019).
+//! What every search engine, queue and settings store must do.
 //!
 //! An engine is held to `hypha_search_index::reference::search`: the fixture's documents are
 //! loaded, and every query in a battery (terms, filters, price, availability, groups,
@@ -175,8 +175,8 @@ async fn battery<I: SearchIndex>(index: &I) {
             max: Some(3000),
         }
     });
-    // Custom field facets (design note 0033, §9): a variant's value, a list's items,
-    // a boolean, and a field filter with an option filter.
+    // Custom field facets: a variant's value, a list's items, a boolean, and a field filter
+    // with an option filter.
     let field = |key: &str| FacetKey::Field(key.to_string());
     base(&|q| q.filters = vec![filter(field("custom.material"), &["silk"])]);
     base(&|q| q.filters = vec![filter(field("custom.material"), &["linen", "cotton"])]);
@@ -210,7 +210,7 @@ async fn battery<I: SearchIndex>(index: &I) {
     base(&|q| q.channel = channel(1));
     base(&|q| q.channel = channel(2));
     base(&|q| q.channel = channel(9));
-    // A category finds what's in it and below it (design note 0022, CA3).
+    // A category finds what's in it and below it.
     let category = |n: u128| Some(hypha_core::CategoryId::from_uuid(Uuid::from_u128(n)));
     base(&|q| q.category = category(1));
     base(&|q| q.category = category(2));

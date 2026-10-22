@@ -1,4 +1,4 @@
-//! Roles: named sets of scopes (design note 0008, A6).
+//! Roles: named sets of scopes.
 
 use hypha_core::{RoleId, Scope, Version, Versioned, required_text};
 

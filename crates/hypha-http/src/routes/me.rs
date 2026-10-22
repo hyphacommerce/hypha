@@ -1,5 +1,5 @@
-//! The logged-in staff member's own account: who am I, password, two-factor setup
-//! (design note 0008, section 6). Each route needs a session, not an API key.
+//! The logged-in staff member's own account: who am I, password, two-factor setup. Each
+//! route needs a session, not an API key.
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_auth::{

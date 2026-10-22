@@ -4,7 +4,7 @@
 import type { ReactNode } from "react";
 
 export interface Email {
-  /** The template's key (design note 0028, §2): the files' names. */
+  /** The template's key: the files' names. */
   key: string;
   /** Jinja, one line; not autoescaped on the API's side. */
   subject: string;

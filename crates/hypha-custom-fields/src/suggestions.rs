@@ -1,8 +1,8 @@
-//! Suggested definitions (design note 0032, CD11): the well-known fields the admin offers
-//! a merchant in one click and `pnpm seed` creates. They're conventions, not core: a
-//! suggestion is an ordinary `DefinitionSpec` for the merchant's `custom` namespace,
-//! created through `create_definition` like any other, and a merchant may rename, delete
-//! or never create it. Apps read the fields like any other.
+//! Suggested definitions: the well-known fields the admin offers a merchant in one click
+//! and `pnpm seed` creates. They're conventions, not core: a suggestion is an ordinary
+//! `DefinitionSpec` for the merchant's `custom` namespace, created through
+//! `create_definition` like any other, and a merchant may rename, delete or never create
+//! it. Apps read the fields like any other.
 //!
 //! Customers get `custom.tags` (labels: a `list.text`, unique ignoring case, filterable)
 //! and `custom.note` (the staff note: `multiline_text`, `personal`, so it's redacted,

@@ -70,7 +70,7 @@ fn get_fulfillment_reports_an_unknown_one() {
 #[test]
 fn reading_needs_fulfillments_read() {
     let repo = repo();
-    // `orders:write` doesn't grant it: shipping is its own permission (FU9).
+    // `orders:write` doesn't grant it: shipping is its own permission.
     let ctx = user_with(vec![Scope::OrdersWrite]);
     let missing = CommandError::Auth(AuthError::MissingScope(Scope::FulfillmentsRead));
     assert_eq!(

@@ -1,8 +1,8 @@
 "use client";
 
-// Signing in with an emailed code (design note 0034, §2): the email, then the six digits.
-// The email's link brings both along (`/account/login?email=…&code=…`), so the second
-// step is already filled in. Centred in a card, like a sign-in page should be.
+// Signing in with an emailed code: the email, then the six digits. The email's link
+// brings both along (`/account/login?email=…&code=…`), so the second step is already
+// filled in. Centred in a card, like a sign-in page should be.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

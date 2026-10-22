@@ -11,11 +11,10 @@ use crate::{InMemoryAppProviderRepo, InMemoryOAuth, InMemoryOutbox};
 /// Apps by key, shared with the linked provider repo.
 pub(crate) type Apps = Arc<Mutex<BTreeMap<String, App>>>;
 
-/// Apps by key (design note 0016, section 8). Keys are strings, so the version rules
-/// are spelled out here, like `InMemoryAppProviderRepo`'s. Linked to one
-/// (`linked`), deleting an app deletes its rate settings and OAuth tokens too, like the
-/// database's `ON DELETE CASCADE`, and joined to custom fields (`joining_fields`), the
-/// definitions in its namespace.
+/// Apps by key. Keys are strings, so the version rules are spelled out here, like
+/// `InMemoryAppProviderRepo`'s. Linked to one (`linked`), deleting an app deletes its rate
+/// settings and OAuth tokens too, like the database's `ON DELETE CASCADE`, and joined to
+/// custom fields (`joining_fields`), the definitions in its namespace.
 #[derive(Default)]
 pub struct InMemoryAppRepo {
     pub(crate) apps: Apps,
@@ -33,7 +32,7 @@ pub struct InMemoryAppRepo {
 
 impl InMemoryAppRepo {
     /// Deleting an app deletes the custom field definitions in its namespace and their
-    /// values, as the database's foreign key does (design note 0033, §8).
+    /// values, as the database's foreign key does.
     pub fn joining_fields(self, fields: &crate::InMemoryCustomFields) -> Self {
         Self {
             custom_fields: Some(fields.view()),
@@ -147,9 +146,8 @@ impl AppRepo for InMemoryAppRepo {
 /// Extension endpoints by app key, then point.
 pub(crate) type Endpoints = Arc<Mutex<BTreeMap<String, Vec<ExtensionEndpoint>>>>;
 
-/// Apps' extension endpoints (design note 0029, §3). Linked to an app repo
-/// (`InMemoryPorts`), an endpoint needs its app, and goes with it, like the database's
-/// foreign key; alone, any app will do.
+/// Apps' extension endpoints. Linked to an app repo (`InMemoryPorts`), an endpoint needs
+/// its app, and goes with it, like the database's foreign key; alone, any app will do.
 #[derive(Default)]
 pub struct InMemoryExtensionEndpointRepo {
     endpoints: Endpoints,

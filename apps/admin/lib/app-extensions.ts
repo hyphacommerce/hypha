@@ -1,6 +1,6 @@
-// Server-only: what installed apps add to this admin (design note 0029, §5-§6). One
-// discovery read per request (`GET /admin/app-extensions`, every admin target), shared
-// by the page and its parts; the targets are picked from it here.
+// Server-only: what installed apps add to this admin. One discovery read per request
+// (`GET /admin/app-extensions`, every admin target), shared by the page and its parts;
+// the targets are picked from it here.
 
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { unstable_rethrow } from "next/navigation";

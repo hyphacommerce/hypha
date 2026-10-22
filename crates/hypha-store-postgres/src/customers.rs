@@ -252,8 +252,8 @@ pub(crate) async fn update_customer(
     Ok(written)
 }
 
-/// Removes a customer at `version` (design note 0032, §7.2): its addresses and group
-/// memberships cascade; its carts are unlinked by the workflow in the same batch.
+/// Removes a customer at `version`: its addresses and group memberships cascade; its carts
+/// are unlinked by the workflow in the same batch.
 pub(crate) async fn delete_customer(
     tx: &impl Queries,
     id: CustomerId,

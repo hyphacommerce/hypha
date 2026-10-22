@@ -1,6 +1,5 @@
-//! Field types and their validations (design note 0033, §3). A definition's type is
-//! immutable (CF3); its validations may change, and a change that tightens them is
-//! checked against the stored values first (§2).
+//! Field types and their validations. A definition's type is immutable; its validations may
+//! change, and a change that tightens them is checked against the stored values first.
 
 use std::{collections::BTreeSet, fmt, str::FromStr};
 
@@ -164,7 +163,7 @@ impl FieldType {
         self.list
     }
 
-    /// Whether a definition of this type may be `unique` (§2: text, integer, url).
+    /// Whether a definition of this type may be `unique` (text, integer, url).
     pub fn may_be_unique(self) -> bool {
         !self.list
             && matches!(
@@ -173,8 +172,8 @@ impl FieldType {
             )
     }
 
-    /// Whether a definition of this type may be `filterable` (§7): values with an index
-    /// form, single or listed. Long text, rich text and JSON aren't.
+    /// Whether a definition of this type may be `filterable`: values with an index form,
+    /// single or listed. Long text, rich text and JSON aren't.
     pub fn may_be_filterable(self) -> bool {
         !matches!(
             self.base,
@@ -248,7 +247,7 @@ impl Dimension {
     }
 }
 
-/// The fixed set of measurement units (§3).
+/// The fixed set of measurement units.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Unit {
     G,
@@ -344,7 +343,7 @@ impl Measurement {
     }
 }
 
-/// What a `reference` field points at (§3). More kinds later.
+/// What a `reference` field points at. More kinds later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ReferenceKind {
     Product,
@@ -564,7 +563,7 @@ impl hypha_core::ErrorCode for ValidationError {
 /// The URL schemes a `url` value may have.
 pub const URL_SCHEMES: [&str; 4] = ["https", "http", "mailto", "tel"];
 
-/// A field's validations, checked against its type (§3's table).
+/// A field's validations, checked against its type.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Validations {
     pub(crate) min_length: Option<u32>,
@@ -803,8 +802,8 @@ impl Validations {
         Ok(v)
     }
 
-    /// No validations: what stored values are loaded with (§2: a value is parsed only by
-    /// its type when loaded). For types with required validations, use the definition's.
+    /// No validations: what stored values are loaded with (a value is parsed only by its
+    /// type when loaded). For types with required validations, use the definition's.
     pub fn none() -> Validations {
         Validations::default()
     }
@@ -912,9 +911,9 @@ impl Validations {
         self.unique_items
     }
 
-    /// Whether `new` accepts less than `self` (§2): a value valid under `self` may fail
-    /// `new`. Then the stored values are checked before the change is applied. Removing
-    /// or widening a validation never tightens.
+    /// Whether `new` accepts less than `self`: a value valid under `self` may fail `new`.
+    /// Then the stored values are checked before the change is applied. Removing or
+    /// widening a validation never tightens.
     pub fn tightened_by(&self, new: &Validations) -> bool {
         // A lower bound that's new or higher; an upper bound that's new or lower.
         fn raised_bound(old: &Option<Bound>, new: &Option<Bound>) -> bool {

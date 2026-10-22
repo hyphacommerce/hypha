@@ -1,6 +1,5 @@
-//! Postgres for the native host (design note 0001): a deadpool pool of `tokio-postgres`
-//! connections, each keeping its prepared statements (design note 0025, §6), migrated
-//! on startup. One `PgStore` per request.
+//! Postgres for the native host: a deadpool pool of `tokio-postgres` connections, each
+//! keeping its prepared statements, migrated on startup. One `PgStore` per request.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -19,8 +18,8 @@ use crate::Deployment;
 use crate::handlers::CoreHandlers;
 use crate::payments::CoreProviders;
 
-/// A pooled connection: deadpool-postgres's client, with the statements prepared on it
-/// (design note 0025, §6), kept as long as the connection.
+/// A pooled connection: deadpool-postgres's client, with the statements prepared on it,
+/// kept as long as the connection.
 pub struct PgConn {
     client: deadpool_postgres::ClientWrapper,
     /// `None` with `database.statement_cache = false`.
@@ -98,14 +97,13 @@ fn postgres_tls() -> Result<tokio_postgres_rustls::MakeRustlsConnect, String> {
 /// the store from before the handlers (which need it) exist.
 pub struct PgDatabase {
     pool: deadpool::managed::Pool<PgManager>,
-    /// What the stores stamp writes with (design note 0016, Q3).
+    /// What the stores stamp writes with.
     clock: HostClock,
 }
 
 impl PgDatabase {
     /// Opens a connection pool (`[database]`) and applies pending `migrations` (core's,
-    /// then each spore's: `crate::migrations`). `clock` stamps what the stores write
-    /// (design note 0016, Q3).
+    /// then each spore's: `crate::migrations`). `clock` stamps what the stores write.
     pub async fn connect(
         url: &str,
         settings: &hypha_config::DatabaseConfig,

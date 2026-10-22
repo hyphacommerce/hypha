@@ -31,8 +31,8 @@ pub enum PaymentError {
         provider: ProviderKey,
         reason: String,
     },
-    /// The provider's app gave no usable answer at an extension point (design note
-    /// 0029, §3: `app_unavailable`, with the app and the point); why is in its call log.
+    /// The provider's app gave no usable answer at an extension point (`app_unavailable`,
+    /// with the app and the point); why is in its call log.
     #[error("{app} is unavailable for {point}: {reason}")]
     AppUnavailable {
         app: AppKey,
@@ -46,8 +46,7 @@ pub enum PaymentError {
         provider: ProviderKey,
         action: PaymentAction,
     },
-    /// The provider can't say where a payment is (design note 0031, §4): checkout waits
-    /// for its report.
+    /// The provider can't say where a payment is: checkout waits for its report.
     #[error("payment provider {0} can't report a payment's status when asked")]
     StatusUnsupported(ProviderKey),
     /// An open payment's method is gone, and its provider (not `manual`) needs the
@@ -56,7 +55,7 @@ pub enum PaymentError {
     MethodUnavailable(PaymentMethodId),
     #[error("instructions are longer than {max} characters", max = PaymentMethod::MAX_INSTRUCTIONS_LEN)]
     InstructionsTooLong,
-    /// A move the payment's status doesn't allow (PA7), e.g. paying a voided payment.
+    /// A move the payment's status doesn't allow, e.g. paying a voided payment.
     #[error("payment {payment} is {from}; it can't become {to}")]
     InvalidTransition {
         payment: PaymentId,
@@ -64,9 +63,9 @@ pub enum PaymentError {
         to: PaymentStatus,
     },
     /// A provider's report about another attempt than the payment's (the report names its
-    /// attempt; design note 0030): a second attempt's money for a payment past pending
-    /// (paid in an old tab: the payment collects once, so the provider gives that money
-    /// back), or another attempt's decline, cancel or refund (nothing to give back).
+    /// attempt): a second attempt's money for a payment past pending (paid in an old tab:
+    /// the payment collects once, so the provider gives that money back), or another
+    /// attempt's decline, cancel or refund (nothing to give back).
     #[error("payment {payment} is {status} through {held:?}, not {reported:?}")]
     ReferenceMismatch {
         payment: PaymentId,
@@ -89,7 +88,7 @@ pub enum PaymentError {
         refunded: i64,
         reported: PaymentStatus,
     },
-    /// A payment pays for one order (design note 0031): checkout attaching it to another.
+    /// A payment pays for one order: checkout attaching it to another.
     #[error("payment {payment} already pays for order {order}")]
     AlreadyAttached { payment: PaymentId, order: OrderId },
     /// Bad stored data: a negative amount, more refunded than paid, a status without its

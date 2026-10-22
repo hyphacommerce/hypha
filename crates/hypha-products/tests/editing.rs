@@ -1,5 +1,5 @@
-//! The editing commands (design note 0014). The aggregate's rules are unit-tested in
-//! `product/edit.rs`; these check scopes, loading, storing and the repository keys.
+//! The editing commands. The aggregate's rules are unit-tested in `product/edit.rs`; these
+//! check scopes, loading, storing and the repository keys.
 
 use hypha_core::{
     Actor, AuthError, Ctx, Currency, Money, MoneyError, OptionValueId, ProductId, Scope, UserId,
@@ -570,7 +570,7 @@ fn variant_commands_need_products_write() {
     );
 }
 
-// ---- events (design note 0016) ----
+// ---- events ----
 
 #[test]
 fn each_edit_records_what_changed() {
@@ -627,7 +627,7 @@ fn an_edit_that_changes_nothing_records_nothing() {
     assert_eq!(w.repo.outbox().types(), ["product.created"]);
 }
 
-// ---------- the whole variant list (design note 0021, Q1) ----------
+// ---------- the whole variant list ----------
 
 fn set(
     id: Option<VariantId>,

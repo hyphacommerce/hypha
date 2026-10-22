@@ -1,5 +1,5 @@
-//! Fulfilments (design note 0018): recording what left a location for an order, its
-//! tracking, and taking it back.
+//! Fulfilments: recording what left a location for an order, its tracking, and taking it
+//! back.
 
 use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_core::{FulfillmentId, LocationId, OrderId, OrderLineId};
@@ -171,8 +171,8 @@ pub async fn create<S: Storage>(
             })
             .collect(),
         tracking: TrackingDto::input(body.tracking),
-        // The event carries it; the mailer answers `fulfillment.created` (design note
-        // 0028, NT7). A replay records no second event, so the buyer is told once.
+        // The event carries it; the mailer answers `fulfillment.created`. A replay records
+        // no second event, so the buyer is told once.
         notify_customer: body.notify,
         idempotency: req.idempotency,
     };

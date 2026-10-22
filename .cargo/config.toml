@@ -11,7 +11,7 @@ HYPHA_S3_ACCESS_KEY_ID = { value = "hypha", force = false }
 HYPHA_S3_SECRET_ACCESS_KEY = { value = "hypha-dev-secret", force = false }
 # The compose server starts empty; `cargo run` creates the bucket.
 HYPHA_S3_CREATE_BUCKET = { value = "true", force = false }
-# Emails go to Mailpit (design note 0028, §6): readable at http://localhost:8025.
+# Emails go to Mailpit: readable at http://localhost:8025.
 HYPHA_EMAIL_SENDER = { value = "smtp", force = false }
 HYPHA_EMAIL_FROM = { value = "shop@hypha.localhost", force = false }
 HYPHA_SMTP_HOST = { value = "localhost", force = false }

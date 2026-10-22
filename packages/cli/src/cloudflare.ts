@@ -1,21 +1,19 @@
-// `--target cloudflare` (design note 0026, §5): the API as a Worker over Hyperdrive, with
-// R2 for files, KV for the jobs' marks (W7) and a Rate Limiting binding per rule (W8).
-// Any Postgres works (Neon, Supabase, RDS, your own): nothing here knows a provider. The
-// Worker is placed next to the database by measuring its host (W12), not by a region
-// read off a provider's hostname.
+// `--target cloudflare`: the API as a Worker over Hyperdrive, with R2 for files, KV for
+// the jobs' marks and a Rate Limiting binding per rule. Any Postgres works (Neon,
+// Supabase, RDS, your own): nothing here knows a provider. The Worker is placed next to
+// the database by measuring its host, not by a region read off a provider's hostname.
 //
 // `hypha deploy` does, each time (each step does nothing that's already done):
 //
-// 1. `hypha-host-axum setup` against the database's direct URL (W9);
+// 1. `hypha-host-axum setup` against the database's direct URL;
 // 2. creates what's missing: Hyperdrive (query cache off, always), the KV namespace, the
 //    R2 bucket with its CORS rule and custom domain;
 // 3. writes `wrangler.toml` from `hypha.json` and deploys the Worker (`worker-build`),
 //    with its secrets;
 // 4. marks the jobs as waiting (setup may have queued a search rebuild) and waits for
 //    `GET /health`;
-// 5. deploys the co-located apps (design note 0029, §9), each a Worker with its D1
-//    database, and binds the API to them; then the storefront's keys and the admin and
-//    storefront Workers.
+// 5. deploys the co-located apps, each a Worker with its D1 database, and binds the API
+//    to them; then the storefront's keys and the admin and storefront Workers.
 
 import { randomBytes } from "node:crypto";
 import { readFile, rm, writeFile } from "node:fs/promises";
@@ -119,8 +117,8 @@ export type WorkerInput = {
   /** The deployment's own Worker crate (absolute), for spores from outside this
    * repository; absent, this repository's `hypha-host-workers`. */
   workerCrate?: string;
-  /** Co-located apps' Workers the API binds to (design note 0029, §9): its calls to
-   * `host` go through `binding` (`HYPHA_APP_BINDINGS`, the Worker's `app_bindings`). */
+  /** Co-located apps' Workers the API binds to: its calls to `host` go through `binding`
+   * (`HYPHA_APP_BINDINGS`, the Worker's `app_bindings`). */
   apps?: AppBinding[];
 };
 
@@ -132,7 +130,7 @@ const str = (value: string) => JSON.stringify(value);
 /** The Worker's `wrangler.toml`, written on every deploy from `hypha.json`. */
 export function wranglerToml(d: Deployment, input: WorkerInput): string {
   const cf = d.cloudflare!;
-  // The deployment's own Worker crate when it has spores from outside (design note 0030).
+  // The deployment's own Worker crate when it has spores from outside.
   const workerCrate = input.workerCrate ?? WORKER_CRATE;
   const crate = relative(input.dir, workerCrate) || ".";
   const vars: [string, string][] = [["HYPHA_CONFIG", input.config]];
@@ -146,8 +144,8 @@ export function wranglerToml(d: Deployment, input: WorkerInput): string {
     if (cf.zoneId) vars.push(["HYPHA_MEDIA_URL", url(d, d.domains.media)]);
   }
   if (d.domains.admin) vars.push(["HYPHA_ADMIN_URL", url(d, d.domains.admin)]);
-  // The OAuth issuer and the URLs apps are given (design note 0029): the API's public
-  // address, never one a request happened to name.
+  // The OAuth issuer and the URLs apps are given: the API's public address, never one
+  // a request happened to name.
   vars.push(["HYPHA_PUBLIC_URL", url(d, d.domains.api)]);
   const bound = input.apps ?? [];
   if (bound.length > 0)
@@ -175,7 +173,7 @@ export function wranglerToml(d: Deployment, input: WorkerInput): string {
   });
   return [
     "# Written by `hypha deploy` from hypha.json and hypha.config.toml on every deploy",
-    "# (design note 0026): change those, not this file.",
+    "#: change those, not this file.",
     `name = ${str(workerName(d))}`,
     `main = ${str(`${crate}/build/worker/shim.mjs`)}`,
     `compatibility_date = ${str(input.compatibilityDate)}`,
@@ -185,7 +183,7 @@ export function wranglerToml(d: Deployment, input: WorkerInput): string {
     "",
     "[build]",
     // This repository's spores are the stock Worker's features; the deployment's own
-    // crate lists every spore itself (design note 0030, §9).
+    // crate lists every spore itself.
     `command = ${str(`worker-build --release${input.workerCrate ? "" : workerFeatures(d)}`)}`,
     // Absolute: wrangler runs the build from its own working directory, reading `cwd`
     // as given (unlike `main`, which is relative to this file).
@@ -206,10 +204,7 @@ export function wranglerToml(d: Deployment, input: WorkerInput): string {
     "# Per rule: the most its [rate_limits] quota allows in a minute (W8).",
     ...limits,
     ...(services.length > 0
-      ? [
-          "# Co-located apps: calls to their domains stay on Cloudflare (design note 0029, §9).",
-          ...services,
-        ]
+      ? ["# Co-located apps: calls to their domains stay on Cloudflare.", ...services]
       : []),
     "[triggers]",
     'crons = ["* * * * *"]',
@@ -341,7 +336,7 @@ export async function deployCloudflare(
   const secretKey = env.get("HYPHA_SECRET_KEY");
   if (!secretKey) throw new Error(".env: HYPHA_SECRET_KEY is missing");
   // Spores from outside this repository: the deployment's own crates, the native one for
-  // `setup` (it migrates and registers them) and the Worker (design note 0030, §9).
+  // `setup` (it migrates and registers them) and the Worker.
   const spores = d.spores ?? [];
   const outside = needsHostCrate(spores);
   const hostCrate = outside ? await writeHostCrate(dir, spores) : undefined;
@@ -392,8 +387,8 @@ export async function deployCloudflare(
   }
   await tools.checkToolchain();
 
-  // The co-located apps (design note 0029, §9), cloned and installed first: a wrong
-  // commit or a missing template stops the deploy before anything changes.
+  // The co-located apps, cloned and installed first: a wrong commit or a missing
+  // template stops the deploy before anything changes.
   const coLocated: { entry: AppEntry; clone: string; profile: AppProfile }[] = [];
   for (const entry of d.apps ?? []) {
     p.log.step(`Preparing the ${entry.name} app (${entry.rev?.slice(0, 12) ?? "unpinned"})…`);
@@ -431,7 +426,7 @@ export async function deployCloudflare(
     spinning = false;
   };
   try {
-    // 1. The database (W9): migrations, the store, the owner, the location, search.
+    // 1. The database: migrations, the store, the owner, the location, search.
     start("Building the setup tool (hypha-host-axum)");
     const binary = await tools.buildHost(hostCrate);
     const hostEnv = {
@@ -572,7 +567,7 @@ export async function deployCloudflare(
     p.log.step("Building and deploying the Worker (worker-build --release)…");
     await deployApi();
 
-    // 4. Setup may have queued work (a search rebuild): the next tick runs the jobs (W7).
+    // 4. Setup may have queued work (a search rebuild): the next tick runs the jobs.
     await tools.wrangler(
       [
         "kv",
@@ -679,7 +674,7 @@ export async function deployCloudflare(
       }
     }
 
-    // 6. The admin and the storefront, bound to the API Worker (design note 0026, §2).
+    // 6. The admin and the storefront, bound to the API Worker.
     for (const app of deployed) {
       const domain = d.domains[app]!;
       const appEnv: Record<string, string> = {

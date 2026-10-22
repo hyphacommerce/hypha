@@ -111,11 +111,10 @@ impl<K: Eq + Hash + Copy, T: Clone + Versioned> Table<K, T> {
         Page::from_overfetch(fetched, page.limit)
     }
 
-    /// A page of the rows `matches` keeps in a sorted list (design note 0024, AU2): each
-    /// viewed by `view`, ordered by `key` of the view and then by ID in `direction`,
-    /// after `after` when given; what a database does with `WHERE (key, id) > ($key,
-    /// $after) ORDER BY key, id LIMIT n + 1`. Views every matching row (tests are small).
-    /// Hidden like `page`.
+    /// A page of the rows `matches` keeps in a sorted list: each viewed by `view`, ordered
+    /// by `key` of the view and then by ID in `direction`, after `after` when given; what a
+    /// database does with `WHERE (key, id) > ($key, $after) ORDER BY key, id LIMIT n + 1`.
+    /// Views every matching row (tests are small). Hidden like `page`.
     pub(crate) fn page_sorted<U>(
         &self,
         matches: impl Fn(&T) -> bool,

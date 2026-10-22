@@ -1,6 +1,6 @@
-// A listing's state in its URL (design notes 0023, SF7, and 0024, §7): the words, the
-// facet filters, the price range, the sort and the page, so every state can be linked
-// to and the back button works. Shared by the server page and the client controls.
+// A listing's state in its URL: the words, the facet filters, the price
+// range, the sort and the page, so every state can be linked to and the back button
+// works. Shared by the server page and the client controls.
 
 export type ListingParams = Record<string, string | string[] | undefined>;
 
@@ -115,8 +115,8 @@ export function toMinor(value: string | undefined, digits: number): number | und
   return Number.isSafeInteger(minor) ? minor : undefined;
 }
 
-/** `option.color` → "Color", `field.custom.skin_type` → "Skin type" (a custom field,
- * design note 0033, §9: its namespace isn't shown), `product_type` → "Type". */
+/** `option.color` → "Color", `field.custom.skin_type` → "Skin type" (a custom field: its
+ * namespace isn't shown), `product_type` → "Type". */
 export function facetName(key: string): string {
   if (key.startsWith("option.")) {
     const name = key.slice("option.".length);

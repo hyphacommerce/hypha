@@ -27,7 +27,7 @@ pub enum CommandError {
     RequestExpired(OAuthRequestId),
     #[error("authorization request {0} was answered already")]
     RequestDecided(OAuthRequestId),
-    /// Approving scopes the staff member doesn't hold (as role grants require, 0008).
+    /// Approving scopes the staff member doesn't hold (as role grants require).
     #[error("you can't grant {0}, which you don't have")]
     CannotGrant(Scope),
     /// A malformed, unknown, expired or revoked access token, or one of an app that is

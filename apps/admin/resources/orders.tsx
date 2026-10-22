@@ -1,6 +1,6 @@
 "use client";
 
-// The order list's table (design note 0024, §3).
+// The order list's table.
 
 import { VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
@@ -69,7 +69,7 @@ export function OrdersTable({
   countries: { value: string; label: string }[];
   /** The currencies markets sell in. */
   orderCurrencies: string[];
-  /** Filterable custom fields (design note 0033, §7), offered as filters. */
+  /** Filterable custom fields, offered as filters. */
   fieldFilters?: Definition[];
 }) {
   const [outcome, setOutcome] = useState<BulkOutcome>();

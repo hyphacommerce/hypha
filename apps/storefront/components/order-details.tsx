@@ -1,6 +1,6 @@
-// An order as its buyer sees it (design notes 0024, §7, and 0034, §3): the lines and
-// totals, when it was placed and how it ships, the payment, the address. The
-// confirmation page and the account's order page share it.
+// An order as its buyer sees it: the lines and totals, when it was placed and
+// how it ships, the payment, the address. The confirmation page and the account's
+// order page share it.
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Card } from "@astryxdesign/core/Card";
@@ -65,8 +65,8 @@ export async function OrderDetails({
   const digits = country.minor_units;
   const to = order.shipping_address;
   const payment = order.payment ?? null;
-  // An order paid online was paid before it existed (design note 0031); one paid by
-  // hand shows its instructions (bank transfer, cash on delivery).
+  // An order paid online was paid before it existed; one paid by hand shows its
+  // instructions (bank transfer, cash on delivery).
   const confirmationElements = await elementsFor("order.confirmation");
   const status = payment ? paymentStatus(payment.status) : undefined;
   const placed = PLACED_DATE.format(new Date(order.placed_at));

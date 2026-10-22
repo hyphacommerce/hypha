@@ -1,7 +1,7 @@
-// Loading states shaped like the pages they stand in for (design note 0024, §7), for the
-// dynamic routes only (search, cart): their `loading.tsx` shows one while the page
-// renders. Static pages have none: their HTML is the page, and a fallback there would be
-// cached with it and flash before every visit (design note 0025, §6).
+// Loading states shaped like the pages they stand in for, for the dynamic routes only
+// (search, cart): their `loading.tsx` shows one while the page renders. Static pages
+// have none: their HTML is the page, and a fallback there would be cached with it and
+// flash before every visit.
 
 import { AspectRatio } from "@astryxdesign/core/AspectRatio";
 import { Card } from "@astryxdesign/core/Card";
@@ -15,7 +15,7 @@ import type { CSSProperties } from "react";
  * (`.shop-bone`, globals.css). Astryx's own carries some fifteen atomic classes and
  * inline variables, and a page's skeleton has a hundred placeholders, rendered with
  * every dynamic page even when its content is ready at once: a quarter of the search
- * page's HTML (design note 0025, §6).
+ * page's HTML.
  */
 export function Skeleton({
   width = "100%",

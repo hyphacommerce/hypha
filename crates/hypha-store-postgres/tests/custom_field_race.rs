@@ -1,6 +1,5 @@
-//! Concurrent list deltas against a real Postgres (design note 0033, CF6): writers on
-//! separate connections add items to the same owner's list, which doesn't exist yet,
-//! and every item lands.
+//! Concurrent list deltas against a real Postgres: writers on separate connections add
+//! items to the same owner's list, which doesn't exist yet, and every item lands.
 //!
 //! Needs `DATABASE_URL` like the contract tests; skips itself without it.
 

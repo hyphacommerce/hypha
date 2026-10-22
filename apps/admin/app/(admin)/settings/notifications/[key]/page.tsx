@@ -8,8 +8,7 @@ import { TEMPLATES, templateName } from "@/lib/notifications";
 
 import { TemplateEditor } from "./template-editor";
 
-/** One email's template (design note 0028, §7): its sources, variables and a live
- * preview. */
+/** One email's template: its sources, variables and a live preview. */
 export default async function TemplatePage({ params }: { params: Promise<{ key: string }> }) {
   const { key } = await params;
   const client = await sessionClient();

@@ -11,8 +11,8 @@ export type Result = { error?: string };
 const PAGE = "/settings/staff";
 
 /**
- * Emails an invite to join as `role` (design note 0008, section 4). Inviting an email
- * with a pending invite renews it: a new link, the old one dead.
+ * Emails an invite to join as `role`. Inviting an email with a pending invite renews
+ * it: a new link, the old one dead.
  */
 export async function inviteStaff(email: string, role: string): Promise<Result> {
   const client = await sessionClient();

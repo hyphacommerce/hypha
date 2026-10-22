@@ -13,8 +13,8 @@ import { link } from "@/lib/site";
 
 import { ProductForm } from "./product-form";
 
-/** Static, refreshed at most every five minutes (design note 0024, §7). None is built
- * ahead (no API at build time): each product renders on its first visit, then is kept. */
+/** Static, refreshed at most every five minutes. None is built ahead (no API at build
+ * time): each product renders on its first visit, then is kept. */
 export const revalidate = 300;
 export function generateStaticParams() {
   return [];
@@ -37,9 +37,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 /**
- * A product page in one read (design note 0021, SU7): priced and stocked in the
- * shopper's country. One the country's market doesn't sell is shown as such (0021, Q2);
- * a draft or unpublished one is a 404.
+ * A product page in one read: priced and stocked in the shopper's country. One the
+ * country's market doesn't sell is shown as such; a draft or unpublished one is a 404.
  */
 export default async function ProductPage({ params }: Props) {
   const { country: folder, handle } = await params;
@@ -48,13 +47,13 @@ export default async function ProductPage({ params }: Props) {
   const [country, product, appBlocks] = await Promise.all([
     countryOf(folder),
     load(handle, folder.toUpperCase()),
-    // What installed apps show on a product (design note 0029, §7): elements, loaded in
-    // the browser, so the page stays static.
+    // What installed apps show on a product: elements, loaded in the browser, so the
+    // page stays static.
     elementsFor("product.block"),
   ]);
   const code = country.country;
-  // The merchant's custom fields (design note 0033, §6.2), formatted here so the form
-  // shows the selected variant's over the product's without formatting in the browser.
+  // The merchant's custom fields, formatted here so the form shows the selected
+  // variant's over the product's without formatting in the browser.
   const context = await fieldContext(
     country,
     product.custom_fields,

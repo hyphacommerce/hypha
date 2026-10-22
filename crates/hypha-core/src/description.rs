@@ -1,5 +1,4 @@
-//! Rich descriptions (design note 0019, Q1; 0022, CA9): sanitised HTML, shared by
-//! products and categories.
+//! Rich descriptions: sanitised HTML, shared by products and categories.
 
 use thiserror::Error;
 
@@ -18,9 +17,8 @@ impl crate::ErrorCode for DescriptionError {
 }
 
 /// A rich description (products, categories): HTML, sanitised when it's made, so what's stored is always
-/// safe to render (design note 0019, Q1). An allow-list keeps paragraphs, headings,
-/// lists, emphasis, links, tables and images, and drops scripts, styles, event
-/// attributes and unsafe URLs (`ammonia`'s defaults).
+/// safe to render. An allow-list keeps paragraphs, headings, lists, emphasis, links, tables and images,
+/// and drops scripts, styles, event attributes and unsafe URLs (`ammonia`'s defaults).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Description(String);
 

@@ -1,5 +1,4 @@
-//! External apps (design note 0016, section 8): every field round trips, the key is
-//! unique, versions hold.
+//! External apps: every field round trips, the key is unique, versions hold.
 
 use hypha_apps::{
     App, AppKey, AppRepo, Grant, HasApps, InstalledManifest, NewApp, NewSpore, Webhook, keys,

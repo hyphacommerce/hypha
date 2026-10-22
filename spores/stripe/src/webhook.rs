@@ -129,7 +129,7 @@ pub fn intent_reports(event: &StripeEvent) -> Result<Vec<Report>, String> {
     };
     match event.kind.as_str() {
         "payment_intent.succeeded" => Ok(vec![report(PaymentEventKind::Paid)]),
-        // Taken and being collected (SEPA Direct Debit: days; design note 0031, Q3).
+        // Taken and being collected (SEPA Direct Debit: days).
         "payment_intent.processing" => Ok(vec![report(PaymentEventKind::Processing)]),
         "payment_intent.amount_capturable_updated" => {
             match event
@@ -340,10 +340,9 @@ pub async fn receive<S: Storage>(
         let unwanted = match record_payment_event(&ctx, &ports, &stripe.env, input).await {
             Ok(done) => {
                 reported += 1;
-                // A cart's money committed: its checkout completes now, though the
-                // shopper never came back (design note 0031, §1.5). A storage failure is
-                // tried again with this event; a checkout that can't complete gave the
-                // money back already.
+                // A cart's money committed: its checkout completes now, though the shopper
+                // never came back. A storage failure is tried again with this event; a
+                // checkout that can't complete gave the money back already.
                 match state
                     .complete_paid_checkout(&ports, &ctx, &done.value.payment)
                     .await

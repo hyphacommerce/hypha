@@ -1,11 +1,11 @@
-// Custom fields as shoppers read them (design note 0033, §6.2): a product's, a
-// variant's or a category's `custom_fields` (`{"custom.material": "wool"}`), only those
-// the merchant shows storefronts. Their definitions (`/storefront/custom-field-
-// definitions`) give each field its name, its place and a choice's label; a value is
-// shown by its shape: a boolean as Yes/No, a date in the store's language,
-// money with its currency's minor units, a measurement as "1.5 kg", a URL as a link,
-// rich text as HTML (when it's the sanitised kind), a reference to a product or a
-// category as a link to its page, a list joined; JSON isn't shown.
+// Custom fields as shoppers read them: a product's, a variant's or a category's
+// `custom_fields` (`{"custom.material": "wool"}`), only those the merchant shows
+// storefronts. Their definitions (`/storefront/custom-field- definitions`) give each
+// field its name, its place and a choice's label; a value is shown by its shape: a
+// boolean as Yes/No, a date in the store's language, money with its currency's minor
+// units, a measurement as "1.5 kg", a URL as a link, rich text as HTML (when it's the
+// sanitised kind), a reference to a product or a category as a link to its page, a list
+// joined; JSON isn't shown.
 //
 // Formatting happens on the server (`presentFields`), so the product form, a client
 // component, gets plain strings and never formats in the browser (no hydration

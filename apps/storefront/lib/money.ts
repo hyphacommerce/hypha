@@ -1,6 +1,6 @@
-// Money as shoppers read it (design note 0023, SF6). Amounts are integers in minor
-// units; how many digits a currency has comes from `/storefront/countries`, never
-// assumed (1050 is 10.50 EUR but 1050 JPY).
+// Money as shoppers read it. Amounts are integers in minor units; how many digits
+// a currency has comes from `/storefront/countries`, never assumed (1050 is 10.50
+// EUR but 1050 JPY).
 
 export type Money = { amount: number; currency: string };
 

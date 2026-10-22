@@ -1,8 +1,8 @@
 "use client";
 
-// An owner's custom fields as a form (design note 0033, §9): one input per definition,
-// in the definitions' order. Controlled: the card around it holds the inputs and saves
-// them, with its own Save (`CustomFieldsCard`) or the product editor's bar.
+// An owner's custom fields as a form: one input per definition, in the definitions'
+// order. Controlled: the card around it holds the inputs and saves them, with its own
+// Save (`CustomFieldsCard`) or the product editor's bar.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Card } from "@astryxdesign/core/Card";

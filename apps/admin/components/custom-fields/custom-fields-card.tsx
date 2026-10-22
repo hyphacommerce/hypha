@@ -1,7 +1,7 @@
 "use client";
 
-// A "Custom fields" card with its own Save (design note 0033, §9), for the pages that
-// have no draft of their own: categories, customers, orders, and a variant's dialog.
+// A "Custom fields" card with its own Save, for the pages that have no draft of their
+// own: categories, customers, orders, and a variant's dialog.
 
 import { Button } from "@astryxdesign/core/Button";
 import { HStack } from "@astryxdesign/core/Layout";

@@ -53,7 +53,7 @@ pub enum ApiKeyError {
     NoScopes,
     #[error("a publishable key always has the storefront scopes; don't send scopes")]
     PublishableScopesFixed,
-    /// A storefront sells through a channel: its key names one (design note 0020).
+    /// A storefront sells through a channel: its key names one.
     #[error("a publishable key needs a channel")]
     ChannelRequired,
     #[error("only a publishable key has a channel")]

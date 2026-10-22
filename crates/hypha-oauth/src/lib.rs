@@ -1,8 +1,8 @@
-//! How apps are installed and act (design note 0029, AP5, §4.1): Hypha's API is an
-//! OAuth 2.1 authorization server. An app's client ID is its manifest's URL; a staff
-//! member approves the scopes it asks for on the consent page of whichever admin the
-//! store uses; the app exchanges the code (with PKCE) for an hour-long access token
-//! (`hypha_at_…`) and a rotating refresh token (`hypha_rt_…`), bound to the grant.
+//! How apps are installed and act: Hypha's API is an OAuth 2.1 authorization server. An
+//! app's client ID is its manifest's URL; a staff member approves the scopes it asks for on
+//! the consent page of whichever admin the store uses; the app exchanges the code (with
+//! PKCE) for an hour-long access token (`hypha_at_…`) and a rotating refresh token
+//! (`hypha_rt_…`), bound to the grant.
 //!
 //! A composing domain: `hypha-apps` (the app, its manifest and grant) and `hypha-auth`
 //! (tokens stored as SHA-256), over core.

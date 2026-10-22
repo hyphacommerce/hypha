@@ -3,7 +3,7 @@ name = "hypha-mail-resend"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
-description = "Hypha's Resend email sender (design note 0028, §5): the `EmailSender` port over an `HttpClient` the host gives it."
+description = "Hypha's Resend email sender: the `EmailSender` port over an `HttpClient` the host gives it."
 
 [dependencies]
 hypha-core.workspace = true

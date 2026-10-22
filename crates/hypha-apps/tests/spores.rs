@@ -1,5 +1,5 @@
-//! Spores as apps (design note 0030, §3): registered by the host at startup, changed by
-//! staff only by enabling or disabling them.
+//! Spores as apps: registered by the host at startup, changed by staff only by enabling or
+//! disabling them.
 
 use hypha_apps::{
     AppError, AppKey, AppKind, CommandError, SporeRegistration, UpdateApp, WebhookInput,

@@ -1,8 +1,8 @@
-//! Fetching apps' manifests (design note 0029, AP5): the host's `ManifestFetcher`, a
-//! plain GET through the host's outbound client (`HostCalls`), so natively it reaches
-//! only public addresses unless `outbound.allow_private`, and on Workers it's `fetch`.
-//! Answers are read up to `outbound::MAX_ANSWER_BYTES`; `hypha_apps::fetch_manifest`
-//! then caps them at the manifest's own limit and checks they're a manifest (JSON).
+//! Fetching apps' manifests: the host's `ManifestFetcher`, a plain GET through the host's
+//! outbound client (`HostCalls`), so natively it reaches only public addresses unless
+//! `outbound.allow_private`, and on Workers it's `fetch`. Answers are read up to
+//! `outbound::MAX_ANSWER_BYTES`; `hypha_apps::fetch_manifest` then caps them at the
+//! manifest's own limit and checks they're a manifest (JSON).
 
 use std::time::Duration;
 

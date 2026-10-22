@@ -253,9 +253,8 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
     async fn next_number(&self) -> Result<OrderNumber, RepoError> {
         let mut conn = self.conn().await;
         // `nextval` is atomic across sessions and never rolled back, so it needs no
-        // transaction: two checkouts can't get the same number. Nor may a cache answer
-        // it, and none does: Hyperdrive's query cache is always off (design note 0026,
-        // §6, step 4).
+        // transaction: two checkouts can't get the same number. Nor may a cache answer it,
+        // and none does: Hyperdrive's query cache is always off.
         let row = conn
             .db()
             .query_typed_one("SELECT nextval('order_numbers') AS number", &[])

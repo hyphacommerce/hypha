@@ -1,14 +1,14 @@
 [package]
 name = "hypha-spore"
 edition.workspace = true
-# Its own semver (design note 0030, SP6): 0.x, a breaking change on a minor version
-# until 1.0, a changelog entry per release.
+# Its own semver: 0.x, a breaking change on a minor version until 1.0, a changelog
+# entry per release.
 version = "0.1.0"
 license.workspace = true
-description = "Everything a Hypha spore may use (design note 0030, §4): the Spore trait, its environment, settings and UI, the domain ports and commands it calls, and kits for Postgres, routes and tests."
+description = "Everything a Hypha spore may use: the Spore trait, its environment, settings and UI, the domain ports and commands it calls, and kits for Postgres, routes and tests."
 
 # The facade spores depend on instead of Hypha's internal crates, so internal refactors
-# break spores only when this crate changes. Builds for wasm, like every spore (SP8).
+# break spores only when this crate changes. Builds for wasm, like every spore.
 [dependencies]
 hypha-spore-core = { path = "../hypha-spore-core" }
 hypha-core.workspace = true

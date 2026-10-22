@@ -1,6 +1,5 @@
-//! Apps installed through OAuth and personal data (design note 0029, AP5, AP10): the
-//! whole dance over HTTP, and the redaction contract on every admin route that returns
-//! customers, orders, carts or emails.
+//! Apps installed through OAuth and personal data: the whole dance over HTTP, and the
+//! redaction contract on every admin route that returns customers, orders, carts or emails.
 
 use axum::{
     Router,
@@ -485,7 +484,7 @@ async fn without_an_admin_url_there_is_no_consent_page() {
     );
 }
 
-// ---------- personal data (AP10) ----------
+// ---------- personal data ----------
 
 /// Values that must never reach a caller without the `customer_data:*` scopes.
 const PII: [&str; 10] = [
@@ -498,7 +497,7 @@ const PII: [&str; 10] = [
     "Piicity",
     "PII-10000",
     "Piiprovince",
-    // A personal custom field's value (design note 0033, §5.2).
+    // A personal custom field's value.
     "Piinote",
 ];
 
@@ -565,7 +564,7 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
     // The order's email is the checkout's; make it a known one too.
     let (_, placed) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
     let order_email = placed["email"].as_str().unwrap().to_string();
-    // Personal custom fields on the customer and the order (design note 0033, §5.2).
+    // Personal custom fields on the customer and the order.
     let mut definitions = Vec::new();
     for (owner, path) in [
         (
@@ -645,8 +644,8 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
         ),
         ("GET", format!("/admin/orders/{order}/custom-fields"), None),
     ];
-    // The export carries everything (design note 0032, §7.4), so it needs every
-    // `customer_data:*` scope rather than redaction: refused outright here.
+    // The export carries everything, so it needs every `customer_data:*` scope rather than
+    // redaction: refused outright here.
     for token in [&app_token, &secret] {
         let (status, json) = send_as(
             &app,

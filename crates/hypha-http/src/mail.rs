@@ -1,6 +1,6 @@
-//! Email in the host (design note 0028, §4): `MailHost`, the `hypha_mail::MailEnv` both
-//! hosts send with (the `Mailer` handler holds one, the routes borrow the state's), and
-//! `StaffEnv`, which gives the staff flows (invites, password resets) their `Notifier`.
+//! Email in the host: `MailHost`, the `hypha_mail::MailEnv` both hosts send with (the
+//! `Mailer` handler holds one, the routes borrow the state's), and `StaffEnv`, which gives
+//! the staff flows (invites, password resets) their `Notifier`.
 
 use std::sync::Arc;
 
@@ -129,11 +129,11 @@ impl MailEnv for MailHost {
     }
 }
 
-/// The staff flows' environment (`hypha_users::invite_user`,
-/// `request_password_reset`), and the customer flows' (`hypha_customer_accounts`, design
-/// note 0034): the host's auth ports, and their emails sent through the store's
-/// templates (`hypha_mail::send_staff`, `send_customer`) and recorded in `ports`, right
-/// where the flow notifies, which is after its own writes committed.
+/// The staff flows' environment (`hypha_users::invite_user`, `request_password_reset`), and
+/// the customer flows' (`hypha_customer_accounts`): the host's auth ports, and their emails
+/// sent through the store's templates (`hypha_mail::send_staff`, `send_customer`) and
+/// recorded in `ports`, right where the flow notifies, which is after its own writes
+/// committed.
 pub struct StaffEnv<'a, P> {
     env: &'a HostEnv,
     mail: StaffMailer<'a, MailHost, P>,

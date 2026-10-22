@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-/// The privacy workflows' tunables (design note 0032, §7.3), set by `hypha.config.toml`'s
-/// `[customers]` table and passed in like a port.
+/// The privacy workflows' tunables, set by `hypha.config.toml`'s `[customers]` table and
+/// passed in like a port.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrivacySettings {
     /// How long a requested erasure can be cancelled before the job runs it

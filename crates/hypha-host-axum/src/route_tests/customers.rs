@@ -1,4 +1,4 @@
-//! Customers (design note 0032): deleting one, and later consent, groups and erasure.
+//! Customers: deleting one, and later consent, groups and erasure.
 
 use serde_json::json;
 
@@ -12,8 +12,8 @@ async fn customer(app: &TestApp, email: &str) -> String {
     created["id"].as_str().unwrap().to_string()
 }
 
-/// Design note 0032, CD7: a customer without orders is deleted (its carts' unlinking is
-/// the workflow's own test); one with orders (cancelled or not) is refused and says so on `can_delete`.
+/// A customer without orders is deleted (its carts' unlinking is the workflow's own test); one with
+/// orders (cancelled or not) is refused and says so on `can_delete`.
 #[tokio::test]
 async fn a_customer_without_orders_is_deleted_and_one_with_orders_is_not() {
     let app = app().await;
@@ -56,8 +56,8 @@ async fn a_customer_without_orders_is_deleted_and_one_with_orders_is_not() {
     );
 }
 
-/// Design note 0032, §5: consent per channel over the API, the newest consent winning,
-/// and the cart's marketing box becoming a subscription at checkout.
+/// Consent per channel over the API, the newest consent winning, and the cart's marketing
+/// box becoming a subscription at checkout.
 #[tokio::test]
 async fn marketing_consent_is_recorded_newest_first_and_at_checkout() {
     let app = app().await;
@@ -126,7 +126,7 @@ async fn marketing_consent_is_recorded_newest_first_and_at_checkout() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    // A new email resets the consent (Q7).
+    // A new email resets the consent.
     let (status, json) = send(
         &app,
         "PATCH",
@@ -147,8 +147,8 @@ async fn marketing_consent_is_recorded_newest_first_and_at_checkout() {
     assert_eq!(json["email_marketing"]["source"], "checkout");
 }
 
-/// Design note 0032, §6: groups are created, changed, filled and emptied as sets, filter
-/// the customers list, and show on the customer; deleting one leaves its customers.
+/// Groups are created, changed, filled and emptied as sets, filter the customers list, and
+/// show on the customer; deleting one leaves its customers.
 #[tokio::test]
 async fn customer_groups_hold_customers_as_sets() {
     let app = app().await;
@@ -330,8 +330,8 @@ async fn customer_groups_hold_customers_as_sets() {
     assert_eq!(json["groups"], json!([]));
 }
 
-/// Design note 0032, §7.3 and §7.4: an erasure is requested and cancelled over the API,
-/// and the export answers a data request.
+/// An erasure is requested and cancelled over the API, and the export answers a data
+/// request.
 #[tokio::test]
 async fn erasure_is_requested_and_cancelled_and_data_is_exported() {
     let app = app().await;

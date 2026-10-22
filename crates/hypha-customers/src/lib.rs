@@ -1,4 +1,4 @@
-//! Customers and their address books (design note 0005).
+//! Customers and their address books.
 //!
 //! A leaf domain: it depends on core only. One customer per email; accounts and login
 //! come later.

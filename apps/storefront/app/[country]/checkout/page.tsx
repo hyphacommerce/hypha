@@ -26,16 +26,16 @@ import {
   ShippingChoice,
 } from "./checkout-forms";
 
-/** Per request: it reads the shopper's cart or query (design note 0024, §7). */
+/** Per request: it reads the shopper's cart or query. */
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "Checkout" };
 
 /**
- * Checkout (design notes 0023, §3, and 0024, §7) on one page: contact and shipping
- * address, a shipping option per group (0015), how the shopper pays when there's
- * something to pay (0027, §4), and a summary with "Place order", or, for a method paid
- * online, the payment itself: the order is placed once it's paid (0031).
+ * Checkout on one page: contact and shipping address, a shipping option per
+ * group, how the shopper pays when there's something to pay, and a summary with "Place
+ * order", or, for a method paid online, the payment itself: the order is placed once
+ * it's paid.
  */
 export default async function CheckoutPage({
   params,
@@ -56,8 +56,7 @@ export default async function CheckoutPage({
     client.GET("/storefront/carts/{id}", { params: { path: { id } } }),
     client.GET("/storefront/carts/{id}/shipping-options", { params: { path: { id } } }),
     client.GET("/storefront/carts/{id}/payment-methods", { params: { path: { id } } }),
-    // A signed-in shopper's address book and marketing choice fill the form (design
-    // note 0034, §4).
+    // A signed-in shopper's address book and marketing choice fill the form.
     loadAccount(),
   ]);
   if (!cart || cart.order || cart.lines.length === 0) redirect(link(code, "/cart"));
@@ -72,13 +71,13 @@ export default async function CheckoutPage({
   const offers = ships && address ? (options.data?.groups ?? []) : [];
   const detailsDone = Boolean(cart.email) && (!ships || Boolean(address));
   const shippingDone = !ships || cart.shipping_ready;
-  // A free order has nothing to pay, so no payment step (design note 0027, Q2).
+  // A free order has nothing to pay, so no payment step.
   const pays = cart.total.amount > 0;
   const methods = payment.data?.items ?? [];
   // The cart's choice counts only while it's still offered.
   const method = methods.find((m) => m.id === cart.payment_method);
   const paymentDone = !pays || Boolean(method);
-  // Paid online before the order (design note 0031): the card form on this page.
+  // Paid online before the order: the card form on this page.
   const online = pays && method !== undefined && method.provider !== "manual";
   // Back from a provider's page without an order (`/checkout/complete`): why.
   const returned = (await searchParams).payment;

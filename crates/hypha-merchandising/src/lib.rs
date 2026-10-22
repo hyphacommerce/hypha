@@ -1,8 +1,7 @@
-//! Merchandising: how products are presented (design note 0014). A composing crate
-//! above `hypha-products` and `hypha-media`, which stay independent leaves: products
-//! store asset IDs without knowing assets, and media records usages without knowing
-//! products. Attaching media to products needs both, so it lives here (0013, M7), and so
-//! does a category's image (0022, Q5).
+//! Merchandising: how products are presented. A composing crate above `hypha-products` and
+//! `hypha-media`, which stay independent leaves: products store asset IDs without knowing
+//! assets, and media records usages without knowing products. Attaching media to products
+//! needs both, so it lives here, and so does a category's image.
 
 pub mod commands;
 pub mod handlers;

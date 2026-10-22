@@ -1,6 +1,6 @@
-// A product's, variant's or category's custom fields (design note 0033, §6.2), as label
-// and value pairs. The values arrive formatted (`lib/custom-fields.ts`'s
-// `presentFields`), so this renders on the server or in the browser alike.
+// A product's, variant's or category's custom fields, as label and value pairs. The
+// values arrive formatted (`lib/custom-fields.ts`'s `presentFields`), so this renders
+// on the server or in the browser alike.
 
 import { Link } from "@astryxdesign/core/Link";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";

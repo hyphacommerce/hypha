@@ -111,10 +111,9 @@ export async function reorderOptions(zone: string, options: string[]): Promise<R
 export type SecretResult = { error?: string; secret?: string };
 
 /**
- * Adds a rate app: the app (design note 0016), unless one with the key exists, then its
- * rate settings. The secret comes back only when the app is new; if the rate settings
- * are refused, an app made just now is deleted again, so a retry makes it afresh and
- * shows its secret.
+ * Adds a rate app: the app, unless one with the key exists, then its rate settings. The
+ * secret comes back only when the app is new; if the rate settings are refused, an app
+ * made just now is deleted again, so a retry makes it afresh and shows its secret.
  */
 export async function createProvider(input: {
   key: string;

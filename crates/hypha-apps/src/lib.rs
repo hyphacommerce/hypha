@@ -1,9 +1,8 @@
-//! External apps (design note 0016, section 8): one record per app that Hypha signs
-//! calls to, owning its signing secret, its webhook endpoint and the events it
-//! subscribes to. Shipping's rate apps are apps too: their rate settings live in
-//! `hypha-shipping` under the same key. Apps installed through OAuth (design note
-//! 0029) also keep the manifest they were installed from and the grant staff approved;
-//! the OAuth flow itself is `hypha-oauth`'s.
+//! External apps: one record per app that Hypha signs calls to, owning its signing secret,
+//! its webhook endpoint and the events it subscribes to. Shipping's rate apps are apps too:
+//! their rate settings live in `hypha-shipping` under the same key. Apps installed through
+//! OAuth also keep the manifest they were installed from and the grant staff approved; the
+//! OAuth flow itself is `hypha-oauth`'s.
 //!
 //! A leaf domain: it depends on core only.
 

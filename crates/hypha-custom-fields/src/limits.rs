@@ -1,5 +1,5 @@
-//! The published limits (design note 0033, §10, CF10). Kept small on purpose: raising
-//! one later breaks nobody, lowering one breaks apps.
+//! The published limits. Kept small on purpose: raising one later breaks nobody, lowering
+//! one breaks apps.
 
 /// Definitions per owner type, per namespace.
 pub const MAX_DEFINITIONS_PER_NAMESPACE: usize = 128;
@@ -31,8 +31,8 @@ pub const MAX_PATTERN_CHARS: usize = 255;
 pub const MAX_INVALID_OWNERS_LISTED: usize = 20;
 /// Keys a list may ask for with `?custom_fields=`.
 pub const MAX_LISTED_KEYS: usize = 10;
-/// Event entries carry a value only up to this size, serialised (§6.4); bigger ones
-/// carry only the key.
+/// Event entries carry a value only up to this size, serialised; bigger ones carry only the
+/// key.
 pub const MAX_EVENT_VALUE_BYTES: usize = 1024;
 /// Significant digits of a `decimal` or a measurement's value.
 pub const MAX_DECIMAL_DIGITS: u32 = 20;

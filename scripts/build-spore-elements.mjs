@@ -1,6 +1,6 @@
 // Bundles each spore's storefront elements (`spores/*/element/*.ts`) into the `.js`
-// beside it, which the spore serves (`include_str!`, design note 0030, §7). With
-// --check, fails instead of writing when a committed bundle is out of date (CI runs it).
+// beside it, which the spore serves (`include_str!`). With --check, fails instead of
+// writing when a committed bundle is out of date (CI runs it).
 
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";

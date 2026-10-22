@@ -1,5 +1,5 @@
-//! Search in Postgres (design note 0019, SE9): the built-in engine, the queue of what to
-//! rebuild, and the merchant's settings.
+//! Search in Postgres: the built-in engine, the queue of what to rebuild, and the
+//! merchant's settings.
 //!
 //! The engine answers exactly as `hypha_search_index::reference::search` (the
 //! `search_index` contract checks it). Everything that defines a match or an order is
@@ -488,10 +488,10 @@ fn facet_branch(source: &str, keys: &[&FacetKey], distinct: bool, params: &mut P
     }
 }
 
-/// Vendor, product type and tags are the product's, the same on all its variants: a
-/// listing or product group has one set of them, so they count once per group, from
-/// its representative, instead of over every matching variant. Custom fields aren't:
-/// a variant's value wins over its product's (design note 0033, §9).
+/// Vendor, product type and tags are the product's, the same on all its variants: a listing
+/// or product group has one set of them, so they count once per group, from its
+/// representative, instead of over every matching variant. Custom fields aren't: a
+/// variant's value wins over its product's.
 fn product_level(key: &FacetKey) -> bool {
     !matches!(key, FacetKey::Option(_) | FacetKey::Field(_))
 }
@@ -694,8 +694,8 @@ fn document_from_row(row: &Row) -> Result<SearchDocument, RepoError> {
     };
     let names: Vec<String> = col(row, "option_names")?;
     let values: Vec<String> = col(row, "option_values")?;
-    // Custom field values live only in `facets` (design note 0033, §9), in the
-    // document's order: no column of their own.
+    // Custom field values live only in `facets`, in the document's order: no column of
+    // their own.
     let field_prefix = FacetKey::Field(String::new()).to_string();
     let fields = col::<Vec<String>>(row, "facets")?
         .into_iter()

@@ -1,6 +1,6 @@
-//! What every custom fields store must do (design note 0033, §4): definitions with
-//! their key, values with versions, `unique` values, list deltas applied under the
-//! rows' locks, cascades, and writes staged in a batch.
+//! What every custom fields store must do: definitions with their key, values with
+//! versions, `unique` values, list deltas applied under the rows' locks, cascades, and
+//! writes staged in a batch.
 
 use hypha_apps::{AppRepo, HasApps};
 use hypha_categories::{CategoryRepo, HasCategories};
@@ -81,7 +81,7 @@ async fn events<S: HasOutbox>(ports: &S) -> Vec<StoredEvent> {
 
 /// Runs every definition scenario, each on fresh ports from `make`. A definition in an
 /// app's or a spore's namespace needs that app stored first (adapters may refer to it:
-/// removing the app removes its fields, design note 0033, §8).
+/// removing the app removes its fields).
 pub async fn custom_field_definitions<S>(make: impl AsyncFn() -> S)
 where
     S: HasApps
@@ -291,9 +291,8 @@ where
     );
 }
 
-/// Removing an app (its second `DELETE`, design note 0033, §8) removes the definitions
-/// in its namespace and their values; another app's and the merchant's stay. Storage
-/// cascades record no events.
+/// Removing an app (its second `DELETE`) removes the definitions in its namespace and their
+/// values; another app's and the merchant's stay. Storage cascades record no events.
 async fn app_removal<S>(ports: &S)
 where
     S: HasApps
@@ -1072,8 +1071,8 @@ where
     assert_eq!(values.get_many(&[customer(1).id()], None).await, Ok(vec![]));
 }
 
-/// Runs the scenarios of lists filtered on custom fields (design note 0033, §7):
-/// products, customers, orders and categories, as the adapter stores their values.
+/// Runs the scenarios of lists filtered on custom fields: products, customers, orders and
+/// categories, as the adapter stores their values.
 pub async fn custom_field_filters<S>(make: impl AsyncFn() -> S)
 where
     S: HasCustomFieldDefinitions

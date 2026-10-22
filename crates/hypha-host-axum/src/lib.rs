@@ -1,9 +1,8 @@
-//! Hypha's native host (design note 0026, W3) as a library plus a macro (design note
-//! 0030, §9): a binary is `hypha_host_axum::host! { spores: [...] }`, which expands, for
-//! the spores listed, the deployment's type (`Deployment`), its router and its dispatch
-//! job, and a `main` that runs `start::run`. Our own binary (`main.rs`) lists none, so
-//! the stock build is what it always was; a deployment with spores is a small crate
-//! `hypha deploy` generates (0030, §9).
+//! Hypha's native host as a library plus a macro: a binary is `hypha_host_axum::host! {
+//! spores: [...] }`, which expands, for the spores listed, the deployment's type
+//! (`Deployment`), its router and its dispatch job, and a `main` that runs `start::run`.
+//! Our own binary (`main.rs`) lists none, so the stock build is what it always was; a
+//! deployment with spores is a small crate `hypha deploy` generates.
 //!
 //! Why a macro rather than a generic `run::<Spores>()`: axum must prove every handler's
 //! future `Send`, and with our `Send`-free repository and provider traits the compiler
@@ -68,7 +67,7 @@ pub trait Deployment: Sized + 'static {
     fn dispatch(state: SharedState<PgStorage<Self>>) -> BoxFuture<Step>;
 }
 
-/// Core's migrations, then each spore's (design note 0030, SP4), in the order listed.
+/// Core's migrations, then each spore's, in the order listed.
 pub fn migrations<D: Deployment>() -> Vec<MigrationSet> {
     let mut sets = vec![CORE];
     sets.extend(<D::Spores as SporeSet>::migrations());
@@ -161,8 +160,7 @@ macro_rules! deployment {
     };
 }
 
-/// The native host's binary, built with `spores` (design note 0030, §9): its whole
-/// `main.rs`.
+/// The native host's binary, built with `spores`: its whole `main.rs`.
 ///
 /// ```ignore
 /// hypha_host_axum::host! { spores: [hypha_spore_stripe::Stripe] }

@@ -1,9 +1,9 @@
 "use server";
 
-// What the admin does for apps' UI and installation (design note 0029): answering a
-// consent request, uploading a private app's manifest, a session token for an embedded
-// page, and running an app's action. Each goes through the admin's server, so the staff
-// session never reaches the browser's JavaScript or an app.
+// What the admin does for apps' UI and installation: answering a consent request,
+// uploading a private app's manifest, a session token for an embedded page, and running
+// an app's action. Each goes through the admin's server, so the staff session never
+// reaches the browser's JavaScript or an app.
 
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { revalidatePath } from "next/cache";

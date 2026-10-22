@@ -1,6 +1,6 @@
-// Loading states (design note 0024, section 6): every route renders the admin's frame at
-// once and, while its data loads, a skeleton of its page with the title already in
-// place. Each route's `loading.tsx` picks one of these.
+// Loading states: every route renders the admin's frame at once and, while its data
+// loads, a skeleton of its page with the title already in place. Each route's
+// `loading.tsx` picks one of these.
 
 import { Card } from "@astryxdesign/core/Card";
 import { HStack, VStack } from "@astryxdesign/core/Layout";

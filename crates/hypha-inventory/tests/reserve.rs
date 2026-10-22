@@ -1,5 +1,5 @@
 //! `reserve_stock` and `release_stock`: all or nothing, idempotent, and safe under
-//! concurrent checkouts (design note 0004, section 3).
+//! concurrent checkouts.
 
 use std::cell::Cell;
 

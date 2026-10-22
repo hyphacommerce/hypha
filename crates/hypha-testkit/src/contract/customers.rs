@@ -244,7 +244,7 @@ async fn round_trips<R: CustomerRepo>(repo: &R) {
         .unwrap();
     c.add_address(addr_id(1), full_address("Zagreb"), true, false)
         .unwrap();
-    // Both consents, with a source and a time (design note 0032, §5).
+    // Both consents, with a source and a time.
     let at = Timestamp::from_unix_micros(1_767_225_600_000_000);
     c.set_marketing_consent(
         Channel::Email,

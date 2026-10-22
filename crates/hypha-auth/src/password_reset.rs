@@ -1,4 +1,4 @@
-//! Password reset requests: a single-use emailed token (design note 0008, section 5).
+//! Password reset requests: a single-use emailed token.
 
 use core::time::Duration;
 

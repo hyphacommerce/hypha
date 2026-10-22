@@ -1,6 +1,5 @@
-//! `SearchIndexer` (design note 0019, section 5): the event handler that queues what
-//! to rebuild. It only marks; the sync job does the work, so a busy product is rebuilt
-//! once however many events it had.
+//! `SearchIndexer`: the event handler that queues what to rebuild. It only marks; the sync
+//! job does the work, so a busy product is rebuilt once however many events it had.
 
 use hypha_core::{EventHandler, StoredEvent};
 
@@ -16,11 +15,10 @@ const PRODUCT_EVENTS: &[&str] = &[
     "product.variant_added",
     "product.variant_updated",
     "product.variant_removed",
-    // Its documents go: the product doesn't load any more (design note 0033, 6.3).
+    // Its documents go: the product doesn't load any more.
     "product.deleted",
 ];
-/// A product's or its variants' custom field values (design note 0033, §9): its facet
-/// fields.
+/// A product's or its variants' custom field values: its facet fields.
 const PRODUCT_FIELDS: &[&str] = &["product.custom_fields_updated"];
 /// A product or variant field definition's change to who reads it or whether it
 /// filters, or its deletion (with its values), changes which values every document
@@ -33,10 +31,9 @@ const FIELD_DEFINITIONS: &[(&str, &[&str])] = &[
     ("custom_field_definition.deleted", &[]),
 ];
 const CATALOG_PRODUCTS: &[&str] = &["catalog.products_added", "catalog.products_removed"];
-/// Which channels sell a product (design note 0020); a channel's name isn't in documents.
+/// Which channels sell a product; a channel's name isn't in documents.
 const PUBLICATIONS: &[&str] = &["channel.products_published", "channel.products_unpublished"];
-/// Which categories a product is in (design note 0022); a deleted category names its
-/// products too.
+/// Which categories a product is in; a deleted category names its products too.
 const CATEGORY_PRODUCTS: &[&str] = &[
     "category.products_added",
     "category.products_removed",
@@ -50,8 +47,8 @@ const EVERYTHING: &[&str] = &["catalog.changed", "price_list.changed"];
 /// - a location's `markets` decide where its stock counts, the settings' `split_by`
 ///   changes every listing key, and a market's countries, currency and tax rule decide
 ///   every price there: everything;
-/// - a category's `parent` or `visible` change which categories the products below it
-///   are listed under (design note 0022, CA3, CA4): that subtree.
+/// - a category's `parent` or `visible` change which categories the products below it are
+///   listed under: that subtree.
 ///
 /// Names and the like aren't in documents and rebuild nothing.
 const WHEN_FIELD: &[(&str, &[&str], Rebuild)] = &[

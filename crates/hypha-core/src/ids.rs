@@ -22,8 +22,7 @@ impl crate::ErrorCode for IdError {
 
 macro_rules! define_id {
     ($name:ident, $prefix:literal) => {
-        /// Ordered like the UUID inside: by creation time for UUIDv7 (list pages,
-        /// design note 0012).
+        /// Ordered like the UUID inside: by creation time for UUIDv7 (list pages).
         #[derive(
             Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
         )]
@@ -129,11 +128,11 @@ define_id!(AddressId, "addr");
 define_id!(OrderId, "ord");
 define_id!(OrderLineId, "ordl");
 define_id!(FulfillmentId, "ful");
-// Payment methods and payments (design note 0027).
+// Payment methods and payments.
 define_id!(PaymentMethodId, "pm");
 define_id!(PaymentId, "pay");
 define_id!(ChannelId, "chan");
-// Categories (design note 0022).
+// Categories.
 define_id!(CategoryId, "pcat");
 
 define_id!(RoleId, "role");
@@ -149,19 +148,19 @@ define_id!(ShippingZoneId, "szone");
 define_id!(ShippingOptionId, "shipopt");
 define_id!(ShippingGroupId, "shgrp");
 
-// Outbox events and their deliveries (design note 0016): IDs the admin and webhooks show.
+// Outbox events and their deliveries: IDs the admin and webhooks show.
 define_id!(EventId, "evt");
 define_id!(DeliveryId, "dlv");
-// Emails sent and their records (design note 0028).
+// Emails sent and their records.
 define_id!(NotificationId, "ntf");
-// Calls Hypha made to apps' extension points (design note 0029, AP3).
+// Calls Hypha made to apps' extension points.
 define_id!(ExtensionCallId, "xcall");
-// Apps installed through OAuth act as `Actor::App(AppId)` (design note 0029): a Copy
-// identity beside the app's key (`app_<name>`), whose prefix can't be mistaken for a key.
+// Apps installed through OAuth act as `Actor::App(AppId)`: a Copy identity beside the app's
+// key (`app_<name>`), whose prefix can't be mistaken for a key.
 define_id!(AppId, "appid");
-// Pending OAuth authorization requests, shown on the consent page (design note 0029).
+// Pending OAuth authorization requests, shown on the consent page.
 define_id!(OAuthRequestId, "oareq");
-// Custom field definitions (design note 0033).
+// Custom field definitions.
 define_id!(CustomFieldDefinitionId, "cfd");
 
 #[cfg(test)]

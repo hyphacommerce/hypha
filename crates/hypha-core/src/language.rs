@@ -3,7 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// A BCP 47 language tag (design note 0021, SU5): `en`, `en-GB`, `sr-Latn`, `es-419`.
+/// A BCP 47 language tag: `en`, `en-GB`, `sr-Latn`, `es-419`.
 ///
 /// A strict subset of the grammar: a language (2 or 3 letters), then optionally a script
 /// (4 letters), a region (2 letters or 3 digits) and variants (5 to 8 letters or digits,

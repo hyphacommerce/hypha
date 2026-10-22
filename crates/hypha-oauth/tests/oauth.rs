@@ -1,4 +1,4 @@
-//! The OAuth flow's commands on the in-memory repos (design note 0029, §4.1).
+//! The OAuth flow's commands on the in-memory repos.
 
 use std::collections::HashMap;
 

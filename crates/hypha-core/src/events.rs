@@ -1,6 +1,6 @@
-//! Domain events (design note 0016): what happened, recorded by the aggregate that
-//! changed and written to the outbox by the adapter in the same transaction as the
-//! change, so an event exists if and only if its change committed.
+//! Domain events: what happened, recorded by the aggregate that changed and written to the
+//! outbox by the adapter in the same transaction as the change, so an event exists if and
+//! only if its change committed.
 //!
 //! An aggregate keeps the events it recorded (usually in a `Recorder`) and hands them
 //! over through `Recorded`. Repository writes (`insert`, `update`, and staging in a
@@ -116,10 +116,9 @@ pub trait StageEvents {
     fn record_events(&mut self, events: Vec<PendingEvent>);
 }
 
-/// Ports that stamp the events they write with whoever is acting (design note 0016,
-/// Q1). A host builds a request's ports before it knows the caller, so it sets the
-/// actor once authentication has made the `Ctx`; until then, and for jobs, it's
-/// `Actor::System`.
+/// Ports that stamp the events they write with whoever is acting. A host builds a request's
+/// ports before it knows the caller, so it sets the actor once authentication has made the
+/// `Ctx`; until then, and for jobs, it's `Actor::System`.
 pub trait ActingAs {
     fn act_as(&self, actor: Actor);
 }
@@ -131,9 +130,8 @@ impl<T: ActingAs + ?Sized> ActingAs for &T {
 }
 
 /// What a host is told when a write gives the dispatcher work: events committed to the
-/// outbox, or a delivery made due again (`OutboxRepo::retry_delivery`). Natively it
-/// wakes the dispatcher; on Workers it runs one after the response (design note 0026,
-/// W6).
+/// outbox, or a delivery made due again (`OutboxRepo::retry_delivery`). Natively it wakes
+/// the dispatcher; on Workers it runs one after the response.
 pub type DispatchHook = std::sync::Arc<dyn Fn() + Send + Sync>;
 
 /// Ports that tell the host when a write has given the dispatcher work (`DispatchHook`),
@@ -150,9 +148,9 @@ impl<T: SignalsDispatch + ?Sized> SignalsDispatch for &T {
     }
 }
 
-/// What fan-out routes an event by: its type, and what it's about. Most destinations
-/// only look at the type; an app's own lifecycle events (`app.uninstalled`, design note
-/// 0029) go only to the app they're about.
+/// What fan-out routes an event by: its type, and what it's about. Most destinations only
+/// look at the type; an app's own lifecycle events (`app.uninstalled`) go only to the app
+/// they're about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventRoute<'a> {
     pub event_type: &'a str,
@@ -163,8 +161,8 @@ pub struct EventRoute<'a> {
 /// An event as the outbox holds it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredEvent {
-    /// The outbox's order of insertion (not of commit: rows from a transaction that
-    /// commits late can appear below rows already read, design note 0016, EV6).
+    /// The outbox's order of insertion (not of commit: rows from a transaction that commits
+    /// late can appear below rows already read).
     pub seq: i64,
     pub id: Uuid,
     pub event_type: String,
@@ -179,7 +177,7 @@ pub struct StoredEvent {
     pub data: serde_json::Value,
 }
 
-/// One event on its way to one destination (design note 0016, section 5).
+/// One event on its way to one destination.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Delivery {
     pub id: Uuid,
@@ -277,9 +275,9 @@ pub struct DeliveryRecord {
     pub last_error: Option<String>,
 }
 
-/// The outbox: tests and the admin read it; the dispatcher fans events out to
-/// deliveries, leases the due ones and records how they went. Each method is one short
-/// transaction, so nothing holds a connection while a destination runs (EV9).
+/// The outbox: tests and the admin read it; the dispatcher fans events out to deliveries,
+/// leases the due ones and records how they went. Each method is one short transaction, so
+/// nothing holds a connection while a destination runs.
 #[allow(async_fn_in_trait)]
 pub trait OutboxRepo {
     /// Events with `seq` greater than `after`, oldest first, at most `limit`. For tests
@@ -322,8 +320,8 @@ pub trait OutboxRepo {
 
     /// When the dispatcher next has work: now-or-earlier for an event not fanned out yet
     /// (when it occurred), else the earliest a pending delivery can be leased (its next
-    /// attempt, or its lease's end if that's later). `None` when nothing is pending. A
-    /// host that runs the jobs only when there's work reads it (design note 0026, W7).
+    /// attempt, or its lease's end if that's later). `None` when nothing is pending. A host
+    /// that runs the jobs only when there's work reads it.
     async fn next_due(&self) -> Result<Option<Timestamp>, RepoError>;
 
     /// Deletes up to `limit` events (and their deliveries) that occurred before
@@ -342,13 +340,13 @@ pub trait OutboxRepo {
         page: PageRequest<i64>,
     ) -> Result<Page<DeliveryRecord>, RepoError>;
 
-    /// Makes `destination`'s delivery `id` due at `now` (design note 0016, Q6): a
-    /// failed or succeeded one goes back to pending, a pending one stops waiting for its
-    /// backoff. Its attempts are kept, so a delivery that had used them all gets one
-    /// more. One whose lease hasn't ended (running right now) is left alone; one whose
-    /// lease has ended is free (runners don't start a delivery they can't finish within
-    /// its lease, and an outcome under an old lease isn't recorded). `None` when there's
-    /// no such delivery to `destination`; otherwise the delivery as it is after.
+    /// Makes `destination`'s delivery `id` due at `now`: a failed or succeeded one goes
+    /// back to pending, a pending one stops waiting for its backoff. Its attempts are kept,
+    /// so a delivery that had used them all gets one more. One whose lease hasn't ended
+    /// (running right now) is left alone; one whose lease has ended is free (runners don't
+    /// start a delivery they can't finish within its lease, and an outcome under an old
+    /// lease isn't recorded). `None` when there's no such delivery to `destination`;
+    /// otherwise the delivery as it is after.
     async fn retry_delivery(
         &self,
         destination: &str,

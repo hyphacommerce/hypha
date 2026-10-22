@@ -1,6 +1,6 @@
 // Hypha signs every call it makes to an app (webhooks, extension points, the proxy) like
-// Stripe does (design notes 0015 §5, 0016 §8, 0029 §15): `Hypha-Signature:
-// t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>">`, keyed with the app's secret.
+// Stripe does: `Hypha-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>">`,
+// keyed with the app's secret.
 
 import { bodyBytes, concat, hmacSha256, timingSafeEqual, toHex, utf8 } from "./encoding.ts";
 
@@ -80,10 +80,10 @@ export function parseSignatureHeader(
 }
 
 /**
- * The header of a forwarded call's context signature (the app proxy and admin blocks,
- * design note 0029, §8): signed like `Hypha-Signature`, over `contextSigningInput`
- * instead of the body, so the context (`Hypha-Store`, `Hypha-Staff`, `Hypha-Cart`, …)
- * can't be changed in transit.
+ * The header of a forwarded call's context signature (the app proxy and admin
+ * blocks): signed like `Hypha-Signature`, over `contextSigningInput` instead of the
+ * body, so the context (`Hypha-Store`, `Hypha-Staff`, `Hypha-Cart`, …) can't be
+ * changed in transit.
  */
 export const CONTEXT_SIGNATURE_HEADER = "Hypha-Context-Signature";
 

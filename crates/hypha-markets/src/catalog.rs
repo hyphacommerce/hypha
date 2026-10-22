@@ -30,7 +30,7 @@ impl fmt::Display for CatalogContext {
 pub struct Catalog {
     id: CatalogId,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016).
+    /// When it was stored and last changed, set by the adapter.
     stamps: Option<Stamps>,
     context: CatalogContext,
     price_list: Option<PriceListId>,
@@ -103,8 +103,8 @@ impl Catalog {
     }
 }
 
-/// Plain-data form of a `Catalog` for storage adapters (design note 0001, 3.4).
-/// Its products are stored separately (see `CatalogRepo`).
+/// Plain-data form of a `Catalog` for storage adapters. Its products are stored separately
+/// (see `CatalogRepo`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogSnapshot {
     pub id: CatalogId,

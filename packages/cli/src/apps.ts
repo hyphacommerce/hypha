@@ -1,7 +1,7 @@
-// Apps deployed alongside Hypha (design note 0029, §9): first-party apps (Stripe,
-// Meilisearch) or any app built the same way, each from its own repository at a pinned
-// commit. They get no shortcut into the store: the deploy runs them, then a staff member
-// installs each one through its consent page like any app's (§4.1).
+// Apps deployed alongside Hypha: first-party apps (Stripe, Meilisearch) or any app built
+// the same way, each from its own repository at a pinned commit. They get no shortcut
+// into the store: the deploy runs them, then a staff member installs each one through its
+// consent page like any app's.
 //
 // Each is cloned here, with this machine's git credentials, into
 // `<deployment>/.build/apps/<name>`, next to `<deployment>/.build/apps/hypha`, a link to
@@ -286,15 +286,15 @@ export function appWranglerToml(template: string, o: AppWorkerInput): string {
   if (o.apiWorker) {
     lines.push(
       "",
-      "# Calls to HYPHA_API_URL go through this Service Binding (design note 0029, §9).",
+      "# Calls to HYPHA_API_URL go through this Service Binding.",
       "[[services]]",
       'binding = "HYPHA_API"',
       `service = ${str(o.apiWorker)}`,
     );
   }
   return [
-    "# Written by `hypha deploy` from the app's wrangler template and hypha.json (design",
-    "# note 0029, §9) on every deploy: change those, not this file.",
+    "# Written by `hypha deploy` from the app's wrangler template and hypha.json on every",
+    "# deploy: change those, not this file.",
     ...lines,
     "",
   ].join("\n");
@@ -311,7 +311,7 @@ export function composeApps(
   apps: { entry: AppEntry; profile: AppProfile }[],
 ): string {
   const out = [
-    "# Written by `hypha deploy` from hypha.json's apps (design note 0029, §9) on every",
+    "# Written by `hypha deploy` from hypha.json's apps on every",
     "# deploy: change those, not this file. Compose reads it after compose.yaml",
     "# (COMPOSE_FILE in .env).",
     "",

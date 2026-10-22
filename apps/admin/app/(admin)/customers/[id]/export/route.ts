@@ -1,6 +1,6 @@
-// Streams a customer's data export to the browser as a JSON download (design note 0032,
-// §7.4): the API answers the merchant's data request with one document; this route only
-// adds the file name. The staff session stays in its cookie.
+// Streams a customer's data export to the browser as a JSON download: the API answers
+// the merchant's data request with one document; this route only adds the file name.
+// The staff session stays in its cookie.
 
 import { sessionClient } from "@/lib/hypha";
 

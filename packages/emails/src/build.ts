@@ -1,6 +1,6 @@
-// Writes the default email templates to crates/hypha-notifications/defaults/ (design note
-// 0028, NT6), which the Rust crate embeds. With --check, fails instead of writing when a
-// committed file is out of date (`pnpm emails:check`, in CI).
+// Writes the default email templates to crates/hypha-notifications/defaults/, which the
+// Rust crate embeds. With --check, fails instead of writing when a committed file is out
+// of date (`pnpm emails:check`, in CI).
 //
 // The templates are TSX, which Node doesn't run by itself: jiti compiles them on load.
 

@@ -1,8 +1,7 @@
 "use client";
 
-// The customer groups table (design note 0032, §6): name, handle, description, with
-// dialogs to add, change and delete a group. A group's customers are the customers list
-// filtered by it.
+// The customer groups table: name, handle, description, with dialogs to add, change and
+// delete a group. A group's customers are the customers list filtered by it.
 
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";

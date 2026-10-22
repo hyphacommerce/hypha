@@ -48,8 +48,8 @@ impl InMemoryOrderRepo {
         }
     }
 
-    /// The same repo, filtering its list by the custom field values `fields` holds
-    /// (design note 0033, §7), as a database joins them.
+    /// The same repo, filtering its list by the custom field values `fields` holds, as a
+    /// database joins them.
     pub fn joining_fields(self, fields: &crate::InMemoryCustomFields) -> Self {
         Self {
             field_values: fields.shared_values(),

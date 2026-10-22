@@ -1,4 +1,4 @@
-//! Customer groups and their membership (design note 0032, §6).
+//! Customer groups and their membership.
 
 use std::collections::HashMap;
 

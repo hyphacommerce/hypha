@@ -1,9 +1,9 @@
 "use client";
 
-// Answering a consent request (design note 0029, §4.1 step 3). An approved or denied
-// public app's request answers where to send the browser (the app's redirect URI, with
-// a code or `error=access_denied`): the browser goes there, leaving the admin. A
-// private app's approval answers with its credentials, shown here once.
+// Answering a consent request. An approved or denied public app's request answers
+// where to send the browser (the app's redirect URI, with a code or
+// `error=access_denied`): the browser goes there, leaving the admin. A private app's
+// approval answers with its credentials, shown here once.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

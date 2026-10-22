@@ -45,8 +45,8 @@ impl ValueRecord {
 /// Values by (definition, owner), as the table's primary key.
 pub(crate) type Values = BTreeMap<(CustomFieldDefinitionId, Uuid), ValueRecord>;
 
-/// Custom field definitions and their values (design note 0033), in memory. One type
-/// for both repos, since deleting a definition takes its values with it.
+/// Custom field definitions and their values, in memory. One type for both repos, since
+/// deleting a definition takes its values with it.
 #[derive(Default)]
 pub struct InMemoryCustomFields {
     /// Shared with a linked app repo, which deletes an app's namespace with it.
@@ -179,9 +179,9 @@ impl InMemoryCustomFields {
         self.definitions.hide_next_lookups(n);
     }
 
-    /// Deletes every definition in `namespace` and their values, as the database's
-    /// `ON DELETE CASCADE` from `apps` does when the app goes (design note 0033, §8).
-    /// No events: storage cascades record none.
+    /// Deletes every definition in `namespace` and their values, as the database's `ON
+    /// DELETE CASCADE` from `apps` does when the app goes. No events: storage cascades
+    /// record none.
     pub(crate) fn drop_namespace(&self, namespace: &Namespace) {
         let mut rows = self.definitions.lock();
         let gone: Vec<CustomFieldDefinitionId> = rows

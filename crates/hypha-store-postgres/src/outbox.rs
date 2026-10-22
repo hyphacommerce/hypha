@@ -1,5 +1,4 @@
-//! The outbox (design note 0016, section 3): events written in the transaction of the
-//! change that recorded them.
+//! The outbox: events written in the transaction of the change that recorded them.
 
 use hypha_core::{
     ActingAs, Actor, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, EventRoute,

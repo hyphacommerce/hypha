@@ -1,12 +1,11 @@
-# syntax=docker/dockerfile:1
-# The API (hypha-host-axum) for a VPS (design note 0025). Built from the repository's
-# root: `docker build -f docker/api.Dockerfile -t hypha-api .` The cache mounts keep
-# downloaded crates and compiled dependencies between builds on the same machine, so a
-# rebuild compiles only what changed.
+# syntax=docker/dockerfile:1 The API (hypha-host-axum) for a VPS. Built from the
+# repository's root: `docker build -f docker/api.Dockerfile -t hypha-api .` The cache
+# mounts keep downloaded crates and compiled dependencies between builds on the same
+# machine, so a rebuild compiles only what changed.
 
 FROM rust:1.99-trixie AS build
-# Spores (design note 0030, §9), as `hypha deploy` passes them: this repository's own as
-# the host's features (`SPORE_FEATURES=spore-stripe`), or a deployment's host crate
+# Spores, as `hypha deploy` passes them: this repository's own as the host's features
+# (`SPORE_FEATURES=spore-stripe`), or a deployment's host crate
 # (`HOST_CRATE=.hypha-build/<deployment>/host`, written by the CLI) when it has others.
 ARG SPORE_FEATURES=""
 ARG HOST_CRATE=""

@@ -1,6 +1,6 @@
-// Writes src/generated/extensions.ts from openapi/extensions.json (design note 0029, AP3),
-// the document the Rust host writes from hypha-extensions' DTOs. With --check, fails
-// instead of writing when the committed file is out of date.
+// Writes src/generated/extensions.ts from openapi/extensions.json, the document the Rust
+// host writes from hypha-extensions' DTOs. With --check, fails instead of writing when the
+// committed file is out of date.
 //
 // Each extension point is an operation, under `webhooks` (keyed by the point's name) or
 // `paths`. Its name and version come from `x-hypha-extension: {point, version}` when the

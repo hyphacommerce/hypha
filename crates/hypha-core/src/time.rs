@@ -35,8 +35,8 @@ impl Timestamp {
     }
 
     /// `duration` later, saturating at the end of `i64` (sub-microsecond parts dropped).
-    /// Settings are `Duration`s (design note 0017): a plain number, so it builds for
-    /// wasm, unlike `Instant` and `SystemTime`.
+    /// Settings are `Duration`s: a plain number, so it builds for wasm, unlike `Instant`
+    /// and `SystemTime`.
     pub const fn plus(self, duration: Duration) -> Self {
         Self(self.0.saturating_add(micros(duration)))
     }
@@ -57,7 +57,7 @@ const fn micros(duration: Duration) -> i64 {
     }
 }
 
-/// When an aggregate was first stored and last changed (design note 0016, Q3).
+/// When an aggregate was first stored and last changed.
 ///
 /// Set by the storage adapter when it writes (or stages) the aggregate, from the clock
 /// its ports carry, the same way it sets the version: an insert stamps both, an update

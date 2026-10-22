@@ -419,7 +419,7 @@ pub async fn adjust_level<S: Storage>(
     Ok(Json(InventoryResponse::new(&item)?))
 }
 
-/// A variant's stock, whether or not it has an item (design note 0004, I3).
+/// A variant's stock, whether or not it has an item.
 #[utoipa::path(
     get,
     path = "/admin/variants/{id}/inventory",
@@ -447,8 +447,8 @@ pub struct ProductInventoryResponse {
     items: Vec<InventoryResponse>,
 }
 
-/// A product's stock, every variant at once: what the product editor shows, in one
-/// call instead of one per variant (design note 0025, §6).
+/// A product's stock, every variant at once: what the product editor shows, in one call
+/// instead of one per variant.
 #[utoipa::path(
     get,
     path = "/admin/products/{id}/inventory",

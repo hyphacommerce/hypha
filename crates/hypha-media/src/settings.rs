@@ -1,4 +1,4 @@
-//! Media's settings (design note 0017): `[media]` in `hypha.config.toml`, defaults here.
+//! Media's settings: `[media]` in `hypha.config.toml`, defaults here.
 
 use core::time::Duration;
 

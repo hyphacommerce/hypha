@@ -1,7 +1,6 @@
-// Server-only: the storefront elements installed apps offer (design note 0029, §7;
-// docs/apps/elements.md), by target. Cached like the store's details (no cookies, so
-// static pages may read it); an API that can't answer means no elements, never a broken
-// page.
+// Server-only: the storefront elements installed apps offer (docs/apps/elements.md), by
+// target. Cached like the store's details (no cookies, so static pages may read it); an
+// API that can't answer means no elements, never a broken page.
 
 import type { StorefrontSchemas } from "@hypha/sdk/storefront";
 import { unstable_cache } from "next/cache";

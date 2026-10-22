@@ -6,8 +6,8 @@ use crate::{Asset, AssetFilter, AssetSort, AssetUsage, UsageOwner, UsageRole};
 /// `RepoError::Reference(key)`.
 pub mod keys {
     pub const ASSET_ID: &str = "asset_id";
-    /// Every usage's asset exists (design note 0014, E10): staging usages of a missing
-    /// asset, or deleting an asset that has usages, fails with `Reference(USAGE_ASSET)`.
+    /// Every usage's asset exists: staging usages of a missing asset, or deleting an asset
+    /// that has usages, fails with `Reference(USAGE_ASSET)`.
     pub const USAGE_ASSET: &str = "asset_usage_asset";
 }
 
@@ -16,10 +16,10 @@ pub trait AssetRepo {
     async fn get(&self, id: AssetId) -> Result<Option<Asset>, RepoError>;
     /// The assets among `ids` that exist, in no particular order, in one query.
     async fn get_many(&self, ids: &[AssetId]) -> Result<Vec<Asset>, RepoError>;
-    /// A page of `ready` assets in `sort`'s order (design notes 0012 and 0024): those
-    /// after `page.after` by `AssetSort::key` and then ID, only those `filter` matches
-    /// (`AssetFilter::matches`). Pending and failed assets aren't in the library. A
-    /// position whose key doesn't fit the sort (`AssetSort::fits`) is a `Backend` error.
+    /// A page of `ready` assets in `sort`'s order: those after `page.after` by
+    /// `AssetSort::key` and then ID, only those `filter` matches (`AssetFilter::matches`).
+    /// Pending and failed assets aren't in the library. A position whose key doesn't fit
+    /// the sort (`AssetSort::fits`) is a `Backend` error.
     async fn list(
         &self,
         filter: &AssetFilter,

@@ -1,5 +1,4 @@
-//! Shipping on carts (design note 0015, sections 6 and 7): the address, the offers, the
-//! choice, and shipping in the totals.
+//! Shipping on carts: the address, the offers, the choice, and shipping in the totals.
 
 use std::sync::Mutex;
 

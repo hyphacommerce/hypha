@@ -1,7 +1,6 @@
-//! `admin.action` v1 (design note 0029, §6.1): a staff member pressed one of the app's
-//! admin actions (a button on an order, a payment, a product), and Hypha calls the
-//! action's URL from the app's manifest. The app acts through its own token; the
-//! answer only tells the admin what to show next.
+//! `admin.action` v1: a staff member pressed one of the app's admin actions (a button on an
+//! order, a payment, a product), and Hypha calls the action's URL from the app's manifest.
+//! The app acts through its own token; the answer only tells the admin what to show next.
 
 use core::time::Duration;
 

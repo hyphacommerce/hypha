@@ -1,7 +1,7 @@
 "use client";
 
-// Erasing a customer's personal data (design note 0032, §7.3): a request with a cancel
-// window, run by a job; and the export answering a data request (§7.4).
+// Erasing a customer's personal data: a request with a cancel window, run by a job;
+// and the export answering a data request.
 
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -137,7 +137,7 @@ export function ErasureBanner({
   );
 }
 
-/** Downloads the customer's data as one JSON document (design note 0032, §7.4). */
+/** Downloads the customer's data as one JSON document. */
 export function ExportCustomer({ id }: { id: string }) {
   return (
     <Button

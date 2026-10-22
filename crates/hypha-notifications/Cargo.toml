@@ -6,9 +6,9 @@ license.workspace = true
 
 [dependencies]
 hypha-core.workspace = true
-# Templates are Jinja (design note 0028, NT1), pure Rust, so they render on Workers too.
-# Only what templates use: builtins, `{% extends %}` across templates, macros, serde
-# contexts, and fuel to bound the CPU a template may burn.
+# Templates are Jinja, pure Rust, so they render on Workers too. Only what templates
+# use: builtins, `{% extends %}` across templates, macros, serde contexts, and fuel to
+# bound the CPU a template may burn.
 minijinja = { version = "3.0.1", default-features = false, features = ["builtins", "macros", "multi_template", "serde", "fuel"] }
 serde.workspace = true
 thiserror.workspace = true

@@ -1,7 +1,6 @@
-//! OpenAPI schemas for core value types (design note 0010, S8), behind the `openapi`
-//! feature. Validated newtypes serialize as plain strings or numbers, so their schemas
-//! are written by hand here: the rules a client can check (pattern, range) are the ones
-//! the constructors enforce.
+//! OpenAPI schemas for core value types, behind the `openapi` feature. Validated newtypes
+//! serialize as plain strings or numbers, so their schemas are written by hand here: the
+//! rules a client can check (pattern, range) are the ones the constructors enforce.
 
 use std::borrow::Cow;
 

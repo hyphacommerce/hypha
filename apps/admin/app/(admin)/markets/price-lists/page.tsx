@@ -28,8 +28,8 @@ function adjustment(bps: number): string {
 }
 
 /**
- * Every price list (design note 0021), with the markets whose catalog uses it: a list is
- * edited on its market's page, so each row links there.
+ * Every price list, with the markets whose catalog uses it: a list is edited on its
+ * market's page, so each row links there.
  */
 export default async function PriceListsPage() {
   const client = await sessionClient();

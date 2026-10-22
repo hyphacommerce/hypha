@@ -2,7 +2,7 @@
   "name": "@hypha/emails",
   "version": "0.1.0",
   "private": true,
-  "description": "Hypha's default email templates, written in React Email and built to the Jinja templates crates/hypha-notifications embeds (design note 0028, NT6).",
+  "description": "Hypha's default email templates, written in React Email and built to the Jinja templates crates/hypha-notifications embeds.",
   "type": "module",
   "scripts": {
     "build": "node src/build.ts",

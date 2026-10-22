@@ -30,16 +30,16 @@ pub struct Reservation {
     pub quantity: Quantity,
 }
 
-/// The stock of one variant across locations (design note 0004).
+/// The stock of one variant across locations.
 ///
-/// The item owns its levels and reservations, the way a product owns its variants, so
-/// they change together under one version. That version is what prevents overselling:
-/// two checkouts that both read "1 left" can't both write (I7).
+/// The item owns its levels and reservations, the way a product owns its variants, so they
+/// change together under one version. That version is what prevents overselling: two
+/// checkouts that both read "1 left" can't both write.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InventoryItem {
     id: InventoryItemId,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016).
+    /// When it was stored and last changed, set by the adapter.
     stamps: Option<Stamps>,
     variant: VariantId,
     tracked: bool,
@@ -47,10 +47,10 @@ pub struct InventoryItem {
     levels: Vec<Level>,
     reservations: Vec<Reservation>,
     /// Its variant was removed while units were still reserved: it goes once the last
-    /// reservation is fulfilled or released (design note 0016, Q5; 0018).
+    /// reservation is fulfilled or released.
     retired: bool,
-    /// Whether anything changed since it was loaded: its event is built from the item
-    /// as it is when written (design note 0016).
+    /// Whether anything changed since it was loaded: its event is built from the item as it
+    /// is when written.
     changed: Changed,
     /// Its deletion, once `delete` was called.
     deleted: Recorder,
@@ -147,8 +147,8 @@ impl InventoryItem {
         }
     }
 
-    /// Untracked stock is always available and never reserved (I3). Existing levels
-    /// and reservations are kept, so turning tracking back on picks up where it was.
+    /// Untracked stock is always available and never reserved. Existing levels and
+    /// reservations are kept, so turning tracking back on picks up where it was.
     pub fn set_tracked(&mut self, tracked: bool) {
         if self.tracked != tracked {
             self.tracked = tracked;
@@ -156,7 +156,7 @@ impl InventoryItem {
         }
     }
 
-    /// Keep selling when stock runs out (I5).
+    /// Keep selling when stock runs out.
     pub fn set_continue_selling(&mut self, continue_selling: bool) {
         if self.continue_selling != continue_selling {
             self.continue_selling = continue_selling;
@@ -230,9 +230,9 @@ impl InventoryItem {
     /// `Err` with how much is available there in total.
     ///
     /// `locations` are the ones serving the buyer's market; their order doesn't matter.
-    /// Allocation (I9): the first location by priority that has the whole quantity;
-    /// otherwise the locations in priority order, each giving what it has. With
-    /// `continue_selling`, whatever is still missing goes to the first location.
+    /// Allocation: the first location by priority that has the whole quantity; otherwise
+    /// the locations in priority order, each giving what it has. With `continue_selling`,
+    /// whatever is still missing goes to the first location.
     fn allocate(
         &self,
         quantity: u32,
@@ -286,11 +286,10 @@ impl InventoryItem {
     /// `Ok` if `quantity` could be reserved from `locations` right now (always, if
     /// untracked); otherwise `Err` with how many are available. Reserves nothing.
     ///
-    /// Returns only the shortage, not an `InventoryError`: a shortage is the one way it
-    /// can fail, so callers can match it exhaustively.
-    /// How many `locations` can supply now (each location once), or `None` without a
-    /// limit: the item isn't tracked, or it keeps selling when out of stock. What a
-    /// storefront caps its quantity inputs at (design note 0024, §7).
+    /// Returns only the shortage, not an `InventoryError`: a shortage is the one way it can
+    /// fail, so callers can match it exhaustively. How many `locations` can supply now
+    /// (each location once), or `None` without a limit: the item isn't tracked, or it keeps
+    /// selling when out of stock. What a storefront caps its quantity inputs at.
     pub fn sellable(&self, locations: &[Location]) -> Option<u64> {
         if !self.tracked || self.continue_selling {
             return None;
@@ -315,9 +314,8 @@ impl InventoryItem {
     /// Reserves `quantity` for `reference` from `locations` (the ones serving the
     /// buyer's market). Returns whether anything changed.
     ///
-    /// Idempotent (I8): if `reference` already holds exactly `quantity`, nothing
-    /// changes, so a retried checkout doesn't reserve twice. Untracked items reserve
-    /// nothing.
+    /// Idempotent: if `reference` already holds exactly `quantity`, nothing changes, so a
+    /// retried checkout doesn't reserve twice. Untracked items reserve nothing.
     pub fn reserve(
         &mut self,
         reference: &ReservationRef,
@@ -363,8 +361,8 @@ impl InventoryItem {
     }
 
     /// Records that the item is being deleted (its variant was removed); the repository's
-    /// `delete` writes it. Refused while anything is reserved: open orders still count
-    /// on those units (design note 0016, Q5).
+    /// `delete` writes it. Refused while anything is reserved: open orders still count on
+    /// those units.
     pub fn delete(&mut self) -> Result<(), InventoryError> {
         if !self.reservations.is_empty() {
             return Err(InventoryError::StillReserved);
@@ -380,12 +378,12 @@ impl InventoryItem {
         Ok(())
     }
 
-    /// Records that `quantity` for `reference` left `location` (design note 0018, FU5).
-    /// It comes out of what `reference` holds at `location` first; whatever else it
-    /// holds elsewhere is released for the rest, since the units shipped from here
-    /// instead. On hand at `location` drops by `quantity`, which may take it below zero
-    /// (the count was off, or stock was sold past zero). Untracked items change no
-    /// counts, but stale reservations are still given back.
+    /// Records that `quantity` for `reference` left `location`. It comes out of what
+    /// `reference` holds at `location` first; whatever else it holds elsewhere is released
+    /// for the rest, since the units shipped from here instead. On hand at `location` drops
+    /// by `quantity`, which may take it below zero (the count was off, or stock was sold
+    /// past zero). Untracked items change no counts, but stale reservations are still given
+    /// back.
     ///
     /// All or nothing; returns whether anything changed.
     pub fn fulfil(
@@ -475,7 +473,7 @@ impl InventoryItem {
     }
 
     /// Marks the item to go once nothing is reserved on it any more: its variant was
-    /// removed while open orders still counted on these units (0016, Q5).
+    /// removed while open orders still counted on these units.
     pub fn retire(&mut self) {
         self.retired = true;
     }
@@ -534,7 +532,7 @@ fn check_range(quantity: i128) -> Result<i64, InventoryError> {
     i64::try_from(quantity).map_err(|_| InventoryError::StockOutOfRange(quantity))
 }
 
-/// Plain-data form of an `InventoryItem` for storage adapters (design note 0001, 3.4).
+/// Plain-data form of an `InventoryItem` for storage adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InventoryItemSnapshot {
     pub id: InventoryItemId,
@@ -725,7 +723,7 @@ mod tests {
         );
     }
 
-    // ---- allocation (I9) ----
+    // ---- allocation ----
 
     #[test]
     fn takes_the_whole_line_from_the_first_location_that_has_it() {
@@ -830,7 +828,7 @@ mod tests {
         );
     }
 
-    // ---- continue selling (I5) ----
+    // ---- continue selling ----
 
     #[test]
     fn continue_selling_puts_the_shortfall_on_the_first_location() {
@@ -851,7 +849,7 @@ mod tests {
         assert_eq!(held(&i), vec![(loc_id(1), 4)]);
     }
 
-    // ---- tracking (I3) ----
+    // ---- tracking ----
 
     #[test]
     fn untracked_items_reserve_nothing_and_never_run_out() {
@@ -879,7 +877,7 @@ mod tests {
         assert_eq!(i.can_supply(qty(1), &[location(1, 0)]), Ok(()));
     }
 
-    // ---- idempotency (I8) ----
+    // ---- idempotency ----
 
     #[test]
     fn reserving_the_same_reference_again_changes_nothing() {
@@ -913,7 +911,7 @@ mod tests {
         assert!(!i.release(&reference("a")), "second release is a no-op");
     }
 
-    // ---- fulfilment (design note 0018) ----
+    // ---- fulfilment ----
 
     fn held_by(item: &InventoryItem, r: &str) -> Vec<(LocationId, u32)> {
         item.reservations()

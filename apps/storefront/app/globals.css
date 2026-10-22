@@ -1,6 +1,5 @@
-/* Astryx's pre-built CSS (design note 0024, AU12): reset, components, then the shop's
-   theme (theme/shopTheme.ts, built to theme/shop.css). The order maps to Astryx's
-   cascade layers, so keep it. */
+/* Astryx's pre-built CSS: reset, components, then the shop's theme (theme/shopTheme.ts,
+   built to theme/shop.css). The order maps to Astryx's cascade layers, so keep it. */
 @import "@astryxdesign/core/reset.css";
 @import "@astryxdesign/core/astryx.css";
 @import "../theme/shop.css";
@@ -85,7 +84,7 @@
 
 /* What Astryx's components don't express: image fills, sticky columns and the
    merchant's HTML descriptions. Everything else, the page's frame included, is
-   components (design note 0024, §7). */
+   components. */
 
 /* The theme's tokens apply from <html> (`data-astryx-theme` is set by the server), so
    the page and the overscroll area have the shop's background from the first paint. */
@@ -180,7 +179,7 @@ body {
   }
 }
 
-/* Multiline text from a custom field (design note 0033): its own line breaks. */
+/* Multiline text from a custom field: its own line breaks. */
 .shop-lines {
   white-space: pre-line;
 }
@@ -555,14 +554,14 @@ body {
   }
 }
 
-/* The account's section links (design note 0034, §7): the current one underlined. */
+/* The account's section links: the current one underlined. */
 .shop-account-nav a[aria-current="page"] {
   font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 0.3em;
 }
 
-/* The sign-in card (design note 0034, §7): centred, narrow, a little off the top. */
+/* The sign-in card: centred, narrow, a little off the top. */
 .shop-sign-in {
   display: flex;
   justify-content: center;

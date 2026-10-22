@@ -7,7 +7,7 @@ use crate::{AssetKind, AssetStatus, MimeType};
 pub enum MediaError {
     #[error(transparent)]
     Text(#[from] TextError),
-    /// SVG lands here too until it can be sanitised (design note 0013, M12).
+    /// SVG lands here too until it can be sanitised.
     #[error("files of type {0:?} aren't accepted")]
     UnsupportedMediaType(String),
     #[error("an empty file can't be uploaded")]

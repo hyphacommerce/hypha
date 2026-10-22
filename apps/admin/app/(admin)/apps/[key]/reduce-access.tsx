@@ -16,9 +16,9 @@ import { narrowGrant } from "../actions";
 type Scope = AdminSchemas["Scope"];
 
 /**
- * Taking scopes away from an installed app's grant (design note 0029, §4.1): the ones
- * unticked stop working at once, for tokens it holds already too. Adding one back takes
- * a new authorization from the app, which staff approve.
+ * Taking scopes away from an installed app's grant: the ones unticked stop working at
+ * once, for tokens it holds already too. Adding one back takes a new authorization from
+ * the app, which staff approve.
  */
 export function ReduceAccess({
   appKey,

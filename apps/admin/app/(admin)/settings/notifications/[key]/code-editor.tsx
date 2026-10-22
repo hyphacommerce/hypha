@@ -1,7 +1,7 @@
 "use client";
 
-// A template source's editor (design note 0028, §7). CodeMirror (`codemirror-setup.ts`)
-// loads once the editor mounts; until then the box shows empty.
+// A template source's editor. CodeMirror (`codemirror-setup.ts`) loads once the editor
+// mounts; until then the box shows empty.
 
 import { useEffect, useEffectEvent, useRef } from "react";
 

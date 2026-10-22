@@ -1,4 +1,4 @@
-//! Postgres storage for Hypha, on `tokio-postgres` (design note 0001, step 5).
+//! Postgres storage for Hypha, on `tokio-postgres`.
 //!
 //! One `PgStore` implements every repository port. It never opens connections or picks a
 //! runtime: the host hands it a connected client, so the same code runs natively (axum on
@@ -8,8 +8,8 @@
 //! Rules, from the design note:
 //! - queries go through `Queries` (`store.rs`): unprepared (`query_typed*`) unless the
 //!   host's connection keeps a `StatementCache`, which only a host connected straight to
-//!   Postgres should (design note 0025, §6): named prepared statements don't survive
-//!   transaction pooling (Hyperdrive, older PgBouncer);
+//!   Postgres should: named prepared statements don't survive transaction pooling
+//!   (Hyperdrive, older PgBouncer);
 //! - every write is one short transaction with no reads in it besides its own version
 //!   check, so it holds a pooled connection only briefly;
 //! - errors are mapped by SQLSTATE and constraint name (`error.rs`), never by message text.

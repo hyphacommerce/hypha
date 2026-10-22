@@ -10,7 +10,7 @@ use crate::{
     events::{ASSET, AssetDeleted},
 };
 
-/// Where an asset is in its upload (design note 0013, section 2).
+/// Where an asset is in its upload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AssetStatus {
     /// Created; the file isn't uploaded or checked yet.
@@ -52,7 +52,7 @@ impl FromStr for AssetStatus {
     }
 }
 
-/// Public files get a CDN URL; private ones only short-lived signed URLs (0013, M6).
+/// Public files get a CDN URL; private ones only short-lived signed URLs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Visibility {
     Public,
@@ -153,7 +153,7 @@ pub struct NewUpload {
     pub now: Timestamp,
 }
 
-/// One file and what is known about it (design note 0013, section 2).
+/// One file and what is known about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Asset {
     id: AssetId,
@@ -172,7 +172,7 @@ pub struct Asset {
     visibility: Visibility,
     created_at: Timestamp,
     updated_at: Timestamp,
-    /// What happened since it was loaded, for its events (design note 0016).
+    /// What happened since it was loaded, for its events.
     events: Recorder,
 }
 
@@ -193,8 +193,8 @@ impl Versioned for Asset {
 }
 
 impl Asset {
-    /// Records that the asset is being deleted (`asset.deleted`, design note 0033,
-    /// section 6.3), for `AssetRepo::delete` to write with the row.
+    /// Records that the asset is being deleted (`asset.deleted`), for `AssetRepo::delete`
+    /// to write with the row.
     pub fn delete(&mut self) {
         let event = AssetDeleted { asset: self.id };
         self.events
@@ -389,7 +389,7 @@ impl Asset {
 }
 
 /// `assets/{id}/{version}/{name}` (public) or `private/{id}/{version}/{name}`: unique per
-/// file version, so a URL's content never changes (0013, M4), with a readable name.
+/// file version, so a URL's content never changes, with a readable name.
 fn blob_key(visibility: Visibility, id: AssetId, file_version: u32, filename: &str) -> BlobKey {
     let prefix = match visibility {
         Visibility::Public => "assets",

@@ -1,7 +1,7 @@
-//! Concurrent order actions against a real Postgres, each request on its own connection
-//! (design note 0018, section 3): fulfilments racing for one line never ship more than
-//! was ordered, and a fulfilment racing a cancellation leaves the order either shipped
-//! or cancelled, with the stock to match.
+//! Concurrent order actions against a real Postgres, each request on its own connection:
+//! fulfilments racing for one line never ship more than was ordered, and a fulfilment
+//! racing a cancellation leaves the order either shipped or cancelled, with the stock to
+//! match.
 //!
 //! Needs `DATABASE_URL` like the contract tests; skips itself without it.
 

@@ -1,5 +1,5 @@
-//! Starting a cart's payment before its order (design note 0031, §1.3): an online
-//! method's money is committed first, and checkout places the order once it is.
+//! Starting a cart's payment before its order: an online method's money is committed first,
+//! and checkout places the order once it is.
 
 use hypha_cart::{CartReading, CartRepo};
 use hypha_core::{Attempts, CartId, Clock, Ctx, IdGenerator, Money, PaymentId, RepoError, Scope};
@@ -32,7 +32,7 @@ pub struct CartPaymentStarted {
     pub next_action: Result<NextAction, PaymentError>,
 }
 
-/// Starts paying for a cart with its online method (`checkout`; design note 0031, §3).
+/// Starts paying for a cart with its online method (`checkout`).
 ///
 /// Runs checkout's checks first (the same errors: the cart's lines, email, shipping,
 /// `total_changed`, `payment_method_required`, `payment_method_unavailable`). Refused

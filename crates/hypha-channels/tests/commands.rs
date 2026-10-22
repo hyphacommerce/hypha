@@ -1,4 +1,4 @@
-//! Channels and publishing (design note 0020) over a store in memory.
+//! Channels and publishing over a store in memory.
 
 use hypha_channels::ChannelRepo;
 use hypha_channels::{

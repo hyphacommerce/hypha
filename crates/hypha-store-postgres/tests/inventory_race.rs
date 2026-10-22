@@ -1,5 +1,5 @@
-//! Concurrent checkouts against a real Postgres: buyers on separate connections race
-//! for the last units, and stock is never oversold (design note 0004, I7).
+//! Concurrent checkouts against a real Postgres: buyers on separate connections race for
+//! the last units, and stock is never oversold.
 //!
 //! Needs `DATABASE_URL` like the contract tests; skips itself without it.
 

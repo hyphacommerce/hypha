@@ -1,12 +1,12 @@
-//! An order's payment status (design note 0027, PA7): derived from its payments by
-//! `hypha-payments` and stored on the order by `hypha-orders`. Here, in core, because
-//! both leaves name it and neither depends on the other.
+//! An order's payment status: derived from its payments by `hypha-payments` and stored on
+//! the order by `hypha-orders`. Here, in core, because both leaves name it and neither
+//! depends on the other.
 
 use std::{fmt, str::FromStr};
 
-/// Where an order's money is (design note 0007, O3; 0027, PA3). The full set is fixed
-/// now so clients can rely on it; manual payments use `Pending`, `Paid` and `Voided`,
-/// the rest wait for providers that move money that way.
+/// Where an order's money is. The full set is fixed now so clients can rely on it; manual
+/// payments use `Pending`, `Paid` and `Voided`, the rest wait for providers that move money
+/// that way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FinancialStatus {
     /// Nothing paid or authorized yet (or no payment at all).

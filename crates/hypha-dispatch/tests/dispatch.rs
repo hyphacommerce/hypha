@@ -1,4 +1,4 @@
-//! The dispatcher in memory (design note 0016, sections 5 and 6).
+//! The dispatcher in memory.
 
 use std::cell::RefCell;
 
@@ -233,7 +233,7 @@ fn an_item_with_reservations_is_retired_until_its_orders_are_done() {
     let kept = block_on(ports.inventory_items.get_by_variant(small()))
         .unwrap()
         .unwrap();
-    // Kept with its reservation, and marked to go with it (design note 0018).
+    // Kept with its reservation, and marked to go with it.
     assert!(kept.retired());
     assert_eq!(kept.reservations().len(), 1);
     // Not a failure: there's nothing more to do now.
@@ -663,8 +663,8 @@ fn a_delivery_starts_only_with_time_left_on_its_lease() {
 
 // ---------- handlers from other crates ----------
 
-/// A handler the dispatcher doesn't know, as a spore or another domain crate would
-/// write it (design note 0019, section 5): it needs no ports, and records what it saw.
+/// A handler the dispatcher doesn't know, as a spore or another domain crate would write
+/// it: it needs no ports, and records what it saw.
 #[derive(Default)]
 struct Audit {
     seen: std::sync::Mutex<Vec<String>>,

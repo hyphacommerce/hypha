@@ -1,6 +1,5 @@
-//! Shipping zones (with options and rate tiers) and app providers (design note 0015).
-//! A zone and its children load in four queries and are written wholesale, like
-//! products.
+//! Shipping zones (with options and rate tiers) and app providers. A zone and its children
+//! load in four queries and are written wholesale, like products.
 
 use std::collections::HashMap;
 

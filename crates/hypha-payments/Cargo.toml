@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 hypha-core.workspace = true
 serde.workspace = true
-# A method's provider settings (design note 0027, §2): the provider's own JSON.
+# A method's provider settings: the provider's own JSON.
 serde_json.workspace = true
 thiserror.workspace = true
 

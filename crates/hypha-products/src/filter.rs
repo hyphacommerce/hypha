@@ -1,6 +1,6 @@
-//! What a product list is narrowed to (design notes 0012 and 0019, SE8): the admin's
-//! list, read straight from the products, so staff see drafts and their own edits at
-//! once. Shoppers search the index instead (`hypha-search`).
+//! What a product list is narrowed to: the admin's list, read straight from the products,
+//! so staff see drafts and their own edits at once. Shoppers search the index instead
+//! (`hypha-search`).
 
 use hypha_core::{
     CategoryId, ChannelId, Direction, FieldFilter, SortKey, Timestamp, optional_text,
@@ -8,7 +8,7 @@ use hypha_core::{
 
 use crate::{Product, ProductError, ProductStatus, ProductSummary};
 
-/// A list's filters, checked. Every one given must match (design note 0024, AU4).
+/// A list's filters, checked. Every one given must match.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProductFilter {
     /// Any of these; empty is every status.
@@ -27,16 +27,16 @@ pub struct ProductFilter {
 pub struct ProductFilterInput {
     /// Any of these; empty is every status.
     pub statuses: Vec<ProductStatus>,
-    /// Text the title, handle or a SKU contains, ignoring case (design note 0019, SE8).
+    /// Text the title, handle or a SKU contains, ignoring case.
     pub q: Option<String>,
     /// The vendor, product type or a tag, each matched whole, ignoring case.
     pub vendor: Option<String>,
     pub product_type: Option<String>,
     pub tag: Option<String>,
-    /// Products directly in this category (design note 0022). Stored by the categories
-    /// domain: an ID that names none matches nothing (design note 0024, AU5).
+    /// Products directly in this category. Stored by the categories domain: an ID that
+    /// names none matches nothing.
     pub category: Option<CategoryId>,
-    /// Products published to this channel (design note 0020); the same.
+    /// Products published to this channel; the same.
     pub channel: Option<ChannelId>,
 }
 
@@ -59,9 +59,9 @@ impl ProductFilter {
         })
     }
 
-    /// Filters on custom fields (design note 0033, §7), checked against their definitions
-    /// by `hypha-custom-fields` already; every one must match. `matches` doesn't see
-    /// them: adapters apply them to the stored values.
+    /// Filters on custom fields, checked against their definitions by `hypha-custom-fields`
+    /// already; every one must match. `matches` doesn't see them: adapters apply them to
+    /// the stored values.
     pub fn with_fields(mut self, fields: Vec<FieldFilter>) -> Self {
         self.fields = fields;
         self
@@ -128,8 +128,8 @@ impl ProductFilter {
     }
 }
 
-/// How a product list is ordered (design note 0024, AU1). Titles compare as
-/// `SortKey::text` does; ties go by ID in the same direction.
+/// How a product list is ordered. Titles compare as `SortKey::text` does; ties go by ID in
+/// the same direction.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ProductSort {
     /// Newest first: creation order, as lists were before sorting.

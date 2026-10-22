@@ -10,7 +10,7 @@ export type Result = { error?: string };
 
 /**
  * A secret key with `scopes` (only scopes the caller holds), or a publishable key for a
- * storefront selling through `channel` (design note 0008, 0020).
+ * storefront selling through `channel`.
  */
 export async function createApiKey(
   input:

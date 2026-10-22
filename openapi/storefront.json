@@ -19,7 +19,7 @@
         "type": "object"
       },
       "AccountExportResponse": {
-        "description": "Everything Hypha holds about the customer, for the person it's about (design note\n0032, §7.4): the account, their orders, the orders' payments and the emails sent\nabout them. Records `customer.data_requested`, as the admin's export does.",
+        "description": "Everything Hypha holds about the customer, for the person it's about: the account, their\norders, the orders' payments and the emails sent about them. Records\n`customer.data_requested`, as the admin's export does.",
         "properties": {
           "account": {
             "$ref": "#/components/schemas/AccountResponse"
@@ -58,7 +58,7 @@
         "type": "object"
       },
       "AccountResponse": {
-        "description": "The signed-in customer, as they see themselves (design note 0034, §3).",
+        "description": "The signed-in customer, as they see themselves.",
         "properties": {
           "addresses": {
             "items": {
@@ -72,7 +72,7 @@
           },
           "custom_fields": {
             "additionalProperties": {},
-            "description": "The custom field values the merchant shows the account holder (`access.storefront:\nread`, design note 0034, §5), `{\"custom.tier\": \"gold\", …}`.",
+            "description": "The custom field values the merchant shows the account holder (`access.storefront:\nread`), `{\"custom.tier\": \"gold\", …}`.",
             "propertyNames": {
               "type": "string"
             },
@@ -297,7 +297,7 @@
             ]
           },
           "redacted": {
-            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
               "type": "string"
             },
@@ -386,7 +386,7 @@
         "type": "object"
       },
       "CartPaymentResponse": {
-        "description": "A cart's payment, started (design note 0031).",
+        "description": "A cart's payment, started.",
         "properties": {
           "amount": {
             "$ref": "#/components/schemas/Money",
@@ -477,7 +477,7 @@
             "description": "Picked from the country when the cart was created; it sets the currency."
           },
           "marketing_opt_in": {
-            "description": "Whether the buyer ticked \"Email me with news and offers\" (`PUT …/marketing`):\ncheckout records the consent then (design note 0032, §5).",
+            "description": "Whether the buyer ticked \"Email me with news and offers\" (`PUT …/marketing`):\ncheckout records the consent then.",
             "type": "boolean"
           },
           "order": {
@@ -503,7 +503,7 @@
             ]
           },
           "redacted": {
-            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
               "type": "string"
             },
@@ -669,7 +669,7 @@
         "description": "What checkout answers: the placed order and what the shopper must do next to pay."
       },
       "ConsentResponse": {
-        "description": "A channel's marketing consent (design note 0032, §5).",
+        "description": "A channel's marketing consent.",
         "properties": {
           "consented_at": {
             "description": "When the customer last said so, RFC 3339 in UTC; absent while never asked.",
@@ -854,7 +854,7 @@
         "type": "string"
       },
       "Error": {
-        "description": "Every error body, for the OpenAPI documents (design note 0010, S9). `ApiError`\nserializes as this shape.",
+        "description": "Every error body, for the OpenAPI documents. `ApiError` serializes as this shape.",
         "properties": {
           "code": {
             "description": "Stable snake_case code: what clients match on.",
@@ -918,7 +918,7 @@
             "type": "integer"
           },
           "label": {
-            "description": "What to show for it: a `choice` field's label, \"Yes\" or \"No\" for a `boolean` field\n(design note 0033, §9); `null` for every other facet, whose value is its own label.",
+            "description": "What to show for it: a `choice` field's label, \"Yes\" or \"No\" for a `boolean` field;\n`null` for every other facet, whose value is its own label.",
             "type": [
               "string",
               "null"
@@ -936,7 +936,7 @@
         "type": "object"
       },
       "FinancialStatusDto": {
-        "description": "`FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no\nserde and renaming a variant can't silently change the API.\nDerived from the order's payments (design note 0027, PA7): manual payments use\n`pending`, `paid` and `voided`; the rest come with providers that move money so.\n\nKnown values: `pending`, `authorized`, `partially_paid`, `paid`, `partially_refunded`, `refunded`, `voided`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "`FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no serde and\nrenaming a variant can't silently change the API. Derived from the order's payments:\nmanual payments use `pending`, `paid` and `voided`; the rest come with providers that\nmove money so.\n\nKnown values: `pending`, `authorized`, `partially_paid`, `paid`, `partially_refunded`, `refunded`, `voided`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "pending",
           "authorized",
@@ -1194,7 +1194,7 @@
         "type": "object"
       },
       "NextActionResponse": {
-        "description": "What the shopper must do next to pay (design note 0027, §3; 0029, §7).",
+        "description": "What the shopper must do next to pay.",
         "oneOf": [
           {
             "description": "Nothing online: show the instructions (cash on delivery, bank transfer). Empty\nwhen the method has none.",
@@ -1339,7 +1339,7 @@
             ]
           },
           "redacted": {
-            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
               "type": "string"
             },
@@ -1600,7 +1600,7 @@
           },
           "channel": {
             "$ref": "#/components/schemas/ChannelId",
-            "description": "The sales channel it was placed through (design note 0020)."
+            "description": "The sales channel it was placed through."
           },
           "country": {
             "$ref": "#/components/schemas/CountryCode"
@@ -1646,7 +1646,7 @@
             "type": "string"
           },
           "redacted": {
-            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
               "type": "string"
             },
@@ -1799,7 +1799,7 @@
         "type": "object"
       },
       "OrderSummaryPage": {
-        "description": "A page of a list, newest first (design note 0012).",
+        "description": "A page of a list, newest first.",
         "properties": {
           "has_more": {
             "description": "Whether there are more after these.",
@@ -1837,14 +1837,14 @@
           },
           "channel": {
             "$ref": "#/components/schemas/ChannelId",
-            "description": "The sales channel it was placed through (design note 0020)."
+            "description": "The sales channel it was placed through."
           },
           "country": {
             "$ref": "#/components/schemas/CountryCode"
           },
           "custom_fields": {
             "additionalProperties": {},
-            "description": "The custom field values `?custom_fields=` asked for (design note 0033); absent\nwithout it.",
+            "description": "The custom field values `?custom_fields=` asked for; absent without it.",
             "propertyNames": {
               "type": "string"
             },
@@ -1884,7 +1884,7 @@
             "type": "string"
           },
           "redacted": {
-            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
               "type": "string"
             },
@@ -2027,7 +2027,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/OrderId",
-                "description": "The order it collects for; `null` while it's a cart's, before checkout placed\nthe order (design note 0031)."
+                "description": "The order it collects for; `null` while it's a cart's, before checkout placed the\norder."
               },
               {
                 "type": "null"
@@ -2083,7 +2083,7 @@
         "type": "object"
       },
       "PaymentStatusDto": {
-        "description": "`PaymentStatus` on the wire (design note 0027, PA7).\n\nKnown values: `pending`, `authorized`, `processing`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "`PaymentStatus` on the wire.\n\nKnown values: `pending`, `authorized`, `processing`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "pending",
           "authorized",
@@ -2112,7 +2112,7 @@
                 "oneOf": [
                   {
                     "$ref": "#/components/schemas/PlacedPaymentResponse",
-                    "description": "How the buyer pays (design note 0027): the order's newest payment; `null` when\nthere was nothing to pay."
+                    "description": "How the buyer pays: the order's newest payment; `null` when there was nothing to\npay."
                   },
                   {
                     "type": "null"
@@ -2126,7 +2126,7 @@
             "type": "object"
           }
         ],
-        "description": "A storefront's view of an order it placed: the order with its access token, the key\nto reading it again (`GET /storefront/orders/{id}?token=`; design note 0024, §7)."
+        "description": "A storefront's view of an order it placed: the order with its access token, the key to\nreading it again (`GET /storefront/orders/{id}?token=`)."
       },
       "PlacedPaymentResponse": {
         "description": "What a storefront shows of an order's payment: how the shopper chose to pay, where\nit is, and what they were told to do.",
@@ -2271,7 +2271,7 @@
             ]
           },
           "redacted": {
-            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
               "type": "string"
             },
@@ -2298,7 +2298,7 @@
         "type": "string"
       },
       "ProductMediaResponse": {
-        "description": "One item of a product's media list (design note 0014, section 7): what a page needs\nto render it. The asset's own route has the rest.",
+        "description": "One item of a product's media list: what a page needs to render it. The asset's own\nroute has the rest.",
         "properties": {
           "alt": {
             "description": "The asset's alt text.",
@@ -2836,7 +2836,7 @@
           },
           "custom_fields": {
             "additionalProperties": {},
-            "description": "The custom field values the merchant shows storefronts (`access.storefront:\nread`, design note 0033).",
+            "description": "The custom field values the merchant shows storefronts (`access.storefront: read`).",
             "propertyNames": {
               "type": "string"
             },
@@ -2961,7 +2961,7 @@
         "type": "object"
       },
       "StorefrontCustomFieldDefinitionResponse": {
-        "description": "A field a storefront reads values of: what to call it, where it goes and how to show\nits values (design note 0033, §6.2). Values arrive on products', variants' and\ncategories' `custom_fields`, keyed by `field`.",
+        "description": "A field a storefront reads values of: what to call it, where it goes and how to show its\nvalues. Values arrive on products', variants' and categories' `custom_fields`, keyed by\n`field`.",
         "properties": {
           "choices": {
             "description": "A `choice` field's (or list of choices') labels, by the key values hold; `null`\nfor other types.",
@@ -2997,7 +2997,7 @@
             "type": "integer"
           },
           "type": {
-            "description": "`text`, `integer`, `choice`, `list.text`, … (design note 0033, §3).",
+            "description": "`text`, `integer`, `choice`, `list.text`, ….",
             "type": "string"
           }
         },
@@ -3033,7 +3033,7 @@
         "type": "object"
       },
       "StorefrontProductResponse": {
-        "description": "A product as a storefront sees it (design note 0010, S5): active products only, without\nadmin fields. A draft or archived product is `404 product_not_found`, the same as one\nthat doesn't exist, so a storefront can't tell them apart.\n\nPrices and stock are the shopper's: with `country`, each variant carries its price\nin that country's market and whether it can be bought now (design note 0021, SU7),\npriced as a cart prices it. Without `country`, there are none: a product's base price\nisn't what any shopper pays.",
+        "description": "A product as a storefront sees it: active products only, without admin fields. A draft\nor archived product is `404 product_not_found`, the same as one that doesn't exist, so a\nstorefront can't tell them apart.\n\nPrices and stock are the shopper's: with `country`, each variant carries its price in\nthat country's market and whether it can be bought now, priced as a cart prices it.\nWithout `country`, there are none: a product's base price isn't what any shopper pays.",
         "properties": {
           "currency": {
             "oneOf": [
@@ -3048,7 +3048,7 @@
           },
           "custom_fields": {
             "additionalProperties": {},
-            "description": "The custom field values the merchant shows storefronts (`access.storefront:\nread`, design note 0033), `{\"custom.material\": \"wool\", …}`.",
+            "description": "The custom field values the merchant shows storefronts (`access.storefront: read`),\n`{\"custom.material\": \"wool\", …}`.",
             "propertyNames": {
               "type": "string"
             },
@@ -3137,7 +3137,7 @@
         "type": "object"
       },
       "StorefrontStoreResponse": {
-        "description": "What a storefront sees of the store (design note 0021, SU4): what a header, footer\nor contact page shows. Legal details stay in the admin until a storefront needs them.",
+        "description": "What a storefront sees of the store: what a header, footer or contact page shows. Legal\ndetails stay in the admin until a storefront needs them.",
         "properties": {
           "contact_email": {
             "oneOf": [
@@ -3171,7 +3171,7 @@
         "type": "object"
       },
       "StorefrontTarget": {
-        "description": "A storefront target (design note 0029, §5).\n\nKnown values: `checkout.payment`, `product.block`, `cart.block`, `order.confirmation`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "A storefront target.\n\nKnown values: `checkout.payment`, `product.block`, `cart.block`, `order.confirmation`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "checkout.payment",
           "product.block",
@@ -3318,7 +3318,7 @@
       },
       "UpdateAccountRequest": {
         "additionalProperties": false,
-        "description": "JSON Merge Patch: only the fields sent change, `null` clears one. The email isn't\nhere: it's what the customer signs in with (design note 0034, §8).",
+        "description": "JSON Merge Patch: only the fields sent change, `null` clears one. The email isn't here:\nit's what the customer signs in with.",
         "properties": {
           "first_name": {
             "type": [
@@ -4022,7 +4022,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "Asks for the customer's own personal data to be erased after the store's cancel\nwindow (`customers.erasure_delay`; design note 0032, §7.3), recording\n`customer.erasure_requested` and emailing when it runs (`customer_erasure_requested`).\nSigning in still works until then, to cancel. `409 erasure_already_requested` while\none is pending.",
+        "summary": "Asks for the customer's own personal data to be erased after the store's cancel window\n(`customers.erasure_delay`), recording `customer.erasure_requested` and emailing when it\nruns (`customer_erasure_requested`). Signing in still works until then, to cancel. `409\nerasure_already_requested` while one is pending.",
         "tags": [
           "account"
         ],
@@ -4610,7 +4610,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "What installed apps add to a storefront (design note 0029, §7): elements for\n`target` (or every storefront target), and which apps have a proxy.",
+        "summary": "What installed apps add to a storefront: elements for `target` (or every storefront\ntarget), and which apps have a proxy.",
         "tags": [
           "app_extensions"
         ],
@@ -4826,7 +4826,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "Forwards a `GET` to the app's storefront proxy (design note 0029, §8), signed, with `Hypha-Store`, `Hypha-Channel` and `Hypha-Path`; with an `X-Hypha-Cart: cart_…` header (a cart of the key's channel), also `Hypha-Cart`, `Hypha-Country` and `Hypha-Customer` (when the cart has one). No personal data is forwarded.",
+        "summary": "Forwards a `GET` to the app's storefront proxy, signed, with `Hypha-Store`, `Hypha-Channel` and `Hypha-Path`; with an `X-Hypha-Cart: cart_…` header (a cart of the key's channel), also `Hypha-Cart`, `Hypha-Country` and `Hypha-Customer` (when the cart has one). No personal data is forwarded.",
         "tags": [
           "app_extensions"
         ],
@@ -5849,7 +5849,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns\nthe order the first request placed. The body is `{}` or `{\"expected_total\": …}`.\nSomething to pay needs a payment method chosen (`PUT …/payment-method`; 409\n`payment_method_required`) and still offered (409 `payment_method_unavailable`). An\nonline method's money must be committed first (design note 0031: `POST\n…/payment`): none started is 409 `payment_required`, not yet committed `payment_pending`\n(its provider was asked; try again shortly, or it completes when the provider\nreports), declined or released `payment_failed` (start paying again). If the order\ncan't be placed once the money is committed (a line sold out meanwhile), the money is\ngiven back. A cart checked out already answers with its order for an hour after it\nwas placed (the provider's report may have completed it), then `409 cart_completed`.",
+        "summary": "Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns the\norder the first request placed. The body is `{}` or `{\"expected_total\": …}`. Something\nto pay needs a payment method chosen (`PUT …/payment-method`; 409\n`payment_method_required`) and still offered (409 `payment_method_unavailable`). An\nonline method's money must be committed first (`POST …/payment`): none started is 409\n`payment_required`, not yet committed `payment_pending` (its provider was asked; try\nagain shortly, or it completes when the provider reports), declined or released\n`payment_failed` (start paying again). If the order can't be placed once the money is\ncommitted (a line sold out meanwhile), the money is given back. A cart checked out\nalready answers with its order for an hour after it was placed (the provider's report\nmay have completed it), then `409 cart_completed`.",
         "tags": [
           "orders"
         ],
@@ -6538,7 +6538,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "Ticks or unticks \"Email me with news and offers\" (design note 0032, §5). Checkout\nrecords the consent when it's ticked; unticked never unsubscribes anyone.",
+        "summary": "Ticks or unticks \"Email me with news and offers\". Checkout records the consent when it's\nticked; unticked never unsubscribes anyone.",
         "tags": [
           "carts"
         ],
@@ -6687,7 +6687,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "Starts paying for the cart before its order exists (design note 0031): an online\nmethod's money is committed first, and checkout places the order once it is. Runs\ncheckout's checks (409 `total_changed`, `payment_method_required`, …). A pending\npayment of the same method and total is started again (the provider resumes it);\notherwise a new one is made and the old ones released. Refused for a manual method\n(409 `payment_method_offline`: check out instead), a total of zero (409\n`cart_nothing_to_pay`) and a cart whose money is committed already (409\n`cart_payment_committed`: check out).",
+        "summary": "Starts paying for the cart before its order exists: an online method's money is\ncommitted first, and checkout places the order once it is. Runs checkout's checks (409\n`total_changed`, `payment_method_required`, …). A pending payment of the same method and\ntotal is started again (the provider resumes it); otherwise a new one is made and the\nold ones released. Refused for a manual method (409 `payment_method_offline`: check out\ninstead), a total of zero (409 `cart_nothing_to_pay`) and a cart whose money is\ncommitted already (409 `cart_payment_committed`: check out).",
         "tags": [
           "orders"
         ],
@@ -6915,7 +6915,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "How the buyer can pay for the cart (design note 0027, §4).",
+        "summary": "How the buyer can pay for the cart.",
         "tags": [
           "carts"
         ],
@@ -7460,7 +7460,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "A category page (design note 0022, section 4): the category by handle, with its\nancestors and shown children. Its products come through\n`/storefront/search?category=…`. A hidden category (or one under a hidden one) is\n`404 category_not_found`.",
+        "summary": "A category page: the category by handle, with its ancestors and shown children. Its\nproducts come through `/storefront/search?category=…`. A hidden category (or one under a\nhidden one) is `404 category_not_found`.",
         "tags": [
           "categories"
         ],
@@ -7519,7 +7519,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "Where the store sells: each country with its market's currency (design note 0021,\nSU6). What a country picker and a storefront's routing need.",
+        "summary": "Where the store sells: each country with its market's currency. What a country picker\nand a storefront's routing need.",
         "tags": [
           "markets"
         ],
@@ -7806,7 +7806,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "A product page in one read (design note 0021, SU7): the product by its handle,\npriced in `country`, with the same rules as the read by ID.",
+        "summary": "A product page in one read: the product by its handle, priced in `country`, with the\nsame rules as the read by ID.",
         "tags": [
           "products"
         ],
@@ -7997,7 +7997,7 @@
             }
           },
           {
-            "description": "Only products in this category or one below it (design note 0022); a hidden\ncategory is `404 category_not_found`.",
+            "description": "Only products in this category or one below it; a hidden category is `404\ncategory_not_found`.",
             "in": "query",
             "name": "category",
             "required": false,
@@ -8106,7 +8106,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "Searches the products the shopper's market sells, priced and stocked there; without\n`q`, the market's product listing. Pages go at most 1,000 results deep. With a search\napp set (`search_app` in the settings), the app chooses and orders the results\n(`search.query`, design note 0029) and Hypha shows its own prices and stock for them;\n`price` is then `null`. When the app fails, the built-in engine answers.",
+        "summary": "Searches the products the shopper's market sells, priced and stocked there; without `q`,\nthe market's product listing. Pages go at most 1,000 results deep. With a search app set\n(`search_app` in the settings), the app chooses and orders the results (`search.query`)\nand Hypha shows its own prices and stock for them; `price` is then `null`. When the app\nfails, the built-in engine answers.",
         "tags": [
           "search"
         ],

@@ -1,5 +1,5 @@
-//! Spores' settings (design note 0030, §8): one record per spore, every value round
-//! trips, the key is unique, versions hold.
+//! Spores' settings: one record per spore, every value round trips, the key is unique,
+//! versions hold.
 
 use hypha_apps::spore_settings::keys;
 use hypha_apps::{AppKey, SporeSettings, SporeSettingsRepo};

@@ -29,7 +29,7 @@ const STATUSES: Record<string, { label: string; variant: "success" | "warning" |
   failed: { label: "Failed", variant: "error" },
 };
 
-/** An app's webhook deliveries (design note 0016, section 8), newest event first. */
+/** An app's webhook deliveries, newest event first. */
 export default async function AppDeliveriesPage({
   params,
   searchParams,

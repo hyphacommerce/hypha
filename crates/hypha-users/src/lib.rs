@@ -1,5 +1,5 @@
-//! Staff users, roles and invites (design note 0008), and the staff flows built on
-//! `hypha-auth`: the owner's first start, invites, login and password reset.
+//! Staff users, roles and invites, and the staff flows built on `hypha-auth`: the owner's
+//! first start, invites, login and password reset.
 //!
 //! A composing domain: it depends on `hypha-auth` and core.
 

@@ -7,9 +7,9 @@ use hypha_core::{
 
 use crate::{ChannelChanged, ChannelError, events::CHANNEL};
 
-/// What a channel is for (design note 0020, CH2). The kinds only label channels: every
-/// rule is the same for all of them. Responses may grow new kinds; clients should show
-/// the ones they don't know as `custom`.
+/// What a channel is for. The kinds only label channels: every rule is the same for all of
+/// them. Responses may grow new kinds; clients should show the ones they don't know as
+/// `custom`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChannelKind {
     /// A storefront selling to shoppers: the web store, an app.
@@ -52,9 +52,9 @@ impl FromStr for ChannelKind {
     }
 }
 
-/// Where products are sold (design note 0020): a storefront, an agentic surface, an
-/// app. Which products it sells are its publications (`ChannelRepo::publish`), kept
-/// apart since they grow with the catalog.
+/// Where products are sold: a storefront, an agentic surface, an app. Which products it
+/// sells are its publications (`ChannelRepo::publish`), kept apart since they grow with the
+/// catalog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Channel {
     id: ChannelId,

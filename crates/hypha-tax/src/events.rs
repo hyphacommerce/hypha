@@ -1,5 +1,5 @@
-//! What happens to tax settings, as events (design note 0016, section 4): prices shown
-//! with tax change when these do. Contract types: a reshaped field is a new `VERSION`.
+//! What happens to tax settings, as events: prices shown with tax change when these do.
+//! Contract types: a reshaped field is a new `VERSION`.
 
 use hypha_core::{Event, ProductId, TaxClassId, TaxRegionId};
 use serde::Serialize;

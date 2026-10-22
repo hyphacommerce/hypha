@@ -1,8 +1,8 @@
 "use client";
 
-// The bar a page with unsaved changes shows (design note 0024, section 6): sticky at
-// the top, with Discard and Save, and the save's error under them. The product editor,
-// a market and the store settings save this way, every section of the page at once.
+// The bar a page with unsaved changes shows: sticky at the top, with Discard and Save,
+// and the save's error under them. The product editor, a market and the store settings
+// save this way, every section of the page at once.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

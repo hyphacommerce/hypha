@@ -82,8 +82,8 @@ pub async fn create_customer<R: CustomerRepo, I: IdGenerator>(
     Ok(customer)
 }
 
-/// The customer with `email`, created (with no names) if there is none yet. How
-/// checkout turns a guest into a customer (design note 0005, C6).
+/// The customer with `email`, created (with no names) if there is none yet. How checkout
+/// turns a guest into a customer.
 pub async fn find_or_create_customer<R: CustomerRepo, I: IdGenerator>(
     ctx: &Ctx,
     customers: &R,
@@ -117,9 +117,9 @@ pub async fn get_customer<R: CustomerRepo>(
 }
 
 /// A page of customer summaries in `sort`'s order, narrowed to text `q` (email, name,
-/// phone) when given (design note 0024) and to `fields`, filters on custom fields
-/// (design note 0033, §7) checked by `hypha-custom-fields` already. `page.after`'s key
-/// must fit the sort (`CustomerSort::fits`; hosts check cursors).
+/// phone) when given and to `fields`, filters on custom fields checked by
+/// `hypha-custom-fields` already. `page.after`'s key must fit the sort
+/// (`CustomerSort::fits`; hosts check cursors).
 pub async fn list_customers<R: CustomerRepo>(
     ctx: &Ctx,
     customers: &R,
@@ -183,8 +183,8 @@ pub async fn update_customer<R: CustomerRepo>(
     Ok(customer)
 }
 
-/// Where a consent written through the API comes from: an app is itself, anyone else on
-/// the admin surface is `admin` (design note 0032, §5).
+/// Where a consent written through the API comes from: an app is itself, anyone else on the
+/// admin surface is `admin`.
 fn source_of(ctx: &Ctx) -> ConsentSource {
     match ctx.actor() {
         Actor::App(id) => ConsentSource::App(id),
@@ -194,10 +194,9 @@ fn source_of(ctx: &Ctx) -> ConsentSource {
     }
 }
 
-/// Records a customer's marketing consent for `channel` (design note 0032, §5): the
-/// newest `consented_at` wins, so a write older than what's stored changes nothing and
-/// answers `applied: false` with the customer as it is. The source is the caller's, never
-/// input.
+/// Records a customer's marketing consent for `channel`: the newest `consented_at` wins, so
+/// a write older than what's stored changes nothing and answers `applied: false` with the
+/// customer as it is. The source is the caller's, never input.
 pub async fn set_marketing_consent<R: CustomerRepo>(
     ctx: &Ctx,
     customers: &R,

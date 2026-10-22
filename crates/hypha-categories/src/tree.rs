@@ -1,7 +1,7 @@
-//! The category tree as a read model (design note 0022, section 2): built from every
-//! category (`CategoryRepo::list_all`; a store has tens or hundreds), it answers
-//! parents, ancestors, descendants and depth in memory. Commands check the tree's rules
-//! on it before writing, so storage needs no path column a move could leave wrong.
+//! The category tree as a read model: built from every category (`CategoryRepo::list_all`;
+//! a store has tens or hundreds), it answers parents, ancestors, descendants and depth in
+//! memory. Commands check the tree's rules on it before writing, so storage needs no path
+//! column a move could leave wrong.
 
 use std::collections::HashMap;
 
@@ -100,7 +100,7 @@ impl CategoryTree {
             .unwrap_or(1)
     }
 
-    /// Whether the storefront shows `id`: it and every ancestor are visible (CA4).
+    /// Whether the storefront shows `id`: it and every ancestor are visible.
     pub fn is_shown(&self, id: CategoryId) -> bool {
         self.get(id).is_some_and(Category::visible)
             && self

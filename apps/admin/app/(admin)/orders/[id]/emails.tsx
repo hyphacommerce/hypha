@@ -1,7 +1,7 @@
 "use client";
 
-// The order's emails (design note 0028, §7): what was sent, to whom, when, and why one
-// failed or was skipped, with Resend (which queues a new one for the send job).
+// The order's emails: what was sent, to whom, when, and why one failed or was skipped,
+// with Resend (which queues a new one for the send job).
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";

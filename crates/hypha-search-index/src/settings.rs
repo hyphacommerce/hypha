@@ -1,6 +1,5 @@
-//! The merchant's search settings (design note 0019, section 6): which options split
-//! listings, which facets a storefront shows, and the app that answers searches instead
-//! of the built-in engine (design note 0029, §3.1). One per store.
+//! The merchant's search settings: which options split listings, which facets a storefront
+//! shows, and the app that answers searches instead of the built-in engine. One per store.
 
 use std::collections::HashSet;
 

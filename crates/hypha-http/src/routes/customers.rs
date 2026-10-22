@@ -113,22 +113,21 @@ pub struct CustomerResponse {
     default_shipping_address: Option<AddressId>,
     default_billing_address: Option<AddressId>,
     addresses: Vec<AddressResponse>,
-    /// Its custom field values the caller may read, `{"custom.tier": "gold", …}`
-    /// (design note 0033); `PATCH /admin/customers/{id}/custom-fields` writes them.
+    /// Its custom field values the caller may read, `{"custom.tier": "gold", …}`; `PATCH
+    /// /admin/customers/{id}/custom-fields` writes them.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     custom_fields: CustomFieldValues,
-    /// What the customer's orders add up to (design note 0032).
+    /// What the customer's orders add up to.
     orders: OrderStatsResponse,
-    /// The customer groups it's in (design note 0032, §6), sorted; `PUT
-    /// /admin/customers/{id}/groups` sets them.
+    /// The customer groups it's in, sorted; `PUT /admin/customers/{id}/groups` sets them.
     groups: Vec<CustomerGroupId>,
-    /// Consent to marketing by email (design note 0032, §5); `PUT
-    /// /admin/customers/{id}/marketing/email` changes it.
+    /// Consent to marketing by email; `PUT /admin/customers/{id}/marketing/email` changes
+    /// it.
     email_marketing: ConsentResponse,
     /// Consent to marketing by SMS; needs a phone.
     sms_marketing: ConsentResponse,
-    /// When the customer's personal data was erased, RFC 3339 in UTC (design note 0032,
-    /// §7.3): the customer is read-only then and its email a placeholder.
+    /// When the customer's personal data was erased, RFC 3339 in UTC: the customer is
+    /// read-only then and its email a placeholder.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(required = false)]
     erased_at: Option<String>,
@@ -138,25 +137,25 @@ pub struct CustomerResponse {
     #[schema(required = false)]
     erasure_due_at: Option<String>,
     /// Whether `DELETE /admin/customers/{id}` would work: only while the customer has no
-    /// orders, cancelled ones included (design note 0032, CD7). Otherwise erase it.
+    /// orders, cancelled ones included. Otherwise erase it.
     can_delete: bool,
-    /// The customer's storefront account (design note 0034), `null` while they never
-    /// signed in. `POST /admin/customers/{id}/sessions/revoke` signs them out everywhere.
+    /// The customer's storefront account, `null` while they never signed in. `POST
+    /// /admin/customers/{id}/sessions/revoke` signs them out everywhere.
     account: Option<AccountFactsResponse>,
     /// When it was created, RFC 3339 in UTC.
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
     updated_at: String,
-    /// Personal fields left out for this caller (design note 0029, AP10): an API key or
-    /// app without the matching `customer_data:*` scope (`custom_fields.<key>` for a
-    /// personal custom field, without `customer_data:profile`). They are absent from the
-    /// object then, whatever the schema says. Never sent to staff or storefronts.
+    /// Personal fields left out for this caller: an API key or app without the matching
+    /// `customer_data:*` scope (`custom_fields.<key>` for a personal custom field, without
+    /// `customer_data:profile`). They are absent from the object then, whatever the schema
+    /// says. Never sent to staff or storefronts.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(required = false)]
     redacted: Option<Vec<String>>,
 }
 
-/// What the admin knows of a customer's account (design note 0034, §7).
+/// What the admin knows of a customer's account.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct AccountFactsResponse {
     /// Sessions neither signed out nor expired: the devices they're signed in on.
@@ -178,9 +177,9 @@ pub struct AddressResponse {
     postal_code: Option<String>,
     country: CountryCode,
     phone: Option<String>,
-    /// Personal fields left out for this caller (design note 0029, AP10): an API key or
-    /// app without the matching `customer_data:*` scope. They are absent from the
-    /// object then, whatever the schema says. Never sent to staff or storefronts.
+    /// Personal fields left out for this caller: an API key or app without the matching
+    /// `customer_data:*` scope. They are absent from the object then, whatever the schema
+    /// says. Never sent to staff or storefronts.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(required = false)]
     redacted: Option<Vec<String>>,
@@ -214,8 +213,8 @@ pub struct SetCustomerGroupsRequest {
     groups: Vec<CustomerGroupId>,
 }
 
-/// Makes `groups` the customer's groups (design note 0032, §6): one write, an event per
-/// group whose membership changed.
+/// Makes `groups` the customer's groups: one write, an event per group whose membership
+/// changed.
 #[utoipa::path(
     put,
     path = "/admin/customers/{id}/groups",
@@ -244,7 +243,7 @@ pub async fn set_groups<S: Storage>(
     Ok(Json(respond(&ctx, &ports, &state.clock, &customer).await?))
 }
 
-/// A channel's marketing consent (design note 0032, §5).
+/// A channel's marketing consent.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct ConsentResponse {
     /// `not_subscribed` (never asked), `pending`, `subscribed`, `unsubscribed`, or
@@ -305,10 +304,10 @@ pub struct ConsentUpdateResponse {
     customer: Redacted,
 }
 
-/// Records a customer's marketing consent for a channel (`email` or `sms`; design note
-/// 0032, §5). The newest `consented_at` wins, so a delayed sync can't overwrite a newer
-/// opt-out: an older write answers `applied: false`. SMS needs a phone (`409
-/// consent_needs_phone`); an erased customer is read-only (`409 customer_erased`).
+/// Records a customer's marketing consent for a channel (`email` or `sms`). The newest
+/// `consented_at` wins, so a delayed sync can't overwrite a newer opt-out: an older write
+/// answers `applied: false`. SMS needs a phone (`409 consent_needs_phone`); an erased
+/// customer is read-only (`409 customer_erased`).
 #[utoipa::path(
     put,
     path = "/admin/customers/{id}/marketing/{channel}",
@@ -345,8 +344,8 @@ pub async fn set_consent<S: Storage>(
     }))
 }
 
-/// A customer's orders, added up over those that weren't cancelled (design note 0032,
-/// §8): `GET /admin/orders?customer=` lists them.
+/// A customer's orders, added up over those that weren't cancelled: `GET
+/// /admin/orders?customer=` lists them.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct OrderStatsResponse {
     /// How many orders the customer placed that weren't cancelled.
@@ -442,8 +441,7 @@ where
     redact::one_with_fields(ctx, Family::Customer, dto, &fields.redacted)
 }
 
-/// The customer's account, if they have one (design note 0034): their identity's live
-/// sessions.
+/// The customer's account, if they have one: their identity's live sessions.
 async fn account_facts<P: HasIdentities + HasSessions>(
     ports: &P,
     clock: &impl hypha_core::Clock,
@@ -472,8 +470,8 @@ async fn account_facts<P: HasIdentities + HasSessions>(
     }))
 }
 
-/// Signs the customer out of every device (design note 0034, §7): every session of their
-/// account is revoked. Nothing to do for a customer without one.
+/// Signs the customer out of every device: every session of their account is revoked.
+/// Nothing to do for a customer without one.
 #[utoipa::path(
     post,
     path = "/admin/customers/{id}/sessions/revoke",
@@ -505,7 +503,7 @@ pub async fn revoke_sessions<S: Storage>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// A customer in a list: without the address book (design note 0024).
+/// A customer in a list: without the address book.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct CustomerSummaryResponse {
     id: CustomerId,
@@ -519,14 +517,13 @@ pub struct CustomerSummaryResponse {
     created_at: String,
     /// When the customer last changed, RFC 3339 in UTC.
     updated_at: String,
-    /// The custom field values `?custom_fields=` asked for (design note 0033); absent
-    /// without it.
+    /// The custom field values `?custom_fields=` asked for; absent without it.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<std::collections::HashMap<String, serde_json::Value>>, required = false)]
     custom_fields: Option<CustomFieldValues>,
-    /// Personal fields left out for this caller (design note 0029, AP10): an API key or
-    /// app without the matching `customer_data:*` scope. They are absent from the
-    /// object then, whatever the schema says. Never sent to staff or storefronts.
+    /// Personal fields left out for this caller: an API key or app without the matching
+    /// `customer_data:*` scope. They are absent from the object then, whatever the schema
+    /// says. Never sent to staff or storefronts.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(required = false)]
     redacted: Option<Vec<String>>,
@@ -562,16 +559,16 @@ pub struct CustomerFilters {
     /// a staff session needs `customer_data:name`, `:email` and `:phone` for it
     /// (sorting by email or name, the matching one).
     q: Option<String>,
-    /// Only customers in this group (design note 0032, §6).
+    /// Only customers in this group.
     #[param(value_type = Option<CustomerGroupId>)]
     group: Option<CustomerGroupId>,
     #[param(inline)]
     sort: Option<CustomerSortDto>,
 }
 
-/// The order of a customer list (design note 0024, AU1). Default `newest`. A name is
-/// the first name, a space and the last name, compared lowercased character by
-/// character; ties go by creation, in the same direction.
+/// The order of a customer list. Default `newest`. A name is the first name, a space and
+/// the last name, compared lowercased character by character; ties go by creation, in the
+/// same direction.
 #[derive(Debug, Clone, Copy, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CustomerSortDto {
@@ -621,8 +618,8 @@ pub async fn list<S: Storage>(
     let fields =
         custom_fields::list_fields(&ctx, &ports, OwnerType::Customer, &field_query).await?;
     let sort = filters.sort();
-    // Searching or sorting by a personal field tells what it holds: only for callers
-    // who may see it (design note 0029, AP10).
+    // Searching or sorting by a personal field tells what it holds: only for callers who
+    // may see it.
     if filters.q.as_deref().is_some_and(|q| !q.trim().is_empty()) {
         redact::require_fields(
             &ctx,
@@ -814,10 +811,10 @@ pub async fn update_address_handler<S: Storage>(
     Ok(Json(respond(&ctx, &ports, &state.clock, &customer).await?))
 }
 
-/// Deletes a customer that has no orders (design note 0032, CD7): the row, its address
-/// book and memberships go, its carts are unlinked (email kept), and its custom field
-/// values follow `customer.deleted`. One with orders, cancelled ones included, is
-/// refused with `409 customer_has_orders`: request its erasure instead.
+/// Deletes a customer that has no orders: the row, its address book and memberships go, its
+/// carts are unlinked (email kept), and its custom field values follow `customer.deleted`.
+/// One with orders, cancelled ones included, is refused with `409 customer_has_orders`:
+/// request its erasure instead.
 #[utoipa::path(
     delete,
     path = "/admin/customers/{id}",
@@ -836,12 +833,11 @@ pub async fn remove<S: Storage>(
 }
 
 /// Asks for the customer's personal data to be erased after the cancel window
-/// (`customers.erasure_delay`, 10 days by default; design note 0032, §7.3), recording
-/// `customer.erasure_requested`. The job then removes names, contact details, addresses,
-/// consents and personal custom fields from the customer and its orders, carts and email
-/// records, keeps the orders themselves, and records `customer.redacted` for apps. Needs
-/// `customers:erase`; `409 erasure_already_requested` while one is pending, `409
-/// customer_erased` after.
+/// (`customers.erasure_delay`, 10 days by default), recording `customer.erasure_requested`.
+/// The job then removes names, contact details, addresses, consents and personal custom
+/// fields from the customer and its orders, carts and email records, keeps the orders
+/// themselves, and records `customer.redacted` for apps. Needs `customers:erase`; `409
+/// erasure_already_requested` while one is pending, `409 customer_erased` after.
 #[utoipa::path(
     post,
     path = "/admin/customers/{id}/erasure",
@@ -880,7 +876,7 @@ pub async fn cancel_erasure_handler<S: Storage>(
     Ok(Json(respond(&ctx, &ports, &state.clock, &customer).await?))
 }
 
-/// Everything Hypha holds about a customer, as one document (design note 0032, §7.4).
+/// Everything Hypha holds about a customer, as one document.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct CustomerExportResponse {
     /// When the export was made, RFC 3339 in UTC.

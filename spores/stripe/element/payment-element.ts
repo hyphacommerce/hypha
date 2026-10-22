@@ -1,18 +1,16 @@
-// `<stripe-payment>`: the storefront element for `checkout.payment` (design note 0029,
-// §7; docs/apps/elements.md). Props (set as properties): `client_secret`,
-// `publishable_key`, `return_url`, `payment_id`, as `payments.start` answered them
-// (camelCase aliases work too), and the storefront's `submit_mode`: `"external"` hides
-// the element's own button and error line, and the storefront pays with its own by calling `submit()`
-// (design note 0031: the checkout's one "Pay" button). It loads Stripe.js from
-// js.stripe.com (the only way Stripe allows), mounts the Payment Element, confirms with
-// `redirect: "if_required"`, and emits `hypha:ready` (it can be submitted),
-// `hypha:payment-confirmed {paymentId}`, `hypha:error {message}` and
-// `hypha:resize {height}`. Themed by `--hypha-*` custom properties (resolved to plain
+// `<stripe-payment>`: the storefront element for `checkout.payment` (docs/apps/elements.md). Props
+// (set as properties): `client_secret`, `publishable_key`, `return_url`, `payment_id`, as
+// `payments.start` answered them (camelCase aliases work too), and the storefront's `submit_mode`:
+// `"external"` hides the element's own button and error line, and the storefront pays with its own by
+// calling `submit()` (the checkout's one "Pay" button). It loads Stripe.js from js.stripe.com (the
+// only way Stripe allows), mounts the Payment Element, confirms with `redirect: "if_required"`, and
+// emits `hypha:ready` (it can be submitted), `hypha:payment-confirmed {paymentId}`, `hypha:error
+// {message}` and `hypha:resize {height}`. Themed by `--hypha-*` custom properties (resolved to plain
 // colours for Stripe's Appearance API, its dark theme on a dark background).
 //
-// From the Stripe app (hypha-app-stripe). Bundled into `payment-element.js` beside it by
-// `pnpm spores:build` (`spores:check` fails while that's stale), served by the Stripe
-// spore at /spores/stripe/elements/payment.js (design note 0030).
+// From the Stripe app (hypha-app-stripe). Bundled into `payment-element.js` beside it by `pnpm
+// spores:build` (`spores:check` fails while that's stale), served by the Stripe spore at
+// /spores/stripe/elements/payment.js.
 
 const STRIPE_JS = "https://js.stripe.com/v3";
 const TAG = "stripe-payment";

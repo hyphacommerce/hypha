@@ -1,8 +1,8 @@
 "use client";
 
-// One custom field's input, by its type (design note 0033, §3 and §9): what staff type,
-// held as a `FieldInput` until `valueOf` turns it into the field's JSON. Shared by every
-// card that shows custom fields, and later by app action inputs.
+// One custom field's input, by its type: what staff type, held as a `FieldInput` until
+// `valueOf` turns it into the field's JSON. Shared by every card that shows custom
+// fields, and later by app action inputs.
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";

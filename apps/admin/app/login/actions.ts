@@ -47,8 +47,8 @@ export async function finishLogin(_previous: FormState, code: string): Promise<F
 }
 
 /**
- * Asks for a password reset link (design note 0008, section 5). The API answers the same
- * whether or not the email has an account, so this says the same too.
+ * Asks for a password reset link. The API answers the same whether or not the email has
+ * an account, so this says the same too.
  */
 export async function requestPasswordReset(
   _previous: FormState & { sentTo?: string },

@@ -1,5 +1,5 @@
-//! Apps' extension endpoints (design note 0029, §3): every field round trips, a
-//! replace is all at once, an endpoint needs its app and goes with it.
+//! Apps' extension endpoints: every field round trips, a replace is all at once, an
+//! endpoint needs its app and goes with it.
 
 use hypha_apps::{
     App, AppKey, AppRepo, ExtensionEndpoint, ExtensionEndpointRepo, HasApps, HasExtensionEndpoints,

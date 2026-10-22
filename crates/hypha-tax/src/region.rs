@@ -18,7 +18,7 @@ pub struct ClassRate {
 pub struct TaxRegion {
     id: TaxRegionId,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016).
+    /// When it was stored and last changed, set by the adapter.
     stamps: Option<Stamps>,
     country: CountryCode,
     default_rate: TaxRate,

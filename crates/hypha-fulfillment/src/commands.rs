@@ -64,10 +64,10 @@ pub async fn list_order_fulfillments<R: FulfillmentRepo>(
     Ok(fulfillments.list_for_order(order).await?)
 }
 
-/// Replaces a standing fulfilment's tracking (design note 0018, section 3), and says
-/// whether it changed. The same tracking writes nothing; a cancelled fulfilment is
-/// refused (`fulfillment_cancelled`). `notify_customer` goes in `fulfillment.updated`:
-/// whether the buyer is emailed the new tracking (design note 0028, NT7).
+/// Replaces a standing fulfilment's tracking, and says whether it changed. The same
+/// tracking writes nothing; a cancelled fulfilment is refused (`fulfillment_cancelled`).
+/// `notify_customer` goes in `fulfillment.updated`: whether the buyer is emailed the new
+/// tracking.
 pub async fn update_tracking<R: FulfillmentRepo>(
     ctx: &Ctx,
     fulfillments: &R,

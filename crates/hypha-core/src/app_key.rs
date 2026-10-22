@@ -2,16 +2,14 @@ use std::fmt;
 
 use thiserror::Error;
 
-/// An app's key: `app_` (an external app) or `spore_` (a spore, built into the API:
-/// design note 0030, SP3), then lowercase letters, digits and underscores, at most 64
-/// characters. It names the app everywhere: deliveries (`app:<key>`), shipping's rate
-/// settings, extension calls (design note 0029), its OAuth client and `Actor::App`. In
-/// core because several leaf domains name apps.
+/// An app's key: `app_` (an external app) or `spore_` (a spore, built into the API), then
+/// lowercase letters, digits and underscores, at most 64 characters. It names the app
+/// everywhere: deliveries (`app:<key>`), shipping's rate settings, extension calls, its
+/// OAuth client and `Actor::App`. In core because several leaf domains name apps.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AppKey(String);
 
-/// Which kind of app a key names (design note 0030, §2): the same identity, two
-/// runtimes.
+/// Which kind of app a key names: the same identity, two runtimes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppKind {
     /// An external service, called over HTTP (`app_<name>`).
@@ -128,10 +126,9 @@ impl fmt::Display for AppKey {
     }
 }
 
-/// Which extension points apps answer (design note 0029, §3, "Registering"): what a
-/// domain asks before naming an app for a flow (the store's search app), without
-/// depending on apps. The host answers from the app's registrations. No `Send` bound,
-/// like every port.
+/// Which extension points apps answer ("Registering"): what a domain asks before naming an
+/// app for a flow (the store's search app), without depending on apps. The host answers
+/// from the app's registrations. No `Send` bound, like every port.
 #[allow(async_fn_in_trait)]
 pub trait AppPoints {
     /// Whether `app` is installed, enabled and answers `point` (`search.query`).

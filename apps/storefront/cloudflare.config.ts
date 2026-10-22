@@ -1,15 +1,15 @@
 import { createWorkersCacheConfig } from "@vinext/cloudflare/cache/config";
 import { bindings, defineConfig, defineWorker } from "cf/config";
 
-// What `hypha deploy --target cloudflare` passes in (design note 0026, §5): the Worker's
-// name and account, its domain, the API Worker to bind, the cache's KV namespace. Without
-// them (`pnpm storefront:dev`, `vite preview`), a local Worker as before.
+// What `hypha deploy --target cloudflare` passes in: the Worker's name and account, its
+// domain, the API Worker to bind, the cache's KV namespace. Without them (`pnpm
+// storefront:dev`, `vite preview`), a local Worker as before.
 const deploy = process.env;
 const api = deploy.HYPHA_CF_API_WORKER;
 
-// Pages under a country are static with ISR (design note 0024, §7): on Workers their
-// renders live in the Workers Cache and their data in KV, shared by every isolate, so the
-// webhook's revalidation reaches them all (vite.config.ts names the adapters).
+// Pages under a country are static with ISR: on Workers their renders live in the Workers
+// Cache and their data in KV, shared by every isolate, so the webhook's revalidation
+// reaches them all (vite.config.ts names the adapters).
 const workersCache = await createWorkersCacheConfig();
 
 export default defineConfig({
@@ -35,7 +35,7 @@ export default defineConfig({
         deploy.HYPHA_CF_CACHE_KV ? { id: deploy.HYPHA_CF_CACHE_KV } : undefined,
       ),
       // Per deployment, so not in source: `.dev.vars` locally (see .env.example), Worker
-      // secrets in production. Server-side only (design note 0023, SF2).
+      // secrets in production. Server-side only.
       HYPHA_API_URL: bindings.secret(),
       STOREFRONT_KEY: bindings.secret(),
       HYPHA_WEBHOOK_SECRET: bindings.secret(),

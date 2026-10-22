@@ -23,9 +23,8 @@ import { loaded, publicApiUrl, requireStaff, sessionClient } from "@/lib/hypha";
 import { InstallButtons } from "./install";
 
 /**
- * Apps: everything connected to the store (design note 0029), installed through OAuth or
- * made by hand. Each opens its own page, where the apps platform's pages for it will
- * live too.
+ * Apps: everything connected to the store, installed through OAuth or made by hand. Each
+ * opens its own page, where the apps platform's pages for it will live too.
  */
 export default async function AppsPage() {
   const [client, me] = await Promise.all([sessionClient(), requireStaff()]);

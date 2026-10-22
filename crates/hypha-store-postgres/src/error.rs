@@ -130,11 +130,10 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Maps a driver error to the repo error the ports promise.
-/// A spore's query error as a `RepoError` (design note 0030, §4's storage kit): a unique
-/// violation of one of `keys` (`(constraint, key)`, the spore's own) is
-/// `Duplicate(key)`; the rest maps as core's do (`StaleVersion` for a concurrent
-/// change, `Backend` otherwise).
+/// Maps a driver error to the repo error the ports promise. A spore's query error as a
+/// `RepoError`: a unique violation of one of `keys` (`(constraint,
+/// key)`, the spore's own) is `Duplicate(key)`; the rest maps as core's do (`StaleVersion`
+/// for a concurrent change, `Backend` otherwise).
 pub fn spore_repo_error(e: tokio_postgres::Error, keys: &[(&str, &'static str)]) -> RepoError {
     if let Some(db) = e.as_db_error()
         && *db.code() == SqlState::UNIQUE_VIOLATION

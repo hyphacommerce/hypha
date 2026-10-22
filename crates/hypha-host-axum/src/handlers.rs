@@ -1,8 +1,7 @@
-//! The event handlers the native host runs (design note 0019, section 5): the composition
-//! root for core's in-process destinations. A domain crate with a handler adds it to the
-//! tuple; a spore contributes its own (`Spore::Handlers`), joined to these by
-//! `PgStorage` (design note 0030, §4). The dispatcher runs whatever it's given and knows
-//! none of them.
+//! The event handlers the native host runs: the composition root for core's in-process
+//! destinations. A domain crate with a handler adds it to the tuple; a spore contributes
+//! its own (`Spore::Handlers`), joined to these by `PgStorage`. The dispatcher runs
+//! whatever it's given and knows none of them.
 
 use std::sync::Arc;
 

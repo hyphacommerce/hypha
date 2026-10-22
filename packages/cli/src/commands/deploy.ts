@@ -139,8 +139,8 @@ export const deploy = defineCommand({
 
       await preflight(d, machine, Boolean(args.yes), !args["skip-build"]);
 
-      // The co-located apps (design note 0029, §9): cloned, installed and bundled here,
-      // their images built where the API's are.
+      // The co-located apps: cloned, installed and bundled here, their images built
+      // where the API's are.
       const coLocated: { entry: AppEntry; clone: string; profile: AppProfile }[] = [];
       for (const entry of d.apps ?? []) {
         const clone = cloneDir(resolve(dir), entry);
@@ -158,8 +158,8 @@ export const deploy = defineCommand({
       }
 
       if (!args["skip-build"]) {
-        // Spores from outside this repository need a host crate of the deployment's own
-        // (design note 0030, §9); this repository's are the host's features.
+        // Spores from outside this repository need a host crate of the deployment's
+        // own; this repository's are the host's features.
         const spores = d.spores ?? [];
         const hostCrate = needsHostCrate(spores) ? await writeHostCrate(dir, spores) : undefined;
         for (const image of images(apps(d), spores, hostCrate)) {
@@ -276,7 +276,7 @@ export async function writeServerApps(
     // A Caddyfile from before the apps: the import goes at its end, the rest as it was.
     await writeFile(
       join(dir, "Caddyfile"),
-      `${caddyfile.trimEnd()}\n\n# The co-located apps' sites (design note 0029, §9), written by \`hypha deploy\`.\n${CADDY_IMPORT}\n`,
+      `${caddyfile.trimEnd()}\n\n# The co-located apps' sites, written by \`hypha deploy\`.\n${CADDY_IMPORT}\n`,
     );
   }
   const env = await loadEnv(dir);

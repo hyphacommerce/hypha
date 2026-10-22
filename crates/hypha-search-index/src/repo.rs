@@ -1,5 +1,5 @@
-//! Search's ports (design note 0019, sections 4 to 6): the engine, the queue of what
-//! to rebuild, and the merchant's settings.
+//! Search's ports (sections 4 to 6): the engine, the queue of what to rebuild, and the
+//! merchant's settings.
 
 use hypha_core::{CategoryId, ChannelId, MarketId, ProductId, RepoError, Timestamp, VariantId};
 
@@ -26,10 +26,10 @@ pub trait SearchIndex {
 
     async fn search(&self, query: &SearchQuery) -> Result<SearchResults, IndexError>;
 
-    /// The option names (lowercased) documents in `market` have, most documents
-    /// first, then by name: the default facets. With a `channel`, only its documents
-    /// count (design note 0020), so a storefront's facets are its own products'.
-    /// `reference::option_names` says exactly what.
+    /// The option names (lowercased) documents in `market` have, most documents first, then
+    /// by name: the default facets. With a `channel`, only its documents count, so a
+    /// storefront's facets are its own products'. `reference::option_names` says exactly
+    /// what.
     async fn option_names(
         &self,
         market: MarketId,
@@ -77,7 +77,7 @@ pub enum Target {
     /// The product of this variant (resolved when the mark is worked).
     Variant(VariantId),
     /// The products in this category or below it, whose ancestor lists changed when it
-    /// moved (design note 0022, section 3; resolved when the mark is worked).
+    /// moved (resolved when the mark is worked).
     Category(CategoryId),
     /// Every product.
     All,
@@ -91,8 +91,8 @@ pub struct Mark {
     pub generation: i64,
 }
 
-/// What needs rebuilding (design note 0019, section 5): one row per target however
-/// often it's marked, which is how 500 checkouts of one shirt become one rebuild.
+/// What needs rebuilding: one row per target however often it's marked, which is how 500
+/// checkouts of one shirt become one rebuild.
 #[allow(async_fn_in_trait)]
 pub trait SearchQueue {
     /// Queues `targets`: new ones are added, queued ones get a new generation (so a

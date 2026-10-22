@@ -1,12 +1,12 @@
-//! In-process event handlers (design note 0019, section 5; 0002 §6): destinations in
-//! code for domain events, next to webhooks to apps. The dispatcher runs whatever set
-//! the host gives it, so a domain crate or a spore adds a handler without the dispatcher
-//! knowing it, and each handler asks for just the repositories it uses.
+//! In-process event handlers: destinations in code for domain events, next to webhooks to
+//! apps. The dispatcher runs whatever set the host gives it, so a domain crate or a spore
+//! adds a handler without the dispatcher knowing it, and each handler asks for just the
+//! repositories it uses.
 //!
-//! A set is a tuple of handlers, `(VariantCleanup, SearchIndexer)`: static dispatch, so
-//! a host on concrete ports can still prove the futures `Send` (a `dyn` handler couldn't
-//! have a generic `async fn`). A host with spores (design note 0030, §4) joins its own
-//! set and each spore's in a `Union`: `Union((core, stripe, ()))` reads as one set.
+//! A set is a tuple of handlers, `(VariantCleanup, SearchIndexer)`: static dispatch, so a
+//! host on concrete ports can still prove the futures `Send` (a `dyn` handler couldn't have
+//! a generic `async fn`). A host with spores joins its own set and each spore's in a
+//! `Union`: `Union((core, stripe, ()))` reads as one set.
 
 use crate::StoredEvent;
 
@@ -103,12 +103,11 @@ tuple_handlers!(A, B, C, D, E, F, G, H, I, J);
 tuple_handlers!(A, B, C, D, E, F, G, H, I, J, K);
 tuple_handlers!(A, B, C, D, E, F, G, H, I, J, K, L);
 
-/// Several sets read as one, in order: `Union((core, (stripe_handler,), ()))`. A host
-/// joins its own set and each spore's this way (design note 0030, §4), so the dispatcher
-/// and checkout never see the nesting. A wrapper rather than plain tuples of tuples: a
-/// tuple of handlers is a set already, and a tuple of sets can't be one too without the
-/// two impls overlapping (another crate may implement `EventHandler<ItsPorts>` for a
-/// tuple).
+/// Several sets read as one, in order: `Union((core, (stripe_handler,), ()))`. A host joins
+/// its own set and each spore's this way, so the dispatcher and checkout never see the
+/// nesting. A wrapper rather than plain tuples of tuples: a tuple of handlers is a set
+/// already, and a tuple of sets can't be one too without the two impls overlapping (another
+/// crate may implement `EventHandler<ItsPorts>` for a tuple).
 ///
 /// `hypha_payments::PaymentProviders` reads it the same way. Names (and provider keys)
 /// must be unique across the whole union; the hosts check at startup.

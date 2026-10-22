@@ -7,21 +7,21 @@ use crate::consent::ConsentState;
 pub enum CustomerError {
     #[error(transparent)]
     Text(#[from] TextError),
-    /// A group's handle (design note 0032, §6).
+    /// A group's handle.
     #[error(transparent)]
     Handle(#[from] HandleError),
     #[error("address {0} not found")]
     AddressNotFound(AddressId),
     #[error("address {0} is in the address book more than once")]
     DuplicateAddress(AddressId),
-    /// `not_subscribed` is the starting state and `redacted` is erasure's: neither can
-    /// be asked for (design note 0032, §5).
+    /// `not_subscribed` is the starting state and `redacted` is erasure's: neither can be
+    /// asked for.
     #[error("marketing consent can't be set to {0}")]
     ConsentStateNotSettable(ConsentState),
     /// SMS consent needs somewhere to send.
     #[error("SMS marketing consent needs a phone number")]
     ConsentNeedsPhone,
-    /// An erased customer is read-only (design note 0032, §7.3).
+    /// An erased customer is read-only.
     #[error("the customer was erased")]
     Erased,
     #[error("the customer's erasure is requested already")]

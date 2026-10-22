@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Regenerates core's reference tables (design note 0021, SU1, SU2, Q4):
-//   crates/hypha-core/src/tables/currencies.rs  ISO 4217, SIX's "list one"
-//   crates/hypha-core/src/tables/countries.rs   ISO 3166-1 alpha-2, Debian's iso-codes
-//   crates/hypha-core/src/tables/timezones.rs   IANA names, from a tzdata.zi
-// English names come from CLDR, through this Node's ICU (what `Intl.DisplayNames("en")`
-// shows), so the CLI and agents name things the way the admin's fallback does.
+// Regenerates core's reference tables: crates/hypha-core/src/tables/currencies.rs  ISO
+// 4217, SIX's "list one" crates/hypha-core/src/tables/countries.rs   ISO 3166-1 alpha-2,
+// Debian's iso-codes crates/hypha-core/src/tables/timezones.rs   IANA names, from a
+// tzdata.zi English names come from CLDR, through this Node's ICU (what
+// `Intl.DisplayNames("en")` shows), so the CLI and agents name things the way the admin's
+// fallback does.
 //
 //   node scripts/reference-tables.mjs [path/to/zoneinfo]
 //

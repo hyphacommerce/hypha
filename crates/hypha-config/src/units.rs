@@ -1,5 +1,5 @@
-//! Durations and sizes as people write them (design note 0017, CF8): `"30s"`, `"7d"`,
-//! `"2MiB"`. One number and one unit, so there's one way to read each value.
+//! Durations and sizes as people write them: `"30s"`, `"7d"`, `"2MiB"`. One number and one
+//! unit, so there's one way to read each value.
 
 use core::{fmt, str::FromStr, time::Duration};
 use std::borrow::Cow;

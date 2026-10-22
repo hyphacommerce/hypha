@@ -75,7 +75,7 @@ export function ProductGrid({
                   <div className="shop-rounded shop-product-image">
                     <AspectRatio ratio={4 / 5}>
                       {image ? (
-                        // Plain <img>: the media URLs resize themselves (design note 0014).
+                        // Plain <img>: the media URLs resize themselves.
                         <img
                           className="shop-fill"
                           src={image}

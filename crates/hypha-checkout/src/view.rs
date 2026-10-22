@@ -28,7 +28,7 @@ pub async fn view_cart<S: HasCarts + HasOrders + PricingPorts>(
         .carts()
         .get(id)
         .await?
-        // Another channel's cart reads as missing (design note 0020).
+        // Another channel's cart reads as missing.
         .filter(|cart| cart.visible_in(ctx.channel()))
         .ok_or(CommandError::CartNotFound(id))?;
     let CartStatus::Completed { order } = cart.status() else {

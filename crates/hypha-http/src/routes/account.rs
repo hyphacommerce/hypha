@@ -1,8 +1,8 @@
-//! Customers on the storefront (design note 0034): signing in and out (§2: a code is
-//! emailed, the code opens a session, the session rides beside the publishable key;
-//! rate limited like the staff login, per client address before the body is parsed, per
-//! email and address right after), and their account (§3: every route takes the customer
-//! from the session, `hypha_customer_accounts::own`, never from input).
+//! Customers on the storefront: signing in and out (a code is emailed, the code opens a
+//! session, the session rides beside the publishable key; rate limited like the staff
+//! login, per client address before the body is parsed, per email and address right after),
+//! and their account (every route takes the customer from the session,
+//! `hypha_customer_accounts::own`, never from input).
 
 use axum::{
     Json,
@@ -63,7 +63,7 @@ pub struct CustomerLoginRequest {
     code: String,
 }
 
-/// The signed-in customer, as they see themselves (design note 0034, §3).
+/// The signed-in customer, as they see themselves.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct AccountResponse {
     id: CustomerId,
@@ -85,7 +85,7 @@ pub struct AccountResponse {
     #[schema(required = false)]
     erasure_due_at: Option<String>,
     /// The custom field values the merchant shows the account holder (`access.storefront:
-    /// read`, design note 0034, §5), `{"custom.tier": "gold", …}`.
+    /// read`), `{"custom.tier": "gold", …}`.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     custom_fields: CustomFieldValues,
     /// When the account was created, RFC 3339 in UTC.
@@ -114,7 +114,7 @@ impl AccountResponse {
 }
 
 /// The account's response for `customer`: with the custom fields the storefront shows
-/// (`access.storefront: read`); the holder sees their personal ones too (§5).
+/// (`access.storefront: read`); the holder sees their personal ones too.
 async fn respond<P>(
     owned: &Owned,
     ports: &P,
@@ -217,7 +217,7 @@ pub async fn login<S: Storage>(
         ),
         None => None,
     };
-    // A publishable key always has a channel (design note 0020).
+    // A publishable key always has a channel.
     let channel = ctx
         .channel()
         .ok_or(hypha_auth::CommandError::InvalidToken)?;
@@ -282,7 +282,7 @@ pub async fn logout_all_handler<S: Storage>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-// ---------- the account (design note 0034, §3) ----------
+// ---------- the account ----------
 
 /// The signed-in customer's account: email, names, phone, address book, marketing
 /// consent, a pending erasure, and the custom fields the merchant shows them.
@@ -301,8 +301,8 @@ pub async fn fetch<S: Storage>(
     Ok(Json(respond(&owned, &ports, &me.customer).await?))
 }
 
-/// JSON Merge Patch: only the fields sent change, `null` clears one. The email isn't
-/// here: it's what the customer signs in with (design note 0034, §8).
+/// JSON Merge Patch: only the fields sent change, `null` clears one. The email isn't here:
+/// it's what the customer signs in with.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateAccountRequest {
@@ -561,9 +561,9 @@ pub async fn fetch_order<S: Storage>(
     }))
 }
 
-/// Everything Hypha holds about the customer, for the person it's about (design note
-/// 0032, §7.4): the account, their orders, the orders' payments and the emails sent
-/// about them. Records `customer.data_requested`, as the admin's export does.
+/// Everything Hypha holds about the customer, for the person it's about: the account, their
+/// orders, the orders' payments and the emails sent about them. Records
+/// `customer.data_requested`, as the admin's export does.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct AccountExportResponse {
     /// When the export was made, RFC 3339 in UTC.
@@ -610,11 +610,10 @@ pub async fn export<S: Storage>(
     }))
 }
 
-/// Asks for the customer's own personal data to be erased after the store's cancel
-/// window (`customers.erasure_delay`; design note 0032, §7.3), recording
-/// `customer.erasure_requested` and emailing when it runs (`customer_erasure_requested`).
-/// Signing in still works until then, to cancel. `409 erasure_already_requested` while
-/// one is pending.
+/// Asks for the customer's own personal data to be erased after the store's cancel window
+/// (`customers.erasure_delay`), recording `customer.erasure_requested` and emailing when it
+/// runs (`customer_erasure_requested`). Signing in still works until then, to cancel. `409
+/// erasure_already_requested` while one is pending.
 #[utoipa::path(
     post,
     path = "/storefront/account/erasure",
