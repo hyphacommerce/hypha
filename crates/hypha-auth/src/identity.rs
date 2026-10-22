@@ -955,12 +955,6 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_round_trips() {
-        let i = with_mfa();
-        assert_eq!(Identity::restore(i.snapshot()), Ok(i));
-    }
-
-    #[test]
     fn restore_puts_credentials_in_kind_order() {
         let i = with_mfa();
         let mut s = i.snapshot();

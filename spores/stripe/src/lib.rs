@@ -39,15 +39,6 @@ use serde_json::{Map, Value, json};
 use crate::cancel::CancelIntents;
 use crate::provider::StripeProvider;
 
-/// Stripe's events to select for the webhook endpoint.
-pub const WEBHOOK_EVENTS: [&str; 5] = [
-    "payment_intent.succeeded",
-    "payment_intent.amount_capturable_updated",
-    "payment_intent.payment_failed",
-    "payment_intent.canceled",
-    "charge.refunded",
-];
-
 /// The spore.
 pub struct Stripe {
     pub env: SporeEnv,

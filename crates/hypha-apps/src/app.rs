@@ -720,7 +720,77 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use uuid::Uuid;
+
     use super::*;
+
+    const REDACTED: EventRoute<'static> = EventRoute {
+        event_type: "customer.redacted",
+        subject_kind: "customer",
+        subject_id: Uuid::from_u128(9),
+    };
+
+    /// Installed from a manifest that subscribes to `order.cancelled` only.
+    fn installed(scopes: &[Scope]) -> App {
+        let manifest = AppManifest::parse(
+            serde_json::json!({
+                "key": "app_shop",
+                "name": "Shop",
+                "version": "1.0.0",
+                "app_url": "https://shop-app.example",
+                "redirect_uris": ["/callback"],
+                "scopes": ["customers:read", "orders:read"],
+                "privacy_url": "/privacy",
+                "webhooks": { "url": "/hooks", "events": ["order.cancelled"] }
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap();
+        App::install(
+            AppId::from_uuid(Uuid::from_u128(1)),
+            Sealed::from_bytes(vec![1]),
+            InstalledManifest {
+                url: "https://shop-app.example/hypha-app.json".to_string(),
+                manifest,
+                fetched_at: Timestamp::UNIX_EPOCH,
+            },
+            Grant::new(scopes, Actor::System, Timestamp::UNIX_EPOCH),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn customer_redacted_reaches_an_unsubscribed_app_whose_grant_reads_customers() {
+        assert!(installed(&[Scope::CustomersRead]).wants_event(&REDACTED));
+    }
+
+    #[test]
+    fn customer_redacted_skips_a_grant_without_customers_read() {
+        assert!(!installed(&[Scope::OrdersRead]).wants_event(&REDACTED));
+    }
+
+    #[test]
+    fn customer_redacted_skips_a_manifest_app_without_a_grant() {
+        let mut snapshot = installed(&[Scope::CustomersRead]).snapshot();
+        snapshot.grant = None;
+        let app = App::restore(snapshot).unwrap();
+        assert!(!app.wants_event(&REDACTED));
+    }
+
+    #[test]
+    fn customer_redacted_reaches_a_hand_made_app_subscribed_to_customers() {
+        let app = App::new(NewApp {
+            key: AppKey::new("app_erp").unwrap(),
+            id: AppId::from_uuid(Uuid::from_u128(2)),
+            name: "ERP".to_string(),
+            secret: Sealed::from_bytes(vec![1]),
+            webhook: Some(Webhook::new("https://erp.example/hooks", None).unwrap()),
+            subscriptions: vec!["customer.*".to_string()],
+        })
+        .unwrap();
+        assert!(app.wants_event(&REDACTED));
+    }
 
     #[test]
     fn custom_field_definition_events_need_custom_fields_read() {

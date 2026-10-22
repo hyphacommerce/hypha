@@ -1244,6 +1244,27 @@ mod tests {
     }
 
     #[test]
+    fn erasure_delays_urls_and_connections_are_checked() {
+        for (text, problem) in [
+            (
+                "[customers]\nerasure_delay = \"59m\"",
+                "customers.erasure_delay: is 59m, at least 1h is needed",
+            ),
+            (
+                "[server]\nadmin_url = \"admin.example\"",
+                "server.admin_url: \"admin.example\" isn't an http:// or https:// URL",
+            ),
+            (
+                "[database]\nmax_connections = 0",
+                "database.max_connections: is at least 1",
+            ),
+        ] {
+            assert_eq!(problems(load(text)), [problem], "{text}");
+        }
+        assert!(load("[customers]\nerasure_delay = \"1h\"").is_ok());
+    }
+
+    #[test]
     fn stopping_waits_at_least_a_second() {
         assert_eq!(
             problems(load("[server]\nshutdown_grace = \"0s\"")),

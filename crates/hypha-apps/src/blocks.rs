@@ -34,8 +34,15 @@ pub struct BlockCheck {
 }
 
 impl BlockCheck {
-    pub fn is_valid(&self) -> bool {
-        self.errors.is_empty()
+    /// Why the tree is refused, naming its first problem; `None` when it's valid.
+    pub fn problem(&self) -> Option<String> {
+        let first = self.errors.first()?;
+        Some(format!(
+            "not a block v1: {}: {} ({} problem(s))",
+            first.path,
+            first.message,
+            self.errors.len()
+        ))
     }
 }
 
@@ -623,14 +630,27 @@ mod tests {
 
     #[test]
     fn trees_nest_up_to_the_limit() {
-        assert!(check_block(&nested(MAX_BLOCK_DEPTH)).is_valid());
-        assert!(!check_block(&nested(MAX_BLOCK_DEPTH + 1)).is_valid());
+        assert!(check_block(&nested(MAX_BLOCK_DEPTH)).problem().is_none());
+        assert!(
+            check_block(&nested(MAX_BLOCK_DEPTH + 1))
+                .problem()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn the_problem_names_the_first_error_and_counts_them() {
+        let tree = serde_json::json!({ "version": 2, "root": { "type": "divider" } });
+        assert_eq!(
+            check_block(&tree).problem().as_deref(),
+            Some("not a block v1: $.version: must be 1 (1 problem(s))")
+        );
     }
 
     #[test]
     fn anything_but_an_object_is_invalid() {
         for value in [Value::Null, "x".into(), 1.into(), Value::Array(vec![])] {
-            assert!(!check_block(&value).is_valid());
+            assert!(check_block(&value).problem().is_some());
         }
     }
 
@@ -640,7 +660,7 @@ mod tests {
         let label = "\u{1F600}".repeat(100);
         let tree =
             serde_json::json!({ "version": 1, "root": { "type": "heading", "value": label } });
-        assert!(check_block(&tree).is_valid());
+        assert!(check_block(&tree).problem().is_none());
         let longer = "\u{1F600}".repeat(101);
         let tree =
             serde_json::json!({ "version": 1, "root": { "type": "heading", "value": longer } });

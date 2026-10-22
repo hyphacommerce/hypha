@@ -518,14 +518,7 @@ async fn spore_block<S: Storage>(
         Err(UiError::NotFound) => return Err(not_found().into()),
         Err(UiError::Failed(reason)) => return Err(unavailable(reason).into()),
     };
-    let check = check_block(&tree);
-    if let Some(problem) = check.errors.first() {
-        let reason = format!(
-            "not a block v1: {}: {} ({} problem(s))",
-            problem.path,
-            problem.message,
-            check.errors.len()
-        );
+    if let Some(reason) = check_block(&tree).problem() {
         tracing::warn!(app = %app.key(), "blocks: a spore's invalid tree: {reason}");
         return Err(ExtensionError::Invalid {
             app: app.key().clone(),
@@ -1124,14 +1117,7 @@ fn judge_block(
             );
         }
     };
-    let check = check_block(&tree);
-    if let Some(problem) = check.errors.first() {
-        let reason = format!(
-            "not a block v1: {}: {} ({} problem(s))",
-            problem.path,
-            problem.message,
-            check.errors.len()
-        );
+    if let Some(reason) = check_block(&tree).problem() {
         tracing::info!(app = %app.key(), "blocks: an invalid tree: {reason}");
         return (status, Err((CallOutcome::Invalid, reason)));
     }

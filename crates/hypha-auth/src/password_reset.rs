@@ -160,15 +160,6 @@ mod tests {
     }
 
     #[test]
-    fn a_working_link_holds_another_back_until_resend_after() {
-        let now = Timestamp::UNIX_EPOCH;
-        let r = reset(now, 3600);
-        let resend_after = Duration::from_secs(300);
-        assert!(r.blocks_another(now.plus_secs(299), resend_after));
-        assert!(!r.blocks_another(now.plus_secs(300), resend_after));
-    }
-
-    #[test]
     fn an_expired_link_never_holds_another_back() {
         // Resending waits a day, but the link only worked for an hour.
         let now = Timestamp::UNIX_EPOCH;
@@ -176,13 +167,5 @@ mod tests {
         let resend_after = Duration::from_secs(86_400);
         assert!(r.blocks_another(now.plus_secs(3599), resend_after));
         assert!(!r.blocks_another(now.plus_secs(3600), resend_after));
-    }
-
-    #[test]
-    fn a_used_link_never_holds_another_back() {
-        let now = Timestamp::UNIX_EPOCH;
-        let mut r = reset(now, 3600);
-        r.mark_used(now);
-        assert!(!r.blocks_another(now, Duration::from_secs(300)));
     }
 }

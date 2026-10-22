@@ -1,14 +1,15 @@
 //! The OAuth flow's commands on the in-memory repos.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use hypha_apps::{AppError, AppRepo, ManifestFetcher};
 use hypha_core::{Actor, AppKey, AuthError, Clock, Ctx, OAuthRequestId, Scope, UserId};
 use hypha_oauth::{
-    Approval, AuthorizeError, AuthorizeInput, Authorized, CodeExchange, CommandError, Refresh,
-    RequestStatus, TokenError, Uninstalled, UnredirectableError, approve,
-    authenticate_access_token, authorize, deny, exchange_code, narrow_grant, pkce, refresh,
-    refresh_manifest, request_private_app, revoke, uninstall,
+    Approval, AuthorizeError, AuthorizeInput, Authorized, CodeExchange, CommandError,
+    REFRESH_TOKEN_LIFETIME, Refresh, RequestStatus, TokenError, Uninstalled, UnredirectableError,
+    approve, authenticate_access_token, authorize, deny, exchange_code, narrow_grant, pkce,
+    refresh, refresh_manifest, request_private_app, revoke, uninstall,
 };
 use hypha_testkit::{InMemoryPorts, TestEnv};
 use pollster::block_on;
@@ -277,6 +278,91 @@ fn refreshing_rotates_and_reusing_a_rotated_token_revokes_everything() {
         block_on(refresh(&ports, &env, again(second.refresh_token.expose()))),
         Err(TokenError::InvalidGrant(
             "the refresh token was revoked".to_string()
+        ))
+    );
+}
+
+fn refresh_with(token: &hypha_oauth::IssuedTokens, client: &str, scope: Option<&str>) -> Refresh {
+    Refresh {
+        refresh_token: token.refresh_token.expose().to_string(),
+        client_id: Some(client.to_string()),
+        scope: scope.map(str::to_string),
+    }
+}
+
+#[test]
+fn a_refresh_token_expires_after_its_lifetime() {
+    let at = |micros_before_expiry: u64| {
+        let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+        let issued = env.clock.now();
+        let tokens = install(&ports, &env);
+        env.clock.set(
+            issued
+                .plus(REFRESH_TOKEN_LIFETIME)
+                .minus(Duration::from_micros(micros_before_expiry)),
+        );
+        block_on(refresh(&ports, &env, refresh_with(&tokens, CLIENT, None))).map(|_| ())
+    };
+    assert_eq!(at(1), Ok(()));
+    assert_eq!(
+        at(0),
+        Err(TokenError::InvalidGrant(
+            "the refresh token has expired".to_string()
+        ))
+    );
+}
+
+#[test]
+fn another_client_cannot_refresh_and_the_token_is_not_rotated() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    let tokens = install(&ports, &env);
+    let evil = "https://evil.example/hypha-app.json";
+    assert_eq!(
+        block_on(refresh(&ports, &env, refresh_with(&tokens, evil, None))).map(|_| ()),
+        Err(TokenError::InvalidGrant(
+            "the refresh token was issued to another client".to_string()
+        ))
+    );
+    assert!(block_on(refresh(&ports, &env, refresh_with(&tokens, CLIENT, None))).is_ok());
+}
+
+#[test]
+fn refreshing_with_fewer_scopes_issues_only_those() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    let tokens = install(&ports, &env);
+    let narrowed = block_on(refresh(
+        &ports,
+        &env,
+        refresh_with(&tokens, CLIENT, Some("orders:read")),
+    ))
+    .unwrap();
+    assert_eq!(narrowed.scopes, vec![Scope::OrdersRead]);
+    let ctx = block_on(authenticate_access_token(
+        &ports,
+        &env.clock,
+        narrowed.access_token.expose(),
+    ))
+    .unwrap();
+    assert_eq!(ctx.require(Scope::OrdersRead), Ok(()));
+    assert_eq!(
+        ctx.require(Scope::CustomersRead),
+        Err(AuthError::AppNotAuthorized(Scope::CustomersRead))
+    );
+}
+
+#[test]
+fn refreshing_cannot_ask_for_a_scope_beyond_the_tokens() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    let tokens = install(&ports, &env);
+    assert_eq!(
+        block_on(refresh(
+            &ports,
+            &env,
+            refresh_with(&tokens, CLIENT, Some("orders:read products:write")),
+        ))
+        .map(|_| ()),
+        Err(TokenError::InvalidScope(
+            "\"products:write\" is not among the token's scopes".to_string()
         ))
     );
 }

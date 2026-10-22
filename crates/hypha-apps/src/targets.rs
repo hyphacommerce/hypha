@@ -116,11 +116,6 @@ impl Target {
         }
     }
 
-    /// Whether admin pages (embedded) fill it.
-    pub fn takes_pages(self) -> bool {
-        matches!(self, Target::AppsPage | Target::SettingsApp)
-    }
-
     /// Whether admin blocks (declarative UI trees) fill it.
     pub fn takes_blocks(self) -> bool {
         matches!(
@@ -136,11 +131,6 @@ impl Target {
     /// Whether admin actions (buttons) fill it.
     pub fn takes_actions(self) -> bool {
         self.takes_blocks() || self == Target::Payment
-    }
-
-    /// Whether storefront elements (web components) fill it.
-    pub fn takes_elements(self) -> bool {
-        self.surface() == Surface::Storefront
     }
 
     /// The context keys it's given: the first is required, the others optional.
@@ -256,11 +246,9 @@ mod tests {
 
     #[test]
     fn targets_take_their_kind_of_contribution() {
-        assert!(Target::AppsPage.takes_pages() && !Target::AppsPage.takes_blocks());
+        assert!(!Target::AppsPage.takes_blocks());
         assert!(Target::OrderPayment.takes_blocks() && Target::OrderPayment.takes_actions());
         assert!(Target::Payment.takes_actions() && !Target::Payment.takes_blocks());
-        assert!(Target::CheckoutPayment.takes_elements());
-        assert!(!Target::OrderDetails.takes_elements());
     }
 
     #[test]
