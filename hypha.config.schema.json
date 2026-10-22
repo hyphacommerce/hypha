@@ -4,6 +4,12 @@
   "description": "Hypha's settings for one deployment. Secrets (`DATABASE_URL`, `HYPHA_SECRET_KEY`, the\nS3 keys, the email provider's password or key) stay in environment variables and\nhave no key here.",
   "type": "object",
   "properties": {
+    "agents": {
+      "$ref": "#/$defs/Agents",
+      "default": {
+        "preview_timeout": "5s"
+      }
+    },
     "auth": {
       "$ref": "#/$defs/Auth",
       "default": {
@@ -214,6 +220,18 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "Agents": {
+      "description": "Agents, and previews of writes (`Hypha-Preview`), which anyone may ask for.",
+      "type": "object",
+      "properties": {
+        "preview_timeout": {
+          "description": "How long one statement of a previewed write may run before it's cut off (the\npreview then fails): a preview holds the locks its write takes until it's rolled\nback. 100 milliseconds to 30 seconds; 5 seconds by default.",
+          "$ref": "#/$defs/Duration",
+          "default": "5s"
+        }
+      },
+      "additionalProperties": false
+    },
     "Auth": {
       "description": "How long staff sessions and auth's emailed tokens last. Each is at most 365 days.",
       "type": "object",

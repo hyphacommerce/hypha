@@ -38,6 +38,7 @@ pub struct File {
     pub webhooks: Webhooks,
     pub jobs: Jobs,
     pub rate_limits: RateLimits,
+    pub agents: Agents,
     /// Settings for the spores this API is built with: one table per spore,
     /// `[spores.<name>]`, read by the spore itself; its keys are the spore's to document. A
     /// table for a spore the build doesn't have stops startup.
@@ -359,6 +360,24 @@ impl Default for Customers {
             session_lifetime: Dur(accounts.session_lifetime),
             login_code_lifetime: Dur(accounts.login_code_lifetime),
             login_code_resend_after: Dur(accounts.login_code_resend_after),
+        }
+    }
+}
+
+/// Agents, and previews of writes (`Hypha-Preview`), which anyone may ask for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Agents {
+    /// How long one statement of a previewed write may run before it's cut off (the
+    /// preview then fails): a preview holds the locks its write takes until it's rolled
+    /// back. 100 milliseconds to 30 seconds; 5 seconds by default.
+    pub preview_timeout: Dur,
+}
+
+impl Default for Agents {
+    fn default() -> Self {
+        Self {
+            preview_timeout: Dur(crate::AgentsConfig::default().preview_timeout),
         }
     }
 }

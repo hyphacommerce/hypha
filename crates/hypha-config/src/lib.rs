@@ -56,11 +56,27 @@ pub struct Config {
     pub extensions: ExtensionSettings,
     pub jobs: JobsConfig,
     pub rate_limits: RateLimits,
+    pub agents: AgentsConfig,
     /// Each spore's section, `[spores.<name>]`, as written: the spore reads its own when
     /// the host builds it, and the host refuses a section for a spore it wasn't built with.
     pub spores: BTreeMap<String, toml::Table>,
     /// The file with the environment applied, for `Config::to_toml`.
     effective: File,
+}
+
+/// Agents, and previews of writes (`[agents]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentsConfig {
+    /// The statement timeout of a previewed write's transaction.
+    pub preview_timeout: Duration,
+}
+
+impl Default for AgentsConfig {
+    fn default() -> Self {
+        Self {
+            preview_timeout: Duration::from_secs(5),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -567,6 +583,14 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
         p.add("database.max_connections", Broken::Zero);
     }
 
+    // Agents.
+    p.between(
+        "agents.preview_timeout",
+        file.agents.preview_timeout,
+        Duration::from_millis(100),
+        Duration::from_secs(30),
+    );
+
     // URLs.
     let media = &file.media;
     for (key, url) in [
@@ -937,6 +961,9 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             ),
         },
         rate_limits: file.rate_limits.clone(),
+        agents: AgentsConfig {
+            preview_timeout: file.agents.preview_timeout.0,
+        },
         spores: file.spores.clone(),
         effective: file.clone(),
     }
@@ -1262,6 +1289,29 @@ mod tests {
             assert_eq!(problems(load(text)), [problem], "{text}");
         }
         assert!(load("[customers]\nerasure_delay = \"1h\"").is_ok());
+    }
+
+    #[test]
+    fn a_previews_timeout_is_a_tenth_of_a_second_to_half_a_minute() {
+        assert_eq!(
+            problems(load("[agents]\npreview_timeout = \"99ms\"")),
+            ["agents.preview_timeout: is 99ms, at least 100ms is needed"]
+        );
+        assert_eq!(
+            problems(load("[agents]\npreview_timeout = \"31s\"")).len(),
+            1
+        );
+        assert_eq!(
+            load("[agents]\npreview_timeout = \"100ms\"")
+                .unwrap()
+                .agents
+                .preview_timeout,
+            Duration::from_millis(100)
+        );
+        assert_eq!(
+            load("").unwrap().agents.preview_timeout,
+            Duration::from_secs(5)
+        );
     }
 
     #[test]
