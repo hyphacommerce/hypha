@@ -26,6 +26,9 @@ pub mod keys {
 pub trait IdentityRepo {
     async fn get(&self, id: IdentityId) -> Result<Option<Identity>, RepoError>;
     async fn get_by_principal(&self, principal: Principal) -> Result<Option<Identity>, RepoError>;
+    /// Whether `principal` has an identity: its ID alone, one lookup without the
+    /// credentials (an account's existence, design note 0034, §7).
+    async fn find_principal(&self, principal: Principal) -> Result<Option<IdentityId>, RepoError>;
     /// The identity of `principal` kind with a `credential` whose lookup is `lookup`
     /// (for a password, the lowercased email).
     async fn find_login(

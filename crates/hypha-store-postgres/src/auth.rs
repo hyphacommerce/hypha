@@ -67,6 +67,20 @@ impl<C: PgConnection> IdentityRepo for PgStore<C> {
         })
     }
 
+    async fn find_principal(&self, principal: Principal) -> Result<Option<IdentityId>, RepoError> {
+        let (kind, pid) = principal_to_db(principal);
+        let mut conn = self.conn().await;
+        conn.db()
+            .query_typed_opt(
+                "SELECT id FROM identities WHERE principal_kind = $1 AND principal_id = $2",
+                &[(&kind, Type::TEXT), (&pid, Type::UUID)],
+            )
+            .await
+            .map_err(repo_error)?
+            .map(|row| col::<Uuid>(&row, "id").map(IdentityId::from_uuid))
+            .transpose()
+    }
+
     async fn find_login(
         &self,
         principal: PrincipalKind,

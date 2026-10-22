@@ -155,6 +155,8 @@ async fn identity_round_trips<R: IdentityRepo>(repo: &R) {
     assert_eq!(i.version(), Version::new(1));
     assert_eq!(repo.get(i.id()).await, Ok(Some(i.clone())));
     assert_eq!(repo.get_by_principal(staff(1)).await, Ok(Some(i.clone())));
+    assert_eq!(repo.find_principal(staff(1)).await, Ok(Some(i.id())));
+    assert_eq!(repo.find_principal(staff(9)).await, Ok(None));
     assert_eq!(
         repo.find_login(
             PrincipalKind::Staff,

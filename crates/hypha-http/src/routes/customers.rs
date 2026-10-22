@@ -449,18 +449,18 @@ async fn account_facts<P: HasIdentities + HasSessions>(
     clock: &impl hypha_core::Clock,
     customer: CustomerId,
 ) -> Result<Option<AccountFactsResponse>, ApiError> {
+    // One lookup each (the connection serves a request's reads one at a time, so
+    // nothing is gained by sending them together): the identity's ID, then its
+    // sessions.
     let Some(identity) = ports
         .identities()
-        .get_by_principal(Principal::Customer(customer))
+        .find_principal(Principal::Customer(customer))
         .await?
     else {
         return Ok(None);
     };
     let now = clock.now();
-    let live = ports
-        .sessions()
-        .live_for_identity(identity.id(), now)
-        .await?;
+    let live = ports.sessions().live_for_identity(identity, now).await?;
     Ok(Some(AccountFactsResponse {
         active_sessions: u32::try_from(live.len()).unwrap_or(u32::MAX),
         last_active_at: live

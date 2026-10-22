@@ -39,6 +39,13 @@ impl IdentityRepo for InMemoryIdentityRepo {
         Ok(self.identities.find(|i| i.principal() == principal))
     }
 
+    async fn find_principal(&self, principal: Principal) -> Result<Option<IdentityId>, RepoError> {
+        Ok(self
+            .identities
+            .find(|i| i.principal() == principal)
+            .map(|i| i.id()))
+    }
+
     async fn find_login(
         &self,
         principal: PrincipalKind,
