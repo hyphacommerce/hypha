@@ -113,6 +113,10 @@ define_id!(CatalogId, "cat");
 define_id!(PriceListId, "pl");
 define_id!(UserId, "user");
 define_id!(AgentId, "agent");
+// A write an agent proposed, waiting for a person.
+define_id!(ProposalId, "prop");
+// One tool call an agent made, in its call log.
+define_id!(AgentCallId, "acall");
 define_id!(StoreId, "store");
 
 define_id!(TaxClassId, "txc");

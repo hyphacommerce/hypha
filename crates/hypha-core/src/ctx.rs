@@ -7,7 +7,8 @@ use crate::{AgentId, ApiKeyId, AppId, ChannelId, CustomerId, ErrorCode, UserId, 
 pub enum Actor {
     /// A staff member, through a session.
     User(UserId),
-    /// An admin assistant acting with its own scopes (not built yet).
+    /// An admin agent: an MCP client a staff member connected, or an autonomous one staff
+    /// made for a job, acting with what its grant allows.
     Agent(AgentId),
     /// A script, integration or storefront, through a secret or publishable key.
     ApiKey(ApiKeyId),

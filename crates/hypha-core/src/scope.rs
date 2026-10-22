@@ -102,6 +102,12 @@ pub enum Scope {
     CustomFieldsRead,
     #[serde(rename = "custom_fields:write")]
     CustomFieldsWrite,
+    /// Admin agents: their grants, their call log and the proposals they make. Never
+    /// granted to an agent itself, so no agent widens its own reach.
+    #[serde(rename = "agents:read")]
+    AgentsRead,
+    #[serde(rename = "agents:write")]
+    AgentsWrite,
     /// Personal data: without these, a caller that isn't a staff session (an API key, an
     /// app) gets customers, orders and carts with the field absent and listed in
     /// `redacted`. First and last names.
@@ -165,6 +171,8 @@ impl Scope {
             Scope::NotificationsWrite => "notifications:write",
             Scope::CustomFieldsRead => "custom_fields:read",
             Scope::CustomFieldsWrite => "custom_fields:write",
+            Scope::AgentsRead => "agents:read",
+            Scope::AgentsWrite => "agents:write",
             Scope::CustomerDataName => "customer_data:name",
             Scope::CustomerDataEmail => "customer_data:email",
             Scope::CustomerDataPhone => "customer_data:phone",
@@ -208,6 +216,7 @@ impl Scope {
             Scope::PaymentsRead => Some(Scope::PaymentsWrite),
             Scope::NotificationsRead => Some(Scope::NotificationsWrite),
             Scope::CustomFieldsRead => Some(Scope::CustomFieldsWrite),
+            Scope::AgentsRead => Some(Scope::AgentsWrite),
             Scope::ProductsWrite
             | Scope::MarketsWrite
             | Scope::PricingWrite
@@ -229,6 +238,7 @@ impl Scope {
             | Scope::PaymentsWrite
             | Scope::NotificationsWrite
             | Scope::CustomFieldsWrite
+            | Scope::AgentsWrite
             | Scope::CustomerDataName
             | Scope::CustomerDataEmail
             | Scope::CustomerDataPhone
@@ -257,7 +267,7 @@ impl Scope {
         Scope::CustomerDataProfile,
     ];
 
-    pub const ALL: [Scope; 45] = [
+    pub const ALL: [Scope; 47] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -298,6 +308,8 @@ impl Scope {
         Scope::NotificationsWrite,
         Scope::CustomFieldsRead,
         Scope::CustomFieldsWrite,
+        Scope::AgentsRead,
+        Scope::AgentsWrite,
         Scope::CustomerDataName,
         Scope::CustomerDataEmail,
         Scope::CustomerDataPhone,
