@@ -2173,6 +2173,40 @@ if [[ -n $CODE ]]; then
 fi
 
 echo
+echo "## agents"
+# Agents call through /mcp (not yet built): here, the staff routes that manage them, as
+# the owner (logged out above; `apply` is granted only from a session).
+AUTH=()
+step "owner logs in again" 200 - -X POST "$BASE/admin/auth/login" -H "$JSON" \
+    -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASSWORD\"}"
+AUTH=(-H "authorization: Bearer $(token)")
+step "create an autonomous agent" 201 - -X POST "$BASE/admin/agents" -H "$JSON" \
+    -d '{"name":"Restocker","grant":{"read":["orders:read"],"write":{"inventory:write":"apply","products:write":"propose"}}}'
+contains "its key is shown once" '"key":"hypha_ak_'
+AGENT=$(id)
+AGENT_KEY=$(sed -E 's/.*"key":"(hypha_ak_[0-9a-f]+)".*/\1/' <<<"$BODY")
+step "an agent never grants itself more" 422 agent_scope_not_grantable -X POST "$BASE/admin/agents" \
+    -H "$JSON" -d '{"name":"Greedy","grant":{"write":{"api_keys:write":"propose"}}}'
+step "list agents" 200 - "$BASE/admin/agents"
+contains "the agent is listed" "\"id\":\"$AGENT\""
+step "fetch the agent" 200 - "$BASE/admin/agents/$AGENT"
+contains "with the deployment's cap" '"writes_cap":"apply"'
+step "narrow it to an allowlist and disable it" 200 - -X PATCH "$BASE/admin/agents/$AGENT" \
+    -H "$JSON" -d '{"operations":["admin.orders.list"],"enabled":false}'
+contains "it's disabled" '"enabled":false'
+step "its calls (none yet)" 200 - "$BASE/admin/agents/$AGENT/calls"
+contains "an empty log" '"items":[]'
+step "the proposals inbox" 200 - "$BASE/admin/agent-proposals?status=pending&approvable=true"
+step "an unknown proposal" 404 proposal_not_found \
+    "$BASE/admin/agent-proposals/prop_00000000000000000000000000000000"
+SAVED_AUTH=("${AUTH[@]}")
+AUTH=(-H "authorization: Bearer $AGENT_KEY")
+step "an agent's key works at /mcp only" 401 agent_credentials_mcp_only "$BASE/admin/orders"
+AUTH=("${SAVED_AUTH[@]}")
+step "revoke the agent" 200 - -X POST "$BASE/admin/agents/$AGENT/revoke"
+step "revoking twice" 409 agent_revoked -X POST "$BASE/admin/agents/$AGENT/revoke"
+
+echo
 echo "## rate limits"
 # Last on purpose: this uses up the login allowance of the address the script runs from.
 # Ten more tries on top of the script's earlier logins: well past both the address's and
