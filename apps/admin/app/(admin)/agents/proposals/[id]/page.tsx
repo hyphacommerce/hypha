@@ -12,14 +12,7 @@ import { JsonDisclosure, PreviewView } from "@/components/agents/preview-view";
 import { DateTime } from "@/components/date-time";
 import { type Crumb, PageHeader } from "@/components/page-header";
 import { DetailSkeleton } from "@/components/skeletons";
-import {
-  type Proposal,
-  operationLabel,
-  proposalStatus,
-  readPreview,
-  recordOf,
-  shortId,
-} from "@/lib/agents";
+import { type Proposal, operationLabel, proposalStatus, readPreview, shortId } from "@/lib/agents";
 import {
   isMissingScope,
   loaded,
@@ -80,7 +73,7 @@ async function ProposalDetail({ id }: { id: string }) {
   return (
     <>
       <PageHeader
-        title={operationLabel(proposal.operation)}
+        title={operationLabel(proposal.operation, proposal.summary)}
         back={BACK}
         badges={<Badge label={status.label} variant={status.variant} />}
         description={
@@ -94,6 +87,13 @@ async function ProposalDetail({ id }: { id: string }) {
 
       <div className="detail-columns">
         <div>
+          {proposal.status === "pending" && proposal.refreshes > 0 && (
+            <Banner
+              status="warning"
+              title="The store changed since this was proposed. Here's what it would do now."
+              description={`Approving found the write would no longer do what was first previewed, so nothing was applied${proposal.refreshes > 1 ? ` (${proposal.refreshes} times so far)` : ""}. The preview below is the new version: approve it, or reject it.`}
+            />
+          )}
           {proposal.status === "pending" ? (
             <Decision id={proposal.id} missing={missing} />
           ) : (
@@ -204,43 +204,24 @@ function Outcome({ proposal, people }: { proposal: Proposal; people: Map<string,
           </VStack>
         </Card>
       );
-    case "failed": {
-      const fresh =
-        code === "preview_stale" ? readPreview(recordOf(body, "details")?.preview) : null;
+    case "failed":
       return (
         <Card>
           <VStack gap={3}>
-            {code === "preview_stale" ? (
-              <Banner
-                status="warning"
-                title="Not applied: the store changed since this was proposed"
-                description={`Approved${decider ? ` by ${decider}` : ""}, but the write would no longer do what was previewed, so nothing changed. Below the original preview is what it would do now. To go ahead, ask the agent to propose it again.`}
-              />
-            ) : (
-              <Banner
-                status="error"
-                title="Approved, but the write failed"
-                description={
-                  message
-                    ? `${message}${code ? ` (${code})` : ""}`
-                    : "The write answered with an error; nothing changed."
-                }
-              />
-            )}
+            <Banner
+              status="error"
+              title="Approved, but the write failed"
+              description={
+                message
+                  ? `${message}${code ? ` (${code})` : ""}`
+                  : "The write answered with an error; nothing changed."
+              }
+            />
             {when && <Text color="secondary">Decided {when}</Text>}
-            {fresh && (
-              <VStack gap={3}>
-                <Text type="display-3" as="h3">
-                  What it would do now
-                </Text>
-                <PreviewView preview={fresh} />
-              </VStack>
-            )}
             {body && <JsonDisclosure label="What the write answered" value={body} />}
           </VStack>
         </Card>
       );
-    }
     case "rejected":
       return (
         <Card>

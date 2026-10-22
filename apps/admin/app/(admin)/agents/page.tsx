@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { type SearchParams, one } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
-import { requireStaff, sessionClient, staffNames } from "@/lib/hypha";
+import { loadAgentSettings, requireStaff, sessionClient, staffNames } from "@/lib/hypha";
 import { hasScope } from "@/lib/navigation";
 
 import { AgentsTable } from "./agents-table";
@@ -39,8 +39,9 @@ export default async function AgentsPage({
 
 async function AgentRows({ params, canWrite }: { params: SearchParams; canWrite: boolean }) {
   const client = await sessionClient();
-  const [me, result, people] = await Promise.all([
+  const [me, settings, result, people] = await Promise.all([
     requireStaff(),
+    loadAgentSettings(),
     client.GET("/admin/agents", {
       params: {
         query: { ...pageQuery(params), include_revoked: one(params, "revoked") === "true" },
@@ -51,7 +52,7 @@ async function AgentRows({ params, canWrite }: { params: SearchParams; canWrite:
   return (
     <AgentsTable
       page={listPage(result, "/agents", params)}
-      cap={result.data?.items[0]?.writes_cap}
+      settings={settings ?? undefined}
       people={Object.fromEntries(people)}
       myScopes={me.scopes}
       canWrite={canWrite}

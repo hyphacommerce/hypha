@@ -642,6 +642,19 @@ export async function staffNames(
   return new Map((data?.items ?? []).map((u) => [u.id, u.name]));
 }
 
+/**
+ * The operator's settings for agents (`GET /admin/agent-settings`: on or off, the cap on
+ * what they write), once per request. `null` without `agents:read`.
+ */
+export const loadAgentSettings = perRequest(
+  async (): Promise<AdminSchemas["AgentSettingsResponse"] | null> => {
+    const client = await sessionClient();
+    const result = await client.GET("/admin/agent-settings");
+    if (isMissingScope(result)) return null;
+    return loaded(result);
+  },
+);
+
 /** Locations' names by ID. Empty without `inventory:read`. */
 export async function locationNames(
   client: Awaited<ReturnType<typeof sessionClient>>,
