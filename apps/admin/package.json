@@ -2,7 +2,7 @@
   "name": "admin",
   "version": "0.1.0",
   "private": true,
-  "description": "The Hypha admin panel: Next.js on vinext, Astryx (design note 0011).",
+  "description": "The Hypha admin panel: Next.js on vinext, Astryx.",
   "type": "module",
   "imports": {
     "#api-fetch": {
@@ -14,7 +14,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "start": "vite preview",
-    "deploy": "vinext-cloudflare deploy",
+    "test": "node --test lib/*.test.ts",
     "typecheck": "node scripts/clean-next-types.mjs && tsc --noEmit",
     "theme:build": "astryx theme build theme/hyphaTheme.ts --out theme/hypha.css",
     "theme:check": "astryx theme build theme/hyphaTheme.ts --out theme/hypha.css --check"
@@ -47,7 +47,6 @@
     "@lexical/utils": "0.52.0",
     "@lezer/highlight": "1.2.5",
     "@stylexjs/stylex": "0.19.1",
-    "@vinext/cloudflare": "1.1.1",
     "codemirror": "6.0.2",
     "lexical": "0.52.0",
     "react": "19.3.1",

@@ -256,9 +256,6 @@ importers:
       '@stylexjs/stylex':
         specifier: 0.19.1
         version: 0.19.1
-      '@vinext/cloudflare':
-        specifier: 1.1.1
-        version: 1.1.1(041a6c6df174f6805f15dec6c85e0153)
       codemirror:
         specifier: 6.0.2
         version: 6.0.2
@@ -326,6 +323,9 @@ importers:
       '@heroicons/react':
         specifier: 2.2.0
         version: 2.2.0(react@19.3.1)
+      '@hypha/app':
+        specifier: workspace:*
+        version: link:../../packages/app
       '@hypha/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
