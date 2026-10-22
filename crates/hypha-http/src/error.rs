@@ -302,6 +302,132 @@ impl ApiError {
         )
     }
 
+    /// A `Hypha-Preview-Token` that can't apply this write: unknown, expired, another
+    /// caller's or another request's.
+    pub fn preview_token_invalid(why: &str) -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "preview_token_invalid",
+            format!("the preview token can't apply this write: {why}"),
+        )
+    }
+
+    /// A `Hypha-Preview-Token` that already applied its write. The idempotency key, sent
+    /// with it, replays the first answer instead.
+    pub fn preview_used() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            "preview_used",
+            "the preview token already applied its write",
+        )
+    }
+
+    /// The write would record other events than its preview did (something changed
+    /// meanwhile): nothing was written; `details.preview` is what it would do now.
+    pub fn preview_stale(preview: Value) -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            "preview_stale",
+            "the write would no longer do what was previewed; nothing was written",
+        )
+        .with_details(Some(json!({ "preview": preview })))
+    }
+
+    /// An approved proposal's write that would no longer do what was previewed: recorded
+    /// `failed`; `details.preview` is what it would do now, `details.proposal` the
+    /// proposal.
+    pub fn proposal_stale(preview: Value, proposal: Value) -> Self {
+        Self::preview_stale(Value::Null).with_details(Some(json!({
+            "preview": preview,
+            "proposal": proposal,
+        })))
+    }
+
+    /// Approving a proposal can't be previewed: its write is its own request, previewed
+    /// when it was proposed.
+    pub fn proposal_not_previewable() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            "preview_blocked",
+            "approving a proposal can't be previewed: its preview is the proposal's",
+        )
+    }
+
+    /// An agent's credential sent from outside: agents call through `/mcp` only.
+    pub fn agent_credentials_mcp_only() -> Self {
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            "agent_credentials_mcp_only",
+            "an agent's credentials work at /mcp only",
+        )
+    }
+
+    /// The agent was disabled or revoked, or the staff member it acts for deactivated.
+    pub fn agent_disabled() -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "agent_disabled",
+            "this agent may not act: it's disabled or revoked, or its staff member is",
+        )
+    }
+
+    /// `agents.enabled = false`: no agent acts in this deployment.
+    pub fn agents_disabled() -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "agents_disabled",
+            "agents are turned off in this deployment",
+        )
+    }
+
+    /// The operator's cap (`agents.writes = "off"`): agents only read.
+    pub fn agent_writes_off() -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "agent_writes_off",
+            "agents may only read in this deployment",
+        )
+    }
+
+    /// An operation outside the agent's allowlist.
+    pub fn operation_not_allowed(operation: &str) -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "operation_not_allowed",
+            format!("this agent may not call {operation}"),
+        )
+    }
+
+    /// No operation at that method and path, for an agent (who calls operations, not
+    /// routes).
+    pub fn operation_not_found(operation: &str) -> Self {
+        Self::new(
+            StatusCode::NOT_FOUND,
+            "operation_not_found",
+            format!("no operation {operation}"),
+        )
+    }
+
+    /// A request an agent sends that doesn't fit its operation (a path parameter
+    /// missing).
+    pub fn invalid_operation_call(why: impl ToString) -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_operation_call",
+            why,
+        )
+    }
+
+    /// `Hypha-Preview: 1` and `Hypha-Preview-Token` together: one previews, the other
+    /// applies.
+    pub fn preview_with_token() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_preview_header",
+            "send Hypha-Preview-Token without Hypha-Preview to apply a preview",
+        )
+    }
+
     pub fn method_not_allowed() -> Self {
         Self::new(
             StatusCode::METHOD_NOT_ALLOWED,
@@ -1365,6 +1491,45 @@ impl From<hypha_oauth::CommandError> for ApiError {
             | E::InstalledFromUrl(_)
             | E::InstalledFromOtherUrl(_) => StatusCode::CONFLICT,
             E::Seal(_) | E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
+impl From<hypha_agents::CommandError> for ApiError {
+    fn from(e: hypha_agents::CommandError) -> Self {
+        use hypha_agents::{AgentError as A, CommandError as E, ProposalError as P};
+        let status = match &e {
+            E::Auth(_)
+            | E::CannotGrant(_)
+            | E::CannotGrantApply(_)
+            | E::AgentDisabled(_)
+            | E::AgentRequired => StatusCode::FORBIDDEN,
+            E::SessionRequired => return Self::session_required(),
+            E::Agent(A::Revoked(_)) => StatusCode::CONFLICT,
+            E::Agent(A::Text(_) | A::Grant(_) | A::ClientId(_))
+            | E::Grant(_)
+            | E::Operation(_)
+            | E::Idempotency(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Proposal(P::Decided(_) | P::Expired) => StatusCode::CONFLICT,
+            E::Proposal(
+                P::Operation(_)
+                | P::Idempotency(_)
+                | P::TooLarge { .. }
+                | P::InvalidParam(_)
+                | P::InvalidDigest(_)
+                | P::NoteTooLong { .. },
+            ) => StatusCode::UNPROCESSABLE_ENTITY,
+            // What the host hands the leaf: a status, a digest, the job's timing.
+            E::Proposal(P::InvalidStatus(_) | P::NotDue | P::Inconsistent) | E::Call(_) => {
+                return Self::internal(e);
+            }
+            // Agents and proposals only arrive in URLs.
+            E::AgentNotFound(_) | E::ProposalNotFound(_) => StatusCode::NOT_FOUND,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,

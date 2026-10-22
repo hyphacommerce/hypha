@@ -5,6 +5,7 @@ pub(crate) mod address;
 // Handlers and their request and response types are `pub` so a host's router (`router!`,
 // expanded in its crate) can name them; the types' fields stay private.
 pub mod account;
+pub mod agents;
 pub mod api_keys;
 pub mod app_extensions;
 pub mod apps;
@@ -340,6 +341,17 @@ macro_rules! route_table {
             [admin, GET, "/admin/notifications", notifications::list],
             [admin, GET, "/admin/notifications/{id}", notifications::fetch],
             [admin, POST, "/admin/notifications/{id}/resend", notifications::resend],
+            // agents and their proposals
+            [admin, GET, "/admin/agents", agents::list],
+            [admin, POST, "/admin/agents", agents::create],
+            [admin, GET, "/admin/agents/{id}", agents::fetch],
+            [admin, PATCH, "/admin/agents/{id}", agents::update],
+            [admin, POST, "/admin/agents/{id}/revoke", agents::revoke],
+            [admin, GET, "/admin/agents/{id}/calls", agents::calls],
+            [admin, GET, "/admin/agent-proposals", agents::list_proposals],
+            [admin, GET, "/admin/agent-proposals/{id}", agents::fetch_proposal],
+            [admin, POST, "/admin/agent-proposals/{id}/approve", agents::approve],
+            [admin, POST, "/admin/agent-proposals/{id}/reject", agents::reject],
 
             // ---------- storefront ----------
             [storefront, GET, "/storefront/store", stores::fetch_storefront],

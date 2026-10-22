@@ -432,8 +432,9 @@ pub async fn media_sweep<S: Storage>(state: &AppState<S>) -> Step {
 }
 
 /// Deletes what's past keeping (`[jobs.prune]`): events, idempotency keys, sessions that
-/// ended, and the extension call log; and runs the customer erasures that are due, since
-/// they too are data past its time.
+/// ended, the extension and agent call logs, and preview tokens that expired; expires the
+/// agents' proposals past their lifetime; and runs the customer erasures that are due,
+/// since they too are data past its time.
 pub async fn prune<S: Storage>(state: &AppState<S>) -> Step {
     let ports = state
         .public_ports()
@@ -456,6 +457,7 @@ pub async fn prune<S: Storage>(state: &AppState<S>) -> Step {
     )
     .await
     .map_err(|e| e.to_string())?;
+    let agents = agent_upkeep(&ports, state).await?;
     let erasures = hypha_privacy::erase_due(&ports, &state.clock, state.config.dispatch.batch)
         .await
         .map_err(|e| e.to_string())?;
@@ -463,22 +465,59 @@ pub async fn prune<S: Storage>(state: &AppState<S>) -> Step {
         tracing::warn!(%customer, %error, "jobs: a customer's erasure failed; tried again next run");
     }
     let erased = erasures.progress;
-    let done = events.done + keys.done + sessions.done + calls.done + erased.done;
+    let done = events.done
+        + keys.done
+        + sessions.done
+        + calls.done
+        + agents.iter().map(|p| p.done).sum::<u32>()
+        + erased.done;
     if done > 0 {
+        let [agent_calls, preview_tokens, proposals] = agents;
         tracing::info!(
             events = events.done,
             idempotency_keys = keys.done,
             sessions = sessions.done,
             extension_calls = calls.done,
+            agent_calls = agent_calls.done,
+            preview_tokens = preview_tokens.done,
+            proposals_expired = proposals.done,
             customers_erased = erased.done,
             "jobs: pruned"
         );
     }
     Ok(Ran {
-        more: events.more || keys.more || sessions.more || calls.more || erased.more,
+        more: events.more
+            || keys.more
+            || sessions.more
+            || calls.more
+            || agents.iter().any(|p| p.more)
+            || erased.more,
         idle: done == 0,
         retry_at: None,
     })
+}
+
+/// The agents' part of `prune`: their call log past `jobs.prune.agent_calls_after`,
+/// preview tokens that expired, and proposals nobody decided in their lifetime.
+async fn agent_upkeep<S: Storage>(
+    ports: &S::Ports<'_>,
+    state: &AppState<S>,
+) -> Result<[Progress; 3], String> {
+    use hypha_core::{HasPreviewTokens, PreviewTokenRepo};
+    let batch = state.config.dispatch.batch;
+    let calls =
+        hypha_agents::prune_agent_calls(ports, &state.clock, &state.config.agents.settings, batch)
+            .await
+            .map_err(|e| e.to_string())?;
+    let tokens = ports
+        .preview_tokens()
+        .prune(state.clock.now(), batch)
+        .await
+        .map_err(|e| e.to_string())?;
+    let proposals = hypha_agents::expire_proposals(ports, &state.clock, batch)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok([calls, Progress::of(tokens, batch), proposals])
 }
 
 /// When dispatch or the send job next has work (`OutboxRepo::next_due`,

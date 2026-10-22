@@ -271,10 +271,14 @@ impl<D: Deployment> Storage for PgStorage<D> {
         ports: &'a Self::Ports<'_>,
         timeout: std::time::Duration,
     ) -> Pin<Box<dyn Future<Output = Result<OpenPreview, ApiError>> + Send + 'a>> {
-        Box::pin(async move {
-            let open = ports.begin_preview(timeout).await?;
-            Ok(OpenPreview::new(move || Box::pin(open.end())))
-        })
+        Box::pin(async move { Ok(open_preview(ports.begin_preview(timeout).await?)) })
+    }
+
+    fn begin_apply<'a>(
+        &'a self,
+        ports: &'a Self::Ports<'_>,
+    ) -> Pin<Box<dyn Future<Output = Result<OpenPreview, ApiError>> + Send + 'a>> {
+        Box::pin(async move { Ok(open_preview(ports.begin_apply().await?)) })
     }
 
     fn spawn_password_reset(state: SharedState<Self>, email: String) {
@@ -284,4 +288,19 @@ impl<D: Deployment> Storage for PgStorage<D> {
             tracing::warn!("password reset request dropped: every background slot is busy");
         }
     }
+}
+
+/// A store's open preview or apply, as `hypha-http` ends it.
+fn open_preview<C>(open: hypha_store_postgres::PgPreview<C>) -> OpenPreview
+where
+    C: hypha_store_postgres::PgConnection + Send + 'static,
+{
+    let reader = open.clone();
+    OpenPreview::new(
+        move || {
+            let reader = reader.clone();
+            Box::pin(async move { reader.events().await })
+        },
+        move |commit, token| Box::pin(open.finish(commit, token)),
+    )
 }

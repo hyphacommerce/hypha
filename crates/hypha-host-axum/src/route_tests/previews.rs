@@ -335,6 +335,7 @@ async fn a_previewed_capture_stops_at_the_payment_app() {
         json!({"kind": "extension_call", "point": "payments.capture", "app": "app_card"})
     );
     assert_eq!(preview["response"], Value::Null);
+    assert!(preview.get("token").is_none(), "nothing to apply");
     assert_eq!(saw.lock().unwrap().len(), calls, "the app wasn't called");
 
     let (_, json) = send(&app, "GET", &format!("/admin/payments/{payment}"), None).await;
@@ -391,4 +392,163 @@ async fn reads_ignore_the_header_and_it_is_one_or_zero() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "0 runs the write");
+}
+
+/// Sends `method uri` as `token` with `Hypha-Preview-Token: preview_token`.
+async fn apply_as(
+    app: &TestApp,
+    token: &str,
+    preview_token: &str,
+    method: &str,
+    uri: &str,
+    body: Option<&str>,
+) -> (StatusCode, Value) {
+    let auth = format!("Bearer {token}");
+    send_with(
+        app,
+        &[
+            (AUTHORIZATION.as_str(), &auth),
+            ("hypha-preview-token", preview_token),
+        ],
+        method,
+        uri,
+        body,
+    )
+    .await
+}
+
+const MUG: &str =
+    r#"{"handle": "mug", "title": "Mug", "price": {"amount": 1000, "currency": "EUR"}}"#;
+
+#[tokio::test]
+async fn a_token_applies_exactly_the_preview_once() {
+    let app = app().await;
+    let (status, json) = preview(&app, "POST", "/admin/products", Some(MUG)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let preview = &json["preview"];
+    let token = preview["token"].as_str().unwrap().to_string();
+    assert!(token.starts_with("hypha_pv_"), "{token}");
+    assert!(preview["expires_at"].is_string());
+    let previewed = preview["response"]["body"]["id"].clone();
+    let events = rows(&app, "outbox_events").await;
+
+    // Re-serialized: the same request.
+    let same =
+        json!({"price": {"currency": "EUR", "amount": 1000}, "title": "Mug", "handle": "mug"})
+            .to_string();
+    let key = app.admin_key.clone();
+    let (status, created) =
+        apply_as(&app, &key, &token, "POST", "/admin/products", Some(&same)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["id"], previewed, "the product the preview showed");
+    assert_eq!(rows(&app, "outbox_events").await, events + 1);
+
+    let (status, json) = apply_as(&app, &key, &token, "POST", "/admin/products", Some(&same)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "preview_used")
+    );
+    assert_eq!(rows(&app, "products").await, 1);
+}
+
+#[tokio::test]
+async fn a_token_applies_nothing_once_the_write_would_differ() {
+    let app = app().await;
+    let product = create_product(&app, "mug").await;
+    let (_, json) = send(&app, "GET", &format!("/admin/products/{product}"), None).await;
+    let variant = json["variants"][0]["id"].as_str().unwrap().to_string();
+    let path = format!("/admin/products/{product}/variants/{variant}");
+    let change = r#"{"price":{"amount":2490,"currency":"EUR"}}"#;
+    let (status, json) = preview(&app, "PATCH", &path, Some(change)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let token = json["preview"]["token"].as_str().unwrap().to_string();
+
+    // Meanwhile, someone else sets that price: the write would now change nothing.
+    let (status, _) = send(&app, "PATCH", &path, Some(change)).await;
+    assert_eq!(status, StatusCode::OK);
+    let events = rows(&app, "outbox_events").await;
+
+    let key = app.admin_key.clone();
+    let (status, json) = apply_as(&app, &key, &token, "PATCH", &path, Some(change)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "preview_stale"),
+        "{json}"
+    );
+    let fresh = &json["details"]["preview"];
+    assert_eq!(fresh["complete"], true);
+    assert_eq!(fresh["events"], json!([]), "nothing left to change");
+    assert_eq!(fresh["response"]["status"], 200);
+    let again = fresh["token"].as_str().unwrap().to_string();
+    assert_ne!(again, token);
+    assert_eq!(rows(&app, "outbox_events").await, events, "nothing written");
+
+    // The fresh preview's token applies it as it is now.
+    let (status, json) = apply_as(&app, &key, &again, "PATCH", &path, Some(change)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["variants"][0]["price"]["amount"], 2490);
+    assert_eq!(rows(&app, "outbox_events").await, events);
+}
+
+#[tokio::test]
+async fn a_token_is_its_callers_and_its_requests_only() {
+    let app = app().await;
+    let (_, json) = preview(&app, "POST", "/admin/products", Some(MUG)).await;
+    let token = json["preview"]["token"].as_str().unwrap().to_string();
+    let session = owner_session(&app).await;
+    let (status, json) =
+        apply_as(&app, &session, &token, "POST", "/admin/products", Some(MUG)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "preview_token_invalid"),
+        "another caller"
+    );
+    let key = app.admin_key.clone();
+    let cup = MUG.replace("mug", "cup");
+    let (status, json) = apply_as(&app, &key, &token, "POST", "/admin/products", Some(&cup)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "preview_token_invalid"),
+        "another body"
+    );
+    let unknown = format!("hypha_pv_{}", "0".repeat(64));
+    for bad in [unknown.as_str(), "nonsense"] {
+        let (status, json) = apply_as(&app, &key, bad, "POST", "/admin/products", Some(MUG)).await;
+        assert_eq!(
+            (status, code(&json)),
+            (StatusCode::UNPROCESSABLE_ENTITY, "preview_token_invalid"),
+            "{bad}"
+        );
+    }
+    assert_eq!(rows(&app, "products").await, 0, "nothing applied");
+    // Expired.
+    sql(
+        &app,
+        "UPDATE preview_tokens SET expires_at = now() - interval '1 second'",
+    )
+    .await;
+    let (status, json) = apply_as(&app, &key, &token, "POST", "/admin/products", Some(MUG)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "preview_token_invalid"),
+        "expired"
+    );
+    // Both headers: one previews, the other applies.
+    let auth = format!("Bearer {key}");
+    let (status, json) = send_with(
+        &app,
+        &[
+            (AUTHORIZATION.as_str(), &auth),
+            ("hypha-preview", "1"),
+            ("hypha-preview-token", &token),
+        ],
+        "POST",
+        "/admin/products",
+        Some(MUG),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::BAD_REQUEST, "invalid_preview_header")
+    );
 }

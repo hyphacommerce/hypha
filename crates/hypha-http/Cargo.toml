@@ -22,6 +22,7 @@ hypha-fulfillment = { path = "../hypha-fulfillment" }
 hypha-order-actions = { path = "../hypha-order-actions" }
 hypha-privacy = { path = "../hypha-privacy" }
 hypha-payments = { path = "../hypha-payments" }
+hypha-agents = { path = "../hypha-agents" }
 hypha-auth = { path = "../hypha-auth" }
 hypha-users = { path = "../hypha-users" }
 hypha-customer-accounts = { path = "../hypha-customer-accounts" }
@@ -54,6 +55,7 @@ thiserror.workspace = true
 uuid = { workspace = true }
 tracing = "0.1"
 sha2 = "0.11"
+tower = { version = "0.5.3", default-features = false, features = ["util"] }
 hmac = "0.13"
 jiff = "0.2"
 base64 = "0.22"

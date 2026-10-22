@@ -259,10 +259,19 @@ fn add_standard_errors(op: &mut Operation, row: &Row, secured: bool) {
         );
     }
     if writes && row.doc == Doc::Admin {
-        errors
-            .entry("400")
-            .or_default()
-            .push("A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`).");
+        errors.entry("400").or_default().push(
+            "A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` \
+             (`invalid_preview_header`).",
+        );
+        errors.entry("409").or_default().push(
+            "With `Hypha-Preview-Token`: the token already applied its write \
+             (`preview_used`), or the write would no longer record what was previewed \
+             (`preview_stale`, nothing written, `details.preview` is what it would do now).",
+        );
+        errors.entry("422").or_default().push(
+            "A `Hypha-Preview-Token` that is unknown, expired, another caller's or another \
+             request's (`preview_token_invalid`).",
+        );
     }
     if writes {
         errors.entry("409").or_default().push(
@@ -358,6 +367,8 @@ pub fn document_with(doc: Doc, extra: Vec<Row>) -> OpenApi {
 
 /// The reusable `Hypha-Preview` header (`#/components/parameters/HyphaPreview`).
 const PREVIEW_PARAMETER: &str = "HyphaPreview";
+/// The reusable `Hypha-Preview-Token` header.
+const PREVIEW_TOKEN_PARAMETER: &str = "HyphaPreviewToken";
 /// The reusable answer to a preview (`#/components/responses/Preview`).
 const PREVIEW_RESPONSE: &str = "Preview";
 
@@ -365,11 +376,12 @@ const PREVIEW_RESPONSE: &str = "Preview";
 /// (`x-hypha-preview`): its own `200`, where it has one, is what the write answers.
 fn add_preview(op: &mut Operation) {
     use utoipa::openapi::extensions::ExtensionsBuilder;
-    op.parameters
-        .get_or_insert_with(Vec::new)
-        .push(RefOr::Ref(Ref::new(format!(
-            "#/components/parameters/{PREVIEW_PARAMETER}"
+    let parameters = op.parameters.get_or_insert_with(Vec::new);
+    for name in [PREVIEW_PARAMETER, PREVIEW_TOKEN_PARAMETER] {
+        parameters.push(RefOr::Ref(Ref::new(format!(
+            "#/components/parameters/{name}"
         ))));
+    }
     let preview = ExtensionsBuilder::new()
         .add(
             "x-hypha-preview",
@@ -409,6 +421,23 @@ fn add_preview_components(components: &mut utoipa::openapi::Components) {
     components
         .parameters
         .insert(PREVIEW_PARAMETER.to_string(), RefOr::T(header));
+    let token = ParameterBuilder::new()
+        .name("Hypha-Preview-Token")
+        .parameter_in(ParameterIn::Header)
+        .required(Required::False)
+        .description(Some(
+            "A preview's `token` (`hypha_pv_…`): sent with the same request by the same \
+             caller, the write runs with the preview's IDs and commits only if it records \
+             the same events (else `409 preview_stale`, nothing written). Once \
+             (`409 preview_used`); a retry sends the `Idempotency-Key` alone.",
+        ))
+        .schema(Some(
+            ObjectBuilder::new().schema_type(SchemaType::Type(Type::String)),
+        ))
+        .build();
+    components
+        .parameters
+        .insert(PREVIEW_TOKEN_PARAMETER.to_string(), RefOr::T(token));
     let response = ResponseBuilder::new()
         .description(
             "The write previewed (`Hypha-Preview: 1`): what it would have answered and \
@@ -817,6 +846,9 @@ mod tests {
         assert_eq!(
             lists,
             [
+                "get /admin/agent-proposals",
+                "get /admin/agents",
+                "get /admin/agents/{id}/calls",
                 "get /admin/api-keys",
                 "get /admin/apps/{key}/deliveries",
                 "get /admin/apps/{key}/extension-calls",

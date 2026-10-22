@@ -1043,6 +1043,7 @@ dependencies = [
 name = "hypha-config"
 version = "0.1.0"
 dependencies = [
+ "hypha-agents",
  "hypha-auth",
  "hypha-categories",
  "hypha-core",
@@ -1171,6 +1172,7 @@ dependencies = [
  "deadpool-postgres",
  "getrandom 0.4.3",
  "governor",
+ "hypha-agents",
  "hypha-apps",
  "hypha-auth",
  "hypha-config",
@@ -1255,6 +1257,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "hmac",
+ "hypha-agents",
  "hypha-apps",
  "hypha-auth",
  "hypha-cart",
@@ -1299,6 +1302,7 @@ dependencies = [
  "serde_urlencoded",
  "sha2",
  "thiserror",
+ "tower",
  "tracing",
  "url",
  "utoipa",

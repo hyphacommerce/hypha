@@ -490,6 +490,8 @@ pub(crate) async fn prepare<D: Deployment>(
         host,
         config,
     ));
+    // What agents' calls and approved proposals are sent through, in process.
+    state.install(D::router(), D::spore_rows());
     if let Err(e) = register_spores(&state).await {
         tracing::error!("spore setup failed: {e}");
         std::process::exit(1);

@@ -134,6 +134,10 @@ pub trait Surface {
     /// token's prefix says (`None` if it isn't one of ours), `publishable_header`
     /// whether it came in `X-Publishable-Key`.
     fn admit(kind: Option<TokenKind>, publishable_header: bool) -> Result<(), ApiError>;
+
+    /// Refuses an agent (an in-process request, `internal::AgentRequest`) where agents
+    /// don't act.
+    fn admit_agent() -> Result<(), ApiError>;
 }
 
 /// `/admin/*`: staff sessions and secret keys.
@@ -156,6 +160,10 @@ impl Surface for Admin {
             _ => Err(hypha_auth::CommandError::InvalidToken.into()),
         }
     }
+
+    fn admit_agent() -> Result<(), ApiError> {
+        Ok(())
+    }
 }
 
 impl Surface for Storefront {
@@ -172,6 +180,11 @@ impl Surface for Storefront {
             _ => Err(hypha_auth::CommandError::InvalidToken.into()),
         }
     }
+
+    /// Shopping agents go through their own adapter, never an admin agent's grant.
+    fn admit_agent() -> Result<(), ApiError> {
+        Err(ApiError::publishable_key_required())
+    }
 }
 
 struct Credential {
@@ -182,6 +195,9 @@ struct Credential {
     /// publishable key: the key decides the store and channel, the session adds who the
     /// shopper is.
     customer_session: Option<String>,
+    /// An agent the request acts as, set only by in-process requests (`internal.rs`);
+    /// `token` is empty then.
+    agent: Option<crate::internal::AgentRequest>,
 }
 
 /// What a request authenticated as.
@@ -208,10 +224,25 @@ fn bearer(parts: &Parts) -> Result<Option<String>, ApiError> {
 
 /// The token a request carries; `unauthenticated` if none. With `X-Publishable-Key`,
 /// the bearer token may only be a customer's session: anything else beside the key is
-/// `invalid_token`.
+/// `invalid_token`. An agent's key from outside is refused (`agent_credentials_mcp_only`):
+/// agents act only through requests made in process, which carry the agent instead.
 fn credential(parts: &Parts) -> Result<Credential, ApiError> {
+    if let Some(agent) = parts.extensions.get::<crate::internal::AgentRequest>() {
+        return Ok(Credential {
+            token: String::new(),
+            publishable_header: false,
+            customer_session: None,
+            agent: Some(agent.clone()),
+        });
+    }
     let invalid = || ApiError::from(hypha_auth::CommandError::InvalidToken);
     let bearer = bearer(parts)?;
+    if bearer
+        .as_deref()
+        .is_some_and(|token| TokenKind::of(token) == Some(TokenKind::AgentKey))
+    {
+        return Err(ApiError::agent_credentials_mcp_only());
+    }
     if let Some(value) = parts.headers.get("x-publishable-key") {
         let token = value.to_str().map_err(|_| invalid())?.trim().to_string();
         if let Some(session) = &bearer
@@ -223,6 +254,7 @@ fn credential(parts: &Parts) -> Result<Credential, ApiError> {
             token,
             publishable_header: true,
             customer_session: bearer,
+            agent: None,
         });
     }
     match bearer {
@@ -230,6 +262,7 @@ fn credential(parts: &Parts) -> Result<Credential, ApiError> {
             token,
             publishable_header: false,
             customer_session: None,
+            agent: None,
         }),
         None => Err(ApiError::unauthenticated()),
     }
@@ -292,6 +325,13 @@ impl<A: Surface> Caller<A> {
         self,
         state: &AppState<S>,
     ) -> Result<(S::Ports<'_>, Ctx), ApiError> {
+        if let Some(agent) = self.0.agent {
+            A::admit_agent()?;
+            let ports = state.public_ports().await?;
+            ports.act_as(agent.ctx.actor());
+            note_viewer(&ports, &agent.ctx, &state.clock).await?;
+            return Ok((ports, agent.ctx));
+        }
         A::admit(TokenKind::of(&self.0.token), self.0.publishable_header)?;
         let ports = state.public_ports().await?;
         let ctx = match self
@@ -305,21 +345,28 @@ impl<A: Surface> Caller<A> {
         };
         // Every event these ports write from here on is the caller's.
         ports.act_as(ctx.actor());
-        note_viewer(&ports, &ctx).await?;
+        note_viewer(&ports, &ctx, &state.clock).await?;
         Ok((ports, ctx))
     }
 }
 
 /// In a preview, who the caller is, so its events are shown as the caller may see them
 /// (`crate::preview::Viewer`): for anyone but a staff session, with the custom field
-/// definitions as they are before the write.
-async fn note_viewer<P>(ports: &P, ctx: &Ctx) -> Result<(), ApiError>
+/// definitions as they are before the write. Applying one, the token is checked against
+/// the caller and claimed, and the caller noted the same way, for a stale write's fresh
+/// preview.
+async fn note_viewer<P>(ports: &P, ctx: &Ctx, clock: &impl Clock) -> Result<(), ApiError>
 where
-    P: HasApps + hypha_custom_fields::HasCustomFieldDefinitions,
+    P: HasApps + hypha_custom_fields::HasCustomFieldDefinitions + hypha_core::HasPreviewTokens,
 {
-    let Some(preview) = crate::preview::current() else {
+    let preview = crate::preview::current();
+    let apply = crate::preview::applying();
+    if preview.is_none() && apply.is_none() {
         return Ok(());
-    };
+    }
+    if let Some(apply) = &apply {
+        apply.claim(ports, ctx, clock.now()).await?;
+    }
     let fields = match ctx.is_staff() {
         true => None,
         false => {
@@ -330,10 +377,15 @@ where
             Some((kind, definitions))
         }
     };
-    preview.set_viewer(crate::preview::Viewer {
+    let viewer = crate::preview::Viewer {
         ctx: ctx.clone(),
         fields,
-    });
+    };
+    match (preview, apply) {
+        (Some(preview), _) => preview.set_viewer(viewer),
+        (None, Some(apply)) => apply.set_viewer(viewer),
+        (None, None) => {}
+    }
     Ok(())
 }
 
@@ -344,6 +396,9 @@ impl StaffCaller {
         self,
         state: &AppState<S>,
     ) -> Result<(S::Ports<'_>, StaffSession), ApiError> {
+        if self.0.agent.is_some() {
+            return Err(ApiError::session_required());
+        }
         Admin::admit(TokenKind::of(&self.0.token), self.0.publishable_header)?;
         let ports = state.public_ports().await?;
         match self
@@ -353,7 +408,7 @@ impl StaffCaller {
         {
             Authenticated::Staff(staff) => {
                 ports.act_as(staff.ctx.actor());
-                note_viewer(&ports, &staff.ctx).await?;
+                note_viewer(&ports, &staff.ctx, &state.clock).await?;
                 Ok((ports, *staff))
             }
             Authenticated::Key(_) | Authenticated::Customer(_) => Err(ApiError::session_required()),
@@ -371,6 +426,9 @@ impl CustomerCaller {
         self,
         state: &AppState<S>,
     ) -> Result<(S::Ports<'_>, CustomerSession), ApiError> {
+        if self.0.agent.is_some() {
+            Storefront::admit_agent()?;
+        }
         Storefront::admit(TokenKind::of(&self.0.token), self.0.publishable_header)?;
         if self.0.customer_session.is_none() {
             return Err(ApiError::account_required());
@@ -460,29 +518,31 @@ impl<S: Storage, T> FromRequest<SharedState<S>> for KeyedJson<T> {
 
 impl<T: DeserializeOwned> KeyedJson<T> {
     pub fn parse(self) -> Result<Keyed<T>, ApiError> {
-        let idempotency = self.key.map(|key| {
-            let body = canonical_json(&self.body.bytes);
-            let mut hash = Sha256::new();
-            for part in [
-                self.method.as_bytes(),
-                self.path.as_bytes(),
-                self.query.as_bytes(),
-                &body,
-            ] {
-                hash.update(part);
-                // A separator, so moving bytes between parts changes the fingerprint.
-                hash.update([0]);
-            }
-            IdempotencyRequest {
-                key,
-                fingerprint: hash.finalize().into(),
-            }
+        let idempotency = self.key.map(|key| IdempotencyRequest {
+            key,
+            fingerprint: fingerprint(&self.method, &self.path, &self.query, &self.body.bytes),
         });
         Ok(Keyed {
             body: self.body.parse()?,
             idempotency,
         })
     }
+}
+
+/// A request's fingerprint: SHA-256 over the method, the path (lowercased: IDs are
+/// case-insensitive) with its query string, and the body in canonical JSON. What an
+/// idempotency key and a preview's token are bound to: a retry that re-serialized its body
+/// matches, another request doesn't.
+pub(crate) fn fingerprint(method: &str, path: &str, query: &str, body: &[u8]) -> [u8; 32] {
+    let body = canonical_json(body);
+    let path = path.to_ascii_lowercase();
+    let mut hash = Sha256::new();
+    for part in [method.as_bytes(), path.as_bytes(), query.as_bytes(), &body] {
+        hash.update(part);
+        // A separator, so moving bytes between parts changes the fingerprint.
+        hash.update([0]);
+    }
+    hash.finalize().into()
 }
 
 /// `body` as canonical JSON: no whitespace, object keys sorted, at every depth. A body
@@ -496,7 +556,7 @@ fn canonical_json(body: &[u8]) -> Vec<u8> {
     out
 }
 
-fn write_canonical(value: &serde_json::Value, out: &mut Vec<u8>) {
+pub(crate) fn write_canonical(value: &serde_json::Value, out: &mut Vec<u8>) {
     use serde_json::Value;
     match value {
         // Sorted here rather than trusting `Map`'s order: with serde_json's

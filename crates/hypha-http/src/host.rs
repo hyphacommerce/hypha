@@ -62,8 +62,12 @@ impl HostIds {
 }
 
 impl IdGenerator for HostIds {
-    /// In a preview, each ID handed out is noted, in order.
+    /// In a preview, each ID handed out is noted, in order; applying one, its IDs are
+    /// handed out first.
     fn new_uuid(&self) -> Uuid {
+        if let Some(apply) = crate::preview::applying() {
+            return apply.next_id(|| self.0.new_uuid());
+        }
         let id = self.0.new_uuid();
         if let Some(preview) = crate::preview::current() {
             preview.id(id);

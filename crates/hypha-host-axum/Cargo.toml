@@ -64,6 +64,7 @@ toml = "0.9"
 spore-stripe = ["dep:hypha-spore-stripe"]
 
 [dev-dependencies]
+hypha-agents = { path = "../hypha-agents" }
 # The first-party Stripe spore, for route tests of a host built with it; the stock
 # binary has no spores.
 hypha-spore-stripe = { path = "../../spores/stripe" }

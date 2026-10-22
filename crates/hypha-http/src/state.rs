@@ -276,6 +276,8 @@ pub struct AppState<S> {
     /// outbound policy, the jobs' timers and the dispatcher's batch, lease, retries and
     /// retention are read from here.
     pub config: hypha_config::Config,
+    /// The host's own router and operations, for in-process requests (`internal.rs`).
+    pub(crate) internal: crate::internal::Internal<S>,
 }
 
 /// What a host gives `AppState::new` besides its storage, its store and its settings
@@ -323,6 +325,7 @@ impl<S> AppState<S> {
             mail: host.mail,
             calls: host.calls,
             config,
+            internal: crate::internal::Internal::default(),
         }
     }
 
@@ -349,16 +352,36 @@ impl<S: Storage> AppState<S> {
     /// In a request previewing a write (`crate::preview`), the ports run in a preview
     /// (`Storage::begin_preview`), which the request ends once its handler is done, and
     /// wake nothing.
+    ///
+    /// In a request applying a preview (`Hypha-Preview-Token`), the ports run in one
+    /// transaction (`Storage::begin_apply`), committed or not once the handler is done.
     pub async fn public_ports(&self) -> Result<S::Ports<'_>, ApiError> {
         let ports = self.storage.ports(self.store).await?;
-        match crate::preview::current() {
-            Some(preview) => {
+        match (crate::preview::current(), crate::preview::applying()) {
+            (Some(preview), _) => {
                 let timeout = self.config.agents.preview_timeout;
-                preview.hold(self.storage.begin_preview(&ports, timeout).await?);
+                let open = self.storage.begin_preview(&ports, timeout).await?;
+                preview.hold(open, self.token_host());
             }
-            None => hypha_core::SignalsDispatch::on_dispatch_work(&ports, self.after_writes.hook()),
+            (None, Some(apply)) => {
+                hypha_core::SignalsDispatch::on_dispatch_work(&ports, self.after_writes.hook());
+                let open = self.storage.begin_apply(&ports).await?;
+                apply.hold(open, self.token_host());
+            }
+            (None, None) => {
+                hypha_core::SignalsDispatch::on_dispatch_work(&ports, self.after_writes.hook())
+            }
         }
         Ok(ports)
+    }
+
+    /// What issuing a preview's token needs.
+    fn token_host(&self) -> crate::preview::TokenHost {
+        crate::preview::TokenHost {
+            clock: self.clock.clone(),
+            random: self.env.runtime().random.clone(),
+            lifetime: self.config.agents.preview_token_lifetime,
+        }
     }
 }
 
@@ -552,6 +575,10 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_custom_fields::ReferenceTargets
         + hypha_auth::ChannelDirectory
         + hypha_mail::MailPorts
+        + hypha_core::HasPreviewTokens
+        + hypha_agents::HasAgents
+        + hypha_agents::HasProposals
+        + hypha_agents::HasAgentCalls
         + HasBatch<
             Batch: hypha_core::StageEvents
                        + hypha_markets::StageCatalogProducts
@@ -564,7 +591,8 @@ pub trait Storage: Send + Sync + 'static {
                        + hypha_custom_fields::StageCustomFieldValues
                        + hypha_notifications::StageNotificationSettings
                        + hypha_apps::StageApps
-                       + hypha_oauth::StageOAuth,
+                       + hypha_oauth::StageOAuth
+                       + hypha_agents::StageAgents,
         >
     where
         Self: 'a;
@@ -640,6 +668,21 @@ pub trait Storage: Send + Sync + 'static {
         &'a self,
         ports: &'a Self::Ports<'_>,
         timeout: std::time::Duration,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<crate::preview::OpenPreview, ApiError>>
+                + Send
+                + 'a,
+        >,
+    >;
+
+    /// Runs everything `ports` do from now on in one transaction, which the
+    /// `OpenPreview` commits or rolls back as a whole once it has read back the events the
+    /// writes recorded: a write sent with its preview's token (`crate::preview`). Boxed
+    /// for the same reason as `begin_preview`.
+    fn begin_apply<'a>(
+        &'a self,
+        ports: &'a Self::Ports<'_>,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<crate::preview::OpenPreview, ApiError>>

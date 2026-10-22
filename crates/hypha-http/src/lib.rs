@@ -7,6 +7,7 @@
 //! (`state::Storage`). So this crate holds no runtime: the Postgres pool, the job runner
 //! and the Tokio pieces are `hypha-host-axum`'s.
 
+pub mod agents;
 pub mod app_endpoints;
 pub mod app_fields;
 pub mod client_ip;
@@ -16,11 +17,13 @@ pub mod extensions;
 pub mod extract;
 pub mod handlers;
 pub mod host;
+pub mod internal;
 pub mod jobs;
 pub mod key_cache;
 pub mod mail;
 pub mod manifests;
 pub mod media;
+pub mod operations;
 pub mod outbound;
 pub mod patch;
 pub mod payments;

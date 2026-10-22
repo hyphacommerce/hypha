@@ -60,6 +60,9 @@ pub trait Deployment: Sized + 'static {
 
     /// `hypha_http::router!` for this deployment's storage.
     fn router() -> axum::Router<hypha_http::state::SharedState<WorkersStorage<Self>>>;
+
+    /// Its spores' routes as OpenAPI rows: the operations they add for agents.
+    fn spore_rows() -> Vec<hypha_http::routes::openapi::Row>;
 }
 
 /// What the macros' expansions name.
@@ -101,6 +104,13 @@ macro_rules! deployment {
                             $crate::__private::hypha_http::error::ApiError::method_not_allowed()
                         })
                 )
+            }
+
+            fn spore_rows() -> ::std::vec::Vec<$crate::__private::hypha_http::routes::openapi::Row> {
+                #[allow(unused_mut)]
+                let mut rows = ::std::vec::Vec::new();
+                $($(rows.extend($($routes)::+!(rows));)*)?
+                rows
             }
         }
     };
@@ -449,6 +459,8 @@ mod worker_main {
             host,
             config,
         ));
+        // What agents' calls and approved proposals are sent through, in process.
+        state.install(D::router(), D::spore_rows());
         spores_set_up::<D>(&state).await?;
         // Expanded for the concrete deployment (`worker!`): axum can only prove its
         // handlers' futures `Send` there.

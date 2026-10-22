@@ -39,6 +39,8 @@ use hypha_notifications::{OutgoingEmail, Sent};
 use crate::platform::{Background, UuidV7Ids};
 use crate::storage::PgDatabase;
 
+// Agents, their calls and proposals.
+mod agents;
 // Apps installed through OAuth, and personal data.
 mod app_extensions;
 // Apps' custom fields, synced with their manifests.
@@ -275,6 +277,7 @@ async fn app_exactly<D: crate::Deployment>(
         config,
     ));
     // As `prepare` does at startup.
+    state.install(D::router(), D::spore_rows());
     crate::start::register_spores(&state).await.unwrap();
     let ports = state.public_ports().await.unwrap();
     let owner = NewOwner {
