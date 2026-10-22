@@ -55,7 +55,6 @@ use crate::{
         add_group_members, delete_group, insert_group, remove_group_members, update_group,
     },
     customers::{delete_customer, insert_customer, update_customer},
-    error::repo_error,
     fulfillments::{insert_fulfillment, update_fulfillment},
     idempotency::insert_records,
     inventory::update_items,
@@ -69,7 +68,7 @@ use crate::{
     outbox::insert_events,
     payments::{insert_payment, update_payment},
     products::{delete_product, update_product},
-    store::{Db, end_transaction},
+    store::{Db, Tx, end_transaction},
     store::{PgConnection, PgStore},
     tax::assign_tax_class,
     users::{insert_role, insert_user, update_invite, update_role, update_user},
@@ -644,9 +643,10 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         let mut records = Vec::new();
 
         let mut conn = self.conn().await;
+        let preview = conn.in_preview();
         let (client, statements) = conn.parts();
-        let tx = client.transaction().await.map_err(repo_error)?;
-        let db = Db::new(&tx, statements);
+        let tx = Tx::begin(client, preview).await?;
+        let db = Db::new(tx.client(), statements);
         // Every early return ends the transaction explicitly (`end_transaction`).
         let written: Result<(), RepoError> = async {
             for write in batch.staged {

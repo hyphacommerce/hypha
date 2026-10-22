@@ -38,29 +38,58 @@ pub(crate) async fn insert_events(
     let subject_version = subject_version.map(version_to_db).transpose()?;
     // jsonb arrays don't bind as `jsonb[]` from serde values; text cast back is exact.
     let data: Vec<String> = events.iter().map(|e| e.data.to_string()).collect();
-    tx.query_typed(
-        "INSERT INTO outbox_events
+    let rows = tx
+        .query_typed(
+            "INSERT INTO outbox_events
             (type, version, subject_type, subject_id, subject_version, actor_kind, actor_id,
              data)
          SELECT t, v, st, si, $5, $6, $7, d::jsonb
          FROM unnest($1::text[], $2::smallint[], $3::text[], $4::uuid[], $8::text[])
               WITH ORDINALITY AS e (t, v, st, si, d, n)
-         ORDER BY n",
-        &[
-            (&types, Type::TEXT_ARRAY),
-            (&versions, Type::INT2_ARRAY),
-            (&subject_types, Type::TEXT_ARRAY),
-            (&subject_ids, Type::UUID_ARRAY),
-            (&subject_version, Type::INT8),
-            (&actor_kind, Type::TEXT),
-            (&actor_id, Type::UUID),
-            (&data, Type::TEXT_ARRAY),
-        ],
-    )
-    .await
-    .map_err(repo_error)?;
+         ORDER BY n
+         RETURNING seq",
+            &[
+                (&types, Type::TEXT_ARRAY),
+                (&versions, Type::INT2_ARRAY),
+                (&subject_types, Type::TEXT_ARRAY),
+                (&subject_ids, Type::UUID_ARRAY),
+                (&subject_version, Type::INT8),
+                (&actor_kind, Type::TEXT),
+                (&actor_id, Type::UUID),
+                (&data, Type::TEXT_ARRAY),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
     stamp.wrote();
+    stamp.wrote_events(
+        rows.iter()
+            .map(|row| col::<i64>(row, "seq"))
+            .collect::<Result<Vec<_>, _>>()?,
+    );
     Ok(())
+}
+
+/// The events with these `seq`s that are still there, in `seq` order: what a preview's
+/// writes recorded and kept (`PgPreview::end`).
+pub(crate) async fn events_by_seq(
+    db: &impl Queries,
+    seqs: &[i64],
+) -> Result<Vec<StoredEvent>, RepoError> {
+    if seqs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = db
+        .query_typed(
+            &format!(
+                "SELECT {} FROM outbox_events WHERE seq = ANY($1) ORDER BY seq",
+                event_columns()
+            ),
+            &[(&seqs, Type::INT8_ARRAY)],
+        )
+        .await
+        .map_err(repo_error)?;
+    rows.iter().map(event_from_row).collect()
 }
 
 impl<C: PgConnection> ActingAs for PgStore<C> {

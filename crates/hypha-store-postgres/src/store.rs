@@ -1,9 +1,11 @@
 use futures_util::lock::{Mutex, MutexGuard};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
-use hypha_core::{Actor, Clock, DispatchHook, RepoError, Timestamp};
+use hypha_core::{Actor, Clock, DispatchHook, RepoError, StoredEvent, Timestamp};
 use tokio_postgres::{
     Client, Error, GenericClient, IsolationLevel, Row, Statement, Transaction,
     types::{ToSql, Type},
@@ -31,6 +33,15 @@ pub trait PgConnection {
     /// direct connection says `true`.
     fn ends_reads_unawaited(&self) -> bool {
         false
+    }
+
+    /// Told when a preview's transaction opens on this connection (`open`) and when it's
+    /// rolled back. A preview whose request was dropped half-way (cancelled, panicked)
+    /// never rolls back, so a pooled connection must roll back before it's handed out
+    /// again; one that closes when dropped (a Workers request's, a test's) needs nothing,
+    /// the default.
+    fn preview_open(&mut self, open: bool) {
+        let _ = open;
     }
 
     /// Queries on the client outside a transaction, through its statement cache.
@@ -131,15 +142,53 @@ pub trait Queries {
 pub struct Db<'a, G> {
     client: &'a G,
     statements: Option<&'a StatementCache>,
+    /// Inside a preview, outside any write's savepoint (`StoreConn::db`): each statement
+    /// runs in a savepoint of its own, so one that fails (a unique key, a reference)
+    /// fails alone, as it would on its own connection, instead of aborting the preview's
+    /// whole transaction.
+    savepoint_each: bool,
 }
 
 impl<'a, G> Db<'a, G> {
     pub fn new(client: &'a G, statements: Option<&'a StatementCache>) -> Self {
-        Self { client, statements }
+        Self {
+            client,
+            statements,
+            savepoint_each: false,
+        }
     }
 }
 
+/// The savepoint each statement takes inside a preview (`Db::savepoint_each`).
+const STATEMENT_SAVEPOINT: &str = "hypha_statement";
+
 impl<G: GenericClient + Sync> Db<'_, G> {
+    /// Runs `statement`, in a savepoint of its own when `savepoint_each` says so.
+    async fn run<T>(
+        &self,
+        statement: impl std::future::Future<Output = Result<T, Error>>,
+    ) -> Result<T, Error> {
+        if !self.savepoint_each {
+            return statement.await;
+        }
+        self.client
+            .batch_execute(&format!("SAVEPOINT {STATEMENT_SAVEPOINT}"))
+            .await?;
+        let result = statement.await;
+        let end = match result {
+            Ok(_) => format!("RELEASE SAVEPOINT {STATEMENT_SAVEPOINT}"),
+            Err(_) => format!(
+                "ROLLBACK TO SAVEPOINT {STATEMENT_SAVEPOINT}; RELEASE SAVEPOINT {STATEMENT_SAVEPOINT}"
+            ),
+        };
+        // The statement's own error is the one to report; a failed end means the
+        // connection is gone, which the next statement reports.
+        let ended = self.client.batch_execute(&end).await;
+        let value = result?;
+        ended?;
+        Ok(value)
+    }
+
     async fn prepared(
         &self,
         sql: &str,
@@ -165,10 +214,13 @@ impl<G: GenericClient + Sync> Queries for Db<'_, G> {
         sql: &str,
         params: &[(&(dyn ToSql + Sync), Type)],
     ) -> Result<Vec<Row>, Error> {
-        match self.prepared(sql, params).await? {
-            Some(statement) => self.client.query(&statement, &values(params)).await,
-            None => self.client.query_typed(sql, params).await,
-        }
+        self.run(async {
+            match self.prepared(sql, params).await? {
+                Some(statement) => self.client.query(&statement, &values(params)).await,
+                None => self.client.query_typed(sql, params).await,
+            }
+        })
+        .await
     }
 
     async fn query_typed_opt(
@@ -176,10 +228,13 @@ impl<G: GenericClient + Sync> Queries for Db<'_, G> {
         sql: &str,
         params: &[(&(dyn ToSql + Sync), Type)],
     ) -> Result<Option<Row>, Error> {
-        match self.prepared(sql, params).await? {
-            Some(statement) => self.client.query_opt(&statement, &values(params)).await,
-            None => self.client.query_typed_opt(sql, params).await,
-        }
+        self.run(async {
+            match self.prepared(sql, params).await? {
+                Some(statement) => self.client.query_opt(&statement, &values(params)).await,
+                None => self.client.query_typed_opt(sql, params).await,
+            }
+        })
+        .await
     }
 
     async fn query_typed_one(
@@ -187,10 +242,13 @@ impl<G: GenericClient + Sync> Queries for Db<'_, G> {
         sql: &str,
         params: &[(&(dyn ToSql + Sync), Type)],
     ) -> Result<Row, Error> {
-        match self.prepared(sql, params).await? {
-            Some(statement) => self.client.query_one(&statement, &values(params)).await,
-            None => self.client.query_typed_one(sql, params).await,
-        }
+        self.run(async {
+            match self.prepared(sql, params).await? {
+                Some(statement) => self.client.query_one(&statement, &values(params)).await,
+                None => self.client.query_typed_one(sql, params).await,
+            }
+        })
+        .await
     }
 
     async fn execute_typed(
@@ -198,14 +256,17 @@ impl<G: GenericClient + Sync> Queries for Db<'_, G> {
         sql: &str,
         params: &[(&(dyn ToSql + Sync), Type)],
     ) -> Result<u64, Error> {
-        match self.prepared(sql, params).await? {
-            Some(statement) => self.client.execute(&statement, &values(params)).await,
-            None => self.client.execute_typed(sql, params).await,
-        }
+        self.run(async {
+            match self.prepared(sql, params).await? {
+                Some(statement) => self.client.execute(&statement, &values(params)).await,
+                None => self.client.execute_typed(sql, params).await,
+            }
+        })
+        .await
     }
 
     async fn batch_execute(&self, sql: &str) -> Result<(), Error> {
-        self.client.batch_execute(sql).await
+        self.run(self.client.batch_execute(sql)).await
     }
 }
 
@@ -225,9 +286,11 @@ impl PgConnection for &mut Client {
 ///
 /// The connection sits behind an async mutex, so one operation uses it at a time: a
 /// transaction can't interleave with another query on the same connection, even if the
-/// store is shared. Transactions need `&mut Client`, which the mutex hands out.
+/// store is shared. Transactions need `&mut Client`, which the mutex hands out. The mutex
+/// is shared (`Arc`) so an open preview (`PgPreview`) can end on the connection after the
+/// store that began it is gone.
 pub struct PgStore<C> {
-    conn: Mutex<C>,
+    conn: Arc<Mutex<C>>,
     /// Who the events this store writes are stamped with (`ActingAs`): `Actor::System`
     /// until the host sets the caller. A plain mutex: it's held only to copy an `Actor`,
     /// never across an `.await`.
@@ -242,16 +305,19 @@ pub struct PgStore<C> {
     /// Told after a write gives the dispatcher work (`SignalsDispatch`); none until the
     /// host sets one. A plain mutex, held only to clone the `Arc`.
     dispatch_hook: std::sync::Mutex<Option<DispatchHook>>,
+    /// Set once the store runs in a preview (`begin_preview`): what its writes recorded.
+    preview: OnceLock<Arc<PreviewLog>>,
 }
 
 impl<C: PgConnection> PgStore<C> {
     pub fn new(conn: C, clock: Arc<dyn Clock + Send + Sync>) -> Self {
         Self {
-            conn: Mutex::new(conn),
+            conn: Arc::new(Mutex::new(conn)),
             actor: std::sync::Mutex::new(Actor::System),
             clock,
             events_pending: AtomicBool::new(false),
             dispatch_hook: std::sync::Mutex::new(None),
+            preview: OnceLock::new(),
         }
     }
 
@@ -260,12 +326,54 @@ impl<C: PgConnection> PgStore<C> {
         self.clock.now()
     }
 
-    /// The request's connection, for a query: `conn.db()` (`PgConnection::db`) queries
+    /// The request's connection, for a query: `conn.db()` (`StoreConn::db`) queries
     /// outside a transaction through its statement cache. Public for spores' own
     /// repositories over their own tables, which implement their accessor traits for
     /// `PgStore`.
-    pub async fn conn(&self) -> MutexGuard<'_, C> {
-        self.conn.lock().await
+    pub async fn conn(&self) -> StoreConn<'_, C> {
+        StoreConn {
+            guard: self.conn.lock().await,
+            preview: self.in_preview(),
+        }
+    }
+
+    /// Whether this store runs in a preview (`begin_preview`).
+    pub fn in_preview(&self) -> bool {
+        self.preview.get().is_some()
+    }
+
+    /// Runs everything this store does from now on in one transaction that's never
+    /// committed: a preview. Each write's transaction becomes a savepoint inside it, so a
+    /// write that fails is rolled back to where it began, as it would be on its own, and
+    /// what it wrote stays visible to the reads after it. Every statement is cut off
+    /// after `timeout`, which bounds the locks a preview holds.
+    ///
+    /// The `PgPreview` ends it: what the writes recorded, then the ROLLBACK. Dropped
+    /// unended (the request was cancelled), the connection is told
+    /// (`PgConnection::preview_open`), and Postgres ends a transaction left idle past
+    /// `PREVIEW_LEFT_OPEN`.
+    pub async fn begin_preview(&self, timeout: Duration) -> Result<PgPreview<C>, RepoError> {
+        let log = Arc::new(PreviewLog::default());
+        if self.preview.set(Arc::clone(&log)).is_err() {
+            return Err(RepoError::Backend(
+                "the store is already in a preview".into(),
+            ));
+        }
+        let mut conn = self.conn.lock().await;
+        conn.preview_open(true);
+        let millis = timeout.as_millis().max(1);
+        let left_open = PREVIEW_LEFT_OPEN.as_millis();
+        conn.client()
+            .batch_execute(&format!(
+                "BEGIN; SET LOCAL statement_timeout = {millis}; \
+                 SET LOCAL idle_in_transaction_session_timeout = {left_open}"
+            ))
+            .await
+            .map_err(repo_error)?;
+        Ok(PgPreview {
+            conn: Arc::clone(&self.conn),
+            log,
+        })
     }
 
     /// What `insert_events` needs from the store: the actor to stamp events with, and
@@ -274,6 +382,7 @@ impl<C: PgConnection> PgStore<C> {
         EventStamp {
             actor: self.actor(),
             pending: &self.events_pending,
+            preview: self.preview.get().map(Arc::as_ref),
         }
     }
 
@@ -285,8 +394,12 @@ impl<C: PgConnection> PgStore<C> {
         }
     }
 
-    /// Tells the dispatch hook, if there is one, that the dispatcher has work.
+    /// Tells the dispatch hook, if there is one, that the dispatcher has work. Never in a
+    /// preview: nothing it writes is committed.
     pub(crate) fn dispatch_work(&self) {
+        if self.in_preview() {
+            return;
+        }
         let hook = self
             .dispatch_hook
             .lock()
@@ -314,6 +427,99 @@ impl<C: PgConnection> PgStore<C> {
     }
 }
 
+/// How long Postgres lets a preview's transaction sit idle before it ends the session:
+/// the bound on the locks of a preview whose request was dropped before it rolled back.
+/// Longer than any call a preview waits on mid-transaction (a read-only extension point).
+pub const PREVIEW_LEFT_OPEN: Duration = Duration::from_secs(60);
+
+/// What a preview's writes recorded: the outbox rows' `seq`s, in order. A write rolled back
+/// to its savepoint leaves its numbers here, but not its rows, so `PgPreview::end` reads
+/// back what's still there.
+#[derive(Default)]
+pub(crate) struct PreviewLog {
+    events: std::sync::Mutex<Vec<i64>>,
+}
+
+impl PreviewLog {
+    fn wrote(&self, seqs: impl IntoIterator<Item = i64>) {
+        self.events
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .extend(seqs);
+    }
+
+    fn written(&self) -> Vec<i64> {
+        self.events
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+}
+
+/// An open preview (`PgStore::begin_preview`), on the connection it shares with its store.
+pub struct PgPreview<C> {
+    conn: Arc<Mutex<C>>,
+    log: Arc<PreviewLog>,
+}
+
+impl<C: PgConnection> PgPreview<C> {
+    /// Ends the preview: the events its writes recorded and kept (in the order written,
+    /// as the outbox stores them), then everything rolled back. Waits for the store's
+    /// last query, if it's still running one.
+    pub async fn end(self) -> Result<Vec<StoredEvent>, RepoError> {
+        let mut conn = self.conn.lock().await;
+        let seqs = self.log.written();
+        let events = {
+            let (client, statements) = conn.parts();
+            crate::outbox::events_by_seq(&Db::new(&*client, statements), &seqs).await
+        };
+        let rolled_back = conn.client().batch_execute("ROLLBACK").await;
+        conn.preview_open(false);
+        rolled_back.map_err(repo_error)?;
+        events
+    }
+}
+
+/// The store's connection while it's locked (`PgStore::conn`): the host's connection
+/// (`Deref`), and whether the store runs in a preview.
+pub struct StoreConn<'a, C> {
+    guard: MutexGuard<'a, C>,
+    preview: bool,
+}
+
+impl<C: PgConnection> StoreConn<'_, C> {
+    /// Queries on the client outside a transaction, through its statement cache; in a
+    /// preview, each in a savepoint of its own (`Db`).
+    pub fn db(&mut self) -> Db<'_, Client> {
+        let preview = self.preview;
+        let (client, statements) = self.guard.parts();
+        Db {
+            client: &*client,
+            statements,
+            savepoint_each: preview,
+        }
+    }
+
+    /// Whether the store runs in a preview: transactions are savepoints then.
+    pub(crate) fn in_preview(&self) -> bool {
+        self.preview
+    }
+}
+
+impl<C> Deref for StoreConn<'_, C> {
+    type Target = C;
+
+    fn deref(&self) -> &C {
+        &self.guard
+    }
+}
+
+impl<C> DerefMut for StoreConn<'_, C> {
+    fn deref_mut(&mut self) -> &mut C {
+        &mut self.guard
+    }
+}
+
 impl<C: PgConnection> hypha_core::SignalsDispatch for PgStore<C> {
     fn on_dispatch_work(&self, hook: DispatchHook) {
         *self
@@ -329,12 +535,21 @@ impl<C: PgConnection> hypha_core::SignalsDispatch for PgStore<C> {
 pub(crate) struct EventStamp<'a> {
     pub actor: Actor,
     pending: &'a AtomicBool,
+    /// In a preview, where the rows written are noted.
+    preview: Option<&'a PreviewLog>,
 }
 
 impl EventStamp<'_> {
     /// The open transaction gave the dispatcher work: events, or a delivery due again.
     pub(crate) fn wrote(&self) {
         self.pending.store(true, Ordering::Relaxed);
+    }
+
+    /// The outbox rows just written, by `seq`, for a preview to read back.
+    pub(crate) fn wrote_events(&self, seqs: impl IntoIterator<Item = i64>) {
+        if let Some(log) = self.preview {
+            log.wrote(seqs);
+        }
     }
 }
 
@@ -403,19 +618,22 @@ accessors! {
 /// consistent snapshot: `REPEATABLE READ READ ONLY`. Without it, a write committing
 /// between the queries could pair a new root with old children, `restore` would reject
 /// the mix, and the reader would get a 500 (review plan B3). One query is consistent on
-/// its own; single-query reads don't need this.
+/// its own; single-query reads don't need this. In a preview the snapshot can't be
+/// taken (the isolation of a transaction is fixed by its first query): the load reads the
+/// preview's own view, in a savepoint.
 ///
 /// `consistent_read!(conn, |tx| body)` runs `body` (which returns `Result<_, RepoError>`)
-/// with `tx: &Db<Transaction>` (queries through the connection's statement cache), then
+/// with `tx: &Db<Client>` (queries through the connection's statement cache), then
 /// ends the snapshot. A macro rather than a
 /// function taking an async closure: the compiler can't yet prove such futures `Send`
 /// ("`AsyncFnOnce` is not general enough"), and hosts like axum need them `Send`.
 macro_rules! consistent_read {
     ($conn:expr, |$tx:ident| $body:expr) => {{
         let unawaited = $crate::store::PgConnection::ends_reads_unawaited(&*$conn);
+        let preview = $conn.in_preview();
         let (client, statements) = $crate::store::PgConnection::parts(&mut *$conn);
-        let read = $crate::store::begin_consistent_read(client).await?;
-        let db = $crate::store::Db::new(&read, statements);
+        let read = $crate::store::begin_consistent_read(client, preview).await?;
+        let db = $crate::store::Db::new(read.client(), statements);
         let $tx = &db;
         let value: Result<_, hypha_core::RepoError> = async { $body }.await;
         $crate::store::end_read(read, value, unawaited).await
@@ -423,36 +641,102 @@ macro_rules! consistent_read {
 }
 pub(crate) use consistent_read;
 
+/// The savepoint a write takes inside a preview, in place of its transaction.
+const WRITE_SAVEPOINT: &str = "hypha_write";
+
+/// A write's or a snapshot's transaction: its own, or, inside a preview, a savepoint in
+/// the preview's transaction, released or rolled back to like a transaction is committed
+/// or rolled back.
+pub(crate) enum Tx<'a> {
+    Own(Transaction<'a>),
+    Savepoint(&'a Client),
+}
+
+impl<'a> Tx<'a> {
+    /// A write's transaction: in a preview (`preview`), a savepoint.
+    pub(crate) async fn begin(client: &'a mut Client, preview: bool) -> Result<Self, RepoError> {
+        if preview {
+            return Self::savepoint(client).await;
+        }
+        let tx = client.transaction().await.map_err(repo_error)?;
+        Ok(Tx::Own(tx))
+    }
+
+    async fn savepoint(client: &'a mut Client) -> Result<Self, RepoError> {
+        client
+            .batch_execute(&format!("SAVEPOINT {WRITE_SAVEPOINT}"))
+            .await
+            .map_err(repo_error)?;
+        Ok(Tx::Savepoint(client))
+    }
+
+    /// The client its queries go through.
+    pub(crate) fn client(&self) -> &Client {
+        match self {
+            Tx::Own(tx) => tx.client(),
+            Tx::Savepoint(client) => client,
+        }
+    }
+
+    async fn commit(self) -> Result<(), Error> {
+        match self {
+            Tx::Own(tx) => tx.commit().await,
+            Tx::Savepoint(client) => {
+                client
+                    .batch_execute(&format!("RELEASE SAVEPOINT {WRITE_SAVEPOINT}"))
+                    .await
+            }
+        }
+    }
+
+    async fn rollback(self) -> Result<(), Error> {
+        match self {
+            Tx::Own(tx) => tx.rollback().await,
+            Tx::Savepoint(client) => {
+                client
+                    .batch_execute(&format!(
+                        "ROLLBACK TO SAVEPOINT {WRITE_SAVEPOINT}; \
+                         RELEASE SAVEPOINT {WRITE_SAVEPOINT}"
+                    ))
+                    .await
+            }
+        }
+    }
+}
+
 pub(crate) async fn begin_consistent_read(
     client: &mut Client,
-) -> Result<Transaction<'_>, RepoError> {
-    client
+    preview: bool,
+) -> Result<Tx<'_>, RepoError> {
+    if preview {
+        return Tx::savepoint(client).await;
+    }
+    let read = client
         .build_transaction()
         .isolation_level(IsolationLevel::RepeatableRead)
         .read_only(true)
         .start()
         .await
-        .map_err(repo_error)
+        .map_err(repo_error)?;
+    Ok(Tx::Own(read))
 }
 
 /// Runs a repository write as a batch of one: `body` (which returns `Result<_, RepoError>`)
-/// gets `tx: &Transaction` and calls the same `insert_x` / `update_x` functions
+/// gets `tx: &Db<Client>` and calls the same `insert_x` / `update_x` functions
 /// `PgBatch::commit` does, then the transaction commits. On an error it's rolled back
 /// (`end_transaction`, awaited: never by dropping it), so a write that fails half-way (a
 /// stale version after some child rows) leaves nothing behind. A commit that wrote events
-/// tells the dispatch hook (`PgStore::transaction_ended`). A macro for the same reason as
-/// `consistent_read!`.
+/// tells the dispatch hook (`PgStore::transaction_ended`). In a preview, the transaction
+/// is a savepoint (`Tx`). A macro for the same reason as `consistent_read!`.
 ///
 /// `in_transaction!(store, |tx| body)`.
 macro_rules! in_transaction {
     ($store:expr, |$tx:ident| $body:expr) => {{
         let mut conn = $store.conn().await;
+        let preview = conn.in_preview();
         let (client, statements) = $crate::store::PgConnection::parts(&mut *conn);
-        let transaction = client
-            .transaction()
-            .await
-            .map_err($crate::error::repo_error)?;
-        let db = $crate::store::Db::new(&transaction, statements);
+        let transaction = $crate::store::Tx::begin(client, preview).await?;
+        let db = $crate::store::Db::new(transaction.client(), statements);
         let $tx = &db;
         let value: Result<_, hypha_core::RepoError> = async { $body }.await;
         let ended = $crate::store::end_transaction(transaction, value).await;
@@ -465,18 +749,18 @@ pub(crate) use in_transaction;
 /// Ends a read-only snapshot: like `end_transaction`, or, when the connection allows it
 /// (`PgConnection::ends_reads_unawaited`) and the read succeeded, by dropping it, which
 /// queues its ROLLBACK without waiting (nothing was written, so ending it either way is
-/// the same).
+/// the same). A preview's savepoint is always released, awaited.
 pub(crate) async fn end_read<T>(
-    read: Transaction<'_>,
+    read: Tx<'_>,
     value: Result<T, RepoError>,
     unawaited: bool,
 ) -> Result<T, RepoError> {
-    match value {
-        Ok(value) if unawaited => {
+    match (read, value) {
+        (Tx::Own(read), Ok(value)) if unawaited => {
             drop(read);
             Ok(value)
         }
-        value => end_transaction(read, value).await,
+        (read, value) => end_transaction(read, value).await,
     }
 }
 
@@ -485,7 +769,7 @@ pub(crate) async fn end_read<T>(
 /// queues a ROLLBACK without waiting, which works against Postgres directly but stalled the
 /// next query through Hyperdrive.
 pub(crate) async fn end_transaction<T>(
-    tx: Transaction<'_>,
+    tx: Tx<'_>,
     value: Result<T, RepoError>,
 ) -> Result<T, RepoError> {
     match value {
