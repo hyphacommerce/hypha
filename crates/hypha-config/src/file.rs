@@ -368,6 +368,19 @@ impl Default for Customers {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Agents {
+    /// Whether agents may act at all: `false` refuses every agent's credentials, whatever
+    /// their grants say.
+    pub enabled: bool,
+    /// The most any agent may write, whatever its grant says (`HYPHA_AGENT_WRITES` too):
+    /// `apply` (grants decide), `propose` (every write waits for a person to approve it) or
+    /// `off` (agents only read; no previews or proposals either).
+    pub writes: AgentWrites,
+    /// How long a proposal waits for a person before it expires. 1 hour to 90 days; 7
+    /// days by default.
+    pub proposal_lifetime: Dur,
+    /// How long a preview's token (`Hypha-Preview-Token`) can apply its write. 1 minute to
+    /// 1 day; 15 minutes by default.
+    pub preview_token_lifetime: Dur,
     /// How long one statement of a previewed write may run before it's cut off (the
     /// preview then fails): a preview holds the locks its write takes until it's rolled
     /// back. 100 milliseconds to 30 seconds; 5 seconds by default.
@@ -376,8 +389,36 @@ pub struct Agents {
 
 impl Default for Agents {
     fn default() -> Self {
+        let config = crate::AgentsConfig::default();
         Self {
-            preview_timeout: Dur(crate::AgentsConfig::default().preview_timeout),
+            enabled: config.enabled,
+            writes: AgentWrites::Apply,
+            proposal_lifetime: Dur(config.settings.proposal_lifetime),
+            preview_token_lifetime: Dur(config.preview_token_lifetime),
+            preview_timeout: Dur(config.preview_timeout),
+        }
+    }
+}
+
+/// The most any agent may write (`agents.writes`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentWrites {
+    /// Each agent's grant decides.
+    #[default]
+    Apply,
+    /// No agent applies a write itself: each is proposed, for a person to approve.
+    Propose,
+    /// Agents only read.
+    Off,
+}
+
+impl AgentWrites {
+    pub fn cap(self) -> hypha_agents::WritesCap {
+        match self {
+            AgentWrites::Apply => hypha_agents::WritesCap::Apply,
+            AgentWrites::Propose => hypha_agents::WritesCap::Propose,
+            AgentWrites::Off => hypha_agents::WritesCap::Off,
         }
     }
 }
@@ -559,6 +600,8 @@ pub struct PruneJob {
     pub sessions_after: Dur,
     /// How long the log of calls to apps' extension points is kept.
     pub extension_calls_after: Dur,
+    /// How long the log of agents' calls is kept.
+    pub agent_calls_after: Dur,
 }
 
 impl Default for PruneJob {
@@ -571,6 +614,7 @@ impl Default for PruneJob {
             idempotency_keys_after: Dur(d.keep_idempotency_keys),
             sessions_after: Dur(d.keep_ended_sessions),
             extension_calls_after: Dur(ExtensionSettings::default().keep_calls),
+            agent_calls_after: Dur(hypha_agents::AgentSettings::default().keep_calls),
         }
     }
 }
@@ -630,6 +674,11 @@ pub struct RateLimits {
     /// A customer signing in with a code, per email and address: guesses at one account
     /// from one place (the fifth wrong code voids it anyway).
     pub customer_login_email_from_ip: Quota,
+    /// An agent's calls, per agent: reads, previews, proposals and writes.
+    pub agent_call: Quota,
+    /// An agent's writes and proposals, per agent: few, since each changes the store or
+    /// asks a person to look.
+    pub agent_write: Quota,
 }
 
 /// The starting quotas.
@@ -661,13 +710,20 @@ impl Default for RateLimits {
             code_email_from_ip: quota(3, 5 * 60),
             customer_login_ip: quota(10, 30),
             customer_login_email_from_ip: quota(5, 60),
+            // An agent reads in bursts (a page of orders, then each order).
+            agent_call: Quota {
+                burst: 120,
+                per: Dur(Duration::from_millis(500)),
+            },
+            // About a write every 3 seconds, after a burst of 20.
+            agent_write: quota(20, 3),
         }
     }
 }
 
 impl RateLimits {
     /// Every limit with its key, for the checks.
-    pub(crate) fn all(&self) -> [(&'static str, Quota); 16] {
+    pub(crate) fn all(&self) -> [(&'static str, Quota); 18] {
         [
             ("login_ip", self.login_ip),
             ("login_email_from_ip", self.login_email_from_ip),
@@ -688,6 +744,8 @@ impl RateLimits {
                 "customer_login_email_from_ip",
                 self.customer_login_email_from_ip,
             ),
+            ("agent_call", self.agent_call),
+            ("agent_write", self.agent_write),
         ]
     }
 }

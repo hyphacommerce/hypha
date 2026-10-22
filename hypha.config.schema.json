@@ -7,7 +7,11 @@
     "agents": {
       "$ref": "#/$defs/Agents",
       "default": {
-        "preview_timeout": "5s"
+        "enabled": true,
+        "preview_timeout": "5s",
+        "preview_token_lifetime": "15m",
+        "proposal_lifetime": "7d",
+        "writes": "apply"
       }
     },
     "auth": {
@@ -70,6 +74,7 @@
           "interval": "1h"
         },
         "prune": {
+          "agent_calls_after": "30d",
           "enabled": true,
           "events_after": "30d",
           "extension_calls_after": "30d",
@@ -120,6 +125,14 @@
     "rate_limits": {
       "$ref": "#/$defs/RateLimits",
       "default": {
+        "agent_call": {
+          "burst": 120,
+          "per": "500ms"
+        },
+        "agent_write": {
+          "burst": 20,
+          "per": "3s"
+        },
         "cart_create_ip": {
           "burst": 20,
           "per": "3s"
@@ -220,14 +233,54 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "AgentWrites": {
+      "description": "The most any agent may write (`agents.writes`).",
+      "oneOf": [
+        {
+          "description": "Each agent's grant decides.",
+          "type": "string",
+          "const": "apply"
+        },
+        {
+          "description": "No agent applies a write itself: each is proposed, for a person to approve.",
+          "type": "string",
+          "const": "propose"
+        },
+        {
+          "description": "Agents only read.",
+          "type": "string",
+          "const": "off"
+        }
+      ]
+    },
     "Agents": {
       "description": "Agents, and previews of writes (`Hypha-Preview`), which anyone may ask for.",
       "type": "object",
       "properties": {
+        "enabled": {
+          "description": "Whether agents may act at all: `false` refuses every agent's credentials, whatever\ntheir grants say.",
+          "type": "boolean",
+          "default": true
+        },
         "preview_timeout": {
           "description": "How long one statement of a previewed write may run before it's cut off (the\npreview then fails): a preview holds the locks its write takes until it's rolled\nback. 100 milliseconds to 30 seconds; 5 seconds by default.",
           "$ref": "#/$defs/Duration",
           "default": "5s"
+        },
+        "preview_token_lifetime": {
+          "description": "How long a preview's token (`Hypha-Preview-Token`) can apply its write. 1 minute to\n1 day; 15 minutes by default.",
+          "$ref": "#/$defs/Duration",
+          "default": "15m"
+        },
+        "proposal_lifetime": {
+          "description": "How long a proposal waits for a person before it expires. 1 hour to 90 days; 7\ndays by default.",
+          "$ref": "#/$defs/Duration",
+          "default": "7d"
+        },
+        "writes": {
+          "description": "The most any agent may write, whatever its grant says (`HYPHA_AGENT_WRITES` too):\n`apply` (grants decide), `propose` (every write waits for a person to approve it) or\n`off` (agents only read; no previews or proposals either).",
+          "$ref": "#/$defs/AgentWrites",
+          "default": "apply"
         }
       },
       "additionalProperties": false
@@ -470,6 +523,7 @@
         "prune": {
           "$ref": "#/$defs/PruneJob",
           "default": {
+            "agent_calls_after": "30d",
             "enabled": true,
             "events_after": "30d",
             "extension_calls_after": "30d",
@@ -563,6 +617,11 @@
       "description": "Deleting what's past keeping.",
       "type": "object",
       "properties": {
+        "agent_calls_after": {
+          "description": "How long the log of agents' calls is kept.",
+          "$ref": "#/$defs/Duration",
+          "default": "30d"
+        },
         "enabled": {
           "type": "boolean",
           "default": true
@@ -618,6 +677,22 @@
       "description": "Limits on the routes that need no credentials, and on the storefront routes that call\nrate apps. Counted per instance.",
       "type": "object",
       "properties": {
+        "agent_call": {
+          "description": "An agent's calls, per agent: reads, previews, proposals and writes.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 120,
+            "per": "500ms"
+          }
+        },
+        "agent_write": {
+          "description": "An agent's writes and proposals, per agent: few, since each changes the store or\nasks a person to look.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 20,
+            "per": "3s"
+          }
+        },
         "cart_create_ip": {
           "description": "Creating carts, per client address.",
           "$ref": "#/$defs/Quota",

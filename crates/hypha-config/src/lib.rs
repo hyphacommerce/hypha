@@ -26,7 +26,7 @@ use hypha_search::SyncSettings;
 use ipnet::IpNet;
 use thiserror::Error;
 
-pub use file::{EmailSender, File, Quota, RateLimits, SmtpTls, Transforms};
+pub use file::{AgentWrites, EmailSender, File, Quota, RateLimits, SmtpTls, Transforms};
 pub use units::{Dur, Size, UnitError};
 
 /// The file read when `HYPHA_CONFIG` names none, if it's there.
@@ -65,16 +65,30 @@ pub struct Config {
 }
 
 /// Agents, and previews of writes (`[agents]`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentsConfig {
+    /// Whether agents may act at all.
+    pub enabled: bool,
+    /// The operator's cap on what any agent writes.
+    pub writes: hypha_agents::WritesCap,
     /// The statement timeout of a previewed write's transaction.
     pub preview_timeout: Duration,
+    /// How long a preview's token applies its write.
+    pub preview_token_lifetime: Duration,
+    /// How long proposals wait and the call log is kept.
+    pub settings: hypha_agents::AgentSettings,
 }
 
 impl Default for AgentsConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
+            writes: hypha_agents::WritesCap::Apply,
             preview_timeout: Duration::from_secs(5),
+            // Long enough to read a preview and send it back; short enough that what it
+            // previewed is still what's there.
+            preview_token_lifetime: Duration::from_secs(15 * 60),
+            settings: hypha_agents::AgentSettings::default(),
         }
     }
 }
@@ -251,6 +265,8 @@ pub enum Broken {
     NotPort(String),
     #[error("can't be empty")]
     Empty,
+    #[error("is `apply`, `propose` or `off`, not {0:?}")]
+    NotAgentWrites(String),
 }
 
 fn because_of(key: Option<&str>) -> String {
@@ -278,6 +294,7 @@ impl ErrorCode for Broken {
             Broken::NotTls(_) => "config_not_tls",
             Broken::NotPort(_) => "config_not_port",
             Broken::Empty => "config_empty",
+            Broken::NotAgentWrites(_) => "config_not_agent_writes",
         }
     }
 }
@@ -395,6 +412,16 @@ fn apply_env(
     if let Some(url) = env("HYPHA_MEDIA_URL") {
         file.media.public_url = Some(url);
         set.push(("media.public_url", "HYPHA_MEDIA_URL"));
+    }
+    match env("HYPHA_AGENT_WRITES").as_deref() {
+        None => {}
+        Some("apply") => file.agents.writes = file::AgentWrites::Apply,
+        Some("propose") => file.agents.writes = file::AgentWrites::Propose,
+        Some("off") => file.agents.writes = file::AgentWrites::Off,
+        Some(other) => problems.push(Problem {
+            key: "HYPHA_AGENT_WRITES".to_string(),
+            broken: Broken::NotAgentWrites(other.to_string()),
+        }),
     }
     match env("HYPHA_MEDIA_TRANSFORMS").as_deref() {
         None => {}
@@ -590,6 +617,18 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
         Duration::from_millis(100),
         Duration::from_secs(30),
     );
+    p.between(
+        "agents.proposal_lifetime",
+        file.agents.proposal_lifetime,
+        Duration::from_secs(3600),
+        Duration::from_secs(90 * 24 * 3600),
+    );
+    p.between(
+        "agents.preview_token_lifetime",
+        file.agents.preview_token_lifetime,
+        Duration::from_secs(60),
+        Duration::from_secs(24 * 3600),
+    );
 
     // URLs.
     let media = &file.media;
@@ -740,6 +779,7 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             "jobs.prune.extension_calls_after",
             jobs.prune.extension_calls_after,
         ),
+        ("jobs.prune.agent_calls_after", jobs.prune.agent_calls_after),
         ("jobs.idle_interval", jobs.idle_interval),
     ] {
         p.at_least(key, value, Duration::from_millis(1));
@@ -962,7 +1002,14 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
         },
         rate_limits: file.rate_limits.clone(),
         agents: AgentsConfig {
+            enabled: file.agents.enabled,
+            writes: file.agents.writes.cap(),
             preview_timeout: file.agents.preview_timeout.0,
+            preview_token_lifetime: file.agents.preview_token_lifetime.0,
+            settings: hypha_agents::AgentSettings {
+                proposal_lifetime: file.agents.proposal_lifetime.0,
+                keep_calls: jobs.prune.agent_calls_after.0,
+            },
         },
         spores: file.spores.clone(),
         effective: file.clone(),
@@ -1425,6 +1472,61 @@ mod tests {
         let config = Config::load(None, empty).unwrap();
         assert_eq!(config.media.public_url, None);
         assert_eq!(config.server.bind, "127.0.0.1:3000");
+    }
+
+    #[test]
+    fn agents_writes_are_capped_by_the_file_or_the_environment() {
+        use hypha_agents::WritesCap;
+        assert_eq!(load("").unwrap().agents.writes, WritesCap::Apply);
+        assert!(load("").unwrap().agents.enabled);
+        let config = load("[agents]\nwrites = \"propose\"\nenabled = false").unwrap();
+        assert_eq!(
+            (config.agents.writes, config.agents.enabled),
+            (WritesCap::Propose, false)
+        );
+        let config = Config::load(
+            Some("[agents]\nwrites = \"propose\""),
+            env(&[("HYPHA_AGENT_WRITES", "off")]),
+        )
+        .unwrap();
+        assert_eq!(config.agents.writes, WritesCap::Off, "the environment wins");
+        assert_eq!(
+            problems(Config::load(None, env(&[("HYPHA_AGENT_WRITES", "all")]))),
+            ["HYPHA_AGENT_WRITES: is `apply`, `propose` or `off`, not \"all\""]
+        );
+        assert!(load("[agents]\nwrites = \"all\"").is_err());
+    }
+
+    #[test]
+    fn agents_lifetimes_have_bounds() {
+        let config = load("").unwrap();
+        assert_eq!(
+            config.agents.preview_token_lifetime,
+            Duration::from_secs(900)
+        );
+        assert_eq!(
+            config.agents.settings,
+            hypha_agents::AgentSettings::default()
+        );
+        let config =
+            load("[agents]\nproposal_lifetime = \"2d\"\n[jobs.prune]\nagent_calls_after = \"3d\"")
+                .unwrap();
+        assert_eq!(
+            config.agents.settings,
+            hypha_agents::AgentSettings {
+                proposal_lifetime: Duration::from_secs(2 * 86400),
+                keep_calls: Duration::from_secs(3 * 86400),
+            }
+        );
+        assert_eq!(
+            problems(load(
+                "[agents]\npreview_token_lifetime = \"59s\"\nproposal_lifetime = \"91d\""
+            )),
+            [
+                "agents.preview_token_lifetime: is 59s, at least 1m is needed",
+                "agents.proposal_lifetime: is 91d, at most 90d",
+            ]
+        );
     }
 
     #[test]

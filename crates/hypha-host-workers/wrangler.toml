@@ -122,3 +122,13 @@ simple = { limit = 12, period = 60 }
 name = "RL_CUSTOMER_LOGIN_EMAIL_FROM_IP"
 namespace_id = "1015"
 simple = { limit = 6, period = 60 }
+
+[[ratelimits]]
+name = "RL_AGENT_CALL"
+namespace_id = "1016"
+simple = { limit = 240, period = 60 }
+
+[[ratelimits]]
+name = "RL_AGENT_WRITE"
+namespace_id = "1017"
+simple = { limit = 40, period = 60 }

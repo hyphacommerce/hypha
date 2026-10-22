@@ -63,11 +63,15 @@ pub enum Rule {
     /// `POST /storefront/auth/login`, per email and address: guesses at one account from
     /// one place.
     CustomerLoginEmailFromIp,
+    /// Every call an agent makes (reads, previews, proposals, writes), per agent.
+    AgentCall,
+    /// An agent's writes and proposals, per agent, on top of `AgentCall`.
+    AgentWrite,
 }
 
 impl Rule {
     /// In declaration order: an in-memory limiter can index by `rule as usize`.
-    pub const ALL: [Rule; 16] = [
+    pub const ALL: [Rule; 18] = [
         Rule::LoginIp,
         Rule::LoginEmailFromIp,
         Rule::LoginEmail,
@@ -84,6 +88,8 @@ impl Rule {
         Rule::CodeEmailFromIp,
         Rule::CustomerLoginIp,
         Rule::CustomerLoginEmailFromIp,
+        Rule::AgentCall,
+        Rule::AgentWrite,
     ];
 
     /// The rule's key under `[rate_limits]` (`login_ip`): a contract with operators,
@@ -106,6 +112,8 @@ impl Rule {
             Rule::CodeEmailFromIp => "code_email_from_ip",
             Rule::CustomerLoginIp => "customer_login_ip",
             Rule::CustomerLoginEmailFromIp => "customer_login_email_from_ip",
+            Rule::AgentCall => "agent_call",
+            Rule::AgentWrite => "agent_write",
         }
     }
 
@@ -130,6 +138,8 @@ impl Rule {
             Rule::CodeEmailFromIp => "RL_CODE_EMAIL_FROM_IP",
             Rule::CustomerLoginIp => "RL_CUSTOMER_LOGIN_IP",
             Rule::CustomerLoginEmailFromIp => "RL_CUSTOMER_LOGIN_EMAIL_FROM_IP",
+            Rule::AgentCall => "RL_AGENT_CALL",
+            Rule::AgentWrite => "RL_AGENT_WRITE",
         }
     }
 
@@ -154,6 +164,8 @@ impl Rule {
             Rule::CodeEmailFromIp => 13,
             Rule::CustomerLoginIp => 14,
             Rule::CustomerLoginEmailFromIp => 15,
+            Rule::AgentCall => 16,
+            Rule::AgentWrite => 17,
         }
     }
 
@@ -185,6 +197,8 @@ impl Rule {
             Rule::CodeEmailFromIp => limits.code_email_from_ip,
             Rule::CustomerLoginIp => limits.customer_login_ip,
             Rule::CustomerLoginEmailFromIp => limits.customer_login_email_from_ip,
+            Rule::AgentCall => limits.agent_call,
+            Rule::AgentWrite => limits.agent_write,
         };
         (quota.burst, quota.per.0)
     }
