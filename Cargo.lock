@@ -1480,6 +1480,7 @@ dependencies = [
  "hypha-payments",
  "hypha-testkit",
  "pollster",
+ "serde_json",
  "thiserror",
  "uuid",
 ]
@@ -1524,7 +1525,6 @@ version = "0.1.0"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
- "pollster",
  "serde",
  "serde_json",
  "thiserror",

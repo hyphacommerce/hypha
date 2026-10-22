@@ -1135,6 +1135,19 @@ mod tests {
     }
 
     #[test]
+    fn restore_rejects_a_shipping_line_naming_an_unknown_line() {
+        let mut shipping = shipping_line(400, None);
+        shipping.lines = vec![line_id(9)];
+        let mut s = placed().snapshot();
+        s.shipping_address = Some(zagreb());
+        s.shipping_lines = vec![shipping];
+        assert_eq!(
+            Order::restore(s),
+            Err(OrderError::UnknownShippedLine(line_id(9)))
+        );
+    }
+
+    #[test]
     fn restore_rejects_a_status_the_lines_dont_have() {
         let mut s = placed().snapshot();
         s.fulfillment_status = FulfillmentStatus::Fulfilled;
@@ -1153,6 +1166,10 @@ mod tests {
         ] {
             assert_eq!(status.as_str().parse(), Ok(status));
         }
+        assert_eq!(
+            "shipped".parse::<FulfillmentStatus>(),
+            Err("shipped".to_string())
+        );
         for reason in [
             CancelReason::Customer,
             CancelReason::Inventory,
@@ -1281,14 +1298,5 @@ mod tests {
         assert_eq!(OrderNumber::new(0), Err(OrderError::InvalidNumber(0)));
         assert_eq!(OrderNumber::new(1).map(OrderNumber::value), Ok(1));
         assert_eq!(OrderNumber::new(1001).unwrap().to_string(), "#1001");
-    }
-
-    #[test]
-    fn statuses_parse_back_from_their_strings() {
-        assert_eq!("unfulfilled".parse(), Ok(FulfillmentStatus::Unfulfilled));
-        assert_eq!(
-            "shipped".parse::<FulfillmentStatus>(),
-            Err("shipped".to_string())
-        );
     }
 }

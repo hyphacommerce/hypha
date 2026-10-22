@@ -288,6 +288,24 @@ mod tests {
     }
 
     #[test]
+    fn at_most_twenty_facets() {
+        let mut s = SearchSettings::default();
+        let options = |n: usize| {
+            (0..n)
+                .map(|i| FacetSetting {
+                    key: FacetKey::Option(format!("option {i}")),
+                    label: None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(s.set_facets(options(SearchSettings::MAX_FACETS)), Ok(()));
+        assert_eq!(
+            s.set_facets(options(SearchSettings::MAX_FACETS + 1)),
+            Err(SearchError::TooManyFacets { max: 20 })
+        );
+    }
+
+    #[test]
     fn one_event_names_every_changed_field() {
         let mut s = SearchSettings::default();
         s.set_split_by(names(&["Color"])).unwrap();

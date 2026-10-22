@@ -11,13 +11,12 @@ hypha-auth = { path = "../hypha-auth" }
 hypha-inventory = { path = "../hypha-inventory" }
 hypha-markets = { path = "../hypha-markets" }
 hypha-products = { path = "../hypha-products" }
-uuid.workspace = true
 
 [dev-dependencies]
 hypha-testkit = { path = "../hypha-testkit" }
-hypha-apps = { path = "../hypha-apps" }
 pollster = "0.4"
 serde_json.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

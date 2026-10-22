@@ -1,14 +1,18 @@
 //! `Mailer`: the event handler that queues emails to buyers and staff about orders. It
 //! renders and records; the send job sends.
 
-use hypha_core::{Email, EventHandler, EventId, FulfillmentId, OrderId, StoredEvent, Timezone};
-use hypha_fulfillment::{Fulfillment, FulfillmentRepo, HasFulfillments};
+use hypha_core::{
+    Email, Event, EventHandler, EventId, FulfillmentId, OrderId, StoredEvent, Timezone,
+};
+use hypha_fulfillment::{
+    Fulfillment, FulfillmentCreated, FulfillmentRepo, FulfillmentUpdated, HasFulfillments,
+};
 use hypha_media::HasAssets;
 use hypha_notifications::{
     HasNotificationSettings, HasNotificationTemplates, HasNotifications, Notification,
     NotificationRepo, TemplateKey,
 };
-use hypha_orders::{HasOrders, Order, OrderRepo};
+use hypha_orders::{HasOrders, Order, OrderCancelled, OrderPlaced, OrderRepo};
 use hypha_payments::{HasPayments, Payment, newest_payment};
 use hypha_stores::StoreRepo;
 use serde::Deserialize;
@@ -51,10 +55,10 @@ impl<T> MailPorts for T where
 }
 
 /// The event types the mailer answers.
-pub const ORDER_PLACED: &str = "order.placed";
-pub const ORDER_CANCELLED: &str = "order.cancelled";
-pub const FULFILLMENT_CREATED: &str = "fulfillment.created";
-pub const FULFILLMENT_UPDATED: &str = "fulfillment.updated";
+pub const ORDER_PLACED: &str = <OrderPlaced as Event>::TYPE;
+pub const ORDER_CANCELLED: &str = <OrderCancelled as Event>::TYPE;
+pub const FULFILLMENT_CREATED: &str = <FulfillmentCreated as Event>::TYPE;
+pub const FULFILLMENT_UPDATED: &str = <FulfillmentUpdated as Event>::TYPE;
 
 /// Emails about orders, on their events:
 /// - `order.placed`: `order_confirmation` to the buyer, `staff_new_order` to each staff

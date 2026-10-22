@@ -82,10 +82,6 @@ impl SendError {
             SendError::Transient(message) | SendError::Permanent(message) => message,
         }
     }
-
-    pub fn is_transient(&self) -> bool {
-        matches!(self, SendError::Transient(_))
-    }
 }
 
 impl ErrorCode for SendError {

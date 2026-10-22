@@ -67,14 +67,6 @@ impl NotificationStatus {
             (S::Queued, S::Sending) | (S::Sending, S::Sent | S::Failed | S::Queued | S::Sending)
         )
     }
-
-    /// Whether nothing more happens to it.
-    pub fn is_final(self) -> bool {
-        matches!(
-            self,
-            NotificationStatus::Sent | NotificationStatus::Failed | NotificationStatus::Skipped
-        )
-    }
 }
 
 impl fmt::Display for NotificationStatus {
@@ -704,7 +696,6 @@ mod tests {
         failed.failed("smtp", "550 refused").unwrap();
         assert_eq!(failed.email(), None);
         for n in [&mut sent, &mut failed] {
-            assert!(n.status().is_final());
             assert_eq!(
                 n.lease(at(1_000), at(2_000)),
                 Err(NotificationError::NotDue(n.id()))
@@ -730,6 +721,19 @@ mod tests {
                 to: NotificationStatus::Sent,
             })
         );
+    }
+
+    #[test]
+    fn redacting_a_leased_message_skips_it() {
+        let mut n = leased();
+        let placeholder = Email::placeholder(Uuid::from_u128(7));
+        assert!(n.redact(placeholder.clone()));
+        assert_eq!(n.status(), NotificationStatus::Skipped);
+        assert_eq!(n.to(), &placeholder);
+        assert_eq!(n.subject(), "");
+        assert_eq!((n.lease_until(), n.next_attempt_at()), (None, None));
+        assert_eq!(n.email(), None);
+        assert!(!n.redact(placeholder), "a second run changes nothing");
     }
 
     #[test]

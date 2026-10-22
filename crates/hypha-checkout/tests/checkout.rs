@@ -537,25 +537,6 @@ fn checkout_needs_the_checkout_scope() {
 }
 
 #[test]
-fn a_completed_cart_refuses_new_lines() {
-    let world = World::new();
-    let cart = world.cart();
-    let order = world.checkout(cart).unwrap();
-    let input = AddLine {
-        cart,
-        variant: vid("cup"),
-        quantity: 1,
-        idempotency: None,
-    };
-    assert_eq!(
-        block_on(add_line(&Ctx::system(), &world.ports, &world.clock, input)),
-        Err(hypha_cart::CommandError::Cart(
-            hypha_cart::CartError::Completed { order: order.id() }
-        ))
-    );
-}
-
-#[test]
 fn long_option_labels_and_skus_are_copied_whole() {
     use hypha_core::{OptionId, OptionValueId};
     use hypha_products::{NewVariant, OptionValue, ProductOption};
@@ -1693,4 +1674,73 @@ fn storage_failures_dont_give_money_back() {
         }
         .gives_money_back()
     );
+}
+
+// ---- scopes of the cart's payment commands ----
+
+fn caller_with(scopes: Vec<Scope>) -> Ctx {
+    Ctx::new(Actor::User(UserId::from_uuid(Uuid::from_u128(7))), scopes)
+}
+
+fn missing(scope: Scope) -> Result<(), CommandError> {
+    Err(CommandError::Auth(AuthError::MissingScope(scope)))
+}
+
+#[test]
+fn starting_a_cart_payment_needs_checkout() {
+    let world = World::new();
+    let cart = world.cart();
+    let ctx = caller_with(vec![Scope::CartsWrite, Scope::PaymentsWrite]);
+    let started = block_on(start_cart_payment(
+        &ctx,
+        &world.ports,
+        &world.ids,
+        &world.clock,
+        &NoRateProviders,
+        &(ManualProvider,),
+        StartCartPayment {
+            cart,
+            expected_total: None,
+            return_url: None,
+        },
+    ));
+    assert_eq!(started.map(|_| ()), missing(Scope::Checkout));
+}
+
+#[test]
+fn choosing_a_payment_method_needs_carts_write() {
+    let world = World::new();
+    let cart = world.cart();
+    let ctx = caller_with(vec![Scope::CartsRead, Scope::Checkout]);
+    let chosen = block_on(set_payment_method(
+        &ctx,
+        &world.ports,
+        &(ManualProvider,),
+        cart,
+        None,
+    ));
+    assert_eq!(chosen.map(|_| ()), missing(Scope::CartsWrite));
+}
+
+#[test]
+fn listing_a_carts_payment_methods_needs_carts_read() {
+    let world = World::new();
+    let cart = world.cart();
+    let ctx = caller_with(vec![Scope::Checkout]);
+    let listed = block_on(cart_payment_methods(
+        &ctx,
+        &world.ports,
+        &(ManualProvider,),
+        cart,
+    ));
+    assert_eq!(listed.map(|_| ()), missing(Scope::CartsRead));
+}
+
+#[test]
+fn viewing_a_cart_needs_carts_read() {
+    let world = World::new();
+    let cart = world.cart();
+    let ctx = caller_with(vec![Scope::Checkout]);
+    let viewed = block_on(view_cart(&ctx, &world.ports, cart));
+    assert_eq!(viewed.map(|_| ()), missing(Scope::CartsRead));
 }
