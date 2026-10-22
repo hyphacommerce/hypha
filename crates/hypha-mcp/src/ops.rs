@@ -8,8 +8,9 @@ use serde_json::{Map, Value};
 
 /// An operation's stable ID, the OpenAPI `operationId` (`admin.products.update`).
 ///
-/// It doubles as a tool name, so it keeps to the characters the MCP specification
-/// recommends for those: 1 to 128 ASCII letters, digits, `.`, `_` and `-`.
+/// 1 to 128 ASCII letters, digits, `.`, `_` and `-`, never `__` nor an `_` beside a
+/// `.`: a direct tool's name is the ID with each `.` as `__`, which only reads back
+/// (and never names two IDs alike) while the ID can't hold those.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct OperationId(String);
@@ -21,6 +22,7 @@ impl OperationId {
         let raw = raw.into();
         let valid = !raw.is_empty()
             && raw.len() <= Self::MAX_LEN
+            && !["__", "._", "_."].iter().any(|pair| raw.contains(pair))
             && raw
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
@@ -34,6 +36,22 @@ impl OperationId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// The name of the operation's direct tool. Model APIs (Anthropic's, OpenAI's)
+    /// take only `[a-zA-Z0-9_-]` in tool names, and MCP clients pass names through
+    /// to them, so a dot can't stay.
+    pub fn tool_name(&self) -> String {
+        self.0.replace('.', "__")
+    }
+
+    /// The operation a direct tool's name stands for.
+    pub fn from_tool_name(name: &str) -> Result<Self, InvalidOperationId> {
+        // A dot is never in a tool name, so the dotted ID doesn't pass for one.
+        if name.contains('.') {
+            return Err(InvalidOperationId(name.to_string()));
+        }
+        Self::new(name.replace("__", "."))
+    }
 }
 
 impl fmt::Display for OperationId {
@@ -43,7 +61,9 @@ impl fmt::Display for OperationId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("invalid operation ID {0:?}: expected 1 to 128 ASCII letters, digits, '.', '_' or '-'")]
+#[error(
+    "invalid operation ID {0:?}: expected 1 to 128 ASCII letters, digits, '.', '_' or '-', without \"__\" or an '_' beside a '.'"
+)]
 pub struct InvalidOperationId(pub String);
 
 impl ErrorCode for InvalidOperationId {
@@ -248,6 +268,38 @@ mod tests {
                 Err(InvalidOperationId(raw.to_string()))
             );
         }
+    }
+
+    #[test]
+    fn operation_ids_refuse_a_double_underscore() {
+        assert_eq!(
+            OperationId::new("admin.orders__list"),
+            Err(InvalidOperationId("admin.orders__list".into()))
+        );
+    }
+
+    #[test]
+    fn a_tool_name_has_no_dots_and_reads_back() {
+        let id = OperationId::new("admin.orders.mark_paid").unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(id.tool_name(), "admin__orders__mark_paid");
+        assert_eq!(OperationId::from_tool_name(&id.tool_name()), Ok(id));
+    }
+
+    #[test]
+    fn a_dotted_id_is_not_a_tool_name() {
+        assert_eq!(
+            OperationId::from_tool_name("admin.orders.list"),
+            Err(InvalidOperationId("admin.orders.list".into()))
+        );
+    }
+
+    #[test]
+    fn an_underscore_beside_a_dot_is_refused() {
+        // "a._b" and "a_.b" would both be the tool "a___b".
+        for raw in ["a._b", "a_.b"] {
+            assert_eq!(OperationId::new(raw), Err(InvalidOperationId(raw.into())));
+        }
+        assert!(OperationId::from_tool_name("a___b").is_err());
     }
 
     #[test]

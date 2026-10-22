@@ -54,5 +54,5 @@ pub use ops::{
 pub use protocol::{
     Headers, LEGACY_VERSIONS, METHOD_HEADER, MODERN_VERSIONS, NAME_HEADER, PROTOCOL_VERSION_HEADER,
 };
-pub use server::{ConfigError, McpRequest, McpResponse, Server, ServerConfig};
+pub use server::{ConfigError, MAX_TOOL_NAME_LEN, McpRequest, McpResponse, Server, ServerConfig};
 pub use tools::{DEFAULT_INSTRUCTIONS, FIXED_TOOLS};

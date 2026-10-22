@@ -52,6 +52,8 @@ pub enum ConfigError {
     DirectToolShadowsFixed(OperationId),
     #[error("direct tool {0} is listed twice")]
     DuplicateDirectTool(OperationId),
+    #[error("direct tool {0}'s name is over 64 characters, which model APIs refuse")]
+    DirectToolNameTooLong(OperationId),
 }
 
 impl ErrorCode for ConfigError {
@@ -59,6 +61,7 @@ impl ErrorCode for ConfigError {
         match self {
             Self::DirectToolShadowsFixed(_) => "direct_tool_shadows_fixed",
             Self::DuplicateDirectTool(_) => "duplicate_direct_tool",
+            Self::DirectToolNameTooLong(_) => "direct_tool_name_too_long",
         }
     }
 }
@@ -103,7 +106,11 @@ pub struct Server {
 impl Server {
     pub fn new(config: ServerConfig) -> Result<Self, ConfigError> {
         for (i, id) in config.direct_tools.iter().enumerate() {
-            if FIXED_TOOLS.contains(&id.as_str()) {
+            let name = id.tool_name();
+            if name.len() > MAX_TOOL_NAME_LEN {
+                return Err(ConfigError::DirectToolNameTooLong(id.clone()));
+            }
+            if FIXED_TOOLS.contains(&name.as_str()) {
                 return Err(ConfigError::DirectToolShadowsFixed(id.clone()));
             }
             if config.direct_tools[..i].contains(id) {
@@ -293,7 +300,7 @@ impl Server {
             }
         };
         let outcome = match name {
-            FIND_OPERATIONS => find_operations(ops, args).await,
+            FIND_OPERATIONS => find_operations(ops, &self.config.direct_tools, args).await,
             DESCRIBE_OPERATION => describe_operation(ops, args).await,
             CALL => call(ops, args).await,
             GET_PROPOSAL => get_proposal(ops, args).await,
@@ -328,12 +335,10 @@ impl Server {
         id: &Value,
         name: &str,
     ) -> Result<Option<OperationId>, RpcError> {
-        let Some(operation) = self
-            .config
-            .direct_tools
-            .iter()
-            .find(|op| op.as_str() == name)
-        else {
+        let Ok(wanted) = OperationId::from_tool_name(name) else {
+            return Ok(None);
+        };
+        let Some(operation) = self.config.direct_tools.iter().find(|op| **op == wanted) else {
             return Ok(None);
         };
         let visible = ops.visible().await.map_err(|e| internal(id, e))?;
@@ -343,6 +348,11 @@ impl Server {
             .then(|| operation.clone()))
     }
 }
+
+/// The longest tool name the Anthropic and OpenAI APIs take. Clients that prefix
+/// names (Claude Code's `mcp__<server>__`) eat into it, so the curated IDs stay well
+/// under.
+pub const MAX_TOOL_NAME_LEN: usize = 64;
 
 /// A failure behind the port: the client learns only that it happened.
 fn internal(id: &Value, _error: McpError) -> RpcError {
@@ -371,7 +381,11 @@ fn operation_id(raw: String) -> Result<OperationId, Value> {
     })
 }
 
-async fn find_operations<O: Operations>(ops: &O, args: Map<String, Value>) -> Outcome {
+async fn find_operations<O: Operations>(
+    ops: &O,
+    direct_tools: &[OperationId],
+    args: Map<String, Value>,
+) -> Outcome {
     let args: FindArgs = args!(args);
     let limit = args
         .limit
@@ -383,7 +397,7 @@ async fn find_operations<O: Operations>(ops: &O, args: Map<String, Value>) -> Ou
     let operations: Vec<Value> = ranked
         .into_iter()
         .take(limit)
-        .map(tools::summary_json)
+        .map(|op| tools::summary_json(op, direct_tools.contains(&op.id)))
         .collect();
     Ok(tools::json_result(
         json!({"operations": operations, "matches": matches}),
@@ -470,6 +484,24 @@ mod tests {
             Server::new(config).err(),
             Some(ConfigError::DirectToolShadowsFixed(id("call")))
         );
+    }
+
+    #[test]
+    fn a_direct_tool_name_fits_model_apis() {
+        // 32 segments of "ab": 95 characters as an ID, 126 as a tool name.
+        let long = ["ab"; 32].join(".");
+        let mut config = ServerConfig::new("hypha", "0.1.0");
+        config.direct_tools = vec![id(&long)];
+        assert_eq!(
+            Server::new(config).err(),
+            Some(ConfigError::DirectToolNameTooLong(id(&long)))
+        );
+        // Exactly 64 is fine: each ".ab" becomes "__ab", so "abcd" and 15 of them.
+        let edge = format!("abcd{}", ".ab".repeat(15));
+        assert_eq!(id(&edge).tool_name().len(), 64);
+        let mut config = ServerConfig::new("hypha", "0.1.0");
+        config.direct_tools = vec![id(&edge)];
+        assert!(Server::new(config).is_ok());
     }
 
     #[test]

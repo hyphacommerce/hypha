@@ -38,7 +38,9 @@ pub const DEFAULT_INSTRUCTIONS: &str = "\
 This server operates a Hypha store's admin for its staff. Every admin operation you may \
 use is reachable by its operation ID (such as admin.orders.list): search them with \
 find_operations, read one's inputs, answer and error codes with describe_operation, then \
-run it with call. The common jobs also have direct tools named after their operation.
+run it with call. The common jobs also have direct tools, named after their operation \
+with each dot as two underscores (admin__orders__list); call and describe_operation take \
+the dotted ID.
 
 Writes are never blind. Call a write with mode \"preview\" first: it runs for real and is \
 rolled back, and answers what the write would return, the events it would record and the \
@@ -86,7 +88,9 @@ pub fn fixed_definitions() -> Vec<Value> {
         want to do (\"cancel order\", \"stock level\", \"price list\"). Answers each match's \
         operation ID, summary, whether it reads or writes, and your mode for it: read, propose (an \
         apply becomes a proposal a staff member approves) or apply. Best matches first. Then use \
-        describe_operation for its inputs.",
+        describe_operation for its inputs. Operation IDs are dotted (admin.orders.list) and are \
+        what describe_operation and call take; an operation that also has a direct tool shows \
+        that tool's name (admin__orders__list: the same ID, each dot as two underscores).",
             "inputSchema": object_schema(json!({
                 "query": {
                     "type": "string",
@@ -130,7 +134,8 @@ pub fn fixed_definitions() -> Vec<Value> {
         first to see exactly what it would change, events and emails included, with nothing \
         saved; then \"apply\". Under a propose grant, apply stores a proposal for a staff member \
         to approve instead (the answer names it; follow it with get_proposal). A failure answers \
-        Hypha's {code, error, details}: fix what they point to and retry.",
+        Hypha's {code, error, details}: fix what they point to and retry. Give the dotted \
+        operation ID (admin.orders.fetch), never a direct tool's name.",
             "inputSchema": object_schema(json!({
                 "operation": {
                     "type": "string",
@@ -244,7 +249,7 @@ saved, the answer shows exactly what would change), then apply."
 
     let read = summary.access == Access::Read;
     json!({
-        "name": summary.id,
+        "name": summary.id.tool_name(),
         "title": summary.summary,
         "description": description,
         "inputSchema": object_schema(Value::Object(properties), &required),
@@ -426,14 +431,20 @@ fn singular(word: &str) -> String {
     word.to_string()
 }
 
-pub fn summary_json(op: &OperationSummary) -> Value {
-    json!({
+/// One found operation; `direct` when it also has a tool of its own, whose name is
+/// given beside the ID.
+pub fn summary_json(op: &OperationSummary, direct: bool) -> Value {
+    let mut found = json!({
         "operation": op.id,
         "summary": op.summary,
         "tags": op.tags,
         "access": op.access,
         "mode": op.mode,
-    })
+    });
+    if direct && let Value::Object(found) = &mut found {
+        found.insert("tool".into(), json!(op.id.tool_name()));
+    }
+    found
 }
 
 pub fn schema_json(schema: &OperationSchema) -> Value {
@@ -677,7 +688,7 @@ mod tests {
             scopes: vec!["orders:write".into()],
         };
         let tool = direct_definition(&schema);
-        assert_eq!(tool["name"], "admin.orders.cancel");
+        assert_eq!(tool["name"], "admin__orders__cancel");
         assert_eq!(tool["inputSchema"]["required"], json!(["params"]));
         assert_eq!(
             tool["inputSchema"]["properties"]["mode"]["default"],

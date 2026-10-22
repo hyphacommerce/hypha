@@ -266,8 +266,8 @@ fn lists_the_fixed_tools_then_the_visible_direct_ones() {
             "get_proposal",
             "list_proposals",
             "whoami",
-            "admin.orders.list",
-            "admin.inventory.adjust_level",
+            "admin__orders__list",
+            "admin__inventory__adjust_level",
         ]
     );
     assert_eq!(result["resultType"], "complete");
@@ -288,7 +288,7 @@ fn a_direct_tool_carries_its_operation_schema() {
         .as_array()
         .and_then(|t| {
             t.iter()
-                .find(|t| t["name"] == "admin.inventory.adjust_level")
+                .find(|t| t["name"] == "admin__inventory__adjust_level")
         })
         .cloned()
         .unwrap_or(Value::Null);
@@ -380,11 +380,32 @@ fn a_proposal_answers_its_id_and_link() {
 #[test]
 fn a_direct_tool_calls_its_operation() {
     let ops = FakeOps::new();
-    let result = call_tool(&ops, "admin.orders.list", json!({"query": {"limit": 2}}));
+    let result = call_tool(&ops, "admin__orders__list", json!({"query": {"limit": 2}}));
     assert_eq!(result["isError"], false);
     let calls = ops.calls();
     assert_eq!(calls[0].operation.as_str(), "admin.orders.list");
     assert_eq!(calls[0].query.get("limit"), Some(&json!(2)));
+}
+
+#[test]
+fn a_direct_tool_is_not_called_by_its_dotted_id() {
+    let ops = FakeOps::new();
+    let response = modern(
+        &ops,
+        "tools/call",
+        json!({"name": "admin.orders.list", "arguments": {}}),
+    );
+    assert_eq!(body(&response)["error"]["code"], -32602);
+    assert!(ops.calls().is_empty());
+}
+
+#[test]
+fn call_takes_the_dotted_id_not_the_tool_name() {
+    let ops = FakeOps::new();
+    let result = call_tool(&ops, "call", json!({"operation": "admin__orders__list"}));
+    assert_eq!(result["isError"], true);
+    assert_eq!(result["structuredContent"]["code"], "invalid_arguments");
+    assert!(ops.calls().is_empty());
 }
 
 #[test]
@@ -393,12 +414,12 @@ fn a_direct_tool_the_caller_cannot_see_is_unknown() {
     let response = modern(
         &ops,
         "tools/call",
-        json!({"name": "admin.customers.list", "arguments": {}}),
+        json!({"name": "admin__customers__list", "arguments": {}}),
     );
     assert_eq!(response.status, 200);
     assert_eq!(
         body(&response)["error"],
-        json!({"code": -32602, "message": "Unknown tool: admin.customers.list"})
+        json!({"code": -32602, "message": "Unknown tool: admin__customers__list"})
     );
     assert!(ops.calls().is_empty());
 }
@@ -453,7 +474,8 @@ fn find_operations_ranks_what_the_caller_sees() {
                 {"operation": "admin.orders.cancel", "summary": "Cancel an order",
                  "tags": ["orders"], "access": "write", "mode": "propose"},
                 {"operation": "admin.orders.list", "summary": "List orders",
-                 "tags": ["orders"], "access": "read", "mode": "read"},
+                 "tags": ["orders"], "access": "read", "mode": "read",
+                 "tool": "admin__orders__list"},
             ],
             "matches": 2,
         })
