@@ -636,3 +636,80 @@ with Claude Code's `mcp__hypha__`. Only tool names are mapped: `find_operations`
 answers, `describe_operation` and `call` take and show the dotted ID, and
 `find_operations` gives a curated operation's tool name beside it (`tool`). The fixed
 tools' names have no dots and are unchanged.
+
+## As built: hosting agents (M2–M4)
+
+- **Tokens are stored, hashed** (`preview_tokens`, migration 0070), not sealed. A token
+  must stay short whatever the write created (a sealed token carrying 300 IDs is a 6 KB
+  header, past what proxies take), it must be single use (which needs a write anyway), and
+  storing it makes "used" a row update inside the apply's own transaction: two applies
+  racing with one token serialize on its row, and a write that rolls back (stale, failed)
+  leaves it unused. The record (`hypha_core::PreviewToken`, port `PreviewTokenRepo`) sits
+  in core beside idempotency keys: a mechanism every command shares, owned by none. It's
+  bound to the actor and to the request's fingerprint (method, path, query and canonical
+  body, `extract::fingerprint`, the one idempotency keys use), which is stricter than "the
+  operation": a token for product A can't apply to product B even if no event would tell.
+  It's issued after the preview's ROLLBACK, on the same connection (`PgPreview::finish`),
+  so a preview stays one connection. A preview with `complete: false`, or of a route
+  without credentials, gets none.
+- **One commit path for applies.** A write sent with `Hypha-Preview-Token` runs like a
+  preview, in one outer transaction (`PgStore::begin_apply`: each write's transaction a
+  savepoint), so the whole request commits or nothing does; once the handler is done its
+  events are read back by `seq` (as M1 does), digested (`preview::digest`) and compared:
+  equal, `COMMIT` and the dispatch hook told; different, `ROLLBACK` and `409
+  preview_stale` with a fresh preview built from the run and a token for it (its `emails`
+  and `calls` are empty: in an apply those effects ran). This is the `Tx`/`end_transaction`
+  path M1 described, lifted to the request: checking per transaction would commit the first
+  of a request's writes before the last could be compared. The token is claimed in
+  `Caller::authenticate` (and `StaffCaller`), in that transaction; the preview's IDs are
+  handed out first by `HostIds` (`preview::applying`), then fresh ones. A used token is
+  `409 preview_used`; a retry of an applied write sends its `Idempotency-Key` without the
+  token to get the replay (with the token it would be refused before the key is read).
+  Known gap: an email sent while answering (an invite) goes out before a stale apply rolls
+  back; holding emails until the commit is a follow-up.
+- **The operations index** (`hypha-http`'s `operations.rs`, `AppState::operations()`): the
+  admin rows of the route table and the build's spores' (`Deployment::spore_rows`, now on
+  the Workers deployment too), each with its `OperationId`, method, path, `write`,
+  `x-hypha-scopes`, summary, description and tag; `get(id)`, `find(method, path)` (the
+  fixed segment wins, as the router decides), `Operation::request_path(params)`
+  (percent-encoded, a catch-all keeps its slashes). `/mcp`'s `visible`/`describe` read it.
+- **Internal dispatch** (`internal.rs`): each host installs its router once built
+  (`AppState::install(D::router(), D::spore_rows())`, router without its state, so the
+  state holds no reference to itself); `internal::dispatch(state, request, agent)` sends a
+  request through it with the state, outside any preview or apply of the request sending it
+  (`preview::detached`). An agent rides as the `AgentRequest` extension (agent and `Ctx`),
+  which only in-process requests can carry; `Caller` builds the agent's `Ctx` from it,
+  `StaffCaller` refuses it (`session_required`), the storefront too.
+- **Agent authentication and modes, in one place: `agents::call(state, agent,
+  OperationCall)`**, not a layer. `/mcp` authenticates the credential to an `AgentId` and
+  calls it; nothing else makes an agent's request. A layer would have had to rebuild the
+  operation from the HTTP request, open ports twice and still not see proposals, which wrap
+  the whole request; here the operation is known by ID, the request is built from it, and
+  the proposal stored after it. An agent's key (`hypha_ak_…`, an `Identity` with
+  `Principal::Agent` and `Credential::AgentKey`, migration 0070 allows the principal) sent
+  to any route is `401 agent_credentials_mcp_only`; `hypha_auth::authenticate_agent_key`
+  is what `/mcp` will call. The `Hypha-Propose` header of the brief isn't needed: agents
+  never send HTTP themselves; `Mode::Propose` is the same ask.
+- **Proposals.** Propose = the request sent with `Hypha-Preview: 1`; a `200` is kept with
+  its preview (token removed, the IDs it was handed added as `ids`, hidden from the DTO),
+  the digest (`PreviewDigest`, a response extension beside `PreviewIds`), the operation's
+  scopes and the idempotency key, answering `202 {"proposal": …}`. Approving makes a token
+  from the proposal's own IDs and digest (so nothing expires between a 7-day proposal and a
+  15-minute token: "re-previewed if the token expired" isn't needed) and sends the write as
+  the agent with it, past the agent's propose mode but not past the cap `off`. A proposal
+  whose preview was `complete: false` is sent without a token (its full run records more
+  than its partial preview, and an external effect must not run before a rollback).
+  `applied`/`failed` are recorded by the approver; stale is recorded `failed` and answered
+  `409 preview_stale` with `details.preview` and `details.proposal`. Approving can't be
+  previewed (`blocked_by: {"kind": "proposal"}`): its write is its own request.
+- **The proposal's ID beside the actor** needs a column (`outbox_events` has the actor
+  only, and `data` is the contract payload): a follow-up. The write's events are the
+  agent's (`Actor::Agent`); `proposal.decided` names the approver.
+- **Settings.** `[agents]`: `enabled`, `writes`, `proposal_lifetime` (1 h to 90 d),
+  `preview_token_lifetime` (1 min to 1 d), `preview_timeout`;
+  `jobs.prune.agent_calls_after`; `[rate_limits]` `agent_call` (120, then 2 a second) and
+  `agent_write` (20, then one per 3 s), with their Workers bindings. The prune job (both
+  hosts) also expires proposals and deletes expired preview tokens.
+- **Follow-ups.** `/mcp` and the agent client kind in OAuth (next); emails of a stale apply;
+  the proposal ID in the outbox; bulk approval; e2e of a propose/approve round trip once
+  `/mcp` gives agents an HTTP way in (M8).
