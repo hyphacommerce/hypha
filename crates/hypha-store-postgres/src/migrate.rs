@@ -359,6 +359,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "agents",
             sql: include_str!("../migrations/0067_agents.sql"),
         },
+        Migration {
+            version: 70,
+            name: "preview_tokens",
+            sql: include_str!("../migrations/0070_preview_tokens.sql"),
+        },
     ],
 };
 

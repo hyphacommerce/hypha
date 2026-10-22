@@ -28,6 +28,7 @@ mod orders;
 mod outbox;
 mod payments;
 mod ports;
+mod preview_tokens;
 mod price_lists;
 mod products;
 mod search;
@@ -74,6 +75,7 @@ pub use orders::InMemoryOrderRepo;
 pub use outbox::InMemoryOutbox;
 pub use payments::{InMemoryPaymentMethodRepo, InMemoryPaymentRepo};
 pub use ports::InMemoryPorts;
+pub use preview_tokens::InMemoryPreviewTokenRepo;
 pub use price_lists::InMemoryPriceListRepo;
 pub use products::InMemoryProductRepo;
 pub use search::{

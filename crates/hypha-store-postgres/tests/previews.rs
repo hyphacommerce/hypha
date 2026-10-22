@@ -277,3 +277,74 @@ async fn a_preview_cuts_off_slow_statements() {
     }
     preview.end().await.unwrap();
 }
+
+#[tokio::test]
+async fn an_apply_commits_or_rolls_back_as_a_whole_once_its_events_are_read() {
+    use hypha_core::{Actor, PreviewToken, PreviewTokenRepo, Timestamp};
+    let Some((_db, store, open, other)) = setup("store_apply").await else {
+        return;
+    };
+    let signals = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&signals);
+    store.on_dispatch_work(Arc::new(move || {
+        counted.fetch_add(1, Ordering::Relaxed);
+    }));
+
+    // Rolled back: nothing kept, though two writes were; the token is stored after it.
+    let apply = store.begin_apply().await.unwrap();
+    ProductRepo::insert(&store, &mut product(1, "mug"))
+        .await
+        .unwrap();
+    ProductRepo::insert(&store, &mut product(2, "cup"))
+        .await
+        .unwrap();
+    let events = apply.events().await.unwrap();
+    assert_eq!(events.len(), 2, "{events:?}");
+    let token = PreviewToken {
+        hash: [3; 32],
+        actor: Actor::System,
+        request: [4; 32],
+        ids: vec![Uuid::from_u128(5)],
+        digest: "sha256:00".to_string(),
+        expires_at: Timestamp::from_unix_micros(9),
+        used_at: None,
+    };
+    apply.finish(false, Some(token.clone())).await.unwrap();
+    assert!(!open.load(Ordering::Relaxed));
+    assert_eq!(count(&other, "products").await, 0);
+    assert_eq!(signals.load(Ordering::Relaxed), 0);
+    // The store that ran the apply takes no more statements; a fresh one finds it.
+    let fresh = PgStore::new(
+        connect(_db.url()).await,
+        Arc::new(hypha_testkit::FixedClock::default()),
+    );
+    assert_eq!(
+        PreviewTokenRepo::get(&fresh, &token.hash).await,
+        Ok(Some(token))
+    );
+
+    // Committed: both writes, one signal for the dispatcher, after the COMMIT.
+    let store = {
+        let conn = Watched {
+            client: connect(_db.url()).await,
+            open: Arc::clone(&open),
+        };
+        PgStore::new(conn, Arc::new(hypha_testkit::FixedClock::default()))
+    };
+    let counted = Arc::clone(&signals);
+    store.on_dispatch_work(Arc::new(move || {
+        counted.fetch_add(1, Ordering::Relaxed);
+    }));
+    let apply = store.begin_apply().await.unwrap();
+    ProductRepo::insert(&store, &mut product(1, "mug"))
+        .await
+        .unwrap();
+    ProductRepo::insert(&store, &mut product(2, "cup"))
+        .await
+        .unwrap();
+    assert_eq!(count(&other, "products").await, 0, "not before the commit");
+    assert_eq!(apply.events().await.unwrap().len(), 2);
+    apply.finish(true, None).await.unwrap();
+    assert_eq!(count(&other, "products").await, 2);
+    assert_eq!(signals.load(Ordering::Relaxed), 1);
+}

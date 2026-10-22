@@ -46,6 +46,7 @@ pub struct InMemoryPorts {
     /// Customer groups and their membership.
     pub customer_groups: crate::InMemoryCustomerGroupRepo,
     pub idempotency: InMemoryIdempotencyRepo,
+    pub preview_tokens: crate::InMemoryPreviewTokenRepo,
     pub orders: InMemoryOrderRepo,
     pub fulfillments: InMemoryFulfillmentRepo,
     // Payment methods and payments.
@@ -117,6 +118,7 @@ impl Default for InMemoryPorts {
                 .joining_groups(&customer_groups),
             customer_groups,
             idempotency: InMemoryIdempotencyRepo::default(),
+            preview_tokens: crate::InMemoryPreviewTokenRepo::default(),
             orders: InMemoryOrderRepo::sharing(&outbox).joining_fields(&custom_fields),
             fulfillments: InMemoryFulfillmentRepo::sharing(&outbox),
             payment_methods,
@@ -148,6 +150,13 @@ impl Default for InMemoryPorts {
             agents: crate::InMemoryAgents::sharing(&outbox),
             outbox,
         }
+    }
+}
+
+impl hypha_core::HasPreviewTokens for InMemoryPorts {
+    type PreviewTokens = crate::InMemoryPreviewTokenRepo;
+    fn preview_tokens(&self) -> &crate::InMemoryPreviewTokenRepo {
+        &self.preview_tokens
     }
 }
 

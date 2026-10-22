@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use hypha_core::{Actor, Clock, DispatchHook, RepoError, StoredEvent, Timestamp};
+use hypha_core::{Actor, Clock, DispatchHook, PreviewToken, RepoError, StoredEvent, Timestamp};
 use tokio_postgres::{
     Client, Error, GenericClient, IsolationLevel, Row, Statement, Transaction,
     types::{ToSql, Type},
@@ -353,26 +353,45 @@ impl<C: PgConnection> PgStore<C> {
     /// (`PgConnection::preview_open`), and Postgres ends a transaction left idle past
     /// `PREVIEW_LEFT_OPEN`.
     pub async fn begin_preview(&self, timeout: Duration) -> Result<PgPreview<C>, RepoError> {
+        let millis = timeout.as_millis().max(1);
+        self.begin_outer(&format!("SET LOCAL statement_timeout = {millis}; "))
+            .await
+    }
+
+    /// Runs everything this store does from now on in one transaction, as a preview does,
+    /// which `PgPreview::finish` commits or rolls back as a whole once it has read what the
+    /// writes recorded: applying a previewed write, which commits only if it recorded what
+    /// the preview did. Statements aren't cut off (it's a real write), and the dispatch
+    /// hook (`SignalsDispatch`, set before this) is told after the COMMIT.
+    pub async fn begin_apply(&self) -> Result<PgPreview<C>, RepoError> {
+        self.begin_outer("").await
+    }
+
+    async fn begin_outer(&self, settings: &str) -> Result<PgPreview<C>, RepoError> {
         let log = Arc::new(PreviewLog::default());
         if self.preview.set(Arc::clone(&log)).is_err() {
             return Err(RepoError::Backend(
                 "the store is already in a preview".into(),
             ));
         }
+        let hook = self
+            .dispatch_hook
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         let mut conn = self.conn.lock().await;
         conn.preview_open(true);
-        let millis = timeout.as_millis().max(1);
         let left_open = PREVIEW_LEFT_OPEN.as_millis();
         conn.client()
             .batch_execute(&format!(
-                "BEGIN; SET LOCAL statement_timeout = {millis}; \
-                 SET LOCAL idle_in_transaction_session_timeout = {left_open}"
+                "BEGIN; {settings}SET LOCAL idle_in_transaction_session_timeout = {left_open}"
             ))
             .await
             .map_err(repo_error)?;
         Ok(PgPreview {
             conn: Arc::clone(&self.conn),
             log,
+            hook,
         })
     }
 
@@ -456,26 +475,64 @@ impl PreviewLog {
     }
 }
 
-/// An open preview (`PgStore::begin_preview`), on the connection it shares with its store.
+/// An open preview (`PgStore::begin_preview`) or apply (`begin_apply`), on the connection
+/// it shares with its store. Ended in two steps: `events` reads what the writes recorded,
+/// then `finish` commits or rolls back.
 pub struct PgPreview<C> {
     conn: Arc<Mutex<C>>,
     log: Arc<PreviewLog>,
+    /// Told after a COMMIT that wrote events.
+    hook: Option<DispatchHook>,
+}
+
+impl<C> Clone for PgPreview<C> {
+    fn clone(&self) -> Self {
+        Self {
+            conn: Arc::clone(&self.conn),
+            log: Arc::clone(&self.log),
+            hook: self.hook.clone(),
+        }
+    }
 }
 
 impl<C: PgConnection> PgPreview<C> {
-    /// Ends the preview: the events its writes recorded and kept (in the order written,
-    /// as the outbox stores them), then everything rolled back. Waits for the store's
-    /// last query, if it's still running one.
-    pub async fn end(self) -> Result<Vec<StoredEvent>, RepoError> {
+    /// The events its writes recorded and kept, in the order written, as the outbox
+    /// stores them. Waits for the store's last query, if it's still running one.
+    pub async fn events(&self) -> Result<Vec<StoredEvent>, RepoError> {
         let mut conn = self.conn.lock().await;
         let seqs = self.log.written();
-        let events = {
-            let (client, statements) = conn.parts();
-            crate::outbox::events_by_seq(&Db::new(&*client, statements), &seqs).await
-        };
-        let rolled_back = conn.client().batch_execute("ROLLBACK").await;
+        let (client, statements) = conn.parts();
+        crate::outbox::events_by_seq(&Db::new(&*client, statements), &seqs).await
+    }
+
+    /// Ends it: everything committed (`commit`) or rolled back, then `token` stored, on
+    /// its own, outside the transaction. A preview passes `false`, an apply `true` when its
+    /// events matched.
+    pub async fn finish(self, commit: bool, token: Option<PreviewToken>) -> Result<(), RepoError> {
+        let mut conn = self.conn.lock().await;
+        let ended = conn
+            .client()
+            .batch_execute(if commit { "COMMIT" } else { "ROLLBACK" })
+            .await;
         conn.preview_open(false);
-        rolled_back.map_err(repo_error)?;
+        ended.map_err(repo_error)?;
+        if commit
+            && !self.log.written().is_empty()
+            && let Some(hook) = &self.hook
+        {
+            hook();
+        }
+        if let Some(token) = token {
+            let (client, statements) = conn.parts();
+            crate::preview_tokens::insert_token(&Db::new(&*client, statements), &token).await?;
+        }
+        Ok(())
+    }
+
+    /// Ends a preview: its events, then everything rolled back.
+    pub async fn end(self) -> Result<Vec<StoredEvent>, RepoError> {
+        let events = self.events().await;
+        self.finish(false, None).await?;
         events
     }
 }
@@ -615,6 +672,7 @@ accessors! {
     hypha_agents::HasAgents => Agents, agents;
     hypha_agents::HasProposals => Proposals, proposals;
     hypha_agents::HasAgentCalls => AgentCalls, agent_calls;
+    hypha_core::HasPreviewTokens => PreviewTokens, preview_tokens;
 }
 
 /// Runs a load that takes several queries (a root row, then its children) in one

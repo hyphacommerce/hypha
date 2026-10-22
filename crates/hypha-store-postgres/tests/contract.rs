@@ -129,6 +129,12 @@ async fn idempotency_repo() {
 }
 
 #[tokio::test]
+async fn preview_token_repo() {
+    let Some(url) = database_url() else { return };
+    contract::preview_token_repo(async || fresh_store(&url, "contract_preview_tokens").await).await;
+}
+
+#[tokio::test]
 async fn agent_repo() {
     let Some(url) = database_url() else { return };
     contract::agent_repo(async || fresh_store(&url, "contract_agents").await).await;

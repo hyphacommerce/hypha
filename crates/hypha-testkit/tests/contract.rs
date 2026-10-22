@@ -114,6 +114,13 @@ fn batch() {
 }
 
 #[test]
+fn preview_token_repo() {
+    block_on(contract::preview_token_repo(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
 fn idempotency_repo() {
     block_on(contract::idempotency_repo(async || {
         InMemoryPorts::default()

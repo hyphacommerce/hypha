@@ -73,6 +73,10 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("category_handle", category_keys::CATEGORY_HANDLE),
     ("search_settings_pkey", search_keys::SETTINGS),
     ("idempotency_key", idempotency_keys::IDEMPOTENCY_KEY),
+    (
+        "preview_token",
+        hypha_core::preview_token::keys::PREVIEW_TOKEN,
+    ),
     ("orders_pkey", order_keys::ORDER_ID),
     ("order_number", order_keys::ORDER_NUMBER),
     ("order_cart", order_keys::ORDER_CART),
