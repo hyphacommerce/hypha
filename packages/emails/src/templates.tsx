@@ -1,5 +1,5 @@
-// Every default template rendered to its Jinja files (design note 0028, §11): the layout
-// and, per key, the subject, the HTML (the layout's blocks) and the plain text.
+// Every default template rendered to its Jinja files: the layout and, per key, the
+// subject, the HTML (the layout's blocks) and the plain text.
 
 import type { Email } from "./email.ts";
 import { customerErasureRequested } from "./emails/customer-erasure-requested.tsx";

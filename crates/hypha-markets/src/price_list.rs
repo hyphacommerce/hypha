@@ -19,7 +19,7 @@ use crate::{
 pub struct PriceList {
     id: PriceListId,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016).
+    /// When it was stored and last changed, set by the adapter.
     stamps: Option<Stamps>,
     currency: Currency,
     adjustment: BasisPoints,
@@ -127,8 +127,8 @@ impl PriceList {
     }
 }
 
-/// Plain-data form of a `PriceList` for storage adapters (design note 0001, 3.4).
-/// Its fixed prices are stored separately (see `PriceListRepo`).
+/// Plain-data form of a `PriceList` for storage adapters. Its fixed prices are stored
+/// separately (see `PriceListRepo`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PriceListSnapshot {
     pub id: PriceListId,

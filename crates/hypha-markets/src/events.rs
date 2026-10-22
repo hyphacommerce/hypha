@@ -1,6 +1,6 @@
-//! What happens to markets, catalogs and price lists, as events (design note 0016,
-//! section 4). Search and caches react to them: which products a market sells, and at
-//! what price. Contract types: a reshaped field is a new `VERSION`, never an edit.
+//! What happens to markets, catalogs and price lists, as events. Search and caches react to
+//! them: which products a market sells, and at what price. Contract types: a reshaped field
+//! is a new `VERSION`, never an edit.
 
 use hypha_core::{CatalogId, Event, MarketId, PriceListId, ProductId, VariantId};
 use serde::Serialize;
@@ -10,8 +10,8 @@ pub const CATALOG: &str = "catalog";
 pub const PRICE_LIST: &str = "price_list";
 
 /// `market.changed`: what changed, among `created`, `name`, `countries` and
-/// `prices_include_tax` (design note 0021: search rebuilds only for what documents
-/// depend on, so a rename costs nothing).
+/// `prices_include_tax` (search rebuilds only for what documents depend on, so a rename
+/// costs nothing).
 #[derive(Debug, Serialize)]
 pub struct MarketChanged {
     pub market: MarketId,

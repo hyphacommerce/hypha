@@ -1,6 +1,6 @@
-//! Shipping zones and their options (design note 0015, sections 2 and 3). A zone owns
-//! its options, as a product owns its variants: a cart reads one zone, and the rules
-//! between options (unique codes, order) hold in one aggregate.
+//! Shipping zones and their options. A zone owns its options, as a product owns its
+//! variants: a cart reads one zone, and the rules between options (unique codes, order)
+//! hold in one aggregate.
 
 use std::collections::HashSet;
 
@@ -17,9 +17,9 @@ use crate::{
 /// How an option's price is found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OptionRate {
-    /// Computed by Hypha (SH4).
+    /// Computed by Hypha.
     Builtin(BuiltinRate),
-    /// One service of a provider (SH5, Q2).
+    /// One service of a provider.
     Provider {
         provider: ProviderKey,
         service: String,
@@ -52,7 +52,7 @@ impl OptionCode {
     }
 }
 
-/// What a buyer picks (SH3).
+/// What a buyer picks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShippingOption {
     id: ShippingOptionId,
@@ -81,12 +81,11 @@ impl ShippingOption {
     pub fn estimate(&self) -> Option<DeliveryEstimate> {
         self.estimate
     }
-    /// The tax class shipping by this option is taxed at; the region's default otherwise
-    /// (SH10).
+    /// The tax class shipping by this option is taxed at; the region's default otherwise.
     pub fn tax_class(&self) -> Option<TaxClassId> {
         self.tax_class
     }
-    /// Offered only when every provider option of the zone failed (SH7).
+    /// Offered only when every provider option of the zone failed.
     pub fn is_backup(&self) -> bool {
         self.is_backup
     }
@@ -124,7 +123,7 @@ pub struct OptionPatch {
 pub struct ShippingZone {
     id: ShippingZoneId,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016).
+    /// When it was stored and last changed, set by the adapter.
     stamps: Option<Stamps>,
     name: String,
     countries: Vec<CountryCode>,
@@ -371,7 +370,7 @@ fn checked_rate(rate: OptionRate) -> Result<OptionRate, ShippingError> {
     })
 }
 
-/// Plain-data form for storage adapters (design note 0001, 3.4).
+/// Plain-data form for storage adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShippingZoneSnapshot {
     pub id: ShippingZoneId,

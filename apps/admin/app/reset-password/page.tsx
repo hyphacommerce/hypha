@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   referrer: "no-referrer",
 };
 
-/** Where a reset email's link lands (`{admin_url}/reset-password?token=…`, design note 0008). */
+/** Where a reset email's link lands (`{admin_url}/reset-password?token=…`). */
 export default async function ResetPasswordPage({
   searchParams,
 }: {

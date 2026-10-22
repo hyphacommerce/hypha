@@ -1,6 +1,6 @@
-//! Rate providers (design note 0015, SH5): who calculates a price Hypha's built-in rates
-//! don't. External apps answer a signed HTTP callback; spores are compiled in. Both sit
-//! behind `RateProvider`, which the host implements once and dispatches by key.
+//! Rate providers: who calculates a price Hypha's built-in rates don't. External apps
+//! answer a signed HTTP callback; spores are compiled in. Both sit behind `RateProvider`,
+//! which the host implements once and dispatches by key.
 
 use std::fmt;
 
@@ -81,7 +81,7 @@ impl DeliveryEstimate {
     }
 }
 
-/// One line of a group, as a provider sees it: plain values, no product (SH11).
+/// One line of a group, as a provider sees it: plain values, no product.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RateItem {
     pub variant: VariantId,
@@ -103,7 +103,7 @@ pub struct RateRequest {
     pub subtotal: Money,
 }
 
-/// A service a provider can quote: what an option offers by `service` (Q2).
+/// A service a provider can quote: what an option offers by `service`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceInfo {
     pub code: String,
@@ -119,11 +119,11 @@ pub struct Rate {
     /// parsing, which reports it as a failure.
     pub amount: Price,
     pub estimate: Option<DeliveryEstimate>,
-    /// The provider's quote ID, kept to buy the label later (design note 0017).
+    /// The provider's quote ID, kept to buy the label later.
     pub reference: Option<String>,
 }
 
-/// Why a provider gave no rates. Never fails a cart: its options are left out (SH7).
+/// Why a provider gave no rates. Never fails a cart: its options are left out.
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum ProviderError {
     /// No provider with this key is registered (a removed app, a spore not in this build).
@@ -161,9 +161,8 @@ impl hypha_core::ErrorCode for ProviderError {
 }
 
 /// Calculates rates for options priced by a provider. The host implements it once,
-/// dispatching by key to the external apps and spores it was built with: static
-/// dispatch, no `dyn`, so futures stay provably `Send` (CLAUDE.md). Each call enforces
-/// its provider's timeout.
+/// dispatching by key to the external apps and spores it was built with: static dispatch,
+/// no `dyn`, so futures stay provably `Send`. Each call enforces its provider's timeout.
 #[allow(async_fn_in_trait)]
 pub trait RateProvider {
     async fn services(&self, provider: &ProviderKey) -> Result<Vec<ServiceInfo>, ProviderError>;

@@ -1,7 +1,7 @@
 {
   "name": "hypha-workspace",
   "private": true,
-  "description": "The TypeScript apps and packages of Hypha (design note 0011). The Rust crates are the Cargo workspace.",
+  "description": "The TypeScript apps and packages of Hypha. The Rust crates are the Cargo workspace.",
   "scripts": {
     "sdk:generate": "pnpm --filter @hypha/sdk generate",
     "sdk:check": "pnpm --filter @hypha/sdk check",

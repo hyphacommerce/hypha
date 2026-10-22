@@ -11,20 +11,19 @@ use crate::{InventoryError, LocationChanged, events::LOCATION};
 
 /// A place that holds stock: a warehouse, a store, a 3PL.
 ///
-/// Its stock counts for the markets it lists (Shopify: a location's stock shows only in
-/// the regions it ships to). A location with no markets still holds stock, it just
-/// doesn't sell anywhere. When several locations could fill a line, the lowest
-/// `priority` goes first (design note 0004, I9).
+/// Its stock counts for the markets it lists (Shopify: a location's stock shows only in the
+/// regions it ships to). A location with no markets still holds stock, it just doesn't sell
+/// anywhere. When several locations could fill a line, the lowest `priority` goes first.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Location {
     id: LocationId,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016).
+    /// When it was stored and last changed, set by the adapter.
     stamps: Option<Stamps>,
     name: String,
     markets: Vec<MarketId>,
     priority: u32,
-    /// Where it ships from: the origin carriers quote from (design note 0015, SH11).
+    /// Where it ships from: the origin carriers quote from.
     address: Option<Address>,
     /// The fields changed since it was loaded, for one `location.changed` per write.
     changed: Changed,
@@ -166,7 +165,7 @@ impl Location {
     }
 }
 
-/// Plain-data form of a `Location` for storage adapters (design note 0001, 3.4).
+/// Plain-data form of a `Location` for storage adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocationSnapshot {
     pub id: LocationId,

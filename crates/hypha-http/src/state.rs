@@ -42,9 +42,9 @@ pub struct Runtime {
     pub offload: Offload,
 }
 
-/// Orders' access tokens (design note 0024, §7): `hypha_ord_` and a hex HMAC-SHA256 of
-/// the order's ID under a key derived from `HYPHA_SECRET_KEY`. Shared by `HostEnv` (the
-/// routes) and `MailHost` (the links in emails), so both make the same tokens.
+/// Orders' access tokens: `hypha_ord_` and a hex HMAC-SHA256 of the order's ID under a key
+/// derived from `HYPHA_SECRET_KEY`. Shared by `HostEnv` (the routes) and `MailHost` (the
+/// links in emails), so both make the same tokens.
 #[derive(Clone)]
 pub struct OrderTokens {
     key: [u8; 32],
@@ -113,9 +113,9 @@ pub struct HostEnv {
     /// Signs orders' access tokens (`order_token`).
     order_tokens: OrderTokens,
     hasher: Argon2id,
-    /// Session, second-factor, reset and invite lifetimes (`[auth]`, design note 0017).
+    /// Session, second-factor, reset and invite lifetimes (`[auth]`).
     auth: AuthSettings,
-    /// Customers' session and code lifetimes (`[customers]`, design note 0034).
+    /// Customers' session and code lifetimes (`[customers]`).
     accounts: hypha_customer_accounts::AccountSettings,
 }
 
@@ -150,8 +150,7 @@ impl HostEnv {
         self
     }
 
-    /// The `SecretBox` under `HYPHA_SECRET_KEY`, for what shares it (spores' secrets,
-    /// design note 0030, §8).
+    /// The `SecretBox` under `HYPHA_SECRET_KEY`, for what shares it (spores' secrets).
     pub fn secret_box(&self) -> &XChaChaBox {
         &self.secret_box
     }
@@ -252,36 +251,35 @@ pub struct AppState<S> {
     pub env: HostEnv,
     /// Work after the response (a password reset).
     pub background: HostBackground,
-    /// Limits on the public routes (design note 0009).
+    /// Limits on the public routes.
     pub limiter: HostLimiter,
     /// Publishable keys authenticated in the last half minute (`key_cache.rs`).
     pub publishable_keys: crate::key_cache::KeyCache,
     /// Told when a write gives the dispatcher work (`hypha_core::SignalsDispatch`):
     /// wakes the jobs.
     pub after_writes: AfterWrites,
-    /// The one store this deployment serves (design note 0006, model A), set at startup.
+    /// The one store this deployment serves (model A), set at startup.
     pub store: StoreId,
     /// Its name at startup, for labels that shouldn't cost a query (the entry in an
     /// authenticator app). A rename shows there after a restart.
     pub store_name: String,
-    /// File storage and asset URLs (design note 0013); `None` without
-    /// `media.s3.endpoint`, and the asset routes then answer 503. Shared with `mail`,
-    /// for the logo's URL.
+    /// File storage and asset URLs; `None` without `media.s3.endpoint`, and the asset
+    /// routes then answer 503. Shared with `mail`, for the logo's URL.
     pub media: Option<Arc<crate::media::Media>>,
-    /// Sending email (design note 0028): the sender, the from address and the links,
-    /// the same one the host's `Mailer` handler holds.
+    /// Sending email: the sender, the from address and the links, the same one the host's
+    /// `Mailer` handler holds.
     pub mail: Arc<crate::mail::MailHost>,
-    /// Calls to merchant-configured URLs (rate apps, webhooks; design notes 0015, 0016),
-    /// signed by `outbound::prepare`; each call sets its own timeout.
+    /// Calls to merchant-configured URLs (rate apps, webhooks), signed by
+    /// `outbound::prepare`; each call sets its own timeout.
     pub calls: HostCalls,
-    /// The settings in effect (design note 0017), the one copy: the body limit, the
-    /// trusted proxies, the outbound policy, the jobs' timers and the dispatcher's
-    /// batch, lease, retries and retention are read from here.
+    /// The settings in effect, the one copy: the body limit, the trusted proxies, the
+    /// outbound policy, the jobs' timers and the dispatcher's batch, lease, retries and
+    /// retention are read from here.
     pub config: hypha_config::Config,
 }
 
 /// What a host gives `AppState::new` besides its storage, its store and its settings
-/// (`host.rs`; design note 0026).
+/// (`host.rs`).
 pub struct HostParts {
     pub env: HostEnv,
     pub background: HostBackground,
@@ -355,8 +353,8 @@ impl<S: Storage> AppState<S> {
 }
 
 impl<S> AppState<S> {
-    /// The shipping rate providers for a request's ports (design note 0015), whose
-    /// calls to rate apps are recorded in the call log (design note 0029).
+    /// The shipping rate providers for a request's ports, whose calls to rate apps are
+    /// recorded in the call log.
     pub fn rates<'a, P>(&'a self, ports: &'a P) -> crate::shipping::HostRates<'a, P>
     where
         P: hypha_shipping::HasAppProviders
@@ -392,7 +390,7 @@ impl<S> AppState<S> {
         }
     }
 
-    /// The caller of apps' extension points (design note 0029) for this store.
+    /// The caller of apps' extension points for this store.
     pub fn extensions(&self) -> crate::extensions::HostExtensions<'_> {
         crate::extensions::HostExtensions {
             calls: &self.calls,
@@ -415,14 +413,14 @@ impl<S> AppState<S> {
 }
 
 impl<S: Storage> AppState<S> {
-    /// Completes the checkout a provider's report just committed (design note 0031,
-    /// §1.5): when `payment` is a cart's, without its order yet, and `authorized`,
-    /// `processing` or `paid`, the cart becomes its order now, though the shopper never
-    /// came back (`hypha_checkout::complete_paid_checkout`, as `ctx`: the reporter, with
+    /// Completes the checkout a provider's report just committed: when `payment` is a
+    /// cart's, without its order yet, and `authorized`, `processing` or `paid`, the cart
+    /// becomes its order now, though the shopper never came back
+    /// (`hypha_checkout::complete_paid_checkout`, as `ctx`: the reporter, with
     /// `payments:write`). The order placed (or placed already by the shopper's browser);
-    /// `None` when there was nothing to complete. A checkout that can't complete gives
-    /// the money back and answers why; a storage failure is worth trying again (the
-    /// provider's report delivered again does).
+    /// `None` when there was nothing to complete. A checkout that can't complete gives the
+    /// money back and answers why; a storage failure is worth trying again (the provider's
+    /// report delivered again does).
     pub async fn complete_paid_checkout<P>(
         &self,
         ports: &P,
@@ -458,8 +456,8 @@ impl<S: Storage> AppState<S> {
         Ok(placed.map(|p| p.order.id()))
     }
 
-    /// A request's payment providers: the ones this host was built with and the
-    /// store's payment apps (design note 0029, §3.1).
+    /// A request's payment providers: the ones this host was built with and the store's
+    /// payment apps.
     pub fn payments<'a, P>(
         &'a self,
         ports: &'a P,
@@ -483,7 +481,7 @@ impl<S> AppState<S> {
 }
 
 impl<S> AppState<S> {
-    /// Fetches apps' manifests (design note 0029) through the host's outbound client.
+    /// Fetches apps' manifests through the host's outbound client.
     pub fn manifests(&self) -> crate::manifests::HostManifests<'_> {
         crate::manifests::HostManifests {
             calls: &self.calls,
@@ -491,7 +489,7 @@ impl<S> AppState<S> {
         }
     }
 
-    /// The webhook sender the dispatcher delivers to apps with (design note 0016).
+    /// The webhook sender the dispatcher delivers to apps with.
     pub fn webhooks(&self) -> crate::webhooks::HostWebhooks<'_> {
         crate::webhooks::HostWebhooks {
             calls: &self.calls,
@@ -563,34 +561,34 @@ pub trait Storage: Send + Sync + 'static {
     type Directory<'a>: StoreRepo
     where
         Self: 'a;
-    /// The search engine a request's ports search with (design note 0019).
+    /// The search engine a request's ports search with.
     type Search<'p>: hypha_search_index::SearchIndex
     where
         Self: 'p;
-    /// The in-process event handlers this host runs (design note 0019, section 5.1): a
-    /// tuple the host lists in its `handlers.rs`, its composition root. The dispatcher
-    /// runs whatever is here (`jobs::dispatch`).
+    /// The in-process event handlers this host runs: a tuple, core's (`handlers.rs`)
+    /// joined with its spores'. The dispatcher runs whatever is here
+    /// (`jobs::dispatch`).
     type Handlers: for<'a> hypha_core::EventHandlers<Self::Ports<'a>> + Send + Sync + 'static;
-    /// The payment providers this host was built with (design note 0027, PA5): a tuple
-    /// the host lists in its `payments.rs`, next to `handlers.rs`. Checkout and the
-    /// method commands find one by key.
+    /// The payment providers this host was built with: a tuple, core's
+    /// (`payments::CoreProviders`) joined with its spores'. Checkout and the method commands
+    /// find one by key.
     type Payments: hypha_payments::PaymentProviders + Send + Sync + 'static;
-    /// The spores this host was built with, built (design note 0030): what the routes
-    /// ask in-process (settings forms, UI). `()` for none.
+    /// The spores this host was built with, built: what the routes ask in-process (settings
+    /// forms, UI). `()` for none.
     type Spores: for<'a> hypha_spore_core::SporeRuntime<Self::Ports<'a>>;
 
     /// Whether a dispatch step keeps one set of ports for all its work (`jobs::dispatch`)
-    /// rather than getting them for each delivery and letting them go before a webhook
-    /// is sent (design note 0016, EV9). `false`, the default, for a pool: a connection
-    /// held while another server answers is one the requests can't have. A host whose
-    /// every `ports()` opens a new connection that nothing else shares (Workers through
-    /// Hyperdrive, design note 0026, W4) says `true`: there, holding one idle costs
-    /// nothing, and opening one per delivery costs a connection's setup each time.
+    /// rather than getting them for each delivery and letting them go before a webhook is
+    /// sent. `false`, the default, for a pool: a connection held while another server
+    /// answers is one the requests can't have. A host whose every `ports()` opens a new
+    /// connection that nothing else shares (Workers through Hyperdrive) says `true`: there,
+    /// holding one idle costs nothing, and opening one per delivery costs a connection's
+    /// setup each time.
     const KEEPS_PORTS_ACROSS_DELIVERIES: bool = false;
 
-    /// Repositories that only see `store`'s data (design note 0006). With one store per
-    /// deployment (model A) the database *is* the store, so implementations ignore it;
-    /// shared tables (B) would filter by it, a database per store (C) would pick by it.
+    /// Repositories that only see `store`'s data. With one store per deployment (model A)
+    /// the database *is* the store, so implementations ignore it; shared tables (B) would
+    /// filter by it, a database per store (C) would pick by it.
     async fn ports(&self, store: StoreId) -> Result<Self::Ports<'_>, ApiError>;
 
     /// The stores this deployment knows (in model C, a control plane).
@@ -606,7 +604,7 @@ pub trait Storage: Send + Sync + 'static {
     }
 
     /// The search engine, borrowing `ports` when the engine is the database (the
-    /// built-in Postgres one). An external engine (Meilisearch, design note 0019 step 7)
+    /// built-in Postgres one). An external engine (Meilisearch)
     /// will be held by the storage and picked by configuration here.
     fn search<'p>(&'p self, ports: &'p Self::Ports<'_>) -> Self::Search<'p>;
 
@@ -622,10 +620,10 @@ pub trait Storage: Send + Sync + 'static {
     fn spores(&self) -> &Self::Spores;
 
     /// Runs a password reset request as background work (`AppState::background`), so the
-    /// response doesn't wait for it (design note 0008, section 5); dropped and logged
-    /// when the host takes no more. Here rather than in the handler because background
-    /// work must be a `Send` future, which the compiler can only prove for a concrete
-    /// storage (the same reason as `routes::router!`).
+    /// response doesn't wait for it; dropped and logged when the host takes no more. Here
+    /// rather than in the handler because background work must be a `Send` future, which
+    /// the compiler can only prove for a concrete storage (the same reason as
+    /// `routes::router!`).
     fn spawn_password_reset(state: SharedState<Self>, email: String)
     where
         Self: Sized;

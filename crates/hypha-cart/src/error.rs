@@ -11,15 +11,15 @@ pub enum CartError {
     LineNotFound(VariantId),
     #[error("a cart linked to a customer needs an email; unlink the customer first")]
     EmailRequired,
-    /// A signed-in customer's cart is for them (design note 0034, §4): the order is
-    /// theirs, so the email stays theirs.
+    /// A signed-in customer's cart is for them: the order is theirs, so the email stays
+    /// theirs.
     #[error("the cart is a customer's: its email is theirs")]
     CustomerEmailFixed,
     /// Checked out: the cart became `order` and can't change any more.
     #[error("the cart was checked out as order {order}")]
     Completed { order: OrderId },
     /// The cart's country picked its market and taxes; an address elsewhere would need
-    /// another cart (design note 0015, Q5).
+    /// another cart.
     #[error("the address is in {address}, but the cart ships to {cart}")]
     AddressCountryMismatch {
         address: CountryCode,
@@ -37,7 +37,7 @@ pub enum LineError {
     ProductNotFound(ProductId),
     #[error("product {0} is not active")]
     ProductNotActive(ProductId),
-    /// Not sold through the cart's channel (design note 0020, CH6).
+    /// Not sold through the cart's channel.
     #[error("product {0} isn't sold in this channel")]
     ProductNotPublished(ProductId),
     #[error("variant {variant} does not belong to product {product}")]
@@ -45,7 +45,7 @@ pub enum LineError {
         product: ProductId,
         variant: VariantId,
     },
-    /// The market's locations can't supply the line's quantity (design note 0004, I6).
+    /// The market's locations can't supply the line's quantity.
     #[error("variant {variant}: only {available} of {requested} in stock")]
     OutOfStock {
         variant: VariantId,

@@ -3,11 +3,11 @@ name = "hypha-spore-core"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
-description = "The Spore trait (design note 0030, §4): what a spore declares and contributes, and the set a host is built with."
+description = "The Spore trait: what a spore declares and contributes, and the set a host is built with."
 
 # Above the domain crates and the storage adapter whose types a spore names (its
 # migrations are a `MigrationSet`), below the hosts that list spores. Builds for wasm,
-# like every spore (SP8).
+# like every spore.
 [dependencies]
 hypha-core.workspace = true
 hypha-apps = { path = "../hypha-apps" }
@@ -18,7 +18,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
-# A spore's section of `hypha.config.toml`, as written (design note 0030, §8).
+# A spore's section of `hypha.config.toml`, as written.
 toml = "0.9"
 
 # `testing`: a `SporeHost` with deterministic ports, for spores' own tests.

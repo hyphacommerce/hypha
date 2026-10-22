@@ -1,7 +1,7 @@
-// Session tokens (design note 0029, §6.3, Q4): an admin asks Hypha for one per embedded
-// page or block (`POST /admin/app-extensions/{app}/session`) and hands it to the app
-// through the bridge; the app's frontend sends it to the app's backend, which verifies
-// it here. A JWT, HS256 with the app's secret, a minute long, its audience the app.
+// Session tokens: an admin asks Hypha for one per embedded page or block (`POST
+// /admin/app-extensions/{app}/session`) and hands it to the app through the bridge; the
+// app's frontend sends it to the app's backend, which verifies it here. A JWT, HS256
+// with the app's secret, a minute long, its audience the app.
 //
 // Claims: `iss` (the API's base URL), `aud` (the app's key, `app_…`), `sub` (the staff
 // member's user ID), `store`, `scope` (the app's scopes for that staff member,

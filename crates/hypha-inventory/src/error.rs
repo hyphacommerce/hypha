@@ -1,6 +1,4 @@
-use hypha_core::{
-    AddressError, ErrorCode, LocationId, MarketId, QuantityError, TextError, VariantId,
-};
+use hypha_core::{AddressError, ErrorCode, LocationId, MarketId, QuantityError, TextError};
 use thiserror::Error;
 
 use crate::{MAX_STOCK, ReservationRef};
@@ -25,11 +23,6 @@ pub enum InventoryError {
     ReferenceInUse(ReservationRef),
     #[error("only {available} of {requested} in stock")]
     OutOfStock { requested: u32, available: i64 },
-    #[error("{reference} for variant {variant} is listed more than once")]
-    DuplicateLine {
-        reference: ReservationRef,
-        variant: VariantId,
-    },
     /// Deleting an item open orders have units reserved on.
     #[error("units are still reserved")]
     StillReserved,
@@ -63,7 +56,6 @@ impl ErrorCode for InventoryError {
             InventoryError::InvalidReference => "invalid_reservation_reference",
             InventoryError::ReferenceInUse(_) => "reservation_reference_in_use",
             InventoryError::OutOfStock { .. } => "out_of_stock",
-            InventoryError::DuplicateLine { .. } => "duplicate_reservation_line",
             InventoryError::StillReserved => "inventory_still_reserved",
         }
     }

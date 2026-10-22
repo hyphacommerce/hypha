@@ -1,4 +1,4 @@
-//! What an order list is narrowed to and how it is ordered (design note 0024, §2).
+//! What an order list is narrowed to and how it is ordered.
 
 use hypha_core::{
     ChannelId, CountryCode, Currency, CustomerId, Direction, FieldFilter, SortKey, Timestamp,
@@ -33,7 +33,7 @@ pub struct OrderFilterInput {
     pub fulfillment_statuses: Vec<FulfillmentStatus>,
     /// Only cancelled orders (`true`) or only those that aren't (`false`).
     pub cancelled: Option<bool>,
-    /// Only this customer's orders (design note 0032, §12 step 1).
+    /// Only this customer's orders.
     pub customer: Option<CustomerId>,
     pub channel: Option<ChannelId>,
     pub country: Option<CountryCode>,
@@ -69,9 +69,9 @@ impl OrderFilter {
         })
     }
 
-    /// Filters on custom fields (design note 0033, §7), checked against their definitions
-    /// by `hypha-custom-fields` already; every one must match. `matches` doesn't see
-    /// them: adapters apply them to the stored values.
+    /// Filters on custom fields, checked against their definitions by `hypha-custom-fields`
+    /// already; every one must match. `matches` doesn't see them: adapters apply them to
+    /// the stored values.
     pub fn with_fields(mut self, fields: Vec<FieldFilter>) -> Self {
         self.fields = fields;
         self
@@ -157,9 +157,8 @@ impl OrderFilter {
     }
 }
 
-/// How an order list is ordered (design note 0024, AU1); ties go by ID in the same
-/// direction. Totals compare only within one currency, so sorting by them needs the
-/// `currency` filter.
+/// How an order list is ordered; ties go by ID in the same direction. Totals compare only
+/// within one currency, so sorting by them needs the `currency` filter.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum OrderSort {
     /// Newest first: placing order, as lists were before sorting.

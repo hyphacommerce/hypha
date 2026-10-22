@@ -1,7 +1,7 @@
-//! Payments (design note 0027): the methods a store offers, the payments an order has,
-//! and the `PaymentProvider` port with its built-in `manual` provider (cash on
-//! delivery, bank transfer). Apps collect through the same port under their own keys
-//! (`app_stripe`, design note 0029, §3.1), answered by the host.
+//! Payments: the methods a store offers, the payments an order has, and the
+//! `PaymentProvider` port with its built-in `manual` provider (cash on delivery, bank
+//! transfer). Apps collect through the same port under their own keys (`app_stripe`),
+//! answered by the host.
 //!
 //! A leaf domain: it depends on core only. A payment names its order and method by ID;
 //! choosing a method at checkout and keeping the order's `financial_status` in step

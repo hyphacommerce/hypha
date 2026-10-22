@@ -1,5 +1,4 @@
-//! API keys (design note 0008, A8): secret keys for servers, publishable keys for
-//! storefronts.
+//! API keys: secret keys for servers, publishable keys for storefronts.
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_auth::{

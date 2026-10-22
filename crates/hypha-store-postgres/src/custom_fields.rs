@@ -1,6 +1,5 @@
-//! Custom field definitions and their values (design note 0033, §4): one row per
-//! definition, one per (definition, owner) value, the values' index columns derived by
-//! the domain (`ValueRow`).
+//! Custom field definitions and their values: one row per definition, one per (definition,
+//! owner) value, the values' index columns derived by the domain (`ValueRow`).
 
 use std::collections::HashSet;
 

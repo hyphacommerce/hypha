@@ -68,9 +68,9 @@ pub struct CartResponse {
     country: CountryCode,
     /// Who to contact about the order; required at checkout.
     email: Option<Email>,
-    /// Personal fields left out for this caller (design note 0029, AP10): an API key or
-    /// app without the matching `customer_data:*` scope. They are absent from the
-    /// object then, whatever the schema says. Never sent to staff or storefronts.
+    /// Personal fields left out for this caller: an API key or app without the matching
+    /// `customer_data:*` scope. They are absent from the object then, whatever the schema
+    /// says. Never sent to staff or storefronts.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(required = false)]
     redacted: Option<Vec<String>>,
@@ -102,7 +102,7 @@ pub struct CartResponse {
     /// there's something to pay.
     payment_method: Option<PaymentMethodId>,
     /// Whether the buyer ticked "Email me with news and offers" (`PUT …/marketing`):
-    /// checkout records the consent then (design note 0032, §5).
+    /// checkout records the consent then.
     marketing_opt_in: bool,
 }
 
@@ -312,7 +312,7 @@ pub async fn create<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     rate_limit::enforce(&state.limiter, Rule::CartCreateIp, &ip).await?;
     let req = req.parse()?;
-    // A signed-in shopper's cart is theirs from the start (design note 0034, §4).
+    // A signed-in shopper's cart is theirs from the start.
     let customer = match hypha_customer_accounts::own(&ctx) {
         Ok(owned) => {
             let me = get_customer(&owned.ctx, ports.customers(), owned.customer).await?;
@@ -414,8 +414,8 @@ pub struct SetMarketingRequest {
     opt_in: bool,
 }
 
-/// Ticks or unticks "Email me with news and offers" (design note 0032, §5). Checkout
-/// records the consent when it's ticked; unticked never unsubscribes anyone.
+/// Ticks or unticks "Email me with news and offers". Checkout records the consent when it's
+/// ticked; unticked never unsubscribes anyone.
 #[utoipa::path(
     put,
     path = "/storefront/carts/{id}/marketing",
@@ -457,7 +457,7 @@ pub async fn set_customer<S: Storage>(
     let req = body.parse()?;
     let priced = set_cart_customer(&ctx, &ports, id, req.customer).await?;
     let cart = cart_response(&priced, &ports, state.media.as_deref()).await?;
-    // The admin surface: personal data per the caller (design note 0029, AP10).
+    // The admin surface: personal data per the caller.
     Ok(Json(crate::redact::one(
         &ctx,
         crate::redact::Family::Order,
@@ -524,7 +524,7 @@ pub async fn remove_line<S: Storage>(
     ))
 }
 
-// ---------- shipping (design note 0015) ----------
+// ---------- shipping ----------
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -685,7 +685,7 @@ pub struct CartPaymentMethodsResponse {
     items: Vec<CartPaymentMethodResponse>,
 }
 
-/// How the buyer can pay for the cart (design note 0027, §4).
+/// How the buyer can pay for the cart.
 #[utoipa::path(
     get,
     path = "/storefront/carts/{id}/payment-methods",

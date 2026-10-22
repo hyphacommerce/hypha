@@ -1,6 +1,6 @@
-//! Webhooks (design note 0016, section 8): the event envelope apps receive, and the
-//! sender `hypha-dispatch` calls through its `WebhookSender` port. Calls are signed and
-//! guarded like rate callbacks (`outbound.rs`).
+//! Webhooks: the event envelope apps receive, and the sender `hypha-dispatch` calls through
+//! its `WebhookSender` port. Calls are signed and guarded like rate callbacks
+//! (`outbound.rs`).
 
 use std::time::Duration;
 
@@ -32,8 +32,7 @@ pub const DELIVERY_ID_HEADER: &str = "Hypha-Delivery-Id";
 /// installed in several stores picks the secret to verify with before reading the body.
 pub use hypha_extensions::STORE_HEADER;
 
-/// An event as apps receive it (design note 0016, EV5), and as
-/// `GET /admin/events/{id}` shows it.
+/// An event as apps receive it, and as `GET /admin/events/{id}` shows it.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct EventEnvelope {
     pub id: EventId,
@@ -59,8 +58,8 @@ pub struct EventSubject {
     pub kind: String,
     /// Its prefixed ID (`prod_…`).
     pub id: String,
-    /// Its version after the change, when it has one: deliveries can arrive out of
-    /// order, and a consumer drops an event older than one it applied (EV7).
+    /// Its version after the change, when it has one: deliveries can arrive out of order,
+    /// and a consumer drops an event older than one it applied.
     pub version: Option<u64>,
 }
 
@@ -152,7 +151,7 @@ impl WebhookSender for HostWebhooks<'_> {
             tracing::error!(event = %delivery.event.id, error = ?e, "webhooks: bad event");
             "the event can't be sent".to_string()
         })?;
-        // Personal data only as far as the app's grant allows (design note 0029, AP10).
+        // Personal data only as far as the app's grant allows.
         envelope.data = crate::redact::event_data(
             |scope| app.grant().is_some_and(|g| g.has(scope)),
             &delivery.event.data,

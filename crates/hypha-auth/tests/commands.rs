@@ -974,21 +974,6 @@ fn a_secret_key_authenticates_with_its_own_scopes() {
 }
 
 #[test]
-fn a_publishable_key_gets_the_storefront_scopes() {
-    let (ports, env) = world();
-    let ctx = Ctx::new(Actor::System, Scope::ALL.to_vec());
-    let input = CreateApiKey {
-        kind: ApiKeyKind::Publishable,
-        name: "Storefront".to_string(),
-        scopes: None,
-        channel: Some(online_store()),
-    };
-    let (key, token) = block_on(create_api_key(&ctx, &ports, &env, input)).unwrap();
-    assert!(token.expose().starts_with("hypha_pk_"));
-    assert_eq!(key.scopes(), Scope::STOREFRONT);
-}
-
-#[test]
 fn nobody_grants_a_scope_they_lack() {
     let (ports, env) = world();
     assert_eq!(

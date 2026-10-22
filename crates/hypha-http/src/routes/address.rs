@@ -58,9 +58,9 @@ pub struct PostalAddressResponse {
     postal_code: Option<String>,
     country: CountryCode,
     phone: Option<String>,
-    /// Personal fields left out for this caller (design note 0029, AP10): an API key or
-    /// app without the matching `customer_data:*` scope. They are absent from the
-    /// object then, whatever the schema says. Never sent to staff or storefronts.
+    /// Personal fields left out for this caller: an API key or app without the matching
+    /// `customer_data:*` scope. They are absent from the object then, whatever the schema
+    /// says. Never sent to staff or storefronts.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(required = false)]
     redacted: Option<Vec<String>>,

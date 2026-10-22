@@ -1,7 +1,6 @@
-// A JSON Schema for an action's input (design note 0029, §6.1), read as a flat form:
-// an object whose properties are strings, numbers, integers, booleans or enums. That's
-// what admin actions take; anything else isn't shown as a field (and the app checks the
-// input it gets anyway).
+// A JSON Schema for an action's input, read as a flat form: an object whose properties
+// are strings, numbers, integers, booleans or enums. That's what admin actions take;
+// anything else isn't shown as a field (and the app checks the input it gets anyway).
 
 export type SchemaField =
   | { name: string; label: string; description?: string; required: boolean; kind: "text" }

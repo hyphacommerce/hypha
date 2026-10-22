@@ -12,9 +12,9 @@ import { setupDone } from "../setup-checklist";
 import { type WizardData, SetupWizard } from "./setup-wizard";
 
 /**
- * The setup wizard (design note 0024, AU11): the home page's checklist as one guided
- * flow. Each step is done when the data says so; the store remembers the step the
- * merchant is on and opens there (or on `?step=`, or the first one that isn't done).
+ * The setup wizard: the home page's checklist as one guided flow. Each step is done
+ * when the data says so; the store remembers the step the merchant is on and opens
+ * there (or on `?step=`, or the first one that isn't done).
  */
 export default async function SetupPage({
   searchParams,

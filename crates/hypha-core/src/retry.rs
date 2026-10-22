@@ -1,7 +1,7 @@
-//! Trying a write again when another request committed first (design note 0004,
-//! section 3). Versioned writes fail with `RepoError::StaleVersion` (or a unique key the
-//! racing request took) instead of overwriting; a command that can redo its work on
-//! fresh data does so a few times before reporting the conflict.
+//! Trying a write again when another request committed first. Versioned writes fail with
+//! `RepoError::StaleVersion` (or a unique key the racing request took) instead of
+//! overwriting; a command that can redo its work on fresh data does so a few times before
+//! reporting the conflict.
 
 /// How many times a command tries its write in total before a lost race is reported.
 pub const MAX_ATTEMPTS: u32 = 3;

@@ -1,6 +1,6 @@
-//! The store's notification settings (design note 0028, §2, NT4): branding every email
-//! shares, the sender's name and reply-to, who gets the staff's new-order email, and
-//! where order links point. One per store; none stored until the merchant first saves.
+//! The store's notification settings: branding every email shares, the sender's name and
+//! reply-to, who gets the staff's new-order email, and where order links point. One per
+//! store; none stored until the merchant first saves.
 
 use std::fmt;
 
@@ -34,10 +34,9 @@ impl fmt::Display for Colour {
     }
 }
 
-/// Where an order's page is, as a pattern (design note 0028, §2): an http(s) URL with
-/// `{order}` (the order's ID) and optionally `{token}` (its access token, so the link
-/// works without the shopper's cookie). The API stays URL-agnostic: the storefront's
-/// deployment sets it.
+/// Where an order's page is, as a pattern: an http(s) URL with `{order}` (the order's ID)
+/// and optionally `{token}` (its access token, so the link works without the shopper's
+/// cookie). The API stays URL-agnostic: the storefront's deployment sets it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OrderUrl(String);
 
@@ -256,8 +255,7 @@ fn recipient_list(recipients: Vec<Email>) -> Result<Vec<Email>, SettingsError> {
     Ok(kept)
 }
 
-/// Plain-data form of `NotificationSettings` for storage adapters (design note 0001,
-/// 3.4).
+/// Plain-data form of `NotificationSettings` for storage adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationSettingsSnapshot {
     pub version: Version,

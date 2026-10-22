@@ -47,14 +47,14 @@ pub enum OrderError {
         requested: u32,
         fulfilled: u32,
     },
-    /// Cancelling an order with standing fulfilments (design note 0018, FU7).
+    /// Cancelling an order with standing fulfilments.
     #[error("order {0} has fulfilments; cancel them first")]
     HasFulfillments(OrderId),
-    /// A list's text filter that breaks the text rule (design note 0024): the caller's
-    /// input, unlike `Text`, which only bad stored data or a bug breaks.
+    /// A list's text filter that breaks the text rule: the caller's input, unlike `Text`,
+    /// which only bad stored data or a bug breaks.
     #[error("filter: {0}")]
     Filter(TextError),
-    /// Sorting a list by total without the `currency` filter (design note 0024).
+    /// Sorting a list by total without the `currency` filter.
     #[error("sorting by total needs one currency: filter by currency")]
     SortNeedsCurrency,
 }

@@ -1,7 +1,7 @@
-//! An app's custom fields (design note 0033, §8): the `custom_fields` its manifest
-//! declares become definitions in its namespace (`app_<name>`) whenever a manifest is
-//! applied (an approval, a refresh that needs none), staged in the very batch that
-//! applies it, so the app and its fields change together or not at all.
+//! An app's custom fields: the `custom_fields` its manifest declares become definitions in
+//! its namespace (`app_<name>`) whenever a manifest is applied (an approval, a refresh that
+//! needs none), staged in the very batch that applies it, so the app and its fields change
+//! together or not at all.
 //!
 //! It lives here because it joins two crates that can't see each other: `hypha-oauth`
 //! (a composing crate over `hypha-apps`, which owns manifests) and the
@@ -131,8 +131,7 @@ fn invalid(e: ManifestError) -> ApiError {
 }
 
 /// A sync's error: a field whose stored definition has another type is the manifest's
-/// problem at that field's `type` (CF3), as `check_retypes` reports one; the rest are
-/// the leaf's.
+/// problem at that field's `type`, as `check_retypes` reports one; the rest are the leaf's.
 fn sync_error(manifest: &AppManifest, e: CommandError) -> ApiError {
     if let CommandError::TypeChanged(key) = &e {
         let at = manifest

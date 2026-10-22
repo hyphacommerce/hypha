@@ -1,8 +1,8 @@
 "use client";
 
-// An app's storefront element in place (design note 0029, §7): the custom element,
-// loaded from the app's module in the browser, with its props set as properties. A
-// failure to load shows nothing: an app's block never breaks the page.
+// An app's storefront element in place: the custom element, loaded from the app's
+// module in the browser, with its props set as properties. A failure to load shows
+// nothing: an app's block never breaks the page.
 
 import { HyphaElement } from "@hypha/storefront-elements/react";
 

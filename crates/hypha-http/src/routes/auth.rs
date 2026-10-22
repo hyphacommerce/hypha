@@ -1,7 +1,7 @@
-//! Logging in and out, password resets and accepting invites (design note 0008,
-//! sections 3 and 5). These routes take no `Caller`: they are how one gets credentials.
-//! So they are rate limited (design note 0009): per client IP before the body is even
-//! parsed, per email right after, and both before any hashing, storage or email.
+//! Logging in and out, password resets and accepting invites. These routes take no
+//! `Caller`: they are how one gets credentials. So they are rate limited: per client IP
+//! before the body is even parsed, per email right after, and both before any hashing,
+//! storage or email.
 
 use axum::{
     Json,
@@ -185,11 +185,11 @@ pub struct PasswordResetRequest {
     email: String,
 }
 
-/// 202 at once, whether or not the email belongs to anyone: the work (finding the
-/// account, storing the reset, sending the email) runs on its own task, so neither the
-/// answer nor its timing tells which emails exist. The one other answer is 429
-/// `rate_limited` (design note 0009), which depends on the caller's address and the
-/// email asked about, never on whether the account exists.
+/// 202 at once, whether or not the email belongs to anyone: the work (finding the account,
+/// storing the reset, sending the email) runs on its own task, so neither the answer nor
+/// its timing tells which emails exist. The one other answer is 429 `rate_limited`, which
+/// depends on the caller's address and the email asked about, never on whether the account
+/// exists.
 #[utoipa::path(
     post,
     path = "/admin/auth/password-reset",

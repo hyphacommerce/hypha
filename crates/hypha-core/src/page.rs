@@ -1,12 +1,11 @@
-//! Pages of a list (design note 0012): newest first, continued after the last item seen.
+//! Pages of a list: newest first, continued after the last item seen.
 //!
 //! IDs are UUIDv7, so ordering by ID is ordering by creation time; a page asks for the
 //! items whose ID is below the last one it got (`after`). A cursor like this stays
 //! correct while items are added, unlike an offset, and costs one indexed range scan.
 //!
-//! Lists sorted by something else (design note 0024, AU2) page the same way by a
-//! `Keyset`: the last item's sort key with its ID, which breaks ties. A list that sorts
-//! takes `PageRequest<Keyset<Id>>`.
+//! Lists sorted by something else page the same way by a `Keyset`: the last item's sort key
+//! with its ID, which breaks ties. A list that sorts takes `PageRequest<Keyset<Id>>`.
 
 use std::cmp::Ordering;
 
@@ -71,8 +70,8 @@ impl<Id> Default for PageRequest<Id> {
     }
 }
 
-/// The value a sorted list orders by, at one item (design note 0024, AU2): what a
-/// cursor carries besides the item's ID. Each sort uses one kind.
+/// The value a sorted list orders by, at one item: what a cursor carries besides the item's
+/// ID. Each sort uses one kind.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SortKey {
     /// Sorted by ID alone (creation order): nothing besides the ID.

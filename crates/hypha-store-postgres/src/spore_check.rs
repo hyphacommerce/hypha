@@ -1,16 +1,14 @@
-//! What a spore's migration may create (design note 0030, §5, SP4): objects named
-//! `spore_<name>_*` only, foreign keys out of its tables that never block a core delete
-//! (`ON DELETE CASCADE` or `SET NULL`), and nothing on a table outside its prefix: no
-//! trigger, rule, policy, index, constraint or column there, and nothing of core's
-//! dropped or changed in place (a column's type, nullability or default, a constraint's
-//! or index's definition, a function's body: each object carries a fingerprint of its
-//! definition).
+//! What a spore's migration may create: objects named `spore_<name>_*` only, foreign keys
+//! out of its tables that never block a core delete (`ON DELETE CASCADE` or `SET NULL`),
+//! and nothing on a table outside its prefix: no trigger, rule, policy, index, constraint
+//! or column there, and nothing of core's dropped or changed in place (a column's type,
+//! nullability or default, a constraint's or index's definition, a function's body: each
+//! object carries a fingerprint of its definition).
 //!
-//! The runner reads the schema's catalog before and after each new migration of a
-//! spore's set, in the migration's transaction, and compares: a problem rolls the
-//! migration back and stops startup (and `setup`) naming the object. That makes "own
-//! tables only" mechanical for the DDL; writes to core tables with raw SQL can't be told
-//! apart this way (Q6).
+//! The runner reads the schema's catalog before and after each new migration of a spore's
+//! set, in the migration's transaction, and compares: a problem rolls the migration back
+//! and stops startup (and `setup`) naming the object. That makes "own tables only"
+//! mechanical for the DDL; writes to core tables with raw SQL can't be told apart this way.
 //!
 //! Only the current schema (`search_path`'s first) is read: that's where migrations
 //! create what they create, and other schemas may be other databases' (tests run in a

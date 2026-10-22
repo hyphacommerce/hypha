@@ -1,11 +1,9 @@
 "use client";
 
-// The header on every page of a country (design note 0024, §7), Astryx's TopNav: the
-// store's name, its top categories (each a link; one with subcategories discloses them
-// under it, `NavMenu`, one open at a time), then search, the currency, the
-// account and the cart, which opens the cart drawer. On phones the categories move to a
-// menu drawer (`MobileNav`) with the currency and the account, by CSS. Static pages render it; the cart's count comes from
-// the cart provider once the page is here.
+// The header on every page of a country, Astryx's TopNav: the store's name, its top categories (each a link; one with
+// subcategories discloses them under it, `NavMenu`, one open at a time), then search, the currency, the account and the
+// cart, which opens the cart drawer. On phones the categories move to a menu drawer (`MobileNav`) with the currency and
+// the account, by CSS. Static pages render it; the cart's count comes from the cart provider once the page is here.
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";

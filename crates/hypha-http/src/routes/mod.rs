@@ -48,18 +48,18 @@ pub(crate) fn rfc3339(at: Timestamp) -> Result<String, ApiError> {
         .map_err(ApiError::internal)
 }
 
-/// An aggregate's `created_at` and `updated_at` as RFC 3339 (design note 0016, Q3).
-/// Responses show stored aggregates, which the adapter always stamps; one without
-/// stamps is a bug, reported as a 500.
+/// An aggregate's `created_at` and `updated_at` as RFC 3339. Responses show stored
+/// aggregates, which the adapter always stamps; one without stamps is a bug, reported as a
+/// 500.
 pub(crate) fn stamp_times(stamps: Option<Stamps>) -> Result<(String, String), ApiError> {
     let stamps = stamps.ok_or_else(|| ApiError::internal("an aggregate without stamps"))?;
     Ok((rfc3339(stamps.created_at)?, rfc3339(stamps.updated_at)?))
 }
 
-/// Every route, once (design note 0010, S7): `[surface, METHOD, "path", handler]`.
-/// `$callback!` gets the whole table: `build_router!` turns it into a router per
-/// storage, `openapi_rows!` (in `openapi.rs`) into the documents, so a route can't go
-/// undocumented or a documented one unrouted.
+/// Every route, once: `[surface, METHOD, "path", handler]`. `$callback!` gets the whole
+/// table: `build_router!` turns it into a router per storage, `openapi_rows!` (in
+/// `openapi.rs`) into the documents, so a route can't go undocumented or a documented one
+/// unrouted.
 ///
 /// Surfaces: `admin` (`/admin/*`, staff and secret keys), `storefront`
 /// (`/storefront/*`, publishable keys), `hidden` (health and the documents themselves,
@@ -72,7 +72,7 @@ macro_rules! route_table {
             [hidden, GET, "/health", health::check],
             [hidden, GET, "/admin/openapi.json", openapi::admin_document],
             [hidden, GET, "/storefront/openapi.json", openapi::storefront_document],
-            // OAuth for apps (design note 0029): public, documented by their RFCs
+            // OAuth for apps: public, documented by their RFCs
             [hidden, GET, "/oauth/authorize", oauth::authorize_handler],
             [hidden, POST, "/oauth/token", oauth::token_handler],
             [hidden, POST, "/oauth/revoke", oauth::revoke_handler],
@@ -81,10 +81,10 @@ macro_rules! route_table {
             // ---------- admin ----------
             [admin, GET, "/admin/store", stores::fetch],
             [admin, PATCH, "/admin/store", stores::update],
-            // reference data for pickers (0021)
+            // reference data for pickers
             [admin, GET, "/admin/currencies", reference::currencies],
             [admin, GET, "/admin/countries", reference::countries],
-            // staff auth (no credentials needed; rate limited, 0009)
+            // staff auth (no credentials needed; rate limited)
             [admin, POST, "/admin/auth/login", auth::login_handler],
             [admin, POST, "/admin/auth/login/mfa", auth::finish_login_handler],
             [admin, POST, "/admin/auth/logout", auth::logout_handler],
@@ -132,7 +132,7 @@ macro_rules! route_table {
             [admin, DELETE, "/admin/products/{id}/variants/{variant_id}", products::remove_variant],
             [admin, PUT, "/admin/products/{id}/media", products::set_media],
             [admin, PUT, "/admin/products/{id}/variants/{variant_id}/media", products::set_variant_media_handler],
-            // media (0013)
+            // media
             [admin, POST, "/admin/assets", assets::create],
             [admin, GET, "/admin/assets", assets::list],
             [admin, GET, "/admin/assets/{id}", assets::fetch],
@@ -160,27 +160,27 @@ macro_rules! route_table {
             [admin, POST, "/admin/catalogs/{id}/products", markets::add_products_handler],
             [admin, DELETE, "/admin/catalogs/{id}/products", markets::remove_products_handler],
             [admin, PUT, "/admin/catalogs/{id}/price-list", markets::assign_price_list_handler],
-            // carts: only linking a customer (storefronts set an email; 0010 §2)
+            // carts: only linking a customer (storefronts set an email)
             [admin, PUT, "/admin/carts/{id}/customer", carts::set_customer],
             // orders
             [admin, GET, "/admin/orders", orders::list],
             [admin, GET, "/admin/orders/{id}", orders::fetch],
             [admin, POST, "/admin/orders/{id}/paid", orders::mark_paid],
             [admin, POST, "/admin/orders/{id}/cancel", orders::cancel],
-            // payment methods (design note 0027)
+            // payment methods
             [admin, GET, "/admin/payment-providers", payments::list_providers],
             [admin, GET, "/admin/payment-methods", payments::list],
             [admin, POST, "/admin/payment-methods", payments::create],
             [admin, GET, "/admin/payment-methods/{id}", payments::fetch],
             [admin, PATCH, "/admin/payment-methods/{id}", payments::update],
             [admin, DELETE, "/admin/payment-methods/{id}", payments::delete],
-            // an app's payments (design note 0029, §3.1)
+            // an app's payments
             [admin, GET, "/admin/payments/{id}", payments::fetch_payment],
             [admin, POST, "/admin/payments/{id}/events", payments::report_event],
             [admin, POST, "/admin/payments/{id}/capture", payments::capture],
             [admin, POST, "/admin/payments/{id}/void", payments::void],
             [admin, POST, "/admin/payments/{id}/refund", payments::refund],
-            // fulfilments (design note 0018)
+            // fulfilments
             [admin, POST, "/admin/orders/{id}/fulfillments", fulfillments::create],
             [admin, GET, "/admin/orders/{id}/fulfillments", fulfillments::list],
             [admin, GET, "/admin/fulfillments/{id}", fulfillments::fetch],
@@ -218,7 +218,7 @@ macro_rules! route_table {
             [admin, PATCH, "/admin/tax-regions/{id}", taxes::update_region],
             [admin, PUT, "/admin/tax-regions/{id}/class-rates/{class_id}", taxes::set_region_class_rate],
             [admin, DELETE, "/admin/tax-regions/{id}/class-rates/{class_id}", taxes::remove_region_class_rate],
-            // shipping (design note 0015)
+            // shipping
             [admin, GET, "/admin/shipping-zones", shipping::list_zones_handler],
             [admin, POST, "/admin/shipping-zones", shipping::create_zone_handler],
             [admin, GET, "/admin/shipping-zones/{id}", shipping::fetch_zone],
@@ -234,7 +234,7 @@ macro_rules! route_table {
             [admin, PATCH, "/admin/shipping-providers/{key}", shipping::update_provider_handler],
             [admin, DELETE, "/admin/shipping-providers/{key}", shipping::delete_provider_handler],
             [admin, GET, "/admin/shipping-providers/{key}/services", shipping::provider_services_handler],
-            // apps and webhooks (design note 0016)
+            // apps and webhooks
             [admin, GET, "/admin/apps", apps::list],
             [admin, POST, "/admin/apps", apps::create],
             [admin, GET, "/admin/apps/{key}", apps::fetch],
@@ -246,18 +246,18 @@ macro_rules! route_table {
             [admin, GET, "/admin/apps/{key}/extension-points", apps::extension_points],
             [admin, PUT, "/admin/apps/{key}/extension-points", apps::set_extension_points],
             [admin, POST, "/admin/apps/{key}/deliveries/{id}/retry", apps::retry],
-            // a spore's settings (design note 0030, §8)
+            // a spore's settings
             [admin, GET, "/admin/apps/{key}/settings", apps::settings],
             [admin, PUT, "/admin/apps/{key}/settings", apps::save_settings],
             [admin, GET, "/admin/events/{id}", apps::event],
-            // installing apps (design note 0029)
+            // installing apps
             [admin, PATCH, "/admin/apps/{key}/grant", apps::narrow],
             [admin, GET, "/admin/oauth/requests/{id}", oauth::fetch_request],
             [admin, POST, "/admin/oauth/requests/{id}/approve", oauth::approve_request],
             [admin, POST, "/admin/oauth/requests/{id}/deny", oauth::deny_request],
             [admin, POST, "/admin/apps/private", oauth::create_private],
             [admin, POST, "/admin/apps/{key}/refresh", app_extensions::refresh],
-            // app UI in any admin and storefront, the app proxy (design note 0029, §5-§8)
+            // app UI in any admin and storefront, the app proxy
             [admin, GET, "/admin/app-extensions", app_extensions::list_admin],
             [admin, GET, "/admin/app-extensions/origins", app_extensions::origins],
             [admin, POST, "/admin/app-extensions/{app}/session", app_extensions::session],
@@ -282,7 +282,7 @@ macro_rules! route_table {
             [admin, GET, "/admin/products/{id}/inventory", inventory::fetch_product_inventory],
             [admin, GET, "/admin/setup/checklist", setup::checklist],
 
-            // custom fields (design note 0033)
+            // custom fields
             [admin, GET, "/admin/custom-field-definitions", custom_fields::list],
             [admin, POST, "/admin/custom-field-definitions", custom_fields::create],
             [admin, GET, "/admin/custom-field-definitions/suggestions", custom_fields::suggestions],
@@ -304,7 +304,7 @@ macro_rules! route_table {
             [admin, GET, "/admin/orders/{id}/custom-fields", custom_fields::fetch_order],
             [admin, PATCH, "/admin/orders/{id}/custom-fields", custom_fields::update_order],
 
-            // categories (design note 0022)
+            // categories
             [admin, GET, "/admin/categories", categories::list],
             [admin, POST, "/admin/categories", categories::create],
             [admin, GET, "/admin/categories/{id}", categories::fetch],
@@ -327,7 +327,7 @@ macro_rules! route_table {
             [admin, PATCH, "/admin/search/settings", search::update_settings],
             [admin, GET, "/admin/search/status", search::status],
             [admin, POST, "/admin/search/reindex", search::start_reindex],
-            // notifications (design note 0028)
+            // notifications
             [admin, GET, "/admin/notification-settings", notifications::fetch_settings],
             [admin, PATCH, "/admin/notification-settings", notifications::update_settings],
             [admin, GET, "/admin/notification-templates", notifications::list_templates],

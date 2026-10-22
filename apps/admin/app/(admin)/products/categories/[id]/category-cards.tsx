@@ -44,10 +44,10 @@ type Media = AdminSchemas["ProductMediaResponse"];
 
 /** Name, handle, description, parent and visibility: one Save sends what changed. */
 /**
- * A category's page body (design note 0024, section 6): its details and products on the
- * left, where it sits and its image on the right. The name, handle, description, parent
- * and visibility are one draft saved by the bar at the top; the image and products save
- * as they change (`main` and `side`).
+ * A category's page body: its details and products on the left, where it sits and its
+ * image on the right. The name, handle, description, parent and visibility are one
+ * draft saved by the bar at the top; the image and products save as they change (`main`
+ * and `side`).
  */
 export function CategoryForm({
   category,
@@ -211,7 +211,7 @@ export function ImageCard({ id, image }: { id: string; image: Media | null }) {
         </HStack>
         {error && <Banner status="error" title={error} />}
         {src ? (
-          // A plain <img>: the media URLs resize, so no Next.js image pipeline (0011 §2).
+          // A plain <img>: the media URLs resize, so no Next.js image pipeline.
           <img
             src={src}
             alt={image?.alt ?? ""}

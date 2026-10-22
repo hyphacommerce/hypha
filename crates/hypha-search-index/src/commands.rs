@@ -1,6 +1,6 @@
-//! The search index's own commands (design note 0019, sections 6 and 7): the
-//! merchant's settings, a full rebuild, and how far behind the index is. Searching a
-//! market is `hypha_search::search` (it resolves the market).
+//! The search index's own commands: the merchant's settings, a full rebuild, and how far
+//! behind the index is. Searching a market is `hypha_search::search` (it resolves the
+//! market).
 
 use hypha_core::{AppKey, AppPoints, AuthError, Ctx, ErrorCode, RepoError, Scope};
 use thiserror::Error;
@@ -47,9 +47,9 @@ pub async fn get_search_settings<S: HasSearchSettings>(
     Ok(ports.search_settings().get().await?.unwrap_or_default())
 }
 
-/// The extension point a search app answers (design note 0029, §3.1); the same name
-/// as `hypha_extensions::SearchQuery`'s (a host test keeps them equal: this leaf
-/// doesn't depend on the catalog).
+/// The extension point a search app answers; the same name as
+/// `hypha_extensions::SearchQuery`'s (a host test keeps them equal: this leaf doesn't
+/// depend on the catalog).
 pub const SEARCH_POINT: &str = "search.query";
 
 /// Changes only what's `Some`, like a JSON Merge Patch.

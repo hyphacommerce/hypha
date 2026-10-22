@@ -1,8 +1,8 @@
-//! What a spore adds to admins (design note 0030, §7): blocks and actions on the same
-//! targets apps use (0029, §5–§6), answered in-process. The HTTP layer asks installed
-//! apps (over HTTP) and spores (here) and merges the two, so a frontend can't tell
-//! which answered. Blocks are trees in `packages/app-blocks`' format v1, checked like an
-//! app's (`hypha_apps::check_block`). No embedded pages for spores (Q9).
+//! What a spore adds to admins: blocks and actions on the same targets apps use, answered
+//! in-process. The HTTP layer asks installed apps (over HTTP) and spores (here) and merges
+//! the two, so a frontend can't tell which answered. Blocks are trees in
+//! `packages/app-blocks`' format v1, checked like an app's (`hypha_apps::check_block`). No
+//! embedded pages for spores.
 
 use hypha_apps::{ExtensionContext, Target};
 use hypha_core::{Ctx, UserId};
@@ -33,14 +33,13 @@ pub struct UiAction {
     pub point: Option<&'static str>,
 }
 
-/// A web component a spore adds to storefronts (design note 0030, §7; 0029, §7): its
-/// tag, the storefront target it's for (`checkout.payment` for a payment widget), and
-/// the path of the spore's own storefront route that serves its ES module
-/// (`/storefront/spores/stripe/elements/payment.js`), which storefronts load from the
-/// API's public address (`server.public_url`, which `hypha deploy` sets; unset, the
-/// address the storefront reached the API at, which must then be one a browser can load
-/// too). The route must answer `Access-Control-Allow-Origin: *`: a module loads
-/// cross-origin.
+/// A web component a spore adds to storefronts: its tag, the storefront target it's for
+/// (`checkout.payment` for a payment widget), and the path of the spore's own storefront
+/// route that serves its ES module (`/storefront/spores/stripe/elements/payment.js`), which
+/// storefronts load from the API's public address (`server.public_url`, which `hypha
+/// deploy` sets; unset, the address the storefront reached the API at, which must then be
+/// one a browser can load too). The route must answer `Access-Control-Allow-Origin: *`: a
+/// module loads cross-origin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiElement {
     pub id: &'static str,

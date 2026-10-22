@@ -1,8 +1,8 @@
-//! Publishable keys authenticated recently (design note 0025, §6): a storefront sends
-//! the same key with every request, and looking it up each time was a query per
-//! request. Only publishable keys: they're public by design (0008) and grant reads and
-//! carts in one channel. Secret keys and staff sessions are read fresh every time, so
-//! revoking one, or changing a role's scopes, applies to the next request.
+//! Publishable keys authenticated recently: a storefront sends the same key with every
+//! request, and looking it up each time was a query per request. Only publishable keys:
+//! they're public by design and grant reads and carts in one channel. Secret keys and staff
+//! sessions are read fresh every time, so revoking one, or changing a role's scopes,
+//! applies to the next request.
 //!
 //! Entries live for [`KeyCache::TTL`] and are keyed by the token's SHA-256, so the
 //! cache never holds a key itself. Revoking any key clears it, so on one instance a

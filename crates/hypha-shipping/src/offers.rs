@@ -1,7 +1,7 @@
-//! What a group of a cart is offered (design note 0015, section 6): every enabled option
-//! of the destination's zone, priced. Built-in rates are computed here; each provider is
-//! asked once for all its options, all providers at once. A provider that fails leaves
-//! its options out with the reason, never failing the cart (SH7).
+//! What a group of a cart is offered: every enabled option of the destination's zone,
+//! priced. Built-in rates are computed here; each provider is asked once for all its
+//! options, all providers at once. A provider that fails leaves its options out with the
+//! reason, never failing the cart.
 
 use std::collections::{BTreeMap, BTreeSet};
 

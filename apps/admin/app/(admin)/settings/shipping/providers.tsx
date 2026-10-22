@@ -31,7 +31,7 @@ import {
   testProvider,
 } from "./actions";
 
-/** A provider's rate settings with its app's name and switch (design note 0016, EV11). */
+/** A provider's rate settings with its app's name and switch. */
 export type RateApp = AdminSchemas["AppProviderResponse"] & {
   name: string;
   /** `null` when the staff member can't read apps. */
@@ -41,9 +41,9 @@ export type RateApp = AdminSchemas["AppProviderResponse"] & {
 type Provider = RateApp;
 
 /**
- * Rate apps (design note 0015, section 5): external services Hypha asks for live rates
- * over a signed callback. Each is an app (Settings → Apps), whose signing secret is
- * shown once, when created or rotated.
+ * Rate apps: external services Hypha asks for live rates over a signed callback. Each
+ * is an app (Settings → Apps), whose signing secret is shown once, when created or
+ * rotated.
  */
 export function ProvidersCard({ providers }: { providers: Provider[] }) {
   const [isAdding, setIsAdding] = useState(false);

@@ -15,8 +15,8 @@ pub trait CartRepo {
     /// Stores changes and bumps the version, or fails with `StaleVersion` if someone
     /// else changed the cart since it was loaded (two `add_line` calls at once).
     async fn update(&self, cart: &mut Cart) -> Result<(), RepoError>;
-    /// Every cart linked to `customer`, open or completed, oldest first: what deleting
-    /// or erasing the customer unlinks (design note 0032, §7.2).
+    /// Every cart linked to `customer`, open or completed, oldest first: what deleting or
+    /// erasing the customer unlinks.
     async fn of_customer(&self, customer: CustomerId) -> Result<Vec<Cart>, RepoError>;
 }
 
@@ -30,8 +30,8 @@ pub trait StageCarts {
     /// once the batch commits. If the commit fails, `cart` is stale: load it again.
     fn update_cart(&mut self, cart: &mut Cart);
     /// Removes the cart with its lines at the version it was loaded at (erasure deleting a
-    /// customer's open carts, design note 0032, §7.3). The commit fails with
-    /// `StaleVersion` if the stored cart has another version or is gone.
+    /// customer's open carts). The commit fails with `StaleVersion` if the stored cart has
+    /// another version or is gone.
     fn delete_cart(&mut self, cart: &Cart);
 }
 

@@ -1,7 +1,6 @@
-//! The build's templates (design note 0028, NT5, NT6): written in React Email in
-//! `packages/emails`, built to Jinja into `defaults/` (committed) and embedded here. A
-//! store uses them until it edits a template, so improved defaults reach every store
-//! that kept them.
+//! The build's templates: written in React Email in `packages/emails`, built to Jinja into
+//! `defaults/` (committed) and embedded here. A store uses them until it edits a template,
+//! so improved defaults reach every store that kept them.
 
 use crate::{TemplateKey, TemplateSources};
 

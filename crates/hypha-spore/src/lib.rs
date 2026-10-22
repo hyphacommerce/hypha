@@ -1,19 +1,19 @@
-//! Everything a spore may use (design note 0030, §4, SP6): a spore depends on this crate,
-//! not on Hypha's internal ones, so an internal refactor breaks spores only when this
-//! crate changes. It is public API: each item here is a promise, versioned on its own
-//! (0.x, breaking changes on minor versions until 1.0).
+//! Everything a spore may use: a spore depends on this crate, not on Hypha's internal ones,
+//! so an internal refactor breaks spores only when this crate changes. It is public API:
+//! each item here is a promise, versioned on its own (0.x, breaking changes on minor
+//! versions until 1.0).
 //!
 //! - the crate root: the [`Spore`] trait, its environment ([`SporeEnv`]) and errors,
 //!   and what it contributes to frontends ([`ui`]) and to the settings form
 //!   ([`settings`]);
-//! - [`custom_fields`]: the fields a spore declares and the values it writes (0033);
+//! - [`custom_fields`]: the fields a spore declares and the values it writes;
 //! - [`core`]: Hypha's shared types (IDs, money, `Ctx` and scopes, time, errors) and
 //!   generic ports (clock, IDs, randomness, the `SecretBox`, events);
 //! - [`client`]: the host's HTTP client, for calling other services;
 //! - [`migrations`]: a spore's own tables (`MigrationSet`);
-//! - [`payments`], [`orders`], [`order_actions`]: the domain ports a spore implements
-//!   and the commands and read repositories it calls, by domain. Not the `Stage*`
-//!   traits of core aggregates: a spore changes core data through commands (SP4);
+//! - [`payments`], [`orders`], [`order_actions`]: the domain ports a spore implements and
+//!   the commands and read repositories it calls, by domain. Not the `Stage*` traits of
+//!   core aggregates: a spore changes core data through commands;
 //! - [`postgres`] (feature `postgres`): what a spore's repositories over its own tables
 //!   are written with;
 //! - [`http`] (feature `http`): what a spore's routes are written with, and
@@ -43,26 +43,26 @@ pub mod client {
     };
 }
 
-/// What a spore adds to admins (design note 0030, §7): blocks (format v1 trees) and
-/// actions on the targets apps use, answered in-process (`SporeUi`, implemented next
-/// to `Spore`; `impl<P> SporeUi<P> for MySpore {}` for none).
+/// What a spore adds to admins: blocks (format v1 trees) and actions on the targets apps
+/// use, answered in-process (`SporeUi`, implemented next to `Spore`; `impl<P> SporeUi<P>
+/// for MySpore {}` for none).
 pub mod ui {
     pub use hypha_apps::{ExtensionContext, Target};
     pub use hypha_spore_core::{SporeUi, UiAction, UiAnswer, UiBlock, UiCall, UiElement, UiError};
 }
 
-/// A spore's settings (design note 0030, §8): the problems its `check_settings`
-/// reports, the schema subset its form is written in, and the port it reads them
-/// through (`SporeEnv::settings` does the reading).
+/// A spore's settings: the problems its `check_settings` reports, the schema subset its
+/// form is written in, and the port it reads them through (`SporeEnv::settings` does the
+/// reading).
 pub mod settings {
     pub use hypha_apps::{
         HasSporeSettings, ORDER_MARKER, SECRET_MARKER, SettingsProblem, SettingsSchema,
     };
 }
 
-/// Custom fields (design note 0033, §8): what `Spore::custom_fields` declares (a
-/// `DefinitionSpec` per field, in the spore's namespace) and what `SporeEnv`'s
-/// `set_custom_fields` / `custom_fields` take and answer.
+/// Custom fields: what `Spore::custom_fields` declares (a `DefinitionSpec` per field, in
+/// the spore's namespace) and what `SporeEnv`'s `set_custom_fields` / `custom_fields` take
+/// and answer.
 pub mod custom_fields {
     pub use hypha_custom_fields::{
         Access, AdminAccess, Capabilities, DefinitionSpec, FieldEntry, FieldType, FieldValue,
@@ -82,14 +82,13 @@ pub mod core {
     };
 }
 
-/// A spore's own tables (SP4): module `spore_<name>`, tables `spore_<name>_*`, checked
-/// when they're applied (§5).
+/// A spore's own tables: module `spore_<name>`, tables `spore_<name>_*`, checked when
+/// they're applied.
 pub mod migrations {
     pub use hypha_store_postgres::{Migration, MigrationSet};
 }
 
-/// Payments (design note 0027): the provider port a spore implements, and reading
-/// payments and methods.
+/// Payments: the provider port a spore implements, and reading payments and methods.
 pub mod payments {
     pub use hypha_payments::{
         ActionAnswer, ActionRequest, HasPaymentMethods, HasPayments, NextAction, Payment,
@@ -107,8 +106,8 @@ pub mod orders {
     };
 }
 
-/// Checkout (design note 0031): what completing a paid cart's checkout answers, for a
-/// payment spore's webhook (`hypha_http`'s `AppState::complete_paid_checkout` runs it).
+/// Checkout: what completing a paid cart's checkout answers, for a payment spore's webhook
+/// (`hypha_http`'s `AppState::complete_paid_checkout` runs it).
 pub mod checkout {
     pub use hypha_checkout::{CommandError, Placed, complete_paid_checkout};
 }

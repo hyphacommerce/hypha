@@ -1,6 +1,6 @@
-//! Apps' custom fields (design note 0033, §8): created when an install is approved,
-//! following refreshes (a dropped field waits for consent and goes with its values on
-//! approval), never retyped, kept on uninstall and removed with the app.
+//! Apps' custom fields: created when an install is approved, following refreshes (a dropped
+//! field waits for consent and goes with its values on approval), never retyped, kept on
+//! uninstall and removed with the app.
 
 use axum::{Router, routing::get};
 use hypha_core::{AppKey, Ctx, ProductId};

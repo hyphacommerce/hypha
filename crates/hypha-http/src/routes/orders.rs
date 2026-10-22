@@ -56,10 +56,10 @@ pub struct CheckoutRequest {
     return_url: Option<String>,
 }
 
-/// `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no
-/// serde and renaming a variant can't silently change the API.
-/// Derived from the order's payments (design note 0027, PA7): manual payments use
-/// `pending`, `paid` and `voided`; the rest come with providers that move money so.
+/// `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no serde and
+/// renaming a variant can't silently change the API. Derived from the order's payments:
+/// manual payments use `pending`, `paid` and `voided`; the rest come with providers that
+/// move money so.
 #[derive(Clone, Copy, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FinancialStatusDto {
@@ -105,7 +105,7 @@ impl From<FulfillmentStatus> for FulfillmentStatusDto {
     }
 }
 
-/// `CancelReason` on the wire (design note 0018).
+/// `CancelReason` on the wire.
 #[derive(Serialize, Deserialize, Clone, Copy, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CancelReasonDto {
@@ -155,15 +155,15 @@ pub struct OrderResponse {
     placed_at: String,
     cart: CartId,
     market: MarketId,
-    /// The sales channel it was placed through (design note 0020).
+    /// The sales channel it was placed through.
     channel: ChannelId,
     currency: Currency,
     country: CountryCode,
     customer: CustomerId,
     email: Email,
-    /// Personal fields left out for this caller (design note 0029, AP10): an API key or
-    /// app without the matching `customer_data:*` scope. They are absent from the
-    /// object then, whatever the schema says. Never sent to staff or storefronts.
+    /// Personal fields left out for this caller: an API key or app without the matching
+    /// `customer_data:*` scope. They are absent from the object then, whatever the schema
+    /// says. Never sent to staff or storefronts.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(required = false)]
     redacted: Option<Vec<String>>,
@@ -369,8 +369,8 @@ async fn line_images<P: HasProducts + HasAssets>(
     Ok(images)
 }
 
-/// A storefront's view of an order it placed: the order with its access token, the key
-/// to reading it again (`GET /storefront/orders/{id}?token=`; design note 0024, §7).
+/// A storefront's view of an order it placed: the order with its access token, the key to
+/// reading it again (`GET /storefront/orders/{id}?token=`).
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct PlacedOrderResponse {
     #[serde(flatten)]
@@ -378,8 +378,8 @@ pub struct PlacedOrderResponse {
     /// Lets whoever holds it read this order: keep it with the buyer (a cookie, the
     /// confirmation email's link), never in a public place. The same for every read.
     pub(super) access_token: String,
-    /// How the buyer pays (design note 0027): the order's newest payment; `null` when
-    /// there was nothing to pay.
+    /// How the buyer pays: the order's newest payment; `null` when there was nothing to
+    /// pay.
     pub(super) payment: Option<PlacedPaymentResponse>,
 }
 
@@ -417,17 +417,17 @@ fn next_step(
 /// How long checkout answers a checked-out cart with its order: an hour.
 const REPLAY_WINDOW_MICROS: i64 = 60 * 60 * 1_000_000;
 
-/// Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns
-/// the order the first request placed. The body is `{}` or `{"expected_total": …}`.
-/// Something to pay needs a payment method chosen (`PUT …/payment-method`; 409
+/// Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns the
+/// order the first request placed. The body is `{}` or `{"expected_total": …}`. Something
+/// to pay needs a payment method chosen (`PUT …/payment-method`; 409
 /// `payment_method_required`) and still offered (409 `payment_method_unavailable`). An
-/// online method's money must be committed first (design note 0031: `POST
-/// …/payment`): none started is 409 `payment_required`, not yet committed `payment_pending`
-/// (its provider was asked; try again shortly, or it completes when the provider
-/// reports), declined or released `payment_failed` (start paying again). If the order
-/// can't be placed once the money is committed (a line sold out meanwhile), the money is
-/// given back. A cart checked out already answers with its order for an hour after it
-/// was placed (the provider's report may have completed it), then `409 cart_completed`.
+/// online method's money must be committed first (`POST …/payment`): none started is 409
+/// `payment_required`, not yet committed `payment_pending` (its provider was asked; try
+/// again shortly, or it completes when the provider reports), declined or released
+/// `payment_failed` (start paying again). If the order can't be placed once the money is
+/// committed (a line sold out meanwhile), the money is given back. A cart checked out
+/// already answers with its order for an hour after it was placed (the provider's report
+/// may have completed it), then `409 cart_completed`.
 #[utoipa::path(
     post,
     path = "/storefront/carts/{id}/checkout",
@@ -465,9 +465,9 @@ pub async fn checkout_handler<S: Storage>(
     )
     .await?;
     let order = &placed.value.order;
-    // A cart checked out already answers with its order and access token for an hour
-    // (the shopper's browser after the provider's webhook placed it; a retry), then only
-    // says so: an old cart ID isn't a key to the order (design note 0031).
+    // A cart checked out already answers with its order and access token for an hour (the
+    // shopper's browser after the provider's webhook placed it; a retry), then only says
+    // so: an old cart ID isn't a key to the order.
     let age = hypha_core::Clock::now(&state.clock).unix_micros() - order.placed_at().unix_micros();
     if placed.replayed && age > REPLAY_WINDOW_MICROS {
         return Err(hypha_checkout::CommandError::CartCompleted {
@@ -547,7 +547,7 @@ pub struct StartCartPaymentRequest {
     return_url: Option<String>,
 }
 
-/// A cart's payment, started (design note 0031).
+/// A cart's payment, started.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct CartPaymentResponse {
     /// The payment (`pay_…`): what the provider's reports name.
@@ -564,14 +564,13 @@ pub struct CartPaymentResponse {
     payment_error: Option<ApiErrorBody>,
 }
 
-/// Starts paying for the cart before its order exists (design note 0031): an online
-/// method's money is committed first, and checkout places the order once it is. Runs
-/// checkout's checks (409 `total_changed`, `payment_method_required`, …). A pending
-/// payment of the same method and total is started again (the provider resumes it);
-/// otherwise a new one is made and the old ones released. Refused for a manual method
-/// (409 `payment_method_offline`: check out instead), a total of zero (409
-/// `cart_nothing_to_pay`) and a cart whose money is committed already (409
-/// `cart_payment_committed`: check out).
+/// Starts paying for the cart before its order exists: an online method's money is
+/// committed first, and checkout places the order once it is. Runs checkout's checks (409
+/// `total_changed`, `payment_method_required`, …). A pending payment of the same method and
+/// total is started again (the provider resumes it); otherwise a new one is made and the
+/// old ones released. Refused for a manual method (409 `payment_method_offline`: check out
+/// instead), a total of zero (409 `cart_nothing_to_pay`) and a cart whose money is
+/// committed already (409 `cart_payment_committed`: check out).
 #[utoipa::path(
     post,
     path = "/storefront/carts/{id}/payment",
@@ -633,13 +632,13 @@ pub struct OrderSummaryResponse {
     number: i64,
     /// RFC 3339, UTC.
     placed_at: String,
-    /// The sales channel it was placed through (design note 0020).
+    /// The sales channel it was placed through.
     channel: ChannelId,
     customer: CustomerId,
     email: Email,
-    /// Personal fields left out for this caller (design note 0029, AP10): an API key or
-    /// app without the matching `customer_data:*` scope. They are absent from the
-    /// object then, whatever the schema says. Never sent to staff or storefronts.
+    /// Personal fields left out for this caller: an API key or app without the matching
+    /// `customer_data:*` scope. They are absent from the object then, whatever the schema
+    /// says. Never sent to staff or storefronts.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(required = false)]
     redacted: Option<Vec<String>>,
@@ -651,8 +650,7 @@ pub struct OrderSummaryResponse {
     total: Money,
     /// How many items, adding up line quantities.
     item_count: u64,
-    /// The custom field values `?custom_fields=` asked for (design note 0033); absent
-    /// without it.
+    /// The custom field values `?custom_fields=` asked for; absent without it.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<std::collections::HashMap<String, serde_json::Value>>, required = false)]
     custom_fields: Option<CustomFieldValues>,
@@ -725,7 +723,7 @@ pub struct OrderFilters {
     fulfillment_status: Vec<FulfillmentStatusDto>,
     /// Only cancelled orders (`true`), or only those that aren't (`false`).
     cancelled: Option<bool>,
-    /// Only this customer's orders (design note 0032).
+    /// Only this customer's orders.
     #[param(value_type = Option<CustomerId>)]
     customer: Option<CustomerId>,
     /// Only orders placed through this sales channel.
@@ -743,9 +741,8 @@ pub struct OrderFilters {
     sort: Option<OrderSortDto>,
 }
 
-/// The order of an order list (design note 0024, AU1). Default `newest`. Sorting by
-/// total needs the `currency` filter (`422 sort_needs_currency`); ties go by placing
-/// order, in the same direction.
+/// The order of an order list. Default `newest`. Sorting by total needs the `currency`
+/// filter (`422 sort_needs_currency`); ties go by placing order, in the same direction.
 #[derive(Debug, Clone, Copy, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OrderSortDto {
@@ -819,8 +816,7 @@ pub async fn list<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (page, filters, scope, field_query) = query.parse_sorted_with_fields()?;
     let fields = custom_fields::list_fields(&ctx, &ports, OwnerType::Order, &field_query).await?;
-    // Text other than a number searches emails: only for callers who may see them
-    // (design note 0029, AP10).
+    // Text other than a number searches emails: only for callers who may see them.
     if let Some(q) = filters.q.as_deref().map(str::trim)
         && !q.is_empty()
         && !q
@@ -881,7 +877,7 @@ pub async fn list<S: Storage>(
     )?))
 }
 
-/// Units of a line still to ship, and where they wait (design note 0018, FU4).
+/// Units of a line still to ship, and where they wait.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct UnfulfilledDto {
     line: OrderLineId,
@@ -905,13 +901,11 @@ pub struct AdminOrderResponse {
     /// Per line with anything left, in line order; empty once everything shipped or the
     /// order was cancelled.
     unfulfilled: Vec<UnfulfilledDto>,
-    /// Its payments, newest first (design note 0027): the method, status and
-    /// instructions of each.
+    /// Its payments, newest first: the method, status and instructions of each.
     payments: Vec<PaymentResponse>,
-    /// Its custom field values the caller may read (design note 0033); `PATCH
-    /// /admin/orders/{id}/custom-fields` writes them. A personal one is left out
-    /// without `customer_data:profile` and listed in `redacted` as
-    /// `custom_fields.<key>`.
+    /// Its custom field values the caller may read; `PATCH
+    /// /admin/orders/{id}/custom-fields` writes them. A personal one is left out without
+    /// `customer_data:profile` and listed in `redacted` as `custom_fields.<key>`.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     custom_fields: CustomFieldValues,
 }
@@ -1017,8 +1011,8 @@ pub async fn cancel<S: Storage>(
     let input = CancelOrder {
         order: id,
         reason: req.reason.into(),
-        // The event carries it; the mailer answers `order.cancelled` (design note 0028,
-        // NT7). Cancelling again records no event, so the buyer is told once.
+        // The event carries it; the mailer answers `order.cancelled`. Cancelling again
+        // records no event, so the buyer is told once.
         notify_customer: req.notify,
     };
     let (done, _cancelled_now) = cancel_order(&ctx, &ports, &state.clock, input).await?;
@@ -1043,15 +1037,15 @@ pub struct MarkPaidRequest {
     reference: Option<String>,
 }
 
-/// Records that the order's money arrived (a bank transfer, cash from the courier;
-/// design note 0027, §5): its pending payments become `paid`, with the `reference` when
-/// given, and so does the order. A `pending` order without an open payment gets a
-/// `manual` one of its total, paid on the spot. The body is optional (none, `{}` or
-/// `{"reference": …}`). Marking a paid order again changes nothing. Refused (409): a
-/// cancelled order (`order_cancelled`), an authorized payment (`payment_authorized`,
-/// `details.payment`: only its provider can capture it), and any other payment status
-/// (`order_not_payable`, `details.financial_status`: partially paid, refunded or
-/// voided, where money moved already).
+/// Records that the order's money arrived (a bank transfer, cash from the courier): its
+/// pending payments become `paid`, with the `reference` when given, and so does the order.
+/// A `pending` order without an open payment gets a `manual` one of its total, paid on the
+/// spot. The body is optional (none, `{}` or `{"reference": …}`). Marking a paid order
+/// again changes nothing. Refused (409): a cancelled order (`order_cancelled`), an
+/// authorized payment (`payment_authorized`, `details.payment`: only its provider can
+/// capture it), and any other payment status (`order_not_payable`,
+/// `details.financial_status`: partially paid, refunded or voided, where money moved
+/// already).
 #[utoipa::path(
     post,
     path = "/admin/orders/{id}/paid",

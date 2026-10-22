@@ -1,6 +1,6 @@
-//! URLs Hypha calls on a merchant's behalf (design note 0015, section 5; 0016, section 8):
-//! rate apps' callbacks and webhook endpoints. Hosts also check, when calling, that the
-//! address is public (`outbound.rs` in the axum host); this checks the URL itself.
+//! URLs Hypha calls on a merchant's behalf: rate apps' callbacks and webhook endpoints.
+//! Hosts also check, when calling, that the address is public (`outbound.rs` in the axum
+//! host); this checks the URL itself.
 
 use thiserror::Error;
 

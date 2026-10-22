@@ -1,7 +1,7 @@
-// Guards the contract between the built defaults and the API (design note 0028, §11):
-// every file exists, blocks are balanced, the layout has exactly its two blocks, and each
-// template names only variables its context has. A default that names one its context
-// lacks would fail on every send (the API renders with strict undefined).
+// Guards the contract between the built defaults and the API: every file exists, blocks
+// are balanced, the layout has exactly its two blocks, and each template names only
+// variables its context has. A default that names one its context lacks would fail on
+// every send (the API renders with strict undefined).
 
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";

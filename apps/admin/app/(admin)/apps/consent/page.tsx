@@ -21,12 +21,12 @@ import { ConsentButtons } from "./consent-buttons";
 type Request = AdminSchemas["ConsentRequestResponse"];
 
 /**
- * The consent page (design note 0029, §4.1 step 3): where Hypha's `/oauth/authorize`
- * sends staff (`?request=oareq_…`), and where an uploaded private app's manifest waits.
- * It shows who the app is, what it asks for in plain words, the personal data it would
- * see with the app's reasons, and what changes compared with its current access; staff
- * who may approve answer, and the browser goes where the API says. Signed out, the
- * login comes first and returns here (`proxy.ts`).
+ * The consent page: where Hypha's `/oauth/authorize` sends staff (`?request=oareq_…`),
+ * and where an uploaded private app's manifest waits. It shows who the app is, what it
+ * asks for in plain words, the personal data it would see with the app's reasons, and
+ * what changes compared with its current access; staff who may approve answer, and the
+ * browser goes where the API says. Signed out, the login comes first and returns here
+ * (`proxy.ts`).
  */
 export default async function ConsentPage({
   searchParams,
@@ -343,8 +343,8 @@ function FieldItems({ fields, badge }: { fields: Field[]; badge?: ReactNode }) {
 }
 
 /**
- * The custom fields the app keeps on the store's objects (design note 0033, §8): which
- * owners it adds fields to, which are personal, and on an update which it removes.
+ * The custom fields the app keeps on the store's objects: which owners it adds fields
+ * to, which are personal, and on an update which it removes.
  */
 function CustomFields({ request }: { request: Request }) {
   const { added, kept, removed, retyped } = request.custom_fields;

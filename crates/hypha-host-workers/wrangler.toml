@@ -1,6 +1,6 @@
-# The API on Cloudflare Workers (design note 0026). `wrangler dev` runs it against the
-# compose Postgres (`localConnectionString`), on a database `hypha-host-axum setup`
-# prepared first (W9); `hypha deploy --target cloudflare` writes a deployment's own file.
+# The API on Cloudflare Workers. `wrangler dev` runs it against the compose Postgres
+# (`localConnectionString`), on a database `hypha-host-axum setup` prepared first; `hypha
+# deploy --target cloudflare` writes a deployment's own file.
 name = "hypha-api"
 main = "build/worker/shim.mjs"
 compatibility_date = "2026-10-01"
@@ -12,20 +12,20 @@ command = "worker-build --release"
 # OFF: `wrangler hyperdrive create hypha --connection-string=… --caching-disabled`.
 # Hyperdrive caches reads outside a transaction for up to a minute by default, and the
 # API's are not cacheable: a revoked key or ended session would keep working, a session
-# that just passed MFA would read as pending (design note 0026, W4).
+# that just passed MFA would read as pending.
 [[hyperdrive]]
 binding = "HYPERDRIVE"
 id = "00000000000000000000000000000000"
 localConnectionString = "postgres://hypha:hypha@localhost:5432/hypha_workers"
 
-# The jobs' marks (W7): a tick reads them first and touches Postgres only when there's
+# The jobs' marks: a tick reads them first and touches Postgres only when there's
 # work, so an idle serverless database can sleep. `hypha deploy` creates the namespace
 # (`wrangler kv namespace create`); `wrangler dev` simulates it locally.
 [[kv_namespaces]]
 binding = "JOBS"
 id = "00000000000000000000000000000000"
 
-# Rate limits (W8): a binding per rule, capping all isolates together; each isolate also
+# Rate limits: a binding per rule, capping all isolates together; each isolate also
 # counts the exact quota (`src/limiter.rs`). The limit is the most the rule's
 # `[rate_limits]` quota allows in a minute (burst + one per period that fits); these are
 # the defaults', and `hypha deploy` writes a deployment's own. A namespace_id is unique
@@ -91,20 +91,17 @@ name = "RL_SPORE_PUBLIC"
 namespace_id = "1011"
 simple = { limit = 360, period = 60 }
 
-# One tick a minute (W6): dispatch and search sync when the marks say so, prune and the media sweep
-# on the ticks that start their `jobs.<job>.interval` (hourly by default).
+# One tick a minute: dispatch and search sync when the marks say so, prune and the media sweep on
+# the ticks that start their `jobs.<job>.interval` (hourly by default).
 [triggers]
 crons = ["* * * * *"]
 
 [observability]
 enabled = true
 
-# Run next to the database: its round trips are most of a request (§8, W12). `hypha
-# deploy` sets it to the database's host (Cloudflare measures it), or `region` with
-# `hypha init --region`.
-# [placement]
-# mode = "targeted"
-# host = "db.example.com:5432"
+# Run next to the database: its round trips are most of a request. `hypha deploy`
+# sets it to the database's host (Cloudflare measures it), or `region` with `hypha
+# init --region`. [placement] mode = "targeted" host = "db.example.com:5432"
 
 [[ratelimits]]
 name = "RL_CODE_IP"

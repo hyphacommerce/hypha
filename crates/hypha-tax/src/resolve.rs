@@ -11,10 +11,9 @@ pub struct TaxContext {
     pub product_classes: HashMap<ProductId, TaxClassId>,
 }
 
-/// What is taxed: an item (its product's tax class applies) or shipping (design note
-/// 0015, SH10: the option's tax class, or the region's default rate). Tax engines
-/// (spores, later) get the kind too, so they can apportion shipping across items as
-/// some EU states require.
+/// What is taxed: an item (its product's tax class applies) or shipping (the option's tax
+/// class, or the region's default rate). Tax engines (spores, later) get the kind too, so
+/// they can apportion shipping across items as some EU states require.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaxableKind {
     Item { product: ProductId },

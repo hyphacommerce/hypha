@@ -30,8 +30,8 @@ impl InMemoryCustomerRepo {
         }
     }
 
-    /// The same repo, filtering its list by the custom field values `fields` holds
-    /// (design note 0033, §7), as a database joins them.
+    /// The same repo, filtering its list by the custom field values `fields` holds, as a
+    /// database joins them.
     pub fn joining_fields(self, fields: &crate::InMemoryCustomFields) -> Self {
         Self {
             field_values: fields.shared_values(),
@@ -39,7 +39,7 @@ impl InMemoryCustomerRepo {
         }
     }
 
-    /// The same repo, filtering its list by `groups`' membership (design note 0032, §6).
+    /// The same repo, filtering its list by `groups`' membership.
     pub fn joining_groups(self, groups: &crate::InMemoryCustomerGroupRepo) -> Self {
         Self {
             group_members: groups.shared_members(),

@@ -1,9 +1,9 @@
 "use client";
 
-// The product page's interactive part (design note 0024, §7; the `product-detail`
-// template): the gallery, the option pickers, quantity and "Add to cart". Price,
-// availability and image follow the choice; nothing is fetched here, since the page
-// passed every variant priced in the shopper's country.
+// The product page's interactive part (the `product-detail` template): the gallery,
+// the option pickers, quantity and "Add to cart". Price, availability and image
+// follow the choice; nothing is fetched here, since the page passed every variant
+// priced in the shopper's country.
 
 import { AspectRatio } from "@astryxdesign/core/AspectRatio";
 import { Badge } from "@astryxdesign/core/Badge";
@@ -129,7 +129,7 @@ export function ProductForm({
     });
   };
 
-  // The selected variant's values win over the product's (design note 0033, §6.2).
+  // The selected variant's values win over the product's.
   const custom = withVariant(fields.product, variant ? fields.variants[variant.id] : undefined);
   const hasDetails = Boolean(
     product.vendor ||

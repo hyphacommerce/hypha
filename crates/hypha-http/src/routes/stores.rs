@@ -28,9 +28,9 @@ pub struct StoreResponse {
     /// Clients convert times with it; the API keeps every time in UTC.
     timezone: Option<Timezone>,
     /// The language the store's content (titles, descriptions, option labels) is written
-    /// in (design note 0021, SU5).
+    /// in.
     default_language: Language,
-    /// How far the admin's setup guide got (design note 0024, AU11).
+    /// How far the admin's setup guide got.
     setup: SetupProgressResponse,
 }
 
@@ -124,8 +124,8 @@ pub struct UpdateStoreRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = String, required = false)]
     default_language: Option<String>,
-    /// The setup guide step the merchant is on: 1 to 40 lowercase letters, digits, `-`
-    /// or `_`, named by the admin (design note 0024, AU11). `null` clears it.
+    /// The setup guide step the merchant is on: 1 to 40 lowercase letters, digits, `-` or
+    /// `_`, named by the admin. `null` clears it.
     #[serde(default, deserialize_with = "patch::nullable")]
     #[schema(value_type = Option<String>, required = false)]
     setup_step: Option<Option<String>>,
@@ -174,8 +174,8 @@ pub async fn update<S: Storage>(
     Ok(Json(StoreResponse::new(&store)?))
 }
 
-/// What a storefront sees of the store (design note 0021, SU4): what a header, footer
-/// or contact page shows. Legal details stay in the admin until a storefront needs them.
+/// What a storefront sees of the store: what a header, footer or contact page shows. Legal
+/// details stay in the admin until a storefront needs them.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct StorefrontStoreResponse {
     name: String,

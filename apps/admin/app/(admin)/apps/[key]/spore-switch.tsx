@@ -8,8 +8,8 @@ import { useState } from "react";
 import { setAppEnabled } from "../actions";
 
 /**
- * Turning a built-in spore on or off: all staff may change about it (design note 0030,
- * SP2). Off, its payment providers, event handlers, routes and blocks stop.
+ * Turning a built-in spore on or off: all staff may change about it. Off, its payment
+ * providers, event handlers, routes and blocks stop.
  */
 export function SporeSwitch({ appKey, isEnabled }: { appKey: string; isEnabled: boolean }) {
   const [error, setError] = useState<string>();

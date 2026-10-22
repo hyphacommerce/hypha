@@ -1,9 +1,8 @@
-//! An app's tokens (design note 0029, §15): an access token (`hypha_at_…`, an hour)
-//! and the refresh token issued with it (`hypha_rt_…`, 30 days), stored together as
-//! SHA-256 hashes. Refreshing replaces the pair: the old refresh token is marked
-//! rotated, and the new pair joins its *family* (every pair since one code exchange).
-//! A rotated refresh token used again means it was copied: the app's tokens are all
-//! revoked (theft detection, OAuth 2.1 §4.3.1).
+//! An app's tokens: an access token (`hypha_at_…`, an hour) and the refresh token issued
+//! with it (`hypha_rt_…`, 30 days), stored together as SHA-256 hashes. Refreshing replaces
+//! the pair: the old refresh token is marked rotated, and the new pair joins its *family*
+//! (every pair since one code exchange). A rotated refresh token used again means it was
+//! copied: the app's tokens are all revoked (theft detection, OAuth 2.1 §4.3.1).
 
 use hypha_apps::normalize;
 use hypha_auth::TokenHash;

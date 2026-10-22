@@ -1,6 +1,6 @@
 "use client";
 
-// The product list's table (design note 0024, §3): its columns, sorts and filters.
+// The product list's table: its columns, sorts and filters.
 
 import { Button } from "@astryxdesign/core/Button";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
@@ -93,7 +93,7 @@ function FeaturedImage({ media }: { media?: AdminSchemas["ProductMediaResponse"]
       }}
     >
       {src ? (
-        // A plain <img>: the media URLs resize, so no Next.js image pipeline (0011 §2).
+        // A plain <img>: the media URLs resize, so no Next.js image pipeline.
         <img src={src} alt="" width={40} height={40} style={{ objectFit: "cover" }} />
       ) : (
         <Text color="secondary">
@@ -113,7 +113,7 @@ export function ProductsTable({
 }: {
   page: { items: Product[]; next_cursor: string | null; error?: string };
   currencies: Currencies;
-  /** Filterable custom fields (design note 0033, §7), offered as filters. */
+  /** Filterable custom fields, offered as filters. */
   fieldFilters?: Definition[];
   /** Channel names by ID. */
   channels: Record<string, string>;

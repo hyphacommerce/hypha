@@ -1,9 +1,9 @@
-# syntax=docker/dockerfile:1
-# The admin or the storefront as a standalone Node server, for a VPS (design note 0025):
-#   docker build -f docker/app.Dockerfile --build-arg APP=storefront -t hypha-storefront .
-# vinext builds it without the Cloudflare plugin under HYPHA_TARGET=node; it refuses to
-# while the app's `cloudflare.config.ts` is there, so the build's copy goes without it.
-# Every setting is read at run time from the environment (see the app's .env.example).
+# syntax=docker/dockerfile:1 The admin or the storefront as a standalone Node server, for
+# a VPS: docker build -f docker/app.Dockerfile --build-arg APP=storefront -t
+# hypha-storefront . vinext builds it without the Cloudflare plugin under
+# HYPHA_TARGET=node; it refuses to while the app's `cloudflare.config.ts` is there, so the
+# build's copy goes without it. Every setting is read at run time from the environment
+# (see the app's .env.example).
 
 ARG NODE_IMAGE=node:24-trixie-slim
 

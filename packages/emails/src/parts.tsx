@@ -1,5 +1,5 @@
 // Pieces the order emails share: the greeting, the button, lines, totals, the address,
-// the payment and the tracking. Each reads the context's names (design note 0028, §11).
+// the payment and the tracking. Each reads the context's names.
 
 import type { ReactNode } from "react";
 import { Button, Column, Link, Row, Section, Text } from "react-email";

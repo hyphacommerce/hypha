@@ -1,5 +1,5 @@
-//! What every channel store must do (design note 0020): channels, and publications
-//! written directly and staged in a batch.
+//! What every channel store must do: channels, and publications written directly and staged
+//! in a batch.
 
 use hypha_channels::{Channel, ChannelKind, ChannelRepo, HasChannels, StagePublications, keys};
 use hypha_core::{ChannelId, HasBatch, ProductId, RepoError, Version, Versioned};

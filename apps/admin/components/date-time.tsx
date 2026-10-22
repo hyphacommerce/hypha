@@ -1,8 +1,8 @@
 "use client";
 
-// Times in the store's time zone (design note 0024, section 6): the admin layout loads
-// it once (`loadTimeZone`) and provides it here, so every page and table shows times the
-// same way without fetching anything itself.
+// Times in the store's time zone: the admin layout loads it once (`loadTimeZone`) and
+// provides it here, so every page and table shows times the same way without fetching
+// anything itself.
 
 import { createContext, useContext } from "react";
 

@@ -30,11 +30,11 @@ pub enum CommandError {
     /// Not kept (pruned after 30 days) or never written.
     #[error("event {0} not found")]
     EventNotFound(EventId),
-    /// The app has no action, block or other UI contribution `id` in a target this
-    /// Hypha knows (design note 0029, §6).
+    /// The app has no action, block or other UI contribution `id` in a target this Hypha
+    /// knows.
     #[error("app {app} has no UI extension {id:?}")]
     ExtensionNotFound { app: AppKey, id: String },
-    /// The app's manifest names no proxy URL for the surface asked (§8).
+    /// The app's manifest names no proxy URL for the surface asked.
     #[error("app {0} has no proxy here")]
     ProxyNotFound(AppKey),
     /// The objects passed don't fit the contribution's target (`order.details needs
@@ -49,7 +49,7 @@ pub enum CommandError {
         id: String,
         point: String,
     },
-    /// The spore takes no settings (design note 0030, §8).
+    /// The spore takes no settings.
     #[error("{0} has no settings")]
     SettingsNotFound(AppKey),
     /// Settings that break the spore's schema or its own check, every problem.
@@ -219,7 +219,7 @@ pub async fn delete_app<R: AppRepo>(ctx: &Ctx, apps: &R, key: &str) -> Result<()
     Ok(apps.delete(app.key()).await?)
 }
 
-/// A spore as this build declares it (design note 0030, §3).
+/// A spore as this build declares it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SporeRegistration {
     /// `stripe`, for `spore_stripe`.
@@ -267,17 +267,17 @@ fn spore_keys(key: &str) -> Vec<AppKey> {
     }
 }
 
-/// Whether the spore `key` belongs to is on (design note 0030, §3): the one rule routes,
-/// event handlers, payment providers and UI discovery ask. A spore without its app
-/// (not set up, or another build's) is off.
+/// Whether the spore `key` belongs to is on: the one rule routes, event handlers, payment
+/// providers and UI discovery ask. A spore without its app (not set up, or another build's)
+/// is off.
 pub async fn spore_enabled<R: AppRepo>(apps: &R, key: &str) -> Result<bool, RepoError> {
     Ok(spore_of(apps, key).await?.is_some_and(|app| app.enabled()))
 }
 
-/// Whether a spore's app is set up as this build declares it (a spore's, with its title
-/// and scopes): what a host that registers nothing asks (the Worker: the native host's
-/// `setup` registers, design note 0030, §9), so a Worker built with other spores than
-/// its database was set up with refuses to serve.
+/// Whether a spore's app is set up as this build declares it (a spore's, with its title and
+/// scopes): what a host that registers nothing asks (the Worker: the native host's `setup`
+/// registers), so a Worker built with other spores than its database was set up with
+/// refuses to serve.
 pub async fn spore_registered<R: AppRepo>(
     apps: &R,
     spore: SporeRegistration,
@@ -358,9 +358,8 @@ pub async fn list_deliveries<S: HasApps + HasOutbox>(
         .await?)
 }
 
-/// Sends a delivery again as soon as the dispatcher runs (a failed one included, with
-/// one more attempt; design note 0016, Q6). One that's running right now is left alone
-/// and returned as it is.
+/// Sends a delivery again as soon as the dispatcher runs (a failed one included, with one
+/// more attempt). One that's running right now is left alone and returned as it is.
 pub async fn retry_delivery<S: HasApps + HasOutbox>(
     ctx: &Ctx,
     ports: &S,

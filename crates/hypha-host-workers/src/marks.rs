@@ -1,5 +1,5 @@
-//! Whether a cron tick has work (design note 0026, W7), read from KV so that a quiet
-//! store's ticks don't touch Postgres and a serverless database can sleep.
+//! Whether a cron tick has work, read from KV so that a quiet store's ticks don't touch
+//! Postgres and a serverless database can sleep.
 //!
 //! Three marks, each a time in milliseconds since the epoch, so no write undoes
 //! another's (KV has no compare-and-set, and the last write wins):
@@ -12,11 +12,11 @@
 //!   the last run that did something found it.
 //!
 //! A tick runs the jobs when a run left work since the last clean check, when `due` came
-//! between that check and now, or when nothing was ever checked (a new namespace: setup
-//! may have queued a search rebuild). After a write, its own run usually does the work
-//! (W6), so most writes set nothing. What a lost mark could hide (two runs racing to
-//! write `due`, a run killed before it marked) waits at most for the safety net, a run
-//! on the first tick of every `NET`. Portable, so its tests run natively.
+//! between that check and now, or when nothing was ever checked (a new namespace: setup may
+//! have queued a search rebuild). After a write, its own run usually does the work, so most
+//! writes set nothing. What a lost mark could hide (two runs racing to write `due`, a run
+//! killed before it marked) waits at most for the safety net, a run on the first tick of
+//! every `NET`. Portable, so its tests run natively.
 
 use std::time::Duration;
 

@@ -1,5 +1,5 @@
-//! Shipping zones (with their options and rate tables) and app providers (design note
-//! 0015): every field round trips, a country is in one zone, versions hold.
+//! Shipping zones (with their options and rate tables) and app providers: every field round
+//! trips, a country is in one zone, versions hold.
 
 use hypha_apps::{App, AppKey, AppRepo, HasApps, NewApp};
 use hypha_core::{
@@ -29,8 +29,8 @@ pub async fn shipping_zone_repo<R: ShippingZoneRepo>(make: impl AsyncFn() -> R) 
     zone_stale(&make().await).await;
 }
 
-/// Runs every `AppProviderRepo` scenario, each on a fresh store from `make`. A provider
-/// is an app's rate settings (design note 0016, EV11), so the store has apps too.
+/// Runs every `AppProviderRepo` scenario, each on a fresh store from `make`. A provider is
+/// an app's rate settings, so the store has apps too.
 pub async fn app_provider_repo<S: HasAppProviders + HasApps>(make: impl AsyncFn() -> S) {
     scenario("app provider: insert stores every field; the key is unique");
     provider_round_trips(&make().await).await;

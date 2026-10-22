@@ -1,6 +1,6 @@
-//! Calling an app's extension point (design note 0029, §3 and §15): serialize the
-//! request, have the host sign and send it, read at most `MAX_ANSWER_BYTES`, parse the
-//! answer as the point's response, and record the call.
+//! Calling an app's extension point: serialize the request, have the host sign and send it,
+//! read at most `MAX_ANSWER_BYTES`, parse the answer as the point's response, and record
+//! the call.
 
 use core::time::Duration;
 
@@ -15,16 +15,16 @@ pub const EXTENSION_VERSION_HEADER: &str = "Hypha-Extension-Version";
 /// The same for every retry of one piece of work (a payment's ID): an app that did it
 /// already answers as it did.
 pub const IDEMPOTENCY_KEY_HEADER: &str = "Idempotency-Key";
-/// The store the call is for (its `store_…` ID). Set by the host, which knows the
-/// store; domain code never sees one (design note 0006).
+/// The store the call is for (its `store_…` ID). Set by the host, which knows the store;
+/// domain code never sees one.
 pub const STORE_HEADER: &str = "Hypha-Store";
-/// The most of an answer read: a bigger one is an `invalid` call rather than filled
-/// memory. The same cap as webhooks' and rate callbacks' (0015 §5).
+/// The most of an answer read: a bigger one is an `invalid` call rather than filled memory.
+/// The same cap as webhooks' and rate callbacks'.
 pub const MAX_ANSWER_BYTES: usize = 256 * 1024;
 
-/// A call for the host to send: `POST url` with `body` (JSON) and `headers`, signed
-/// with `secret` (`Hypha-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<body>">`,
-/// 0015 §5), the content type and the store added by the host.
+/// A call for the host to send: `POST url` with `body` (JSON) and `headers`, signed with
+/// `secret` (`Hypha-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<body>">`), the content
+/// type and the store added by the host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutgoingCall<'a> {
     pub url: &'a str,
@@ -54,9 +54,9 @@ pub enum TransportError {
     TooLarge,
 }
 
-/// How the host sends calls to apps: natively over its outbound client (public
-/// addresses only), on Workers through `fetch` or a Service Binding (design note 0029,
-/// §9). No `Send` bound (CLAUDE.md): Workers' futures aren't.
+/// How the host sends calls to apps: natively over its outbound client (public addresses
+/// only), on Workers through `fetch` or a Service Binding. No `Send` bound: Workers'
+/// futures aren't.
 #[allow(async_fn_in_trait)]
 pub trait ExtensionCaller {
     /// Signs and sends `call`; follows no redirects; reads at most

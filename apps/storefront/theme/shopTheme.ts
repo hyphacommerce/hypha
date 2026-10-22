@@ -1,7 +1,7 @@
-// The shop's theme (design note 0024, AU12): a warm, editorial look for shoppers, apart
-// from the admin's Hypha theme. Clay on cream, Fraunces headings over Instrument Sans,
-// a roomier type scale. Extends Neutral and only replaces what the shop changes, so a
-// merchant forking the storefront restyles it here.
+// The shop's theme: a warm, editorial look for shoppers, apart from the admin's Hypha
+// theme. Clay on cream, Fraunces headings over Instrument Sans, a roomier type scale.
+// Extends Neutral and only replaces what the shop changes, so a merchant forking the
+// storefront restyles it here.
 //
 // Build after editing: `pnpm theme:build` (writes shop.css, shop.js, shop.d.ts).
 // `pnpm theme:check` fails while they're stale.

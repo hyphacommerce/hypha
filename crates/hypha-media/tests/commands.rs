@@ -403,6 +403,23 @@ fn reading_needs_media_read_and_changing_needs_media_write() {
             Scope::MediaWrite
         )))
     );
+    let input = UpdateAsset {
+        alt: Some(Some("A blue shirt".to_string())),
+        title: None,
+    };
+    assert_eq!(
+        block_on(update_asset(
+            &reader,
+            &world.assets,
+            &world.clock,
+            id,
+            input
+        ))
+        .map(|_| ()),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::MediaWrite
+        )))
+    );
 }
 
 /// An asset repo whose first `get` returns `stale`: the asset as one `complete_upload`
@@ -537,7 +554,7 @@ fn the_sweep_deletes_uploads_abandoned_for_a_day() {
     assert_eq!(world.outbox.types(), ["asset.deleted"]);
 }
 
-// ---- usages (design note 0014, section 6) ----
+// ---- usages ----
 
 /// A world with batches, to record usages the way merchandising does.
 struct UsageWorld {

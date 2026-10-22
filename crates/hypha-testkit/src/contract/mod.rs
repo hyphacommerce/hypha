@@ -1,4 +1,4 @@
-//! Contract tests every repository adapter must pass (design note 0001, 3.6).
+//! Contract tests every repository adapter must pass.
 //!
 //! One function per repo trait runs all its scenarios, each against a fresh repo from
 //! `make`. The in-memory repos in this crate run them, and so must every storage adapter

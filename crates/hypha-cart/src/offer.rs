@@ -1,7 +1,6 @@
-//! A product's prices and stock in a shopper's country (design note 0021, SU7): what a
-//! product page shows before anything is in a cart. Priced with the cart's loaders and
-//! rules (`load_pricing`, `price_line`, `StockContext::load`), so the page, search and
-//! the cart can't disagree.
+//! A product's prices and stock in a shopper's country: what a product page shows before
+//! anything is in a cart. Priced with the cart's loaders and rules (`load_pricing`,
+//! `price_line`, `StockContext::load`), so the page, search and the cart can't disagree.
 
 use hypha_core::{CountryCode, Ctx, Price, Quantity, Scope, VariantId};
 use hypha_inventory::{Availability, HasInventoryItems, HasLocations, StockContext};
@@ -36,8 +35,8 @@ pub struct ProductOffer {
 }
 
 impl ProductOffer {
-    /// Whether the country's market sells the product: some variant has a price
-    /// there (Q2: a product page shows "not available in your country" otherwise).
+    /// Whether the country's market sells the product: some variant has a price there (a
+    /// product page shows "not available in your country" otherwise).
     pub fn sold(&self) -> bool {
         self.variants.iter().any(|v| v.price.is_some())
     }

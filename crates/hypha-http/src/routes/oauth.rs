@@ -1,5 +1,4 @@
-//! OAuth 2.1 for apps (design note 0029, AP5, §4.1): Hypha's API is the authorization
-//! server.
+//! OAuth 2.1 for apps: Hypha's API is the authorization server.
 //!
 //! - `GET /oauth/authorize` (public): checks the request against the app's manifest
 //!   (its `client_id` is the manifest's URL) and sends the browser to the admin's
@@ -549,8 +548,7 @@ pub struct ScopeChanges {
     kept: Vec<Scope>,
 }
 
-/// A custom field the app declares (design note 0033, §8), always in its own namespace
-/// (`app_<name>.<key>`).
+/// A custom field the app declares, always in its own namespace (`app_<name>.<key>`).
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct ConsentCustomField {
     /// `product`, `variant`, `category`, `customer` or `order`.
@@ -754,8 +752,8 @@ pub struct ConsentAnswer {
     credentials: Option<PrivateAppCredentials>,
 }
 
-/// What a private app's integration needs to act, shown once (design note 0029, "As
-/// built: the admin's app UI and private apps").
+/// What a private app's integration needs to act, shown once ("As built: the admin's app UI
+/// and private apps").
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct PrivateAppCredentials {
     /// `app_<name>`.
@@ -847,8 +845,7 @@ pub async fn approve_request<S: Storage>(
     PathId(id): PathId<OAuthRequestId>,
 ) -> Result<Response, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    // The manifest applied and the app's custom fields synced to it, in one commit
-    // (design note 0033, §8).
+    // The manifest applied and the app's custom fields synced to it, in one commit.
     let prepared = prepare_approval(&ctx, &ports, &state.env, id).await?;
     let approval = crate::app_fields::commit_applying(&ports, &state.env, prepared).await?;
     let answer = ConsentAnswer::from_approval(approval, &issuer);
@@ -861,8 +858,7 @@ pub async fn approve_request<S: Storage>(
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PrivateAppRequest {
-    /// The manifest (design note 0029, §4). Checked like a served one, except that
-    /// `redirect_uris` may be empty.
+    /// The manifest. Checked like a served one, except that `redirect_uris` may be empty.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     manifest: serde_json::Value,
 }
@@ -877,12 +873,11 @@ pub struct PrivateAppResponse {
     consent_url: Option<String>,
 }
 
-/// Uploads a private app's manifest (a store's own integration with no public site,
-/// design note 0029, §4.1): it becomes a pending authorization request for the consent
-/// page, whose approval installs the app and answers with its tokens. Staff sessions
-/// only (an API key can't install apps); `apps:write`. 422 `manifest_invalid` with
-/// `details.errors`; 409 `app_installed_from_url` when the key is an app installed from
-/// its manifest URL.
+/// Uploads a private app's manifest (a store's own integration with no public site): it
+/// becomes a pending authorization request for the consent page, whose approval installs
+/// the app and answers with its tokens. Staff sessions only (an API key can't install
+/// apps); `apps:write`. 422 `manifest_invalid` with `details.errors`; 409
+/// `app_installed_from_url` when the key is an app installed from its manifest URL.
 #[utoipa::path(
     post,
     path = "/admin/apps/private",

@@ -4,9 +4,8 @@ use hypha_core::{
 
 use crate::{PaymentError, ProviderKey};
 
-/// How shoppers can pay (design note 0027, PA4): a provider (`manual` for cash on
-/// delivery or a bank transfer), the name shoppers see, the instructions shown after
-/// checkout, and where it's offered.
+/// How shoppers can pay: a provider (`manual` for cash on delivery or a bank transfer), the
+/// name shoppers see, the instructions shown after checkout, and where it's offered.
 ///
 /// Invariants, checked by `new` and `restore`: a name (trimmed, at most 255
 /// characters), instructions of at most `MAX_INSTRUCTIONS_LEN` characters, markets and
@@ -86,7 +85,7 @@ impl PaymentMethod {
     }
 
     /// Offered to a cart in `market`, sold through `channel`: enabled, and both lists
-    /// either empty or naming them (design note 0027, Q1).
+    /// either empty or naming them.
     pub fn offered_in(&self, market: MarketId, channel: ChannelId) -> bool {
         self.enabled
             && (self.markets.is_empty() || self.markets.contains(&market))
@@ -179,7 +178,7 @@ fn sorted<T: Ord>(mut ids: Vec<T>) -> Vec<T> {
     ids
 }
 
-/// Plain-data form of a `PaymentMethod` for storage adapters (design note 0001, 3.4).
+/// Plain-data form of a `PaymentMethod` for storage adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentMethodSnapshot {
     pub id: PaymentMethodId,

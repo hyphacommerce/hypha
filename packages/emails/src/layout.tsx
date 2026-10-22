@@ -1,7 +1,7 @@
-// The shared frame every default extends (`{% extends "layout" %}`, design note 0028,
-// NT4): the store's logo or name, its accent colour as a bar along the top, the content,
-// and a footer with the store's own text and its contact address. Merchants can edit it
-// once to change every email.
+// The shared frame every default extends (`{% extends "layout" %}`): the store's logo or
+// name, its accent colour as a bar along the top, the content, and a footer with the
+// store's own text and its contact address. Merchants can edit it once to change every
+// email.
 
 import { Body, Container, Head, Hr, Html, Img, Link, Section, Text } from "react-email";
 import { Block, If, v } from "./jinja.tsx";

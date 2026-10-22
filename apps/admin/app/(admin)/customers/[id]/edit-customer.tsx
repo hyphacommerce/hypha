@@ -1,7 +1,7 @@
 "use client";
 
-// The customer's own fields (design note 0032, §12 step 2): email, name and phone, in a
-// dialog from the page header. Blank name and phone clear them; the email can't be blank.
+// The customer's own fields: email, name and phone, in a dialog from the page header.
+// Blank name and phone clear them; the email can't be blank.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

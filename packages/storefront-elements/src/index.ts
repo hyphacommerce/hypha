@@ -1,5 +1,5 @@
-// @hypha/storefront-elements: loading app elements into any storefront (design note 0029,
-// §7; docs/apps/elements.md). Framework-free; the React wrapper is
+// @hypha/storefront-elements: loading app elements into any storefront
+// (docs/apps/elements.md). Framework-free; the React wrapper is
 // `@hypha/storefront-elements/react`.
 
 export {

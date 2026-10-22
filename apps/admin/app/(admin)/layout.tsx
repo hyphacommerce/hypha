@@ -10,11 +10,11 @@ import { loadCurrencies, loadSetup, loadTimeZone, requireStaff } from "@/lib/hyp
 import { AdminShell, SetupNavItem, StoreNav, UserMenu } from "./admin-shell";
 
 /**
- * Every page in here needs a signed-in staff member (design note 0011, P4). The frame
- * (top bar and nav) renders at once (design note 0024, section 6); the user's menu and
- * the page stream in, each behind its own skeleton, and every route has a `loading.tsx`
- * of its own for navigations. The nav and the palette show every page until the user's
- * scopes arrive, then only the pages their role can open.
+ * Every page in here needs a signed-in staff member. The frame (top bar and nav)
+ * renders at once; the user's menu and the page stream in, each behind its own
+ * skeleton, and every route has a `loading.tsx` of its own for navigations. The nav and
+ * the palette show every page until the user's scopes arrive, then only the pages their
+ * role can open.
  */
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -62,7 +62,7 @@ async function SignedIn() {
   return <UserMenu name={me.user.name} email={me.user.email} />;
 }
 
-/** The setup guide's nav item, while the guide isn't finished (design note 0024, AU11). */
+/** The setup guide's nav item, while the guide isn't finished. */
 async function SetupItem() {
   const setup = await loadSetup();
   return setup && !setup.isFinished ? <SetupNavItem /> : null;

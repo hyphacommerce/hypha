@@ -1,9 +1,9 @@
-//! Sales channels (design note 0020): where products are sold (a storefront, shopping
-//! agents, an app), and which products each sells. A leaf crate on core: products,
-//! carts, search and auth reach channels without depending on each other.
+//! Sales channels: where products are sold (a storefront, shopping agents, an app), and
+//! which products each sells. A leaf crate on core: products, carts, search and auth reach
+//! channels without depending on each other.
 //!
-//! A channel is *where*; a market is *to whom* and *at what price* (CH1). A storefront
-//! request may sell a product only if both allow it.
+//! A channel is *where*; a market is *to whom* and *at what price*. A storefront request
+//! may sell a product only if both allow it.
 
 pub mod channel;
 pub mod commands;

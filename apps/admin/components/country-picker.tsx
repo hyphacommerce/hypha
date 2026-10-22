@@ -1,9 +1,9 @@
 "use client";
 
-// Picking a market's countries (design note 0024, section 6): a searchable list with
-// quick picks for every free country or a region, and Clear. A country belongs to one
-// market, so the ones other markets have are shown but can't be picked, and a quick
-// pick takes only the free ones, saying how many it left out.
+// Picking a market's countries: a searchable list with quick picks for every free
+// country or a region, and Clear. A country belongs to one market, so the ones other
+// markets have are shown but can't be picked, and a quick pick takes only the free
+// ones, saying how many it left out.
 
 import { Button } from "@astryxdesign/core/Button";
 import { HStack, VStack } from "@astryxdesign/core/Layout";

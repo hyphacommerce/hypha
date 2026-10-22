@@ -1,6 +1,6 @@
-//! The sync job (design note 0019, section 5): works the queue's marks into documents.
-//! A plain function of ports, an engine and a clock, like the dispatcher's jobs, so a
-//! Workers Cron trigger can call it too.
+//! The sync job: works the queue's marks into documents. A plain function of ports, an
+//! engine and a clock, like the dispatcher's jobs, so a Workers Cron trigger can call it
+//! too.
 //!
 //! Work per step is bounded and batched: the batch's products load at once (variant
 //! marks resolve in one query), stock items load once for every market, prices once
@@ -70,7 +70,7 @@ impl<T> SyncPorts for T where
 {
 }
 
-/// `[jobs.search_sync]` in `hypha.config.toml` (design note 0017), defaults here.
+/// `[jobs.search_sync]` in `hypha.config.toml`, defaults here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncSettings {
     /// Marks worked per call: each is a product rebuilt in every market.
@@ -283,10 +283,9 @@ impl Sources {
             .await?
             .into_iter()
             .collect();
-        // Each product's categories with their ancestors (CA3), from one tree. Only the
-        // ones a storefront shows: a hidden category hides everything below it (CA4),
-        // so a product only in a hidden subcategory isn't listed under its visible
-        // ancestors.
+        // Each product's categories with their ancestors, from one tree. Only the ones a
+        // storefront shows: a hidden category hides everything below it, so a product only
+        // in a hidden subcategory isn't listed under its visible ancestors.
         let tree = CategoryTree::new(ports.categories().list_all().await?);
         let categories = ports
             .categories()
@@ -302,7 +301,7 @@ impl Sources {
                 (product, all.into_iter().collect())
             })
             .collect();
-        // Custom field values a storefront filters by (design note 0033, §9).
+        // Custom field values a storefront filters by.
         let products: Vec<&Product> = loaded.values().collect();
         let fields = load_facet_fields(ports, &products).await?;
         Ok(Self {
@@ -350,10 +349,9 @@ impl Sources {
     }
 }
 
-/// `ids`' documents in `market` as the sync job would build them now: priced and
-/// stocked there, none for a product that's gone, inactive or not in the market's
-/// catalog. For hits an app found (design note 0029, §3.1): Hypha shows its own prices
-/// and stock, never an app's.
+/// `ids`' documents in `market` as the sync job would build them now: priced and stocked
+/// there, none for a product that's gone, inactive or not in the market's catalog. For hits
+/// an app found: Hypha shows its own prices and stock, never an app's.
 pub async fn documents_for<S: SyncPorts>(
     ports: &S,
     market: Market,

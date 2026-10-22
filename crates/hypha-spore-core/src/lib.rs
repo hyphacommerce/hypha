@@ -1,6 +1,6 @@
-//! Spores (design note 0030): trusted Rust crates compiled into the API beside the
-//! external apps of design note 0029. This crate is the `Spore` trait a spore implements
-//! and `SporeSet`, the list of spores a host is built with (`host! { spores: [...] }`).
+//! Spores: trusted Rust crates compiled into the API beside external apps. This
+//! crate is the `Spore` trait a spore implements and `SporeSet`, the list
+//! of spores a host is built with (`host! { spores: [...] }`).
 //!
 //! It's what the hosts need: what a spore is called, the scopes it acts with, its
 //! tables, how it's built (`SporeEnv`, `env.rs`), and what it adds to the host's payment
@@ -35,18 +35,18 @@ pub use env::{
 /// request (so `Send + Sync`); everything it contributes goes into the host's tuples
 /// (static dispatch, so `Send` stays provable on the native host).
 pub trait Spore: Sized + Send + Sync + 'static {
-    /// `stripe`: its app key (`spore_stripe`, design note 0030, §3), its migration module
-    /// and table prefix (`spore_stripe`, `spore_stripe_*`), its configuration section
-    /// (`[spores.stripe]`). A contract: never rename one that has shipped.
+    /// `stripe`: its app key (`spore_stripe`), its migration module and table prefix
+    /// (`spore_stripe`, `spore_stripe_*`), its configuration section (`[spores.stripe]`). A
+    /// contract: never rename one that has shipped.
     const NAME: &'static str;
-    /// What it may do, as `Actor::App` (SP2): its grant, shown to staff.
+    /// What it may do, as `Actor::App`: its grant, shown to staff.
     const SCOPES: &'static [Scope];
 
     /// Its title in the admin ("Stripe").
     fn title() -> &'static str;
 
-    /// Its own tables (SP4): module `spore_<NAME>` (the host checks), applied after
-    /// core's; `MigrationSet { module: "spore_<NAME>", migrations: &[] }` for none.
+    /// Its own tables: module `spore_<NAME>` (the host checks), applied after core's;
+    /// `MigrationSet { module: "spore_<NAME>", migrations: &[] }` for none.
     fn migrations() -> MigrationSet;
 
     /// Builds it, at startup, with the host's environment and its own section of
@@ -54,9 +54,9 @@ pub trait Spore: Sized + Send + Sync + 'static {
     /// host from starting, naming the spore.
     fn new(env: SporeEnv) -> Result<Self, SporeError>;
 
-    /// Its settings form (design note 0030, §8): a JSON Schema of scalar fields
-    /// (`hypha_apps::SettingsSchema`'s subset, checked when the host starts), secret
-    /// ones marked `"x-hypha-secret": true`. `None` (the default): it takes no settings.
+    /// Its settings form: a JSON Schema of scalar fields (`hypha_apps::SettingsSchema`'s
+    /// subset, checked when the host starts), secret ones marked `"x-hypha-secret": true`.
+    /// `None` (the default): it takes no settings.
     fn settings_schema() -> Option<serde_json::Value> {
         None
     }
@@ -71,33 +71,30 @@ pub trait Spore: Sized + Send + Sync + 'static {
         Ok(())
     }
 
-    /// The custom fields it keeps on Hypha's objects (design note 0033, §8), in its
-    /// namespace `spore_<NAME>` (each spec's `key` alone). The host syncs them at
-    /// startup, next to registering its app: new ones created, changed ones updated,
-    /// missing ones deleted with their values; a changed type stops the host, naming the
-    /// field. None by default. It writes and reads their values through `SporeEnv`.
+    /// The custom fields it keeps on Hypha's objects, in its namespace `spore_<NAME>` (each
+    /// spec's `key` alone). The host syncs them at startup, next to registering its app:
+    /// new ones created, changed ones updated, missing ones deleted with their values; a
+    /// changed type stops the host, naming the field. None by default. It writes and reads
+    /// their values through `SporeEnv`.
     fn custom_fields() -> Vec<hypha_custom_fields::DefinitionSpec> {
         Vec::new()
     }
 
-    /// The payment providers it adds (design note 0027): a tuple of `PaymentProvider`s,
-    /// `()` for none. Keys are `spore_<NAME>` (or `spore_<NAME>_…`) and unique in the
-    /// host.
+    /// The payment providers it adds: a tuple of `PaymentProvider`s, `()` for none. Keys
+    /// are `spore_<NAME>` (or `spore_<NAME>_…`) and unique in the host.
     type PaymentProviders: PaymentProviders + Send + Sync + 'static;
-    /// The event handlers it adds (design note 0019, §5.1): a tuple of
-    /// `EventHandler<P>`s, generic over the ports `P` they need, `()` for none. The host
-    /// checks they're handlers for its ports when it's built. Names are unique in the
-    /// host; prefix them with the spore's name.
+    /// The event handlers it adds: a tuple of `EventHandler<P>`s, generic over the ports
+    /// `P` they need, `()` for none. The host checks they're handlers for its ports when
+    /// it's built. Names are unique in the host; prefix them with the spore's name.
     type Handlers: Send + Sync + 'static;
 
     fn payment_providers(&self) -> Self::PaymentProviders;
     fn handlers(&self) -> Self::Handlers;
 }
 
-/// What the HTTP layer asks of a host's built spores, in-process, by key (design note
-/// 0030, §7–§8): their settings forms and checks, and their UI. `P` is the host's ports
-/// (what their UI reads with). Implemented for `()` and the tuples `SporeSet` is, whose
-/// spores implement `SporeUi<P>`.
+/// What the HTTP layer asks of a host's built spores, in-process, by key: their settings
+/// forms and checks, and their UI. `P` is the host's ports (what their UI reads with).
+/// Implemented for `()` and the tuples `SporeSet` is, whose spores implement `SporeUi<P>`.
 #[allow(async_fn_in_trait)]
 pub trait SporeRuntime<P>: Send + Sync + 'static {
     /// What each spore adds to admins, in order.
@@ -288,12 +285,12 @@ tuple_runtime!(A, B, C, D, E, F);
 tuple_runtime!(A, B, C, D, E, F, G);
 tuple_runtime!(A, B, C, D, E, F, G, H);
 
-/// A spore's event handlers, run only while staff have the spore enabled (design note
-/// 0030, §3): a delivery to one of them while it's disabled fails with "spore … is
-/// disabled" and waits on the retry schedule, as a disabled app's webhooks do (0016:
-/// `jobs.dispatch` retries for `webhooks.give_up_after`, 72 hours by default). Fan-out
-/// still makes the deliveries, so events that happen while it's off reach it once it's
-/// back within that window; after it they fail for good, as any delivery does.
+/// A spore's event handlers, run only while staff have the spore enabled: a delivery to one
+/// of them while it's disabled fails with "spore … is disabled" and waits on the retry
+/// schedule, as a disabled app's webhooks do (`jobs.dispatch` retries for
+/// `webhooks.give_up_after`, 72 hours by default). Fan-out still makes the deliveries, so
+/// events that happen while it's off reach it once it's back within that window; after it
+/// they fail for good, as any delivery does.
 pub struct Gated<H> {
     name: &'static str,
     handlers: H,
@@ -424,7 +421,7 @@ pub trait SporeSet: Sized + Send + Sync + 'static {
     /// Every spore's payment providers, in order.
     type PaymentProviders: PaymentProviders + Send + Sync + 'static;
 
-    /// What the host registers in `apps` at startup (design note 0030, §3).
+    /// What the host registers in `apps` at startup.
     fn registrations() -> Vec<SporeRegistration>;
     /// Their migrations, in order, to apply after core's.
     fn migrations() -> Vec<MigrationSet>;
@@ -565,10 +562,9 @@ fn foreign_keys(name: &str, keys: &[ProviderKey]) -> Vec<String> {
 }
 
 /// Makes each spore's namespace hold exactly the fields it declares
-/// (`Spore::custom_fields`, design note 0033, §8), as the system, after its app is
-/// registered (the definitions refer to it). Each spore's sync is one batch. The first
-/// that fails stops it, naming the spore (and, for a changed type, the field): the host
-/// refuses to start.
+/// (`Spore::custom_fields`), as the system, after its app is registered (the definitions
+/// refer to it). Each spore's sync is one batch. The first that fails stops it, naming the
+/// spore (and, for a changed type, the field): the host refuses to start.
 pub async fn sync_custom_fields<S, P>(ports: &P, ids: &impl IdGenerator) -> Result<(), String>
 where
     S: SporeSet,

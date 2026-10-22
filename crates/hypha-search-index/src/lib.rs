@@ -1,7 +1,7 @@
-//! The search index (design note 0019): what search documents and queries are, what a
-//! search means (`reference::search`), the ports engines and storage implement (the
-//! `SearchIndex` engine, the `SearchQueue` of what to rebuild, the settings), and the
-//! merchant's settings.
+//! The search index: what search documents and queries are, what a search means
+//! (`reference::search`), the ports engines and storage implement (the `SearchIndex`
+//! engine, the `SearchQueue` of what to rebuild, the settings), and the merchant's
+//! settings.
 //!
 //! A leaf crate on core, so storage adapters and engines depend on it without depending
 //! on the domains documents are built from. Building and syncing documents, and

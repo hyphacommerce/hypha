@@ -1,7 +1,7 @@
-//! Fetching an app's manifest from its URL (design note 0029, AP5: the URL is the
-//! app's OAuth client ID). The fetching is a host port, `ManifestFetcher`: natively and
-//! on Workers it's a GET through the outbound client, which reaches only public
-//! addresses unless `outbound.allow_private`.
+//! Fetching an app's manifest from its URL (the URL is the app's OAuth client ID). The
+//! fetching is a host port, `ManifestFetcher`: natively and on Workers it's a GET through
+//! the outbound client, which reaches only public addresses unless
+//! `outbound.allow_private`.
 
 use hypha_core::{CallbackUrl, ErrorCode};
 use thiserror::Error;

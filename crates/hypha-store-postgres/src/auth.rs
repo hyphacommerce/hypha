@@ -1,5 +1,5 @@
-//! `hypha-auth`'s repositories: identities with their credentials, sessions, API keys
-//! and password resets (design note 0008).
+//! `hypha-auth`'s repositories: identities with their credentials, sessions, API keys and
+//! password resets.
 
 use hypha_auth::{
     ApiKey, ApiKeyKind, ApiKeyRepo, ApiKeySnapshot, CredentialKind, Identity, IdentityRepo,
@@ -853,8 +853,8 @@ pub(crate) async fn insert_password_reset(
     Ok(())
 }
 
-/// A channel exists for a new publishable key (design note 0020): `hypha-auth` asks
-/// through its port, the channels table answers.
+/// A channel exists for a new publishable key: `hypha-auth` asks through its port, the
+/// channels table answers.
 impl<C: PgConnection> hypha_auth::ChannelDirectory for PgStore<C> {
     async fn channel_exists(&self, channel: ChannelId) -> Result<bool, RepoError> {
         Ok(hypha_channels::ChannelRepo::get(self, channel)

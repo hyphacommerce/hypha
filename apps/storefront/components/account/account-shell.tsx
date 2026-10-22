@@ -1,5 +1,5 @@
-// The account pages' frame (design note 0034, §7): the heading, the section links and
-// the page. Server-rendered; the links are the site's.
+// The account pages' frame: the heading, the section links and the page.
+// Server-rendered; the links are the site's.
 
 import { Heading } from "@astryxdesign/core/Heading";
 import { HStack, VStack } from "@astryxdesign/core/Stack";

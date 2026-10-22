@@ -1,7 +1,7 @@
-//! The `EmailSender` port (design note 0028, §5, NT9): one way out for every email,
-//! picked by the operator (`log`, `smtp`, `resend`). Like every port it has no `Send`
-//! bound; it's passed to commands and the handler apart from the request's ports, like
-//! the `WebhookSender` and the search engine.
+//! The `EmailSender` port: one way out for every email, picked by the operator (`log`,
+//! `smtp`, `resend`). Like every port it has no `Send` bound; it's passed to commands and
+//! the handler apart from the request's ports, like the `WebhookSender` and the search
+//! engine.
 
 use std::fmt;
 
@@ -81,10 +81,6 @@ impl SendError {
         match self {
             SendError::Transient(message) | SendError::Permanent(message) => message,
         }
-    }
-
-    pub fn is_transient(&self) -> bool {
-        matches!(self, SendError::Transient(_))
     }
 }
 

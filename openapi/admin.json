@@ -37,7 +37,7 @@
         "type": "object"
       },
       "AccountFactsResponse": {
-        "description": "What the admin knows of a customer's account (design note 0034, §7).",
+        "description": "What the admin knows of a customer's account.",
         "properties": {
           "active_sessions": {
             "description": "Sessions neither signed out nor expired: the devices they're signed in on.",
@@ -350,7 +350,7 @@
             ]
           },
           "redacted": {
-            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
               "type": "string"
             },
@@ -454,14 +454,14 @@
               },
               "custom_fields": {
                 "additionalProperties": {},
-                "description": "Its custom field values the caller may read (design note 0033); `PATCH\n/admin/orders/{id}/custom-fields` writes them. A personal one is left out\nwithout `customer_data:profile` and listed in `redacted` as\n`custom_fields.<key>`.",
+                "description": "Its custom field values the caller may read; `PATCH\n/admin/orders/{id}/custom-fields` writes them. A personal one is left out without\n`customer_data:profile` and listed in `redacted` as `custom_fields.<key>`.",
                 "propertyNames": {
                   "type": "string"
                 },
                 "type": "object"
               },
               "payments": {
-                "description": "Its payments, newest first (design note 0027): the method, status and\ninstructions of each.",
+                "description": "Its payments, newest first: the method, status and instructions of each.",
                 "items": {
                   "$ref": "#/components/schemas/PaymentResponse"
                 },
@@ -486,7 +486,7 @@
         "description": "An order as the admin sees it: with its cancellation and what's left to ship, by\nlocation. A storefront's `OrderResponse` has neither: why staff cancelled an order\n(`fraud`) is theirs to know."
       },
       "AdminTarget": {
-        "description": "An admin target (design note 0029, §5): a slot any admin may implement.\n\nKnown values: `apps.page`, `settings.app`, `order.details`, `order.payment`, `order.fulfillment`, `product.details`, `customer.details`, `payment`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "An admin target: a slot any admin may implement.\n\nKnown values: `apps.page`, `settings.app`, `order.details`, `order.payment`, `order.fulfillment`, `product.details`, `customer.details`, `payment`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "apps.page",
           "settings.app",
@@ -509,7 +509,7 @@
         "type": "string"
       },
       "ApiKeyPage": {
-        "description": "A page of a list, newest first (design note 0012).",
+        "description": "A page of a list, newest first.",
         "properties": {
           "has_more": {
             "description": "Whether there are more after these.",
@@ -744,10 +744,10 @@
           },
           "kind": {
             "$ref": "#/components/schemas/AppKind",
-            "description": "An external `app`, or a `spore` built into the API (design note 0030): staff\nonly enable or disable a spore."
+            "description": "An external `app`, or a `spore` built into the API: staff only enable or disable a\nspore."
           },
           "missing": {
-            "description": "A spore this API isn't built with any more (taken out of the deployment, design\nnote 0030, Q7): its app, settings and tables stay, and it does nothing until a\nbuild has it again. Always `false` for an external app.",
+            "description": "A spore this API isn't built with any more (taken out of the deployment): its app,\nsettings and tables stay, and it does nothing until a build has it again. Always\n`false` for an external app.",
             "type": "boolean"
           },
           "name": {
@@ -832,7 +832,7 @@
         "x-hypha-open-enum": true
       },
       "AssetPage": {
-        "description": "A page of a list, newest first (design note 0012).",
+        "description": "A page of a list, newest first.",
         "properties": {
           "has_more": {
             "description": "Whether there are more after these.",
@@ -967,7 +967,7 @@
         "x-hypha-open-enum": true
       },
       "AssetUsagePage": {
-        "description": "A page of a list, newest first (design note 0012).",
+        "description": "A page of a list, newest first.",
         "properties": {
           "has_more": {
             "description": "Whether there are more after these.",
@@ -1129,7 +1129,7 @@
         "type": "object"
       },
       "CancelReasonDto": {
-        "description": "`CancelReason` on the wire (design note 0018).\n\nKnown values: `customer`, `inventory`, `fraud`, `declined`, `staff`, `other`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "`CancelReason` on the wire.\n\nKnown values: `customer`, `inventory`, `fraud`, `declined`, `staff`, `other`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "customer",
           "inventory",
@@ -1197,7 +1197,7 @@
             "description": "Picked from the country when the cart was created; it sets the currency."
           },
           "marketing_opt_in": {
-            "description": "Whether the buyer ticked \"Email me with news and offers\" (`PUT …/marketing`):\ncheckout records the consent then (design note 0032, §5).",
+            "description": "Whether the buyer ticked \"Email me with news and offers\" (`PUT …/marketing`):\ncheckout records the consent then.",
             "type": "boolean"
           },
           "order": {
@@ -1223,7 +1223,7 @@
             ]
           },
           "redacted": {
-            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
               "type": "string"
             },
@@ -1302,7 +1302,7 @@
         "type": "string"
       },
       "CatalogProductPage": {
-        "description": "A page of a list, newest first (design note 0012).",
+        "description": "A page of a list, newest first.",
         "properties": {
           "has_more": {
             "description": "Whether there are more after these.",
@@ -1438,7 +1438,7 @@
           },
           "custom_fields": {
             "additionalProperties": {},
-            "description": "The custom field values `?custom_fields=` asked for (design note 0033); absent\nwithout it.",
+            "description": "The custom field values `?custom_fields=` asked for; absent without it.",
             "propertyNames": {
               "type": "string"
             },
@@ -1477,7 +1477,7 @@
         "type": "object"
       },
       "CategoryProductPage": {
-        "description": "A page of a list, newest first (design note 0012).",
+        "description": "A page of a list, newest first.",
         "properties": {
           "has_more": {
             "description": "Whether there are more after these.",
@@ -1595,7 +1595,7 @@
           },
           "custom_fields": {
             "additionalProperties": {},
-            "description": "Its custom field values the caller may read (design note 0033); `PATCH\n/admin/categories/{id}/custom-fields` writes them.",
+            "description": "Its custom field values the caller may read; `PATCH\n/admin/categories/{id}/custom-fields` writes them.",
             "propertyNames": {
               "type": "string"
             },
@@ -1928,7 +1928,7 @@
         "type": "object"
       },
       "ConsentCustomField": {
-        "description": "A custom field the app declares (design note 0033, §8), always in its own namespace\n(`app_<name>.<key>`).",
+        "description": "A custom field the app declares, always in its own namespace (`app_<name>.<key>`).",
         "properties": {
           "key": {
             "type": "string"
@@ -2026,7 +2026,7 @@
         "type": "object"
       },
       "ConsentResponse": {
-        "description": "A channel's marketing consent (design note 0032, §5).",
+        "description": "A channel's marketing consent.",
         "properties": {
           "consented_at": {
             "description": "When the customer last said so, RFC 3339 in UTC; absent while never asked.",
@@ -2318,7 +2318,7 @@
             ]
           },
           "visible": {
-            "description": "Whether the storefront shows it. Required: there's no default (CA10).",
+            "description": "Whether the storefront shows it. Required: there's no default.",
             "type": "boolean"
           }
         },
@@ -2806,7 +2806,7 @@
       },
       "CustomFieldAccess": {
         "additionalProperties": false,
-        "description": "Who sees and writes a field's values (design note 0033, §5).",
+        "description": "Who sees and writes a field's values.",
         "properties": {
           "admin": {
             "$ref": "#/components/schemas/CustomFieldAdminAccess"
@@ -2832,7 +2832,7 @@
       },
       "CustomFieldCapabilities": {
         "additionalProperties": false,
-        "description": "What a field's values can be used for (§7).",
+        "description": "What a field's values can be used for.",
         "properties": {
           "filterable": {
             "description": "A filter on its owner's admin list (`field[custom.material]=wool`); at most 50\nper owner type.",
@@ -2985,7 +2985,7 @@
             "type": "boolean"
           },
           "type": {
-            "description": "`text`, `integer`, `choice`, `list.text`, … (design note 0033, §3).",
+            "description": "`text`, `integer`, `choice`, `list.text`, ….",
             "type": "string"
           },
           "updated_at": {
@@ -3025,7 +3025,7 @@
       },
       "CustomFieldValidations": {
         "additionalProperties": false,
-        "description": "A definition's validations; which apply depends on its type (design note 0033, §3).\nAbsent ones don't apply.",
+        "description": "A definition's validations; which apply depends on its type. Absent ones don't apply.",
         "properties": {
           "choices": {
             "description": "`choice` (required): at most 128.",
@@ -3190,7 +3190,7 @@
         "type": "object"
       },
       "CustomerExportResponse": {
-        "description": "Everything Hypha holds about a customer, as one document (design note 0032, §7.4).",
+        "description": "Everything Hypha holds about a customer, as one document.",
         "properties": {
           "customer": {
             "$ref": "#/components/schemas/CustomerResponse"
@@ -3300,7 +3300,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/AccountFactsResponse",
-                "description": "The customer's storefront account (design note 0034), `null` while they never\nsigned in. `POST /admin/customers/{id}/sessions/revoke` signs them out everywhere."
+                "description": "The customer's storefront account, `null` while they never signed in. `POST\n/admin/customers/{id}/sessions/revoke` signs them out everywhere."
               },
               {
                 "type": "null"
@@ -3314,7 +3314,7 @@
             "type": "array"
           },
           "can_delete": {
-            "description": "Whether `DELETE /admin/customers/{id}` would work: only while the customer has no\norders, cancelled ones included (design note 0032, CD7). Otherwise erase it.",
+            "description": "Whether `DELETE /admin/customers/{id}` would work: only while the customer has no\norders, cancelled ones included. Otherwise erase it.",
             "type": "boolean"
           },
           "created_at": {
@@ -3323,7 +3323,7 @@
           },
           "custom_fields": {
             "additionalProperties": {},
-            "description": "Its custom field values the caller may read, `{\"custom.tier\": \"gold\", …}`\n(design note 0033); `PATCH /admin/customers/{id}/custom-fields` writes them.",
+            "description": "Its custom field values the caller may read, `{\"custom.tier\": \"gold\", …}`; `PATCH\n/admin/customers/{id}/custom-fields` writes them.",
             "propertyNames": {
               "type": "string"
             },
@@ -3354,10 +3354,10 @@
           },
           "email_marketing": {
             "$ref": "#/components/schemas/ConsentResponse",
-            "description": "Consent to marketing by email (design note 0032, §5); `PUT\n/admin/customers/{id}/marketing/email` changes it."
+            "description": "Consent to marketing by email; `PUT /admin/customers/{id}/marketing/email` changes\nit."
           },
           "erased_at": {
-            "description": "When the customer's personal data was erased, RFC 3339 in UTC (design note 0032,\n§7.3): the customer is read-only then and its email a placeholder.",
+            "description": "When the customer's personal data was erased, RFC 3339 in UTC: the customer is\nread-only then and its email a placeholder.",
             "type": [
               "string",
               "null"
@@ -3377,7 +3377,7 @@
             ]
           },
           "groups": {
-            "description": "The customer groups it's in (design note 0032, §6), sorted; `PUT\n/admin/customers/{id}/groups` sets them.",
+            "description": "The customer groups it's in, sorted; `PUT /admin/customers/{id}/groups` sets them.",
             "items": {
               "$ref": "#/components/schemas/CustomerGroupId"
             },
@@ -3394,7 +3394,7 @@
           },
           "orders": {
             "$ref": "#/components/schemas/OrderStatsResponse",
-            "description": "What the customer's orders add up to (design note 0032)."
+            "description": "What the customer's orders add up to."
           },
           "phone": {
             "type": [
@@ -3403,7 +3403,7 @@
             ]
           },
           "redacted": {
-            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope (`custom_fields.<key>` for a\npersonal custom field, without `customer_data:profile`). They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope (`custom_fields.<key>` for a personal custom field, without\n`customer_data:profile`). They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
               "type": "string"
             },
@@ -3437,7 +3437,7 @@
         "type": "object"
       },
       "CustomerSummaryPage": {
-        "description": "A page of a list, newest first (design note 0012).",
+        "description": "A page of a list, newest first.",
         "properties": {
           "has_more": {
             "description": "Whether there are more after these.",
@@ -3464,7 +3464,7 @@
         "type": "object"
       },
       "CustomerSummaryResponse": {
-        "description": "A customer in a list: without the address book (design note 0024).",
+        "description": "A customer in a list: without the address book.",
         "properties": {
           "address_count": {
             "description": "How many addresses the address book holds.",
@@ -3478,7 +3478,7 @@
           },
           "custom_fields": {
             "additionalProperties": {},
-            "description": "The custom field values `?custom_fields=` asked for (design note 0033); absent\nwithout it.",
+            "description": "The custom field values `?custom_fields=` asked for; absent without it.",
             "propertyNames": {
               "type": "string"
             },
@@ -3512,7 +3512,7 @@
             ]
           },
           "redacted": {
-            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
               "type": "string"
             },
@@ -3565,7 +3565,7 @@
         "type": "string"
       },
       "DeliveryPage": {
-        "description": "A page of a list, newest first (design note 0012).",
+        "description": "A page of a list, newest first.",
         "properties": {
           "has_more": {
             "description": "Whether there are more after these.",
@@ -3660,7 +3660,7 @@
         "type": "string"
       },
       "Error": {
-        "description": "Every error body, for the OpenAPI documents (design note 0010, S9). `ApiError`\nserializes as this shape.",
+        "description": "Every error body, for the OpenAPI documents. `ApiError` serializes as this shape.",
         "properties": {
           "code": {
             "description": "Stable snake_case code: what clients match on.",
@@ -3701,7 +3701,7 @@
         "type": "object"
       },
       "EventEnvelope": {
-        "description": "An event as apps receive it (design note 0016, EV5), and as\n`GET /admin/events/{id}` shows it.",
+        "description": "An event as apps receive it, and as `GET /admin/events/{id}` shows it.",
         "properties": {
           "actor": {
             "$ref": "#/components/schemas/EventActor"
@@ -3762,7 +3762,7 @@
             "type": "string"
           },
           "version": {
-            "description": "Its version after the change, when it has one: deliveries can arrive out of\norder, and a consumer drops an event older than one it applied (EV7).",
+            "description": "Its version after the change, when it has one: deliveries can arrive out of order,\nand a consumer drops an event older than one it applied.",
             "format": "int64",
             "minimum": 0,
             "type": [
@@ -3821,7 +3821,7 @@
         "x-hypha-open-enum": true
       },
       "ExtensionCallPage": {
-        "description": "A page of a list, newest first (design note 0012).",
+        "description": "A page of a list, newest first.",
         "properties": {
           "has_more": {
             "description": "Whether there are more after these.",
@@ -4054,7 +4054,7 @@
         "type": "object"
       },
       "FinancialStatusDto": {
-        "description": "`FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no\nserde and renaming a variant can't silently change the API.\nDerived from the order's payments (design note 0027, PA7): manual payments use\n`pending`, `paid` and `voided`; the rest come with providers that move money so.\n\nKnown values: `pending`, `authorized`, `partially_paid`, `paid`, `partially_refunded`, `refunded`, `voided`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "`FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no serde and\nrenaming a variant can't silently change the API. Derived from the order's payments:\nmanual payments use `pending`, `paid` and `voided`; the rest come with providers that\nmove money so.\n\nKnown values: `pending`, `authorized`, `partially_paid`, `paid`, `partially_refunded`, `refunded`, `voided`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "pending",
           "authorized",
@@ -4102,7 +4102,7 @@
         "type": "object"
       },
       "FixedPricePage": {
-        "description": "A page of a list, newest first (design note 0012).",
+        "description": "A page of a list, newest first.",
         "properties": {
           "has_more": {
             "description": "Whether there are more after these.",
@@ -4348,7 +4348,7 @@
         "type": "object"
       },
       "GrantResponse": {
-        "description": "The scopes staff approved for an app installed through OAuth (design note 0029).",
+        "description": "The scopes staff approved for an app installed through OAuth.",
         "properties": {
           "approved_at": {
             "type": "string"
@@ -5191,7 +5191,7 @@
         "type": "string"
       },
       "NotificationPage": {
-        "description": "A page of a list, newest first (design note 0012).",
+        "description": "A page of a list, newest first.",
         "properties": {
           "has_more": {
             "description": "Whether there are more after these.",
@@ -5289,7 +5289,7 @@
             ]
           },
           "redacted": {
-            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
               "type": "string"
             },
@@ -5772,7 +5772,7 @@
           },
           "channel": {
             "$ref": "#/components/schemas/ChannelId",
-            "description": "The sales channel it was placed through (design note 0020)."
+            "description": "The sales channel it was placed through."
           },
           "country": {
             "$ref": "#/components/schemas/CountryCode"
@@ -5818,7 +5818,7 @@
             "type": "string"
           },
           "redacted": {
-            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
               "type": "string"
             },
@@ -5971,7 +5971,7 @@
         "type": "object"
       },
       "OrderStatsResponse": {
-        "description": "A customer's orders, added up over those that weren't cancelled (design note 0032,\n§8): `GET /admin/orders?customer=` lists them.",
+        "description": "A customer's orders, added up over those that weren't cancelled: `GET\n/admin/orders?customer=` lists them.",
         "properties": {
           "amount_spent": {
             "description": "Their totals, one per currency the customer paid in, by currency code.",
@@ -6015,7 +6015,7 @@
         "type": "object"
       },
       "OrderSummaryPage": {
-        "description": "A page of a list, newest first (design note 0012).",
+        "description": "A page of a list, newest first.",
         "properties": {
           "has_more": {
             "description": "Whether there are more after these.",
@@ -6053,14 +6053,14 @@
           },
           "channel": {
             "$ref": "#/components/schemas/ChannelId",
-            "description": "The sales channel it was placed through (design note 0020)."
+            "description": "The sales channel it was placed through."
           },
           "country": {
             "$ref": "#/components/schemas/CountryCode"
           },
           "custom_fields": {
             "additionalProperties": {},
-            "description": "The custom field values `?custom_fields=` asked for (design note 0033); absent\nwithout it.",
+            "description": "The custom field values `?custom_fields=` asked for; absent without it.",
             "propertyNames": {
               "type": "string"
             },
@@ -6100,7 +6100,7 @@
             "type": "string"
           },
           "redacted": {
-            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
               "type": "string"
             },
@@ -6364,7 +6364,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/OrderId",
-                "description": "Its order; `null` while it's a cart's and the checkout isn't complete (design\nnote 0031). A report that commits a cart's payment completes its checkout: the\norder placed then."
+                "description": "Its order; `null` while it's a cart's and the checkout isn't complete. A report that\ncommits a cart's payment completes its checkout: the order placed then."
               },
               {
                 "type": "null"
@@ -6600,7 +6600,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/OrderId",
-                "description": "The order it collects for; `null` while it's a cart's, before checkout placed\nthe order (design note 0031)."
+                "description": "The order it collects for; `null` while it's a cart's, before checkout placed the\norder."
               },
               {
                 "type": "null"
@@ -6656,7 +6656,7 @@
         "type": "object"
       },
       "PaymentStatusDto": {
-        "description": "`PaymentStatus` on the wire (design note 0027, PA7).\n\nKnown values: `pending`, `authorized`, `processing`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "`PaymentStatus` on the wire.\n\nKnown values: `pending`, `authorized`, `processing`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "pending",
           "authorized",
@@ -6800,7 +6800,7 @@
             ]
           },
           "redacted": {
-            "description": "Personal fields left out for this caller (design note 0029, AP10): an API key or\napp without the matching `customer_data:*` scope. They are absent from the\nobject then, whatever the schema says. Never sent to staff or storefronts.",
+            "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
               "type": "string"
             },
@@ -6912,7 +6912,7 @@
         "type": "object"
       },
       "PrivateAppCredentials": {
-        "description": "What a private app's integration needs to act, shown once (design note 0029, \"As\nbuilt: the admin's app UI and private apps\").",
+        "description": "What a private app's integration needs to act, shown once (\"As built: the admin's app UI\nand private apps\").",
         "properties": {
           "access_token": {
             "description": "`hypha_at_…`: send as `Authorization: Bearer`. An hour.",
@@ -6967,7 +6967,7 @@
         "properties": {
           "manifest": {
             "additionalProperties": {},
-            "description": "The manifest (design note 0029, §4). Checked like a served one, except that\n`redirect_uris` may be empty.",
+            "description": "The manifest. Checked like a served one, except that `redirect_uris` may be empty.",
             "propertyNames": {
               "type": "string"
             },
@@ -7086,7 +7086,7 @@
         "type": "object"
       },
       "ProductMediaResponse": {
-        "description": "One item of a product's media list (design note 0014, section 7): what a page needs\nto render it. The asset's own route has the rest.",
+        "description": "One item of a product's media list: what a page needs to render it. The asset's own\nroute has the rest.",
         "properties": {
           "alt": {
             "description": "The asset's alt text.",
@@ -7144,14 +7144,14 @@
       "ProductResponse": {
         "properties": {
           "categories": {
-            "description": "The categories it's directly in, sorted (design note 0022).",
+            "description": "The categories it's directly in, sorted.",
             "items": {
               "$ref": "#/components/schemas/CategoryId"
             },
             "type": "array"
           },
           "channels": {
-            "description": "The sales channels it is published to, sorted (design note 0020); a new product\nis in none.",
+            "description": "The sales channels it is published to, sorted; a new product is in none.",
             "items": {
               "$ref": "#/components/schemas/ChannelId"
             },
@@ -7163,7 +7163,7 @@
           },
           "custom_fields": {
             "additionalProperties": {},
-            "description": "Its custom field values the caller may read, `{\"custom.material\": \"wool\", …}`\n(design note 0033); `PATCH /admin/products/{id}/custom-fields` writes them.",
+            "description": "Its custom field values the caller may read, `{\"custom.material\": \"wool\", …}`;\n`PATCH /admin/products/{id}/custom-fields` writes them.",
             "propertyNames": {
               "type": "string"
             },
@@ -7260,7 +7260,7 @@
         "x-hypha-open-enum": true
       },
       "ProductSummaryPage": {
-        "description": "A page of a list, newest first (design note 0012).",
+        "description": "A page of a list, newest first.",
         "properties": {
           "has_more": {
             "description": "Whether there are more after these.",
@@ -7287,17 +7287,17 @@
         "type": "object"
       },
       "ProductSummaryResponse": {
-        "description": "A product in a list: what a table of products shows, without options or variants\n(design note 0012, L7). `GET /admin/products/{id}` has the rest.",
+        "description": "A product in a list: what a table of products shows, without options or variants. `GET\n/admin/products/{id}` has the rest.",
         "properties": {
           "categories": {
-            "description": "The categories it's directly in, sorted (design note 0022).",
+            "description": "The categories it's directly in, sorted.",
             "items": {
               "$ref": "#/components/schemas/CategoryId"
             },
             "type": "array"
           },
           "channels": {
-            "description": "The sales channels it is published to, sorted (design note 0020).",
+            "description": "The sales channels it is published to, sorted.",
             "items": {
               "$ref": "#/components/schemas/ChannelId"
             },
@@ -7309,7 +7309,7 @@
           },
           "custom_fields": {
             "additionalProperties": {},
-            "description": "The custom field values `?custom_fields=` asked for (design note 0033); absent\nwithout it.",
+            "description": "The custom field values `?custom_fields=` asked for; absent without it.",
             "propertyNames": {
               "type": "string"
             },
@@ -7627,7 +7627,7 @@
       "RoleListResponse": {
         "properties": {
           "items": {
-            "description": "Oldest first. A store has a handful, so they come in one list (design note 0024,\nAU6).",
+            "description": "Oldest first. A store has a handful, so they come in one list.",
             "items": {
               "$ref": "#/components/schemas/RoleResponse"
             },
@@ -7843,7 +7843,7 @@
             "type": "array"
           },
           "search_app": {
-            "description": "The app that answers storefront searches (`search.query`, design note 0029);\n`null` for the built-in engine, which also answers whenever the app fails.",
+            "description": "The app that answers storefront searches (`search.query`); `null` for the built-in\nengine, which also answers whenever the app fails.",
             "type": [
               "string",
               "null"
@@ -8315,7 +8315,7 @@
         "type": "object"
       },
       "SettingsExtension": {
-        "description": "An app's settings form (§6.1): render the JSON Schema, save through the admin proxy.",
+        "description": "An app's settings form: render the JSON Schema, save through the admin proxy.",
         "properties": {
           "app": {
             "type": "string"
@@ -8355,7 +8355,7 @@
             "type": "boolean"
           },
           "payment": {
-            "description": "A payment method is enabled (`payments:read`; design note 0027): without one,\ncheckout refuses carts with something to pay.",
+            "description": "A payment method is enabled (`payments:read`): without one, checkout refuses carts\nwith something to pay.",
             "type": "boolean"
           },
           "product": {
@@ -8663,7 +8663,7 @@
           },
           "default_language": {
             "$ref": "#/components/schemas/Language",
-            "description": "The language the store's content (titles, descriptions, option labels) is written\nin (design note 0021, SU5)."
+            "description": "The language the store's content (titles, descriptions, option labels) is written\nin."
           },
           "description": {
             "description": "Plain text, at most 500 characters.",
@@ -8697,7 +8697,7 @@
           },
           "setup": {
             "$ref": "#/components/schemas/SetupProgressResponse",
-            "description": "How far the admin's setup guide got (design note 0024, AU11)."
+            "description": "How far the admin's setup guide got."
           },
           "timezone": {
             "oneOf": [
@@ -8735,7 +8735,7 @@
         "type": "object"
       },
       "SuggestedDefinitionResponse": {
-        "description": "A field worth having (design note 0032, CD11): the body `POST\n/admin/custom-field-definitions` takes to create it, and why.",
+        "description": "A field worth having: the body `POST /admin/custom-field-definitions` takes to create\nit, and why.",
         "properties": {
           "access": {
             "$ref": "#/components/schemas/CustomFieldAccess"
@@ -9044,7 +9044,7 @@
         "type": "object"
       },
       "UnfulfilledDto": {
-        "description": "Units of a line still to ship, and where they wait (design note 0018, FU4).",
+        "description": "Units of a line still to ship, and where they wait.",
         "properties": {
           "line": {
             "$ref": "#/components/schemas/OrderLineId"
@@ -9642,7 +9642,7 @@
             "type": "boolean"
           },
           "setup_step": {
-            "description": "The setup guide step the merchant is on: 1 to 40 lowercase letters, digits, `-`\nor `_`, named by the admin (design note 0024, AU11). `null` clears it.",
+            "description": "The setup guide step the merchant is on: 1 to 40 lowercase letters, digits, `-` or\n`_`, named by the admin. `null` clears it.",
             "type": [
               "string",
               "null"
@@ -9797,7 +9797,7 @@
       "UserListResponse": {
         "properties": {
           "items": {
-            "description": "Oldest first. A store's staff is a short list, so it comes whole (design note\n0024, AU6).",
+            "description": "Oldest first. A store's staff is a short list, so it comes whole.",
             "items": {
               "$ref": "#/components/schemas/UserResponse"
             },
@@ -9885,7 +9885,7 @@
         "properties": {
           "custom_fields": {
             "additionalProperties": {},
-            "description": "Its own custom field values the caller may read (variant fields, design note\n0033); `PATCH /admin/variants/{id}/custom-fields` writes them.",
+            "description": "Its own custom field values the caller may read (variant fields); `PATCH\n/admin/variants/{id}/custom-fields` writes them.",
             "propertyNames": {
               "type": "string"
             },
@@ -10486,7 +10486,7 @@
             "bearer": []
           }
         ],
-        "summary": "What installed apps add to an admin (design note 0029, §6), for `target` or every\nadmin target: embedded pages, declarative blocks, actions and settings forms. Only\napps installed through OAuth and enabled contribute, and only where their grant\nreads the target's object (`orders:read` for order targets, …).",
+        "summary": "What installed apps add to an admin, for `target` or every admin target: embedded pages,\ndeclarative blocks, actions and settings forms. Only apps installed through OAuth and\nenabled contribute, and only where their grant reads the target's object (`orders:read`\nfor order targets, …).",
         "tags": [
           "app_extensions"
         ],
@@ -10636,7 +10636,7 @@
             "bearer": []
           }
         ],
-        "summary": "Runs an app's admin action (design note 0029, §6.1): Hypha calls the action's URL\n(`admin.action` v1, `openapi/extensions.json`; in the app's call log) and returns\nthe app's answer. 502 `app_unavailable` when the app fails or answers something\nelse. The caller needs `apps:read` and to read the target's object; an action that\nnames an extension point is `409 app_action_has_point`.",
+        "summary": "Runs an app's admin action: Hypha calls the action's URL (`admin.action` v1,\n`openapi/extensions.json`; in the app's call log) and returns the app's answer. 502\n`app_unavailable` when the app fails or answers something else. The caller needs\n`apps:read` and to read the target's object; an action that names an extension point is\n`409 app_action_has_point`.",
         "tags": [
           "app_extensions"
         ],
@@ -10784,7 +10784,7 @@
             "bearer": []
           }
         ],
-        "summary": "An app's block for the objects in the query (design note 0029, §6.2): Hypha fetches\nthe block's URL from the app (a signed `GET` with the context in the query and in\n`Hypha-*` headers, and a session token in `Authorization` for staff), checks the\ntree, and returns it; nothing is cached. 502 `app_unavailable` when the app fails or\nanswers something that isn't a v1 tree (the call log says which).",
+        "summary": "An app's block for the objects in the query: Hypha fetches the block's URL from the app\n(a signed `GET` with the context in the query and in `Hypha-*` headers, and a session\ntoken in `Authorization` for staff), checks the tree, and returns it; nothing is cached.\n502 `app_unavailable` when the app fails or answers something that isn't a v1 tree (the\ncall log says which).",
         "tags": [
           "app_extensions"
         ],
@@ -10843,7 +10843,7 @@
             "bearer": []
           }
         ],
-        "summary": "The store's admin origins, from configuration (`server.admin_url`), for an app's\n`frame-ancestors` (design note 0029, §6.3). Any admin caller, an app's token\nincluded.",
+        "summary": "The store's admin origins, from configuration (`server.admin_url`), for an app's\n`frame-ancestors`. Any admin caller, an app's token included.",
         "tags": [
           "app_extensions"
         ],
@@ -10942,7 +10942,7 @@
             "bearer": []
           }
         ],
-        "summary": "A staff member's session token for an installed app (design note 0029, §6.3): its\nclaims are the API's base URL (`iss`), the app (`aud`), the staff member (`sub`), the\nstore, and the app's scopes as far as the staff member holds them (`scope`). Staff\nsessions only (API keys: `401 session_required`).",
+        "summary": "A staff member's session token for an installed app: its claims are the API's base URL\n(`iss`), the app (`aud`), the staff member (`sub`), the store, and the app's scopes as\nfar as the staff member holds them (`scope`). Staff sessions only (API keys: `401\nsession_required`).",
         "tags": [
           "app_extensions"
         ],
@@ -11237,7 +11237,7 @@
             "bearer": []
           }
         ],
-        "summary": "Uploads a private app's manifest (a store's own integration with no public site,\ndesign note 0029, §4.1): it becomes a pending authorization request for the consent\npage, whose approval installs the app and answers with its tokens. Staff sessions\nonly (an API key can't install apps); `apps:write`. 422 `manifest_invalid` with\n`details.errors`; 409 `app_installed_from_url` when the key is an app installed from\nits manifest URL.",
+        "summary": "Uploads a private app's manifest (a store's own integration with no public site): it\nbecomes a pending authorization request for the consent page, whose approval installs\nthe app and answers with its tokens. Staff sessions only (an API key can't install\napps); `apps:write`. 422 `manifest_invalid` with `details.errors`; 409\n`app_installed_from_url` when the key is an app installed from its manifest URL.",
         "tags": [
           "oauth"
         ],
@@ -11331,7 +11331,7 @@
             "bearer": []
           }
         ],
-        "summary": "Uninstalls an app installed through OAuth (design note 0029, §4.1): every token is\nrevoked, its registrations removed, and it's sent `app.uninstalled` as its last\nwebhook; it's listed as uninstalled until a second `DELETE`. Any other app (made by\nhand, or uninstalled already) is removed, its rate settings with it; deliveries still\ndue to it fail.",
+        "summary": "Uninstalls an app installed through OAuth: every token is revoked, its registrations\nremoved, and it's sent `app.uninstalled` as its last webhook; it's listed as uninstalled\nuntil a second `DELETE`. Any other app (made by hand, or uninstalled already) is\nremoved, its rate settings with it; deliveries still due to it fail.",
         "tags": [
           "apps"
         ],
@@ -12292,7 +12292,7 @@
             "bearer": []
           }
         ],
-        "summary": "Narrows an installed app's grant (design note 0029, §4.1): the scopes left out stop\nworking at once, for tokens held already too, and the app is sent\n`app.grant_changed`. Adding a scope takes a new authorization staff approve\n(`grant_not_narrower`, 422); an app that isn't installed is `app_not_installed`, 409.",
+        "summary": "Narrows an installed app's grant: the scopes left out stop working at once, for tokens\nheld already too, and the app is sent `app.grant_changed`. Adding a scope takes a new\nauthorization staff approve (`grant_not_narrower`, 422); an app that isn't installed is\n`app_not_installed`, 409.",
         "tags": [
           "apps"
         ],
@@ -12508,7 +12508,7 @@
             "bearer": []
           }
         ],
-        "summary": "Forwards a `GET` to the app's admin proxy (design note 0029, §8), signed, with `Hypha-Store`, `Hypha-Staff` (staff sessions), `Hypha-Scopes`, `Hypha-Path` and a session token in `Authorization` for staff.",
+        "summary": "Forwards a `GET` to the app's admin proxy, signed, with `Hypha-Store`, `Hypha-Staff` (staff sessions), `Hypha-Scopes`, `Hypha-Path` and a session token in `Authorization` for staff.",
         "tags": [
           "app_extensions"
         ],
@@ -12945,7 +12945,7 @@
             "bearer": []
           }
         ],
-        "summary": "Fetches an installed app's manifest again (design note 0029, §4.2) and applies its\nregistrations (webhooks, UI) and its custom fields (design note 0033, §8). Scopes it\nno longer asks for leave the grant at once; new ones, or fields it no longer declares\n(whose values would be deleted), make an authorization request staff approve\n(`consent_required`): approving widens the grant and syncs the fields, and the app\nthen gets tokens with the new scopes from `/oauth/authorize` without asking again.\nA manifest that changes a field's type is `manifest_invalid`. Staff with `apps:write`, or the app itself with its token.\n`manifest_unreachable` / `manifest_invalid` (422) when the manifest can't be used;\n`app_not_installed` (409) for an app not installed through OAuth.",
+        "summary": "Fetches an installed app's manifest again and applies its registrations (webhooks, UI) and its custom fields. Scopes it\nno longer asks for leave the grant at once; new ones, or fields it no longer declares (whose values would be deleted),\nmake an authorization request staff approve (`consent_required`): approving widens the grant and syncs the fields, and\nthe app then gets tokens with the new scopes from `/oauth/authorize` without asking again. A manifest that changes a\nfield's type is `manifest_invalid`. Staff with `apps:write`, or the app itself with its token. `manifest_unreachable` /\n`manifest_invalid` (422) when the manifest can't be used; `app_not_installed` (409) for an app not installed through\nOAuth.",
         "tags": [
           "app_extensions"
         ],
@@ -13137,7 +13137,7 @@
             "bearer": []
           }
         ],
-        "summary": "A spore's settings (design note 0030, §8) and the form for them: the values the\nmerchant set, secret fields as `{\"set\": …}` only. For a spore built into the API;\nan app keeps its own settings (`app_not_found` for an app key), and a spore that\ntakes none is `app_settings_not_found`.",
+        "summary": "A spore's settings and the form for them: the values the merchant set, secret fields as\n`{\"set\": …}` only. For a spore built into the API; an app keeps its own settings\n(`app_not_found` for an app key), and a spore that takes none is\n`app_settings_not_found`.",
         "tags": [
           "apps"
         ],
@@ -13276,7 +13276,7 @@
             "bearer": []
           }
         ],
-        "summary": "Saves a spore's settings (design note 0030, §8): checked against its schema, then by\nthe spore itself (422 `settings_invalid`, every problem in `details.errors` with the\nfield as its `path`); secret fields are sealed under `HYPHA_SECRET_KEY` and never\nanswered.",
+        "summary": "Saves a spore's settings: checked against its schema, then by the spore itself (422\n`settings_invalid`, every problem in `details.errors` with the field as its `path`);\nsecret fields are sealed under `HYPHA_SECRET_KEY` and never answered.",
         "tags": [
           "apps"
         ],
@@ -13333,7 +13333,7 @@
             "name": "sort",
             "required": false,
             "schema": {
-              "description": "The order of the library (design note 0024, AU1). Default `newest`. Names compare\nlowercased, character by character; ties go by upload, in the same direction.\n\nKnown values: `newest`, `oldest`, `name_asc`, `name_desc`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "description": "The order of the library. Default `newest`. Names compare lowercased, character by\ncharacter; ties go by upload, in the same direction.\n\nKnown values: `newest`, `oldest`, `name_asc`, `name_desc`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
               "enum": [
                 "newest",
                 "oldest",
@@ -14453,7 +14453,7 @@
         "security": [
           {}
         ],
-        "summary": "202 at once, whether or not the email belongs to anyone: the work (finding the\naccount, storing the reset, sending the email) runs on its own task, so neither the\nanswer nor its timing tells which emails exist. The one other answer is 429\n`rate_limited` (design note 0009), which depends on the caller's address and the\nemail asked about, never on whether the account exists.",
+        "summary": "202 at once, whether or not the email belongs to anyone: the work (finding the account,\nstoring the reset, sending the email) runs on its own task, so neither the answer nor\nits timing tells which emails exist. The one other answer is 429 `rate_limited`, which\ndepends on the caller's address and the email asked about, never on whether the account\nexists.",
         "tags": [
           "auth"
         ]
@@ -15439,7 +15439,7 @@
         "operationId": "admin.categories.list",
         "parameters": [
           {
-            "description": "Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`.",
+            "description": "Filters on custom fields, only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`.",
             "explode": true,
             "in": "query",
             "name": "field",
@@ -15546,7 +15546,7 @@
             "bearer": []
           }
         ],
-        "summary": "Every category, as a tree. With `field[…]` filters on custom fields (design note\n0033, §7), only the matching categories, flat (each without `children`), in tree\norder. `custom_fields` adds those values to each node.",
+        "summary": "Every category, as a tree. With `field[…]` filters on custom fields, only the matching\ncategories, flat (each without `children`), in tree order. `custom_fields` adds those\nvalues to each node.",
         "tags": [
           "categories"
         ],
@@ -17797,7 +17797,7 @@
             "bearer": []
           }
         ],
-        "summary": "The well-known fields a merchant may want (design note 0032, CD11: customers' labels\n`custom.tags` and note `custom.note`), each with the body that creates it and the\nmerchant's definition of its key when there is one. They're conventions: nothing\ncreates them but a click here or `pnpm seed`.",
+        "summary": "The well-known fields a merchant may want (customers' labels `custom.tags` and note\n`custom.note`), each with the body that creates it and the merchant's definition of its\nkey when there is one. They're conventions: nothing creates them but a click here or\n`pnpm seed`.",
         "tags": [
           "custom_fields"
         ],
@@ -18489,7 +18489,7 @@
             "bearer": []
           }
         ],
-        "summary": "Adds and removes items of one list field on 1 to 250 owners (design note 0033, CF6):\ndone in the database under each value's lock, so concurrent writers both land.\nAdding what's there or removing what isn't changes nothing and records nothing. An\nowner whose list would break `max_items`/`min_items` fails the whole call (`409\ntoo_many_items` / `too_few_items`, naming it). Needs the field's owner type's write\nscope.",
+        "summary": "Adds and removes items of one list field on 1 to 250 owners: done in the database under\neach value's lock, so concurrent writers both land. Adding what's there or removing what\nisn't changes nothing and records nothing. An owner whose list would break\n`max_items`/`min_items` fails the whole call (`409 too_many_items` / `too_few_items`,\nnaming it). Needs the field's owner type's write scope.",
         "tags": [
           "custom_fields"
         ],
@@ -19415,7 +19415,7 @@
             }
           },
           {
-            "description": "Only customers in this group (design note 0032, §6).",
+            "description": "Only customers in this group.",
             "in": "query",
             "name": "group",
             "required": false,
@@ -19428,7 +19428,7 @@
             "name": "sort",
             "required": false,
             "schema": {
-              "description": "The order of a customer list (design note 0024, AU1). Default `newest`. A name is\nthe first name, a space and the last name, compared lowercased character by\ncharacter; ties go by creation, in the same direction.\n\nKnown values: `newest`, `oldest`, `email_asc`, `email_desc`, `name_asc`, `name_desc`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "description": "The order of a customer list. Default `newest`. A name is the first name, a space and\nthe last name, compared lowercased character by character; ties go by creation, in the\nsame direction.\n\nKnown values: `newest`, `oldest`, `email_asc`, `email_desc`, `name_asc`, `name_desc`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
               "enum": [
                 "newest",
                 "oldest",
@@ -19442,7 +19442,7 @@
             }
           },
           {
-            "description": "Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`.",
+            "description": "Filters on custom fields, only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`.",
             "explode": true,
             "in": "query",
             "name": "field",
@@ -19768,7 +19768,7 @@
             "bearer": []
           }
         ],
-        "summary": "Deletes a customer that has no orders (design note 0032, CD7): the row, its address\nbook and memberships go, its carts are unlinked (email kept), and its custom field\nvalues follow `customer.deleted`. One with orders, cancelled ones included, is\nrefused with `409 customer_has_orders`: request its erasure instead.",
+        "summary": "Deletes a customer that has no orders: the row, its address book and memberships go, its\ncarts are unlinked (email kept), and its custom field values follow `customer.deleted`.\nOne with orders, cancelled ones included, is refused with `409 customer_has_orders`:\nrequest its erasure instead.",
         "tags": [
           "customers"
         ],
@@ -20805,7 +20805,7 @@
             "bearer": []
           }
         ],
-        "summary": "Asks for the customer's personal data to be erased after the cancel window\n(`customers.erasure_delay`, 10 days by default; design note 0032, §7.3), recording\n`customer.erasure_requested`. The job then removes names, contact details, addresses,\nconsents and personal custom fields from the customer and its orders, carts and email\nrecords, keeps the orders themselves, and records `customer.redacted` for apps. Needs\n`customers:erase`; `409 erasure_already_requested` while one is pending, `409\ncustomer_erased` after.",
+        "summary": "Asks for the customer's personal data to be erased after the cancel window\n(`customers.erasure_delay`, 10 days by default), recording `customer.erasure_requested`.\nThe job then removes names, contact details, addresses, consents and personal custom\nfields from the customer and its orders, carts and email records, keeps the orders\nthemselves, and records `customer.redacted` for apps. Needs `customers:erase`; `409\nerasure_already_requested` while one is pending, `409 customer_erased` after.",
         "tags": [
           "customers"
         ],
@@ -21034,7 +21034,7 @@
             "bearer": []
           }
         ],
-        "summary": "Makes `groups` the customer's groups (design note 0032, §6): one write, an event per\ngroup whose membership changed.",
+        "summary": "Makes `groups` the customer's groups: one write, an event per group whose membership\nchanged.",
         "tags": [
           "customers"
         ],
@@ -21183,7 +21183,7 @@
             "bearer": []
           }
         ],
-        "summary": "Records a customer's marketing consent for a channel (`email` or `sms`; design note\n0032, §5). The newest `consented_at` wins, so a delayed sync can't overwrite a newer\nopt-out: an older write answers `applied: false`. SMS needs a phone (`409\nconsent_needs_phone`); an erased customer is read-only (`409 customer_erased`).",
+        "summary": "Records a customer's marketing consent for a channel (`email` or `sms`). The newest\n`consented_at` wins, so a delayed sync can't overwrite a newer opt-out: an older write\nanswers `applied: false`. SMS needs a phone (`409 consent_needs_phone`); an erased\ncustomer is read-only (`409 customer_erased`).",
         "tags": [
           "customers"
         ],
@@ -21275,7 +21275,7 @@
             "bearer": []
           }
         ],
-        "summary": "Signs the customer out of every device (design note 0034, §7): every session of their\naccount is revoked. Nothing to do for a customer without one.",
+        "summary": "Signs the customer out of every device: every session of their account is revoked.\nNothing to do for a customer without one.",
         "tags": [
           "customers"
         ],
@@ -26515,7 +26515,7 @@
             }
           },
           {
-            "description": "Only this customer's orders (design note 0032).",
+            "description": "Only this customer's orders.",
             "in": "query",
             "name": "customer",
             "required": false,
@@ -26573,7 +26573,7 @@
             "name": "sort",
             "required": false,
             "schema": {
-              "description": "The order of an order list (design note 0024, AU1). Default `newest`. Sorting by\ntotal needs the `currency` filter (`422 sort_needs_currency`); ties go by placing\norder, in the same direction.\n\nKnown values: `newest`, `oldest`, `total_desc`, `total_asc`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "description": "The order of an order list. Default `newest`. Sorting by total needs the `currency`\nfilter (`422 sort_needs_currency`); ties go by placing order, in the same direction.\n\nKnown values: `newest`, `oldest`, `total_desc`, `total_asc`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
               "enum": [
                 "newest",
                 "oldest",
@@ -26585,7 +26585,7 @@
             }
           },
           {
-            "description": "Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`.",
+            "description": "Filters on custom fields, only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`.",
             "explode": true,
             "in": "query",
             "name": "field",
@@ -27548,7 +27548,7 @@
             "bearer": []
           }
         ],
-        "summary": "Records that the order's money arrived (a bank transfer, cash from the courier;\ndesign note 0027, §5): its pending payments become `paid`, with the `reference` when\ngiven, and so does the order. A `pending` order without an open payment gets a\n`manual` one of its total, paid on the spot. The body is optional (none, `{}` or\n`{\"reference\": …}`). Marking a paid order again changes nothing. Refused (409): a\ncancelled order (`order_cancelled`), an authorized payment (`payment_authorized`,\n`details.payment`: only its provider can capture it), and any other payment status\n(`order_not_payable`, `details.financial_status`: partially paid, refunded or\nvoided, where money moved already).",
+        "summary": "Records that the order's money arrived (a bank transfer, cash from the courier): its\npending payments become `paid`, with the `reference` when given, and so does the order.\nA `pending` order without an open payment gets a `manual` one of its total, paid on the\nspot. The body is optional (none, `{}` or `{\"reference\": …}`). Marking a paid order\nagain changes nothing. Refused (409): a cancelled order (`order_cancelled`), an\nauthorized payment (`payment_authorized`, `details.payment`: only its provider can\ncapture it), and any other payment status (`order_not_payable`,\n`details.financial_status`: partially paid, refunded or voided, where money moved\nalready).",
         "tags": [
           "orders"
         ],
@@ -28099,7 +28099,7 @@
             "bearer": []
           }
         ],
-        "summary": "The providers a payment method may name now: `manual`, each enabled spore's (design\nnote 0030), and each installed, enabled app answering `payments.start`. What an\nadmin offers when creating a method.",
+        "summary": "The providers a payment method may name now: `manual`, each enabled spore's, and each\ninstalled, enabled app answering `payments.start`. What an admin offers when creating a\nmethod.",
         "tags": [
           "payments"
         ],
@@ -28339,7 +28339,7 @@
             "bearer": []
           }
         ],
-        "summary": "Asks the payment's app to capture an authorized payment (`payments.capture`). 202:\nthe app accepted; the payment becomes `paid` when the app reports it, or at once (in\nthe answer's `payment`) when a provider built into the API says it's done (a spore,\ndesign note 0030). Refused by the\nprovider: `409 payment_refused` with its `reason`. Not authorized: `409\ninvalid_payment_transition`; a `manual` payment: `409 payment_action_unsupported`; the\napp gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent,\nis passed to the app (retry a timed-out request with the same one); without it each\nrequest is a new attempt with its own key, so asking again after a refusal is asked\nanew, not answered with the refusal.",
+        "summary": "Asks the payment's app to capture an authorized payment (`payments.capture`). 202: the\napp accepted; the payment becomes `paid` when the app reports it, or at once (in the\nanswer's `payment`) when a provider built into the API says it's done (a spore). Refused\nby the provider: `409 payment_refused` with its `reason`. Not authorized: `409\ninvalid_payment_transition`; a `manual` payment: `409 payment_action_unsupported`; the\napp gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent, is\npassed to the app (retry a timed-out request with the same one); without it each request\nis a new attempt with its own key, so asking again after a refusal is asked anew, not\nanswered with the refusal.",
         "tags": [
           "payments"
         ],
@@ -28498,7 +28498,7 @@
             "bearer": []
           }
         ],
-        "summary": "What a payment's provider reports (design note 0029, §3.1): a payment app tells\nHypha what its provider did (Stripe's webhook landed on the app). Moves the payment\nand its order's payment status in one batch, recording `payment.authorized`,\n`.paid`, `.failed`, `.voided` or `.refunded` (and `order.paid`). Reporting the\nstatus a payment is in already changes nothing. Send an `Idempotency-Key` (the\nprovider's event ID): a retry with it answers as the first did. A refund is counted\nonce per `reference` (the provider's refund ID), whatever the key. A move the payment's status doesn't allow is `409\ninvalid_payment_transition`; a refund that doesn't fit, `422 invalid_refund_amount`.",
+        "summary": "What a payment's provider reports: a payment app tells Hypha what its provider did (Stripe's webhook landed on the\napp). Moves the payment and its order's payment status in one batch, recording `payment.authorized`, `.paid`,\n`.failed`, `.voided` or `.refunded` (and `order.paid`). Reporting the status a payment is in already changes\nnothing. Send an `Idempotency-Key` (the provider's event ID): a retry with it answers as the first did. A refund is\ncounted once per `reference` (the provider's refund ID), whatever the key. A move the payment's status doesn't allow\nis `409 invalid_payment_transition`; a refund that doesn't fit, `422 invalid_refund_amount`.",
         "tags": [
           "payments"
         ],
@@ -29688,7 +29688,7 @@
             "name": "sort",
             "required": false,
             "schema": {
-              "description": "The order of a product list (design note 0024, AU1). Default `newest`. Titles\ncompare lowercased, character by character (accented letters after `z`); ties go by\ncreation, in the same direction.\n\nKnown values: `newest`, `oldest`, `title_asc`, `title_desc`, `updated_desc`, `updated_asc`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "description": "The order of a product list. Default `newest`. Titles compare lowercased, character by\ncharacter (accented letters after `z`); ties go by creation, in the same direction.\n\nKnown values: `newest`, `oldest`, `title_asc`, `title_desc`, `updated_desc`, `updated_asc`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
               "enum": [
                 "newest",
                 "oldest",
@@ -29702,7 +29702,7 @@
             }
           },
           {
-            "description": "Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`.",
+            "description": "Filters on custom fields, only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`.",
             "explode": true,
             "in": "query",
             "name": "field",
@@ -30028,7 +30028,7 @@
             "bearer": []
           }
         ],
-        "summary": "Deletes a product with its variants and options, whatever its status (design note\n0033, section 6.3). Its media stay in the library; its catalog, channel and category\nmembership go with it, and its fixed prices, stock records and search listings\nshortly after (`product.deleted`). Orders keep their lines; carts show its lines as\nunavailable until they're removed. Archive instead to keep it.",
+        "summary": "Deletes a product with its variants and options, whatever its status. Its media stay in\nthe library; its catalog, channel and category membership go with it, and its fixed\nprices, stock records and search listings shortly after (`product.deleted`). Orders keep\ntheir lines; carts show its lines as unavailable until they're removed. Archive instead\nto keep it.",
         "tags": [
           "products"
         ],
@@ -30845,7 +30845,7 @@
             "bearer": []
           }
         ],
-        "summary": "A product's stock, every variant at once: what the product editor shows, in one\ncall instead of one per variant (design note 0025, §6).",
+        "summary": "A product's stock, every variant at once: what the product editor shows, in one call\ninstead of one per variant.",
         "tags": [
           "inventory"
         ],
@@ -31125,7 +31125,7 @@
             "bearer": []
           }
         ],
-        "summary": "Replaces a product's options and their values (design note 0014, section 3).",
+        "summary": "Replaces a product's options and their values.",
         "tags": [
           "products"
         ],
@@ -31540,7 +31540,7 @@
             "bearer": []
           }
         ],
-        "summary": "Sets a product's whole variant list in one write (design note 0021, Q1): all or\nnothing, with one set of events. A variant keeps its media.",
+        "summary": "Sets a product's whole variant list in one write: all or nothing, with one set of\nevents. A variant keeps its media.",
         "tags": [
           "products"
         ],
@@ -32878,7 +32878,7 @@
             "bearer": []
           }
         ],
-        "summary": "Makes an app (design note 0016, EV11) a rate provider (design note 0015, section 5):\nHypha POSTs it rate requests signed with the app's secret.",
+        "summary": "Makes an app a rate provider: Hypha POSTs it rate requests signed with the app's secret.",
         "tags": [
           "shipping"
         ],
@@ -34664,7 +34664,7 @@
             "bearer": []
           }
         ],
-        "summary": "Every tax class, oldest first (design note 0021, SU3).",
+        "summary": "Every tax class, oldest first.",
         "tags": [
           "taxes"
         ],
@@ -36035,7 +36035,7 @@
             "bearer": []
           }
         ],
-        "summary": "A variant's stock, whether or not it has an item (design note 0004, I3).",
+        "summary": "A variant's stock, whether or not it has an item.",
         "tags": [
           "inventory"
         ],

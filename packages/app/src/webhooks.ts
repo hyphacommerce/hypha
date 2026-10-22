@@ -1,9 +1,8 @@
-// Receiving Hypha's webhooks (design notes 0016 §8, 0029 §4.1): Hypha POSTs an event's
-// envelope as JSON, signed in `Hypha-Signature`, with `Hypha-Event-Id`,
-// `Hypha-Event-Type`, `Hypha-Delivery-Id` (stable across retries) and `Hypha-Store`. Any
-// 2xx within the timeout is a success; anything else is retried on Hypha's schedule.
-// `webhookHandler` is a fetch handler that verifies the signature, parses the envelope
-// and hands it to `onEvent`.
+// Receiving Hypha's webhooks: Hypha POSTs an event's envelope as JSON, signed in
+// `Hypha-Signature`, with `Hypha-Event-Id`, `Hypha-Event-Type`, `Hypha-Delivery-Id`
+// (stable across retries) and `Hypha-Store`. Any 2xx within the timeout is a success;
+// anything else is retried on Hypha's schedule. `webhookHandler` is a fetch handler that
+// verifies the signature, parses the envelope and hands it to `onEvent`.
 
 import { STORE_HEADER, resolveSecret, type SecretSource } from "./extensions.ts";
 import { isRecord } from "./encoding.ts";

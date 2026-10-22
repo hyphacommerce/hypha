@@ -1,14 +1,13 @@
-//! The record of one email (design note 0028, NT8): what went to whom, whether it went,
-//! and why not.
+//! The record of one email: what went to whom, whether it went, and why not.
 //!
-//! A message about an event is rendered and recorded `queued` by the `Mailer` handler,
-//! with what the send job needs to send it (`QueuedEmail`: the rendered bodies and the
-//! sender's name); the job leases it (`sending`, with `lease_until`), sends it with no
-//! connection held, and records the outcome: `sent`, back to `queued` for a later
-//! attempt, or `failed` for good. The bodies go once it's sent or has failed: they hold
-//! addresses, order contents and order links, so they're kept only while they're
-//! needed to send (Q1). Direct sends (staff invites, resets) are `sending` without a
-//! lease or bodies while the request sends them itself.
+//! A message about an event is rendered and recorded `queued` by the `Mailer` handler, with
+//! what the send job needs to send it (`QueuedEmail`: the rendered bodies and the sender's
+//! name); the job leases it (`sending`, with `lease_until`), sends it with no connection
+//! held, and records the outcome: `sent`, back to `queued` for a later attempt, or `failed`
+//! for good. The bodies go once it's sent or has failed: they hold addresses, order
+//! contents and order links, so they're kept only while they're needed to send. Direct
+//! sends (staff invites, resets) are `sending` without a lease or bodies while the request
+//! sends them itself.
 
 use std::{fmt, str::FromStr};
 
@@ -68,14 +67,6 @@ impl NotificationStatus {
             (S::Queued, S::Sending) | (S::Sending, S::Sent | S::Failed | S::Queued | S::Sending)
         )
     }
-
-    /// Whether nothing more happens to it.
-    pub fn is_final(self) -> bool {
-        matches!(
-            self,
-            NotificationStatus::Sent | NotificationStatus::Failed | NotificationStatus::Skipped
-        )
-    }
 }
 
 impl fmt::Display for NotificationStatus {
@@ -122,8 +113,8 @@ pub struct QueuedEmail {
     pub text: String,
 }
 
-/// One email's record (design note 0028, §2). One per (event, template, recipient)
-/// where `event` is set, so a handler that runs twice finds it and queues nothing more.
+/// One email's record. One per (event, template, recipient) where `event` is set, so a
+/// handler that runs twice finds it and queues nothing more.
 ///
 /// Invariants, checked by `restore`: `sent_at` set exactly when sent, a provider's
 /// message ID only on a sent message, `next_attempt_at` exactly when queued,
@@ -146,8 +137,8 @@ pub struct Notification {
     provider_message_id: Option<String>,
     /// The last attempt's error, or why it was skipped.
     error: Option<String>,
-    /// Something staff should know about how it was made: "sent with the default
-    /// template: …" when the merchant's didn't render (Q5).
+    /// Something staff should know about how it was made: "sent with the default template:
+    /// …" when the merchant's didn't render.
     note: Option<String>,
     event: Option<EventId>,
     order: Option<OrderId>,
@@ -259,7 +250,7 @@ impl Notification {
 
     /// Whether the send job may lease it at `now`: queued and due, or leased by a runner
     /// whose lease has run out (it stopped before recording; this is the only case a
-    /// provider may get a message twice, design note 0028, §4).
+    /// provider may get a message twice).
     pub fn is_due(&self, now: Timestamp) -> bool {
         match self.status {
             NotificationStatus::Queued => self.next_attempt_at.is_some_and(|at| at <= now),
@@ -336,10 +327,10 @@ impl Notification {
         Ok(())
     }
 
-    /// Done with: nothing to send any more, so the bodies go (Q1).
-    /// Erasure (design note 0032, §7.3): the recipient becomes `placeholder`, the subject
-    /// and the rendered email go, and a message still waiting is `skipped` (it would go
-    /// to an address that no longer exists). Says whether anything changed.
+    /// Done with: nothing to send any more, so the bodies go. Erasure: the recipient
+    /// becomes `placeholder`, the subject and the rendered email go, and a message still
+    /// waiting is `skipped` (it would go to an address that no longer exists). Says whether
+    /// anything changed.
     pub fn redact(&mut self, placeholder: Email) -> bool {
         let mut changed = false;
         if self.to != placeholder {
@@ -445,7 +436,7 @@ fn cut(text: &str, max: usize) -> String {
     }
 }
 
-/// Plain-data form of a `Notification` for storage adapters (design note 0001, 3.4).
+/// Plain-data form of a `Notification` for storage adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationSnapshot {
     pub id: NotificationId,
@@ -705,7 +696,6 @@ mod tests {
         failed.failed("smtp", "550 refused").unwrap();
         assert_eq!(failed.email(), None);
         for n in [&mut sent, &mut failed] {
-            assert!(n.status().is_final());
             assert_eq!(
                 n.lease(at(1_000), at(2_000)),
                 Err(NotificationError::NotDue(n.id()))
@@ -731,6 +721,19 @@ mod tests {
                 to: NotificationStatus::Sent,
             })
         );
+    }
+
+    #[test]
+    fn redacting_a_leased_message_skips_it() {
+        let mut n = leased();
+        let placeholder = Email::placeholder(Uuid::from_u128(7));
+        assert!(n.redact(placeholder.clone()));
+        assert_eq!(n.status(), NotificationStatus::Skipped);
+        assert_eq!(n.to(), &placeholder);
+        assert_eq!(n.subject(), "");
+        assert_eq!((n.lease_until(), n.next_attempt_at()), (None, None));
+        assert_eq!(n.email(), None);
+        assert!(!n.redact(placeholder), "a second run changes nothing");
     }
 
     #[test]

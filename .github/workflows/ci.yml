@@ -30,8 +30,13 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo clippy -p hypha-host-axum --features spore-stripe -- -D warnings
-      # Includes the OpenAPI freshness test and the Postgres and S3 contracts.
-      - run: cargo test --workspace
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      # Includes the OpenAPI freshness test and the Postgres and S3 contracts. nextest runs
+      # no doc tests, so they run apart.
+      - run: cargo nextest run --workspace --profile ci
+      - run: cargo test --workspace --doc
       - name: Core, domain crates, adapters and the HTTP layer build for wasm32
         run: >
           cargo build --target wasm32-unknown-unknown
@@ -42,7 +47,7 @@ jobs:
           -p hypha-merchandising -p hypha-shipping -p hypha-apps -p hypha-oauth -p hypha-channels -p hypha-search-index -p hypha-search -p hypha-config -p hypha-store-postgres -p hypha-store-s3 -p hypha-mail-resend
           -p hypha-categories -p hypha-custom-fields -p hypha-extensions -p hypha-http -p hypha-spore-core -p hypha-host-workers
           -p hypha-spore -p hypha-spore-stripe --features hypha-spore/postgres,hypha-spore/http
-      # The Worker and the native host with this repository's spores (design note 0030, §9).
+      # The Worker and the native host with this repository's spores.
       - run: cargo build --target wasm32-unknown-unknown -p hypha-host-workers --features spore-stripe
       - name: The services' logs, when something failed
         if: failure()
@@ -82,23 +87,27 @@ jobs:
       - run: pnpm lint
       - run: pnpm lint:react
       - run: pnpm sdk:check
-      # The spores' storefront elements as bundled (design note 0030).
+      # The spores' storefront elements as bundled.
       - run: pnpm spores:check
-      # The default email templates (design note 0028, NT6) and their contract with the API.
+      # The default email templates and their contract with the API.
       - run: pnpm emails:check
       - run: pnpm --filter @hypha/emails test
-      # The apps platform's packages (design note 0029): the SDK (and its extension types
-      # against openapi/extensions.json), the bridge, blocks and storefront elements.
+      # The apps platform's packages: the SDK (and its extension types against
+      # openapi/extensions.json), the bridge, blocks and storefront elements.
       - run: pnpm --filter @hypha/app check
       - run: pnpm --filter @hypha/app test
       - run: pnpm --filter @hypha/app-bridge test
       - run: pnpm --filter @hypha/app-bridge-host test
       - run: pnpm --filter @hypha/app-blocks test
       - run: pnpm --filter @hypha/storefront-elements test
+      # The deploy CLI, and the apps' plain helpers.
+      - run: pnpm --filter @hypha/cli test
+      - run: pnpm --filter admin test
+      - run: pnpm --filter storefront test
       - run: pnpm --filter admin theme:check
       - run: pnpm --filter storefront theme:check
       - run: pnpm typecheck
-      # Standard Next.js still builds the admin (design note 0011, P2).
+      # Standard Next.js still builds the admin.
       - run: pnpm --filter admin exec next build
-      # And the storefront (design note 0023, SF1).
+      # And the storefront.
       - run: pnpm --filter storefront exec next build

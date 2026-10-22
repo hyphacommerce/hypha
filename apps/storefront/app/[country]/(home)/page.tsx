@@ -65,9 +65,8 @@ function Shelf({
 }
 
 /**
- * Home (design note 0024, §7), static: the store, its categories, what's new, a shelf
- * per top category and the best prices, all through search, so each is priced and
- * stocked for the country.
+ * Home, static: the store, its categories, what's new, a shelf per top category and
+ * the best prices, all through search, so each is priced and stocked for the country.
  */
 export default async function HomePage({ params }: { params: Promise<{ country: string }> }) {
   // Every read at once: the folder is the country's code (the proxy lets only sold-to

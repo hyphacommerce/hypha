@@ -1,5 +1,4 @@
-//! What installed apps contribute to admins and storefronts, for any frontend (design
-//! note 0029, §5–§8):
+//! What installed apps contribute to admins and storefronts, for any frontend:
 //!
 //! - discovery: `GET /admin/app-extensions?target=…` (pages, blocks, actions, settings
 //!   forms) and `GET /storefront/app-extensions?target=…` (elements, proxies);
@@ -17,7 +16,7 @@
 //! body, as every call, and `Hypha-Context-Signature` over the method and the `Hypha-*`
 //! context headers (`outbound::context_signature`; `@hypha/app`'s
 //! `verifyForwardedRequest`). The context is IDs only: staff IDs, customer and cart IDs
-//! aren't personal data (AP10), and no name, email, phone or address is forwarded.
+//! aren't personal data, and no name, email, phone or address is forwarded.
 
 use std::time::Duration;
 
@@ -66,7 +65,7 @@ pub const PROXY_POINT: &str = "proxy";
 
 // ---------- targets ----------
 
-/// An admin target (design note 0029, §5): a slot any admin may implement.
+/// An admin target: a slot any admin may implement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub enum AdminTarget {
     /// A full page under the app (an embedded page).
@@ -95,7 +94,7 @@ pub enum AdminTarget {
     Payment,
 }
 
-/// A storefront target (design note 0029, §5).
+/// A storefront target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub enum StorefrontTarget {
     /// The payment step (`cart_id`, `order_id`).
@@ -247,7 +246,7 @@ pub struct ActionExtension {
     point: Option<String>,
 }
 
-/// An app's settings form (§6.1): render the JSON Schema, save through the admin proxy.
+/// An app's settings form: render the JSON Schema, save through the admin proxy.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct SettingsExtension {
     app: String,
@@ -270,10 +269,10 @@ pub struct AdminExtensionsResponse {
     settings: Vec<SettingsExtension>,
 }
 
-/// What installed apps add to an admin (design note 0029, §6), for `target` or every
-/// admin target: embedded pages, declarative blocks, actions and settings forms. Only
-/// apps installed through OAuth and enabled contribute, and only where their grant
-/// reads the target's object (`orders:read` for order targets, …).
+/// What installed apps add to an admin, for `target` or every admin target: embedded pages,
+/// declarative blocks, actions and settings forms. Only apps installed through OAuth and
+/// enabled contribute, and only where their grant reads the target's object (`orders:read`
+/// for order targets, …).
 #[utoipa::path(
     get,
     path = "/admin/app-extensions",
@@ -341,11 +340,10 @@ pub async fn list_admin<S: Storage>(
     Ok(Json(response))
 }
 
-/// What the spores built into the API add (design note 0030, §7), merged into the
-/// apps' answer: blocks, actions and settings forms of enabled spores whose declared
-/// scopes read the target's object. A spore's block is fetched through the same blocks
-/// route (`url` names it), its settings saved through `PUT /admin/apps/{key}/settings`
-/// (`proxy` is false).
+/// What the spores built into the API add, merged into the apps' answer: blocks, actions
+/// and settings forms of enabled spores whose declared scopes read the target's object. A
+/// spore's block is fetched through the same blocks route (`url` names it), its settings
+/// saved through `PUT /admin/apps/{key}/settings` (`proxy` is false).
 async fn add_spores<S: Storage>(
     state: &AppState<S>,
     ports: &S::Ports<'_>,
@@ -432,10 +430,10 @@ enum SporeUiKind {
     Action,
 }
 
-/// What using a spore's block or action needs (design note 0030, §7), as for an app's:
-/// the spore's app (enabled, `apps:read`), the target its item `id` declares, the
-/// caller and the spore allowed on that target's object with `context`, and the spore
-/// acting as its app with its scopes as far as the caller holds them.
+/// What using a spore's block or action needs, as for an app's: the spore's app (enabled,
+/// `apps:read`), the target its item `id` declares, the caller and the spore allowed on
+/// that target's object with `context`, and the spore acting as its app with its scopes as
+/// far as the caller holds them.
 async fn spore_ui<S: Storage>(
     state: &AppState<S>,
     ctx: &Ctx,
@@ -484,7 +482,7 @@ async fn spore_ui<S: Storage>(
     Ok((app, target, acting))
 }
 
-/// A spore's block (design note 0030, §7): asked in-process, checked as an app's.
+/// A spore's block: asked in-process, checked as an app's.
 async fn spore_block<S: Storage>(
     state: &AppState<S>,
     ctx: &Ctx,
@@ -520,14 +518,7 @@ async fn spore_block<S: Storage>(
         Err(UiError::NotFound) => return Err(not_found().into()),
         Err(UiError::Failed(reason)) => return Err(unavailable(reason).into()),
     };
-    let check = check_block(&tree);
-    if let Some(problem) = check.errors.first() {
-        let reason = format!(
-            "not a block v1: {}: {} ({} problem(s))",
-            problem.path,
-            problem.message,
-            check.errors.len()
-        );
+    if let Some(reason) = check_block(&tree).problem() {
         tracing::warn!(app = %app.key(), "blocks: a spore's invalid tree: {reason}");
         return Err(ExtensionError::Invalid {
             app: app.key().clone(),
@@ -544,7 +535,7 @@ async fn spore_block<S: Storage>(
     })
 }
 
-/// A spore's action (design note 0030, §7): run in-process.
+/// A spore's action: run in-process.
 async fn spore_action<S: Storage>(
     state: &AppState<S>,
     ctx: &Ctx,
@@ -614,8 +605,8 @@ pub struct StorefrontExtensionsResponse {
     proxies: Vec<ProxyExtension>,
 }
 
-/// What installed apps add to a storefront (design note 0029, §7): elements for
-/// `target` (or every storefront target), and which apps have a proxy.
+/// What installed apps add to a storefront: elements for `target` (or every storefront
+/// target), and which apps have a proxy.
 #[utoipa::path(
     get,
     path = "/storefront/app-extensions",
@@ -657,9 +648,9 @@ pub async fn list_storefront<S: Storage>(
     Ok(Json(response))
 }
 
-/// What enabled spores add to storefronts (design note 0030, §7): their elements for
-/// `target`, each module served by one of the spore's own storefront routes at the API's
-/// public address (`base`, as the OAuth issuer is found).
+/// What enabled spores add to storefronts: their elements for `target`, each module served
+/// by one of the spore's own storefront routes at the API's public address (`base`, as the
+/// OAuth issuer is found).
 async fn add_spore_elements<S: Storage>(
     state: &AppState<S>,
     ports: &S::Ports<'_>,
@@ -707,8 +698,7 @@ pub struct OriginsResponse {
 }
 
 /// The store's admin origins, from configuration (`server.admin_url`), for an app's
-/// `frame-ancestors` (design note 0029, §6.3). Any admin caller, an app's token
-/// included.
+/// `frame-ancestors`. Any admin caller, an app's token included.
 #[utoipa::path(
     get,
     path = "/admin/app-extensions/origins",
@@ -746,10 +736,10 @@ pub struct SessionTokenResponse {
     expires_at: String,
 }
 
-/// A staff member's session token for an installed app (design note 0029, §6.3): its
-/// claims are the API's base URL (`iss`), the app (`aud`), the staff member (`sub`), the
-/// store, and the app's scopes as far as the staff member holds them (`scope`). Staff
-/// sessions only (API keys: `401 session_required`).
+/// A staff member's session token for an installed app: its claims are the API's base URL
+/// (`iss`), the app (`aud`), the staff member (`sub`), the store, and the app's scopes as
+/// far as the staff member holds them (`scope`). Staff sessions only (API keys: `401
+/// session_required`).
 #[utoipa::path(
     post,
     path = "/admin/app-extensions/{app}/session",
@@ -873,11 +863,11 @@ pub struct ActionResultResponse {
     navigate: Option<String>,
 }
 
-/// Runs an app's admin action (design note 0029, §6.1): Hypha calls the action's URL
-/// (`admin.action` v1, `openapi/extensions.json`; in the app's call log) and returns
-/// the app's answer. 502 `app_unavailable` when the app fails or answers something
-/// else. The caller needs `apps:read` and to read the target's object; an action that
-/// names an extension point is `409 app_action_has_point`.
+/// Runs an app's admin action: Hypha calls the action's URL (`admin.action` v1,
+/// `openapi/extensions.json`; in the app's call log) and returns the app's answer. 502
+/// `app_unavailable` when the app fails or answers something else. The caller needs
+/// `apps:read` and to read the target's object; an action that names an extension point is
+/// `409 app_action_has_point`.
 #[utoipa::path(
     post,
     path = "/admin/app-extensions/actions/{app}/{id}",
@@ -967,11 +957,11 @@ pub struct BlockResponse {
     tree: serde_json::Value,
 }
 
-/// An app's block for the objects in the query (design note 0029, §6.2): Hypha fetches
-/// the block's URL from the app (a signed `GET` with the context in the query and in
-/// `Hypha-*` headers, and a session token in `Authorization` for staff), checks the
-/// tree, and returns it; nothing is cached. 502 `app_unavailable` when the app fails or
-/// answers something that isn't a v1 tree (the call log says which).
+/// An app's block for the objects in the query: Hypha fetches the block's URL from the app
+/// (a signed `GET` with the context in the query and in `Hypha-*` headers, and a session
+/// token in `Authorization` for staff), checks the tree, and returns it; nothing is cached.
+/// 502 `app_unavailable` when the app fails or answers something that isn't a v1 tree (the
+/// call log says which).
 #[utoipa::path(
     get,
     path = "/admin/app-extensions/blocks/{app}/{id}",
@@ -1127,14 +1117,7 @@ fn judge_block(
             );
         }
     };
-    let check = check_block(&tree);
-    if let Some(problem) = check.errors.first() {
-        let reason = format!(
-            "not a block v1: {}: {} ({} problem(s))",
-            problem.path,
-            problem.message,
-            check.errors.len()
-        );
+    if let Some(reason) = check_block(&tree).problem() {
         tracing::info!(app = %app.key(), "blocks: an invalid tree: {reason}");
         return (status, Err((CallOutcome::Invalid, reason)));
     }
@@ -1206,8 +1189,8 @@ fn percent_decode(segment: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Forwards one request to the app's proxy URL (design note 0029, §8) and passes its
-/// answer back: the status, the content type and the body, nothing else (no cookies).
+/// Forwards one request to the app's proxy URL and passes its answer back: the status, the
+/// content type and the body, nothing else (no cookies).
 #[allow(clippy::too_many_arguments)]
 async fn forward<S: Storage>(
     state: &AppState<S>,
@@ -1401,7 +1384,7 @@ macro_rules! proxy_handlers {
 
 proxy_handlers! {
     admin_proxy_get, admin_proxy, Caller, get, Get, "/admin/apps/{key}/proxy/{*path}", "apps:read",
-        "Forwards a `GET` to the app's admin proxy (design note 0029, §8), signed, with `Hypha-Store`, `Hypha-Staff` (staff sessions), `Hypha-Scopes`, `Hypha-Path` and a session token in `Authorization` for staff.";
+        "Forwards a `GET` to the app's admin proxy, signed, with `Hypha-Store`, `Hypha-Staff` (staff sessions), `Hypha-Scopes`, `Hypha-Path` and a session token in `Authorization` for staff.";
     admin_proxy_post, admin_proxy, Caller, post, Post, "/admin/apps/{key}/proxy/{*path}", "apps:read",
         "Forwards a `POST` (any content type, at most 1 MiB) to the app's admin proxy, as `GET` does.";
     admin_proxy_put, admin_proxy, Caller, put, Put, "/admin/apps/{key}/proxy/{*path}", "apps:read",
@@ -1411,7 +1394,7 @@ proxy_handlers! {
     admin_proxy_delete, admin_proxy, Caller, delete, Delete, "/admin/apps/{key}/proxy/{*path}", "apps:read",
         "Forwards a `DELETE` to the app's admin proxy, as `POST` does.";
     storefront_proxy_get, storefront_proxy, Caller<Storefront>, get, Get, "/storefront/apps/{key}/proxy/{*path}", "stores:read",
-        "Forwards a `GET` to the app's storefront proxy (design note 0029, §8), signed, with `Hypha-Store`, `Hypha-Channel` and `Hypha-Path`; with an `X-Hypha-Cart: cart_…` header (a cart of the key's channel), also `Hypha-Cart`, `Hypha-Country` and `Hypha-Customer` (when the cart has one). No personal data is forwarded.";
+        "Forwards a `GET` to the app's storefront proxy, signed, with `Hypha-Store`, `Hypha-Channel` and `Hypha-Path`; with an `X-Hypha-Cart: cart_…` header (a cart of the key's channel), also `Hypha-Cart`, `Hypha-Country` and `Hypha-Customer` (when the cart has one). No personal data is forwarded.";
     storefront_proxy_post, storefront_proxy, Caller<Storefront>, post, Post, "/storefront/apps/{key}/proxy/{*path}", "stores:read",
         "Forwards a `POST` (any content type, at most 1 MiB) to the app's storefront proxy, as `GET` does.";
     storefront_proxy_put, storefront_proxy, Caller<Storefront>, put, Put, "/storefront/apps/{key}/proxy/{*path}", "stores:read",
@@ -1445,15 +1428,13 @@ pub struct RefreshResponse {
     consent_url: Option<String>,
 }
 
-/// Fetches an installed app's manifest again (design note 0029, §4.2) and applies its
-/// registrations (webhooks, UI) and its custom fields (design note 0033, §8). Scopes it
-/// no longer asks for leave the grant at once; new ones, or fields it no longer declares
-/// (whose values would be deleted), make an authorization request staff approve
-/// (`consent_required`): approving widens the grant and syncs the fields, and the app
-/// then gets tokens with the new scopes from `/oauth/authorize` without asking again.
-/// A manifest that changes a field's type is `manifest_invalid`. Staff with `apps:write`, or the app itself with its token.
-/// `manifest_unreachable` / `manifest_invalid` (422) when the manifest can't be used;
-/// `app_not_installed` (409) for an app not installed through OAuth.
+/// Fetches an installed app's manifest again and applies its registrations (webhooks, UI) and its custom fields. Scopes it
+/// no longer asks for leave the grant at once; new ones, or fields it no longer declares (whose values would be deleted),
+/// make an authorization request staff approve (`consent_required`): approving widens the grant and syncs the fields, and
+/// the app then gets tokens with the new scopes from `/oauth/authorize` without asking again. A manifest that changes a
+/// field's type is `manifest_invalid`. Staff with `apps:write`, or the app itself with its token. `manifest_unreachable` /
+/// `manifest_invalid` (422) when the manifest can't be used; `app_not_installed` (409) for an app not installed through
+/// OAuth.
 #[utoipa::path(
     post,
     path = "/admin/apps/{key}/refresh",
@@ -1467,9 +1448,8 @@ pub async fn refresh<S: Storage>(
     PathId(key): PathId<String>,
 ) -> Result<Json<RefreshResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    // A manifest that drops custom fields waits for consent like new scopes, judged
-    // against the definitions stored now; one that doesn't syncs them in the batch that
-    // applies it (design note 0033, §8).
+    // A manifest that drops custom fields waits for consent like new scopes, judged against
+    // the definitions stored now; one that doesn't syncs them in the batch that applies it.
     let stored = crate::app_fields::stored_fields(&ports, &key).await?;
     let removes = |m: &hypha_apps::AppManifest| crate::app_fields::removes_fields(&stored, m);
     let prepared =

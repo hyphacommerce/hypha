@@ -64,7 +64,7 @@ where
     taken_key_writes_nothing(&make().await).await;
     scenario("batch: an empty batch commits");
     empty_batch(&make().await).await;
-    scenario("batch: a fulfilment with its order and stock (design note 0018)");
+    scenario("batch: a fulfilment with its order and stock");
     fulfils_an_order(&make().await).await;
     scenario("batch: a stale order writes nothing, not even the new fulfilment");
     stale_order_writes_nothing(&make().await).await;

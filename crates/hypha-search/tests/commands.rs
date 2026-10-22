@@ -1,6 +1,6 @@
-//! Search over a store in memory (design note 0019): events become marks, the sync job
-//! turns marks into documents priced and stocked per market, and the commands search
-//! them and keep the merchant's settings.
+//! Search over a store in memory: events become marks, the sync job turns marks into
+//! documents priced and stocked per market, and the commands search them and keep the
+//! merchant's settings.
 
 use std::cell::Cell;
 
@@ -911,7 +911,7 @@ fn a_product_only_in_a_hidden_subcategory_isnt_listed_under_its_parent() {
     }
 }
 
-// ---------- the search app (design note 0029, §3.1) ----------
+// ---------- the search app ----------
 
 fn set_search_app(w: &World, app: Option<&str>) -> Result<Option<String>, IndexError> {
     block_on(update_search_settings(
@@ -972,7 +972,7 @@ fn a_search_app_must_answer_search_queries() {
     assert_eq!(set_search_app(&w, None), Ok(None));
 }
 
-// ---------- custom fields as facets (design note 0033, §9) ----------
+// ---------- custom fields as facets ----------
 
 mod fields {
     use std::collections::BTreeMap;

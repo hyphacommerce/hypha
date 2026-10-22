@@ -1,9 +1,8 @@
 "use client";
 
-// The phones' menu (design note 0024, §7): a drawer from the start edge, as the cart's
-// is from the end, with every category (its subcategories under it), the account and
-// the currency.
-// Loaded when it first opens (`SiteHeader`).
+// The phones' menu: a drawer from the start edge, as the cart's is from the end, with
+// every category (its subcategories under it), the account and the currency. Loaded
+// when it first opens (`SiteHeader`).
 
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog } from "@astryxdesign/core/Dialog";

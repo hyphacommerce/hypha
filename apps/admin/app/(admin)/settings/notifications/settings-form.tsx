@@ -1,8 +1,8 @@
 "use client";
 
-// The notification settings (design note 0028, §7): branding, the sender's name and
-// reply-to, the staff recipients and the order link, one draft saved by the bar at the
-// top. The logo saves as it's picked, like a category's image.
+// The notification settings: branding, the sender's name and reply-to, the staff
+// recipients and the order link, one draft saved by the bar at the top. The logo saves
+// as it's picked, like a category's image.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -313,7 +313,7 @@ function LogoField({
       </HStack>
       {error && <Banner status="error" title={error} />}
       {logoUrl ? (
-        // A plain <img>: the media URLs resize, so no Next.js image pipeline (0011 §2).
+        // A plain <img>: the media URLs resize, so no Next.js image pipeline.
         <img src={logoUrl} alt="The emails' logo" className="email-logo" />
       ) : (
         <Text color="secondary">{hasLogo ? "Media storage isn't set up." : "No logo."}</Text>

@@ -1,6 +1,6 @@
-// The app's side of the bridge (design note 0029, §6.3): runs in the app's page inside
-// the admin's iframe. Posts only to `hostOrigin` and accepts only messages from the
-// parent window at exactly that origin.
+// The app's side of the bridge: runs in the app's page inside the admin's iframe.
+// Posts only to `hostOrigin` and accepts only messages from the parent window at
+// exactly that origin.
 
 import {
   type BridgeErrorCode,
@@ -49,7 +49,7 @@ export interface BridgeOptions {
 }
 
 export interface Bridge {
-  /** A short-lived session token (§6.3) for the app's backend to verify. */
+  /** A short-lived session token for the app's backend to verify. */
   getSessionToken(): Promise<string>;
   /** Asks the admin to go to `path` within the app's page (e.g. `/settings`). */
   navigate(path: string): Promise<void>;

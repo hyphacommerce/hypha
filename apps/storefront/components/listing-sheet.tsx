@@ -1,8 +1,7 @@
 "use client";
 
-// The filters in a bottom sheet, for phones (design note 0024, §7): loaded only when a
-// shopper opens it (`ListingToolbar`), since wide screens show the facets beside the
-// results instead.
+// The filters in a bottom sheet, for phones: loaded only when a shopper opens it
+// (`ListingToolbar`), since wide screens show the facets beside the results instead.
 
 import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 

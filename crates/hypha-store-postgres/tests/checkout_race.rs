@@ -1,7 +1,7 @@
-//! Concurrent checkouts against a real Postgres, each request on its own connection
-//! (design note 0007, section 2): carts racing for the last units never oversell, a cart
-//! checked out twice at once becomes one order, and retries with the same idempotency
-//! key all get that one order back (and, the same way, add a line only once).
+//! Concurrent checkouts against a real Postgres, each request on its own connection: carts
+//! racing for the last units never oversell, a cart checked out twice at once becomes one
+//! order, and retries with the same idempotency key all get that one order back (and, the
+//! same way, add a line only once).
 //!
 //! Needs `DATABASE_URL` like the contract tests; skips itself without it.
 
@@ -206,7 +206,7 @@ async fn mug_reservations(store: &PgStore<Client>) -> usize {
 
 #[tokio::test]
 async fn carts_racing_for_the_last_units_never_oversell() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping the checkout race test");
         return;
     };
@@ -291,7 +291,7 @@ async fn carts_racing_for_the_last_units_never_oversell() {
 
 #[tokio::test]
 async fn one_cart_checked_out_at_once_becomes_one_order() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping the checkout race test");
         return;
     };
@@ -322,9 +322,8 @@ async fn one_cart_checked_out_at_once_becomes_one_order() {
     }))
     .await;
 
-    // One checkout places the order; the others are answered with it (design note
-    // 0031: the shopper's browser and the provider's webhook may both complete a cart),
-    // or ran out of retries.
+    // One checkout places the order; the others are answered with it (the shopper's browser
+    // and the provider's webhook may both complete a cart), or ran out of retries.
     let placed: Vec<_> = results
         .iter()
         .filter_map(|r| r.as_ref().ok())
@@ -348,7 +347,7 @@ async fn one_cart_checked_out_at_once_becomes_one_order() {
 
 #[tokio::test]
 async fn retries_with_the_same_key_all_get_the_one_order() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping the checkout race test");
         return;
     };
@@ -400,7 +399,7 @@ async fn retries_with_the_same_key_all_get_the_one_order() {
 
 #[tokio::test]
 async fn adding_a_line_retried_with_the_same_key_adds_it_once() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping the checkout race test");
         return;
     };

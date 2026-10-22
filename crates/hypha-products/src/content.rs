@@ -1,5 +1,5 @@
-//! What a product says about itself (design note 0019, section 2): its tags (its
-//! description is `hypha_core::Description`).
+//! What a product says about itself: its tags (its description is
+//! `hypha_core::Description`).
 
 use std::collections::HashSet;
 

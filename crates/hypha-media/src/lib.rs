@@ -1,4 +1,4 @@
-//! Media: assets (files and their metadata) and where files live (design note 0013).
+//! Media: assets (files and their metadata) and where files live.
 //!
 //! A leaf domain: it depends on core only. Products and other owners attach assets
 //! through `hypha-merchandising`; this crate records who uses an asset (`usage.rs`)

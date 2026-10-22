@@ -1,7 +1,7 @@
-// A list page's state lives in its URL (design note 0024, AU7): the filters, `sort`,
-// the page's `cursor`, and `prev`, the cursors of the pages before it (AU8), so
-// Previous works although the API only pages forward. Shared by the server page (which
-// reads it into an API query) and the client table (which changes it).
+// A list page's state lives in its URL: the filters, `sort`, the page's `cursor`, and
+// `prev`, the cursors of the pages before it, so Previous works although the API only
+// pages forward. Shared by the server page (which reads it into an API query) and the
+// client table (which changes it).
 
 /** A page's `searchParams`, as Next.js gives them. */
 export type SearchParams = Record<string, string | string[] | undefined>;

@@ -1,5 +1,5 @@
-//! File storage over the S3 API (design note 0013, section 8): Cloudflare R2, AWS S3 and
-//! S3-compatible servers, with one `BlobStore` adapter.
+//! File storage over the S3 API: Cloudflare R2, AWS S3 and S3-compatible servers, with one
+//! `BlobStore` adapter.
 //!
 //! A storage adapter, like `hypha-store-postgres`: it depends on `hypha-media`, never on
 //! hosts. It opens no connections itself; HTTP goes through the `HttpClient` port, which

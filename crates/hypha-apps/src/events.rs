@@ -1,7 +1,6 @@
-//! What happens to apps installed through OAuth, as events (design note 0029, §4.1).
-//! Contract types: a reshaped field is a new `VERSION`, never an edit. They are about
-//! the app (subject `app`, its `appid_…`) and go to that app only, whatever it
-//! subscribed to (`App::wants_event`).
+//! What happens to apps installed through OAuth, as events. Contract types: a reshaped
+//! field is a new `VERSION`, never an edit. They are about the app (subject `app`, its
+//! `appid_…`) and go to that app only, whatever it subscribed to (`App::wants_event`).
 
 use hypha_core::Event;
 use serde::Serialize;

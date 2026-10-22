@@ -6,7 +6,7 @@ import { loaded, sessionClient } from "@/lib/hypha";
 
 import { CategoryTree } from "./category-tree";
 
-/** Products → Categories (design note 0022): the tree, in order. */
+/** Products → Categories: the tree, in order. */
 export default async function CategoriesPage() {
   const client = await sessionClient();
   const tree = await client.GET("/admin/categories").then(loaded);

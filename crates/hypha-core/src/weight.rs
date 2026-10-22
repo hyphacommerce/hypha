@@ -1,5 +1,5 @@
-//! Weight, in whole grams (design note 0015, SH11): what carriers and weight-tiered rates
-//! read. Grams fit every parcel carriers take; a `u32` holds up to about 4,295 tonnes.
+//! Weight, in whole grams: what carriers and weight-tiered rates read. Grams fit every
+//! parcel carriers take; a `u32` holds up to about 4,295 tonnes.
 
 use std::fmt;
 

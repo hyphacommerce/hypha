@@ -1,5 +1,5 @@
-// Server-only: the custom field definitions pages read (design note 0033). Never import
-// this from a "use client" file.
+// Server-only: the custom field definitions pages read. Never import this from a "use
+// client" file.
 
 import type { Definition, OwnerType } from "./custom-fields";
 import { loaded, perRequest, sessionClient } from "./hypha";

@@ -1,4 +1,4 @@
-//! Erasing a customer's personal data (design note 0032, §7.3) and exporting it (§7.4).
+//! Erasing a customer's personal data and exporting it.
 
 use hypha_auth::{
     HasIdentities, Identity, IdentityRepo, Principal, StageIdentities, StageSessions,
@@ -67,8 +67,7 @@ impl<S> ErasurePorts for S where
 {
 }
 
-/// The customer's account, if they have one (design note 0034): their identity, to go
-/// with them (AC10).
+/// The customer's account, if they have one: their identity, to go with them.
 async fn account_of<S: HasIdentities>(
     ports: &S,
     id: CustomerId,
@@ -87,9 +86,8 @@ async fn load<S: HasCustomers>(ports: &S, id: CustomerId) -> Result<Customer, Co
         .ok_or(CommandError::CustomerNotFound(id))
 }
 
-/// Asks for the customer's personal data to be erased after `settings.erasure_delay`
-/// (design note 0032, §7.3), recording `customer.erasure_requested`. Needs
-/// `customers:erase`.
+/// Asks for the customer's personal data to be erased after `settings.erasure_delay`,
+/// recording `customer.erasure_requested`. Needs `customers:erase`.
 pub async fn request_erasure<S: HasCustomers>(
     ctx: &Ctx,
     ports: &S,
@@ -187,12 +185,12 @@ pub struct Erased {
     pub orders: Vec<OrderId>,
 }
 
-/// Erases one customer's personal data now (design note 0032, §7.3), whether or not a
-/// request was due: the job's unit of work, and what tests call. The customer, its
-/// orders, its placed carts and its and its orders' personal custom field values are
-/// written in one batch with `customer.redacted`; its open carts are deleted in it;
-/// its email records are redacted just before (idempotently, so a failed batch leaves
-/// nothing half done that a rerun wouldn't finish). An erased customer is left alone.
+/// Erases one customer's personal data now, whether or not a request was due: the job's
+/// unit of work, and what tests call. The customer, its orders, its placed carts and its
+/// and its orders' personal custom field values are written in one batch with
+/// `customer.redacted`; its open carts are deleted in it; its email records are redacted
+/// just before (idempotently, so a failed batch leaves nothing half done that a rerun
+/// wouldn't finish). An erased customer is left alone.
 pub async fn erase_customer<S: ErasurePorts>(
     ports: &S,
     now: Timestamp,
@@ -239,9 +237,9 @@ pub async fn erase_customer<S: ErasurePorts>(
 
     let values = personal_values(ports, id, &order_ids).await?;
     let mut carts = ports.carts().of_customer(id).await?;
-    // An open cart whose payment holds money (started online, never checked out;
-    // design note 0031) isn't deleted: the payment points at it, and giving the money
-    // back needs it. It's redacted like a placed one.
+    // An open cart whose payment holds money (started online, never checked out) isn't
+    // deleted: the payment points at it, and giving the money back needs it. It's redacted
+    // like a placed one.
     let mut keep = Vec::new();
     for cart in &carts {
         if matches!(cart.status(), hypha_cart::CartStatus::Open) {
@@ -259,7 +257,7 @@ pub async fn erase_customer<S: ErasurePorts>(
 
     let mut batch = ports.batch();
     batch.update_customer(&mut customer);
-    // Their account goes too (AC10): every session ends, the identity is removed.
+    // Their account goes too: every session ends, the identity is removed.
     if let Some(identity) = &account {
         batch.revoke_sessions(identity.id(), None, now);
         batch.delete_identity(identity);
@@ -302,8 +300,8 @@ pub struct Erasures {
 }
 
 /// The `erase_customers` step: runs every erasure due at `clock.now()`, up to `limit` a
-/// run (design note 0032, §7.3). A customer whose erasure fails is left for the next
-/// run and reported in `failed`; only the due list's own failure fails the step.
+/// run. A customer whose erasure fails is left for the next run and reported in `failed`;
+/// only the due list's own failure fails the step.
 pub async fn erase_due<S: ErasurePorts>(
     ports: &S,
     clock: &impl Clock,
@@ -325,9 +323,9 @@ pub async fn erase_due<S: ErasurePorts>(
     })
 }
 
-/// Everything Hypha holds about a customer (design note 0032, §7.4), for one JSON
-/// document: the customer (its consent and custom fields come with it), its orders with
-/// their payments, and its email records.
+/// Everything Hypha holds about a customer, for one JSON document: the customer (its
+/// consent and custom fields come with it), its orders with their payments, and its email
+/// records.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CustomerExport {
     pub customer: Customer,
@@ -336,9 +334,9 @@ pub struct CustomerExport {
     pub notifications: Vec<Notification>,
 }
 
-/// Answers a data request (design note 0032, §7.4), recording `customer.data_requested`
-/// so apps can answer too. Needs `customers:read`; the route adds every `customer_data:*`
-/// scope for callers that aren't staff.
+/// Answers a data request, recording `customer.data_requested` so apps can answer too.
+/// Needs `customers:read`; the route adds every `customer_data:*` scope for callers that
+/// aren't staff.
 pub async fn export_customer<S: ErasurePorts>(
     ctx: &Ctx,
     ports: &S,

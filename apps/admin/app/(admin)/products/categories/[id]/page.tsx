@@ -12,7 +12,7 @@ import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
 
 import { CategoryForm, DeleteCategory, ImageCard, ProductsCard } from "./category-cards";
 
-/** A category: its details, image and products (design note 0022, section 5). */
+/** A category: its details, image and products. */
 export default async function CategoryPage({
   params,
   searchParams,
@@ -30,7 +30,7 @@ export default async function CategoryPage({
     client
       .GET("/admin/categories/{id}/products", { params: { path: { id }, query: { cursor } } })
       .then(loaded),
-    // Its custom fields (design note 0033): none shown without `custom_fields:read`.
+    // Its custom fields: none shown without `custom_fields:read`.
     definitionsOf("category"),
     client.GET("/admin/categories/{id}/custom-fields", { params: { path: { id } } }),
     requireStaff(),

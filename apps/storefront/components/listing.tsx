@@ -1,13 +1,13 @@
 "use client";
 
-// A product listing through search (design notes 0023, SF7, and 0024, §7): a category
-// page and the search page are both this, with `category` or `q`. Facets and the price
-// range narrow it, the sort orders it, Previous and Next page through it, all in the
-// URL. The page (static for a category) renders its first page; when the URL asks for
-// another (a filter, a sort, a page: changed in place by the controls, `go`), this reads
-// it through `listingPage`: one call, with the old results dimmed until the new ones are
-// here. Facets beside the results on wide screens, in the toolbar's sheet on phones, by
-// CSS (`.shop-listing`), so the HTML is the same for both and nothing moves on load.
+// A product listing through search: a category page and the search page are both
+// this, with `category` or `q`. Facets and the price range narrow it, the sort orders
+// it, Previous and Next page through it, all in the URL. The page (static for a
+// category) renders its first page; when the URL asks for another (a filter, a sort, a
+// page: changed in place by the controls, `go`), this reads it through `listingPage`:
+// one call, with the old results dimmed until the new ones are here. Facets beside the
+// results on wide screens, in the toolbar's sheet on phones, by CSS (`.shop-listing`),
+// so the HTML is the same for both and nothing moves on load.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

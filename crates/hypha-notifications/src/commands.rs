@@ -1,7 +1,7 @@
-//! What needs no other domain (design note 0028, §11): reading the settings, the
-//! templates in effect, turning one off, reverting one, and the record of messages.
-//! Saving a template (checked against its sample), the settings (the logo's asset
-//! usage), previews and sends are the workflow's, `hypha-mail`.
+//! What needs no other domain: reading the settings, the templates in effect, turning one
+//! off, reverting one, and the record of messages. Saving a template (checked against its
+//! sample), the settings (the logo's asset usage), previews and sends are the workflow's,
+//! `hypha-mail`.
 
 use hypha_core::{
     AuthError, Ctx, ErrorCode, NotificationId, Page, PageRequest, RepoError, Scope,
@@ -54,7 +54,7 @@ pub struct EffectiveTemplate {
     pub enabled: bool,
     /// Whether the sources are the merchant's.
     pub customized: bool,
-    /// Why the stored sources no longer parse (Q5); sends use the default meanwhile.
+    /// Why the stored sources no longer parse; sends use the default meanwhile.
     pub problem: Option<TemplateProblem>,
 }
 
@@ -73,9 +73,8 @@ impl EffectiveTemplate {
         }
     }
 
-    /// The sources a send uses: the merchant's while they parse, else the default's,
-    /// so a template broken by an upgrade doesn't leave a customer without an email
-    /// (Q5).
+    /// The sources a send uses: the merchant's while they parse, else the default's, so a
+    /// template broken by an upgrade doesn't leave a customer without an email.
     pub fn sending_sources(&self) -> TemplateSources {
         match self.problem {
             Some(_) => default_template(self.key).sources(),

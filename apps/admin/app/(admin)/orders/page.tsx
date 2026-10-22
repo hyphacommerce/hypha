@@ -51,7 +51,7 @@ export default async function OrdersPage({
   // only a placed filter waits for the store's time zone (read once per request, shared
   // with the layout).
   const timeZone = placed ? await loadTimeZone() : "UTC";
-  // Filterable custom fields (design note 0033, §7).
+  // Filterable custom fields.
   const fieldFilters = (await definitionsOf("order")).filter(isFilterOffered);
   const [result, markets, channelName, currencies, countries] = await Promise.all([
     client.GET("/admin/orders", {
@@ -63,7 +63,7 @@ export default async function OrdersPage({
           fulfillment_status: manyOf(params, "fulfillment_status", FULFILMENT),
           cancelled: cancelled === "true" ? true : cancelled === "false" ? false : undefined,
           channel: one(params, "channel"),
-          // A customer page's "View all" (design note 0032); no chip offers it.
+          // A customer page's "View all"; no chip offers it.
           customer: one(params, "customer"),
           country: one(params, "country"),
           currency: one(params, "currency"),

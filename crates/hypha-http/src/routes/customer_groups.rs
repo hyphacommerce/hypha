@@ -1,6 +1,6 @@
-//! Customer groups (design note 0032, §6): named, static sets of customers with a stable
-//! ID. Membership is written as sets here and read through the customers list
-//! (`GET /admin/customers?group=`) and a customer's `groups`.
+//! Customer groups: named, static sets of customers with a stable ID. Membership is written
+//! as sets here and read through the customers list (`GET /admin/customers?group=`) and a
+//! customer's `groups`.
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::{CustomerGroupId, CustomerId, Stamped};

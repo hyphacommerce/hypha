@@ -1,4 +1,4 @@
-//! Spores' settings (design note 0030, §8): one row per spore.
+//! Spores' settings: one row per spore.
 
 use hypha_apps::{AppKey, SporeSettings, SporeSettingsRepo};
 use hypha_core::{RepoError, Stamped, Version, Versioned, stamp_insert, stamp_update};

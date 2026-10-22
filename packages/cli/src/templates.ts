@@ -17,7 +17,7 @@ export function composeFile(): Promise<string> {
   return readFile(join(TEMPLATES, "vps", "compose.yaml"), "utf8");
 }
 
-/** The settings file's JSON Schema, for editors (design note 0017, CF7). */
+/** The settings file's JSON Schema, for editors. */
 export function configSchema(): Promise<string> {
   return readFile(join(REPO, "hypha.config.schema.json"), "utf8");
 }
@@ -44,13 +44,13 @@ export function caddyfile(d: Deployment, acmeEmail?: string): string {
     ...(d.domains.storefront ? [site(d.domains.storefront, "storefront:3000", true)] : []),
   ];
   return [
-    "# Written by `hypha init` (design note 0025); `hypha init --force` writes it again.",
+    "# Written by `hypha init`; `hypha init --force` writes it again.",
     "",
     ...global,
     "",
     sites.join("\n\n"),
     "",
-    "# The co-located apps' sites (design note 0029, §9), written by `hypha deploy`.",
+    "# The co-located apps' sites, written by `hypha deploy`.",
     CADDY_IMPORT,
     "",
   ].join("\n");
@@ -72,7 +72,7 @@ export function appsCaddy(
   coLocated: { entry: AppEntry; profile: AppProfile }[],
 ): string {
   return [
-    "# Written by `hypha deploy` from hypha.json's apps (design note 0029, §9).",
+    "# Written by `hypha deploy` from hypha.json's apps.",
     ...coLocated.map(({ entry, profile }) =>
       ["", caddySite(d, appDomain(d, entry), `${service(entry)}:${profile.port}`)].join("\n"),
     ),
@@ -99,8 +99,8 @@ export function seaweedConfig(accessKey: string, secretKey: string): string {
   )}\n`;
 }
 
-/** How the API sends email (design note 0028, §5): `[email]` in its settings file, the
- * password or key in `.env`. */
+/** How the API sends email: `[email]` in its settings file, the password or key in `.env`.
+ * */
 export type EmailSettings =
   | { sender: "log" }
   | { sender: "resend"; from: string; apiKey: string }
@@ -125,7 +125,7 @@ function str(value: string): string {
 export function emailToml(email: EmailSettings): string[] {
   if (email.sender === "log") {
     return [
-      "# Emails are only written to the API's log until a sender is set (design note 0028):",
+      "# Emails are only written to the API's log until a sender is set:",
       '# [email] sender = "resend" (HYPHA_RESEND_API_KEY in .env) or "smtp" ([email.smtp],',
       "# HYPHA_SMTP_PASSWORD in .env), and the from address. `hypha init --force` asks again.",
       "# [email]",
@@ -154,13 +154,13 @@ export function configToml(
   const header =
     target === "cloudflare"
       ? [
-          "# The API's settings (design note 0017). Every key has a default; the Worker reads",
+          "# The API's settings. Every key has a default; the Worker reads",
           "# this file as its HYPHA_CONFIG variable, under the addresses and storage that",
           "# `hypha deploy` sets. After a change: `hypha deploy` (it also resizes the rate",
           "# limiters to [rate_limits]).",
         ]
       : [
-          "# The API's settings (design note 0017). Every key has a default; `compose.yaml`",
+          "# The API's settings. Every key has a default; `compose.yaml`",
           "# sets the addresses, storage and proxies through the environment, which wins.",
           "# After a change: `hypha deploy` (or `docker compose up -d api` on the server).",
         ];
@@ -205,7 +205,7 @@ export function newEnv(d: Deployment, owner: Owner): EnvFile {
   const env = new EnvFile();
   env
     .comment(
-      "Written by `hypha init` (design note 0025). Secrets: keep this file private, and\n" +
+      "Written by `hypha init`. Secrets: keep this file private, and\n" +
         "keep it (HYPHA_SECRET_KEY seals two-factor secrets; losing it locks staff out).",
     )
     .set("POSTGRES_PASSWORD", secret())
@@ -234,9 +234,9 @@ export function newEnv(d: Deployment, owner: Owner): EnvFile {
   return env;
 }
 
-/** A Cloudflare deployment's `.env` (design note 0026): kept here, never uploaded as a
- * file. `hypha deploy` passes the token to wrangler and `cf`, the database URL to setup
- * and Hyperdrive, and the rest to the Workers as secrets. */
+/** A Cloudflare deployment's `.env`: kept here, never uploaded as a file. `hypha deploy`
+ * passes the token to wrangler and `cf`, the database URL to setup and Hyperdrive, and the
+ * rest to the Workers as secrets. */
 export function newCloudflareEnv(
   owner: Owner,
   databaseUrl: string,
@@ -244,7 +244,7 @@ export function newCloudflareEnv(
 ): EnvFile {
   const env = new EnvFile()
     .comment(
-      "Written by `hypha init --target cloudflare` (design note 0026). Secrets: keep this file\n" +
+      "Written by `hypha init --target cloudflare`. Secrets: keep this file\n" +
         "private, and keep it (HYPHA_SECRET_KEY seals two-factor secrets; losing it locks staff out).",
     )
     .set("HYPHA_SECRET_KEY", secret())

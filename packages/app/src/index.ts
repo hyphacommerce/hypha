@@ -1,4 +1,4 @@
-// @hypha/app: the SDK for Hypha app authors (design note 0029).
+// @hypha/app: the SDK for Hypha app authors.
 
 export * from "./manifest.ts";
 export {

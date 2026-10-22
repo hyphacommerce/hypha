@@ -26,8 +26,8 @@ export default async function CustomersPage({
     client.GET("/admin/customer-groups").then((r) => r.data?.items ?? []),
   ]);
   const group = one(params, "group");
-  // Filterable custom fields (design note 0033, §7); the labels field (design note 0032,
-  // CD1) also gets a column and the selection bar's actions.
+  // Filterable custom fields; the labels field also gets a column and the selection
+  // bar's actions.
   const fieldFilters = definitions.filter(isFilterOffered);
   const labels = wellKnownField(definitions, "labels");
   const result = await client.GET("/admin/customers", {

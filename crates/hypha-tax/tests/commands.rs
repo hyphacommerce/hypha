@@ -382,3 +382,40 @@ fn classes_and_regions_list_oldest_first_for_taxes_read() {
         )))
     );
 }
+
+#[test]
+fn tax_writes_need_taxes_write() {
+    let world = World::new();
+    let books = world.class("Books");
+    let hr = world.region("HR");
+    world.set_class_rate(hr, books, 50_000).unwrap();
+    let assign = AssignTaxClass {
+        products: vec![pid(1)],
+        class: Some(books),
+    };
+    let results = [
+        block_on(assign_tax_class(&reader(), &world.ports, assign)),
+        block_on(set_default_rate(
+            &reader(),
+            &world.ports.tax_regions,
+            hr,
+            130_000,
+        ))
+        .map(|_| ()),
+        block_on(remove_class_rate(
+            &reader(),
+            &world.ports.tax_regions,
+            hr,
+            books,
+        ))
+        .map(|_| ()),
+    ];
+    for result in results {
+        assert_eq!(
+            result,
+            Err(CommandError::Auth(AuthError::MissingScope(
+                Scope::TaxesWrite
+            )))
+        );
+    }
+}

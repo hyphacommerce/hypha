@@ -1,10 +1,9 @@
 "use client";
 
-// Apps' blocks and actions where staff work (design note 0029, §6.1-§6.2): a block is
-// the app's UI tree rendered with the admin's own components (`@hypha/app-blocks`), and
-// its buttons and the app's action buttons run through the admin's server. An action
-// with an input schema asks for its input first; one that names a payment point runs
-// through the payment's route.
+// Apps' blocks and actions where staff work: a block is the app's UI tree rendered with
+// the admin's own components (`@hypha/app-blocks`), and its buttons and the app's
+// action buttons run through the admin's server. An action with an input schema asks
+// for its input first; one that names a payment point runs through the payment's route.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

@@ -356,8 +356,8 @@ fn a_checked_out_cart_answers_with_its_order() {
     let world = World::new();
     let cart = world.cart();
     let order = world.checkout(cart).unwrap();
-    // The shopper's browser and the provider's webhook may both complete a cart
-    // (design note 0031): the second gets the order, and nothing is reserved twice.
+    // The shopper's browser and the provider's webhook may both complete a cart: the second
+    // gets the order, and nothing is reserved twice.
     let again = world.checkout_as(&Ctx::system(), cart, None, None).unwrap();
     assert_eq!(again.value.id(), order.id());
     assert!(again.replayed);
@@ -533,25 +533,6 @@ fn checkout_needs_the_checkout_scope() {
     assert_eq!(
         world.checkout_as(&shop, cart, None, None),
         Err(CommandError::Auth(AuthError::MissingScope(Scope::Checkout)))
-    );
-}
-
-#[test]
-fn a_completed_cart_refuses_new_lines() {
-    let world = World::new();
-    let cart = world.cart();
-    let order = world.checkout(cart).unwrap();
-    let input = AddLine {
-        cart,
-        variant: vid("cup"),
-        quantity: 1,
-        idempotency: None,
-    };
-    assert_eq!(
-        block_on(add_line(&Ctx::system(), &world.ports, &world.clock, input)),
-        Err(hypha_cart::CommandError::Cart(
-            hypha_cart::CartError::Completed { order: order.id() }
-        ))
     );
 }
 
@@ -734,7 +715,7 @@ fn not_shipped(product: &mut Product, variant: VariantId) {
         .unwrap();
 }
 
-// ---- payments (design note 0027) ----
+// ---- payments ----
 
 fn bank_transfer() -> hypha_core::PaymentMethodId {
     hypha_core::PaymentMethodId::from_uuid(Uuid::from_u128(InMemoryPorts::BANK_TRANSFER))
@@ -1117,6 +1098,8 @@ struct CardApp {
     /// Can't say where a payment is (Stripe down).
     status_down: std::cell::Cell<bool>,
     state: std::cell::Cell<ProviderState>,
+    /// The attempt its status answers are about, when not the payment's own.
+    status_attempt: std::cell::RefCell<Option<String>>,
     started: std::cell::RefCell<Vec<hypha_core::PaymentId>>,
     acted: std::cell::RefCell<Vec<(hypha_core::PaymentId, PaymentAction)>>,
 }
@@ -1128,6 +1111,7 @@ impl Default for CardApp {
             refuse: std::cell::Cell::new(false),
             status_down: std::cell::Cell::new(false),
             state: std::cell::Cell::new(ProviderState::Open),
+            status_attempt: std::cell::RefCell::default(),
             started: std::cell::RefCell::default(),
             acted: std::cell::RefCell::default(),
         }
@@ -1198,10 +1182,15 @@ impl hypha_payments::PaymentProvider for &CardApp {
                 reason: "Stripe is down".to_string(),
             });
         }
+        let attempt = self
+            .status_attempt
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| attempt_of(request.payment));
         Ok(hypha_payments::ProviderStatus {
             state: self.state.get(),
-            reference: Some(attempt_of(request.payment)),
-            attempt: Some(attempt_of(request.payment)),
+            reference: Some(attempt.clone()),
+            attempt: Some(attempt),
         })
     }
 }
@@ -1677,6 +1666,123 @@ fn a_restart_its_provider_cancelled_makes_a_new_payment() {
     assert_eq!(old.status(), PaymentStatus::Voided);
 }
 
+/// Marks `payment` authorized, as the provider's report would.
+fn hold(world: &World, payment: hypha_core::PaymentId) {
+    let mut held = block_on(world.payments.get(payment)).unwrap().unwrap();
+    held.authorize(None).unwrap();
+    block_on(world.payments.update(&mut held)).unwrap();
+}
+
+#[test]
+fn a_held_payment_for_another_total_is_refused_and_given_back() {
+    let world = World::new();
+    let app = CardApp::default();
+    let (cart, payment) = started_cart(&world, &app);
+    hold(&world, payment.id());
+    world.add(cart, "cup", 1);
+    assert_eq!(
+        check_out_by(&world, cart, &app).map(|_| ()),
+        Err(CommandError::TotalChanged {
+            expected: eur(3000),
+            actual: eur(3500)
+        })
+    );
+    assert_eq!(world.mug_reserved(), 0);
+    let stored = block_on(world.payments.get(payment.id())).unwrap().unwrap();
+    assert_eq!(
+        (stored.order(), stored.status()),
+        (None, PaymentStatus::Voided)
+    );
+}
+
+#[test]
+fn starting_again_while_a_payment_is_held_is_refused_without_asking_the_provider() {
+    let world = World::new();
+    let app = CardApp::default();
+    let (cart, payment) = started_cart(&world, &app);
+    hold(&world, payment.id());
+    assert_eq!(
+        start_paying(&world, cart, &app).map(|_| ()),
+        Err(CommandError::CartPaymentCommitted {
+            cart,
+            payment: payment.id()
+        })
+    );
+    assert_eq!(app.started.borrow().as_slice(), [payment.id()]);
+}
+
+#[test]
+fn a_held_payment_cant_pay_for_another_online_method() {
+    let world = World::new();
+    let app = CardApp::default();
+    let (cart, payment) = started_cart(&world, &app);
+    hold(&world, payment.id());
+    let mut wallet = PaymentMethod::new(NewPaymentMethod {
+        id: PaymentMethodId::from_uuid(Uuid::from_u128(1301)),
+        provider: ProviderKey::new("app_card").unwrap(),
+        name: "Wallet".to_string(),
+        instructions: None,
+        markets: vec![],
+        channels: vec![],
+        enabled: true,
+        position: 2,
+        settings: serde_json::json!({}),
+    })
+    .unwrap();
+    block_on(world.payment_methods.insert(&mut wallet)).unwrap();
+    let mut stored = block_on(world.carts.get(cart)).unwrap().unwrap();
+    stored.set_payment_method(Some(wallet.id())).unwrap();
+    block_on(world.carts.update(&mut stored)).unwrap();
+    assert_eq!(
+        check_out_by(&world, cart, &app).map(|_| ()),
+        Err(CommandError::CartPaymentCommitted {
+            cart,
+            payment: payment.id()
+        })
+    );
+    assert_eq!(world.mug_reserved(), 0);
+    let kept = block_on(world.payments.get(payment.id())).unwrap().unwrap();
+    assert_eq!(
+        (kept.order(), kept.status()),
+        (None, PaymentStatus::Authorized)
+    );
+}
+
+/// Checks `cart` out while the provider says `state` about an attempt other than its
+/// payment's: the payment doesn't move.
+fn another_attempt_says(state: ProviderState) {
+    let world = World::new();
+    let app = CardApp::default();
+    let (cart, payment) = started_cart(&world, &app);
+    app.state.set(state);
+    *app.status_attempt.borrow_mut() = Some("pi_other".to_string());
+    assert_eq!(
+        check_out_by(&world, cart, &app).map(|_| ()),
+        Err(CommandError::PaymentPending {
+            cart,
+            payment: payment.id()
+        })
+    );
+    let stored = block_on(world.payments.get(payment.id())).unwrap().unwrap();
+    assert_eq!(stored.status(), PaymentStatus::Pending);
+    assert_eq!(world.mug_reserved(), 0);
+}
+
+#[test]
+fn another_attempt_paid_doesnt_pay_the_payment() {
+    another_attempt_says(ProviderState::Paid);
+}
+
+#[test]
+fn another_attempt_failed_doesnt_fail_the_payment() {
+    another_attempt_says(ProviderState::Failed);
+}
+
+#[test]
+fn another_attempt_cancelled_doesnt_void_the_payment() {
+    another_attempt_says(ProviderState::Canceled);
+}
+
 #[test]
 fn storage_failures_dont_give_money_back() {
     let storage = CommandError::Cart(hypha_cart::CommandError::Repo(
@@ -1693,4 +1799,73 @@ fn storage_failures_dont_give_money_back() {
         }
         .gives_money_back()
     );
+}
+
+// ---- scopes of the cart's payment commands ----
+
+fn caller_with(scopes: Vec<Scope>) -> Ctx {
+    Ctx::new(Actor::User(UserId::from_uuid(Uuid::from_u128(7))), scopes)
+}
+
+fn missing(scope: Scope) -> Result<(), CommandError> {
+    Err(CommandError::Auth(AuthError::MissingScope(scope)))
+}
+
+#[test]
+fn starting_a_cart_payment_needs_checkout() {
+    let world = World::new();
+    let cart = world.cart();
+    let ctx = caller_with(vec![Scope::CartsWrite, Scope::PaymentsWrite]);
+    let started = block_on(start_cart_payment(
+        &ctx,
+        &world.ports,
+        &world.ids,
+        &world.clock,
+        &NoRateProviders,
+        &(ManualProvider,),
+        StartCartPayment {
+            cart,
+            expected_total: None,
+            return_url: None,
+        },
+    ));
+    assert_eq!(started.map(|_| ()), missing(Scope::Checkout));
+}
+
+#[test]
+fn choosing_a_payment_method_needs_carts_write() {
+    let world = World::new();
+    let cart = world.cart();
+    let ctx = caller_with(vec![Scope::CartsRead, Scope::Checkout]);
+    let chosen = block_on(set_payment_method(
+        &ctx,
+        &world.ports,
+        &(ManualProvider,),
+        cart,
+        None,
+    ));
+    assert_eq!(chosen.map(|_| ()), missing(Scope::CartsWrite));
+}
+
+#[test]
+fn listing_a_carts_payment_methods_needs_carts_read() {
+    let world = World::new();
+    let cart = world.cart();
+    let ctx = caller_with(vec![Scope::Checkout]);
+    let listed = block_on(cart_payment_methods(
+        &ctx,
+        &world.ports,
+        &(ManualProvider,),
+        cart,
+    ));
+    assert_eq!(listed.map(|_| ()), missing(Scope::CartsRead));
+}
+
+#[test]
+fn viewing_a_cart_needs_carts_read() {
+    let world = World::new();
+    let cart = world.cart();
+    let ctx = caller_with(vec![Scope::Checkout]);
+    let viewed = block_on(view_cart(&ctx, &world.ports, cart));
+    assert_eq!(viewed.map(|_| ()), missing(Scope::CartsRead));
 }

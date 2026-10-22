@@ -14,9 +14,9 @@ use uuid::Uuid;
 
 use super::scenario;
 
-/// Runs every outbox scenario (design note 0016, section 3), each on a fresh store from
-/// `make`: an event is written if and only if the change that recorded it committed,
-/// with the actor the ports act as and the version the write gave the aggregate.
+/// Runs every outbox scenario, each on a fresh store from `make`: an event is written if
+/// and only if the change that recorded it committed, with the actor the ports act as and
+/// the version the write gave the aggregate.
 pub async fn outbox<S>(make: impl AsyncFn() -> S)
 where
     S: HasProducts + HasCatalogs + HasPriceLists + HasOutbox + HasBatch + ActingAs,

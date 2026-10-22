@@ -1,8 +1,7 @@
-//! External apps that calculate rates over HTTP (design note 0015, section 5): where
-//! Hypha calls one and what it quotes. The app itself (its name, whether it's enabled,
-//! the secret calls are signed with) is `hypha-apps`' record under the same key (design
-//! note 0016, EV11); storage links the two, so a provider needs its app and goes with
-//! it. The calling is the host's (`RateProvider`).
+//! External apps that calculate rates over HTTP: where Hypha calls one and what it quotes.
+//! The app itself (its name, whether it's enabled, the secret calls are signed with) is
+//! `hypha-apps`' record under the same key; storage links the two, so a provider needs its
+//! app and goes with it. The calling is the host's (`RateProvider`).
 
 use hypha_core::{CallbackUrl, Stamped, Stamps, Version, Versioned, required_text};
 
@@ -12,7 +11,7 @@ use crate::{ProviderKey, ProviderKind, ServiceInfo, ShippingError};
 pub struct AppProvider {
     key: ProviderKey,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016).
+    /// When it was stored and last changed, set by the adapter.
     stamps: Option<Stamps>,
     callback_url: CallbackUrl,
     timeout_ms: u32,

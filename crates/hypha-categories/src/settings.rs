@@ -1,5 +1,4 @@
-/// Categories' tunable values (design note 0022, Q3; 0017): from `[categories]` in
-/// `hypha.config.toml`, defaulting here.
+/// Categories' tunable values: from `[categories]` in `hypha.config.toml`, defaulting here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CategorySettings {
     /// How many levels categories nest, 1 to 10. Lowering it leaves deeper categories

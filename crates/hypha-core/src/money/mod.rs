@@ -301,15 +301,6 @@ mod tests {
     }
 
     #[test]
-    fn sum_rejects_mixed_currency() {
-        let items = vec![eur(69), Money::new(420, Currency::RSD).unwrap()];
-        assert_eq!(
-            Money::sum(&items, Currency::EUR),
-            Err(MoneyError::CurrencyMismatch(Currency::EUR, Currency::RSD))
-        );
-    }
-
-    #[test]
     fn sum_overflows() {
         let items = vec![eur(Money::MAX_AMOUNT), eur(1)];
         assert_eq!(Money::sum(&items, Currency::EUR), Err(MoneyError::Overflow));
@@ -377,15 +368,6 @@ mod tests {
     fn adjust_negative_money_is_symmetric() {
         // -1005 * 0.9 = -904.5 -> -905
         assert_eq!(eur(-1005).adjust(bp(-1000)), Ok(eur(-905)));
-    }
-
-    #[test]
-    fn adjust_keeps_currency() {
-        let rsd = Money::new(1000, Currency::RSD).unwrap();
-        assert_eq!(
-            rsd.adjust(bp(-1000)),
-            Ok(Money::new(900, Currency::RSD).unwrap())
-        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
-//! Postgres through Hyperdrive (design note 0026, W4): a connection per `ports()` call,
-//! which Hyperdrive's pool next to the database makes cheap; no statement cache (each
-//! connection is used once). Migrations aren't run here (W9: `setup` from the CLI).
+//! Postgres through Hyperdrive: a connection per `ports()` call, which Hyperdrive's pool
+//! next to the database makes cheap; no statement cache (each connection is used once).
+//! Migrations aren't run here (`setup` from the CLI).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -17,8 +17,8 @@ use worker::Env;
 use worker::send::SendFuture;
 
 use crate::Deployment;
-use crate::handlers::CoreHandlers;
-use crate::payments::CoreProviders;
+use hypha_http::handlers::CoreHandlers;
+use hypha_http::payments::CoreProviders;
 
 /// The Hyperdrive binding's name in `wrangler.toml`.
 pub const HYPERDRIVE: &str = "HYPERDRIVE";
@@ -42,7 +42,7 @@ pub type ProvidersOf<D> = Union<(
 /// handlers and payment providers its spores join.
 pub struct WorkersStorage<D: Deployment> {
     env: Env,
-    /// What the stores stamp writes with (design note 0016, Q3).
+    /// What the stores stamp writes with.
     clock: HostClock,
     /// Built at setup: the `Mailer` holds the host's mail environment.
     handlers: HandlersOf<D>,
@@ -66,8 +66,11 @@ impl<D: Deployment> WorkersStorage<D> {
         Ok(Self {
             env,
             clock,
-            handlers: Union((crate::handlers::core_handlers(mail), built.handlers)),
-            payments: Union((crate::payments::CORE_PROVIDERS, built.payment_providers)),
+            handlers: Union((hypha_http::handlers::core_handlers(mail), built.handlers)),
+            payments: Union((
+                hypha_http::payments::CORE_PROVIDERS,
+                built.payment_providers,
+            )),
             spores: built.spores,
         })
     }

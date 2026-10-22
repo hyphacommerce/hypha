@@ -52,7 +52,7 @@ fn aid(n: u128) -> AddressId {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_load_never_mixes_two_versions_of_a_customer() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping the consistent read test");
         return;
     };

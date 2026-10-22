@@ -1,5 +1,5 @@
-//! The editing commands (design note 0014). The aggregate's rules are unit-tested in
-//! `product/edit.rs`; these check scopes, loading, storing and the repository keys.
+//! The editing commands. The aggregate's rules are unit-tested in `product/edit.rs`; these
+//! check scopes, loading, storing and the repository keys.
 
 use hypha_core::{
     Actor, AuthError, Ctx, Currency, Money, MoneyError, OptionValueId, ProductId, Scope, UserId,
@@ -570,7 +570,7 @@ fn variant_commands_need_products_write() {
     );
 }
 
-// ---- events (design note 0016) ----
+// ---- events ----
 
 #[test]
 fn each_edit_records_what_changed() {
@@ -627,7 +627,7 @@ fn an_edit_that_changes_nothing_records_nothing() {
     assert_eq!(w.repo.outbox().types(), ["product.created"]);
 }
 
-// ---------- the whole variant list (design note 0021, Q1) ----------
+// ---------- the whole variant list ----------
 
 fn set(
     id: Option<VariantId>,
@@ -843,4 +843,29 @@ fn reordering_variants_records_the_order() {
     let last = w.repo.outbox().events().pop().unwrap();
     assert_eq!(last.event_type, "product.updated");
     assert_eq!(last.data["fields"], serde_json::json!(["variant_order"]));
+}
+
+#[test]
+fn status_and_variant_list_need_products_write() {
+    let w = World::new();
+    let p = w.create("shirt");
+    assert_eq!(
+        block_on(hypha_products::set_product_status(
+            &reader(),
+            &w.repo,
+            p.id(),
+            hypha_products::ProductStatus::Active,
+        )),
+        missing_write()
+    );
+    assert_eq!(
+        block_on(hypha_products::set_product_variants(
+            &reader(),
+            &w.repo,
+            &w.ids,
+            p.id(),
+            vec![],
+        )),
+        missing_write()
+    );
 }

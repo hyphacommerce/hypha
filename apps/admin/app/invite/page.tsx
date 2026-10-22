@@ -9,9 +9,9 @@ import { InviteForm } from "./invite-form";
 export const metadata: Metadata = { title: "Join the team · Hypha admin", referrer: "no-referrer" };
 
 /**
- * Where an invite email's link lands (`{admin_url}/invite?token=…`, design note 0008):
- * the invite looked up first, so the page says which store, as whom and from whom, and a
- * link that no longer works says so before anyone types a password.
+ * Where an invite email's link lands (`{admin_url}/invite?token=…`): the invite looked
+ * up first, so the page says which store, as whom and from whom, and a link that no
+ * longer works says so before anyone types a password.
  */
 export default async function InvitePage({
   searchParams,

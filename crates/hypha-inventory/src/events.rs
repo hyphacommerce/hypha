@@ -1,5 +1,5 @@
-//! What happens to stock, as events (design note 0016, section 4). Contract types: a
-//! reshaped field is a new `VERSION`, never an edit.
+//! What happens to stock, as events. Contract types: a reshaped field is a new `VERSION`,
+//! never an edit.
 
 use hypha_core::{Event, InventoryItemId, LocationId, VariantId};
 use serde::Serialize;
@@ -8,8 +8,8 @@ pub const INVENTORY_ITEM: &str = "inventory_item";
 pub const LOCATION: &str = "location";
 
 /// `location.changed`: created, or which of `name`, `markets`, `priority` and `address`
-/// changed (all four when created). Its markets decide where its stock counts, so
-/// search rebuilds when they change (design note 0019, section 8).
+/// changed (all four when created). Its markets decide where its stock counts, so search
+/// rebuilds when they change.
 #[derive(Debug, Serialize)]
 pub struct LocationChanged {
     pub location: LocationId,

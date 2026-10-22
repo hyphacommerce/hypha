@@ -11,10 +11,10 @@ serde.workspace = true
 url = "2.5"
 # Sanitising rich descriptions (products, categories); builds for wasm.
 ammonia = "4.2.3"
-# Only for hosts that publish OpenAPI documents (design note 0010, S8): domain crates
-# and wasm builds never turn it on.
+# Only for hosts that publish OpenAPI documents: domain crates and wasm builds never
+# turn it on.
 utoipa = { version = "6", optional = true }
-# Event payloads (design note 0016) are JSON values; builds for wasm.
+# Event payloads are JSON values; builds for wasm.
 serde_json.workspace = true
 
 [features]

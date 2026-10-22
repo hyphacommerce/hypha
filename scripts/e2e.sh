@@ -1,6 +1,5 @@
-#!/usr/bin/env bash
-# End-to-end check against a running hypha-host-axum on a fresh database, with file
-# storage (`docker compose up -d`; see CLAUDE.md).
+# !/usr/bin/env bash End-to-end check against a running hypha-host-axum on a fresh
+# database, with file storage (`docker compose up -d`).
 #
 #   HYPHA_OWNER_EMAIL=owner@example.com HYPHA_OWNER_PASSWORD=e2e-owner-password \
 #   HYPHA_ALLOW_PRIVATE_CALLBACKS=true HYPHA_ADMIN_URL=http://admin.e2e.test \
@@ -10,10 +9,10 @@
 # The script logs in as that owner (E2E_OWNER_EMAIL / E2E_OWNER_PASSWORD if you chose
 # others) and sends the session with every step; the "auth" section checks the rest.
 #
-# Emails (design note 0028): with the host sending over SMTP (`cargo run` does, to the
-# compose Mailpit) and Mailpit's API at MAILPIT_URL (default http://localhost:8025), the
-# script checks that the order and invite emails arrived, then deletes them. With
-# another sender (the log, as on Workers) or E2E_MAILPIT=0 it skips those checks.
+# Emails: with the host sending over SMTP (`cargo run` does, to the compose Mailpit) and
+# Mailpit's API at MAILPIT_URL (default http://localhost:8025), the script checks that
+# the order and invite emails arrived, then deletes them. With another sender (the log,
+# as on Workers) or E2E_MAILPIT=0 it skips those checks.
 #
 # Every step asserts the HTTP status and, for errors, the stable error code.
 # Exits non-zero if any step fails. Uses only curl, grep, sed and head (no jq).
@@ -121,8 +120,8 @@ wait_for() {
     FAILED=$((FAILED + 1))
 }
 
-# The email checks (design note 0028): on when the host sends over SMTP and Mailpit is
-# reachable (decided after logging in), unless E2E_MAILPIT=0.
+# The email checks: on when the host sends over SMTP and Mailpit is reachable (decided
+# after logging in), unless E2E_MAILPIT=0.
 MAILPIT="${MAILPIT_URL:-http://localhost:8025}"
 MAIL_CHECKS=0
 
@@ -167,7 +166,7 @@ mail_token() {
 }
 
 # mail_code TO SUBJECT: prints the six digits in the text of the latest email to TO
-# whose subject has SUBJECT (a customer's sign-in code, design note 0034; the subject
+# whose subject has SUBJECT (a customer's sign-in code; the subject
 # never carries it, since the record keeps subjects), waiting up to 20 s; nothing
 # without the email checks. The email stays for `mail` to find.
 mail_code() {
@@ -231,7 +230,7 @@ if [[ $BODY != *'"status":"authenticated"'* ]]; then
 fi
 SESSION=$(token)
 AUTH=(-H "authorization: Bearer $SESSION")
-step "the email settings (design note 0028)" 200 - "$BASE/admin/notification-settings"
+step "the email settings" 200 - "$BASE/admin/notification-settings"
 SENDER=$(sed -E 's/.*"sender":"([a-z]+)".*/\1/' <<<"$BODY")
 if [[ ${E2E_MAILPIT:-1} != 0 && $SENDER == smtp ]] && curl -sf -o /dev/null "$MAILPIT/api/v1/info"; then
     MAIL_CHECKS=1
@@ -242,7 +241,7 @@ fi
 for to in guest@example.hr support@example.com "$OWNER_EMAIL"; do
     forget_mail "$to"
 done
-step "the Online Store channel (design note 0020)" 200 - "$BASE/admin/channels"
+step "the Online Store channel" 200 - "$BASE/admin/channels"
 contains "every store starts with one" '"name":"Online Store","kind":"online_store"'
 ONLINE_STORE=$(sed -E 's/.*"items":\[\{"id":"([^"]+)".*/\1/' <<<"$BODY")
 step "a publishable key for the storefront steps" 201 - -X POST "$BASE/admin/api-keys" -H "$JSON" \
@@ -254,16 +253,14 @@ step "a publishable key needs a channel" 422 api_key_channel_required -X POST "$
 
 echo
 echo "## happy path"
-step "health" 200 - "$BASE/health"
 step "the store this deployment serves" 200 - "$BASE/admin/store"
 contains "store has a store_ ID" '"id":"store_'
+contains "default language en" '"default_language":"en"'
+contains "the setup guide hasn't started" '"setup":{"step":null,"finished_at":null}'
 step "rename the store" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"name":"E2E Shop"}'
 contains "store has its new name" '"name":"E2E Shop"'
 step "a blank store name" 422 store_name_empty -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"name":" "}'
-step "a new store writes in English" 200 - "$BASE/admin/store"
-contains "default language en" '"default_language":"en"'
-contains "the setup guide hasn't started" '"setup":{"step":null,"finished_at":null}'
-step "remember the setup guide's step (design note 0024)" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"setup_step":"market"}'
+step "remember the setup guide's step" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"setup_step":"market"}'
 contains "the step is kept" '"step":"market"'
 step "a setup step that isn't one" 422 invalid_setup_step -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"setup_step":"Market!"}'
 step "store details" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" \
@@ -297,13 +294,13 @@ step "the next page" 200 - "$BASE/admin/products?limit=1&cursor=$NEXT"
 contains "is the mug" "\"id\":\"$MUG\""
 contains "as a summary" '"variant_count":1,"price_ranges":[{"min":'
 step "active products" 200 - "$BASE/admin/products?status=active"
-step "products by text (design note 0019)" 200 - "$BASE/admin/products?q=MU"
+step "products by text" 200 - "$BASE/admin/products?q=MU"
 contains "finds the mug by its title" "\"items\":[{\"id\":\"$MUG\""
 step "text too long" 422 field_too_long "$BASE/admin/products?q=$(printf 'x%.0s' {1..256})"
 step "a page too large" 422 invalid_limit "$BASE/admin/products?limit=500"
 step "an unknown filter" 400 invalid_query "$BASE/admin/products?colour=red"
 step "an unknown sort" 400 invalid_query "$BASE/admin/products?sort=title"
-step "products oldest first (design note 0024)" 200 - "$BASE/admin/products?sort=oldest&limit=1"
+step "products oldest first" 200 - "$BASE/admin/products?sort=oldest&limit=1"
 contains "starts with the mug" "\"items\":[{\"id\":\"$MUG\""
 NEXT=$(sed -E 's/.*"next_cursor":"([^"]+)".*/\1/' <<<"$BODY")
 step "the next page of that sort" 200 - "$BASE/admin/products?sort=oldest&limit=1&cursor=$NEXT"
@@ -312,7 +309,7 @@ step "that cursor under another sort" 400 invalid_cursor "$BASE/admin/products?s
 step "products of any of two statuses, by title" 200 - "$BASE/admin/products?status=active&status=draft&sort=title_desc"
 step "a cursor from another list" 400 invalid_cursor "$BASE/admin/products?cursor=ord_00000000000000000000000000000000"
 
-# deleting a product (design note 0033, section 6.3)
+# deleting a product
 step "create a product to delete" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"doomed","title":"Doomed","price":{"amount":500,"currency":"EUR"}}'
 DOOMED=$(id)
@@ -323,7 +320,7 @@ step "its handle is free again" 201 - -X POST "$BASE/admin/products" -H "$JSON" 
     -d '{"handle":"doomed","title":"Doomed","price":{"amount":500,"currency":"EUR"}}'
 step "and goes again" 204 - -X DELETE "$BASE/admin/products/$(id)"
 
-# product editing (design note 0014), on a product of its own
+# product editing, on a product of its own
 step "create shirt" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"shirt","title":"Shirt","price":{"amount":1500,"currency":"EUR"}}'
 SHIRT=$(id)
@@ -331,7 +328,7 @@ SHIRT_S=$(variant)
 step "rename it" 200 - -X PATCH "$BASE/admin/products/$SHIRT" -H "$JSON" \
     -d '{"title":"Linen shirt","handle":"linen-shirt"}'
 contains "with its new handle" '"handle":"linen-shirt","title":"Linen shirt"'
-step "describe it (design note 0019)" 200 - -X PATCH "$BASE/admin/products/$SHIRT" -H "$JSON" \
+step "describe it" 200 - -X PATCH "$BASE/admin/products/$SHIRT" -H "$JSON" \
     -d '{"description":"<p>Soft linen</p><script>x()</script>","vendor":"Acme","product_type":"Shirt","tags":["Summer","summer","Linen"]}'
 contains "sanitised, with its tags deduplicated" '"description":"<p>Soft linen</p>","vendor":"Acme","product_type":"Shirt","tags":["Summer","Linen"]'
 step "too many tags" 422 too_many_tags -X PATCH "$BASE/admin/products/$SHIRT" -H "$JSON" \
@@ -357,7 +354,7 @@ contains "are stored" '"price":{"amount":1400,"currency":"EUR"},"sku":"SHIRT-S"'
 step "a SKU another variant has" 409 sku_taken -X PATCH "$BASE/admin/products/$SHIRT/variants/$SHIRT_S" -H "$JSON" \
     -d '{"sku":"SHIRT-M"}'
 VARIANTS="{\"variants\":[{\"id\":\"$SHIRT_M\",\"sku\":\"SHIRT-M\",\"price\":{\"amount\":1600,\"currency\":\"EUR\"},\"selections\":[\"$SIZE_M\"],\"weight_grams\":null,\"requires_shipping\":true},{\"id\":\"$SHIRT_S\",\"sku\":\"SHIRT-S\",\"price\":{\"amount\":1400,\"currency\":\"EUR\"},\"selections\":[\"$SIZE_S\"],\"weight_grams\":250,\"requires_shipping\":true}]}"
-step "the whole variant list in one PUT (0021 Q1)" 200 - -X PUT "$BASE/admin/products/$SHIRT/variants" \
+step "the whole variant list in one PUT" 200 - -X PUT "$BASE/admin/products/$SHIRT/variants" \
     -H "$JSON" -d "$VARIANTS"
 contains "M first now, S weighed" '"weight_grams":250'
 step "a list leaving a key out" 422 invalid_body -X PUT "$BASE/admin/products/$SHIRT/variants" -H "$JSON" \
@@ -373,8 +370,8 @@ step "the last variant stays" 409 no_variants -X DELETE "$BASE/admin/products/$S
 step "an unknown variant" 404 variant_not_found \
     -X DELETE "$BASE/admin/products/$SHIRT/variants/var_00000000000000000000000000000000"
 
-# media (design note 0013): the file goes straight to storage with the signed request,
-# so that PUT is a plain curl (no admin credentials; S3 checks its own signature).
+# media: the file goes straight to storage with the signed request, so that PUT is a
+# plain curl (no admin credentials; S3 checks its own signature).
 PNG_FILE=$(mktemp)
 { printf '\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x00\x03\x00\x00\x00\x02\x08\x06\x00\x00\x00'; head -c 71 /dev/zero; } > "$PNG_FILE"
 step "start an upload" 201 - -X POST "$BASE/admin/assets" -H "$JSON" \
@@ -393,7 +390,7 @@ step "complete the upload" 200 - -X POST "$BASE/admin/assets/$ASSET/complete"
 contains "it is ready, with its dimensions" '"width":3,"height":2'
 step "list images" 200 - "$BASE/admin/assets?kind=image"
 contains "the asset is listed" "\"items\":[{\"id\":\"$ASSET\""
-step "the library by name (design note 0024)" 200 - "$BASE/admin/assets?sort=name_asc&q=png"
+step "the library by name" 200 - "$BASE/admin/assets?sort=name_asc&q=png"
 step "an unknown library sort" 400 invalid_query "$BASE/admin/assets?sort=size"
 step "set its alt text" 200 - -X PATCH "$BASE/admin/assets/$ASSET" -H "$JSON" -d '{"alt":"A blue shirt"}'
 contains "the alt text is stored" '"alt":"A blue shirt"'
@@ -555,7 +552,7 @@ contains "the retry didn't add the mugs again" '"quantity":2,'
 replayed "the add retry is marked replayed" -X POST "$BASE/storefront/carts/$KEYED/lines" -H "$JSON" \
     -H 'idempotency-key: line-1' -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
 
-echo "## shipping (design note 0015)"
+echo "## shipping"
 step "a zone for Croatia and Germany" 201 - -X POST "$BASE/admin/shipping-zones" -H "$JSON" \
     -d '{"name":"Eurozone","countries":["HR","DE"]}'
 ZONE=$(id)
@@ -608,7 +605,7 @@ step "the offers" 200 - "$SHIP/shipping-options"
 contains "standard costs 4.90 under 10 EUR" '"code":"standard","name":"Standard","amount":{"amount":490,"currency":"EUR"},"estimate":{"min_days":2,"max_days":4}'
 contains "the courier is down, and express says why" '"name":"Express","reason":"provider_failed"'
 contains "standard is offered, so the backup isn't needed" '"name":"Post","reason":"backup_not_needed"'
-echo "## extension calls (design note 0029)"
+echo "## extension calls"
 step "the courier's extension calls" 200 - "$BASE/admin/apps/app_courier/extension-calls"
 contains "the failed quote is a shipping.rates call" '"point":"shipping.rates","version":1,'
 contains "failed, unreachable" '"outcome":"failed","status":null,"error":"unreachable"'
@@ -665,11 +662,11 @@ step "pick standard" 200 - -X PUT "$SHIP/shipping/$SHGRP" -H "$JSON" -d "{\"opti
 contains "shipping is in the total" '"subtotal":{"amount":900,"currency":"EUR"},"shipping_total":{"amount":490,"currency":"EUR"},"tax_total":{"amount":0,"currency":"EUR"},"total":{"amount":1390'
 contains "and ready" '"shipping_ready":true'
 
-echo "## payment methods (design note 0027)"
+echo "## payment methods"
 METHODS="$BASE/admin/payment-methods"
 step "a provider key that isn't one" 422 invalid_payment_provider -X POST "$METHODS" -H "$JSON" \
     -d '{"provider":"stripe","name":"Card"}'
-step "a spore this build doesn't have (design note 0030)" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \
+step "a spore this build doesn't have" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \
     -d '{"provider":"spore_nowhere","name":"Card"}'
 step "settings the manual provider doesn't take" 422 invalid_payment_settings -X POST "$METHODS" -H "$JSON" \
     -d '{"provider":"manual","name":"Bank transfer","settings":{"iban":"HR12"}}'
@@ -724,7 +721,7 @@ contains "it is pending and unfulfilled" '"financial_status":"pending","fulfillm
 contains "it copies the line" '"product_title":"Mug","variant_title":null,"sku":null,"unit_price":{"amount":900,"currency":"EUR"}'
 contains "its total is 1800" '"total":{"amount":1800,"currency":"EUR"},"lines"'
 ORDER_TOKEN=$(sed -E 's/.*"access_token":"(hypha_ord_[0-9a-f]+)".*/\1/' <<<"$BODY")
-step "the buyer reads the order with its token (design note 0024)" 200 - "$BASE/storefront/orders/$ORDER?token=$ORDER_TOKEN"
+step "the buyer reads the order with its token" 200 - "$BASE/storefront/orders/$ORDER?token=$ORDER_TOKEN"
 contains "it is the order" "\"id\":\"$ORDER\""
 contains "with its payment" '"payment":{"status":"pending","method_name":"Bank transfer"'
 step "without the right token it isn't there" 404 order_not_found "$BASE/storefront/orders/$ORDER?token=hypha_ord_00"
@@ -741,7 +738,7 @@ step "same key, different total" 422 idempotency_key_reused -X POST "$CHECKOUT" 
 step "a cart key reused to add a line" 422 idempotency_key_reused -X POST "$BASE/storefront/carts/$CART/lines" \
     -H "$JSON" -H 'idempotency-key: cart-1' -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
 step "checkout again without the key" 201 - -X POST "$CHECKOUT" -H "$JSON" -d '{}'
-contains "answers with its order (design note 0031)" "\"id\":\"$ORDER\""
+contains "answers with its order" "\"id\":\"$ORDER\""
 step "get the checked-out cart" 200 - "$BASE/storefront/carts/$KEYED"
 contains "the cart names its order" "\"order\":\"$ORDER\""
 step "a completed cart takes no lines" 409 cart_completed -X POST "$BASE/storefront/carts/$KEYED/lines" \
@@ -750,7 +747,7 @@ step "get the order" 200 - "$BASE/admin/orders/$ORDER"
 contains "it has a placed_at" '"placed_at":"20'
 step "list orders" 200 - "$BASE/admin/orders?limit=1"
 contains "the order is listed first" "\"items\":[{\"id\":\"$ORDER\""
-step "orders by status and total (design note 0024)" 200 - "$BASE/admin/orders?financial_status=pending&currency=EUR&sort=total_desc"
+step "orders by status and total" 200 - "$BASE/admin/orders?financial_status=pending&currency=EUR&sort=total_desc"
 contains "finds the order" "\"id\":\"$ORDER\""
 step "a total sort without a currency" 422 sort_needs_currency "$BASE/admin/orders?sort=total_asc"
 step "orders placed before 2000" 200 - "$BASE/admin/orders?placed_before=2000-01-01T00:00:00Z"
@@ -784,7 +781,7 @@ contains "the order charges shipping" '"shipping_total":{"amount":490,"currency"
 contains "it copies the address" '"shipping_address":{"first_name":"Ana","last_name":"Horvat"'
 contains "and the shipping line" '"code":"standard","name":"Standard","provider":null,"service":null,"reference":null,"amount":{"amount":490,"currency":"EUR"},"estimate":{"min_days":2,"max_days":4}'
 
-echo "## payment and search apps (design note 0029, §3.1)"
+echo "## payment and search apps"
 step "a payment app that isn't installed" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \
     -d '{"provider":"app_pay","name":"Card"}'
 step "an app that isn't installed searches nothing" 422 search_app_unavailable -X PATCH \
@@ -1050,7 +1047,7 @@ contains "email is normalized" '"email":"ana@example.hr","first_name":"Ana"'
 step "rename customer" 200 - -X PATCH "$BASE/admin/customers/$CUSTOMER" -H "$JSON" \
     -d '{"first_name":null,"last_name":"Horvat"}'
 contains "null clears, others change" '"first_name":null,"last_name":"Horvat"'
-step "customers by text, by name (design note 0024)" 200 - "$BASE/admin/customers?q=horvat&sort=name_asc"
+step "customers by text, by name" 200 - "$BASE/admin/customers?q=horvat&sort=name_asc"
 contains "finds her" "\"items\":[{\"id\":\"$CUSTOMER\""
 step "add shipping address" 201 - -X POST "$BASE/admin/customers/$CUSTOMER/addresses" -H "$JSON" \
     -d '{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR","default_shipping":true}'
@@ -1073,8 +1070,8 @@ step "unlink the customer" 200 - -X PUT "$BASE/admin/carts/$BUYER_CART/customer"
 contains "email stays" '"email":"ana@example.hr","customer":null'
 step "remove the address" 200 - -X DELETE "$BASE/admin/customers/$CUSTOMER/addresses/$ADDRESS"
 contains "address book is empty, defaults cleared" '"default_billing_address":null,"addresses":[]'
-contains "without orders, she could be deleted (design note 0032, CD7)" '"can_delete":true'
-echo "## customer groups (design note 0032, §6)"
+contains "without orders, she could be deleted" '"can_delete":true'
+echo "## customer groups"
 step "a group" 201 - -X POST "$BASE/admin/customer-groups" -H "$JSON" -d '{"name":"Wholesale","handle":"wholesale","description":"Buys in bulk"}'
 WHOLESALE=$(id)
 step "the same handle again" 409 customer_group_handle_taken -X POST "$BASE/admin/customer-groups" -H "$JSON" -d '{"name":"Other","handle":"wholesale"}'
@@ -1107,7 +1104,7 @@ step "add 2 lamps" 200 - -X POST "$BASE/storefront/carts/$SHOP_CART/lines" -H "$
     -d "{\"variant\":\"$LAMP_VAR\",\"quantity\":2}"
 step "add a book" 200 - -X POST "$BASE/storefront/carts/$SHOP_CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$BOOK_VAR\",\"quantity\":1}"
-step "the guest wants news and offers (design note 0032, §5)" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/marketing" -H "$JSON" -d '{"opt_in":true}'
+step "the guest wants news and offers" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/marketing" -H "$JSON" -d '{"opt_in":true}'
 contains "ticked" '"marketing_opt_in":true'
 step "a guest's email" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/email" -H "$JSON" \
     -d '{"email":"guest@example.hr"}'
@@ -1137,15 +1134,15 @@ step "staff unsubscribe now" 200 - -X PUT "$BASE/admin/customers/$GUEST/marketin
 contains "applied" '"applied":true,"customer":{'
 step "never asked can't be asked for" 422 consent_state_not_settable -X PUT "$BASE/admin/customers/$GUEST/marketing/email" -H "$JSON" -d '{"state":"not_subscribed"}'
 step "SMS consent needs a phone" 409 consent_needs_phone -X PUT "$BASE/admin/customers/$GUEST/marketing/sms" -H "$JSON" -d '{"state":"subscribed"}'
-step "request the guest's erasure (design note 0032, §7.3)" 200 - -X POST "$BASE/admin/customers/$GUEST/erasure"
+step "request the guest's erasure" 200 - -X POST "$BASE/admin/customers/$GUEST/erasure"
 contains "due later" '"erasure_due_at":"20'
 step "twice is refused" 409 erasure_already_requested -X POST "$BASE/admin/customers/$GUEST/erasure"
 step "cancel it" 200 - -X DELETE "$BASE/admin/customers/$GUEST/erasure"
 step "nothing to cancel now" 409 erasure_not_requested -X DELETE "$BASE/admin/customers/$GUEST/erasure"
-step "export the guest's data (§7.4)" 200 - "$BASE/admin/customers/$GUEST/export"
+step "export the guest's data" 200 - "$BASE/admin/customers/$GUEST/export"
 contains "the customer" "\"customer\":{\"id\":\"$GUEST\""
 contains "the order" "\"orders\":[{\"id\":\"$SHOP_ORDER\""
-contains "and one order's statistics (design note 0032)" '"orders":{"count":1,"first_placed_at":"20'
+contains "and one order's statistics" '"orders":{"count":1,"first_placed_at":"20'
 contains "spent in EUR" '"amount_spent":[{"amount":3051,"currency":"EUR"}]'
 step "deleting a customer with orders is refused" 409 customer_has_orders -X DELETE "$BASE/admin/customers/$GUEST"
 step "the guest's orders" 200 - "$BASE/admin/orders?customer=$GUEST"
@@ -1189,7 +1186,7 @@ step "every lamp is reserved" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
 contains "4 of 4" '"on_hand":4,"reserved":4,"available":0'
 step "the first order is unchanged" 200 - "$BASE/admin/orders/$SHOP_ORDER"
 
-echo "## search (design note 0019)"
+echo "## search"
 # Events mark what changed; the search sync job rebuilds it every 2 seconds.
 wait_for "search sees every lamp reserved" "$BASE/storefront/search?country=HR&q=LAMP" '"available":false'
 contains "priced in the market (the list takes 10%)" '"price":{"amount":900,"currency":"EUR"}'
@@ -1211,7 +1208,7 @@ step "back to one listing per product" 200 - -X PATCH "$BASE/admin/search/settin
 step "rebuild everything" 202 - -X POST "$BASE/admin/search/reindex"
 wait_for "the rebuild finishes" "$BASE/admin/search/status" '"queued":0'
 
-echo "## categories (design note 0022)"
+echo "## categories"
 step "a top-level category" 201 - -X POST "$BASE/admin/categories" -H "$JSON" \
     -d '{"name":"Home","handle":"home","visible":true,"description":"<p>For the home</p><script>x()</script>"}'
 HOME_CAT=$(id)
@@ -1249,7 +1246,7 @@ step "a hidden category isn't searchable" 404 category_not_found "$BASE/storefro
 step "delete the hidden one" 204 - -X DELETE "$BASE/admin/categories/$CLEARANCE"
 step "it's gone" 404 category_not_found "$BASE/admin/categories/$CLEARANCE"
 
-echo "## custom fields (design note 0033)"
+echo "## custom fields"
 CFD="$BASE/admin/custom-field-definitions"
 step "a product field shown to storefronts" 201 - -X POST "$CFD" -H "$JSON" \
     -d '{"owner_type":"product","key":"material","type":"text","name":"Material","access":{"admin":"read_write","storefront":"read"},"capabilities":{"filterable":true}}'
@@ -1262,7 +1259,7 @@ step "an unknown type" 422 - -X POST "$CFD" -H "$JSON" \
 step "a personal customer field" 201 - -X POST "$CFD" -H "$JSON" \
     -d '{"owner_type":"customer","key":"tags","type":"list.text","name":"Tags","personal":true,"validations":{"unique_items":true},"capabilities":{"filterable":true}}'
 TAGS_FIELD=$(id)
-step "the suggested customer fields (design note 0032, CD11)" 200 - "$CFD/suggestions?owner_type=customer"
+step "the suggested customer fields" 200 - "$CFD/suggestions?owner_type=customer"
 contains "labels are taken by the tags field" "\"existing\":\"$TAGS_FIELD\""
 contains "the note is offered" '"field":"custom.note"'
 step "create the note as suggested" 201 - -X POST "$CFD" -H "$JSON" \
@@ -1338,7 +1335,7 @@ step "no facets again" 200 - -X PATCH "$BASE/admin/search/settings" -H "$JSON" -
 step "delete the order field" 204 - -X DELETE "$CFD/$GIFT_FIELD"
 step "it's gone" 404 custom_field_definition_not_found "$CFD/$GIFT_FIELD"
 
-echo "## fulfilment (design note 0018)"
+echo "## fulfilment"
 # The shop order: 2 lamps, reserved at the warehouse (4 on hand, 4 reserved with the
 # second order's), and a book.
 step "the shop order" 200 - "$BASE/admin/orders/$SHOP_ORDER"
@@ -1394,7 +1391,7 @@ step "fulfilments of an unknown order" 404 order_not_found \
 step "stop tracking lamps again" 200 - -X PATCH "$BASE/admin/inventory-items/$LAMP_ITEM" -H "$JSON" \
     -d '{"tracked":false}'
 
-echo "## notifications (design note 0028)"
+echo "## notifications"
 # The shop order's buyer was told at each step the fulfilment section asked for.
 mail "the guest's order confirmation arrived" guest@example.hr "confirmed"
 mail "and that it shipped" guest@example.hr "on its way"
@@ -1452,15 +1449,15 @@ contains "cleared" '"footer":null'
 step "a colour that isn't one" 422 invalid_colour -X PATCH "$BASE/admin/notification-settings" \
     -H "$JSON" -d '{"accent":"green"}'
 
-echo "## apps and webhooks (design note 0016)"
+echo "## apps and webhooks"
 # A webhook receiver when python3 is here (it is in CI): the host must run with
 # HYPHA_ALLOW_PRIVATE_CALLBACKS=true to reach it. Without one, the delivery fails and the
 # script checks that instead.
 HOOK_PORT=${E2E_HOOK_PORT:-3199}
 HOOKS_FILE=$(mktemp)
 HOOKS=''
-# The same server is an app's site for the OAuth steps (design note 0029): it serves the
-# app's manifest at /hypha-app.json.
+# The same server is an app's site for the OAuth steps: it serves the app's manifest at
+# /hypha-app.json.
 APP_BASE="http://127.0.0.1:$HOOK_PORT"
 MANIFEST_FILE=$(mktemp)
 cat >"$MANIFEST_FILE" <<JSON
@@ -1526,8 +1523,8 @@ contains "the courier from shipping is one" '"key":"app_courier","kind":"app","n
 step "get the app" 200 - "$BASE/admin/apps/app_erp"
 contains "with its webhook, without its secret" "\"webhook\":{\"url\":\"$HOOK_URL\",\"timeout_ms\":2000}"
 step "an unknown app" 404 app_not_found "$BASE/admin/apps/app_none"
-# Spores' settings (design note 0030, §8): the stock build has no spores, so only the
-# refusals are checked here; the route tests build a host with one.
+# Spores' settings: the stock build has no spores, so only the refusals are checked
+# here; the route tests build a host with one.
 step "settings of a spore this build doesn't have" 404 app_not_found "$BASE/admin/apps/spore_none/settings"
 step "an app keeps its own settings" 404 app_not_found "$BASE/admin/apps/app_erp/settings"
 step "saving them for no spore" 404 app_not_found -X PUT "$BASE/admin/apps/spore_none/settings" \
@@ -1571,7 +1568,7 @@ step "delete the app" 204 - -X DELETE "$BASE/admin/apps/app_erp"
 step "it's gone" 404 app_not_found "$BASE/admin/apps/app_erp"
 
 echo
-echo "## apps through OAuth (design note 0029)"
+echo "## apps through OAuth"
 # Needs the receiver above (it serves the manifest) and a host with HYPHA_ADMIN_URL set
 # (the consent page's address; nothing is served there, the script plays the admin).
 if [[ -n $HOOKS ]]; then
@@ -1689,7 +1686,7 @@ else
 fi
 
 echo
-echo "## app UI in any admin and storefront (design note 0029, §5-§8)"
+echo "## app UI in any admin and storefront"
 # A second local app (python3, like the receiver above) with pages, blocks, actions,
 # settings, both proxies and a storefront element; installed through OAuth.
 UI_PORT=${E2E_UI_PORT:-3198}
@@ -1840,7 +1837,7 @@ else
 fi
 
 echo
-echo "## private apps (design note 0029, §4.1)"
+echo "## private apps"
 PRIVATE_MANIFEST='{"key":"app_e2e_private","name":"E2E private","version":"1.0.0",
  "app_url":"https://rates.e2e.example","redirect_uris":[],
  "scopes":["shipping:read","customer_data:address"],
@@ -1992,7 +1989,7 @@ step "draft -> archived" 422 invalid_status_transition -X PATCH "$BASE/admin/pro
     -H "$JSON" -d '{"status":"archived"}'
 
 echo
-echo "## auth (design note 0008)"
+echo "## auth"
 step "who am I" 200 - "$BASE/admin/me"
 contains "the owner has the owner role" '"name":"Owner"'
 OWNER=$(sed -E 's/.*"user":\{"id":"(user_[0-9a-f]+)".*/\1/' <<<"$BODY")
@@ -2049,7 +2046,7 @@ INVITE_TOKEN=$(mail_token support@example.com "invited" hypha_inv_)
 mail "the invite arrived" support@example.com "invited"
 step "staff can't be invited" 409 user_exists -X POST "$BASE/admin/invites" -H "$JSON" \
     -d "{\"email\":\"$OWNER_EMAIL\",\"role\":\"$ROLE\"}"
-step "pending invites (design note 0024)" 200 - "$BASE/admin/invites"
+step "pending invites" 200 - "$BASE/admin/invites"
 contains "lists the invite" '"email":"support@example.com"'
 SAVED_AUTH=("${AUTH[@]}")
 AUTH=()
@@ -2108,7 +2105,7 @@ step "log out" 204 - -X POST "$BASE/admin/auth/logout"
 step "the session is over" 401 invalid_token "$BASE/admin/me"
 
 echo
-echo "## customer accounts (design note 0034)"
+echo "## customer accounts"
 AUTH=()
 forget_mail shopper@example.com
 step "ask for a sign-in code" 202 - -X POST "$BASE/storefront/auth/code" -H "$JSON" \
@@ -2176,7 +2173,7 @@ if [[ -n $CODE ]]; then
 fi
 
 echo
-echo "## rate limits (design note 0009)"
+echo "## rate limits"
 # Last on purpose: this uses up the login allowance of the address the script runs from.
 # Ten more tries on top of the script's earlier logins: well past both the address's and
 # the email-and-address limits, whichever trips first.

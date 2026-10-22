@@ -36,13 +36,11 @@ impl fmt::Display for OrderNumber {
     }
 }
 
-/// Where the money is (design note 0027): derived from the order's payments and
-/// stored here; defined in core so `hypha-payments` can derive it without depending on
-/// orders.
+/// Where the money is: derived from the order's payments and stored here; defined in core
+/// so `hypha-payments` can derive it without depending on orders.
 pub use hypha_core::FinancialStatus;
 
-/// Where the goods are (design note 0007, O3), derived from the lines' fulfilled
-/// quantities (design note 0018, FU3) and stored for lists.
+/// Where the goods are, derived from the lines' fulfilled quantities and stored for lists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FulfillmentStatus {
     Unfulfilled,
@@ -95,7 +93,7 @@ impl FromStr for FulfillmentStatus {
     }
 }
 
-/// Why an order was cancelled (design note 0018, FU7; Shopify's reasons).
+/// Why an order was cancelled (Shopify's reasons).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CancelReason {
     /// The buyer asked.
@@ -154,8 +152,8 @@ pub struct Cancellation {
     pub reason: CancelReason,
 }
 
-/// Which rule produced a line's tax, copied from the cart's tax line so orders don't
-/// depend on the tax crate (design note 0007, O4).
+/// Which rule produced a line's tax, copied from the cart's tax line so orders don't depend
+/// on the tax crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrderTaxSource {
     RateTable { region: TaxRegionId },
@@ -176,7 +174,7 @@ pub struct OrderTax {
 /// checks its lines when it is placed or restored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrderLine {
-    /// Also the reference of the stock reserved for this line (design note 0004, I8).
+    /// Also the reference of the stock reserved for this line.
     pub id: OrderLineId,
     pub product: ProductId,
     pub variant: VariantId,
@@ -190,8 +188,8 @@ pub struct OrderLine {
     pub total: Money,
     /// `None` when the cart's country had no tax rates.
     pub tax: Option<OrderTax>,
-    /// How many of `quantity` standing fulfilments shipped (design note 0018, FU3): 0
-    /// at checkout, never more than `quantity`.
+    /// How many of `quantity` standing fulfilments shipped: 0 at checkout, never more than
+    /// `quantity`.
     pub fulfilled_quantity: u32,
 }
 
@@ -204,13 +202,13 @@ impl OrderLine {
     }
 }
 
-/// How one group of the order ships, as it was charged (design note 0015, SH12): copies,
-/// like lines, so the order reads the same after the option or its provider changes.
-/// Plain values, so orders don't depend on the shipping crate.
+/// How one group of the order ships, as it was charged: copies, like lines, so the order
+/// reads the same after the option or its provider changes. Plain values, so orders don't
+/// depend on the shipping crate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrderShippingLine {
     pub group: ShippingGroupId,
-    /// The order lines this ships: what fulfilment (0018) works through.
+    /// The order lines this ships: what fulfilment works through.
     pub lines: Vec<OrderLineId>,
     pub option: ShippingOptionId,
     pub code: String,
@@ -219,7 +217,7 @@ pub struct OrderShippingLine {
     /// built-in rate.
     pub provider: Option<String>,
     pub service: Option<String>,
-    /// The provider's quote ID: what fulfilment buys the label with (0018, section 8).
+    /// The provider's quote ID: what fulfilment buys the label with.
     pub reference: Option<String>,
     pub amount: Price,
     /// Delivery in days, `min` to `max`, as estimated at checkout.
@@ -235,7 +233,7 @@ pub struct NewOrder {
     pub number: OrderNumber,
     pub placed_at: Timestamp,
     pub cart: CartId,
-    /// The sales channel it was placed in (design note 0020, CH7).
+    /// The sales channel it was placed in.
     pub channel: ChannelId,
     pub market: MarketId,
     pub currency: Currency,
@@ -260,8 +258,8 @@ pub struct NewOrder {
     pub total: Money,
 }
 
-/// An order (design note 0007): a snapshot of a priced cart, plus its payment and
-/// fulfillment status, and its cancellation (design note 0018).
+/// An order: a snapshot of a priced cart, plus its payment and fulfillment status, and its
+/// cancellation.
 ///
 /// Invariants, checked by `place` and `restore`: at least one line, line IDs unique,
 /// every amount in `currency`, each line's total is its unit price times its quantity,
@@ -271,12 +269,12 @@ pub struct NewOrder {
 pub struct Order {
     id: OrderId,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016).
+    /// When it was stored and last changed, set by the adapter.
     stamps: Option<Stamps>,
     number: OrderNumber,
     placed_at: Timestamp,
     cart: CartId,
-    /// The sales channel it was placed in (design note 0020, CH7).
+    /// The sales channel it was placed in.
     channel: ChannelId,
     market: MarketId,
     currency: Currency,
@@ -367,10 +365,10 @@ impl Order {
         Subject::new(ORDER, self.id.as_uuid())
     }
 
-    /// Sets the payment status its payments now add up to (design note 0027, PA3), and
-    /// returns whether it changed. Becoming `paid` records `order.paid`. Not refused for
-    /// a cancelled order: cancelling voids its pending payments, which moves it too. The
-    /// workflow that changes a payment calls this in the same batch.
+    /// Sets the payment status its payments now add up to, and returns whether it changed.
+    /// Becoming `paid` records `order.paid`. Not refused for a cancelled order: cancelling
+    /// voids its pending payments, which moves it too. The workflow that changes a payment
+    /// calls this in the same batch.
     pub fn set_financial_status(&mut self, status: FinancialStatus) -> bool {
         if self.financial_status == status {
             return false;
@@ -455,11 +453,10 @@ impl Order {
         }
     }
 
-    /// Cancels the order; returns whether that changed anything (a cancelled order
-    /// stays as it was, with its first reason). Refused while anything is fulfilled:
-    /// those fulfilments are cancelled first. Payment is untouched (FU7).
-    /// `notify_customer` travels in `order.cancelled`: whether the buyer is emailed
-    /// (design note 0028, NT7).
+    /// Cancels the order; returns whether that changed anything (a cancelled order stays as
+    /// it was, with its first reason). Refused while anything is fulfilled: those
+    /// fulfilments are cancelled first. Payment is untouched. `notify_customer` travels in
+    /// `order.cancelled`: whether the buyer is emailed.
     pub fn cancel(
         &mut self,
         at: Timestamp,
@@ -523,11 +520,11 @@ impl Order {
         self.customer
     }
 
-    /// Erasure (design note 0032, §7.3): the buyer's email becomes `placeholder` (an
-    /// erased customer's, `Email::is_placeholder`) and the shipping address goes (the
-    /// order's country and shipping lines stay). Lines, totals, payments and fulfilments
-    /// are untouched: placed orders are never deleted. Records no event of its own:
-    /// `customer.redacted` names the orders.
+    /// Erasure: the buyer's email becomes `placeholder` (an erased customer's,
+    /// `Email::is_placeholder`) and the shipping address goes (the order's country and
+    /// shipping lines stay). Lines, totals, payments and fulfilments are untouched: placed
+    /// orders are never deleted. Records no event of its own: `customer.redacted` names the
+    /// orders.
     pub fn redact(&mut self, placeholder: Email) -> bool {
         let mut changed = false;
         if self.email != placeholder {
@@ -585,8 +582,8 @@ impl Order {
     }
 }
 
-/// Plain-data form of an `Order` for storage adapters (design note 0001, 3.4).
-/// `restore` re-checks every invariant, so bad stored data fails loudly.
+/// Plain-data form of an `Order` for storage adapters. `restore` re-checks every invariant,
+/// so bad stored data fails loudly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrderSnapshot {
     pub id: OrderId,
@@ -595,7 +592,7 @@ pub struct OrderSnapshot {
     pub number: OrderNumber,
     pub placed_at: Timestamp,
     pub cart: CartId,
-    /// The sales channel it was placed in (design note 0020, CH7).
+    /// The sales channel it was placed in.
     pub channel: ChannelId,
     pub market: MarketId,
     pub currency: Currency,
@@ -689,8 +686,8 @@ impl Order {
             }
         }
 
-        // An erased customer's order (design note 0032, §7.3) keeps its shipping lines and
-        // loses its address: the placeholder email says so.
+        // An erased customer's order keeps its shipping lines and loses its address: the
+        // placeholder email says so.
         if !s.shipping_lines.is_empty() && s.shipping_address.is_none() && !s.email.is_placeholder()
         {
             return Err(OrderError::ShippingWithoutAddress);
@@ -934,7 +931,7 @@ mod tests {
         assert_eq!(order.version(), Version::NEW);
     }
 
-    // ---- fulfilment and cancellation (design note 0018) ----
+    // ---- fulfilment and cancellation ----
 
     fn q(n: u32) -> Quantity {
         Quantity::new(n).unwrap()
@@ -1118,7 +1115,7 @@ mod tests {
 
     #[test]
     fn a_paid_order_can_be_cancelled_and_stays_paid() {
-        // Refunds come with payment spores (FU7, Q3).
+        // Refunds come with payment spores.
         let mut order = placed();
         order.set_financial_status(FinancialStatus::Paid);
         assert_eq!(order.cancel(at(), CancelReason::Customer, false), Ok(true));
@@ -1134,6 +1131,19 @@ mod tests {
         assert_eq!(
             Order::restore(s),
             Err(OrderError::FulfilledPastQuantity(line_id(2)))
+        );
+    }
+
+    #[test]
+    fn restore_rejects_a_shipping_line_naming_an_unknown_line() {
+        let mut shipping = shipping_line(400, None);
+        shipping.lines = vec![line_id(9)];
+        let mut s = placed().snapshot();
+        s.shipping_address = Some(zagreb());
+        s.shipping_lines = vec![shipping];
+        assert_eq!(
+            Order::restore(s),
+            Err(OrderError::UnknownShippedLine(line_id(9)))
         );
     }
 
@@ -1156,6 +1166,10 @@ mod tests {
         ] {
             assert_eq!(status.as_str().parse(), Ok(status));
         }
+        assert_eq!(
+            "shipped".parse::<FulfillmentStatus>(),
+            Err("shipped".to_string())
+        );
         for reason in [
             CancelReason::Customer,
             CancelReason::Inventory,
@@ -1284,14 +1298,5 @@ mod tests {
         assert_eq!(OrderNumber::new(0), Err(OrderError::InvalidNumber(0)));
         assert_eq!(OrderNumber::new(1).map(OrderNumber::value), Ok(1));
         assert_eq!(OrderNumber::new(1001).unwrap().to_string(), "#1001");
-    }
-
-    #[test]
-    fn statuses_parse_back_from_their_strings() {
-        assert_eq!("unfulfilled".parse(), Ok(FulfillmentStatus::Unfulfilled));
-        assert_eq!(
-            "shipped".parse::<FulfillmentStatus>(),
-            Err("shipped".to_string())
-        );
     }
 }

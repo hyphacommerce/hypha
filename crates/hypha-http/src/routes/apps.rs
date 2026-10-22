@@ -1,5 +1,5 @@
-//! Apps and their webhooks (design note 0016, section 8): an external app's record, its
-//! signing secret, and the deliveries of the events it subscribes to.
+//! Apps and their webhooks: an external app's record, its signing secret, and the
+//! deliveries of the events it subscribes to.
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_apps::{
@@ -46,7 +46,7 @@ impl From<WebhookDto> for WebhookInput {
     }
 }
 
-/// The scopes staff approved for an app installed through OAuth (design note 0029).
+/// The scopes staff approved for an app installed through OAuth.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct GrantResponse {
     /// What the app's tokens may do, at most.
@@ -88,8 +88,8 @@ impl From<AppKind> for AppKindDto {
 pub struct AppResponse {
     /// `app_<name>`, or `spore_<name>` for a spore.
     key: String,
-    /// An external `app`, or a `spore` built into the API (design note 0030): staff
-    /// only enable or disable a spore.
+    /// An external `app`, or a `spore` built into the API: staff only enable or disable a
+    /// spore.
     kind: AppKindDto,
     name: String,
     /// A disabled app gets no webhooks and quotes no rates.
@@ -103,9 +103,9 @@ pub struct AppResponse {
     /// When it was uninstalled (it then only gets `app.uninstalled`); `DELETE` again
     /// removes it.
     uninstalled_at: Option<String>,
-    /// A spore this API isn't built with any more (taken out of the deployment, design
-    /// note 0030, Q7): its app, settings and tables stay, and it does nothing until a
-    /// build has it again. Always `false` for an external app.
+    /// A spore this API isn't built with any more (taken out of the deployment): its app,
+    /// settings and tables stay, and it does nothing until a build has it again. Always
+    /// `false` for an external app.
     missing: bool,
     /// Where its events go; `null` when it takes none.
     webhook: Option<WebhookDto>,
@@ -377,10 +377,10 @@ pub struct NarrowGrantRequest {
     scopes: Vec<Scope>,
 }
 
-/// Narrows an installed app's grant (design note 0029, §4.1): the scopes left out stop
-/// working at once, for tokens held already too, and the app is sent
-/// `app.grant_changed`. Adding a scope takes a new authorization staff approve
-/// (`grant_not_narrower`, 422); an app that isn't installed is `app_not_installed`, 409.
+/// Narrows an installed app's grant: the scopes left out stop working at once, for tokens
+/// held already too, and the app is sent `app.grant_changed`. Adding a scope takes a new
+/// authorization staff approve (`grant_not_narrower`, 422); an app that isn't installed is
+/// `app_not_installed`, 409.
 #[utoipa::path(
     patch,
     path = "/admin/apps/{key}/grant",
@@ -447,11 +447,10 @@ pub async fn update<S: Storage>(
     Ok(Json(AppResponse::new(&app)?))
 }
 
-/// Uninstalls an app installed through OAuth (design note 0029, §4.1): every token is
-/// revoked, its registrations removed, and it's sent `app.uninstalled` as its last
-/// webhook; it's listed as uninstalled until a second `DELETE`. Any other app (made by
-/// hand, or uninstalled already) is removed, its rate settings with it; deliveries still
-/// due to it fail.
+/// Uninstalls an app installed through OAuth: every token is revoked, its registrations
+/// removed, and it's sent `app.uninstalled` as its last webhook; it's listed as uninstalled
+/// until a second `DELETE`. Any other app (made by hand, or uninstalled already) is
+/// removed, its rate settings with it; deliveries still due to it fail.
 #[utoipa::path(
     delete,
     path = "/admin/apps/{key}",
@@ -600,7 +599,7 @@ pub async fn deliveries<S: Storage>(
     )?))
 }
 
-// ---------- extension calls (design note 0029) ----------
+// ---------- extension calls ----------
 
 /// How an extension call ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
@@ -738,8 +737,8 @@ pub async fn event<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let event = get_event(&ctx, ports.outbox(), id).await?;
     let mut envelope = EventEnvelope::new(&event)?;
-    // As an app would receive it (design note 0029, AP10), custom field entries too
-    // (design note 0033, §6.4: none it may read is an empty `changes`).
+    // As an app would receive it, custom field entries too (none it may read is an empty
+    // `changes`).
     if !ctx.is_staff() {
         let mut data = event.data.clone();
         if crate::redact::is_custom_fields_event(&event.event_type) {
@@ -763,7 +762,7 @@ pub async fn event<S: Storage>(
     Ok(Json(envelope))
 }
 
-// ---------- extension endpoints (design note 0029, §3) ----------
+// ---------- extension endpoints ----------
 
 #[derive(Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -873,7 +872,7 @@ pub async fn set_extension_points<S: Storage>(
     Ok(Json(ExtensionEndpointsDto::of(endpoints)))
 }
 
-// ---------- a spore's settings (design note 0030, §8) ----------
+// ---------- a spore's settings ----------
 
 /// A spore's settings, with the form to edit them.
 #[derive(Serialize, utoipa::ToSchema)]
@@ -918,10 +917,10 @@ fn settings_schema<S: Storage>(
     SporeRuntime::<S::Ports<'static>>::settings_schema(state.storage.spores(), &key)
 }
 
-/// A spore's settings (design note 0030, §8) and the form for them: the values the
-/// merchant set, secret fields as `{"set": …}` only. For a spore built into the API;
-/// an app keeps its own settings (`app_not_found` for an app key), and a spore that
-/// takes none is `app_settings_not_found`.
+/// A spore's settings and the form for them: the values the merchant set, secret fields as
+/// `{"set": …}` only. For a spore built into the API; an app keeps its own settings
+/// (`app_not_found` for an app key), and a spore that takes none is
+/// `app_settings_not_found`.
 #[utoipa::path(
     get,
     path = "/admin/apps/{key}/settings",
@@ -949,10 +948,9 @@ pub struct SaveSporeSettingsRequest {
     settings: serde_json::Value,
 }
 
-/// Saves a spore's settings (design note 0030, §8): checked against its schema, then by
-/// the spore itself (422 `settings_invalid`, every problem in `details.errors` with the
-/// field as its `path`); secret fields are sealed under `HYPHA_SECRET_KEY` and never
-/// answered.
+/// Saves a spore's settings: checked against its schema, then by the spore itself (422
+/// `settings_invalid`, every problem in `details.errors` with the field as its `path`);
+/// secret fields are sealed under `HYPHA_SECRET_KEY` and never answered.
 #[utoipa::path(
     put,
     path = "/admin/apps/{key}/settings",

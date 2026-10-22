@@ -11,7 +11,7 @@ pub mod keys {
     pub const HANDLE: &str = "product_handle";
     /// Variant IDs are unique across all products, not just within one.
     pub const VARIANT_ID: &str = "variant_id";
-    /// A set SKU is unique across all products' variants (design note 0014, Q4).
+    /// A set SKU is unique across all products' variants.
     pub const VARIANT_SKU: &str = "variant_sku";
 }
 
@@ -42,12 +42,12 @@ pub trait ProductRepo {
     ) -> Result<HashMap<(ProductId, VariantId), AssetId>, RepoError>;
     /// The product with a variant whose SKU is exactly `sku`.
     async fn get_by_sku(&self, sku: &str) -> Result<Option<Product>, RepoError>;
-    /// A page of product summaries in `sort`'s order (design notes 0012 and 0024): the
-    /// products after `page.after` by `ProductSort::key` and then ID, only those `filter`
-    /// matches (`ProductFilter::matches`, with the category and channel membership as
-    /// stored). Each equals `Product::summary` of the stored product; an adapter may
-    /// compute them without loading whole products. The caller passes a position whose
-    /// key fits the sort (`ProductSort::fits`); one that doesn't is a `Backend` error.
+    /// A page of product summaries in `sort`'s order: the products after `page.after` by
+    /// `ProductSort::key` and then ID, only those `filter` matches
+    /// (`ProductFilter::matches`, with the category and channel membership as stored). Each
+    /// equals `Product::summary` of the stored product; an adapter may compute them without
+    /// loading whole products. The caller passes a position whose key fits the sort
+    /// (`ProductSort::fits`); one that doesn't is a `Backend` error.
     async fn list(
         &self,
         filter: &ProductFilter,
@@ -71,11 +71,10 @@ pub trait StageProducts {
     fn update_product(&mut self, product: &mut Product);
     /// Stages removing `product` at the version it was loaded at, with its options and
     /// variants (it owns them) and the events it recorded (`Product::delete`'s
-    /// `product.deleted`). Storage also removes what only names the product: its
-    /// catalog, channel and category membership and its tax class (design note 0033,
-    /// section 6.3). Its asset usages are the caller's to stage (`hypha-media`). The
-    /// commit fails with `StaleVersion` if the stored product has another version or is
-    /// gone.
+    /// `product.deleted`). Storage also removes what only names the product: its catalog,
+    /// channel and category membership and its tax class. Its asset usages are the caller's
+    /// to stage (`hypha-media`). The commit fails with `StaleVersion` if the stored product
+    /// has another version or is gone.
     fn delete_product(&mut self, product: &mut Product);
 }
 

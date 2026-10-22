@@ -1,8 +1,8 @@
-// Back from a payment provider's page (design note 0031, §5): the cart's payment was
-// made there, so the cart is checked out now, and the shopper lands on the order's
-// confirmation. Not paid (yet, or at all): back to the checkout, saying why. Only a cart
-// paying online is checked out here: a link to this page can't place a cash-on-delivery
-// order the shopper never confirmed.
+// Back from a payment provider's page: the cart's payment was made there, so the cart is
+// checked out now, and the shopper lands on the order's confirmation. Not paid (yet, or
+// at all): back to the checkout, saying why. Only a cart paying online is checked out
+// here: a link to this page can't place a cash-on-delivery order the shopper never
+// confirmed.
 
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";

@@ -1,11 +1,10 @@
-//! Payment providers (design note 0027, §3; 0029, §3.1): who collects a payment.
-//! `manual` is built in (cash on delivery, bank transfer: staff record what happened);
-//! an app collects through the extension points `payments.start`, `.capture`, `.void`
-//! and `.refund` under its own key (`app_stripe`); a spore implements `PaymentProvider`
-//! in-process under its key (`spore_stripe`, design note 0030, SP1). The host lists the
-//! providers it was built with (manual and the spores') in its `payments.rs`, a tuple
-//! like its event handlers (static dispatch, so futures stay provably `Send` on concrete
-//! types), and answers for apps itself.
+//! Payment providers: who collects a payment. `manual` is built in (cash on delivery, bank
+//! transfer: staff record what happened); an app collects through the extension points
+//! `payments.start`, `.capture`, `.void` and `.refund` under its own key (`app_stripe`); a
+//! spore implements `PaymentProvider` in-process under its key (`spore_stripe`). The host
+//! lists the providers it was built with (manual and the spores') in its `payments.rs`, a
+//! tuple like its event handlers (static dispatch, so futures stay provably `Send` on
+//! concrete types), and answers for apps itself.
 
 use std::fmt;
 
@@ -17,8 +16,7 @@ use hypha_core::{
 use crate::PaymentError;
 
 /// Which provider: `manual`, an app's key `app_<name>` or a spore's `spore_<name>` (the
-/// name is lowercase ASCII letters, digits and `_`, starting with a letter; design notes
-/// 0029, §10 item 5, and 0030, SP3).
+/// name is lowercase ASCII letters, digits and `_`, starting with a letter).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProviderKey(String);
 
@@ -61,7 +59,7 @@ impl ProviderKey {
     /// Whether the app or spore `owner` collects for this provider: an app's provider is
     /// its key; a spore's is its key or its key and `_…` (`spore_stripe_link` is
     /// `spore_stripe`'s), which the hosts check at startup along with no spore name
-    /// extending another's (design note 0030, §4). Never `manual`.
+    /// extending another's. Never `manual`.
     pub fn belongs_to(&self, owner: &AppKey) -> bool {
         let key = owner.as_str();
         match owner.kind() {
@@ -87,9 +85,8 @@ impl fmt::Display for ProviderKey {
     }
 }
 
-/// What a provider is asked to collect, as plain values: a cart's payment before its
-/// order exists (an online method, design note 0031), or the payment a manual method's
-/// order was placed with.
+/// What a provider is asked to collect, as plain values: a cart's payment before its order
+/// exists (an online method), or the payment a manual method's order was placed with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentRequest {
     pub payment: PaymentId,
@@ -106,8 +103,8 @@ pub struct PaymentRequest {
     pub channel: ChannelId,
     pub market: MarketId,
     pub country: CountryCode,
-    /// The buyer's email. Personal data (design note 0029, AP10): a provider passes it
-    /// on only where the rules on personal data allow.
+    /// The buyer's email. Personal data: a provider passes it on only where the rules on
+    /// personal data allow.
     pub customer_email: Email,
     /// Where the storefront wants the buyer back after a redirect, when it said.
     pub return_url: Option<String>,
@@ -123,10 +120,10 @@ pub struct PaymentRequest {
     pub instructions: Option<String>,
     /// The method's provider settings.
     pub settings: serde_json::Value,
-    /// The provider's store-wide settings, filled by the host for a spore's provider
-    /// (design note 0030, §8: what the merchant saved for the spore, secret fields
-    /// opened, such as Stripe's secret key); empty for `manual` and for apps, which keep
-    /// their own. In memory only, for the provider: never stored or logged.
+    /// The provider's store-wide settings, filled by the host for a spore's provider (what
+    /// the merchant saved for the spore, secret fields opened, such as Stripe's secret
+    /// key); empty for `manual` and for apps, which keep their own. In memory only, for the
+    /// provider: never stored or logged.
     pub store_settings: serde_json::Map<String, serde_json::Value>,
 }
 
@@ -142,7 +139,7 @@ pub struct Started {
     pub attempt: Option<String>,
 }
 
-/// What the shopper must do next (design note 0027, §3; 0029, §7).
+/// What the shopper must do next.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NextAction {
     /// Nothing online: show the instructions (cash on delivery, bank transfer). Empty
@@ -158,7 +155,7 @@ pub enum NextAction {
     Redirect { url: String },
 }
 
-/// What staff ask a provider to do with a payment (design note 0029, §3.1).
+/// What staff ask a provider to do with a payment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PaymentAction {
     /// Collect an authorized payment.
@@ -191,8 +188,7 @@ pub struct ActionRequest {
     pub action: PaymentAction,
     pub payment: PaymentId,
     /// The cart the payment was started for, and its order once placed (`None` when
-    /// checkout gives back a cart's money it couldn't place an order with: design note
-    /// 0031, §3).
+    /// checkout gives back a cart's money it couldn't place an order with).
     pub cart: Option<CartId>,
     pub order: Option<OrderId>,
     /// For a capture or refund, how much (at most what's left); `None` for the whole.
@@ -217,11 +213,11 @@ pub enum ActionAnswer {
     Accepted {
         reference: Option<String>,
     },
-    /// Done already, as the provider's answer says (Stripe's capture answered
-    /// `succeeded`): the host records it at once (design note 0030), so the payment
-    /// moves without waiting for the provider's report, which then changes nothing. For
-    /// a refund, `reference` is the refund's own ID. Only a provider built in answers it;
-    /// an app's answers are `Accepted` or `Refused` (its wire contract).
+    /// Done already, as the provider's answer says (Stripe's capture answered `succeeded`):
+    /// the host records it at once, so the payment moves without waiting for the provider's
+    /// report, which then changes nothing. For a refund, `reference` is the refund's own
+    /// ID. Only a provider built in answers it; an app's answers are `Accepted` or
+    /// `Refused` (its wire contract).
     Completed {
         reference: Option<String>,
     },
@@ -231,8 +227,8 @@ pub enum ActionAnswer {
     },
 }
 
-/// What checkout asks a provider about a payment it started (design note 0031, §4): where
-/// the shopper's money is now.
+/// What checkout asks a provider about a payment it started: where the shopper's money is
+/// now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusRequest {
     pub payment: PaymentId,
@@ -292,10 +288,9 @@ pub trait PaymentProvider {
     /// Starts collecting `payment` (a cart's, before its order; or a manual method's,
     /// committed with its order): what the shopper must do next.
     async fn start(&self, payment: &PaymentRequest) -> Result<Started, PaymentError>;
-    /// Where a payment it started is now (design note 0031, §4), asked by checkout when
-    /// the shopper says they paid before the provider reported it. A provider that can't
-    /// tell (the default): `payment_action_unsupported`, and checkout waits for its
-    /// report (`payment_pending`).
+    /// Where a payment it started is now, asked by checkout when the shopper says they paid
+    /// before the provider reported it. A provider that can't tell (the default):
+    /// `payment_action_unsupported`, and checkout waits for its report (`payment_pending`).
     async fn status(&self, request: &StatusRequest) -> Result<ProviderStatus, PaymentError> {
         let _ = request;
         Err(PaymentError::StatusUnsupported(self.key()))
@@ -310,10 +305,9 @@ pub trait PaymentProvider {
     }
 }
 
-/// The built-in provider (design note 0027, PA5): nothing to call. Its next action is
-/// the method's instructions; staff record the money when it arrives
-/// (`POST /admin/orders/{id}/paid`), and cancelling the order voids it. It takes no
-/// settings and no actions.
+/// The built-in provider: nothing to call. Its next action is the method's instructions;
+/// staff record the money when it arrives (`POST /admin/orders/{id}/paid`), and cancelling
+/// the order voids it. It takes no settings and no actions.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ManualProvider;
 
@@ -335,8 +329,8 @@ impl PaymentProvider for ManualProvider {
     }
 }
 
-/// The check of a provider that takes no settings (`manual`; an app, which keeps its
-/// own, design note 0029, §4.2): `{}` or `null`.
+/// The check of a provider that takes no settings (`manual`; an app, which keeps its own):
+/// `{}` or `null`.
 pub fn no_settings(
     provider: &ProviderKey,
     settings: &serde_json::Value,
@@ -528,7 +522,7 @@ tuple_providers!(A, B, C, D, E, F);
 tuple_providers!(A, B, C, D, E, F, G);
 tuple_providers!(A, B, C, D, E, F, G, H);
 
-/// No providers: a spore that contributes none (design note 0030, §4).
+/// No providers: a spore that contributes none.
 impl PaymentProviders for () {
     fn keys(&self) -> Vec<ProviderKey> {
         Vec::new()
@@ -568,8 +562,7 @@ impl PaymentProviders for () {
 }
 
 /// `PaymentProviders` for a union of 1 to 8 sets (`hypha_core::Union`): a host's own
-/// providers and each spore's, read as one set, the first set with the key answering
-/// (design note 0030, §4).
+/// providers and each spore's, read as one set, the first set with the key answering.
 macro_rules! union_providers {
     ($($s:ident),+) => {
         #[allow(non_snake_case)]

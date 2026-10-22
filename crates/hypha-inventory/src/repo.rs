@@ -28,9 +28,9 @@ pub trait InventoryItemRepo {
     async fn for_variants(&self, variants: &[VariantId]) -> Result<Vec<InventoryItem>, RepoError>;
     async fn insert(&self, item: &mut InventoryItem) -> Result<(), RepoError>;
     async fn update(&self, item: &mut InventoryItem) -> Result<(), RepoError>;
-    /// Updates several items **all or nothing**: if any of them is stale (or gone),
-    /// nothing is written and the result is `StaleVersion`. How one checkout reserves
-    /// stock for all its lines at once (design note 0004, I7).
+    /// Updates several items **all or nothing**: if any of them is stale (or gone), nothing
+    /// is written and the result is `StaleVersion`. How one checkout reserves stock for all
+    /// its lines at once.
     ///
     /// Precondition: each item at most once. Two copies of one item fail (`Backend` or
     /// `StaleVersion`, depending on the adapter) and write nothing.

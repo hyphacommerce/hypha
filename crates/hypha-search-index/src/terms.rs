@@ -1,5 +1,5 @@
-//! How text becomes search terms (design note 0019, section 4): one tokenizer for
-//! documents and queries, shared by every engine, so they agree on what a word is.
+//! How text becomes search terms: one tokenizer for documents and queries, shared by every
+//! engine, so they agree on what a word is.
 //!
 //! A term is a run of letters and digits, lowercased: "LS-RED" is `ls` and `red`,
 //! "Čaša" is `čaša`. A query matches a document when every query term is a prefix of

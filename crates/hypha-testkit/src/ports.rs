@@ -43,21 +43,21 @@ pub struct InMemoryPorts {
     pub inventory_items: InMemoryInventoryItemRepo,
     pub locations: InMemoryLocationRepo,
     pub customers: InMemoryCustomerRepo,
-    /// Customer groups and their membership (design note 0032, §6).
+    /// Customer groups and their membership.
     pub customer_groups: crate::InMemoryCustomerGroupRepo,
     pub idempotency: InMemoryIdempotencyRepo,
     pub orders: InMemoryOrderRepo,
     pub fulfillments: InMemoryFulfillmentRepo,
-    // Payment methods and payments (design note 0027).
+    // Payment methods and payments.
     pub payment_methods: InMemoryPaymentMethodRepo,
     pub payments: InMemoryPaymentRepo,
     pub assets: InMemoryAssetRepo,
     pub shipping_zones: InMemoryShippingZoneRepo,
     pub app_providers: InMemoryAppProviderRepo,
     pub apps: InMemoryAppRepo,
-    /// OAuth's requests, codes and tokens (design note 0029), linked to `apps`.
+    /// OAuth's requests, codes and tokens, linked to `apps`.
     pub oauth: crate::InMemoryOAuth,
-    // Staff and keys live in the store's database (design note 0006, T4).
+    // Staff and keys live in the store's database.
     pub identities: InMemoryIdentityRepo,
     pub sessions: InMemorySessionRepo,
     pub api_keys: InMemoryApiKeyRepo,
@@ -65,28 +65,27 @@ pub struct InMemoryPorts {
     pub users: InMemoryUserRepo,
     pub roles: InMemoryRoleRepo,
     pub invites: InMemoryInviteRepo,
-    // Sales channels and their publications (design note 0020).
+    // Sales channels and their publications.
     pub channels: InMemoryChannelRepo,
-    // Categories and their membership (design note 0022).
+    // Categories and their membership.
     pub categories: InMemoryCategoryRepo,
-    // Search's queue and settings (design note 0019); the engine is passed apart.
+    // Search's queue and settings; the engine is passed apart.
     pub search_queue: InMemorySearchQueue,
     pub search_settings: InMemorySearchSettingsRepo,
-    // Email templates, settings and the record of messages (design note 0028); the
-    // sender is passed apart.
+    // Email templates, settings and the record of messages; the sender is passed apart.
     pub notification_templates: crate::InMemoryNotificationTemplateRepo,
     pub notification_settings: crate::InMemoryNotificationSettingsRepo,
     pub notifications: crate::InMemoryNotificationRepo,
-    // Calls to apps' extension points (design note 0029).
+    // Calls to apps' extension points.
     pub extension_calls: crate::InMemoryExtensionCallRepo,
     /// Where apps answer extension points, linked to `apps`.
     pub extension_endpoints: crate::InMemoryExtensionEndpointRepo,
-    // The store itself (design note 0006, model A: its row is in its own database), so
-    // the ports are its directory too, as a host's are.
+    // The store itself (model A: its row is in its own database), so the ports are its
+    // directory too, as a host's are.
     pub stores: crate::InMemoryStoreRepo,
-    /// Spores' settings (design note 0030, §8).
+    /// Spores' settings.
     pub spore_settings: crate::InMemorySporeSettingsRepo,
-    /// Custom field definitions and values (design note 0033).
+    /// Custom field definitions and values.
     pub custom_fields: crate::InMemoryCustomFields,
 }
 
@@ -422,7 +421,7 @@ impl StaffSessionRepo for InMemoryPorts {
         let Some(session) = self.sessions.get_by_token(hash).await? else {
             return Ok(None);
         };
-        // A customer's session is no staff session (design note 0034).
+        // A customer's session is no staff session.
         let Principal::Staff(user_id) = session.principal() else {
             return Ok(None);
         };
@@ -523,8 +522,8 @@ impl hypha_custom_fields::HasCustomFieldValues for InMemoryPorts {
     }
 }
 
-/// References' targets exist when their records do in these repos (design note 0033,
-/// §3): what a host answers from the same tables.
+/// References' targets exist when their records do in these repos: what a host answers from
+/// the same tables.
 impl hypha_custom_fields::ReferenceTargets for InMemoryPorts {
     async fn existing(
         &self,
@@ -605,9 +604,9 @@ impl InMemoryPorts {
     /// The method `pay_by_hand` chooses.
     pub const BANK_TRANSFER: u128 = 0x0ba2_c7f2;
 
-    /// Makes `cart` pay by bank transfer (design note 0027): a `manual` method offered
-    /// everywhere, made on first use with instructions, chosen on the cart directly (no
-    /// command, no checks). For tests of checkout that aren't about payments.
+    /// Makes `cart` pay by bank transfer: a `manual` method offered everywhere, made on
+    /// first use with instructions, chosen on the cart directly (no command, no checks).
+    /// For tests of checkout that aren't about payments.
     pub fn pay_by_hand(&self, cart: hypha_core::CartId) -> hypha_core::PaymentMethodId {
         use hypha_cart::CartRepo;
         use hypha_payments::{NewPaymentMethod, PaymentMethod, PaymentMethodRepo, ProviderKey};
@@ -641,9 +640,9 @@ impl InMemoryPorts {
         id
     }
 
-    /// A storefront's caller (design note 0020): in an "Online Store" channel, made on
-    /// first use, with every product that exists now published there and every scope.
-    /// For tests of what storefronts do; unpublish through `channels` to test that.
+    /// A storefront's caller: in an "Online Store" channel, made on first use, with every
+    /// product that exists now published there and every scope. For tests of what
+    /// storefronts do; unpublish through `channels` to test that.
     pub fn storefront(&self) -> hypha_core::Ctx {
         use hypha_channels::{Channel, ChannelKind, ChannelRepo};
         let id = hypha_core::ChannelId::from_uuid(uuid::Uuid::from_u128(Self::ONLINE_STORE));

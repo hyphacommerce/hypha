@@ -1,5 +1,5 @@
-//! Which emails exist (design note 0028, §2): a closed set, because each one has a
-//! trigger and a context (its variables) that only code can provide.
+//! Which emails exist: a closed set, because each one has a trigger and a context (its
+//! variables) that only code can provide.
 
 use std::{fmt, str::FromStr};
 
@@ -16,10 +16,10 @@ pub enum TemplateKey {
     StaffNewOrder,
     StaffInvite,
     StaffPasswordReset,
-    /// A customer's sign-in code (design note 0034).
+    /// A customer's sign-in code.
     CustomerLoginCode,
-    /// A customer asked from their account for their data to be erased (design note
-    /// 0034, §3): when it runs, and that they can still cancel.
+    /// A customer asked from their account for their data to be erased: when it runs, and
+    /// that they can still cancel.
     CustomerErasureRequested,
 }
 

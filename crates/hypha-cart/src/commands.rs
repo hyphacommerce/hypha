@@ -50,8 +50,8 @@ pub enum CommandError {
     MarketNotFound(MarketId),
     #[error("no market sells to {0}")]
     NoMarketForCountry(CountryCode),
-    /// Carts are made by storefronts, which sell through a channel (design note 0020):
-    /// a caller in no channel (staff, a secret key) can't make one.
+    /// Carts are made by storefronts, which sell through a channel: a caller in no channel
+    /// (staff, a secret key) can't make one.
     #[error("a cart is made in a sales channel: use a publishable key")]
     ChannelRequired,
     #[error("variant {0} not found")]
@@ -202,8 +202,8 @@ pub struct CreateCart {
     pub country: String,
     /// A retry with the same key returns the cart the first request created.
     pub idempotency: Option<IdempotencyRequest>,
-    /// The signed-in customer the cart is for, with their email (design note 0034, §4):
-    /// the host passes the session's customer; a guest's cart has none.
+    /// The signed-in customer the cart is for, with their email: the host passes the
+    /// session's customer; a guest's cart has none.
     pub customer: Option<(CustomerId, Email)>,
 }
 
@@ -269,9 +269,9 @@ pub struct AddLine {
 /// Adds a variant to the cart (or increases its quantity) and returns the repriced cart.
 ///
 /// Strict about the line being added: its product must be active and in the market's
-/// catalog with a price in its currency, and the market's locations must have stock
-/// for the line's new quantity (design note 0004, I6). Other lines that went stale
-/// don't block it; they come back marked unavailable.
+/// catalog with a price in its currency, and the market's locations must have stock for the
+/// line's new quantity. Other lines that went stale don't block it; they come back marked
+/// unavailable.
 pub async fn add_line<S: IdempotentCartPorts, C: Clock>(
     ctx: &Ctx,
     ports: &S,
@@ -322,8 +322,7 @@ async fn replay_of<S: HasIdempotency>(
     .await
 }
 
-/// What a replay returns: the cart as it is now (not as the first response showed it;
-/// design note 0007, section 5).
+/// What a replay returns: the cart as it is now (not as the first response showed it).
 async fn replay<S: HasCarts + PricingPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -400,8 +399,8 @@ pub async fn set_cart_email<S: HasCarts + PricingPorts>(
     Ok(priced)
 }
 
-/// Ticks or unticks the cart's marketing box (design note 0032, §5): checkout records
-/// the consent when it's ticked.
+/// Ticks or unticks the cart's marketing box: checkout records the consent when it's
+/// ticked.
 pub async fn set_cart_marketing<S: HasCarts + PricingPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -417,8 +416,8 @@ pub async fn set_cart_marketing<S: HasCarts + PricingPorts>(
     Ok(priced)
 }
 
-/// Links the cart to an existing customer (taking their email), or unlinks it with
-/// `None` (design note 0005, C5). Linking needs `customers:read` as well as `carts:write`.
+/// Links the cart to an existing customer (taking their email), or unlinks it with `None`.
+/// Linking needs `customers:read` as well as `carts:write`.
 pub async fn set_cart_customer<S: HasCarts + HasCustomers + PricingPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -517,8 +516,8 @@ async fn reprice_grown_line<S: PricingPorts>(
     product: Product,
     variant: VariantId,
 ) -> Result<PricedCart, CommandError> {
-    // Sold through the cart's channel (design note 0020, CH6): checked first, so a
-    // product the channel doesn't sell says nothing about its price or stock.
+    // Sold through the cart's channel: checked first, so a product the channel doesn't sell
+    // says nothing about its price or stock.
     let published = load_publication(ports, cart).await?;
     if !published.allows(product.id()) {
         return Err(LineError::ProductNotPublished(product.id()).into());
@@ -595,8 +594,7 @@ async fn load_open_cart<S: HasCarts>(
 }
 
 /// The cart as stored, if the caller may use it (another channel's reads as missing),
-/// without pricing it: for passing who and where a shopper is on to an app (design
-/// note 0029, §8).
+/// without pricing it: for passing who and where a shopper is on to an app.
 pub async fn find_cart<S: HasCarts>(
     ctx: &Ctx,
     ports: &S,
@@ -713,7 +711,7 @@ fn empty_reading(cart: &Cart, market: Market) -> CartReading {
     }
 }
 
-/// Which of the cart's products its channel sells, in one query (design note 0020).
+/// Which of the cart's products its channel sells, in one query.
 async fn load_publication<S: HasChannels>(
     ports: &S,
     cart: &Cart,
@@ -785,7 +783,7 @@ fn product_ids(cart: &Cart) -> Vec<ProductId> {
     ids
 }
 
-// ---------- shipping (design note 0015) ----------
+// ---------- shipping ----------
 
 /// Sets where the cart ships, or clears it with `None`. It must be in the cart's
 /// country; a new address drops the shipping choice.
@@ -812,8 +810,8 @@ pub struct GroupOffers {
 }
 
 /// Every option the cart's zone offers its groups, priced: built-in rates computed,
-/// providers asked (each once, all at once). A provider that fails leaves its options
-/// out with the reason; it never fails the call (SH7).
+/// providers asked (each once, all at once). A provider that fails leaves its options out
+/// with the reason; it never fails the call.
 pub async fn shipping_offers<S: HasCarts + PricingPorts, P: RateProvider>(
     ctx: &Ctx,
     ports: &S,
@@ -826,8 +824,8 @@ pub async fn shipping_offers<S: HasCarts + PricingPorts, P: RateProvider>(
     group_offers(&cart, &reading, rates).await
 }
 
-/// Picks `option` for `group`, if the cart is offered it now. A provider's price is
-/// stored with the choice, as quoted (SH9).
+/// Picks `option` for `group`, if the cart is offered it now. A provider's price is stored
+/// with the choice, as quoted.
 pub async fn select_shipping<S: HasCarts + PricingPorts, P: RateProvider>(
     ctx: &Ctx,
     ports: &S,

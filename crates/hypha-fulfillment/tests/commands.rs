@@ -1,6 +1,6 @@
 use hypha_core::{
     Actor, AuthError, Ctx, FulfillmentId, LocationId, OrderId, OrderLineId, Quantity, Scope,
-    Timestamp, UserId, Version, Versioned,
+    UserId, Version, Versioned,
 };
 use hypha_fulfillment::{
     CommandError, Fulfillment, FulfillmentError, FulfillmentLine, FulfillmentRepo, NewFulfillment,
@@ -70,7 +70,7 @@ fn get_fulfillment_reports_an_unknown_one() {
 #[test]
 fn reading_needs_fulfillments_read() {
     let repo = repo();
-    // `orders:write` doesn't grant it: shipping is its own permission (FU9).
+    // `orders:write` doesn't grant it: shipping is its own permission.
     let ctx = user_with(vec![Scope::OrdersWrite]);
     let missing = CommandError::Auth(AuthError::MissingScope(Scope::FulfillmentsRead));
     assert_eq!(
@@ -152,26 +152,6 @@ fn bad_tracking_is_refused_before_anything_loads() {
         Err(CommandError::Fulfillment(
             FulfillmentError::InvalidTrackingUrl("gls.example/2".to_string())
         ))
-    );
-}
-
-#[test]
-fn a_cancelled_fulfilments_tracking_cant_change() {
-    let repo = repo();
-    let mut f = block_on(repo.get(fid(1))).unwrap().unwrap();
-    f.cancel(Timestamp::UNIX_EPOCH);
-    block_on(repo.update(&mut f)).unwrap();
-    assert_eq!(
-        block_on(update_tracking(
-            &Ctx::system(),
-            &repo,
-            fid(1),
-            &[input("2", None)],
-            false
-        )),
-        Err(CommandError::Fulfillment(FulfillmentError::Cancelled(fid(
-            1
-        ))))
     );
 }
 

@@ -5,8 +5,8 @@ import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { useEffect, useRef, useState } from "react";
 
 /**
- * Searches the media library in a picker (design note 0024): file names, alt text and
- * titles. `onSearch` runs once the user pauses typing, and on Enter.
+ * Searches the media library in a picker: file names, alt text and titles. `onSearch`
+ * runs once the user pauses typing, and on Enter.
  */
 export function LibrarySearch({ onSearch }: { onSearch: (q: string) => void }) {
   const [q, setQ] = useState("");

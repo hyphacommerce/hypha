@@ -1,8 +1,7 @@
 "use client";
 
-// Picks an image from the media library (design note 0024): a category's image and the
-// emails' logo (design note 0028). Only ready, public images can be picked: both are
-// shown to people who aren't signed in.
+// Picks an image from the media library: a category's image and the emails' logo. Only
+// ready, public images can be picked: both are shown to people who aren't signed in.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

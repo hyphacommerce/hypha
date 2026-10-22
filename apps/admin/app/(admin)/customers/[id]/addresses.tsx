@@ -1,8 +1,8 @@
 "use client";
 
-// The customer's address book (design note 0032, §12 step 2): each address as it would be
-// written on a parcel, with its defaults; staff with `customers:write` add, edit and
-// delete them. Saving sends the address whole (PUT), defaults included.
+// The customer's address book: each address as it would be written on a parcel, with its
+// defaults; staff with `customers:write` add, edit and delete them. Saving sends the
+// address whole (PUT), defaults included.
 
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Badge } from "@astryxdesign/core/Badge";

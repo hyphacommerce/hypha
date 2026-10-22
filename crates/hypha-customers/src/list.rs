@@ -1,5 +1,5 @@
-//! Customer lists (design note 0024, §2): the summary a table shows, what a list is
-//! narrowed to, and how it is ordered.
+//! Customer lists: the summary a table shows, what a list is narrowed to, and how it is
+//! ordered.
 
 use hypha_core::{
     CustomerGroupId, CustomerId, Direction, Email, FieldFilter, SortKey, Stamps, optional_text,
@@ -52,8 +52,8 @@ impl CustomerFilter {
         })
     }
 
-    /// Only customers in `group` (design note 0032, §6). `matches` doesn't see it:
-    /// adapters apply it to the membership.
+    /// Only customers in `group`. `matches` doesn't see it: adapters apply it to the
+    /// membership.
     pub fn in_group(mut self, group: Option<CustomerGroupId>) -> Self {
         self.group = group;
         self
@@ -63,9 +63,9 @@ impl CustomerFilter {
         self.group
     }
 
-    /// Filters on custom fields (design note 0033, §7), checked against their definitions
-    /// by `hypha-custom-fields` already; every one must match. `matches` doesn't see
-    /// them: adapters apply them to the stored values.
+    /// Filters on custom fields, checked against their definitions by `hypha-custom-fields`
+    /// already; every one must match. `matches` doesn't see them: adapters apply them to
+    /// the stored values.
     pub fn with_fields(mut self, fields: Vec<FieldFilter>) -> Self {
         self.fields = fields;
         self
@@ -93,9 +93,8 @@ impl CustomerFilter {
     }
 }
 
-/// How a customer list is ordered (design note 0024, AU1); ties go by ID in the same
-/// direction. A name is the first name, a space and the last name, missing parts
-/// empty, compared as `SortKey::text` does.
+/// How a customer list is ordered; ties go by ID in the same direction. A name is the first
+/// name, a space and the last name, missing parts empty, compared as `SortKey::text` does.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CustomerSort {
     #[default]

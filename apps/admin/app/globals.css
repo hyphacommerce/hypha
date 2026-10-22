@@ -1,6 +1,6 @@
-/* Astryx's pre-built CSS (design note 0011, P3): reset, components, then the Hypha
-   theme (theme/hyphaTheme.ts, built to theme/hypha.css), then the rich text editor's
-   (design note 0024, AU9). The order maps to Astryx's cascade layers, so keep it. */
+/* Astryx's pre-built CSS: reset, components, then the Hypha theme (theme/hyphaTheme.ts,
+   built to theme/hypha.css), then the rich text editor's. The order maps to Astryx's
+   cascade layers, so keep it. */
 @import "@astryxdesign/core/reset.css";
 @import "@astryxdesign/core/astryx.css";
 @import "../theme/hypha.css";
@@ -38,8 +38,8 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   display: block;
 }
 
-/* Detail pages (design note 0024, section 6): the thing itself on the left, its
-   settings and facts on the right; one column on narrow screens, the side after. */
+/* Detail pages: the thing itself on the left, its settings and facts on the right; one
+   column on narrow screens, the side after. */
 .detail-columns,
 .product-editor-columns {
   display: grid;
@@ -185,8 +185,8 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   white-space: nowrap;
 }
 
-/* The list card (components/resource-table, design note 0024, section 6): one bordered
-   card with the toolbar, filters, the table and its pages, Shopify-style. */
+/* The list card (components/resource-table): one bordered card with the toolbar, filters,
+   the table and its pages, Shopify-style. */
 .rt {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-container);
@@ -291,7 +291,7 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   width: 100%;
 }
 
-/* Settings → Notifications (design note 0028): the accent's colour swatch and the logo. */
+/* Settings → Notifications: the accent's colour swatch and the logo. */
 .colour-swatch {
   width: 36px;
   height: 36px;

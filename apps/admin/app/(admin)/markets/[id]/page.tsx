@@ -11,9 +11,8 @@ import { MarketEditor } from "./market-editor";
 import { PriceListCard } from "./price-list-card";
 
 /**
- * A market (design note 0021, section 8): its details and countries, the catalog of
- * what it sells, and that catalog's price list. Two lists page here, by `products` and
- * `prices` cursors.
+ * A market: its details and countries, the catalog of what it sells, and that
+ * catalog's price list. Two lists page here, by `products` and `prices` cursors.
  */
 export default async function MarketPage({
   params,

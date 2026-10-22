@@ -98,7 +98,7 @@ pub async fn identity_repo<R: IdentityRepo>(make: impl AsyncFn() -> R) {
     identity_keys(&make().await).await;
     scenario("identity: stale and missing updates fail");
     identity_stale(&make().await).await;
-    scenario("identity: a customer signing in with an email code round trips (0034)");
+    scenario("identity: a customer signing in with an email code round trips");
     customer_identity(&make().await).await;
 }
 

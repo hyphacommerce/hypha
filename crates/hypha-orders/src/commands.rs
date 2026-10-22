@@ -31,7 +31,7 @@ impl ErrorCode for CommandError {
     }
 }
 
-/// A page of order summaries, newest first (design note 0012).
+/// A page of order summaries, newest first.
 pub async fn list_orders<R: OrderRepo>(
     ctx: &Ctx,
     orders: &R,
@@ -49,14 +49,13 @@ pub async fn list_orders<R: OrderRepo>(
 pub struct ListOrders {
     pub filter: OrderFilterInput,
     pub sort: OrderSort,
-    /// Filters on custom fields (design note 0033, §7), checked by
-    /// `hypha-custom-fields` already.
+    /// Filters on custom fields, checked by `hypha-custom-fields` already.
     pub fields: Vec<hypha_core::FieldFilter>,
 }
 
-/// What `customer`'s orders add up to, for the customer's page (design note 0032, §12
-/// step 1). It's about the customer, so it takes `customers:read`: a caller allowed to
-/// read the customer learns how much they've bought, not any order's detail.
+/// What `customer`'s orders add up to, for the customer's page. It's about the customer, so
+/// it takes `customers:read`: a caller allowed to read the customer learns how much they've
+/// bought, not any order's detail.
 pub async fn customer_order_stats<R: OrderRepo>(
     ctx: &Ctx,
     orders: &R,
@@ -66,11 +65,10 @@ pub async fn customer_order_stats<R: OrderRepo>(
     Ok(orders.stats_for(customer).await?)
 }
 
-/// The order a storefront's buyer placed, for its confirmation (design note 0024, §7):
-/// needs `checkout`, the scope that placed it, and, for a key of one channel, the order
-/// must be that channel's (another channel's is `OrderNotFound`, as if absent). Hosts
-/// check the order's access token before calling this: knowing an order's ID is not
-/// enough to read it.
+/// The order a storefront's buyer placed, for its confirmation: needs `checkout`, the scope
+/// that placed it, and, for a key of one channel, the order must be that channel's (another
+/// channel's is `OrderNotFound`, as if absent). Hosts check the order's access token before
+/// calling this: knowing an order's ID is not enough to read it.
 pub async fn get_placed_order<R: OrderRepo>(
     ctx: &Ctx,
     orders: &R,

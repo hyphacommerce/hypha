@@ -13,10 +13,10 @@ pub trait Clock {
     fn now(&self) -> Timestamp;
 }
 
-/// How much a job step did, and whether it stopped at its limit with more to do
-/// (design note 0016, EV10): a runner repeats the step while there's more and waits its
-/// interval when there isn't. Every crate's jobs (dispatching, pruning, search sync)
-/// answer with it, so a Workers Cron trigger can drive them all the same way.
+/// How much a job step did, and whether it stopped at its limit with more to do: a runner
+/// repeats the step while there's more and waits its interval when there isn't. Every
+/// crate's jobs (dispatching, pruning, search sync) answer with it, so a Workers Cron
+/// trigger can drive them all the same way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Progress {
     pub done: u32,
@@ -33,20 +33,19 @@ impl Progress {
     }
 }
 
-/// Randomness for secrets: tokens, salts, nonces, recovery codes (design note 0008).
-/// Hosts use the operating system's generator; tests use a deterministic one. Never a
-/// seeded or predictable generator in production: these bytes are what keep a session
-/// token unguessable.
+/// Randomness for secrets: tokens, salts, nonces, recovery codes. Hosts use the operating
+/// system's generator; tests use a deterministic one. Never a seeded or predictable
+/// generator in production: these bytes are what keep a session token unguessable.
 pub trait Random {
     fn fill(&self, bytes: &mut [u8]);
 }
 
-/// Sends a domain's messages, e.g. `hypha_users::StaffEmail` (design note 0008, A10).
-/// Domain crates say *what* to tell whom; the host renders and delivers it (email
-/// templates, links to its admin panel), so domain code never sees URLs.
+/// Sends a domain's messages, e.g. `hypha_users::StaffEmail`. Domain crates say *what* to
+/// tell whom; the host renders and delivers it (email templates, links to its admin panel),
+/// so domain code never sees URLs.
 ///
-/// Commands send after their write commits. The outbox (0002) will later stage
-/// messages in the same batch instead.
+/// Commands send after their write commits. The outbox will later stage messages in the
+/// same batch instead.
 #[allow(async_fn_in_trait)]
 pub trait Notifier<M> {
     async fn notify(&self, message: M) -> Result<(), NotifyError>;
@@ -63,8 +62,8 @@ impl crate::ErrorCode for NotifyError {
     }
 }
 
-/// Writes to several aggregates that commit together or not at all (design note 0007,
-/// O1): one transaction on Postgres, one locked step in memory.
+/// Writes to several aggregates that commit together or not at all: one transaction on
+/// Postgres, one locked step in memory.
 ///
 /// Domain code loads, decides, then stages its writes into a batch through each crate's
 /// `Stage*` trait (`hypha_cart::StageCarts`, …), which the adapter's `Batch` implements;
@@ -99,8 +98,8 @@ pub enum RepoError {
     /// The backend failed (connection, corrupt data, ...). Never shown to clients.
     #[error("storage backend error: {0}")]
     Backend(String),
-    /// An update was based on an old version: someone else changed the record since it
-    /// was loaded (optimistic concurrency, see design note 0001). Safe to retry.
+    /// An update was based on an old version: someone else changed the record since it was
+    /// loaded (optimistic concurrency). Safe to retry.
     #[error("the record was changed by someone else since it was loaded")]
     StaleVersion,
     /// A write would break a uniqueness rule. The key names the rule (e.g.

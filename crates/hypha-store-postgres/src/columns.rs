@@ -262,10 +262,10 @@ pub(crate) fn address_from_row(row: &Row, prefix: &str) -> Result<Option<Address
     }))
 }
 
-/// Writes an aggregate's stamps (design note 0016, Q3) on the row its write just
-/// inserted or updated, in the same transaction: `UPDATE table SET created_at, updated_at
-/// WHERE key = id`. Adapters stamp every aggregate before taking its snapshot, so `None`
-/// means a caller skipped that, and writes nothing.
+/// Writes an aggregate's stamps on the row its write just inserted or updated, in the same
+/// transaction: `UPDATE table SET created_at, updated_at WHERE key = id`. Adapters stamp
+/// every aggregate before taking its snapshot, so `None` means a caller skipped that, and
+/// writes nothing.
 pub(crate) async fn write_stamps(
     tx: &impl crate::store::Queries,
     table: &str,

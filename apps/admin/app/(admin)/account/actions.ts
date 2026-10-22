@@ -1,7 +1,7 @@
 "use server";
 
-// The signed-in staff member's own account (design note 0008, section 6: the "me"
-// routes). Each answers `{error}` for the form to show.
+// The signed-in staff member's own account (the "me" routes). Each answers
+// `{error}` for the form to show.
 
 import { revalidatePath } from "next/cache";
 

@@ -1,5 +1,5 @@
-//! Rendering, queueing and sending messages, with their records (design note 0028, §4,
-//! NT8): the steps the handler, resends, the send job and the staff flows share.
+//! Rendering, queueing and sending messages, with their records: the steps the handler,
+//! resends, the send job and the staff flows share.
 //!
 //! Messages about events (and resends) are rendered and recorded `queued`, without any
 //! network: that's what the `Mailer` handler and `resend` do. The send job then leases
@@ -105,8 +105,8 @@ impl Sources {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rendering {
     pub rendered: Rendered,
-    /// "sent with the default template: …" when the merchant's version didn't render
-    /// and the default was used instead (Q5).
+    /// "sent with the default template: …" when the merchant's version didn't render and
+    /// the default was used instead.
     pub note: Option<String>,
 }
 
@@ -119,8 +119,8 @@ fn fallback_note(error: &RenderError) -> String {
 /// `sources` rendered against `context` as sends use them
 /// (`EffectiveTemplate::sending_sources`). When the merchant's version doesn't render (a
 /// context rule an upgrade added, a value that's null on a real order), the defaults are
-/// used for this message rather than leaving the customer without an email (Q5); that's
-/// logged and noted on the rendering, so staff see it on the record.
+/// used for this message rather than leaving the customer without an email; that's logged
+/// and noted on the rendering, so staff see it on the record.
 pub fn render_for_sending(
     sources: &Sources,
     context: &MailContext,
@@ -160,8 +160,7 @@ pub fn render_for_sending(
 pub struct Message {
     pub template: TemplateKey,
     pub to: Email,
-    /// The event it answers, so a second run finds it (NT8); `None` for direct sends
-    /// and resends.
+    /// The event it answers, so a second run finds it; `None` for direct sends and resends.
     pub event: Option<EventId>,
     pub order: Option<OrderId>,
 }
@@ -181,7 +180,7 @@ impl Message {
 
 /// Why a template that's off isn't sent, on its record.
 pub(crate) const DISABLED: &str = "the template is turned off";
-/// Why a message to an erased customer's placeholder is skipped (design note 0032, CD10).
+/// Why a message to an erased customer's placeholder is skipped.
 pub(crate) const ERASED: &str = "the customer was erased";
 
 /// Stores `record` (queued or skipped). Answering an event, a `Duplicate` of its (event,
@@ -256,10 +255,10 @@ fn mailbox(env: &impl MailEnv, name: Option<&str>) -> Mailbox {
     }
 }
 
-/// Sends `message` at once (staff invites and resets, design note 0028, §4): rendered
-/// with `sources` against `context`, recorded `sending`, sent, then `sent` or `failed`
-/// (no retry: the request that asked for it reports the failure). The record is
-/// returned either way; a storage error is `Err`.
+/// Sends `message` at once (staff invites and resets): rendered with `sources` against
+/// `context`, recorded `sending`, sent, then `sent` or `failed` (no retry: the request that
+/// asked for it reports the failure). The record is returned either way; a storage error is
+/// `Err`.
 pub async fn send_now<E, P>(
     env: &E,
     ports: &P,

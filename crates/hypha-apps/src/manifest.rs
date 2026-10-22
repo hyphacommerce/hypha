@@ -1,7 +1,7 @@
-//! The app manifest (`hypha-app.json`, design note 0029, AP4, §4): what an app is, the
-//! scopes it asks for and why, and what it registers (webhooks, extension points, UI).
-//! An app serves it at a URL, which is also its OAuth client ID (AP5); Hypha fetches
-//! it at `/oauth/authorize` and keeps the copy it installed from.
+//! The app manifest (`hypha-app.json`): what an app is, the scopes it asks for and why, and
+//! what it registers (webhooks, extension points, UI). An app serves it at a URL, which is
+//! also its OAuth client ID; Hypha fetches it at `/oauth/authorize` and keeps the copy it
+//! installed from.
 //!
 //! `ManifestDocument` is the JSON as written (its JSON Schema, generated from these
 //! types, is published as `docs/apps/manifest.schema.json`); `AppManifest::parse`
@@ -23,10 +23,10 @@ pub const SCHEMA_URL: &str = "https://hypha.dev/schemas/app-manifest/1.json";
 /// The most a manifest may weigh: plenty for every registration an app has.
 pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 
-/// The client ID of a private app (design note 0029, §4.1: a store's own integration,
-/// its manifest uploaded rather than served): `urn:hypha:private:<key>`. Not a URL, so
-/// neither `/oauth/authorize` nor a refresh can fetch it; such an app gets its tokens
-/// when staff approve it, not through a redirect.
+/// The client ID of a private app (a store's own integration, its manifest uploaded rather
+/// than served): `urn:hypha:private:<key>`. Not a URL, so neither `/oauth/authorize` nor a
+/// refresh can fetch it; such an app gets its tokens when staff approve it, not through a
+/// redirect.
 pub const PRIVATE_CLIENT_PREFIX: &str = "urn:hypha:private:";
 
 /// The client ID a private app with `key` is installed under.
@@ -115,9 +115,8 @@ pub struct ManifestDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storefront: Option<ManifestStorefront>,
     /// The custom fields the app keeps on Hypha's objects, in its own namespace
-    /// (`app_<name>.<key>`, design note 0033, §8): created when staff approve the app,
-    /// updated when they approve a refreshed manifest, deleted when a refreshed
-    /// manifest no longer declares them.
+    /// (`app_<name>.<key>`): created when staff approve the app, updated when they approve
+    /// a refreshed manifest, deleted when a refreshed manifest no longer declares them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_fields: Vec<ManifestCustomField>,
 }

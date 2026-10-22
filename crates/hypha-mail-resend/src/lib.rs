@@ -1,5 +1,5 @@
-//! The Resend sender (design note 0028, §5): `hypha_notifications::EmailSender` over
-//! Resend's HTTP API, `POST https://api.resend.com/emails`.
+//! The Resend sender: `hypha_notifications::EmailSender` over Resend's HTTP API, `POST
+//! https://api.resend.com/emails`.
 //!
 //! It opens no connections itself: HTTP goes through this crate's `HttpClient` port,
 //! which the host implements (`reqwest` natively, `fetch` on Workers), so the crate stays
@@ -365,8 +365,9 @@ mod tests {
     }
 
     #[test]
-    fn rate_limits_server_errors_and_a_concurrent_retry_are_transient() {
+    fn timeouts_rate_limits_server_errors_and_a_concurrent_retry_are_transient() {
         for (status, name) in [
+            (408, "request_timeout"),
             (429, "rate_limit_exceeded"),
             (429, "daily_quota_exceeded"),
             (500, "application_error"),

@@ -33,7 +33,7 @@ const MAX_SPLIT = 3;
 const MAX_FACETS = 20;
 
 const OPTION = "option.";
-/** A custom field's facet: `field.<namespace>.<key>` (design note 0033, §9). */
+/** A custom field's facet: `field.<namespace>.<key>`. */
 const FIELD = "field.";
 
 /** What a facet filters by, in the merchant's words. */
@@ -85,12 +85,12 @@ function candidates(catalog: SearchCatalog, saved: Facet[]) {
 type Candidate = ReturnType<typeof candidates>[number];
 
 const sum = (values: Counted[]) => values.reduce((n, v) => n + v.count, 0);
-/** Option names match ignoring case, as search does (design note 0019). */
+/** Option names match ignoring case, as search does. */
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 /**
- * The filters storefronts show when the merchant picks none (design note 0019, SE7):
- * product type, vendor, the options most products have, tags.
+ * The filters storefronts show when the merchant picks none: product type, vendor,
+ * the options most products have, tags.
  */
 function defaults(all: Candidate[]): Facet[] {
   const options = all.filter((c) => c.key.startsWith(OPTION) && c.count > 0);
@@ -103,9 +103,8 @@ function defaults(all: Candidate[]): Facet[] {
 }
 
 /**
- * Settings → Search (design notes 0019 and 0024): which filters shoppers get, which
- * options split listings, with a preview built from the store's own products. One draft,
- * saved from the bar at the top.
+ * Settings → Search: which filters shoppers get, which options split listings, with a
+ * preview built from the store's own products. One draft, saved from the bar at the top.
  */
 export function SearchSettingsForm({
   settings,

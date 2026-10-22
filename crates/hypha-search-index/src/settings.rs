@@ -1,6 +1,5 @@
-//! The merchant's search settings (design note 0019, section 6): which options split
-//! listings, which facets a storefront shows, and the app that answers searches instead
-//! of the built-in engine (design note 0029, §3.1). One per store.
+//! The merchant's search settings: which options split listings, which facets a storefront
+//! shows, and the app that answers searches instead of the built-in engine. One per store.
 
 use std::collections::HashSet;
 
@@ -285,6 +284,24 @@ mod tests {
         assert_eq!(
             s.set_facets(vec![vendor(), vendor()]),
             Err(SearchError::DuplicateFacet(FacetKey::Vendor))
+        );
+    }
+
+    #[test]
+    fn at_most_twenty_facets() {
+        let mut s = SearchSettings::default();
+        let options = |n: usize| {
+            (0..n)
+                .map(|i| FacetSetting {
+                    key: FacetKey::Option(format!("option {i}")),
+                    label: None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(s.set_facets(options(SearchSettings::MAX_FACETS)), Ok(()));
+        assert_eq!(
+            s.set_facets(options(SearchSettings::MAX_FACETS + 1)),
+            Err(SearchError::TooManyFacets { max: 20 })
         );
     }
 

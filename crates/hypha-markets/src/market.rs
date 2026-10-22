@@ -14,7 +14,7 @@ use crate::{
 pub struct Market {
     id: MarketId,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016).
+    /// When it was stored and last changed, set by the adapter.
     stamps: Option<Stamps>,
     name: String,
     countries: Vec<CountryCode>,
@@ -176,7 +176,7 @@ impl Market {
     }
 }
 
-/// Plain-data form of a `Market` for storage adapters (design note 0001, 3.4).
+/// Plain-data form of a `Market` for storage adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketSnapshot {
     pub id: MarketId,

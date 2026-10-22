@@ -1,5 +1,5 @@
-// How URLs carry the shopper's country (design note 0023, SF3, SF4). Shared by the
-// proxy, server pages and client components: it reads nothing but its arguments.
+// How URLs carry the shopper's country. Shared by the proxy, server pages and
+// client components: it reads nothing but its arguments.
 
 /** The cookie holding the shopper's country code (`HR`). */
 export const COUNTRY_COOKIE = "country";

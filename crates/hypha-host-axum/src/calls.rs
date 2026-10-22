@@ -127,3 +127,63 @@ impl Resolve for PublicOnly {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// A server on loopback answering every connection with an empty 200.
+    async fn local_server() -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = socket.read(&mut buf).await;
+                let _ = socket
+                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                    .await;
+            }
+        });
+        port
+    }
+
+    fn get(port: u16) -> OutboundCall {
+        OutboundCall {
+            method: Method::Get,
+            url: format!("http://localhost:{port}/"),
+            timeout: std::time::Duration::from_secs(5),
+            headers: Vec::new(),
+            body: Vec::new(),
+            discard_answer: false,
+            max_answer: 1024,
+        }
+    }
+
+    // A name, unlike an IP literal, is only checked when it resolves: this is the guard
+    // that keeps a merchant's URL from reaching the host's own network.
+    #[tokio::test]
+    async fn a_name_resolving_to_loopback_is_refused() {
+        let port = local_server().await;
+        let client = client(OutboundPolicy {
+            allow_private: false,
+        })
+        .unwrap();
+        assert_eq!(
+            send(&client, get(port)).await,
+            Err(CallError::Failed("unreachable".to_string()))
+        );
+    }
+
+    #[tokio::test]
+    async fn allow_private_reaches_loopback() {
+        let port = local_server().await;
+        let client = client(OutboundPolicy {
+            allow_private: true,
+        })
+        .unwrap();
+        let answer = send(&client, get(port)).await.map(|a| a.status);
+        assert_eq!(answer, Ok(200));
+    }
+}

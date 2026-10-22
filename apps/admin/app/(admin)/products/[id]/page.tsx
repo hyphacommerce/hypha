@@ -27,8 +27,8 @@ const STOCK_PRELOAD = 500;
 
 /**
  * A product. Details, content, publishing, categories, options and variants are one draft
- * saved with a bar (design note 0021, section 8); status, stock and media act at once. The
- * media section, which has uploads running, takes each new list while staying mounted.
+ * saved with a bar; status, stock and media act at once. The media section, which has
+ * uploads running, takes each new list while staying mounted.
  */
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -56,9 +56,9 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
     // a read that goes unused for the rare product with more variants than we preload.
     client.GET("/admin/products/{id}/inventory", { params: { path: { id } } }),
     loadCurrencies(),
-    // What installed apps add to a product (design note 0029, §5).
+    // What installed apps add to a product.
     loadExtensions(),
-    // Its custom fields and its variants' (design note 0033): none shown without
+    // Its custom fields and its variants': none shown without
     // `custom_fields:read`.
     definitionsOf("product"),
     definitionsOf("variant"),

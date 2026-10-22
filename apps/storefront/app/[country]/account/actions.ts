@@ -1,9 +1,9 @@
 "use server";
 
-// What a shopper does with their account (design note 0034): asking for a code, signing
-// in and out, their details, address book, marketing choices and privacy. The session
-// stays in an httpOnly cookie (`lib/account.ts`); every change answers with the page
-// re-rendered, or the shopper's message when the API refused.
+// What a shopper does with their account: asking for a code, signing in and out, their
+// details, address book, marketing choices and privacy. The session stays in an
+// httpOnly cookie (`lib/account.ts`); every change answers with the page re-rendered,
+// or the shopper's message when the API refused.
 
 import { refresh } from "next/cache";
 import { redirect } from "next/navigation";

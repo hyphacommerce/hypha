@@ -1,7 +1,7 @@
 "use server";
 
-// What the customer pages ask the API (design note 0032, §12 step 2): the customer's own
-// fields, the address book, the labels in use, and the well-known fields' creation.
+// What the customer pages ask the API: the customer's own fields, the address book, the
+// labels in use, and the well-known fields' creation.
 
 import type { AdminSchemas } from "@hypha/sdk/admin";
 import { revalidatePath } from "next/cache";
@@ -53,8 +53,8 @@ export async function saveAddress(
 }
 
 /**
- * Records a marketing consent as given now by staff (design note 0032, §5). `applied`
- * is false when a newer consent is stored: nothing changed then.
+ * Records a marketing consent as given now by staff. `applied` is false when a newer
+ * consent is stored: nothing changed then.
  */
 export async function setConsent(
   id: string,
@@ -71,7 +71,7 @@ export async function setConsent(
   return { applied: data.applied };
 }
 
-/** Signs the customer out of every device (design note 0034, §7). */
+/** Signs the customer out of every device. */
 export async function revokeSessions(id: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.POST("/admin/customers/{id}/sessions/revoke", {
@@ -82,7 +82,7 @@ export async function revokeSessions(id: string): Promise<Result> {
   return {};
 }
 
-/** Asks for the customer's personal data to be erased after the cancel window (§7.3). */
+/** Asks for the customer's personal data to be erased after the cancel window. */
 export async function requestErasure(id: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.POST("/admin/customers/{id}/erasure", {
@@ -104,7 +104,7 @@ export async function cancelErasure(id: string): Promise<Result> {
   return {};
 }
 
-/** Deletes a customer without orders (design note 0032, CD7); the API refuses otherwise. */
+/** Deletes a customer without orders; the API refuses otherwise. */
 export async function deleteCustomer(id: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.DELETE("/admin/customers/{id}", { params: { path: { id } } });
@@ -138,8 +138,8 @@ export async function labelsInUse(definition: string): Promise<string[]> {
 }
 
 /**
- * Creates a well-known customer field from the API's suggestion (design note 0032,
- * CD11), as Settings → Custom fields would.
+ * Creates a well-known customer field from the API's suggestion, as Settings →
+ * Custom fields would.
  */
 export async function addWellKnownField(which: WellKnown): Promise<Result> {
   const client = await sessionClient();

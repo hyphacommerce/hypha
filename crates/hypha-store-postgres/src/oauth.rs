@@ -1,4 +1,4 @@
-//! OAuth's requests, codes and token pairs (design note 0029, §15).
+//! OAuth's requests, codes and token pairs.
 
 use hypha_auth::TokenHash;
 use hypha_core::{AppKey, OAuthRequestId, RepoError, Timestamp, Version, Versioned};

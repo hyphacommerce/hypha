@@ -1,6 +1,6 @@
-// CodeMirror for a template's sources (design note 0028, §7): HTML, Jinja's tags marked
-// on top, and the line a preview or save failed on highlighted. Loaded on demand by
-// `code-editor.tsx`, so the editor's code only reaches the pages that show one.
+// CodeMirror for a template's sources: HTML, Jinja's tags marked on top, and the line a
+// preview or save failed on highlighted. Loaded on demand by `code-editor.tsx`, so the
+// editor's code only reaches the pages that show one.
 
 import { html } from "@codemirror/lang-html";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";

@@ -1,4 +1,4 @@
-//! The admin's reads of its setup (design note 0021, SU3).
+//! The admin's reads of its setup.
 
 use hypha_core::{
     Actor, AuthError, BasisPoints, CatalogId, CountryCode, Ctx, Currency, MarketId, Money, Page,

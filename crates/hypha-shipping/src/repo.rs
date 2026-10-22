@@ -6,7 +6,7 @@ use crate::{AppProvider, ProviderKey, ShippingZone};
 /// `RepoError::Duplicate(key)`.
 pub mod keys {
     pub const ZONE_ID: &str = "shipping_zone_id";
-    /// A country is in at most one zone (design note 0015, section 2).
+    /// A country is in at most one zone.
     pub const ZONE_COUNTRY: &str = "shipping_zone_country";
     pub const PROVIDER_KEY: &str = "shipping_provider_key";
     /// A provider's key names an existing app (`hypha-apps`), reported as

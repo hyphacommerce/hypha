@@ -1,13 +1,13 @@
-//! Where an app answers an extension point (design note 0029, §3, "Registering"): the
-//! one seam every flow that calls apps (payments, search) looks endpoints up through.
+//! Where an app answers an extension point ("Registering"): the one seam every flow that
+//! calls apps (payments, search) looks endpoints up through.
 //!
-//! `hypha_apps::find_endpoint` decides: an app installed through OAuth answers where
-//! its manifest's `extension_points` say (URLs resolved against its `app_url`), and
-//! only while its grant has the point's scope (`ExtensionPoint::SCOPE`: `payments.*`
-//! need `payments:write`, `search.query` `products:read`, `shipping.rates`
-//! `shipping:read`; §4.1 step 5); an app made by hand where staff set
-//! (`PUT /admin/apps/{key}/extension-points`, `app_extension_endpoints`). What personal
-//! data a call may carry is the app's grant too (`redaction`).
+//! `hypha_apps::find_endpoint` decides: an app installed through OAuth answers where its
+//! manifest's `extension_points` say (URLs resolved against its `app_url`), and only while
+//! its grant has the point's scope (`ExtensionPoint::SCOPE`: `payments.*` need
+//! `payments:write`, `search.query` `products:read`, `shipping.rates` `shipping:read`); an
+//! app made by hand where staff set (`PUT /admin/apps/{key}/extension-points`,
+//! `app_extension_endpoints`). What personal data a call may carry is the app's grant too
+//! (`redaction`).
 
 use std::time::Duration;
 

@@ -1,4 +1,4 @@
-//! Roles, staff users and invites (design note 0008, section 4).
+//! Roles, staff users and invites.
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::{Email, InviteId, RoleId, Scope, UserId};
@@ -62,8 +62,7 @@ impl From<&Role> for RoleResponse {
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct RoleListResponse {
-    /// Oldest first. A store has a handful, so they come in one list (design note 0024,
-    /// AU6).
+    /// Oldest first. A store has a handful, so they come in one list.
     items: Vec<RoleResponse>,
 }
 
@@ -203,8 +202,7 @@ pub enum StatusRequest {
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct UserListResponse {
-    /// Oldest first. A store's staff is a short list, so it comes whole (design note
-    /// 0024, AU6).
+    /// Oldest first. A store's staff is a short list, so it comes whole.
     items: Vec<UserResponse>,
 }
 

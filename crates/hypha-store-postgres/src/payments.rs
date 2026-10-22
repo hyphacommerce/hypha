@@ -1,4 +1,4 @@
-//! Payment methods and payments (design note 0027): one row each, no child tables.
+//! Payment methods and payments: one row each, no child tables.
 
 use hypha_core::{
     CartId, ChannelId, MarketId, Money, OrderId, PaymentId, PaymentMethodId, Recorded, RepoError,

@@ -1,4 +1,4 @@
-//! In-process event handlers for merchandising's own data (design note 0019, 5.1).
+//! In-process event handlers for merchandising's own data.
 
 use hypha_categories::CategoryDeleted;
 use hypha_core::{CategoryId, Event, EventHandler, HasBatch, StoredEvent};

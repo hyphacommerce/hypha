@@ -1,5 +1,5 @@
-//! Managing the category tree and what's in it (design note 0022). Categories organise
-//! products, so they use the products scopes (CA8).
+//! Managing the category tree and what's in it. Categories organise products, so they use
+//! the products scopes.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -33,7 +33,7 @@ pub enum CommandError {
     ParentNotFound(CategoryId),
     #[error("a category already has the handle {0:?}")]
     HandleTaken(String),
-    /// Move or delete its children first (CA7).
+    /// Move or delete its children first.
     #[error("category {0} has subcategories")]
     HasChildren(CategoryId),
 }
@@ -141,7 +141,7 @@ fn order_with(
     order
 }
 
-/// A new category, unvalidated. `visible` is required (CA10).
+/// A new category, unvalidated. `visible` is required.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateCategory {
     pub name: String,
@@ -375,8 +375,8 @@ pub async fn list_categories<S: HasCategories>(
     Ok(tree(ports).await?)
 }
 
-/// The categories matching every filter on their custom fields (design note 0033, §7;
-/// checked by `hypha-custom-fields` already), in tree order (by parent, then position).
+/// The categories matching every filter on their custom fields (checked by
+/// `hypha-custom-fields` already), in tree order (by parent, then position).
 pub async fn find_categories<S: HasCategories>(
     ctx: &Ctx,
     ports: &S,
@@ -414,8 +414,7 @@ pub async fn get_category<S: HasCategories>(
     Ok(CategoryView::of(&tree, category, false))
 }
 
-/// The tree a storefront shows: a hidden category is left out with everything under
-/// it (CA4).
+/// The tree a storefront shows: a hidden category is left out with everything under it.
 pub async fn shown_categories<S: HasCategories>(
     ctx: &Ctx,
     ports: &S,

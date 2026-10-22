@@ -4,8 +4,8 @@ import { Text } from "@astryxdesign/core/Text";
 const SENDERS: Record<string, string> = { log: "the server log", smtp: "SMTP", resend: "Resend" };
 
 /**
- * Where emails go (the operator's `[email]` settings, design note 0028 §5): a line, or a
- * warning when they're only written to the log.
+ * Where emails go (the operator's `[email]` settings): a line, or a warning when they're
+ * only written to the log.
  */
 export function SenderBanner({ sender, from }: { sender: string; from: string }) {
   if (sender === "log") {

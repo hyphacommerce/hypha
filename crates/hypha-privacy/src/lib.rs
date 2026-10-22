@@ -1,8 +1,7 @@
-//! Personal data workflows over customers (design note 0032, §7): deleting a customer
-//! without orders, erasing one with them (a request with a cancel window, run by a job),
-//! and answering a data request with an export. A workflow crate: it composes customers,
-//! orders, carts, payments, email records and custom fields, and writes each action's
-//! aggregates in one batch.
+//! Personal data workflows over customers: deleting a customer without orders, erasing one
+//! with them (a request with a cancel window, run by a job), and answering a data request
+//! with an export. A workflow crate: it composes customers, orders, carts, payments, email
+//! records and custom fields, and writes each action's aggregates in one batch.
 
 pub mod commands;
 pub mod erasure;

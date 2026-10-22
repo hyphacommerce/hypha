@@ -1,5 +1,5 @@
-//! Staff flows (design note 0008): the owner's first start, roles, invites, login and
-//! password reset, composing `hypha-auth` with users and roles.
+//! Staff flows: the owner's first start, roles, invites, login and password reset,
+//! composing `hypha-auth` with users and roles.
 
 use hypha_auth::{
     AuthEnv, HasIdentities, HasPasswordResets, HasSessions, Identity, IdentityRepo, LoginStep,
@@ -59,8 +59,8 @@ impl<T> StaffPorts for T where
 {
 }
 
-/// What the staff flows tell people, for the host to render and deliver (design note
-/// 0008, section 7). Tokens are secrets: the message is their only copy.
+/// What the staff flows tell people, for the host to render and deliver. Tokens are
+/// secrets: the message is their only copy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StaffEmail {
     Invite {
@@ -147,9 +147,9 @@ pub struct NewOwner {
     pub password: String,
 }
 
-/// With no staff user yet, creates the owner role (if missing) and the owner, who can
-/// log in with `password` (design note 0008, A11). `None` once anyone exists: the
-/// environment variables that feed this are ignored from then on.
+/// With no staff user yet, creates the owner role (if missing) and the owner, who can log
+/// in with `password`. `None` once anyone exists: the environment variables that feed this
+/// are ignored from then on.
 pub async fn bootstrap_owner<S: StaffPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -232,13 +232,13 @@ async fn load_role<R: RoleRepo>(roles: &R, id: RoleId) -> Result<Role, CommandEr
     roles.get(id).await?.ok_or(CommandError::RoleNotFound(id))
 }
 
-/// Every role, oldest first (design note 0024, AU6).
+/// Every role, oldest first.
 pub async fn list_roles<R: RoleRepo>(ctx: &Ctx, roles: &R) -> Result<Vec<Role>, CommandError> {
     ctx.require(Scope::UsersRead)?;
     Ok(roles.list_all().await?)
 }
 
-/// Every staff user, oldest first (design note 0024, AU6).
+/// Every staff user, oldest first.
 pub async fn list_users<R: UserRepo>(ctx: &Ctx, users: &R) -> Result<Vec<User>, CommandError> {
     ctx.require(Scope::UsersRead)?;
     Ok(users.list_all().await?)
@@ -665,8 +665,8 @@ pub async fn login<S: StaffPorts>(
     Err(RepoError::StaleVersion.into())
 }
 
-/// A request's staff caller: the session, the user and the `Ctx` with their role's
-/// scopes, read fresh on every request (design note 0008, A3).
+/// A request's staff caller: the session, the user and the `Ctx` with their role's scopes,
+/// read fresh on every request.
 #[derive(Debug, Clone)]
 pub struct StaffSession {
     pub ctx: Ctx,

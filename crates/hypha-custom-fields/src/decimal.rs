@@ -1,6 +1,6 @@
-//! Exact decimal numbers for `decimal` values, measurements and the derived
-//! `scalar_num` index column. No floats anywhere in Hypha (CLAUDE.md, money): a decimal
-//! is an integer count of units of `10^-scale`.
+//! Exact decimal numbers for `decimal` values, measurements and the derived `scalar_num`
+//! index column. No floats anywhere in Hypha: a decimal is an integer count of
+//! units of `10^-scale`.
 
 use std::{cmp::Ordering, fmt};
 

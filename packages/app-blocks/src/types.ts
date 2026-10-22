@@ -1,6 +1,5 @@
-// The declarative block format, version 1 (design note 0029, §6.2): the TypeScript side
-// of schema/block.v1.json. An app's block URL answers a `BlockTree`; any admin renders it
-// with its own components.
+// The declarative block format, version 1: the TypeScript side of schema/block.v1.json.
+// An app's block URL answers a `BlockTree`; any admin renders it with its own components.
 
 export type Gap = 0 | 1 | 2 | 3 | 4;
 export type Tone = "neutral" | "info" | "success" | "warning" | "error";
@@ -57,7 +56,7 @@ interface ButtonBase {
   label: string;
   variant?: "primary" | "secondary" | "destructive";
 }
-/** Runs an action (§6.1) or navigates within the app's page: one of the two. */
+/** Runs an action or navigates within the app's page: one of the two. */
 export type ButtonElement =
   | (ButtonBase & { action: string; navigate?: never })
   | (ButtonBase & { navigate: string; action?: never });

@@ -1,6 +1,6 @@
-//! Values (design note 0033, §3): `FieldValue::parse` is the one place a value is
-//! checked against its definition's type and validations, reporting every problem with
-//! its path (`[3]` for a list's fourth item; commands prefix the key, `custom.sizes[3]`).
+//! Values: `FieldValue::parse` is the one place a value is checked against its definition's
+//! type and validations, reporting every problem with its path (`[3]` for a list's fourth
+//! item; commands prefix the key, `custom.sizes[3]`).
 
 use std::collections::HashSet;
 
@@ -668,9 +668,9 @@ impl FieldValue {
         Self::read(field_type, validations, json, Mode::Input)
     }
 
-    /// Reads a stored value by its type alone (§2: stored values passed their definition
-    /// when written; validations may have changed since only in ways they still pass).
-    /// Rich text isn't sanitised again.
+    /// Reads a stored value by its type alone (stored values passed their definition when
+    /// written; validations may have changed since only in ways they still pass). Rich text
+    /// isn't sanitised again.
     pub fn from_stored(
         field_type: FieldType,
         json: &Value,
@@ -737,9 +737,9 @@ impl FieldValue {
         }
     }
 
-    /// The `scalar_text` index column (§4): text, choice, url and reference lowercased,
-    /// booleans as `"true"`/`"false"`, integers as their digits (so `unique` integers
-    /// share text's unique index). `None` for lists and other types.
+    /// The `scalar_text` index column: text, choice, url and reference lowercased, booleans
+    /// as `"true"`/`"false"`, integers as their digits (so `unique` integers share text's
+    /// unique index). `None` for lists and other types.
     pub fn scalar_text(&self) -> Option<String> {
         match self {
             FieldValue::Text(s) | FieldValue::Url(s) | FieldValue::Choice(s) => {
@@ -752,9 +752,9 @@ impl FieldValue {
         }
     }
 
-    /// The `scalar_num` index column (§4), exact: integers, decimals, money in minor
-    /// units, measurements in their dimension's base unit (g, mm, ml), dates (midnight
-    /// UTC) and times as microseconds since the epoch. `None` for lists and other types.
+    /// The `scalar_num` index column, exact: integers, decimals, money in minor units,
+    /// measurements in their dimension's base unit (g, mm, ml), dates (midnight UTC) and
+    /// times as microseconds since the epoch. `None` for lists and other types.
     pub fn scalar_num(&self) -> Option<Decimal> {
         match self {
             FieldValue::Integer(n) => Some(Decimal::from_i64(*n)),
@@ -767,7 +767,7 @@ impl FieldValue {
         }
     }
 
-    /// What `unique` compares (§7): the lowercased text, URL or the integer's digits.
+    /// What `unique` compares: the lowercased text, URL or the integer's digits.
     pub fn unique_key(&self) -> Option<String> {
         match self {
             FieldValue::Text(_) | FieldValue::Url(_) | FieldValue::Integer(_) => self.scalar_text(),
@@ -784,7 +784,7 @@ impl FieldValue {
     }
 
     /// What list operations compare an item by: its JSON, with text lowercased when
-    /// `case_insensitive` (lists with `unique_items`, §4).
+    /// `case_insensitive` (lists with `unique_items`).
     pub fn item_key(&self, case_insensitive: bool) -> String {
         match self {
             FieldValue::Text(s) if case_insensitive => format!("\"{}\"", s.to_lowercase()),

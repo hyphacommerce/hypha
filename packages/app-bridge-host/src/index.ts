@@ -1,4 +1,4 @@
-// @hypha/app-bridge-host: the admin's side of the app bridge (design note 0029, §6.3).
+// @hypha/app-bridge-host: the admin's side of the app bridge.
 
 export {
   attachBridge,

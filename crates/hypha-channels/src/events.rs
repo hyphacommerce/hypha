@@ -1,5 +1,5 @@
-//! What happens to sales channels, as events (design note 0020, section 6). Contract
-//! types: a renamed or reshaped field is a new `VERSION`, never an edit.
+//! What happens to sales channels, as events. Contract types: a renamed or reshaped field
+//! is a new `VERSION`, never an edit.
 
 use hypha_core::{ChannelId, Event, ProductId};
 use serde::Serialize;

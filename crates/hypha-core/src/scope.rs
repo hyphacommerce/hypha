@@ -33,8 +33,8 @@ pub enum Scope {
     CustomersRead,
     #[serde(rename = "customers:write")]
     CustomersWrite,
-    /// Requesting and cancelling the erasure of a customer's personal data (design note
-    /// 0032, §7.3): only the owner role has it by default.
+    /// Requesting and cancelling the erasure of a customer's personal data: only the owner
+    /// role has it by default.
     #[serde(rename = "customers:erase")]
     CustomersErase,
     #[serde(rename = "stores:read")]
@@ -47,10 +47,10 @@ pub enum Scope {
     #[serde(rename = "orders:write")]
     OrdersWrite,
     /// Turning a cart into an order: what a storefront needs, without the scopes of
-    /// everything checkout writes underneath (design note 0007).
+    /// everything checkout writes underneath.
     #[serde(rename = "checkout")]
     Checkout,
-    /// Staff users, roles and invites (design note 0008).
+    /// Staff users, roles and invites.
     #[serde(rename = "users:read")]
     UsersRead,
     #[serde(rename = "users:write")]
@@ -59,55 +59,52 @@ pub enum Scope {
     ApiKeysRead,
     #[serde(rename = "api_keys:write")]
     ApiKeysWrite,
-    /// The media library: assets and their files (design note 0013).
+    /// The media library: assets and their files.
     #[serde(rename = "media:read")]
     MediaRead,
     #[serde(rename = "media:write")]
     MediaWrite,
-    /// Shipping zones, options and providers (design note 0015).
+    /// Shipping zones, options and providers.
     #[serde(rename = "shipping:read")]
     ShippingRead,
     #[serde(rename = "shipping:write")]
     ShippingWrite,
-    /// External apps: their secrets, webhooks and deliveries (design note 0016).
+    /// External apps: their secrets, webhooks and deliveries.
     #[serde(rename = "apps:read")]
     AppsRead,
     #[serde(rename = "apps:write")]
     AppsWrite,
-    /// Recording shipments and their tracking, without changing or cancelling orders
-    /// (design note 0018, FU9).
+    /// Recording shipments and their tracking, without changing or cancelling orders.
     #[serde(rename = "fulfillments:read")]
     FulfillmentsRead,
     #[serde(rename = "fulfillments:write")]
     FulfillmentsWrite,
-    /// Managing sales channels (design note 0020, CH10). Publishing products to them is
-    /// `products:write`.
+    /// Managing sales channels. Publishing products to them is `products:write`.
     #[serde(rename = "channels:read")]
     ChannelsRead,
     #[serde(rename = "channels:write")]
     ChannelsWrite,
-    /// The payment methods a store offers (design note 0027, PA9). Recording money
-    /// received on an order is `orders:write`; reading an order's payments, `orders:read`.
+    /// The payment methods a store offers. Recording money received on an order is
+    /// `orders:write`; reading an order's payments, `orders:read`.
     #[serde(rename = "payments:read")]
     PaymentsRead,
     #[serde(rename = "payments:write")]
     PaymentsWrite,
-    /// The emails a store sends (design note 0028, NT10): templates, branding, sender
-    /// and staff recipients, and the record of what was sent. Resending one is
-    /// `notifications:write`.
+    /// The emails a store sends: templates, branding, sender and staff recipients, and the
+    /// record of what was sent. Resending one is `notifications:write`.
     #[serde(rename = "notifications:read")]
     NotificationsRead,
     #[serde(rename = "notifications:write")]
     NotificationsWrite,
-    /// Custom field definitions in the merchant's `custom` namespace (design note 0033,
-    /// §2). Values are governed by their owner's scopes (`products:write`, …).
+    /// Custom field definitions in the merchant's `custom` namespace. Values are governed
+    /// by their owner's scopes (`products:write`, …).
     #[serde(rename = "custom_fields:read")]
     CustomFieldsRead,
     #[serde(rename = "custom_fields:write")]
     CustomFieldsWrite,
-    /// Personal data (design note 0029, AP10, §4.2): without these, a caller that isn't
-    /// a staff session (an API key, an app) gets customers, orders and carts with the
-    /// field absent and listed in `redacted`. First and last names.
+    /// Personal data: without these, a caller that isn't a staff session (an API key, an
+    /// app) gets customers, orders and carts with the field absent and listed in
+    /// `redacted`. First and last names.
     #[serde(rename = "customer_data:name")]
     CustomerDataName,
     /// Email addresses.
@@ -119,8 +116,7 @@ pub enum Scope {
     /// Street lines, postal code, city and province (country and company stay visible).
     #[serde(rename = "customer_data:address")]
     CustomerDataAddress,
-    /// Personal custom fields on customers and orders (design note 0033, §5.2; 0032
-    /// CD9): a birthday, a gift message.
+    /// Personal custom fields on customers and orders: a birthday, a gift message.
     #[serde(rename = "customer_data:profile")]
     CustomerDataProfile,
 }
@@ -189,8 +185,8 @@ impl Scope {
     }
 
     /// The scope that also grants this one: a write scope grants its read scope, as in
-    /// Shopify (design note 0008, A7). Roles and keys can then list `products:write`
-    /// alone. `None` for write scopes and `checkout`.
+    /// Shopify. Roles and keys can then list `products:write` alone. `None` for write
+    /// scopes and `checkout`.
     pub fn implied_by(self) -> Option<Scope> {
         match self {
             Scope::ProductsRead => Some(Scope::ProductsWrite),
@@ -241,10 +237,9 @@ impl Scope {
         }
     }
 
-    /// What a publishable API key grants: enough for a storefront to show products and
-    /// run a cart through checkout, nothing that changes the catalog, customers or
-    /// orders (design note 0008, section 4). `carts:write` implies `carts:read`.
-    /// In `ALL` order, like every stored scope list.
+    /// What a publishable API key grants: enough for a storefront to show products and run
+    /// a cart through checkout, nothing that changes the catalog, customers or orders.
+    /// `carts:write` implies `carts:read`. In `ALL` order, like every stored scope list.
     pub const STOREFRONT: [Scope; 5] = [
         Scope::ProductsRead,
         Scope::MarketsRead,
@@ -253,7 +248,7 @@ impl Scope {
         Scope::Checkout,
     ];
 
-    /// The personal-data scopes (AP10), in `ALL` order.
+    /// The personal-data scopes, in `ALL` order.
     pub const CUSTOMER_DATA: [Scope; 5] = [
         Scope::CustomerDataName,
         Scope::CustomerDataEmail,

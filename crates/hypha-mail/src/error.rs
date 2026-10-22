@@ -60,8 +60,8 @@ pub enum CommandError {
     /// isn't kept. Nor can one about no order.
     #[error("a {template} message can't be resent")]
     NotResendable { template: TemplateKey },
-    /// The customer was erased (design note 0032, CD10): their placeholder address can't
-    /// receive mail, so the message can't be sent again.
+    /// The customer was erased: their placeholder address can't receive mail, so the
+    /// message can't be sent again.
     #[error("the customer was erased: the message can't be resent")]
     RecipientErased,
     /// An event whose payload isn't what its type promises.

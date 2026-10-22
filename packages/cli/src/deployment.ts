@@ -13,7 +13,7 @@ export const STATE_FILE = "hypha.json";
 export const ENV_FILE = ".env";
 
 /** Where the stack runs: a server reached over SSH, this machine (to try it out), or
- * Cloudflare's Workers (the API over Hyperdrive to any Postgres; design note 0026). */
+ * Cloudflare's Workers (the API over Hyperdrive to any Postgres). */
 export type Target = "vps" | "local" | "cloudflare";
 
 /** Where the images are built: on the server itself, or here and then copied to it. */
@@ -65,16 +65,16 @@ export interface Deployment {
   domain?: string;
   /** For Let's Encrypt's notices: `hypha deploy` writes the apps' Caddy sites with it. */
   acmeEmail?: string;
-  /** Apps deployed alongside (design note 0029, §9): each built from its repository at
-   * a pinned commit, `hypha apps add|update` (apps.ts). In the file, a first-party
-   * app's name alone (`"stripe"`) stands for its repository, unpinned until a deploy. */
+  /** Apps deployed alongside: each built from its repository at a pinned commit, `hypha
+   * apps add|update` (apps.ts). In the file, a first-party app's name alone (`"stripe"`)
+   * stands for its repository, unpinned until a deploy. */
   apps?: AppEntry[];
-  /** Spores compiled into the API (design note 0030, §9): a first-party name alone
-   * (`"stripe"`), or a crate (`spores.ts`). `hypha spores add|remove`. */
+  /** Spores compiled into the API: a first-party name alone (`"stripe"`), or a crate
+   * (`spores.ts`). `hypha spores add|remove`. */
   spores?: SporeEntry[];
 }
 
-/** An app deployed with the deployment (design note 0029, §9). */
+/** An app deployed with the deployment. */
 export interface AppEntry {
   /** Names its Worker (`<name>-app-<name>`), container (`app-<name>`), domain and
    * encryption key (`APP_<NAME>_ENCRYPTION_KEY` in `.env`). */

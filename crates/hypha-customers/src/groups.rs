@@ -1,11 +1,11 @@
-//! Customer group commands (design note 0032, §6): the groups themselves, and who's in
-//! them, written as sets with one event per group.
+//! Customer group commands: the groups themselves, and who's in them, written as sets with
+//! one event per group.
 
 use std::collections::{BTreeSet, HashMap};
 
 use hypha_core::{
-    Ctx, CustomerGroupId, CustomerId, Handle, HasBatch, IdGenerator, Page, PageRequest,
-    PendingEvent, RepoError, Scope, StageEvents,
+    Ctx, CustomerGroupId, CustomerId, Handle, HasBatch, IdGenerator, PendingEvent, RepoError,
+    Scope, StageEvents,
 };
 
 use crate::{
@@ -333,16 +333,4 @@ pub async fn groups_of_customers<S: HasCustomerGroups>(
 ) -> Result<HashMap<CustomerId, Vec<CustomerGroupId>>, CommandError> {
     ctx.require(Scope::CustomersRead)?;
     Ok(ports.customer_groups().groups_of(customers).await?)
-}
-
-/// A page of the group's customers, newest first.
-pub async fn list_group_members<S: HasCustomerGroups>(
-    ctx: &Ctx,
-    ports: &S,
-    group: CustomerGroupId,
-    page: PageRequest<CustomerId>,
-) -> Result<Page<CustomerId>, CommandError> {
-    ctx.require(Scope::CustomersRead)?;
-    load_group(ports, group).await?;
-    Ok(ports.customer_groups().member_page(group, page).await?)
 }

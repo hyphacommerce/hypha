@@ -1,6 +1,5 @@
-# Local development services: Postgres (design note 0001), an S3 server for media
-# files (design note 0013) and Mailpit, which catches the emails the API sends (design
-# note 0028).
+# Local development services: Postgres, an S3 server for media files and Mailpit,
+# which catches the emails the API sends.
 #
 #   docker compose up -d          # start them in the background
 #   docker compose down           # stop them (data is kept in the named volumes)
@@ -8,6 +7,7 @@
 #
 # `.cargo/config.toml` points the host and the tests at both:
 #   DATABASE_URL=postgres://hypha:hypha@localhost:5432/hypha
+#   HYPHA_TEST_DATABASE_URL=postgres://hypha:hypha@localhost:5433/hypha (the tests')
 #   HYPHA_S3_ENDPOINT=http://localhost:8333 (bucket hypha-media, created on first use)
 #   HYPHA_EMAIL_SENDER=smtp, HYPHA_SMTP_HOST=localhost, HYPHA_SMTP_PORT=1025 (Mailpit;
 #   its inbox is http://localhost:8025)
@@ -24,6 +24,28 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hypha -d hypha"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  # The tests' own Postgres (`HYPHA_TEST_DATABASE_URL`): in memory and without
+  # durability, since every test database is a throwaway copy of a migrated template.
+  # Never point anything you want to keep at it; a restart empties it.
+  postgres-test:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: hypha
+      POSTGRES_PASSWORD: hypha
+      POSTGRES_DB: hypha
+    command: >-
+      postgres -c fsync=off -c synchronous_commit=off -c full_page_writes=off
+      -c max_connections=300
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hypha -d hypha"]
       interval: 2s

@@ -1,9 +1,9 @@
 "use client";
 
-// A customer's labels (design note 0032, CD1 and CD11): the well-known `custom.tags`
-// field rendered as chips under the name, each a link to the customers filtered by it,
-// with an editor offering the labels in use. Where the field doesn't exist yet, staff who
-// may define fields are offered to create it from the API's suggestion.
+// A customer's labels: the well-known `custom.tags` field rendered as chips under the
+// name, each a link to the customers filtered by it, with an editor offering the labels
+// in use. Where the field doesn't exist yet, staff who may define fields are offered to
+// create it from the API's suggestion.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

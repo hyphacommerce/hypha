@@ -1,5 +1,5 @@
-//! App UI in any admin and storefront (design note 0029, §5–§8): discovery, session
-//! tokens, actions, blocks, the app proxy and manifest refreshes, against a local app.
+//! App UI in any admin and storefront: discovery, session tokens, actions, blocks, the app
+//! proxy and manifest refreshes, against a local app.
 
 use axum::{
     Router,

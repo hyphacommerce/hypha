@@ -36,15 +36,14 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
       loadCountries(),
       loadCurrencies(),
       loadExtensions(),
-      // Its custom fields (design note 0033): none shown without `custom_fields:read`.
+      // Its custom fields: none shown without `custom_fields:read`.
       definitionsOf("customer"),
       client.GET("/admin/customers/{id}/custom-fields", { params: { path: { id } } }),
       requireStaff(),
-      // The store's groups (design note 0032, §6), for the groups card.
+      // The store's groups, for the groups card.
       client.GET("/admin/customer-groups").then((r) => r.data?.items ?? []),
     ]);
-  // Their latest orders (design note 0032, §12 step 1). Needs `orders:read`; without it
-  // the card says so.
+  // Their latest orders. Needs `orders:read`; without it the card says so.
   const recent = await client.GET("/admin/orders", {
     params: { query: { customer: customer.id, limit: 10 } },
   });
@@ -55,8 +54,8 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
   const canWrite = hasScope(me.scopes, "customers:write") && !isErased;
   const canErase = hasScope(me.scopes, "customers:erase");
   const canDefine = hasScope(me.scopes, "custom_fields:write");
-  // The well-known fields (design note 0032, CD11) are rendered in place: labels under
-  // the name, the note as its own card; the rest on the custom fields card.
+  // The well-known fields are rendered in place: labels under the name, the note as
+  // its own card; the rest on the custom fields card.
   const labels = wellKnownField(definitions, "labels");
   const note = wellKnownField(definitions, "note");
   const otherFields = withoutWellKnown(definitions);

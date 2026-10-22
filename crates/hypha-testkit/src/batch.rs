@@ -50,9 +50,9 @@ use crate::{
     users::{unique_invite, unique_role, unique_user},
 };
 
-/// Writes staged for `InMemoryPorts::commit`, in the order they were staged: copies
-/// of the aggregates as they were staged, still carrying the version they were loaded
-/// at. Mirrors `PgBatch`'s list of staged writes (design note 0016, EV2).
+/// Writes staged for `InMemoryPorts::commit`, in the order they were staged: copies of the
+/// aggregates as they were staged, still carrying the version they were loaded at. Mirrors
+/// `PgBatch`'s list of staged writes.
 pub struct InMemoryBatch {
     staged: Vec<Staged>,
     /// When the batch was made: every aggregate it stages is stamped with this.

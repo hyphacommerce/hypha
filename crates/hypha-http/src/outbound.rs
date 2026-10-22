@@ -1,8 +1,8 @@
-//! Calls to URLs a merchant configured (rate apps now, webhooks with 0016): only to
-//! public addresses, so a callback URL can't reach the host's own network (cloud
-//! metadata at 169.254.169.254, the database, internal services). The check runs on
-//! the addresses a name resolves to, at connection time, so a name that resolves to a
-//! private address (or is re-pointed at one later) is refused too.
+//! Calls to URLs a merchant configured (rate apps now, webhooks with): only to public
+//! addresses, so a callback URL can't reach the host's own network (cloud metadata at
+//! 169.254.169.254, the database, internal services). The check runs on the addresses a
+//! name resolves to, at connection time, so a name that resolves to a private address (or
+//! is re-pointed at one later) is refused too.
 //!
 //! `outbound.allow_private` (`HYPHA_ALLOW_PRIVATE_CALLBACKS=true`) lifts it, for
 //! development and tests that run an app on localhost.
@@ -27,9 +27,8 @@ impl OutboundPolicy {
 /// HMAC-SHA256 of "<t>.<body>" under the app's secret>` (Stripe's scheme), for rate
 /// callbacks and webhooks alike.
 pub const SIGNATURE_HEADER: &str = "Hypha-Signature";
-/// The most of an answer read: rates for a cart are a few kilobytes, and a bigger
-/// answer counts as a failure rather than filling memory. Extension points' cap
-/// (design note 0029, §3).
+/// The most of an answer read: rates for a cart are a few kilobytes, and a bigger answer
+/// counts as a failure rather than filling memory. Extension points' cap.
 pub const MAX_ANSWER_BYTES: usize = hypha_extensions::MAX_ANSWER_BYTES;
 
 /// The methods merchant URLs are called with.
@@ -37,8 +36,7 @@ pub const MAX_ANSWER_BYTES: usize = hypha_extensions::MAX_ANSWER_BYTES;
 pub enum Method {
     Get,
     Post,
-    /// The rest only for the app proxy (design note 0029, §8), which forwards a
-    /// frontend's method.
+    /// The rest only for the app proxy, which forwards a frontend's method.
     Put,
     Patch,
     Delete,
@@ -170,10 +168,10 @@ pub fn prepare(policy: OutboundPolicy, call: SignedCall<'_>) -> Result<OutboundC
 }
 
 /// The header carrying the context signature of a forwarded call (the app proxy, admin
-/// blocks; design note 0029, §8): `t=<unix seconds>,v1=<hex HMAC-SHA256 of
-/// "<t>.<METHOD>\n" followed by "<name>:<value>\n" for every other `Hypha-*` header,
-/// names lowercased and sorted>`. `Hypha-Signature` signs the body as on every call;
-/// this signs who and what the call is about, so neither can be changed in transit.
+/// blocks): `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<METHOD>\n" followed by
+/// "<name>:<value>\n" for every other `Hypha-*` header, names lowercased and sorted>`.
+/// `Hypha-Signature` signs the body as on every call; this signs who and what the call is
+/// about, so neither can be changed in transit.
 pub const CONTEXT_SIGNATURE_HEADER: &str = "Hypha-Context-Signature";
 
 /// The context signature of a call with `method` and `headers` (see
@@ -257,8 +255,8 @@ pub fn prepare_forward(
     })
 }
 
-/// An unsigned GET of a JSON document (an app's manifest, design note 0029) with its
-/// URL checked like `prepare`'s.
+/// An unsigned GET of a JSON document (an app's manifest) with its URL checked like
+/// `prepare`'s.
 pub fn prepare_get(
     policy: OutboundPolicy,
     url: &str,
@@ -516,6 +514,45 @@ mod tests {
             allow_private: true,
         };
         assert!(prepare(allowed, call("http://127.0.0.1:9000/hook", &[])).is_ok());
+    }
+
+    #[test]
+    fn forwarded_calls_manifest_gets_and_spore_calls_refuse_private_literals() {
+        let refused = Err(CallError::Failed(
+            "the URL is not a public address".to_string(),
+        ));
+        let policy = OutboundPolicy::default();
+        let timeout = std::time::Duration::from_secs(5);
+        for url in [
+            "http://127.0.0.1:9000/x",
+            "http://169.254.169.254/latest/meta-data",
+            "http://[::1]:3000/x",
+        ] {
+            let forward = ForwardCall {
+                method: Method::Get,
+                url,
+                timeout,
+                secret: "s3cret",
+                at: 1_700_000_000,
+                content_type: None,
+                headers: Vec::new(),
+                body: Vec::new(),
+                max_answer: 1024,
+            };
+            assert_eq!(prepare_forward(policy, forward), refused, "{url}");
+            assert_eq!(prepare_get(policy, url, timeout), refused, "{url}");
+            assert_eq!(
+                check_literal(policy, url),
+                refused.clone().map(|_| ()),
+                "{url}"
+            );
+        }
+        let allowed = OutboundPolicy {
+            allow_private: true,
+        };
+        assert!(prepare_get(allowed, "http://127.0.0.1:9000/x", timeout).is_ok());
+        assert_eq!(check_literal(allowed, "http://[::1]:3000/x"), Ok(()));
+        assert_eq!(check_literal(policy, "https://app.example/x"), Ok(()));
     }
 
     #[test]

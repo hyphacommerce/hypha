@@ -18,7 +18,6 @@ const generated = [
   "hypha.config.schema.json",
   "docs/apps/manifest.schema.json",
   "target/**",
-  "spikes/**",
   "hypha-deploy*/**",
   // A spore's element as bundled (`spores/*/element/*.js`, built from its `.ts` beside).
   "spores/*/element/*.js",
@@ -82,7 +81,7 @@ export default defineConfig({
         env: { node: true },
       },
       {
-        // The app packages of design note 0029 run in browsers (the bridge, blocks and
+        // The apps platform's packages run in browsers (the bridge, blocks and
         // elements) and on Workers (the SDK): Web APIs only.
         files: [
           "packages/app/src/**",

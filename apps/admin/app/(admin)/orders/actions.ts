@@ -8,9 +8,9 @@ import { type TrackingInput, trackingBody, trackingProblem } from "@/lib/trackin
 export type ActionResult = { error?: string };
 
 /**
- * Records money staff collected themselves (design note 0027, §5): the order's open
- * payment becomes paid with the `reference`, or the API records a manual one of the
- * total when the order has none.
+ * Records money staff collected themselves: the order's open payment becomes paid
+ * with the `reference`, or the API records a manual one of the total when the order
+ * has none.
  */
 export async function markOrderPaid(id: string, reference: string): Promise<ActionResult> {
   const client = await sessionClient();
@@ -105,8 +105,8 @@ export async function cancelOrder(
 }
 
 /**
- * Sends one of the order's emails again (design note 0028, §7): a new message with the
- * template and the order as they are now, to the same recipient.
+ * Sends one of the order's emails again: a new message with the template and the order
+ * as they are now, to the same recipient.
  */
 export async function resendNotification(orderId: string, id: string): Promise<ActionResult> {
   const client = await sessionClient();

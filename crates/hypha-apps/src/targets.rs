@@ -1,7 +1,7 @@
-//! Where an app's UI can appear (design note 0029, §5): a closed catalog of targets,
-//! stable slot names any admin or storefront may implement. A frontend shows the
-//! targets it supports and ignores the rest; manifests may name targets a later
-//! version adds (they're listed nowhere until this catalog knows them).
+//! Where an app's UI can appear: a closed catalog of targets, stable slot names any admin
+//! or storefront may implement. A frontend shows the targets it supports and ignores the
+//! rest; manifests may name targets a later version adds (they're listed nowhere until this
+//! catalog knows them).
 
 use core::fmt;
 
@@ -116,11 +116,6 @@ impl Target {
         }
     }
 
-    /// Whether admin pages (embedded) fill it.
-    pub fn takes_pages(self) -> bool {
-        matches!(self, Target::AppsPage | Target::SettingsApp)
-    }
-
     /// Whether admin blocks (declarative UI trees) fill it.
     pub fn takes_blocks(self) -> bool {
         matches!(
@@ -136,11 +131,6 @@ impl Target {
     /// Whether admin actions (buttons) fill it.
     pub fn takes_actions(self) -> bool {
         self.takes_blocks() || self == Target::Payment
-    }
-
-    /// Whether storefront elements (web components) fill it.
-    pub fn takes_elements(self) -> bool {
-        self.surface() == Surface::Storefront
     }
 
     /// The context keys it's given: the first is required, the others optional.
@@ -162,8 +152,8 @@ impl Target {
     }
 
     /// The read scope the target's object needs: an app's grant must have it for its
-    /// contributions there to be listed or called (design note 0029, §4.1 step 5), and
-    /// a staff member must have it to use them (they're about that object).
+    /// contributions there to be listed or called, and a staff member must have it to use
+    /// them (they're about that object).
     pub fn scope(self) -> Option<Scope> {
         match self {
             Target::AppsPage | Target::SettingsApp | Target::CheckoutPayment => None,
@@ -256,11 +246,9 @@ mod tests {
 
     #[test]
     fn targets_take_their_kind_of_contribution() {
-        assert!(Target::AppsPage.takes_pages() && !Target::AppsPage.takes_blocks());
+        assert!(!Target::AppsPage.takes_blocks());
         assert!(Target::OrderPayment.takes_blocks() && Target::OrderPayment.takes_actions());
         assert!(Target::Payment.takes_actions() && !Target::Payment.takes_blocks());
-        assert!(Target::CheckoutPayment.takes_elements());
-        assert!(!Target::OrderDetails.takes_elements());
     }
 
     #[test]

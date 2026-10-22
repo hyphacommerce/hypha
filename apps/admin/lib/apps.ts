@@ -1,5 +1,5 @@
-// How the admin labels apps (design notes 0016 §8, 0029): how each got here, whether it
-// runs, and which of its scopes reach customers' personal data.
+// How the admin labels apps: how each got here, whether it runs, and which of its
+// scopes reach customers' personal data.
 
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
@@ -11,7 +11,7 @@ export type AppState = {
   description: string;
 };
 
-/** Whether an app is a spore: built into the API rather than a service (design note 0030). */
+/** Whether an app is a spore: built into the API rather than a service. */
 export function isBuiltIn(app: Pick<App, "kind">): boolean {
   return app.kind === "spore";
 }

@@ -7,8 +7,8 @@ import { loaded, sessionClient } from "@/lib/hypha";
 
 import { ChannelsCard } from "./channels";
 
-/** Settings → Channels (design note 0020): where products are sold, and the keys
- * storefronts sell through them with. */
+/** Settings → Channels: where products are sold, and the keys storefronts sell through them
+ * with. */
 export default async function ChannelsSettingsPage() {
   const client = await sessionClient();
   const channels = await client.GET("/admin/channels").then(loaded);

@@ -1,9 +1,8 @@
 "use client";
 
-// Overlays close when the shopper goes somewhere else (design note 0024, §7): the cart
-// drawer, the search popover, the filters sheet. Static pages keep the header and the
-// layout mounted across navigations, so an open overlay would otherwise stay open on
-// the next page.
+// Overlays close when the shopper goes somewhere else: the cart drawer, the search
+// popover, the filters sheet. Static pages keep the header and the layout mounted
+// across navigations, so an open overlay would otherwise stay open on the next page.
 
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useEffectEvent, useRef } from "react";

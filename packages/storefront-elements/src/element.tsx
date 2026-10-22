@@ -1,6 +1,6 @@
-// A React wrapper for app elements (design note 0029, §7): renders the custom element,
-// loads its module in the browser, sets props as properties and forwards the documented
-// events. On the server it renders the bare tag, which upgrades once the module loads.
+// A React wrapper for app elements: renders the custom element, loads its module in the
+// browser, sets props as properties and forwards the documented events. On the server
+// it renders the bare tag, which upgrades once the module loads.
 
 import { createElement, useEffect, useEffectEvent, useState } from "react";
 

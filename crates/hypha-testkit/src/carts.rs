@@ -93,7 +93,7 @@ mod tests {
         );
     }
 
-    /// The lost-update case from design note 0001: two writers load the same cart,
+    /// The lost-update case: two writers load the same cart,
     /// both add a line, and the second save must fail instead of dropping a line.
     #[test]
     fn concurrent_changes_cannot_lose_a_line() {

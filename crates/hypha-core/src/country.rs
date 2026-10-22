@@ -5,8 +5,8 @@ use thiserror::Error;
 
 use crate::tables::COUNTRIES;
 
-/// An ISO 3166-1 alpha-2 country code (design note 0021, SU2): one of the officially
-/// assigned codes in core's table, so `XK` or `UK` don't pass.
+/// An ISO 3166-1 alpha-2 country code: one of the officially assigned codes in core's
+/// table, so `XK` or `UK` don't pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct CountryCode([u8; 2]);

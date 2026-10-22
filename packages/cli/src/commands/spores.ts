@@ -1,7 +1,7 @@
-// `hypha spores`: the spores compiled into the deployment's API (design note 0030, §9).
-// `add` lists one in `hypha.json` (this repository's by name, or a crate), `remove`
-// takes it out, `list` shows them. `hypha deploy` builds the API with them; a spore
-// removed keeps its tables and its app (shown as missing) until dropped by hand.
+// `hypha spores`: the spores compiled into the deployment's API. `add` lists one in
+// `hypha.json` (this repository's by name, or a crate), `remove` takes it out, `list`
+// shows them. `hypha deploy` builds the API with them; a spore removed keeps its tables
+// and its app (shown as missing) until dropped by hand.
 
 import * as p from "@clack/prompts";
 import { defineCommand } from "citty";

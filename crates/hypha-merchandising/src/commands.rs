@@ -1,5 +1,4 @@
-//! Attaching media to products (design note 0014, section 5) and reading products with
-//! their media.
+//! Attaching media to products and reading products with their media.
 
 use hypha_categories::{Category, CategoryRepo, HasCategories, StageCategories};
 use hypha_core::{
@@ -40,7 +39,7 @@ pub enum CommandError {
     /// Products are public, so their media must be.
     #[error("asset {0} is private")]
     AssetNotPublic(AssetId),
-    /// A product's media are images and videos; a variant shows an image (0014, Q6).
+    /// A product's media are images and videos; a variant shows an image.
     #[error("asset {asset} is a {kind} file, which can't be used here")]
     AssetKindNotAllowed { asset: AssetId, kind: AssetKind },
 }
@@ -142,12 +141,12 @@ pub async fn set_product_media<S: MerchandisingPorts>(
     .await
 }
 
-/// Deletes a product (design note 0033, section 6.3), in any status: in one batch, the
-/// product with its variants and options, its asset usages, and its `product.deleted`
-/// event. The assets stay. Storage removes its catalog, channel and category membership
-/// and its tax class with it; fixed prices, stock and search documents are cleaned up by
-/// the handlers that want the event. Orders keep their lines (copies), and carts report
-/// lines of it unavailable until they're removed.
+/// Deletes a product, in any status: in one batch, the product with its variants and
+/// options, its asset usages, and its `product.deleted` event. The assets stay. Storage
+/// removes its catalog, channel and category membership and its tax class with it; fixed
+/// prices, stock and search documents are cleaned up by the handlers that want the event.
+/// Orders keep their lines (copies), and carts report lines of it unavailable until they're
+/// removed.
 ///
 /// A product changed by someone else meanwhile is loaded again and deleted, up to
 /// `MAX_ATTEMPTS` times in total: the event then lists its variants as they were.
@@ -171,10 +170,10 @@ pub async fn delete_product<S: MerchandisingPorts>(
     .await
 }
 
-/// Sets a category's image, or clears it with `None` (design note 0022, CA9, Q5): the
-/// category and its asset usage in one batch, so an image in use can't be deleted from
-/// the library. The asset must exist, be ready and public, and be an image. Retried on a
-/// lost race like product media: the image replaces whatever was there.
+/// Sets a category's image, or clears it with `None`: the category and its asset usage in
+/// one batch, so an image in use can't be deleted from the library. The asset must exist,
+/// be ready and public, and be an image. Retried on a lost race like product media: the
+/// image replaces whatever was there.
 pub async fn set_category_image<S>(
     ctx: &Ctx,
     ports: &S,
@@ -265,8 +264,7 @@ pub async fn get_product_view<S: HasProducts + HasAssets>(
     Ok(ProductView::load(ports.assets(), product).await?)
 }
 
-/// A product with its media, by handle: how a storefront's product page finds it
-/// (design note 0021, SU7).
+/// A product with its media, by handle: how a storefront's product page finds it.
 pub async fn get_product_view_by_handle<S: HasProducts + HasAssets>(
     ctx: &Ctx,
     ports: &S,
@@ -283,8 +281,8 @@ pub async fn get_product_view_by_handle<S: HasProducts + HasAssets>(
     Ok(ProductView::load(ports.assets(), product).await?)
 }
 
-/// A category's image asset, for showing it (`None` without one, or if the asset is
-/// gone). Products scopes, like the category itself (design note 0022, CA8).
+/// A category's image asset, for showing it (`None` without one, or if the asset is gone).
+/// Products scopes, like the category itself.
 pub async fn category_image<S: HasAssets>(
     ctx: &Ctx,
     ports: &S,

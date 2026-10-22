@@ -11,8 +11,8 @@ pub mod keys {
     /// There's one settings record per store.
     pub const SETTINGS: &str = "notification_settings";
     pub const NOTIFICATION_ID: &str = "notification_id";
-    /// One message per (event, template, recipient) where the event is set (NT8): a
-    /// handler that runs twice can't send twice.
+    /// One message per (event, template, recipient) where the event is set: a handler that
+    /// runs twice can't send twice.
     pub const NOTIFICATION_MESSAGE: &str = "notification_message";
 }
 
@@ -77,7 +77,7 @@ pub trait NotificationRepo {
         template: TemplateKey,
         to: &Email,
     ) -> Result<Option<Notification>, RepoError>;
-    /// A page of the messages `filter` keeps, newest first (design note 0012).
+    /// A page of the messages `filter` keeps, newest first.
     async fn list(
         &self,
         filter: NotificationFilter,
@@ -99,15 +99,15 @@ pub trait NotificationRepo {
         lease_until: Timestamp,
         limit: u32,
     ) -> Result<Vec<Notification>, RepoError>;
-    /// When a message is next due to be sent (a queued one's `next_attempt_at`, the end
-    /// of a lease), so a host that runs jobs only when there's work knows when (design
-    /// note 0026, W7); `None` with nothing queued or leased.
+    /// When a message is next due to be sent (a queued one's `next_attempt_at`, the end of
+    /// a lease), so a host that runs jobs only when there's work knows when; `None` with
+    /// nothing queued or leased.
     async fn next_due(&self) -> Result<Option<Timestamp>, RepoError>;
 }
 
-/// Stages settings writes in a `hypha_core::HasBatch` batch, so the workflow can write
-/// them with the logo's asset usage (`hypha_media::StageAssetUsages`) in one commit, as
-/// a category's image is (design note 0028, §11).
+/// Stages settings writes in a `hypha_core::HasBatch` batch, so the workflow can write them
+/// with the logo's asset usage (`hypha_media::StageAssetUsages`) in one commit, as a
+/// category's image is.
 pub trait StageNotificationSettings {
     /// Stages what `NotificationSettingsRepo::insert` would write; `settings` is at
     /// version 1 once the batch commits (`Duplicate(keys::SETTINGS)` if stored already).

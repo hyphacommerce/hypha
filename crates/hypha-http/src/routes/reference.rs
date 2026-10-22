@@ -1,5 +1,5 @@
-//! Reference data for pickers (design note 0021, SU3): core's tables as the API accepts
-//! them. Anyone with admin credentials may read them; they hold nothing about the store.
+//! Reference data for pickers: core's tables as the API accepts them. Anyone with admin
+//! credentials may read them; they hold nothing about the store.
 
 use axum::{Json, extract::State};
 use hypha_core::{CountryCode, Currency};

@@ -1,5 +1,5 @@
-//! A merchant's edit of one template (design note 0028, §2, NT5): stored only once
-//! edited, so a store that kept a default gets the build's improved defaults.
+//! A merchant's edit of one template: stored only once edited, so a store that kept a
+//! default gets the build's improved defaults.
 
 use hypha_core::{Language, Stamped, Stamps, Version, Versioned};
 
@@ -125,22 +125,22 @@ impl TemplateSources {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewTemplate {
     pub key: TemplateKey,
-    /// Reserved for translations (design note 0028, Q2): `None` is the default
-    /// language, the only one used for now.
+    /// Reserved for translations: `None` is the default language, the only one used for
+    /// now.
     pub locale: Option<Language>,
     /// `None`: the build's default sources (a template only turned off).
     pub sources: Option<TemplateSources>,
     pub enabled: bool,
 }
 
-/// One stored template (design note 0028, §2): the merchant's sources for a key, or
-/// none (the default's) when they only turned it off, and whether it's on.
+/// One stored template: the merchant's sources for a key, or none (the default's) when they
+/// only turned it off, and whether it's on.
 ///
-/// Identified by (key, locale); there's no ID. Invariants: `enabled` is `true` for the
-/// keys that can't be disabled, and the sources keep their rules. A source that stops
-/// parsing after an upgrade of minijinja doesn't fail `restore` (that would make the
-/// template unreadable, a 500): it's kept, with the parser's `problem`, so the editor
-/// can show the merchant where, and sends fall back to the default meanwhile (Q5).
+/// Identified by (key, locale); there's no ID. Invariants: `enabled` is `true` for the keys
+/// that can't be disabled, and the sources keep their rules. A source that stops parsing
+/// after an upgrade of minijinja doesn't fail `restore` (that would make the template
+/// unreadable, a 500): it's kept, with the parser's `problem`, so the editor can show the
+/// merchant where, and sends fall back to the default meanwhile.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Template {
     key: TemplateKey,
@@ -242,8 +242,8 @@ fn check_enabled(key: TemplateKey, enabled: bool) -> Result<(), TemplateError> {
     Ok(())
 }
 
-/// Plain-data form of a `Template` for storage adapters (design note 0001, 3.4): the
-/// sources flattened into columns, `subject` and `html` both set or both `None`.
+/// Plain-data form of a `Template` for storage adapters: the sources flattened into
+/// columns, `subject` and `html` both set or both `None`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TemplateSnapshot {
     pub key: TemplateKey,

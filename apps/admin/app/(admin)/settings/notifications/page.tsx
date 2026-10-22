@@ -10,8 +10,8 @@ import { SenderBanner } from "./sender-banner";
 import { NotificationSettingsForm } from "./settings-form";
 import { TemplatesCard } from "./templates";
 
-/** Settings → Notifications (design note 0028): how the store's emails look, who gets
- * the staff ones, and each email's template. */
+/** Settings → Notifications: how the store's emails look, who gets the staff ones, and each
+ * email's template. */
 export default async function NotificationsSettingsPage() {
   const client = await sessionClient();
   const [me, settings, templates] = await Promise.all([

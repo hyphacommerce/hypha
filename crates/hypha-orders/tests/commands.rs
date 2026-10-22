@@ -4,8 +4,8 @@ use hypha_core::{
     VariantId,
 };
 use hypha_orders::{
-    CommandError, ListOrders, NewOrder, Order, OrderLine, OrderNumber, OrderRepo, get_order,
-    get_placed_order, list_orders,
+    CommandError, ListOrders, NewOrder, Order, OrderLine, OrderNumber, OrderRepo, OrderStats,
+    customer_order_stats, get_order, get_placed_order, list_orders,
 };
 use hypha_testkit::InMemoryOrderRepo;
 use pollster::block_on;
@@ -22,8 +22,15 @@ fn eur(amount: i64) -> Money {
 /// A repo holding one pending order: 2 mugs at 5.00, untaxed.
 fn repo_with_order() -> InMemoryOrderRepo {
     let repo = InMemoryOrderRepo::default();
-    let mut order = Order::place(NewOrder {
-        id: order_id(),
+    let mut order = mugs(order_id(), 500);
+    block_on(repo.insert(&mut order)).unwrap();
+    repo
+}
+
+/// Ana's pending order `id`: 2 mugs at `unit`, untaxed.
+fn mugs(id: OrderId, unit: i64) -> Order {
+    Order::place(NewOrder {
+        id,
         number: OrderNumber::new(1001).unwrap(),
         placed_at: Timestamp::from_unix_micros(1_767_225_600_000_000),
         cart: CartId::from_uuid(Uuid::from_u128(2)),
@@ -42,21 +49,19 @@ fn repo_with_order() -> InMemoryOrderRepo {
             product_title: "Mug".to_string(),
             variant_title: None,
             sku: None,
-            unit_price: Price::new(eur(500)).unwrap(),
-            total: eur(1000),
+            unit_price: Price::new(eur(unit)).unwrap(),
+            total: eur(2 * unit),
             tax: None,
             fulfilled_quantity: 0,
         }],
         shipping_address: None,
         shipping_lines: vec![],
-        subtotal: eur(1000),
+        subtotal: eur(2 * unit),
         shipping_total: eur(0),
         tax_total: eur(0),
-        total: eur(1000),
+        total: eur(2 * unit),
     })
-    .unwrap();
-    block_on(repo.insert(&mut order)).unwrap();
-    repo
+    .unwrap()
 }
 
 fn user_with(scopes: Vec<Scope>) -> Ctx {
@@ -155,4 +160,29 @@ fn list_orders_needs_orders_read() {
             Scope::OrdersRead
         )))
     );
+}
+
+#[test]
+fn a_customers_order_stats_need_customers_read() {
+    let ctx = user_with(vec![Scope::OrdersRead]);
+    let customer = CustomerId::from_uuid(Uuid::from_u128(4));
+    assert_eq!(
+        block_on(customer_order_stats(&ctx, &repo_with_order(), customer)),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::CustomersRead
+        )))
+    );
+}
+
+#[test]
+fn a_sum_past_the_largest_amount_is_capped_there() {
+    // Each order costs a little over half the largest amount: together they overflow.
+    let unit = Money::MAX_AMOUNT / 4 + 1;
+    let orders = [
+        mugs(OrderId::from_uuid(Uuid::from_u128(1)), unit),
+        mugs(OrderId::from_uuid(Uuid::from_u128(2)), unit),
+    ];
+    let stats = OrderStats::of(&orders);
+    assert_eq!(stats.orders_count, 2);
+    assert_eq!(stats.amount_spent, [eur(Money::MAX_AMOUNT)]);
 }

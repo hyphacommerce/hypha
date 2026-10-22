@@ -1,4 +1,4 @@
-//! Customers and their address books (design note 0005).
+//! Customers and their address books.
 //!
 //! A leaf domain: it depends on core only. One customer per email; accounts and login
 //! come later.
@@ -35,8 +35,8 @@ pub use group::{
 };
 pub use groups::{
     CreateCustomerGroup, GroupPorts, UpdateCustomerGroup, add_group_members, create_group,
-    delete_group, get_group, groups_of_customers, list_group_members, list_groups,
-    remove_group_members, set_customer_groups, update_group,
+    delete_group, get_group, groups_of_customers, list_groups, remove_group_members,
+    set_customer_groups, update_group,
 };
 pub use list::{CustomerFilter, CustomerSort, CustomerSummary};
 pub use repo::{

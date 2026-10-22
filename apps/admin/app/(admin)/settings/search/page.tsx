@@ -10,9 +10,9 @@ import { IndexStatus } from "./index-status";
 import { SearchSettingsForm } from "./search-settings-form";
 
 /**
- * How the storefront's search and product listings work (design notes 0019 and 0024):
- * which filters shoppers see and which options split listings, offered from what the
- * store's products actually have, beside the index behind them.
+ * How the storefront's search and product listings work: which filters shoppers see
+ * and which options split listings, offered from what the store's products actually
+ * have, beside the index behind them.
  */
 export default async function SearchSettingsPage() {
   const client = await sessionClient();

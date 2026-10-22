@@ -1,6 +1,6 @@
-// The admin's side of the bridge (design note 0029, §6.3): answers the messages of one
-// app page in one iframe. Accepts only messages whose source is that iframe's window and
-// whose origin is exactly `appOrigin`, and posts only to that window at that origin.
+// The admin's side of the bridge: answers the messages of one app page in one iframe.
+// Accepts only messages whose source is that iframe's window and whose origin is exactly
+// `appOrigin`, and posts only to that window at that origin.
 
 import {
   type BridgeErrorCode,

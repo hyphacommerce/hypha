@@ -1,5 +1,5 @@
-// The tags the storefront's cached reads carry (design note 0024, §7), shared by the
-// reads (`lib/api.ts`, `lib/listing-data.ts`) and the webhook that expires them
+// The tags the storefront's cached reads carry, shared by the reads (`lib/api.ts`,
+// `lib/listing-data.ts`) and the webhook that expires them
 // (`app/api/revalidate/route.ts`). A tag on a read also lands on every static page that
 // rendered it, so expiring the tag re-renders those pages on their next visit.
 

@@ -1,6 +1,6 @@
-// Notifications in the admin (design note 0028): what each template is called and does,
-// how a message's status reads, and the variables a template can print. Plain data, for
-// server and client code alike.
+// Notifications in the admin: what each template is called and does, how a message's
+// status reads, and the variables a template can print. Plain data, for server and
+// client code alike.
 
 /** A template's name and what it's for, by its stable key. */
 export const TEMPLATES: Record<string, { name: string; description: string }> = {

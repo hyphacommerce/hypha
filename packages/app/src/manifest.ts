@@ -1,12 +1,12 @@
-// The app manifest, `hypha-app.json` (design note 0029, §4, AP4). These types follow the
-// published JSON Schema, `docs/apps/manifest.schema.json` (written from hypha-apps'
-// `AppManifest`), which is what Hypha validates against; keep the two in step when
-// either changes. URLs that start with `/` are relative to `app_url`.
+// The app manifest, `hypha-app.json`. These types follow the published JSON Schema,
+// `docs/apps/manifest.schema.json` (written from hypha-apps' `AppManifest`), which is
+// what Hypha validates against; keep the two in step when either changes. URLs that
+// start with `/` are relative to `app_url`.
 
-/** A scope name, e.g. `orders:read` or `customer_data:email` (AP10). */
+/** A scope name, e.g. `orders:read` or `customer_data:email`. */
 export type Scope = string;
 
-/** The personal-data scopes (design note 0029, §4.2): without them those fields are absent. */
+/** The personal-data scopes: without them those fields are absent. */
 export const PERSONAL_DATA_SCOPES = [
   "customer_data:name",
   "customer_data:email",
@@ -16,7 +16,7 @@ export const PERSONAL_DATA_SCOPES = [
 ] as const;
 export type PersonalDataScope = (typeof PERSONAL_DATA_SCOPES)[number];
 
-/** The extension points this SDK knows (§3.1). Others may exist on newer deployments. */
+/** The extension points this SDK knows. Others may exist on newer deployments. */
 export type ExtensionPointName =
   | "shipping.rates"
   | "payments.start"
@@ -27,7 +27,7 @@ export type ExtensionPointName =
   | "search.query"
   | "admin.action";
 
-/** The admin targets (§5). */
+/** The admin targets. */
 export type AdminTarget =
   | "apps.page"
   | "settings.app"
@@ -38,7 +38,7 @@ export type AdminTarget =
   | "customer.details"
   | "payment";
 
-/** The storefront targets (§5). */
+/** The storefront targets. */
 export type StorefrontTarget =
   | "checkout.payment"
   | "product.block"
@@ -62,7 +62,7 @@ export interface ManifestExtensionPoint {
 }
 
 export interface ManifestSettings {
-  /** A JSON Schema for a frontend to render the app's settings form from (§6.1). */
+  /** A JSON Schema for a frontend to render the app's settings form from. */
   schema: Record<string, unknown>;
   /** Fields a form must treat as secrets (masked, never echoed back). */
   secret_fields?: string[];
@@ -79,7 +79,7 @@ export interface ManifestAdminPage {
 export interface ManifestAdminBlock {
   id: string;
   target: Target;
-  /** Answers a declarative block (§6.2): Hypha fetches it, signed, and checks it. */
+  /** Answers a declarative block: Hypha fetches it, signed, and checks it. */
   url: string;
 }
 
@@ -98,7 +98,7 @@ export interface ManifestAdmin {
   pages?: ManifestAdminPage[];
   blocks?: ManifestAdminBlock[];
   actions?: ManifestAdminAction[];
-  /** The app proxy's base for admins, behind `/admin/apps/{app}/proxy/…` (§8). */
+  /** The app proxy's base for admins, behind `/admin/apps/{app}/proxy/…`. */
   proxy?: string;
 }
 
@@ -113,11 +113,11 @@ export interface ManifestStorefrontElement {
 
 export interface ManifestStorefront {
   elements?: ManifestStorefrontElement[];
-  /** The app proxy's base path (§8). */
+  /** The app proxy's base path. */
   proxy?: string;
 }
 
-/** What a custom field is on (design note 0033). */
+/** What a custom field is on. */
 export type CustomFieldOwnerType = "product" | "variant" | "category" | "customer" | "order";
 
 /** The types a field may also be a list of (`list.<type>`). */
@@ -133,7 +133,7 @@ export type ListableCustomFieldType =
   | "choice"
   | "reference";
 
-/** A custom field's type (design note 0033, §3). It can't change once installed. */
+/** A custom field's type. It can't change once installed. */
 export type CustomFieldType =
   | ListableCustomFieldType
   | "multiline_text"
@@ -189,7 +189,7 @@ export interface AppManifest {
   scopes: Scope[];
   /** Why the app needs a scope, shown on the consent screen (required in practice for personal data). */
   scope_reasons?: Partial<Record<Scope, string>>;
-  /** The app's privacy policy, linked from the consent screen (§4.2). */
+  /** The app's privacy policy, linked from the consent screen. */
   privacy_url: string;
   /** Who publishes the app, shown on the consent screen. */
   publisher?: string;
@@ -200,7 +200,7 @@ export interface AppManifest {
   settings?: ManifestSettings;
   admin?: ManifestAdmin;
   storefront?: ManifestStorefront;
-  /** Custom fields in the app's namespace (design note 0033, §8). */
+  /** Custom fields in the app's namespace. */
   custom_fields?: ManifestCustomField[];
 }
 

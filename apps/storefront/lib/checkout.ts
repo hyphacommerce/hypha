@@ -1,5 +1,5 @@
-// Server-only: checking out the shopper's cart (design note 0031), shared by the "Place
-// order" action and the route a payment provider's page sends the shopper back to.
+// Server-only: checking out the shopper's cart, shared by the "Place order" action and
+// the route a payment provider's page sends the shopper back to.
 
 import { api, describe } from "./api";
 import { cartId, forgetCart, rememberOrder } from "./site";
@@ -26,16 +26,16 @@ export async function checkOutCart(input: {
   });
   if (error) return { code: error.code, error: describe(error) };
   // The confirmation reads the order with its access token, kept here for this buyer:
-  // the order's ID alone reads nothing (design note 0024, §7).
+  // the order's ID alone reads nothing.
   await rememberOrder(data.id, data.access_token);
   await forgetCart(input.country);
   return { order: data.id };
 }
 
 /**
- * Whether the shopper's cart in `country` pays online (design note 0031): a method whose
- * provider isn't `manual`. Only such a cart is checked out by coming back from a
- * provider's page; a manual one is placed with "Place order".
+ * Whether the shopper's cart in `country` pays online: a method whose provider isn't
+ * `manual`. Only such a cart is checked out by coming back from a provider's page; a
+ * manual one is placed with "Place order".
  */
 export async function paysOnline(country: string): Promise<boolean> {
   const id = await cartId(country);

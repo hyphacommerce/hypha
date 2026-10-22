@@ -1,4 +1,4 @@
-//! Erasing a customer's personal data and exporting it (design note 0032, §7.3, §7.4).
+//! Erasing a customer's personal data and exporting it.
 
 use hypha_auth::{IdentityRepo as _, SessionRepo as _};
 use std::time::Duration;
@@ -139,7 +139,7 @@ fn world() -> (InMemoryPorts, FixedClock) {
     let mut open = cart_of(ana_id(), 2);
     block_on(ports.carts.insert(&mut open)).unwrap();
 
-    // Ana has an account (design note 0034): an identity and a live session.
+    // Ana has an account: an identity and a live session.
     let mut identity = hypha_auth::Identity::with_email_code(
         hypha_core::IdentityId::from_uuid(Uuid::from_u128(901)),
         hypha_auth::Principal::Customer(ana_id()),
@@ -280,7 +280,7 @@ fn erasing_removes_the_person_and_keeps_the_orders() {
         None
     );
 
-    // Her account went too (design note 0034, AC10): no identity, the session ended.
+    // Her account went too: no identity, the session ended.
     {
         assert_eq!(
             block_on(
@@ -369,4 +369,158 @@ fn an_export_gathers_the_customer_and_records_the_request() {
         block_on(export_customer(&nobody, &ports, ana_id())),
         Err(CommandError::Auth(_))
     ));
+}
+
+fn ana_order() -> OrderId {
+    OrderId::from_uuid(Uuid::from_u128(1001))
+}
+
+#[test]
+fn erasing_redacts_the_orders_email_records() {
+    use hypha_notifications::{
+        NewNotification, Notification, NotificationRepo, NotificationStatus, QueuedEmail,
+        TemplateKey,
+    };
+    let (ports, clock) = world();
+    let id = hypha_core::NotificationId::from_uuid(Uuid::from_u128(3001));
+    let mut queued = Notification::queued(
+        NewNotification {
+            id,
+            template: TemplateKey::OrderConfirmation,
+            to: Email::new("ana@example.hr").unwrap(),
+            subject: "Order #1001 confirmed".to_string(),
+            event: None,
+            order: Some(ana_order()),
+        },
+        QueuedEmail {
+            sender_name: None,
+            reply_to: None,
+            html: "<p>Thanks, Ana</p>".to_string(),
+            text: "Thanks, Ana".to_string(),
+        },
+        clock.now(),
+    );
+    block_on(ports.notifications.insert(&mut queued)).unwrap();
+    block_on(erase_customer(&ports, clock.now(), ana_id())).unwrap();
+    let record = block_on(ports.notifications.get(id)).unwrap().unwrap();
+    assert_eq!(record.to(), &Email::placeholder(ana_id().as_uuid()));
+    assert_eq!(record.status(), NotificationStatus::Skipped);
+    assert_eq!(record.email(), None);
+}
+
+#[test]
+fn an_open_cart_with_a_pending_payment_is_kept_redacted() {
+    use hypha_payments::{NewPayment, Payment, PaymentRepo, ProviderKey};
+    let (ports, clock) = world();
+    let open = CartId::from_uuid(Uuid::from_u128(6002));
+    let payment_id = hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001));
+    let mut payment = Payment::new(NewPayment {
+        id: payment_id,
+        cart: Some(open),
+        order: None,
+        method: None,
+        method_name: None,
+        provider: ProviderKey::manual(),
+        amount: eur(500),
+        instructions: None,
+    })
+    .unwrap();
+    block_on(ports.payments.insert(&mut payment)).unwrap();
+    block_on(erase_customer(&ports, clock.now(), ana_id())).unwrap();
+    let cart = block_on(ports.carts.get(open)).unwrap().expect("kept");
+    assert!(cart.email().unwrap().is_placeholder());
+    assert_eq!(cart.shipping_address(), None);
+    let payment = block_on(ports.payments.get(payment_id)).unwrap().unwrap();
+    assert_eq!(payment.cart(), Some(open));
+}
+
+#[test]
+fn erasing_removes_personal_field_values_and_keeps_the_rest() {
+    use hypha_core::{CustomFieldDefinitionId, HasBatch};
+    use hypha_custom_fields::{
+        Access, Capabilities, CustomFieldDefinition, DefinitionRepo, DefinitionSpec, FieldType,
+        FieldValue, HasCustomFieldDefinitions, HasCustomFieldValues, Namespace, Owner, OwnerType,
+        RawValidations, StageCustomFieldValues, ValueRepo, ValueRow,
+    };
+    let (ports, clock) = world();
+    let field = |n: u128, key: &str, personal: bool| {
+        let mut definition = CustomFieldDefinition::new(
+            CustomFieldDefinitionId::from_uuid(Uuid::from_u128(n)),
+            Namespace::parse("custom").unwrap(),
+            DefinitionSpec {
+                owner_type: OwnerType::Customer,
+                key: key.to_string(),
+                field_type: FieldType::parse("text").unwrap(),
+                name: key.to_string(),
+                description: None,
+                validations: RawValidations::default(),
+                access: Access::default(),
+                private: false,
+                personal,
+                capabilities: Capabilities::default(),
+            },
+            n as u32,
+        )
+        .unwrap();
+        block_on(ports.custom_field_definitions().insert(&mut definition)).unwrap();
+        definition
+    };
+    let birthday = field(1, "birthday", true);
+    let tier = field(2, "tier", false);
+    let owner = Owner::customer(ana_id());
+    let mut batch = ports.batch();
+    for (definition, text) in [(&birthday, "1990-01-01"), (&tier, "gold")] {
+        let value = FieldValue::parse(
+            definition.field_type(),
+            definition.validations(),
+            &serde_json::json!(text),
+        )
+        .unwrap();
+        batch.set_custom_field_value(ValueRow::new(definition, &owner, &value), None);
+    }
+    block_on(ports.commit(batch)).unwrap();
+
+    block_on(erase_customer(&ports, clock.now(), ana_id())).unwrap();
+    let kept = block_on(ports.custom_field_values().get_many(&[owner.id()], None)).unwrap();
+    let kept: Vec<_> = kept.iter().map(|v| v.definition).collect();
+    assert_eq!(kept, [tier.id()]);
+}
+
+#[test]
+fn the_job_erases_the_others_when_one_erasure_fails() {
+    let (ports, clock) = world();
+    let bo_id = CustomerId::from_uuid(Uuid::from_u128(2));
+    let mut bo = Customer::new(bo_id, Email::new("bo@example.hr").unwrap());
+    block_on(ports.customers.insert(&mut bo)).unwrap();
+    let settings = PrivacySettings {
+        erasure_delay: Duration::from_secs(3600),
+    };
+    for id in [ana_id(), bo_id] {
+        block_on(request_erasure(&eraser(), &ports, &clock, &settings, id)).unwrap();
+    }
+    // Ana's order changes after her erasure loads it: her batch is stale. Bo has no
+    // orders, so the stale copy is served to Ana's erasure alone.
+    let stale = block_on(ports.orders.get(ana_order())).unwrap().unwrap();
+    let mut changed = stale.clone();
+    block_on(ports.orders.update(&mut changed)).unwrap();
+    ports.orders.serve_next_get(stale);
+
+    let later = FixedClock::at(clock.now().plus(Duration::from_secs(3601)));
+    let run = block_on(erase_due(&ports, &later, 10)).unwrap();
+    assert_eq!(run.progress.done, 1);
+    assert_eq!(
+        run.failed,
+        [(
+            ana_id(),
+            CommandError::Repo(hypha_core::RepoError::StaleVersion)
+        )]
+    );
+    let erased = |id| {
+        block_on(ports.customers.get(id))
+            .unwrap()
+            .unwrap()
+            .is_erased()
+    };
+    assert!(erased(bo_id));
+    assert!(!erased(ana_id()));
 }

@@ -7,14 +7,14 @@ use crate::Category;
 /// Uniqueness rules a `CategoryRepo` enforces, reported as `RepoError::Duplicate(key)`.
 pub mod keys {
     pub const CATEGORY_ID: &str = "category_id";
-    /// Handles are unique store-wide, so a category keeps its URL when it moves (CA6).
+    /// Handles are unique store-wide, so a category keeps its URL when it moves.
     pub const CATEGORY_HANDLE: &str = "category_handle";
 }
 
 /// Categories, plus the products in each (their membership).
 ///
 /// Membership is read and written in batches, like publications. A storefront lists a
-/// category's products through search (design note 0022, section 3), not here.
+/// category's products through search, not here.
 #[allow(async_fn_in_trait)]
 pub trait CategoryRepo {
     async fn get(&self, id: CategoryId) -> Result<Option<Category>, RepoError>;
@@ -22,9 +22,9 @@ pub trait CategoryRepo {
     /// Every category, in no particular order: a store has tens or hundreds, and
     /// `CategoryTree` orders them.
     async fn list_all(&self) -> Result<Vec<Category>, RepoError>;
-    /// The categories whose custom field values match every one of `fields` (design
-    /// note 0033, §7; checked against their definitions by `hypha-custom-fields`), in no
-    /// particular order; every category when `fields` is empty.
+    /// The categories whose custom field values match every one of `fields` (checked
+    /// against their definitions by `hypha-custom-fields`), in no particular order; every
+    /// category when `fields` is empty.
     async fn list_with_fields(&self, fields: &[FieldFilter]) -> Result<Vec<Category>, RepoError>;
     /// Stores a new category (version 1). Enforces `keys`.
     async fn insert(&self, category: &mut Category) -> Result<(), RepoError>;
@@ -43,7 +43,7 @@ pub trait CategoryRepo {
         category: CategoryId,
         products: &[ProductId],
     ) -> Result<(), RepoError>;
-    /// A page of the products directly in the category, newest first (0012).
+    /// A page of the products directly in the category, newest first.
     async fn product_page(
         &self,
         category: CategoryId,

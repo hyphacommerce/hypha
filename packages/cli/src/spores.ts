@@ -1,10 +1,10 @@
-// Spores (design note 0030, §9): Rust crates compiled into the deployment's API. A
-// first-party spore (this repository's `spores/<name>`, `"stripe"` in `hypha.json`) is a
-// Cargo feature of the hosts (`spore-<name>`); any other is a crate from git, crates.io
-// or a path, which needs host crates of the deployment's own, written next to this
-// checkout (so Docker's build context holds both) and built instead of the stock ones:
-// the native host (`writeHostCrate`: a server's API, and Cloudflare's `setup` tool) and
-// the Worker (`writeWorkerCrate`).
+// Spores: Rust crates compiled into the deployment's API. A first-party spore (this
+// repository's `spores/<name>`, `"stripe"` in `hypha.json`) is a Cargo feature of the
+// hosts (`spore-<name>`); any other is a crate from git, crates.io or a path, which
+// needs host crates of the deployment's own, written next to this checkout (so Docker's
+// build context holds both) and built instead of the stock ones: the native host
+// (`writeHostCrate`: a server's API, and Cloudflare's `setup` tool) and the Worker
+// (`writeWorkerCrate`).
 
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -135,7 +135,7 @@ export function hostCrateDir(deploymentDir: string): string {
 export function hostCargoToml(dir: string, spores: SporeEntry[], deploymentDir = "."): string {
   const repo = (path: string) => JSON.stringify(relative(dir, join(REPO, path)));
   const lines = [
-    "# Written by `hypha deploy` from hypha.json's `spores` (design note 0030, §9): change",
+    "# Written by `hypha deploy` from hypha.json's `spores`: change",
     "# those, not this file.",
     "[package]",
     'name = "hypha-deployment"',
@@ -179,7 +179,7 @@ function crateEntry(macro: string, writer: string, spores: SporeEntry[]): string
     isFirstParty(s) ? [`hypha_spore_${s}::${s}_routes`] : s.routes ? [s.routes] : [],
   );
   return [
-    `//! Written by ${writer} from hypha.json's \`spores\` (design note 0030, §9).`,
+    `//! Written by ${writer} from hypha.json's \`spores\`.`,
     "",
     `${macro} {`,
     `    spores: [${types.join(", ")}],`,
@@ -215,8 +215,8 @@ function sporeDependencies(dir: string, spores: SporeEntry[], deploymentDir: str
   });
 }
 
-/** The Worker crate's `Cargo.toml` (design note 0030, §9): `hypha-host-workers` without
- * its stock Worker, `worker` (its `#[event]`s expand to `::worker`), every spore. */
+/** The Worker crate's `Cargo.toml`: `hypha-host-workers` without its stock Worker, `worker`
+ * (its `#[event]`s expand to `::worker`), every spore. */
 export function workerCargoToml(
   dir: string,
   spores: SporeEntry[],
@@ -224,7 +224,7 @@ export function workerCargoToml(
   deploymentDir = ".",
 ): string {
   return [
-    "# Written by `hypha deploy` from hypha.json's `spores` (design note 0030, §9): change",
+    "# Written by `hypha deploy` from hypha.json's `spores`: change",
     "# those, not this file.",
     "[package]",
     'name = "hypha-deployment-worker"',

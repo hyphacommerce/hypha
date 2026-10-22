@@ -409,6 +409,52 @@ fn a_payment_is_read_with_orders_read() {
         block_on(hypha_payments::get_payment(&Ctx::system(), &ports, missing)),
         Err(CommandError::PaymentNotFound(missing))
     );
+    let payments_only = Ctx::new(
+        Actor::User(UserId::from_uuid(Uuid::from_u128(1))),
+        vec![Scope::PaymentsWrite],
+    );
+    assert_eq!(
+        block_on(hypha_payments::get_payment(&payments_only, &ports, id)).map(|_| ()),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::OrdersRead
+        )))
+    );
+}
+
+#[test]
+fn acting_on_a_payment_needs_orders_write() {
+    use hypha_payments::{ActOnPayment, PaymentAction};
+    let ports = InMemoryPorts::default();
+    let gateway = Gateway::default();
+    let id = gateway_payment(&ports, |p| {
+        p.authorize(Some("pi_1".to_string())).unwrap();
+    });
+    let payments_only = Ctx::new(
+        Actor::User(UserId::from_uuid(Uuid::from_u128(1))),
+        vec![Scope::PaymentsWrite, Scope::OrdersRead],
+    );
+    let acted = block_on(hypha_payments::act_on_payment(
+        &payments_only,
+        &ports,
+        &SequentialIds::default(),
+        &(&gateway,),
+        ActOnPayment {
+            payment: id,
+            action: PaymentAction::Void,
+            amount: None,
+            idempotency_key: None,
+        },
+    ));
+    assert_eq!(
+        acted.map(|_| ()),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::OrdersWrite
+        )))
+    );
+    assert!(
+        gateway.asked.borrow().is_empty(),
+        "the provider isn't asked"
+    );
 }
 
 #[test]

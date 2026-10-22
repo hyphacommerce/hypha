@@ -1,5 +1,5 @@
-//! Staff users (design note 0008): the people who run the store. How they log in lives
-//! in their `hypha_auth::Identity`.
+//! Staff users: the people who run the store. How they log in lives in their
+//! `hypha_auth::Identity`.
 
 use hypha_core::{Email, RoleId, Timestamp, UserId, Version, Versioned, required_text};
 

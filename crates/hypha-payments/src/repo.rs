@@ -22,10 +22,10 @@ pub trait PaymentMethodRepo {
     /// Stores changes and bumps the version, or fails with `StaleVersion`.
     async fn update(&self, method: &mut PaymentMethod) -> Result<(), RepoError>;
     /// Removes `method` at the version it was loaded at, or fails with `StaleVersion`
-    /// (changed or gone since). Refused with `Reference(OPEN_PAYMENT_METHOD)` while an
-    /// open (`pending` or `authorized`) payment uses it, in the same step as the delete,
-    /// so a checkout racing it can't strand a payment (design note 0027, §7). Its other
-    /// payments keep its ID, name and provider.
+    /// (changed or gone since). Refused with `Reference(OPEN_PAYMENT_METHOD)` while an open
+    /// (`pending` or `authorized`) payment uses it, in the same step as the delete, so a
+    /// checkout racing it can't strand a payment. Its other payments keep its ID, name and
+    /// provider.
     async fn delete(&self, method: &PaymentMethod) -> Result<(), RepoError>;
 }
 
@@ -35,8 +35,7 @@ pub trait PaymentRepo {
     /// Every payment of `order`, newest first (by ID). An order has a handful.
     async fn list_for_order(&self, order: OrderId) -> Result<Vec<Payment>, RepoError>;
     /// Every payment started for `cart`, newest first (by ID): the ones checkout started
-    /// before the order (design note 0031), and the order's own once placed. A cart has
-    /// a handful.
+    /// before the order, and the order's own once placed. A cart has a handful.
     async fn list_for_cart(&self, cart: CartId) -> Result<Vec<Payment>, RepoError>;
     /// Stores a new payment (version 1). Enforces `PAYMENT_ID`. Workflows insert
     /// through `StagePayments` instead, with the order.

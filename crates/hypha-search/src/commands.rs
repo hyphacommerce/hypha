@@ -1,7 +1,6 @@
-//! Searching a market (design note 0019, SE6): the shopper's country picks the market.
-//! Changing the settings checks custom field facets here (design note 0033, §9: the
-//! leaf can't see definitions), then is `hypha_search_index`'s, as are reindex and
-//! status.
+//! Searching a market: the shopper's country picks the market. Changing the settings checks
+//! custom field facets here (the leaf can't see definitions), then is
+//! `hypha_search_index`'s, as are reindex and status.
 
 use std::collections::BTreeMap;
 
@@ -68,7 +67,7 @@ pub struct SearchInput {
     pub price_min: Option<i64>,
     pub price_max: Option<i64>,
     pub available: Option<bool>,
-    /// Only products in this category or below it (design note 0022, CA3).
+    /// Only products in this category or below it.
     pub category: Option<CategoryId>,
     pub sort: Sort,
     pub group: Group,
@@ -84,16 +83,16 @@ pub struct Found {
     /// The labels of the facets in `results`, where the merchant set one.
     pub labels: BTreeMap<FacetKey, String>,
     /// The value labels of `choice` and `boolean` field facets in `results`, by stored
-    /// value: a choice's label, "Yes"/"No" (design note 0033, §9: filters use values).
+    /// value: a choice's label, "Yes"/"No" (filters use values).
     pub value_labels: BTreeMap<FacetKey, BTreeMap<String, String>>,
 }
 
 /// How many default option facets a search counts (the most used options).
 pub const DEFAULT_OPTION_FACETS: usize = 5;
 
-/// Searches the market serving `input.country` (design note 0019, SE6). The facets
-/// counted are the merchant's (`SearchSettings::facets`), else product type, vendor,
-/// the market's most used options and tags.
+/// Searches the market serving `input.country`. The facets counted are the merchant's
+/// (`SearchSettings::facets`), else product type, vendor, the market's most used options
+/// and tags.
 pub async fn search<
     S: HasMarkets + HasSearchSettings + HasCategories + HasCustomFieldDefinitions,
     I: SearchIndex,
@@ -154,8 +153,8 @@ pub async fn search<
         (facets, labels)
     };
 
-    // A storefront (a caller with a channel) sees only shown categories (CA4); staff
-    // may filter by any.
+    // A storefront (a caller with a channel) sees only shown categories; staff may filter
+    // by any.
     if let Some(category) = input.category {
         let tree = CategoryTree::new(ports.categories().list_all().await?);
         let usable = match ctx.channel() {

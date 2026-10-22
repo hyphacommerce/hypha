@@ -1,8 +1,8 @@
 import { bindings, defineConfig, defineWorker } from "cf/config";
 
-// What `hypha deploy --target cloudflare` passes in (design note 0026, §5): the Worker's
-// name and account, its domain, the API Worker to bind. Without them (`pnpm admin:dev`,
-// `vite preview`), a local Worker as before.
+// What `hypha deploy --target cloudflare` passes in: the Worker's name and account, its
+// domain, the API Worker to bind. Without them (`pnpm admin:dev`, `vite preview`), a
+// local Worker as before.
 const deploy = process.env;
 const api = deploy.HYPHA_CF_API_WORKER;
 

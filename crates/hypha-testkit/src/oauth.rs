@@ -1,6 +1,5 @@
-//! OAuth's requests, codes and tokens in memory (design note 0029), with the
-//! database's rules: unique token hashes, a code's request and a token's app must
-//! exist, an app's tokens go with it.
+//! OAuth's requests, codes and tokens in memory, with the database's rules: unique token
+//! hashes, a code's request and a token's app must exist, an app's tokens go with it.
 
 use std::{
     collections::HashMap,

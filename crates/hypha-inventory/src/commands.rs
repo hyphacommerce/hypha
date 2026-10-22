@@ -99,10 +99,10 @@ pub async fn list_locations<L: LocationRepo>(
 pub const DEFAULT_LOCATION_NAME: &str = "Default";
 
 /// Creates a location named `DEFAULT_LOCATION_NAME`, serving no market yet, if the store
-/// has none (design note 0018): a fulfilment leaves from a location, so a store that
-/// never set up stock can ship too. Hosts call it at startup, as the system; returns the
-/// new location, or `None` when there was one already. Two instances starting at once
-/// may each create one; the merchant renames or keeps both.
+/// has none: a fulfilment leaves from a location, so a store that never set up stock can
+/// ship too. Hosts call it at startup, as the system; returns the new location, or `None`
+/// when there was one already. Two instances starting at once may each create one; the
+/// merchant renames or keeps both.
 pub async fn ensure_default_location<L: LocationRepo, I: IdGenerator>(
     ctx: &Ctx,
     locations: &L,
@@ -235,8 +235,7 @@ pub async fn get_inventory_item<R: InventoryItemRepo>(
     load_item(items, id).await
 }
 
-/// The variant's item, or `None` if stock was never set up for it, which means
-/// untracked (design note 0004, I3).
+/// The variant's item, or `None` if stock was never set up for it, which means untracked.
 pub async fn get_variant_inventory<R: InventoryItemRepo>(
     ctx: &Ctx,
     items: &R,
@@ -287,7 +286,7 @@ pub struct SetOnHand {
     pub item: InventoryItemId,
     pub location: LocationId,
     pub quantity: i64,
-    /// The count the caller last saw; the change is refused if it moved since (I10).
+    /// The count the caller last saw; the change is refused if it moved since.
     pub expected: Option<i64>,
 }
 
@@ -358,76 +357,14 @@ async fn load_item<R: InventoryItemRepo>(
 
 // ---------- reservations ----------
 
-pub struct ReserveStock {
-    /// The buyer's market: only locations serving it supply the stock.
-    pub market: MarketId,
-    pub lines: Vec<ReserveLine>,
-}
-
-pub struct ReserveLine {
-    /// Identifies this reservation (later the order line), so a retry is a no-op (I8).
-    pub reference: String,
-    pub variant: VariantId,
-    pub quantity: u32,
-}
-
-/// Reserves stock for every line, **all or nothing** (design note 0004, section 3).
-///
-/// Reads the items and the market's locations without locks, allocates in domain code,
-/// then writes every changed item in one `update_many`. If another checkout changed one
-/// of them in between, the write fails with `StaleVersion` and the whole attempt runs
-/// again on fresh data, up to `MAX_ATTEMPTS` times. A real shortage then shows up as
-/// `OutOfStock` (listing every short line), not as a conflict.
-///
-/// Variants without an item, or with tracking off, need no stock and reserve nothing.
-pub async fn reserve_stock<R: InventoryItemRepo, L: LocationRepo>(
-    ctx: &Ctx,
-    items: &R,
-    locations: &L,
-    input: ReserveStock,
-) -> Result<(), CommandError> {
-    ctx.require(Scope::InventoryWrite)?;
-
-    let lines = input
-        .lines
-        .iter()
-        .map(|l| {
-            Ok((
-                ReservationRef::new(&l.reference)?,
-                l.variant,
-                Quantity::new(l.quantity)?,
-            ))
-        })
-        .collect::<Result<Vec<_>, InventoryError>>()?;
-    reject_duplicate_lines(
-        lines
-            .iter()
-            .map(|(reference, variant, _)| (reference, *variant)),
-    )?;
-    let variants = &distinct(lines.iter().map(|(_, variant, _)| *variant));
-    let lines = &lines;
-    let market = input.market;
-
-    retry_on_conflict(
-        move || async move {
-            let serving = locations.serving(market).await?;
-            let mut stock = by_variant(items.for_variants(variants).await?);
-            let changed = reserve_lines(&mut stock, &serving, lines)?;
-            write_changed(items, &mut stock, &changed).await
-        },
-        lost_a_race,
-    )
-    .await
-}
-
 /// Reserves every line on `stock` (items by variant) from the `serving` locations, in
-/// memory, and returns the variants whose items changed; the caller writes those. A
-/// variant without an item is untracked and skipped, and a reference already reserved
-/// changes nothing (I8).
+/// memory, and returns the variants whose items changed; the caller writes those. A variant
+/// without an item is untracked and skipped, and a reference already reserved changes
+/// nothing.
 ///
 /// All or nothing for the caller: if any line is short, the result is `OutOfStock`
 /// listing every short line, and `stock` may be partly changed, so the caller discards
-/// it. `reserve_stock` and checkout both reserve through this.
+/// it. Checkout reserves through this, in its own batch.
 pub fn reserve_lines(
     stock: &mut HashMap<VariantId, InventoryItem>,
     serving: &[Location],
@@ -461,121 +398,138 @@ pub fn reserve_lines(
     Ok(changed)
 }
 
-pub struct ReleaseStock {
-    pub lines: Vec<ReleaseLine>,
-}
-
-pub struct ReleaseLine {
-    pub reference: String,
-    pub variant: VariantId,
-}
-
-/// Gives back what `reserve_stock` reserved for each line, all or nothing, retried
-/// like `reserve_stock`. Releasing something that isn't reserved is not an error, so a
-/// retried or duplicate release is harmless. A retired item left with nothing reserved
-/// is deleted (design note 0016, Q5), as every path that releases stock does.
-pub async fn release_stock<R: InventoryItemRepo>(
-    ctx: &Ctx,
-    items: &R,
-    input: ReleaseStock,
-) -> Result<(), CommandError> {
-    ctx.require(Scope::InventoryWrite)?;
-
-    let lines = input
-        .lines
-        .iter()
-        .map(|l| Ok((ReservationRef::new(&l.reference)?, l.variant)))
-        .collect::<Result<Vec<_>, InventoryError>>()?;
-    reject_duplicate_lines(
-        lines
-            .iter()
-            .map(|(reference, variant)| (reference, *variant)),
-    )?;
-    let variants = &distinct(lines.iter().map(|(_, variant)| *variant));
-    let lines = &lines;
-
-    retry_on_conflict(
-        move || async move {
-            let mut stock = by_variant(items.for_variants(variants).await?);
-            let mut changed = HashSet::new();
-            for (reference, variant) in lines {
-                if let Some(item) = stock.get_mut(variant)
-                    && item.release(reference)
-                {
-                    changed.insert(*variant);
-                }
-            }
-            // The removed variants' items go once spent; their variants are gone, so
-            // nothing reserves them again meanwhile.
-            let spent: Vec<VariantId> = changed
-                .iter()
-                .filter(|v| stock.get(v).is_some_and(InventoryItem::is_spent))
-                .copied()
-                .collect();
-            for variant in &spent {
-                changed.remove(variant);
-            }
-            write_changed(items, &mut stock, &changed).await?;
-            for variant in &spent {
-                if let Some(mut item) = stock.remove(variant) {
-                    item.delete()?;
-                    items.delete(&mut item).await?;
-                }
-            }
-            Ok(())
-        },
-        lost_a_race,
-    )
-    .await
-}
-
-/// A request may name each (reference, variant) once: a second line would be silently
-/// swallowed by the idempotency path (review plan B5).
-fn reject_duplicate_lines<'a>(
-    lines: impl Iterator<Item = (&'a ReservationRef, VariantId)>,
-) -> Result<(), InventoryError> {
-    let mut seen = HashSet::new();
-    for (reference, variant) in lines {
-        if !seen.insert((reference, variant)) {
-            return Err(InventoryError::DuplicateLine {
-                reference: reference.clone(),
-                variant,
-            });
-        }
-    }
-    Ok(())
-}
-
-fn distinct(variants: impl Iterator<Item = VariantId>) -> Vec<VariantId> {
-    let mut seen = HashSet::new();
-    variants.filter(|v| seen.insert(*v)).collect()
-}
-
-fn by_variant(items: Vec<InventoryItem>) -> HashMap<VariantId, InventoryItem> {
-    items.into_iter().map(|i| (i.variant(), i)).collect()
-}
-
-/// One atomic write of the items that changed (none: no write at all).
-async fn write_changed<R: InventoryItemRepo>(
-    items: &R,
-    stock: &mut HashMap<VariantId, InventoryItem>,
-    changed: &HashSet<VariantId>,
-) -> Result<(), CommandError> {
-    let mut write: Vec<InventoryItem> = changed
-        .iter()
-        .filter_map(|variant| stock.remove(variant))
-        .collect();
-    if write.is_empty() {
-        return Ok(());
-    }
-    // A stable order, so adapters always touch rows in the same sequence.
-    write.sort_by_key(|i| i.id().as_uuid());
-    items.update_many(&mut write).await?;
-    Ok(())
-}
-
-/// A stock write lost a race (design note 0004, section 3): the attempt runs again on
-/// fresh data, up to `MAX_ATTEMPTS` times.
+/// A stock write lost a race: the attempt runs again on fresh data, up to `MAX_ATTEMPTS`
+/// times.
 fn lost_a_race(e: &CommandError) -> bool {
     matches!(e, CommandError::Repo(RepoError::StaleVersion))
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::*;
+
+    fn market() -> MarketId {
+        MarketId::from_uuid(Uuid::from_u128(1))
+    }
+
+    fn loc(n: u128) -> LocationId {
+        LocationId::from_uuid(Uuid::from_u128(100 + n))
+    }
+
+    fn vid(n: u128) -> VariantId {
+        VariantId::from_uuid(Uuid::from_u128(200 + n))
+    }
+
+    /// Location 1 serves the market; location 3, which serves another, is left out.
+    fn serving() -> Vec<Location> {
+        vec![Location::new(loc(1), "Zagreb".to_string(), vec![market()], 0).unwrap()]
+    }
+
+    /// Tracked items, each variant's stock as (location, on hand).
+    fn stock(items: &[(u128, &[(u128, i64)])]) -> HashMap<VariantId, InventoryItem> {
+        items
+            .iter()
+            .map(|(n, levels)| {
+                let id = InventoryItemId::from_uuid(Uuid::from_u128(300 + n));
+                let mut item = InventoryItem::new(id, vid(*n), true, false);
+                for (location, on_hand) in *levels {
+                    item.set_on_hand(loc(*location), *on_hand, None).unwrap();
+                }
+                (vid(*n), item)
+            })
+            .collect()
+    }
+
+    fn line(
+        reference: &str,
+        variant: u128,
+        quantity: u32,
+    ) -> (ReservationRef, VariantId, Quantity) {
+        (
+            ReservationRef::new(reference).unwrap(),
+            vid(variant),
+            Quantity::new(quantity).unwrap(),
+        )
+    }
+
+    fn shortage(variant: u128, requested: u32, available: i64) -> Shortage {
+        Shortage {
+            variant: vid(variant),
+            requested,
+            available,
+        }
+    }
+
+    #[test]
+    fn every_short_line_is_reported() {
+        let mut items = stock(&[(1, &[(1, 5)]), (2, &[(1, 1)]), (3, &[])]);
+        assert_eq!(
+            reserve_lines(
+                &mut items,
+                &serving(),
+                &[line("ol-1", 1, 2), line("ol-2", 2, 3), line("ol-3", 3, 1)]
+            ),
+            Err(CommandError::OutOfStock {
+                lines: vec![shortage(2, 3, 1), shortage(3, 1, 0)]
+            })
+        );
+    }
+
+    #[test]
+    fn two_lines_of_one_variant_share_its_stock() {
+        let mut items = stock(&[(1, &[(1, 3)])]);
+        assert_eq!(
+            reserve_lines(
+                &mut items,
+                &serving(),
+                &[line("ol-1", 1, 2), line("ol-2", 1, 2)]
+            ),
+            Err(CommandError::OutOfStock {
+                lines: vec![shortage(1, 2, 1)]
+            })
+        );
+    }
+
+    #[test]
+    fn variants_without_tracked_stock_need_nothing() {
+        let mut items = stock(&[(1, &[])]);
+        items.get_mut(&vid(1)).unwrap().set_tracked(false);
+        // Variant 1 is untracked, variant 9 has no item at all.
+        assert_eq!(
+            reserve_lines(
+                &mut items,
+                &serving(),
+                &[line("ol-1", 1, 100), line("ol-2", 9, 100)]
+            ),
+            Ok(HashSet::new())
+        );
+    }
+
+    #[test]
+    fn reserving_again_changes_nothing() {
+        let mut items = stock(&[(1, &[(1, 2)])]);
+        let lines = [line("ol-1", 1, 2)];
+        assert_eq!(
+            reserve_lines(&mut items, &serving(), &lines),
+            Ok(HashSet::from([vid(1)]))
+        );
+        assert_eq!(
+            reserve_lines(&mut items, &serving(), &lines),
+            Ok(HashSet::new())
+        );
+        assert_eq!(items[&vid(1)].reservations().len(), 1);
+    }
+
+    #[test]
+    fn stock_in_another_market_does_not_count() {
+        let mut items = stock(&[(1, &[(1, 1), (3, 50)])]);
+        assert_eq!(
+            reserve_lines(&mut items, &serving(), &[line("ol-1", 1, 2)]),
+            Err(CommandError::OutOfStock {
+                lines: vec![shortage(1, 2, 1)]
+            })
+        );
+    }
 }

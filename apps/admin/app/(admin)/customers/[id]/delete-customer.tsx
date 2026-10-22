@@ -1,7 +1,7 @@
 "use client";
 
-// Deleting a customer (design note 0032, CD7): only one without orders; with orders the
-// button isn't shown and erasure takes its place.
+// Deleting a customer: only one without orders; with orders the button isn't shown and
+// erasure takes its place.
 
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Button } from "@astryxdesign/core/Button";

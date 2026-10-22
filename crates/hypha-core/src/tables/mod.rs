@@ -1,6 +1,6 @@
-//! Reference tables compiled into core (design note 0021): plain sorted arrays, so they
-//! cost no I/O, build for wasm and are searched with `binary_search`. Regenerate them
-//! with `node scripts/reference-tables.mjs`; never edit the generated files by hand.
+//! Reference tables compiled into core: plain sorted arrays, so they cost no I/O, build for
+//! wasm and are searched with `binary_search`. Regenerate them with `node
+//! scripts/reference-tables.mjs`; never edit the generated files by hand.
 
 mod countries;
 mod currencies;

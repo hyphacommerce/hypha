@@ -1,7 +1,7 @@
 "use client";
 
-// The store's email templates (design note 0028, §7): the layout, the customer's and the
-// staff's, each with its state, a switch where it can be off, and a link to its editor.
+// The store's email templates: the layout, the customer's and the staff's, each with its
+// state, a switch where it can be off, and a link to its editor.
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";

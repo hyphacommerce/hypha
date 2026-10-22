@@ -1,6 +1,5 @@
-// The category tree as the admin's screens use it (design note 0022): the API's nested
-// tree flattened into rows, with the paths pickers show. Shared by server and client
-// components.
+// The category tree as the admin's screens use it: the API's nested tree flattened
+// into rows, with the paths pickers show. Shared by server and client components.
 
 import type { AdminSchemas } from "@hypha/sdk/admin";
 
@@ -91,7 +90,7 @@ export function toHandle(name: string): string {
 }
 
 /** The two visibility choices, Hidden first: a new category starts hidden unless the
- * merchant says otherwise, and the request always states which (CA10). */
+ * merchant says otherwise, and the request always states which. */
 export const VISIBILITY = [
   { value: "hidden", label: "Hidden", description: "The storefront doesn't show it yet." },
   { value: "visible", label: "Visible", description: "Shown in the storefront." },

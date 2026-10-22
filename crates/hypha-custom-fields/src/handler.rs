@@ -1,7 +1,7 @@
-//! `CustomFieldCleanup` (design note 0033, §6.3): values have no foreign key to their
-//! owners (they live in other modules' tables) nor to what references point at, so
-//! deletions are followed by event. Eventually consistent, like search sync: readers
-//! ignore values whose owner doesn't load and tolerate dangling references meanwhile.
+//! `CustomFieldCleanup`: values have no foreign key to their owners (they live in other
+//! modules' tables) nor to what references point at, so deletions are followed by event.
+//! Eventually consistent, like search sync: readers ignore values whose owner doesn't load
+//! and tolerate dangling references meanwhile.
 
 use std::collections::BTreeMap;
 

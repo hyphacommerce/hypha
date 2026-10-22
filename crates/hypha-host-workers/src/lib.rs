@@ -1,7 +1,6 @@
-//! Hypha's API on Cloudflare Workers (design note 0026): `hypha-http`'s routes, as on the
-//! VPS, over Postgres through Hyperdrive, with the runtime's clock, randomness and
-//! `fetch`. The database is set up beforehand (W9: `hypha-host-axum setup`, which
-//! `hypha deploy` runs): this Worker runs no migrations and creates no store.
+//! Hypha's API on Cloudflare Workers: `hypha-http`'s routes, as on the VPS, over Postgres through Hyperdrive,
+//! with the runtime's clock, randomness and `fetch`. The database is set up beforehand (`hypha-host-axum
+//! setup`, which `hypha deploy` runs): this Worker runs no migrations and creates no store.
 //!
 //! An isolate builds its `AppState` and router once, on its first event (`Isolate`), and
 //! serves every request with them: the configuration, the store, recently authenticated
@@ -9,24 +8,21 @@
 //! `waitUntil`, whether it wrote) reaches the shared state through `Scoped`, which makes
 //! the event current while its future is polled.
 //!
-//! Jobs run after each write that gave them work (W6: events committed, a delivery
-//! retried, an email queued; the ports say so through `AfterWrites`, the mail host
-//! through `MailQueued`) and on a cron tick that touches the database only when
-//! KV's marks say there's work (W7, `marks`), so an idle serverless database can sleep.
+//! Jobs run after each write that gave them work (events committed, a delivery retried, an email queued; the
+//! ports say so through `AfterWrites`, the mail host through `MailQueued`) and on a cron tick that touches the
+//! database only when KV's marks say there's work (`marks`), so an idle serverless database can sleep.
 //!
 //! The portable parts (`app_bindings`, `ids`, `limiter`, `marks`, `peer`, `schedule`) build natively, so their
 //! tests run with the workspace's; the rest is Workers only.
 //!
-//! Like the native host, it's a library plus a macro (design note 0030, §9):
-//! `hypha_host_workers::worker! { spores: [...] }` declares the deployment's type, expands
-//! its router with the concrete spore types (axum must prove the handlers' futures
-//! `Send`, which it can only do for concrete types) and the Worker's `fetch` and
-//! `scheduled` events, which run `fetch::<Deployment>` and `scheduled::<Deployment>`.
-//! This crate's own Worker is `worker! { spores: [] }`, behind the default `stock`
-//! feature; a deployment with spores builds its own crate (which depends on `worker`
-//! too, since `#[event]` names it) with `default-features = false`, so the events are
-//! exported once. The database is set up by a native host built with the same spores
-//! (its `setup` migrates and registers them).
+//! Like the native host, it's a library plus a macro: `hypha_host_workers::worker! { spores: [...] }` declares
+//! the deployment's type, expands its router with the concrete spore types (axum must prove the handlers'
+//! futures `Send`, which it can only do for concrete types) and the Worker's `fetch` and `scheduled` events,
+//! which run `fetch::<Deployment>` and `scheduled::<Deployment>`. This crate's own Worker is `worker! {
+//! spores: [] }`, behind the default `stock` feature; a deployment with spores builds its own crate (which
+//! depends on `worker` too, since `#[event]` names it) with `default-features = false`, so the events are
+//! exported once. The database is set up by a native host built with the same spores (its `setup` migrates and
+//! registers them).
 
 pub mod app_bindings;
 pub mod ids;
@@ -38,20 +34,16 @@ pub mod schedule;
 #[cfg(target_arch = "wasm32")]
 mod email;
 #[cfg(target_arch = "wasm32")]
-mod handlers;
-#[cfg(target_arch = "wasm32")]
 mod log;
-#[cfg(target_arch = "wasm32")]
-mod payments;
 #[cfg(target_arch = "wasm32")]
 mod platform;
 #[cfg(target_arch = "wasm32")]
 mod storage;
 
 #[cfg(target_arch = "wasm32")]
-pub use handlers::CoreHandlers;
+pub use hypha_http::handlers::CoreHandlers;
 #[cfg(target_arch = "wasm32")]
-pub use payments::CoreProviders;
+pub use hypha_http::payments::CoreProviders;
 #[cfg(target_arch = "wasm32")]
 pub use storage::{HandlersOf, ProvidersOf, WorkersPorts, WorkersStorage};
 #[cfg(target_arch = "wasm32")]
@@ -111,9 +103,8 @@ macro_rules! deployment {
     };
 }
 
-/// The Worker, built with `spores` (design note 0030, §9): its crate's whole `lib.rs`
-/// (`crate-type = ["cdylib"]`, depending on `worker` and on this crate with
-/// `default-features = false`).
+/// The Worker, built with `spores`: its crate's whole `lib.rs` (`crate-type = ["cdylib"]`,
+/// depending on `worker` and on this crate with `default-features = false`).
 ///
 /// ```ignore
 /// hypha_host_workers::worker! { spores: [hypha_spore_stripe::Stripe] }
@@ -157,8 +148,8 @@ mod stock {
     crate::worker! { spores: [] }
 }
 
-/// This workspace's Worker with the first-party Stripe spore (design note 0030, §9):
-/// `--features spore-stripe`, as the native host.
+/// This workspace's Worker with the first-party Stripe spore: `--features spore-stripe`, as
+/// the native host.
 #[cfg(all(target_arch = "wasm32", feature = "stock", feature = "spore-stripe"))]
 mod stock_with_stripe {
     crate::worker! {
@@ -235,8 +226,7 @@ mod worker_main {
         static LAST_DUE: Cell<Option<u64>> = const { Cell::new(None) };
     }
 
-    /// The KV namespace holding the jobs' marks (W7). Without one, every tick runs the
-    /// jobs.
+    /// The KV namespace holding the jobs' marks. Without one, every tick runs the jobs.
     const JOBS_KV: &str = "JOBS";
 
     /// What belongs to one event: its `waitUntil`, and whether a write in it gave the
@@ -312,16 +302,16 @@ mod worker_main {
             .map_err(|_| "the isolate was set up for another deployment".to_string())
     }
 
-    /// Reads the configuration (design note 0026, W11: `HYPHA_CONFIG` holds the TOML
-    /// itself, under the Worker's variables, as `hypha-config` reads the environment
-    /// natively), finds the store and builds the state and the router.
+    /// Reads the configuration (`HYPHA_CONFIG` holds the TOML itself, under the Worker's
+    /// variables, as `hypha-config` reads the environment natively), finds the store and
+    /// builds the state and the router.
     async fn set_up<D: Deployment>(env: Env) -> Result<Rc<Isolate<D>>, String> {
         let level = env_string(&env, "HYPHA_LOG")
             .and_then(|l| l.parse().ok())
             .unwrap_or(tracing::Level::INFO);
         crate::log::init(level);
-        // The native host's checks (design note 0030): a bad spore list stops the
-        // isolate before it touches the database.
+        // The native host's checks: a bad spore list stops the isolate before it touches
+        // the database.
         let problems = hypha_spore_core::check::<D::Spores>();
         if !problems.is_empty() {
             return Err(format!("this build's spores:\n{}", problems.join("\n")));
@@ -336,12 +326,12 @@ mod worker_main {
             .map_err(|e| format!("HYPHA_SECRET_KEY: {e}"))?;
         // Built now so a missing key (or `smtp`) stops setup.
         let mail_sender = email::email_sender(&config.email, |name| env_string(&env, name))?;
-        // Co-located apps' hosts and their Service Bindings (design note 0029, §9).
+        // Co-located apps' hosts and their Service Bindings.
         let app_bindings = crate::app_bindings::AppBindings::parse(
             &env_string(&env, crate::app_bindings::VAR).unwrap_or_default(),
         )?;
         let runtime = platform::runtime();
-        // One store per deployment (design note 0006, model A), made by setup.
+        // One store per deployment (model A), made by setup.
         let stores = crate::storage::store(&env, &runtime.clock)
             .await
             .map_err(|_| "cannot reach the database".to_string())?
@@ -382,7 +372,7 @@ mod worker_main {
             return Err(problems.join("\n"));
         }
         // Each spore is built with the host's capabilities and its `[spores.<name>]`
-        // section (design note 0030, §4); its HTTP goes through `fetch`, as apps' calls.
+        // section; its HTTP goes through `fetch`, as apps' calls.
         let outbound = hypha_http::outbound::OutboundPolicy {
             allow_private: config.allow_private_callbacks,
         };
@@ -494,7 +484,7 @@ mod worker_main {
                 ));
             }
         }
-        // Their custom fields too (design note 0033, §8): `setup` synced them.
+        // Their custom fields too: `setup` synced them.
         let stale = hypha_spore_core::custom_fields_out_of_sync::<D::Spores, _>(&ports).await?;
         if !stale.is_empty() {
             return Err(format!(
@@ -515,8 +505,8 @@ mod worker_main {
         })
     }
 
-    /// The Rate Limiting bindings (W8), at `rule as usize`; a rule without one counts
-    /// in the isolate only, with a warning.
+    /// The Rate Limiting bindings, at `rule as usize`; a rule without one counts in the
+    /// isolate only, with a warning.
     fn rate_limit_bindings(env: &Env) -> [Option<RateLimiter>; Rule::ALL.len()] {
         Rule::ALL.map(|rule| {
             let name = rule.binding();
@@ -595,10 +585,9 @@ mod worker_main {
         }
         let mut app = isolate.app.clone();
         let response = Scoped::new(&event, app.call(req)).await?;
-        // A write's events go out after its response (W6), as the VPS's runner wakes. A
-        // request whose writes recorded none (a cart's) runs nothing: its run would find
-        // nothing and write no marks (`marks::after`), and what others left is the
-        // ticks' to find.
+        // A write's events go out after its response, as the VPS's runner wakes. A request
+        // whose writes recorded none (a cart's) runs nothing: its run would find nothing
+        // and write no marks (`marks::after`), and what others left is the ticks' to find.
         if event.wrote.get() {
             let state = Arc::clone(&isolate.state);
             let deadline = state.clock.now().plus(AFTER_RESPONSE);
@@ -752,10 +741,10 @@ mod worker_main {
         run
     }
 
-    /// A search sync step that says there's more while marks are queued after it
-    /// worked. A mark marked again while this run held it waits for the next run, which
-    /// natively is the next timer but here may be the safety net's tick (W7); marks
-    /// another run holds are that run's to finish, so the next step finds none and stops.
+    /// A search sync step that says there's more while marks are queued after it worked. A
+    /// mark marked again while this run held it waits for the next run, which natively is
+    /// the next timer but here may be the safety net's tick; marks another run holds are
+    /// that run's to finish, so the next step finds none and stops.
     async fn search_step<D: Deployment>(state: &AppState<WorkersStorage<D>>) -> Step {
         let ran = jobs::search_sync(state).await?;
         if ran.more || ran.idle {

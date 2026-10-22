@@ -1,4 +1,4 @@
-//! The mailer and the mail commands on the in-memory world (design note 0028, §4, §6).
+//! The mailer and the mail commands on the in-memory world.
 
 use hypha_core::{
     Actor, Address, AddressParts, ApiKeyId, AssetId, AuthError, CartId, ChannelId, CountryCode,
@@ -654,6 +654,49 @@ fn without_staff_recipients_only_the_buyer_is_emailed() {
     let records = records(&ports);
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].template(), TemplateKey::OrderConfirmation);
+}
+
+#[test]
+fn an_erased_buyer_is_skipped_while_staff_are_still_emailed() {
+    let ports = world();
+    set_staff_recipients(&ports, &["ops@fernandfield.example"]);
+    let placeholder = Email::placeholder(uuid(3300));
+    let mut order = block_on(ports.orders.get(order_id())).unwrap().unwrap();
+    assert!(order.redact(placeholder.clone()));
+    block_on(ports.orders.update(&mut order)).unwrap();
+    let env = TestEnv::new();
+    let records = mail_event(&env, &ports, &event(&ports, "order.placed")).unwrap();
+    let buyer = records
+        .iter()
+        .find(|r| r.template() == TemplateKey::OrderConfirmation)
+        .unwrap();
+    assert_eq!(
+        (buyer.status(), buyer.to(), buyer.error()),
+        (
+            NotificationStatus::Skipped,
+            &placeholder,
+            Some("the customer was erased")
+        )
+    );
+    let sent = env.sender.sent();
+    let to: Vec<&str> = sent.iter().map(|e| e.to.as_str()).collect();
+    assert_eq!(to, ["ops@fernandfield.example"]);
+}
+
+#[test]
+fn a_login_link_percent_encodes_the_email_and_the_code() {
+    assert_eq!(
+        hypha_mail::context::login_link(Some("https://shop.example"), "a+b@x.com", "12 3"),
+        "https://shop.example/account/login?email=a%2Bb%40x.com&code=12%203"
+    );
+}
+
+#[test]
+fn without_a_shop_url_a_login_link_is_empty() {
+    assert_eq!(
+        hypha_mail::context::login_link(None, "ana@example.hr", "123456"),
+        ""
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
-// The bridge's wire protocol, version 1 (design note 0029, §6.3; docs/apps/bridge.md):
-// what an embedded app page and the admin around it say over `postMessage`. Shared by
-// `@hypha/app-bridge` (the app's side) and `@hypha/app-bridge-host` (the admin's).
+// The bridge's wire protocol, version 1 (docs/apps/bridge.md): what an embedded app
+// page and the admin around it say over `postMessage`. Shared by `@hypha/app-bridge`
+// (the app's side) and `@hypha/app-bridge-host` (the admin's).
 
 export const PROTOCOL_VERSION = 1;
 

@@ -1,5 +1,5 @@
-//! The call log (`extension_calls`, design note 0029, §15): one row per call Hypha made
-//! to an app's extension point, shown to staff per app and pruned by age.
+//! The call log (`extension_calls`): one row per call Hypha made to an app's extension
+//! point, shown to staff per app and pruned by age.
 
 use core::time::Duration;
 
@@ -106,8 +106,7 @@ impl<T: HasExtensionCalls + ?Sized> HasExtensionCalls for &T {
     }
 }
 
-/// How long the call log is kept (`jobs.prune.extension_calls_after`, design note
-/// 0017).
+/// How long the call log is kept (`jobs.prune.extension_calls_after`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionSettings {
     pub keep_calls: Duration,
@@ -116,7 +115,7 @@ pub struct ExtensionSettings {
 impl Default for ExtensionSettings {
     fn default() -> Self {
         Self {
-            // As long as events and their deliveries (0016, Q7).
+            // As long as events and their deliveries.
             keep_calls: Duration::from_secs(30 * 24 * 3600),
         }
     }

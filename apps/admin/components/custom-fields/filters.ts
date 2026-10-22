@@ -1,7 +1,7 @@
-// Filterable custom fields as list filters (design note 0033, §7): a choice field offers
-// its choices (any of them), true/false fields a yes/no, the rest the value typed. The
-// URL parameter is the API's own, `field[custom.material]`; the list's server page
-// passes it on (`fieldQuery`).
+// Filterable custom fields as list filters: a choice field offers its choices (any of
+// them), true/false fields a yes/no, the rest the value typed. The URL parameter is the
+// API's own, `field[custom.material]`; the list's server page passes it on
+// (`fieldQuery`).
 
 import type { FilterDef } from "@/components/resource-table/resource-table";
 import { type Definition, filterParam, isFilterOffered, parseType } from "@/lib/custom-fields";

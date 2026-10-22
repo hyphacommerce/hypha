@@ -1,4 +1,4 @@
-//! Passwords and the hashing port (design note 0008, section 2).
+//! Passwords and the hashing port.
 
 use std::fmt;
 
@@ -100,9 +100,9 @@ impl fmt::Debug for PasswordHash {
 #[error("password hashing failed: {0}")]
 pub struct HashError(pub String);
 
-/// Slow password hashing, as a port (design note 0008, section 2). It's async so a host
-/// can move the work off its request threads (the axum host uses a blocking thread),
-/// and a Workers host could later hand it elsewhere.
+/// Slow password hashing, as a port. It's async so a host can move the work off its request
+/// threads (the axum host uses a blocking thread), and a Workers host could later hand it
+/// elsewhere.
 #[allow(async_fn_in_trait)]
 pub trait PasswordHasher {
     /// `salt` comes from `hypha_core::Random`, 16 bytes.

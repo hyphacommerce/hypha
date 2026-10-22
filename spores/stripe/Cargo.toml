@@ -3,10 +3,10 @@ name = "hypha-spore-stripe"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
-description = "Stripe payments built into Hypha's API (design note 0030, SP9): the payment provider, Stripe's webhook, the order.payment block and the storefront's <stripe-payment> element."
+description = "Stripe payments built into Hypha's API: the payment provider, Stripe's webhook, the order.payment block and the storefront's <stripe-payment> element."
 
-# A spore depends on the facade only (design note 0030, SP6), and builds for wasm
-# like every spore (SP8): Stripe is called through the host's HTTP client.
+# A spore depends on the facade only, and builds for wasm like every spore:
+# Stripe is called through the host's HTTP client.
 [dependencies]
 hypha-spore = { path = "../../crates/hypha-spore", features = ["http"] }
 serde.workspace = true

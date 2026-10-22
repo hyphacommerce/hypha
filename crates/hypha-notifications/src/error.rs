@@ -89,8 +89,8 @@ impl ErrorCode for TemplateError {
     }
 }
 
-/// Why a template didn't render (design note 0028, §2): what a preview shows and what a
-/// save is refused with when the template fails against its sample.
+/// Why a template didn't render: what a preview shows and what a save is refused with when
+/// the template fails against its sample.
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum RenderError {
     /// A syntax error, a variable the context lacks (undefined is strict), a filter

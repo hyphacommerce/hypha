@@ -1,7 +1,7 @@
-//! Stripe, built into Hypha's API (design note 0030, SP9): card payments (and every other
-//! Payment Element method) with no service of its own to host. Ported from the
-//! first-party Stripe app (`hypha-app-stripe`), which stays as the example of an
-//! external payment app; this is the recommended way to take cards.
+//! Stripe, built into Hypha's API: card payments (and every other Payment Element method)
+//! with no service of its own to host. Ported from the first-party Stripe app
+//! (`hypha-app-stripe`), which stays as the example of an external payment app; this is the
+//! recommended way to take cards.
 //!
 //! - **The provider** `spore_stripe` (`provider.rs`): starting a payment creates a
 //!   PaymentIntent (idempotency key: Hypha's payment ID) and answers the storefront's
@@ -38,15 +38,6 @@ use serde_json::{Map, Value, json};
 
 use crate::cancel::CancelIntents;
 use crate::provider::StripeProvider;
-
-/// Stripe's events to select for the webhook endpoint.
-pub const WEBHOOK_EVENTS: [&str; 5] = [
-    "payment_intent.succeeded",
-    "payment_intent.amount_capturable_updated",
-    "payment_intent.payment_failed",
-    "payment_intent.canceled",
-    "charge.refunded",
-];
 
 /// The spore.
 pub struct Stripe {
@@ -85,8 +76,8 @@ impl CaptureMode {
     }
 }
 
-/// The merchant's settings, as the spore reads them: secrets opened (design note 0030,
-/// §8). Every field is optional until the merchant saves them.
+/// The merchant's settings, as the spore reads them: secrets opened. Every field is
+/// optional until the merchant saves them.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Settings {
     #[serde(default)]

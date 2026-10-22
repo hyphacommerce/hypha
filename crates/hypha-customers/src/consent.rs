@@ -1,7 +1,6 @@
-//! Marketing consent (design note 0032, §5, CD4): per channel (email, SMS), a small state
-//! machine with its opt-in level, when it was given and from where. The newest
-//! `consented_at` wins, not the newest write, so a delayed sync can't overwrite a newer
-//! opt-out.
+//! Marketing consent: per channel (email, SMS), a small state machine with its opt-in
+//! level, when it was given and from where. The newest `consented_at` wins, not the newest
+//! write, so a delayed sync can't overwrite a newer opt-out.
 
 use hypha_core::{AppId, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -48,7 +47,7 @@ pub enum ConsentState {
     Pending,
     Subscribed,
     Unsubscribed,
-    /// Set only by erasure (design note 0032, §7.3).
+    /// Set only by erasure.
     Redacted,
 }
 
@@ -206,7 +205,7 @@ impl MarketingConsent {
         true
     }
 
-    /// Erasure (design note 0032, §7.3): the state says so, nothing else is kept.
+    /// Erasure: the state says so, nothing else is kept.
     pub(crate) fn redact(&mut self, now: Timestamp) {
         *self = MarketingConsent {
             state: ConsentState::Redacted,

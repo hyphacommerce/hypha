@@ -1,5 +1,5 @@
-//! How callers prove who they are (design note 0008): identities and their credentials,
-//! sessions, second factors, API keys and password resets.
+//! How callers prove who they are: identities and their credentials, sessions, second
+//! factors, API keys and password resets.
 //!
 //! A leaf domain: it knows principals only by their core IDs (`UserId`), and
 //! `hypha-users` composes it with staff users and roles.

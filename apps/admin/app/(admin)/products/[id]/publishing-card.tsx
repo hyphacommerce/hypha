@@ -10,8 +10,8 @@ import type { AdminSchemas } from "@hypha/sdk/admin";
 import type { Draft } from "./draft";
 
 /**
- * The channels a product is sold in (design note 0020): part of the editor's draft, saved
- * with the bar like its categories.
+ * The channels a product is sold in: part of the editor's draft, saved with the bar like
+ * its categories.
  */
 export function PublishingCard({
   channels,

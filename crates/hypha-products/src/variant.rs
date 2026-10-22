@@ -7,8 +7,7 @@ pub struct Variant {
     base_price: Price,
     selections: Vec<OptionValueId>,
     media: Option<AssetId>,
-    /// A fact about the product, read by shipping (design note 0015, SH11); `None` when
-    /// not entered.
+    /// A fact about the product, read by shipping; `None` when not entered.
     weight: Option<Weight>,
     /// `false` for what is never shipped (downloads, gift cards).
     requires_shipping: bool,

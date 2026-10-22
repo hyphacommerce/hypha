@@ -1,8 +1,7 @@
-//! Personal data leaves only for callers allowed to see it (design note 0029, AP10,
-//! §4.2). One place decides, per field, for every channel: admin responses (the DTO
-//! families below), webhook payloads (`event_data`), extension requests (`for_app`:
-//! `payments.start`'s `customer_email`, `shipping.rates`' destination) and, later, proxy
-//! headers.
+//! Personal data leaves only for callers allowed to see it. One place decides, per field,
+//! for every channel: admin responses (the DTO families below), webhook payloads
+//! (`event_data`), extension requests (`for_app`: `payments.start`'s `customer_email`,
+//! `shipping.rates`' destination) and, later, proxy headers.
 //!
 //! The rules:
 //! - A staff session (`Actor::User`) sees everything: staff work the store.
@@ -353,11 +352,10 @@ pub fn page(ctx: &Ctx, family: Family, page: impl Serialize) -> Result<Redacted,
     page_with_fields(ctx, family, page, &[])
 }
 
-/// `one` for a DTO carrying `custom_fields` (design note 0033, §5.2): `hidden` are the
-/// personal fields the caller may not read (`hypha_custom_fields::FieldsRead::redacted`,
-/// per request, since definitions are data). They're absent from its `custom_fields`
-/// and listed in its `redacted` as `custom_fields.<key>`, held or not, like every other
-/// personal field.
+/// `one` for a DTO carrying `custom_fields`: `hidden` are the personal fields the caller
+/// may not read (`hypha_custom_fields::FieldsRead::redacted`, per request, since
+/// definitions are data). They're absent from its `custom_fields` and listed in its
+/// `redacted` as `custom_fields.<key>`, held or not, like every other personal field.
 pub fn one_with_fields(
     ctx: &Ctx,
     family: Family,
@@ -454,13 +452,13 @@ pub fn is_custom_fields_event(event_type: &str) -> bool {
     event_type.ends_with(".custom_fields_updated")
 }
 
-/// A `<owner>.custom_fields_updated` event's `data` as `app` may receive it (design note
-/// 0033, §6.4): change entries for fields it may not read are dropped (another app's
-/// `private` field; a personal one without `customer_data:profile`; any field without
-/// the owner's read scope), judged by `definitions` as they are now, with the rules
-/// `hypha_custom_fields::read_access` applies to the app's own API calls. An entry
-/// whose definition is gone since stays only in the merchant's or the app's own
-/// namespace. `None` when no entry is left: the delivery isn't sent.
+/// A `<owner>.custom_fields_updated` event's `data` as `app` may receive it: change entries
+/// for fields it may not read are dropped (another app's `private` field; a personal one
+/// without `customer_data:profile`; any field without the owner's read scope), judged by
+/// `definitions` as they are now, with the rules `hypha_custom_fields::read_access` applies
+/// to the app's own API calls. An entry whose definition is gone since stays only in the
+/// merchant's or the app's own namespace. `None` when no entry is left: the delivery isn't
+/// sent.
 ///
 /// An app without a grant (made by hand) reads the records it subscribed to but no
 /// personal data, as its other webhooks.
@@ -719,7 +717,7 @@ mod tests {
         assert_eq!(all, destination());
     }
 
-    // ---------- custom fields (design note 0033, §5.2, §6.4) ----------
+    // ---------- custom fields ----------
 
     fn hidden(keys: &[&str]) -> Vec<FieldKey> {
         keys.iter().map(|k| FieldKey::parse(k).unwrap()).collect()

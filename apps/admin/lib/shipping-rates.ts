@@ -1,7 +1,7 @@
-// Shipping option rates as the admin edits them (design note 0015, section 3), and the
-// API's tagged `rate` both ways. One built-in rate in the API (a basis and tiers per
-// currency) is shown as the preset it matches: flat, free from an amount, tiers by
-// subtotal or by weight. Shared by server and client components.
+// Shipping option rates as the admin edits them, and the API's tagged `rate` both
+// ways. One built-in rate in the API (a basis and tiers per currency) is shown as the
+// preset it matches: flat, free from an amount, tiers by subtotal or by weight. Shared
+// by server and client components.
 
 import type { AdminSchemas } from "@hypha/sdk/admin";
 

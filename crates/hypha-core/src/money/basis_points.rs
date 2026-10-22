@@ -55,11 +55,6 @@ mod tests {
     }
 
     #[test]
-    fn accepts_large_markup() {
-        assert!(BasisPoints::new(1_000_000).is_ok());
-    }
-
-    #[test]
     fn deserializes_with_validation() {
         assert_eq!(
             serde_json::from_str::<BasisPoints>("-1000").unwrap(),

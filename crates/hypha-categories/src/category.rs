@@ -5,11 +5,10 @@ use hypha_core::{
 
 use crate::{CategoryError, events::Changes};
 
-/// A category of products (design note 0022, CA1): a name and handle, an optional
-/// description and image, its place in the tree (a parent and a position among its
-/// siblings), and whether the storefront shows it. Which products are in it is its
-/// membership (`CategoryRepo::add_products`), kept apart since it grows with the
-/// catalog.
+/// A category of products: a name and handle, an optional description and image, its place
+/// in the tree (a parent and a position among its siblings), and whether the storefront
+/// shows it. Which products are in it is its membership (`CategoryRepo::add_products`),
+/// kept apart since it grows with the catalog.
 ///
 /// The tree's rules (no cycles, the depth limit, dense sibling positions) span several
 /// categories, so they're checked by the commands on a `CategoryTree`; `place` only
@@ -38,7 +37,7 @@ pub struct NewCategory {
     pub description: Option<Description>,
     pub parent: Option<CategoryId>,
     pub position: u32,
-    /// Stated, never defaulted (CA10).
+    /// Stated, never defaulted.
     pub visible: bool,
 }
 
@@ -84,8 +83,8 @@ impl Category {
         }
     }
 
-    /// The image from the media library; `hypha-merchandising` sets it, together with
-    /// the asset's usage (design note 0022, Q5).
+    /// The image from the media library; `hypha-merchandising` sets it, together with the
+    /// asset's usage.
     pub fn set_image(&mut self, image: Option<AssetId>) {
         if image != self.image {
             self.image = image;
@@ -93,7 +92,7 @@ impl Category {
         }
     }
 
-    /// `false` hides it and everything below it from the storefront (CA4).
+    /// `false` hides it and everything below it from the storefront.
     pub fn set_visible(&mut self, visible: bool) {
         if visible != self.visible {
             self.visible = visible;
@@ -211,7 +210,7 @@ impl Stamped for Category {
     }
 }
 
-/// Plain-data form of a `Category` for storage adapters (design note 0001, 3.4).
+/// Plain-data form of a `Category` for storage adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CategorySnapshot {
     pub id: CategoryId,

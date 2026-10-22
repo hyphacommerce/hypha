@@ -1,5 +1,5 @@
-//! An order with what's left to ship, by location (design note 0018, FU4): derived from
-//! the lines' reservations, not stored.
+//! An order with what's left to ship, by location: derived from the lines' reservations,
+//! not stored.
 
 use hypha_core::{Ctx, LocationId, OrderId, OrderLineId, Scope};
 use hypha_inventory::{HasInventoryItems, ReservationRef};
@@ -24,7 +24,7 @@ pub struct OrderView {
     /// For each line with something left, in line order, then location by the
     /// reservations' order; nothing for a cancelled order.
     pub unfulfilled: Vec<Unfulfilled>,
-    /// Its payments, newest first (design note 0027).
+    /// Its payments, newest first.
     pub payments: Vec<Payment>,
 }
 

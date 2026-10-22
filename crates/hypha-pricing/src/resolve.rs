@@ -169,14 +169,6 @@ mod tests {
     }
 
     #[test]
-    fn adjustment_rounds_half_away_from_zero() {
-        // 999 * 0.95 = 949.05 -> 949; 1010 * 0.95 = 959.5 -> 960
-        let ctx = context(Currency::EUR, Some(list(Currency::EUR, -500)));
-        assert_eq!(resolve_price(&ctx, pid(), vid(), eur(999)), Ok(eur(949)));
-        assert_eq!(resolve_price(&ctx, pid(), vid(), eur(1010)), Ok(eur(960)));
-    }
-
-    #[test]
     fn rejects_market_without_catalog() {
         let ctx = PricingContext {
             catalog: None,

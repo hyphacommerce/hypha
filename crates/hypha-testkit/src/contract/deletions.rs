@@ -1,5 +1,5 @@
-//! Deleting products and assets (design note 0033, section 6.3): the row goes with its
-//! event in one write, and what only names a deleted product goes with it.
+//! Deleting products and assets: the row goes with its event in one write, and what only
+//! names a deleted product goes with it.
 
 use hypha_categories::{Category, CategoryRepo, HasCategories, NewCategory};
 use hypha_channels::{Channel, ChannelKind, ChannelRepo, HasChannels};

@@ -14,8 +14,8 @@ use crate::{
     method::instructions_text,
 };
 
-/// Where one payment is (design note 0027, PA7). Manual payments use `Pending`, `Paid`
-/// and `Voided`; the rest wait for providers that move money that way.
+/// Where one payment is. Manual payments use `Pending`, `Paid` and `Voided`; the rest wait
+/// for providers that move money that way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PaymentStatus {
     /// Started; nothing collected yet (cash on delivery before delivery).
@@ -23,7 +23,7 @@ pub enum PaymentStatus {
     /// The money is held (a card authorization), not yet captured.
     Authorized,
     /// The provider took the shopper's payment and is collecting it (SEPA Direct Debit:
-    /// days; design note 0031, Q3): committed, not collected.
+    /// days): committed, not collected.
     Processing,
     /// Collected.
     Paid,
@@ -63,11 +63,11 @@ impl PaymentStatus {
         }
     }
 
-    /// The moves the domain allows (§2): `pending` → `authorized` → `paid` →
+    /// The moves the domain allows: `pending` → `authorized` → `paid` →
     /// `partially_refunded` → `refunded`, `pending` straight to `paid`, and `voided` or
     /// `failed` from `pending` or `authorized`. A partial refund may follow another.
-    /// `processing` (design note 0031) comes from `pending` and ends `paid` or `failed`:
-    /// money on its way can't be voided.
+    /// `processing` comes from `pending` and ends `paid` or `failed`: money on its way
+    /// can't be voided.
     pub fn can_become(self, to: PaymentStatus) -> bool {
         use PaymentStatus as S;
         matches!(
@@ -101,9 +101,9 @@ impl PaymentStatus {
         )
     }
 
-    /// The shopper's money is committed (design note 0031): held, on its way or
-    /// collected, and none of it given back. What lets checkout place an order paid
-    /// online; a payment refunded (by checkout giving it back, or by staff) isn't.
+    /// The shopper's money is committed: held, on its way or collected, and none of it
+    /// given back. What lets checkout place an order paid online; a payment refunded (by
+    /// checkout giving it back, or by staff) isn't.
     pub fn committed(self) -> bool {
         matches!(
             self,
@@ -136,7 +136,7 @@ pub struct NewPayment {
     pub id: PaymentId,
     /// The cart checkout started it for (`None` for money staff recorded by hand).
     pub cart: Option<CartId>,
-    /// `None` for a payment started for a cart before its order (design note 0031).
+    /// `None` for a payment started for a cart before its order.
     pub order: Option<OrderId>,
     pub method: Option<PaymentMethodId>,
     pub method_name: Option<String>,
@@ -147,9 +147,9 @@ pub struct NewPayment {
 
 impl NewPayment {
     /// A payment of `amount` by `method` for `cart`, and `order` when it's placed with it
-    /// (a manual method; an online one is started before the order: design note 0031),
-    /// copying what the shopper is shown (its name and instructions), so later edits to
-    /// the method don't change it.
+    /// (a manual method; an online one is started before the order), copying what the
+    /// shopper is shown (its name and instructions), so later edits to the method don't
+    /// change it.
     pub fn by(
         method: &PaymentMethod,
         id: PaymentId,
@@ -186,8 +186,8 @@ impl NewPayment {
     }
 }
 
-/// One attempt to collect an order's money (design note 0027, PA2), started for its cart
-/// before the order exists when it's paid online (design note 0031).
+/// One attempt to collect an order's money, started for its cart before the order exists
+/// when it's paid online.
 ///
 /// Invariants, checked by `new` and `restore`: a cart or an order (or both); a
 /// non-negative amount; `refunded` in the
@@ -380,9 +380,9 @@ impl Payment {
         Ok(true)
     }
 
-    /// The provider took the payment and is collecting it (`payment.processing`; design
-    /// note 0031), with `reference` when given. Returns whether that changed anything: a
-    /// processing payment stays as it was. Refused unless pending.
+    /// The provider took the payment and is collecting it (`payment.processing`), with
+    /// `reference` when given. Returns whether that changed anything: a processing payment
+    /// stays as it was. Refused unless pending.
     pub fn process(&mut self, reference: Option<String>) -> Result<bool, PaymentError> {
         if self.status == PaymentStatus::Processing {
             return Ok(false);
@@ -405,9 +405,9 @@ impl Payment {
         Ok(true)
     }
 
-    /// Ties it to the order checkout placed with it (design note 0031): once, to one
-    /// order (`payment_attached` for another). Records nothing: `order.placed` says it,
-    /// and the payment's later events name the order.
+    /// Ties it to the order checkout placed with it: once, to one order (`payment_attached`
+    /// for another). Records nothing: `order.placed` says it, and the payment's later
+    /// events name the order.
     pub fn attach(&mut self, order: OrderId) -> Result<(), PaymentError> {
         match self.order {
             Some(attached) if attached != order => Err(PaymentError::AlreadyAttached {
@@ -616,7 +616,7 @@ impl Payment {
     }
 }
 
-/// Plain-data form of a `Payment` for storage adapters (design note 0001, 3.4).
+/// Plain-data form of a `Payment` for storage adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentSnapshot {
     pub id: PaymentId,
@@ -731,12 +731,12 @@ impl Payment {
     }
 }
 
-/// The payment status an order's `payments` add up to against its `total` (design note
-/// 0027, §2). Failed and voided payments count for nothing; an order whose every
-/// payment was voided is `voided`. Then refunds decide (`refunded` once everything
-/// collected was given back, else `partially_refunded`), then collected money (`paid`
-/// once it covers the total, `partially_paid` below it), then authorizations
-/// (`authorized` once they cover it); else `pending`. No payments at all is `pending`.
+/// The payment status an order's `payments` add up to against its `total`. Failed and
+/// voided payments count for nothing; an order whose every payment was voided is `voided`.
+/// Then refunds decide (`refunded` once everything collected was given back, else
+/// `partially_refunded`), then collected money (`paid` once it covers the total,
+/// `partially_paid` below it), then authorizations (`authorized` once they cover it); else
+/// `pending`. No payments at all is `pending`.
 pub fn financial_status(
     total: Money,
     payments: &[Payment],

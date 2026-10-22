@@ -1,5 +1,4 @@
-//! The extension call log (design note 0029, `0049_extension_calls.sql`): one row per
-//! call, written once.
+//! The extension call log (`0049_extension_calls.sql`): one row per call, written once.
 
 use hypha_core::{AppKey, ExtensionCallId, Page, PageRequest, RepoError, Timestamp};
 use hypha_extensions::{CallOutcome, ExtensionCall, ExtensionCallRepo};

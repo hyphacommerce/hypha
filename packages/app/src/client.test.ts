@@ -198,3 +198,32 @@ test("a 401's refresh runs under the lock too", async () => {
   assert.equal((await client.fetch("/admin/orders")).status, 200);
   assert.deepEqual(locks, [REFRESH_LOCK]);
 });
+
+test("a failed refresh is tried again by the next call", async () => {
+  const api = fakeApi();
+  let failing = true;
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const request = new Request(input, init);
+    if (failing && new URL(request.url).pathname === "/oauth/token")
+      return Response.json({ error: "temporarily_unavailable" }, { status: 503 });
+    return api.fetch(request);
+  };
+  const client = new HyphaClient({
+    apiUrl: API,
+    manifestUrl: MANIFEST,
+    tokens: memoryTokenStore({ ...fresh, expiresAt: 30_000 }),
+    fetch,
+    now: () => 0,
+  });
+  const both = await Promise.allSettled([
+    client.fetch("/admin/orders"),
+    client.fetch("/admin/orders"),
+  ]);
+  assert.deepEqual(
+    both.map((r) => r.status),
+    ["rejected", "rejected"],
+  );
+  failing = false;
+  assert.equal((await client.fetch("/admin/orders")).status, 200);
+  assert.equal(api.refreshes, 1);
+});

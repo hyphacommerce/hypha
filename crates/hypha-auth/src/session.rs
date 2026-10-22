@@ -1,5 +1,5 @@
-//! Sessions (design note 0008, A3 and A4): what a staff member's requests carry after
-//! logging in. Server-side, so revoking one works on the next request.
+//! Sessions: what a staff member's requests carry after logging in. Server-side, so
+//! revoking one works on the next request.
 
 use core::time::Duration;
 
@@ -83,8 +83,8 @@ impl Session {
     /// Wrong second-factor codes before a pending session is revoked.
     pub const MAX_ATTEMPTS: u32 = 5;
 
-    /// How stale `last_used_at` may get before a request records its use again: one
-    /// write per session per this long, not one per request (design note 0008, §9).
+    /// How stale `last_used_at` may get before a request records its use again: one write
+    /// per session per this long, not one per request.
     pub const USE_RESOLUTION: Duration = Duration::from_secs(15 * 60);
 
     /// A logged-in session, lasting `lifetime` (`AuthSettings::session_lifetime`).
@@ -195,9 +195,9 @@ impl Session {
         self.last_used_at = self.last_used_at.max(now);
     }
 
-    /// Pushes the expiry out to `now + lifetime` for a session refreshed on use (design
-    /// note 0034, AC5), when at least `at_most_every` of the old life has gone, so a busy
-    /// session isn't rewritten on every request. Says whether it moved.
+    /// Pushes the expiry out to `now + lifetime` for a session refreshed on use, when at
+    /// least `at_most_every` of the old life has gone, so a busy session isn't rewritten on
+    /// every request. Says whether it moved.
     pub fn extend(&mut self, now: Timestamp, lifetime: Duration, at_most_every: Duration) -> bool {
         let fresh = now.plus(lifetime);
         if !self.is_active(now) || fresh <= self.expires_at.plus(at_most_every) {

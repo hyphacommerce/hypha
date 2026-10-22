@@ -1,6 +1,6 @@
-//! Shipping on a priced cart (design note 0015, sections 6 and 7): the group of lines
-//! that need shipping, and what the buyer's choice costs now. Offers and selection are
-//! commands (`commands.rs`); this is the read side, with no I/O.
+//! Shipping on a priced cart: the group of lines that need shipping, and what the buyer's
+//! choice costs now. Offers and selection are commands (`commands.rs`); this is the read
+//! side, with no I/O.
 
 use hypha_core::{
     Currency, Money, MoneyError, ShippingGroupId, ShippingOptionId, TotalWeight, VariantId,

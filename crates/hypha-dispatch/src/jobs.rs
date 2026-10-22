@@ -1,6 +1,6 @@
-//! The dispatcher's jobs (design note 0016, sections 5 and 7). Each is a plain function
-//! of ports and a clock that does a bounded amount of work and says whether there's
-//! more (`Progress`), so a runner loops while there is and sleeps when there isn't.
+//! The dispatcher's jobs. Each is a plain function of ports and a clock that does a bounded
+//! amount of work and says whether there's more (`Progress`), so a runner loops while there
+//! is and sleeps when there isn't.
 
 use hypha_apps::{App, AppKey, AppRepo, HasApps, Webhook};
 use hypha_auth::{HasSessions, SessionRepo};
@@ -22,8 +22,8 @@ impl<T> DispatchPorts for T where T: HasOutbox + HasApps + ?Sized {}
 /// A handler's destination name in deliveries.
 const HANDLER: &str = "handler:";
 
-/// Sends webhooks (design note 0016, section 8): the host's HTTP client, signing with
-/// the app's secret. A port, so the dispatcher stays free of HTTP and runtimes.
+/// Sends webhooks: the host's HTTP client, signing with the app's secret. A port, so the
+/// dispatcher stays free of HTTP and runtimes.
 #[allow(async_fn_in_trait)]
 pub trait WebhookSender {
     /// Sends `delivery`'s event to `app`'s webhook (it has one). `Err` with why, which
@@ -210,14 +210,13 @@ fn outcome(
     }
 }
 
-/// App `key` as it is now, if it can take `delivery` now. A disabled app's deliveries
-/// wait on the retry schedule, so pausing an app for a while keeps its backlog. One that
-/// may no longer receive the event (uninstalled, its grant narrowed so it no longer
-/// reads what the event is about, unsubscribed from the type: `App::wants_event`, as
-/// fan-out asked when the delivery was made) fails for good at once, with why: a
-/// delivery queued or retrying from before the change must not reach it. What the
-/// event's payload shows is decided when it's sent, by the grant then (the host's
-/// `WebhookSender` redacts, design note 0029, AP10).
+/// App `key` as it is now, if it can take `delivery` now. A disabled app's deliveries wait
+/// on the retry schedule, so pausing an app for a while keeps its backlog. One that may no
+/// longer receive the event (uninstalled, its grant narrowed so it no longer reads what the
+/// event is about, unsubscribed from the type: `App::wants_event`, as fan-out asked when
+/// the delivery was made) fails for good at once, with why: a delivery queued or retrying
+/// from before the change must not reach it. What the event's payload shows is decided when
+/// it's sent, by the grant then (the host's `WebhookSender` redacts).
 async fn load_app<S: HasApps>(ports: &S, key: &str, delivery: &Delivery) -> Result<App, Failure> {
     let gone = || Failure::Final(format!("there is no app {key}"));
     let key = AppKey::new(key).map_err(|_| gone())?;
@@ -263,9 +262,9 @@ pub async fn record<S: HasOutbox>(ports: &S, outcomes: &[Outcome]) -> Result<(),
     ports.outbox().record_outcomes(outcomes).await
 }
 
-/// `lease_due`, `run` for each and `record`, all with `ports`: for tests and hosts that
-/// get a connection per invocation anyway. A host with a pool gets ports for each step
-/// instead, so none is held while a handler or webhook runs (EV9).
+/// `lease_due`, `run` for each and `record`, all with `ports`: for tests and hosts that get
+/// a connection per invocation anyway. A host with a pool gets ports for each step instead,
+/// so none is held while a handler or webhook runs.
 pub async fn deliver_due<S: DispatchPorts>(
     ports: &S,
     clock: &impl Clock,
@@ -283,7 +282,7 @@ pub async fn deliver_due<S: DispatchPorts>(
     Ok(Progress::of(leased.len() as u32, settings.batch))
 }
 
-/// Deletes events (and their deliveries) older than `keep_events` (Q7).
+/// Deletes events (and their deliveries) older than `keep_events`.
 pub async fn prune_events<S: HasOutbox>(
     ports: &S,
     clock: &impl Clock,
@@ -294,8 +293,8 @@ pub async fn prune_events<S: HasOutbox>(
     Ok(Progress::of(done, settings.batch))
 }
 
-/// Deletes idempotency records older than `keep_idempotency_keys`: past that, a retry
-/// with the same key is a new request (design note 0007, section 5).
+/// Deletes idempotency records older than `keep_idempotency_keys`: past that, a retry with
+/// the same key is a new request.
 pub async fn prune_idempotency_keys<S: HasIdempotency>(
     ports: &S,
     clock: &impl Clock,

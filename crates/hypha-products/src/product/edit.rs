@@ -1,7 +1,7 @@
-//! Editing a product after it's created (design note 0014): title and handle, options
-//! and their values, variants, media. A child module of `product`, so it sees the
-//! aggregate's private fields. Every method checks everything before it changes
-//! anything, so a refused edit leaves the product as it was.
+//! Editing a product after it's created: title and handle, options and their values,
+//! variants, media. A child module of `product`, so it sees the aggregate's private fields.
+//! Every method checks everything before it changes anything, so a refused edit leaves the
+//! product as it was.
 
 use std::collections::{HashMap, HashSet};
 
@@ -99,9 +99,9 @@ impl Product {
         }
     }
 
-    /// Replaces the options with `drafts`, in order (design note 0014, section 3).
-    /// Drafts with an `id` keep that option or value (renamed, moved); the others are new
-    /// and get IDs from `ids`. Then, for the variants:
+    /// Replaces the options with `drafts`, in order. Drafts with an `id` keep that option
+    /// or value (renamed, moved); the others are new and get IDs from `ids`. Then, for the
+    /// variants:
     ///
     /// 1. those in `remove` are removed;
     /// 2. any other that selects a value removed from an option that stays fails the
@@ -310,11 +310,11 @@ impl Product {
         Ok(())
     }
 
-    /// Replaces the variant list with `drafts`, in order (design note 0021, Q1): a draft
-    /// with an ID updates that variant, one without adds a variant (IDs from `ids`),
-    /// and a variant left out is removed. The rules are `add_variant`'s, over the whole
-    /// list: 1 to `MAX_VARIANTS` variants, each naming one value per option, no two
-    /// with the same combination or SKU. A variant keeps its media; new ones have none.
+    /// Replaces the variant list with `drafts`, in order: a draft with an ID updates that
+    /// variant, one without adds a variant (IDs from `ids`), and a variant left out is
+    /// removed. The rules are `add_variant`'s, over the whole list: 1 to `MAX_VARIANTS`
+    /// variants, each naming one value per option, no two with the same combination or SKU.
+    /// A variant keeps its media; new ones have none.
     pub fn set_variants(
         &mut self,
         drafts: Vec<VariantDraft>,

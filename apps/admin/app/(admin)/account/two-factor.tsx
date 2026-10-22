@@ -1,8 +1,8 @@
 "use client";
 
-// Two-factor authentication on the account page (design note 0008, sections 3 and 6):
-// set up an authenticator (password → scan → first code → recovery codes), get new
-// recovery codes, or turn it off. Each code-taking step accepts a recovery code too.
+// Two-factor authentication on the account page: set up an authenticator (password →
+// scan → first code → recovery codes), get new recovery codes, or turn it off. Each
+// code-taking step accepts a recovery code too.
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";

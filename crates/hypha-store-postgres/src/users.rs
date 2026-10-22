@@ -1,4 +1,4 @@
-//! `hypha-users`'s repositories: users, roles and invites (design note 0008).
+//! `hypha-users`'s repositories: users, roles and invites.
 
 use hypha_auth::TokenHash;
 use hypha_core::{Email, InviteId, RepoError, RoleId, Timestamp, UserId, Version, Versioned};

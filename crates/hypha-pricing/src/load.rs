@@ -1,5 +1,5 @@
-//! Loading a `PricingContext` (design note 0019, section 8): shared by everything that
-//! prices variants in a market (carts, search documents), so they can't disagree.
+//! Loading a `PricingContext`: shared by everything that prices variants in a market
+//! (carts, search documents), so they can't disagree.
 
 use std::collections::{HashMap, HashSet};
 

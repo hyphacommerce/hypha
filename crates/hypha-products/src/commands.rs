@@ -96,14 +96,12 @@ async fn handle_taken<R: ProductRepo>(
 pub struct ListProducts {
     pub filter: ProductFilterInput,
     pub sort: ProductSort,
-    /// Filters on custom fields (design note 0033, §7), checked by
-    /// `hypha-custom-fields` already.
+    /// Filters on custom fields, checked by `hypha-custom-fields` already.
     pub fields: Vec<FieldFilter>,
 }
 
-/// A page of product summaries in `input.sort`'s order, narrowed by its filter (design
-/// notes 0012, 0019, 0024). `page.after`'s key must fit the sort (`ProductSort::fits`;
-/// hosts check cursors).
+/// A page of product summaries in `input.sort`'s order, narrowed by its filter.
+/// `page.after`'s key must fit the sort (`ProductSort::fits`; hosts check cursors).
 pub async fn list_products<R: ProductRepo>(
     ctx: &Ctx,
     repo: &R,
@@ -139,8 +137,8 @@ pub async fn get_product<R: ProductRepo>(
     load(repo, id).await
 }
 
-/// The products of `ids` that exist, in no particular order: for lists that hold
-/// product IDs (a catalog's products, design note 0021).
+/// The products of `ids` that exist, in no particular order: for lists that hold product
+/// IDs (a catalog's products).
 pub async fn get_products<R: ProductRepo>(
     ctx: &Ctx,
     repo: &R,
@@ -183,7 +181,7 @@ pub async fn set_product_status<R: ProductRepo>(
 pub struct UpdateProduct {
     pub title: Option<String>,
     pub handle: Option<String>,
-    /// `Some(None)` clears it (design note 0019, section 2).
+    /// `Some(None)` clears it.
     pub description: Option<Option<String>>,
     pub vendor: Option<Option<String>>,
     pub product_type: Option<Option<String>>,
@@ -191,7 +189,7 @@ pub struct UpdateProduct {
     pub tags: Option<Vec<String>>,
 }
 
-/// Changes a product's title, handle or content (design notes 0014 and 0019).
+/// Changes a product's title, handle or content.
 pub async fn update_product<R: ProductRepo>(
     ctx: &Ctx,
     repo: &R,
@@ -241,8 +239,7 @@ pub struct SetProductOptions {
     pub remove_variants: Vec<VariantId>,
 }
 
-/// Replaces a product's options and values (design note 0014, section 3; the rules are
-/// `Product::set_options`'s).
+/// Replaces a product's options and values (the rules are `Product::set_options`'s).
 pub async fn set_product_options<R: ProductRepo, I: IdGenerator>(
     ctx: &Ctx,
     repo: &R,
@@ -263,11 +260,11 @@ pub struct AddVariant {
     /// One value per option, in option order.
     pub selections: Vec<OptionValueId>,
     pub weight: Option<Weight>,
-    /// `true` unless the variant is never shipped (design note 0015, SH11).
+    /// `true` unless the variant is never shipped.
     pub requires_shipping: bool,
 }
 
-/// Adds one variant: the combination a merchant sells, never all of them (E5).
+/// Adds one variant: the combination a merchant sells, never all of them.
 pub async fn add_product_variant<R: ProductRepo, I: IdGenerator>(
     ctx: &Ctx,
     repo: &R,
@@ -361,11 +358,10 @@ pub struct SetVariant {
     pub requires_shipping: bool,
 }
 
-/// Sets a product's whole variant list in one write (design note 0021, Q1): listed
-/// variants with an ID are updated, those without are added, and stored ones left out
-/// are removed, all or nothing, with one set of events. The admin's "Create all
-/// variants" sends its combinations this way: nothing here expands options, and
-/// `Product::MAX_VARIANTS` bounds the list.
+/// Sets a product's whole variant list in one write: listed variants with an ID are
+/// updated, those without are added, and stored ones left out are removed, all or nothing,
+/// with one set of events. The admin's "Create all variants" sends its combinations this
+/// way: nothing here expands options, and `Product::MAX_VARIANTS` bounds the list.
 pub async fn set_product_variants<R: ProductRepo, I: IdGenerator>(
     ctx: &Ctx,
     repo: &R,
@@ -405,8 +401,8 @@ pub async fn set_product_variants<R: ProductRepo, I: IdGenerator>(
     Ok(product)
 }
 
-/// Removes a variant. Price lists and inventory keep its ID until the outbox cleans
-/// them up (design note 0014, section 4); carts show it as unavailable.
+/// Removes a variant. Price lists and inventory keep its ID until the outbox cleans them
+/// up; carts show it as unavailable.
 pub async fn remove_product_variant<R: ProductRepo>(
     ctx: &Ctx,
     repo: &R,

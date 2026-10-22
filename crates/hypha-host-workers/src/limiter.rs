@@ -1,9 +1,8 @@
-//! Rate limits on Workers (design note 0009's rules and quotas; 0026, W8): each check
-//! counts twice. GCRA in this isolate's memory gives the quota's exact shape (a burst,
-//! then one more every period) and the time to wait; Cloudflare's Rate Limiting binding,
-//! one per rule (`Rule::binding`), caps all isolates together, in fixed windows of a minute.
-//! A Worker runs in many isolates, each counting on its own, so the binding is what
-//! bounds a client spread over them.
+//! Rate limits on Workers: each check counts twice. GCRA in this isolate's memory gives the
+//! quota's exact shape (a burst, then one more every period) and the time to wait;
+//! Cloudflare's Rate Limiting binding, one per rule (`Rule::binding`), caps all isolates
+//! together, in fixed windows of a minute. A Worker runs in many isolates, each counting on
+//! its own, so the binding is what bounds a client spread over them.
 //!
 //! The binding's limit is the most the quota allows in any minute (`Rule::binding_limit`:
 //! the burst, plus one per period that fits), so it never refuses what the quota allows

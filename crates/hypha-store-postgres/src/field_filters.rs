@@ -1,6 +1,6 @@
-//! List filters on custom fields (design note 0033, §7): each `FieldFilter` becomes an
-//! `EXISTS` (or `NOT EXISTS`) on `custom_field_values` for the listed row's ID, which
-//! the values' primary key (definition, owner) answers per row.
+//! List filters on custom fields: each `FieldFilter` becomes an `EXISTS` (or `NOT EXISTS`)
+//! on `custom_field_values` for the listed row's ID, which the values' primary key
+//! (definition, owner) answers per row.
 
 use hypha_core::{FieldFilter, FieldFilterOp, FilterScalar};
 use tokio_postgres::types::{ToSql, Type};

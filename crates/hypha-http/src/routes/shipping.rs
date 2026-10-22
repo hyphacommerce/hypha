@@ -1,5 +1,4 @@
-//! Shipping setup (design note 0015, section 8): zones and their options, and the
-//! external apps that calculate rates.
+//! Shipping setup: zones and their options, and the external apps that calculate rates.
 
 use hypha_core::Stamped;
 
@@ -575,8 +574,7 @@ fn services(dtos: Vec<ServiceDto>) -> Vec<ServiceInfo> {
         .collect()
 }
 
-/// Makes an app (design note 0016, EV11) a rate provider (design note 0015, section 5):
-/// Hypha POSTs it rate requests signed with the app's secret.
+/// Makes an app a rate provider: Hypha POSTs it rate requests signed with the app's secret.
 #[utoipa::path(
     post,
     path = "/admin/shipping-providers",

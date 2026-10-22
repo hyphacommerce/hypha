@@ -436,7 +436,7 @@ fn a_cancelled_order_cant_be_fulfilled() {
 #[test]
 fn fulfilling_needs_fulfillments_write() {
     let world = World::new();
-    // Changing orders isn't shipping them (FU9).
+    // Changing orders isn't shipping them.
     let ctx = user_with(vec![Scope::OrdersWrite]);
     assert_eq!(
         world
@@ -650,16 +650,6 @@ fn cancelling_again_keeps_the_first_cancellation() {
 }
 
 #[test]
-fn a_paid_order_cancelled_stays_paid() {
-    let world = World::new();
-    let mut order = world.order();
-    order.set_financial_status(FinancialStatus::Paid);
-    block_on(world.orders.update(&mut order)).unwrap();
-    let cancelled = world.cancel(CancelReason::Customer).unwrap();
-    assert_eq!(cancelled.financial_status(), FinancialStatus::Paid);
-}
-
-#[test]
 fn cancelling_releases_a_retired_item_and_deletes_it() {
     let world = World::new();
     let mut item = world.item().unwrap();
@@ -722,8 +712,8 @@ fn whats_left_is_where_it_was_reserved() {
 #[test]
 fn a_split_reservation_shows_at_each_location() {
     let world = World::new();
-    // Re-reserve the mugs with 1 at the warehouse and 2 at the shop: neither covers
-    // all 3, so the line is split (design note 0004, I9).
+    // Re-reserve the mugs with 1 at the warehouse and 2 at the shop: neither covers all 3,
+    // so the line is split.
     let mut item = world.item().unwrap();
     item.release(&reference(mugs()));
     item.set_on_hand(warehouse(), 1, None).unwrap();
@@ -834,7 +824,7 @@ fn only_the_request_that_cancels_says_it_changed_the_order() {
     assert!(!world.cancel_and_changed(CancelReason::Customer).unwrap().1);
 }
 
-// ---- payments (design note 0027) ----
+// ---- payments ----
 
 /// A pending payment of the order's total, as checkout leaves it.
 fn pending_payment(world: &World) -> Payment {
@@ -1189,6 +1179,23 @@ fn marking_an_order_without_payments_twice_at_once_records_one() {
 }
 
 #[test]
+fn cancelling_while_a_fulfilment_lands_reloads_and_refuses() {
+    let world = World::new();
+    // The cancel loads the order before the fulfilment commits.
+    let stale_order = world.order();
+    let id = shipped_two(&world);
+    world.orders.serve_next_get(stale_order);
+    assert_eq!(
+        world.cancel(CancelReason::Customer),
+        Err(CommandError::HasFulfillments {
+            order: order_id(),
+            fulfillments: vec![id]
+        })
+    );
+    assert_eq!(world.order().cancelled(), None);
+}
+
+#[test]
 fn an_order_with_an_authorized_payment_isnt_cancelled() {
     let world = World::new();
     stored_payment(&world, 1, 2000, PaymentStatus::Authorized, 0);
@@ -1203,7 +1210,7 @@ fn an_order_with_an_authorized_payment_isnt_cancelled() {
     assert_eq!((world.order(), world.stock()), before);
 }
 
-// ---- payment events (design note 0029, §3.1) ----
+// ---- payment events ----
 
 impl World {
     fn report(
@@ -1714,7 +1721,7 @@ fn an_unknown_payment_is_reported() {
     );
 }
 
-// ---- who may report (design note 0029, §3.1, §15) ----
+// ---- who may report ----
 
 fn app_id(n: u128) -> hypha_core::AppId {
     hypha_core::AppId::from_uuid(Uuid::from_u128(n))
@@ -1854,7 +1861,7 @@ fn staff_report_on_an_apps_payment() {
     assert_eq!(world.report_as(staff, K::Paid), Ok(PaymentStatus::Paid));
 }
 
-/// A payment started for a cart before its order (design note 0031).
+/// A payment started for a cart before its order.
 fn cart_payment(world: &World) -> Payment {
     let mut payment = Payment::new(NewPayment {
         id: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
@@ -1923,5 +1930,64 @@ fn processing_is_reported_and_then_paid() {
     assert_eq!(
         report_cart(&world, K::Paid).map(|r| r.payment.status()),
         Ok(PaymentStatus::Paid)
+    );
+}
+
+#[test]
+fn two_reports_on_one_order_at_once_both_land() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    stored_payment(&world, 1, 1000, PaymentStatus::Pending, 0);
+    stored_payment(&world, 2, 1000, PaymentStatus::Pending, 0);
+    let report = |n: u128| {
+        block_on(hypha_order_actions::record_payment_event(
+            &Ctx::system(),
+            &world.ports,
+            &world.clock,
+            hypha_order_actions::PaymentEvent {
+                payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8100 + n)),
+                kind: K::Paid,
+                amount: None,
+                reference: None,
+                attempt: None,
+                occurred_at: None,
+                idempotency: None,
+            },
+        ))
+    };
+    // Both reports load the order and its payments; the first one commits first.
+    let stale_order = world.order();
+    let stale_payments = block_on(world.payments.list_for_order(order_id())).unwrap();
+    report(1).unwrap();
+    assert_eq!(
+        world.order().financial_status(),
+        FinancialStatus::PartiallyPaid
+    );
+
+    world.orders.serve_next_get(stale_order);
+    world.payments.serve_next_list(stale_payments);
+    let second = report(2).unwrap().value.order.expect("an order's payment");
+    // The loser's view had only its own payment paid; it reloaded and saw both.
+    assert_eq!(second.order.financial_status(), FinancialStatus::Paid);
+    assert_eq!(world.order().financial_status(), FinancialStatus::Paid);
+    let stored = block_on(world.payments.list_for_order(order_id())).unwrap();
+    assert!(stored.iter().all(|p| p.status() == PaymentStatus::Paid));
+}
+
+#[test]
+fn a_partial_refund_without_an_amount_is_refused() {
+    use hypha_order_actions::PaymentEventKind as K;
+    let world = World::new();
+    pending_payment(&world);
+    world.report(K::Paid, None, None).unwrap();
+    assert_eq!(
+        world.report(K::PartiallyRefunded, None, None),
+        Err(CommandError::Payment(PaymentError::InvalidRefund {
+            payment: hypha_core::PaymentId::from_uuid(Uuid::from_u128(8001)),
+            amount: 0,
+            paid: 2000,
+            refunded: 0,
+            reported: PaymentStatus::PartiallyRefunded,
+        }))
     );
 }

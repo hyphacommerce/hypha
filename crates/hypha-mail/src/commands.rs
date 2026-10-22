@@ -1,6 +1,6 @@
-//! What needs other domains (design note 0028, §11): saving the settings with the logo's
-//! asset usage, saving a template (checked against its sample), previews, test sends,
-//! resending a message, and the staff flows' direct emails.
+//! What needs other domains: saving the settings with the logo's asset usage, saving a
+//! template (checked against its sample), previews, test sends, resending a message, and
+//! the staff flows' direct emails.
 
 use hypha_core::{
     Actor, AssetId, Clock, Ctx, Email, HasBatch, HasOutbox, IdGenerator, NotificationId, Notifier,
@@ -32,8 +32,8 @@ use crate::{
     },
 };
 
-/// A change to the notification settings, as JSON Merge Patch reads (design note 0028,
-/// §7): `None` keeps a field, `Some(None)` clears it. Raw input: checked here.
+/// A change to the notification settings, as JSON Merge Patch reads: `None` keeps a field,
+/// `Some(None)` clears it. Raw input: checked here.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UpdateSettings {
     /// An image from the media library: ready, public.
@@ -81,11 +81,10 @@ fn check_settings(input: UpdateSettings) -> Result<Checked, CommandError> {
     })
 }
 
-/// Changes the store's notification settings (design note 0028, §7): the settings and
-/// the logo's asset usage (`UsageOwner::notification_settings`, `UsageRole::logo`) in
-/// one batch, so a logo in use can't be deleted from the library (as a category's
-/// image, 0022). The logo must exist, be ready, public and an image. Retried on a lost
-/// race; the first save stores them.
+/// Changes the store's notification settings: the settings and the logo's asset usage
+/// (`UsageOwner::notification_settings`, `UsageRole::logo`) in one batch, so a logo in use
+/// can't be deleted from the library (as a category's image). The logo must exist, be
+/// ready, public and an image. Retried on a lost race; the first save stores them.
 pub async fn update_settings<S>(
     ctx: &Ctx,
     ports: &S,
@@ -201,14 +200,13 @@ impl TemplateInput {
     }
 }
 
-/// Saves a template's sources and whether it's on (design note 0028, §3, §7). The
-/// sources must parse, and render in the layout in effect against the template's
-/// sample, and against it with every value that may be absent absent
-/// (`MailContext::checks`): `template_invalid` with the part and line otherwise, so a
-/// template that only works when an order has a payment or a shipping address is
-/// refused here rather than failing on a real order. Saving the layout renders every
-/// message template in it, so a layout that breaks one is refused. Turning off one that
-/// can't be is `template_required`.
+/// Saves a template's sources and whether it's on. The sources must parse, and render in
+/// the layout in effect against the template's sample, and against it with every value that
+/// may be absent absent (`MailContext::checks`): `template_invalid` with the part and line
+/// otherwise, so a template that only works when an order has a payment or a shipping
+/// address is refused here rather than failing on a real order. Saving the layout renders
+/// every message template in it, so a layout that breaks one is refused. Turning off one
+/// that can't be is `template_required`.
 pub async fn save_template<S: HasNotificationTemplates>(
     ctx: &Ctx,
     ports: &S,
@@ -341,11 +339,10 @@ async fn render_preview<E: MailEnv, P: MailPorts>(
     Ok((rendered, branding))
 }
 
-/// Renders unsaved sources of `key` (design note 0028, §7): against the sample with the
-/// store's branding, or against a real `order` (which needs `orders:read` too; the
-/// shipping templates use its newest fulfilment). The layout previews as an order
-/// confirmation in it. `template_invalid` with the part and line when they don't
-/// render.
+/// Renders unsaved sources of `key`: against the sample with the store's branding, or
+/// against a real `order` (which needs `orders:read` too; the shipping templates use its
+/// newest fulfilment). The layout previews as an order confirmation in it.
+/// `template_invalid` with the part and line when they don't render.
 pub async fn preview<E: MailEnv, P: MailPorts>(
     ctx: &Ctx,
     env: &E,
@@ -373,11 +370,10 @@ fn from(env: &impl MailEnv, branding: &Branding) -> Mailbox {
 /// The test sender's name: what the `log` sender calls itself.
 const LOG_SENDER: &str = "log";
 
-/// Sends `preview`'s rendering to the calling staff member's own address only (design
-/// note 0028, §7), its subject marked `[Test]`. Not recorded: it's about no one's
-/// order. Refused with the `log` sender (`email_not_configured`: there'd be nothing to
-/// receive) and for callers that aren't a staff member (`staff_only`). Returns where it
-/// went.
+/// Sends `preview`'s rendering to the calling staff member's own address only, its subject
+/// marked `[Test]`. Not recorded: it's about no one's order. Refused with the `log` sender
+/// (`email_not_configured`: there'd be nothing to receive) and for callers that aren't a
+/// staff member (`staff_only`). Returns where it went.
 pub async fn send_test<E, P>(
     ctx: &Ctx,
     env: &E,
@@ -420,13 +416,12 @@ where
     Ok(to)
 }
 
-/// Queues a message again (design note 0028, §4: "the customer didn't get it"),
-/// rendered from the order as it is now with the templates in effect, as a new `queued`
-/// record without an event, even if the template has since been turned off: staff
-/// asked. The send job sends it (woken now). A shipping email is about the fulfilment
-/// its event named (while the event is kept), else the order's newest. Invites and
-/// resets can't be resent (their token isn't kept; the flow sends a new one):
-/// `notification_not_resendable`.
+/// Queues a message again ("the customer didn't get it"), rendered from the order as it is
+/// now with the templates in effect, as a new `queued` record without an event, even if the
+/// template has since been turned off: staff asked. The send job sends it (woken now). A
+/// shipping email is about the fulfilment its event named (while the event is kept), else
+/// the order's newest. Invites and resets can't be resent (their token isn't kept; the flow
+/// sends a new one): `notification_not_resendable`.
 pub async fn resend<E, P>(
     ctx: &Ctx,
     env: &E,
@@ -499,12 +494,11 @@ where
     Ok(queued)
 }
 
-/// Sends a staff flow's email at once (design note 0028, §4, NT7): an invite or a
-/// password reset, rendered from its template with `link` (the admin's page with the
-/// token: `server.admin_url` + `/invite` or `/reset-password` + `?token=`; the bare
-/// token without an admin URL), recorded without an event (the token isn't). What a
-/// host's `Notifier<StaffEmail>` calls; any failure, a refusal included, is the flow's
-/// `notification_failed`.
+/// Sends a staff flow's email at once: an invite or a password reset, rendered from its
+/// template with `link` (the admin's page with the token: `server.admin_url` + `/invite` or
+/// `/reset-password` + `?token=`; the bare token without an admin URL), recorded without an
+/// event (the token isn't). What a host's `Notifier<StaffEmail>` calls; any failure, a
+/// refusal included, is the flow's `notification_failed`.
 pub async fn send_staff<E, P>(
     env: &E,
     ports: &P,
@@ -572,10 +566,9 @@ where
     }
 }
 
-/// Sends a customer's account email at once (design note 0034, §6), like `send_staff`:
-/// the sign-in code (a secret, not kept in the record) or the confirmation of an erasure
-/// request (which should arrive while the person is there). What a host's
-/// `Notifier<CustomerEmail>` calls.
+/// Sends a customer's account email at once, like `send_staff`: the sign-in code (a secret,
+/// not kept in the record) or the confirmation of an erasure request (which should arrive
+/// while the person is there). What a host's `Notifier<CustomerEmail>` calls.
 pub async fn send_customer<E, P>(
     env: &E,
     ports: &P,

@@ -9,9 +9,9 @@ import { SETTINGS_CRUMB, hasScope } from "@/lib/navigation";
 import { DefinitionsCard } from "./definitions";
 
 /**
- * Settings → Custom fields (design note 0033, §9): per owner type, the fields its pages
- * show. The merchant's own can be added, changed, reordered and deleted; apps' and
- * spores' are listed read-only, named by their app.
+ * Settings → Custom fields: per owner type, the fields its pages show. The merchant's
+ * own can be added, changed, reordered and deleted; apps' and spores' are listed
+ * read-only, named by their app.
  */
 export default async function CustomFieldsSettingsPage({
   searchParams,
@@ -26,7 +26,7 @@ export default async function CustomFieldsSettingsPage({
     client
       .GET("/admin/custom-field-definitions", { params: { query: { owner_type: owner } } })
       .then(loaded),
-    // The well-known fields the API suggests for this owner type (design note 0032, CD11).
+    // The well-known fields the API suggests for this owner type.
     client
       .GET("/admin/custom-field-definitions/suggestions", {
         params: { query: { owner_type: owner } },

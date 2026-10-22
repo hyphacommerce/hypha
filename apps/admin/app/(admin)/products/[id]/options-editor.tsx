@@ -25,10 +25,9 @@ const splitLabels = (text: string) =>
     .filter((label) => label !== "");
 
 /**
- * Options and their values (design note 0014, section 3), part of the editor's draft.
- * An option shows its values; Edit opens it to rename, reorder, add and remove them
- * (a renamed value keeps its variants). A variant using a removed value is named here
- * and removed with the save.
+ * Options and their values, part of the editor's draft. An option shows its values;
+ * Edit opens it to rename, reorder, add and remove them (a renamed value keeps its
+ * variants). A variant using a removed value is named here and removed with the save.
  */
 export function OptionsEditor({
   draft,

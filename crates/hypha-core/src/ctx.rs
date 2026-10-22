@@ -5,18 +5,18 @@ use crate::{AgentId, ApiKeyId, AppId, ChannelId, CustomerId, ErrorCode, UserId, 
 /// Who a command runs for, for audit and idempotency (keys are per actor).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Actor {
-    /// A staff member, through a session (design note 0008).
+    /// A staff member, through a session.
     User(UserId),
     /// An admin assistant acting with its own scopes (not built yet).
     Agent(AgentId),
     /// A script, integration or storefront, through a secret or publishable key.
     ApiKey(ApiKeyId),
-    /// An app installed through OAuth, through one of its access tokens, with the
-    /// scopes staff granted it (design note 0029, AP5). Its ID rather than its key
-    /// (`app_<name>`), so `Actor` stays `Copy`.
+    /// An app installed through OAuth, through one of its access tokens, with the scopes
+    /// staff granted it. Its ID rather than its key (`app_<name>`), so `Actor` stays
+    /// `Copy`.
     App(AppId),
-    /// A shopper signed in to their account on the storefront (design note 0034): the
-    /// customer the session belongs to. Account commands act on this customer only.
+    /// A shopper signed in to their account on the storefront: the customer the session
+    /// belongs to. Account commands act on this customer only.
     Customer(CustomerId),
     /// The host itself: startup tasks and tests.
     System,
@@ -26,9 +26,8 @@ pub enum Actor {
 pub struct Ctx {
     actor: Actor,
     scopes: Vec<Scope>,
-    /// The sales channel the caller sells through (design note 0020, CH5): a
-    /// storefront's, from its publishable key. `None` for staff, secret keys and the
-    /// system, who see every channel.
+    /// The sales channel the caller sells through: a storefront's, from its publishable
+    /// key. `None` for staff, secret keys and the system, who see every channel.
     channel: Option<ChannelId>,
 }
 
@@ -37,8 +36,8 @@ pub struct Ctx {
 pub enum AuthError {
     #[error("missing scope {0}")]
     MissingScope(Scope),
-    /// An app's token lacks the scope (design note 0029, §15): the merchant hasn't
-    /// granted it, which only a new authorization staff approve can change.
+    /// An app's token lacks the scope: the merchant hasn't granted it, which only a new
+    /// authorization staff approve can change.
     #[error("the app is not authorized for {0}")]
     AppNotAuthorized(Scope),
 }
@@ -107,12 +106,12 @@ impl Ctx {
     }
 
     /// Whether the caller is a staff member through a session: the only callers who see
-    /// personal data without the `customer_data:*` scopes (design note 0029, AP10).
+    /// personal data without the `customer_data:*` scopes.
     pub fn is_staff(&self) -> bool {
         matches!(self.actor, Actor::User(_))
     }
 
-    /// The signed-in customer, when the caller is one (design note 0034, AC4).
+    /// The signed-in customer, when the caller is one.
     pub fn customer(&self) -> Option<CustomerId> {
         match self.actor {
             Actor::Customer(id) => Some(id),

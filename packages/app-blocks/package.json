@@ -2,7 +2,7 @@
   "name": "@hypha/app-blocks",
   "version": "0.1.0",
   "private": true,
-  "description": "Hypha's declarative app blocks, version 1 (design note 0029, §6.2): the JSON Schema, TypeScript types, a validator and the reference React renderer on Astryx.",
+  "description": "Hypha's declarative app blocks, version 1: the JSON Schema, TypeScript types, a validator and the reference React renderer on Astryx.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",

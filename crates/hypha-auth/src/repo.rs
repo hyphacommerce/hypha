@@ -12,7 +12,7 @@ pub mod keys {
     /// One identity per principal.
     pub const IDENTITY_PRINCIPAL: &str = "identity_principal";
     /// A credential's lookup (a password's email) is unique per principal kind and
-    /// credential kind (design note 0008, A2).
+    /// credential kind.
     pub const IDENTITY_LOGIN: &str = "identity_login";
     pub const SESSION_ID: &str = "session_id";
     pub const SESSION_TOKEN: &str = "session_token";
@@ -27,7 +27,7 @@ pub trait IdentityRepo {
     async fn get(&self, id: IdentityId) -> Result<Option<Identity>, RepoError>;
     async fn get_by_principal(&self, principal: Principal) -> Result<Option<Identity>, RepoError>;
     /// Whether `principal` has an identity: its ID alone, one lookup without the
-    /// credentials (an account's existence, design note 0034, §7).
+    /// credentials (an account's existence).
     async fn find_principal(&self, principal: Principal) -> Result<Option<IdentityId>, RepoError>;
     /// The identity of `principal` kind with a `credential` whose lookup is `lookup`
     /// (for a password, the lowercased email).
@@ -73,7 +73,7 @@ pub trait SessionRepo {
 pub trait ApiKeyRepo {
     async fn get(&self, id: ApiKeyId) -> Result<Option<ApiKey>, RepoError>;
     async fn get_by_token(&self, hash: TokenHash) -> Result<Option<ApiKey>, RepoError>;
-    /// A page of keys, revoked ones too, newest first (design note 0012).
+    /// A page of keys, revoked ones too, newest first.
     async fn list(&self, page: PageRequest<ApiKeyId>) -> Result<Page<ApiKey>, RepoError>;
     /// Enforces `API_KEY_ID` and `API_KEY_TOKEN`.
     async fn insert(&self, key: &mut ApiKey) -> Result<(), RepoError>;
@@ -99,9 +99,8 @@ pub trait StageIdentities {
     /// What `IdentityRepo::update` would write; `StaleVersion` on commit if it moved.
     fn update_identity(&mut self, identity: &mut Identity);
     /// Removes the identity with its credentials at the version it was loaded at (a
-    /// customer erased or deleted, design note 0034, AC10); its sessions are revoked
-    /// apart (`StageSessions::revoke_sessions`). `StaleVersion` on commit if it moved
-    /// or is gone.
+    /// customer erased or deleted); its sessions are revoked apart
+    /// (`StageSessions::revoke_sessions`). `StaleVersion` on commit if it moved or is gone.
     fn delete_identity(&mut self, identity: &Identity);
 }
 

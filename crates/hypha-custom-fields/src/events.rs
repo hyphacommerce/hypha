@@ -1,5 +1,5 @@
-//! What happens to custom fields, as events (design note 0033, §2, §6.4). Contract
-//! types: a renamed or reshaped field is a new `VERSION`, never an edit.
+//! What happens to custom fields, as events. Contract types: a renamed or reshaped field is
+//! a new `VERSION`, never an edit.
 
 use hypha_core::{
     CategoryId, CustomFieldDefinitionId, CustomerId, Event, OrderId, PendingEvent, ProductId,
@@ -94,10 +94,10 @@ impl Event for CustomFieldDefinitionDeleted {
     const VERSION: u16 = 1;
 }
 
-/// One field's change in a `<owner>.custom_fields_updated` event (§6.4):
-/// `{"key": "custom.material", "value": "wool"}` (`null` when removed),
-/// `{"key": "custom.tags", "added": [...], "removed": [...]}` for list operations, or
-/// `{"key": "custom.birthday"}` alone for personal fields and values over 1 KiB.
+/// One field's change in a `<owner>.custom_fields_updated` event: `{"key":
+/// "custom.material", "value": "wool"}` (`null` when removed), `{"key": "custom.tags",
+/// "added": [...], "removed": [...]}` for list operations, or `{"key": "custom.birthday"}`
+/// alone for personal fields and values over 1 KiB.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldChange {
     pub key: String,
@@ -217,9 +217,9 @@ impl Event for OrderCustomFieldsUpdated {
     const VERSION: u16 = 1;
 }
 
-/// The one event a write records for `owner` (§6.4): about the owner (a variant's
-/// product), listing every change. `None` when nothing changed: a write that changes
-/// nothing records nothing.
+/// The one event a write records for `owner`: about the owner (a variant's product),
+/// listing every change. `None` when nothing changed: a write that changes nothing records
+/// nothing.
 pub fn fields_updated(owner: &Owner, changes: Vec<FieldChange>) -> Option<PendingEvent> {
     if changes.is_empty() {
         return None;
@@ -323,5 +323,41 @@ mod tests {
     fn no_changes_no_event() {
         let owner = Owner::customer(CustomerId::from_uuid(Uuid::from_u128(1)));
         assert_eq!(fields_updated(&owner, vec![]), None);
+    }
+
+    #[test]
+    fn a_category_gets_its_own_event() {
+        let category = CategoryId::from_uuid(Uuid::from_u128(1));
+        let event = fields_updated(
+            &Owner::category(category),
+            vec![FieldChange::value("custom.banner", Some(json!("x")), false)],
+        )
+        .unwrap();
+        assert_eq!(
+            (event.event_type, event.subject),
+            (
+                "category.custom_fields_updated",
+                Subject::new("category", category.as_uuid())
+            )
+        );
+        assert_eq!(event.data["category"], json!(category.to_string()));
+    }
+
+    #[test]
+    fn an_order_gets_its_own_event() {
+        let order = OrderId::from_uuid(Uuid::from_u128(1));
+        let event = fields_updated(
+            &Owner::order(order),
+            vec![FieldChange::value("custom.gift", Some(json!(true)), false)],
+        )
+        .unwrap();
+        assert_eq!(
+            (event.event_type, event.subject),
+            (
+                "order.custom_fields_updated",
+                Subject::new("order", order.as_uuid())
+            )
+        );
+        assert_eq!(event.data["order"], json!(order.to_string()));
     }
 }

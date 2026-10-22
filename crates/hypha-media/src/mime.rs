@@ -1,5 +1,5 @@
-//! The file types Hypha accepts (design note 0013, section 3), and telling them apart by
-//! their first bytes: what a client declares is checked against what it stored.
+//! The file types Hypha accepts, and telling them apart by their first bytes: what a client
+//! declares is checked against what it stored.
 
 use std::{fmt, str::FromStr};
 
@@ -50,7 +50,7 @@ impl FromStr for AssetKind {
     }
 }
 
-/// An accepted file type. SVG is refused until it can be sanitised (0013, M12).
+/// An accepted file type. SVG is refused until it can be sanitised.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MimeType {
     Jpeg,
@@ -125,8 +125,8 @@ impl MimeType {
     }
 }
 
-/// An ISO base media file (MP4, MOV, AVIF, but also HEIC and M4A) by its `ftyp` box: the
-/// major brand and the compatible brands after it say what it is.
+/// An ISO base media file (MOV, AVIF, but also HEIC and M4A) by its `ftyp` box: the major
+/// brand and the compatible brands after it say what it is.
 fn iso_media(head: &[u8]) -> Option<MimeType> {
     let size = u32::from_be_bytes(head.get(0..4)?.try_into().ok()?) as usize;
     let ftyp = head.get(8..size.min(head.len()))?;

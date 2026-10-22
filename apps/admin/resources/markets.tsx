@@ -1,6 +1,6 @@
 "use client";
 
-// The markets table (design note 0024, AU6): a whole list, sorted and searched here.
+// The markets table: a whole list, sorted and searched here.
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";

@@ -1,5 +1,5 @@
-//! Asset usages (design note 0014, section 6): written in a batch with their owner,
-//! replaced wholesale per owner, and a reference the storage enforces both ways.
+//! Asset usages: written in a batch with their owner, replaced wholesale per owner, and a
+//! reference the storage enforces both ways.
 
 use hypha_core::{
     AssetId, Currency, HasBatch, Money, PageLimit, PageRequest, Price, ProductId, RepoError,

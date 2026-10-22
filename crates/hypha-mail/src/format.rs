@@ -1,7 +1,6 @@
-//! How values read in an email (design note 0028, §11, Q3): money with its currency's
-//! minor units and a store-wide format, times in the store's time zone. Templates get
-//! the formatted text next to the raw value, so one that wants its own format can build
-//! it.
+//! How values read in an email: money with its currency's minor units and a store-wide
+//! format, times in the store's time zone. Templates get the formatted text next to the raw
+//! value, so one that wants its own format can build it.
 
 use hypha_core::{Currency, Money, Timestamp, Timezone};
 use serde::Serialize;

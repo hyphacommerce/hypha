@@ -1,5 +1,5 @@
-// Tracking numbers as the order page edits them (design note 0018): shared by the
-// dialogs, which check them, and the server actions, which send them.
+// Tracking numbers as the order page edits them: shared by the dialogs, which
+// check them, and the server actions, which send them.
 
 /** One row of the form. Every field is text; blanks are left out when sent. */
 export type TrackingInput = { carrier: string; number: string; url: string };

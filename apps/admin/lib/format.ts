@@ -6,10 +6,10 @@ import type { AdminSchemas } from "@hypha/sdk/admin";
 type Money = AdminSchemas["Money"];
 
 /**
- * Minor-unit digits by currency code, as `GET /admin/currencies` lists them (design note
- * 0021, SU1): 1050 is 10.50 EUR but 1050 JPY. Server code gets it from `loadCurrencies`,
- * client components from `useCurrencies`. A plain object, so a server page can pass it
- * to a client component.
+ * Minor-unit digits by currency code, as `GET /admin/currencies` lists them: 1050 is
+ * 10.50 EUR but 1050 JPY. Server code gets it from `loadCurrencies`, client components
+ * from `useCurrencies`. A plain object, so a server page can pass it to a client
+ * component.
  */
 export type Currencies = Readonly<Record<string, number>>;
 
@@ -29,7 +29,7 @@ function minorUnits(currencies: Currencies, currency: string): number {
   return digits;
 }
 
-/** "€18.00". Amounts are integers in minor units, never floats (CLAUDE.md, Money). */
+/** "€18.00". Amounts are integers in minor units, never floats. */
 export function formatMoney({ amount, currency }: Money, currencies: Currencies): string {
   const digits = minorUnits(currencies, currency);
   return new Intl.NumberFormat("en-IE", {

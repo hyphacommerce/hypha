@@ -125,7 +125,7 @@ async fn write_shipping(tx: &impl Queries, s: &CartSnapshot) -> Result<(), RepoE
 }
 
 /// Removes a cart at `version` (its lines cascade): erasure deleting a customer's open
-/// carts (design note 0032, §7.3).
+/// carts.
 pub(crate) async fn delete_cart(
     tx: &impl Queries,
     id: CartId,

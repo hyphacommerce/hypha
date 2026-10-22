@@ -18,9 +18,8 @@ impl<C: PgConnection> IdempotencyRepo for PgStore<C> {
         let (kind, id) = actor_to_db(actor);
         let mut conn = self.conn().await;
         // One query, outside a transaction: consistent on its own. It must not be served
-        // from a cache (a cached miss would run the command twice), which is why
-        // Hyperdrive is always created with its query cache off (design note 0026, §6,
-        // step 4), as session and key lookups need too.
+        // from a cache (a cached miss would run the command twice), which is why Hyperdrive
+        // is always created with its query cache off, as session and key lookups need too.
         let row = conn
             .db()
             .query_typed_opt(
@@ -55,7 +54,7 @@ impl<C: PgConnection> IdempotencyRepo for PgStore<C> {
     async fn prune(&self, before: Timestamp, limit: u32) -> Result<u32, RepoError> {
         let before = before.unix_micros();
         in_transaction!(self, |tx| {
-            // `idempotency_keys_created_at` (migration 0012) serves this.
+            // `idempotency_keys_created_at` (migration) serves this.
             let deleted = tx
                 .execute_typed(
                     &format!(

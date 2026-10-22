@@ -85,10 +85,10 @@ impl ShippingZoneRepo for InMemoryShippingZoneRepo {
 /// App providers by key. Keys are strings, which `Table` (`Copy` keys) doesn't take, so
 /// the version rules are spelled out here.
 ///
-/// A provider is an app's rate settings (design note 0016, EV11): linked to an
-/// `InMemoryAppRepo` (`crate::apps::linked`, as `InMemoryPorts` does), a provider needs
-/// its app (`RepoError::Reference(keys::PROVIDER_APP)`) and goes when the app does, like
-/// the database's foreign key. Made on its own, it checks nothing.
+/// A provider is an app's rate settings: linked to an `InMemoryAppRepo`
+/// (`crate::apps::linked`, as `InMemoryPorts` does), a provider needs its app
+/// (`RepoError::Reference(keys::PROVIDER_APP)`) and goes when the app does, like the
+/// database's foreign key. Made on its own, it checks nothing.
 #[derive(Default)]
 pub struct InMemoryAppProviderRepo {
     pub(crate) providers: Arc<Mutex<BTreeMap<ProviderKey, AppProvider>>>,

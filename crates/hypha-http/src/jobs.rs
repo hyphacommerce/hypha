@@ -1,8 +1,8 @@
-//! The background jobs' steps (design note 0016, section 7): each does a bounded amount
-//! of work and says whether there's more and whether it found any (`Ran`). The hosts
-//! run them: `hypha-host-axum` on timers (its `runner`), woken after writes; a Workers
-//! host from Cron triggers and `waitUntil` (design note 0026, W6). The steps are the
-//! domain crates' plain functions (`hypha_dispatch::fan_out`, …), so both run the same.
+//! The background jobs' steps: each does a bounded amount of work and says whether there's
+//! more and whether it found any (`Ran`). The hosts run them: `hypha-host-axum` on timers
+//! (its `runner`), woken after writes; a Workers host from Cron triggers and `waitUntil`.
+//! The steps are the domain crates' plain functions (`hypha_dispatch::fan_out`, …), so both
+//! run the same.
 
 use std::time::Duration;
 
@@ -15,10 +15,10 @@ use hypha_notifications::{LONGEST_SEND, NotificationStatus};
 
 use crate::state::{AppState, Storage};
 
-/// What a step did: whether there's more to do right away, whether it found anything
-/// at all (an idle step makes the job wait longer), and when work it couldn't finish is
-/// due again (a failed search rebuild, under its lease): a host that runs jobs only
-/// when there's work records it (design note 0026, W7). Timers ignore it.
+/// What a step did: whether there's more to do right away, whether it found anything at all
+/// (an idle step makes the job wait longer), and when work it couldn't finish is due again
+/// (a failed search rebuild, under its lease): a host that runs jobs only when there's work
+/// records it. Timers ignore it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ran {
     pub more: bool,
@@ -39,12 +39,11 @@ impl Ran {
 /// A step's result; `Err` when the step as a whole couldn't run.
 pub type Step = Result<Ran, String>;
 
-/// Fans out new events, then runs the due deliveries. The lease and the outcomes each
-/// take a connection briefly; each delivery gets ports to load its app or run its
-/// handler, and lets them go before a webhook is sent, so no connection waits on another
-/// server (design note 0016, EV9). A host whose connections aren't pooled keeps one for
-/// the step instead (`Storage::KEEPS_PORTS_ACROSS_DELIVERIES`). Deliveries the lease can't cover any more are left
-/// for the next lease (`has_time`).
+/// Fans out new events, then runs the due deliveries. The lease and the outcomes each take a connection briefly;
+/// each delivery gets ports to load its app or run its handler, and lets them go before a webhook is sent, so no
+/// connection waits on another server. A host whose connections aren't pooled keeps one for the step instead
+/// (`Storage::KEEPS_PORTS_ACROSS_DELIVERIES`). Deliveries the lease can't cover any more are left for the next
+/// lease (`has_time`).
 pub async fn dispatch<S: Storage>(state: &AppState<S>) -> Step {
     dispatch_within(state, None).await
 }
@@ -52,11 +51,10 @@ pub async fn dispatch<S: Storage>(state: &AppState<S>) -> Step {
 /// Room left at the end of a deadline for recording the outcomes.
 const RECORD_MARGIN: Duration = Duration::from_secs(5);
 
-/// `dispatch` for a host that cuts its work off at `deadline` (Workers' `waitUntil`,
-/// about 30 seconds after the response; design note 0026, W6): no delivery starts that
-/// couldn't finish, its webhook's own timeout included, and be recorded by then. The
-/// deliveries left keep their lease until it ends, then the next lease (a cron's) takes
-/// them; nothing is sent twice.
+/// `dispatch` for a host that cuts its work off at `deadline` (Workers' `waitUntil`, about
+/// 30 seconds after the response): no delivery starts that couldn't finish, its webhook's
+/// own timeout included, and be recorded by then. The deliveries left keep their lease
+/// until it ends, then the next lease (a cron's) takes them; nothing is sent twice.
 pub async fn dispatch_by<S: Storage>(state: &AppState<S>, deadline: Timestamp) -> Step {
     dispatch_within(state, Some(deadline)).await
 }
@@ -130,7 +128,7 @@ async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Times
                 {
                     match custom_field_entries(ports, &mut definitions, &app, delivery).await {
                         Ok(Some(filtered)) => (Prepared::Webhook(app), Some(filtered)),
-                        // Nothing in it the app may read: not sent (design note 0033, §6.4).
+                        // Nothing in it the app may read: not sent.
                         Ok(None) => (Prepared::Done(hypha_core::DeliveryOutcome::Succeeded), None),
                         Err(error) => (
                             Prepared::Done(retry_later(state, delivery, error.to_string())),
@@ -170,9 +168,9 @@ async fn dispatch_within<S: Storage>(state: &AppState<S>, deadline: Option<Times
         }
         outcomes.push(Outcome::of(delivery, outcome));
     }
-    // When this step's unfinished work is due again: a retry's time, or the lease's end
-    // of a delivery it didn't start (out of time); a host that runs jobs only when
-    // there's work records it (design note 0026, W7).
+    // When this step's unfinished work is due again: a retry's time, or the lease's end of
+    // a delivery it didn't start (out of time); a host that runs jobs only when there's
+    // work records it.
     let retries = outcomes.iter().filter_map(|o| match &o.outcome {
         hypha_core::DeliveryOutcome::Retry { at, .. } => Some(*at),
         _ => None,
@@ -267,11 +265,11 @@ fn webhook_time(app: &hypha_apps::App) -> Duration {
     })
 }
 
-/// Sends a batch of the queued emails (design note 0028, §4): leases what's due, lets
-/// the connection go, sends each (a provider call of up to `LONGEST_SEND`), then takes a
-/// connection to record the outcomes, as `dispatch` delivers webhooks (a host whose
-/// connections aren't pooled keeps one, `Storage::KEEPS_PORTS_ACROSS_DELIVERIES`).
-/// Messages the lease can't cover any more are left for the next lease.
+/// Sends a batch of the queued emails: leases what's due, lets the connection go, sends
+/// each (a provider call of up to `LONGEST_SEND`), then takes a connection to record the
+/// outcomes, as `dispatch` delivers webhooks (a host whose connections aren't pooled keeps
+/// one, `Storage::KEEPS_PORTS_ACROSS_DELIVERIES`). Messages the lease can't cover any more
+/// are left for the next lease.
 pub async fn send_notifications<S: Storage>(state: &AppState<S>) -> Step {
     send_notifications_within(state, None).await
 }
@@ -373,8 +371,8 @@ fn earliest(a: Option<Timestamp>, b: Option<Timestamp>) -> Option<Timestamp> {
     }
 }
 
-/// Rebuilds a batch of the search documents events marked (design note 0019, section
-/// 5). One connection for the step: the built-in engine is the database.
+/// Rebuilds a batch of the search documents events marked. One connection for the step: the
+/// built-in engine is the database.
 pub async fn search_sync<S: Storage>(state: &AppState<S>) -> Step {
     let ports = state
         .public_ports()
@@ -401,8 +399,7 @@ pub async fn search_sync<S: Storage>(state: &AppState<S>) -> Step {
     })
 }
 
-/// Deletes uploads abandoned for over `media.abandoned_after` (design note 0013,
-/// section 3).
+/// Deletes uploads abandoned for over `media.abandoned_after`.
 pub async fn media_sweep<S: Storage>(state: &AppState<S>) -> Step {
     let Some(media) = &state.media else {
         return Ok(Ran {
@@ -434,9 +431,9 @@ pub async fn media_sweep<S: Storage>(state: &AppState<S>) -> Step {
     })
 }
 
-/// Deletes what's past keeping (`[jobs.prune]`): events, idempotency keys, sessions
-/// that ended, and the extension call log (design note 0029); and runs the customer
-/// erasures that are due (design note 0032, §7.3), since they too are data past its time.
+/// Deletes what's past keeping (`[jobs.prune]`): events, idempotency keys, sessions that
+/// ended, and the extension call log; and runs the customer erasures that are due, since
+/// they too are data past its time.
 pub async fn prune<S: Storage>(state: &AppState<S>) -> Step {
     let ports = state
         .public_ports()
@@ -485,8 +482,7 @@ pub async fn prune<S: Storage>(state: &AppState<S>) -> Step {
 }
 
 /// When dispatch or the send job next has work (`OutboxRepo::next_due`,
-/// `NotificationRepo::next_due`), for a host that runs the jobs only when there's some
-/// (design note 0026, W7).
+/// `NotificationRepo::next_due`), for a host that runs the jobs only when there's some.
 pub async fn next_due<S: Storage>(state: &AppState<S>) -> Result<Option<Timestamp>, String> {
     use hypha_core::{HasOutbox, OutboxRepo};
     use hypha_notifications::{HasNotifications, NotificationRepo};
@@ -503,9 +499,9 @@ pub async fn next_due<S: Storage>(state: &AppState<S>) -> Result<Option<Timestam
     Ok(earliest(events, emails))
 }
 
-/// How many search targets are queued, for a host whose runs don't follow each other on
-/// a timer (design note 0026, W7): a mark marked again while another run held it is left
-/// for the next run, which on Workers may be an hour away.
+/// How many search targets are queued, for a host whose runs don't follow each other on a
+/// timer: a mark marked again while another run held it is left for the next run, which on
+/// Workers may be an hour away.
 pub async fn search_queued<S: Storage>(state: &AppState<S>) -> Result<u64, String> {
     use hypha_search_index::{HasSearchQueue, SearchQueue};
     let ports = state

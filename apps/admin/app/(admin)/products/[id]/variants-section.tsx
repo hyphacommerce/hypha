@@ -56,10 +56,10 @@ interface Row extends Record<string, unknown> {
 const FILTER_FROM = 8;
 
 /**
- * The variants (design note 0014, section 8): SKU, price, weight and whether it ships
- * (design note 0015), part of the editor's draft and saved as one list (design note
- * 0021, Q1). Selected variants can be priced, weighed or removed together. A variant's
- * image and stock are separate decisions and save at once, for saved variants.
+ * The variants: SKU, price, weight and whether it ships, part of the editor's draft
+ * and saved as one list. Selected variants can be priced, weighed or removed together.
+ * A variant's image and stock are separate decisions and save at once, for saved
+ * variants.
  */
 export function VariantsSection({
   product,
@@ -79,7 +79,7 @@ export function VariantsSection({
    * Stock column then). A variant missing from it is read when its stock is opened. */
   stock?: Record<string, Stock>;
   locations: Location[];
-  /** The variants' custom field definitions (design note 0033); none: no Fields column. */
+  /** The variants' custom field definitions; none: no Fields column. */
   variantFields?: { definitions: Definition[]; scopes: readonly string[] | null };
   onChange: (change: Partial<Draft>) => void;
 }) {

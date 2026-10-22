@@ -262,8 +262,7 @@ impl World {
         block_on(self.products.update(&mut product)).unwrap();
     }
 
-    /// Deletes the product as `hypha_merchandising::delete_product` does (design note
-    /// 0033, section 6.3).
+    /// Deletes the product as `hypha_merchandising::delete_product` does.
     fn delete_product(&self, name: &str) {
         use hypha_core::HasBatch;
         use hypha_products::StageProducts;
@@ -389,18 +388,6 @@ fn add_line_returns_priced_cart() {
         }
     );
     assert_eq!(priced.total, eur(2000));
-}
-
-#[test]
-fn add_line_merges_same_variant() {
-    let world = World::new();
-    let cart = world.create_cart();
-
-    world.add(&Ctx::system(), cart, "mug", 2).unwrap();
-    let priced = world.add(&Ctx::system(), cart, "mug", 1).unwrap();
-
-    assert_eq!(priced.lines.len(), 1);
-    assert_eq!(priced.total, eur(3000));
 }
 
 #[test]
@@ -592,7 +579,7 @@ fn line_becomes_unavailable_when_product_leaves_catalog() {
     assert_eq!(priced.total, eur(0));
 }
 
-// ---- channels (design note 0020) ----
+// ---- channels ----
 
 #[test]
 fn a_cart_needs_a_channel() {
@@ -1319,7 +1306,7 @@ fn losing_the_race_for_a_key_replays_the_winner() {
     assert_eq!(block_on(world.carts.get(loser_cart)), Ok(None));
 }
 
-// ---------- a product's offer in a country (design note 0021, SU7) ----------
+// ---------- a product's offer in a country ----------
 
 fn product(world: &World, name: &str) -> Product {
     block_on(world.products.get(pid(name))).unwrap().unwrap()

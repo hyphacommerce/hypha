@@ -1,6 +1,6 @@
-//! The in-memory rate limiter (design note 0009): counts in this process with
-//! `governor` (GCRA, a smooth token bucket), right for one instance (0006's model A on a
-//! VPS). The rules and quotas are `hypha_http::rate_limit`'s.
+//! The in-memory rate limiter: counts in this process with `governor` (GCRA, a smooth token
+//! bucket), right for one instance (0006's model A on a VPS). The rules and quotas are
+//! `hypha_http::rate_limit`'s.
 
 use std::num::NonZeroU32;
 

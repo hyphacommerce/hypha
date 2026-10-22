@@ -1,10 +1,10 @@
 "use client";
 
-// The shopper's cart in the browser (design note 0024, §7). Pages are static (ISR), so
-// none of them knows the cart: this reads it once the page is here (`loadCart`, only when
-// the `has_cart_<country>` cookie says there is one, `lib/cart-flag.ts`) and
-// keeps it while the shopper adds, changes and removes lines, for the header's count,
-// the drawer and the cart page. Every change answers with the cart, so nothing reloads.
+// The shopper's cart in the browser. Pages are static (ISR), so none of them knows the
+// cart: this reads it once the page is here (`loadCart`, only when the
+// `has_cart_<country>` cookie says there is one, `lib/cart-flag.ts`) and keeps it while
+// the shopper adds, changes and removes lines, for the header's count, the drawer and the
+// cart page. Every change answers with the cart, so nothing reloads.
 
 import {
   createContext,

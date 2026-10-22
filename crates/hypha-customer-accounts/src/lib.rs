@@ -1,5 +1,5 @@
-//! Customer accounts (design note 0034): shoppers signing in to the storefront with a
-//! code emailed to them, their sessions, and what they may do while signed in.
+//! Customer accounts: shoppers signing in to the storefront with a code emailed to them,
+//! their sessions, and what they may do while signed in.
 //!
 //! A composing crate: `hypha-auth` holds the identity (`Principal::Customer`, a
 //! `Credential::EmailCode`) and the session (`TokenKind::CustomerSession`),

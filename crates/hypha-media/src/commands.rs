@@ -1,5 +1,5 @@
-//! The media library's commands (design note 0013). Files go straight between the client
-//! and storage; these commands sign uploads, check what was stored and keep the metadata.
+//! The media library's commands. Files go straight between the client and storage; these
+//! commands sign uploads, check what was stored and keep the metadata.
 
 use hypha_core::{
     AssetId, AuthError, Clock, Ctx, ErrorCode, IdGenerator, Keyset, Page, PageLimit, PageRequest,
@@ -236,11 +236,11 @@ pub async fn update_asset<R: AssetRepo>(
     Ok(asset)
 }
 
-/// Deletes the asset and its file, unless something uses it (`AssetInUse`, design note
-/// 0014, E10). The row goes first: the repository refuses it while usages exist, even
-/// ones attached after the check here, and a file must never disappear from under an
-/// asset that is still in use. If deleting the file then fails, it stays in storage
-/// with nothing pointing at it. Records `asset.deleted` with the row.
+/// Deletes the asset and its file, unless something uses it (`AssetInUse`). The row goes
+/// first: the repository refuses it while usages exist, even ones attached after the check
+/// here, and a file must never disappear from under an asset that is still in use. If
+/// deleting the file then fails, it stays in storage with nothing pointing at it. Records
+/// `asset.deleted` with the row.
 pub async fn delete_asset<S: HasAssets + HasAssetUsages, B: BlobStore>(
     ctx: &Ctx,
     ports: &S,

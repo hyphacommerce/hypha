@@ -24,9 +24,9 @@ use crate::{
 pub struct InMemoryProductRepo {
     pub(crate) products: Table<ProductId, Product>,
     pub(crate) outbox: InMemoryOutbox,
-    /// The categories' membership and the channels' publications, which the list
-    /// filters by, as a database joins them (design note 0024, AU5). Empty unless
-    /// shared (`InMemoryPorts` shares its repos').
+    /// The categories' membership and the channels' publications, which the list filters
+    /// by, as a database joins them. Empty unless shared (`InMemoryPorts` shares its
+    /// repos').
     members: Arc<Mutex<Members>>,
     publications: Arc<Mutex<Publications>>,
     field_values: SharedValues,
@@ -54,8 +54,8 @@ impl InMemoryProductRepo {
         }
     }
 
-    /// The same repo, filtering its list by the custom field values `fields` holds
-    /// (design note 0033, §7), as a database joins them.
+    /// The same repo, filtering its list by the custom field values `fields` holds, as a
+    /// database joins them.
     pub fn joining_fields(self, fields: &crate::InMemoryCustomFields) -> Self {
         Self {
             field_values: fields.shared_values(),

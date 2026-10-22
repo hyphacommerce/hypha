@@ -71,11 +71,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Asks for the customer's own personal data to be erased after the store's cancel
-         *     window (`customers.erasure_delay`; design note 0032, §7.3), recording
-         *     `customer.erasure_requested` and emailing when it runs (`customer_erasure_requested`).
-         *     Signing in still works until then, to cancel. `409 erasure_already_requested` while
-         *     one is pending.
+         * Asks for the customer's own personal data to be erased after the store's cancel window
+         *     (`customers.erasure_delay`), recording `customer.erasure_requested` and emailing when it
+         *     runs (`customer_erasure_requested`). Signing in still works until then, to cancel. `409
+         *     erasure_already_requested` while one is pending.
          */
         post: operations["storefront.account.request_erasure"];
         /**
@@ -204,8 +203,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * What installed apps add to a storefront (design note 0029, §7): elements for
-         *     `target` (or every storefront target), and which apps have a proxy.
+         * What installed apps add to a storefront: elements for `target` (or every storefront
+         *     target), and which apps have a proxy.
          */
         get: operations["storefront.app_extensions.list"];
         put?: never;
@@ -223,7 +222,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Forwards a `GET` to the app's storefront proxy (design note 0029, §8), signed, with `Hypha-Store`, `Hypha-Channel` and `Hypha-Path`; with an `X-Hypha-Cart: cart_…` header (a cart of the key's channel), also `Hypha-Cart`, `Hypha-Country` and `Hypha-Customer` (when the cart has one). No personal data is forwarded. */
+        /** Forwards a `GET` to the app's storefront proxy, signed, with `Hypha-Store`, `Hypha-Channel` and `Hypha-Path`; with an `X-Hypha-Cart: cart_…` header (a cart of the key's channel), also `Hypha-Cart`, `Hypha-Country` and `Hypha-Customer` (when the cart has one). No personal data is forwarded. */
         get: operations["storefront.app_extensions.storefront_proxy_get"];
         /** Forwards a `PUT` to the app's storefront proxy, as `POST` does. */
         put: operations["storefront.app_extensions.storefront_proxy_put"];
@@ -325,17 +324,17 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns
-         *     the order the first request placed. The body is `{}` or `{"expected_total": …}`.
-         *     Something to pay needs a payment method chosen (`PUT …/payment-method`; 409
+         * Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns the
+         *     order the first request placed. The body is `{}` or `{"expected_total": …}`. Something
+         *     to pay needs a payment method chosen (`PUT …/payment-method`; 409
          *     `payment_method_required`) and still offered (409 `payment_method_unavailable`). An
-         *     online method's money must be committed first (design note 0031: `POST
-         *     …/payment`): none started is 409 `payment_required`, not yet committed `payment_pending`
-         *     (its provider was asked; try again shortly, or it completes when the provider
-         *     reports), declined or released `payment_failed` (start paying again). If the order
-         *     can't be placed once the money is committed (a line sold out meanwhile), the money is
-         *     given back. A cart checked out already answers with its order for an hour after it
-         *     was placed (the provider's report may have completed it), then `409 cart_completed`.
+         *     online method's money must be committed first (`POST …/payment`): none started is 409
+         *     `payment_required`, not yet committed `payment_pending` (its provider was asked; try
+         *     again shortly, or it completes when the provider reports), declined or released
+         *     `payment_failed` (start paying again). If the order can't be placed once the money is
+         *     committed (a line sold out meanwhile), the money is given back. A cart checked out
+         *     already answers with its order for an hour after it was placed (the provider's report
+         *     may have completed it), then `409 cart_completed`.
          */
         post: operations["storefront.orders.checkout"];
         delete?: never;
@@ -405,8 +404,8 @@ export interface paths {
         };
         get?: never;
         /**
-         * Ticks or unticks "Email me with news and offers" (design note 0032, §5). Checkout
-         *     records the consent when it's ticked; unticked never unsubscribes anyone.
+         * Ticks or unticks "Email me with news and offers". Checkout records the consent when it's
+         *     ticked; unticked never unsubscribes anyone.
          */
         put: operations["storefront.carts.set_marketing"];
         post?: never;
@@ -426,14 +425,13 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Starts paying for the cart before its order exists (design note 0031): an online
-         *     method's money is committed first, and checkout places the order once it is. Runs
-         *     checkout's checks (409 `total_changed`, `payment_method_required`, …). A pending
-         *     payment of the same method and total is started again (the provider resumes it);
-         *     otherwise a new one is made and the old ones released. Refused for a manual method
-         *     (409 `payment_method_offline`: check out instead), a total of zero (409
-         *     `cart_nothing_to_pay`) and a cart whose money is committed already (409
-         *     `cart_payment_committed`: check out).
+         * Starts paying for the cart before its order exists: an online method's money is
+         *     committed first, and checkout places the order once it is. Runs checkout's checks (409
+         *     `total_changed`, `payment_method_required`, …). A pending payment of the same method and
+         *     total is started again (the provider resumes it); otherwise a new one is made and the
+         *     old ones released. Refused for a manual method (409 `payment_method_offline`: check out
+         *     instead), a total of zero (409 `cart_nothing_to_pay`) and a cart whose money is
+         *     committed already (409 `cart_payment_committed`: check out).
          */
         post: operations["storefront.orders.start_cart_payment"];
         delete?: never;
@@ -470,7 +468,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** How the buyer can pay for the cart (design note 0027, §4). */
+        /** How the buyer can pay for the cart. */
         get: operations["storefront.carts.payment_methods"];
         put?: never;
         post?: never;
@@ -562,10 +560,9 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * A category page (design note 0022, section 4): the category by handle, with its
-         *     ancestors and shown children. Its products come through
-         *     `/storefront/search?category=…`. A hidden category (or one under a hidden one) is
-         *     `404 category_not_found`.
+         * A category page: the category by handle, with its ancestors and shown children. Its
+         *     products come through `/storefront/search?category=…`. A hidden category (or one under a
+         *     hidden one) is `404 category_not_found`.
          */
         get: operations["storefront.categories.fetch_by_handle"];
         put?: never;
@@ -584,8 +581,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Where the store sells: each country with its market's currency (design note 0021,
-         *     SU6). What a country picker and a storefront's routing need.
+         * Where the store sells: each country with its market's currency. What a country picker
+         *     and a storefront's routing need.
          */
         get: operations["storefront.markets.storefront_countries"];
         put?: never;
@@ -645,8 +642,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * A product page in one read (design note 0021, SU7): the product by its handle,
-         *     priced in `country`, with the same rules as the read by ID.
+         * A product page in one read: the product by its handle, priced in `country`, with the
+         *     same rules as the read by ID.
          */
         get: operations["storefront.products.fetch_by_handle"];
         put?: never;
@@ -685,11 +682,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Searches the products the shopper's market sells, priced and stocked there; without
-         *     `q`, the market's product listing. Pages go at most 1,000 results deep. With a search
-         *     app set (`search_app` in the settings), the app chooses and orders the results
-         *     (`search.query`, design note 0029) and Hypha shows its own prices and stock for them;
-         *     `price` is then `null`. When the app fails, the built-in engine answers.
+         * Searches the products the shopper's market sells, priced and stocked there; without `q`,
+         *     the market's product listing. Pages go at most 1,000 results deep. With a search app set
+         *     (`search_app` in the settings), the app chooses and orders the results (`search.query`)
+         *     and Hypha shows its own prices and stock for them; `price` is then `null`. When the app
+         *     fails, the built-in engine answers.
          */
         get: operations["storefront.search.storefront_search"];
         put?: never;
@@ -728,9 +725,9 @@ export interface components {
             applied: boolean;
         };
         /**
-         * @description Everything Hypha holds about the customer, for the person it's about (design note
-         *     0032, §7.4): the account, their orders, the orders' payments and the emails sent
-         *     about them. Records `customer.data_requested`, as the admin's export does.
+         * @description Everything Hypha holds about the customer, for the person it's about: the account, their
+         *     orders, the orders' payments and the emails sent about them. Records
+         *     `customer.data_requested`, as the admin's export does.
          */
         AccountExportResponse: {
             account: components["schemas"]["AccountResponse"];
@@ -741,14 +738,14 @@ export interface components {
             orders: components["schemas"]["OrderResponse"][];
             payments: components["schemas"]["PaymentResponse"][];
         };
-        /** @description The signed-in customer, as they see themselves (design note 0034, §3). */
+        /** @description The signed-in customer, as they see themselves. */
         AccountResponse: {
             addresses: components["schemas"]["AddressResponse"][];
             /** @description When the account was created, RFC 3339 in UTC. */
             created_at: string;
             /**
              * @description The custom field values the merchant shows the account holder (`access.storefront:
-             *     read`, design note 0034, §5), `{"custom.tier": "gold", …}`.
+             *     read`), `{"custom.tier": "gold", …}`.
              */
             custom_fields: {
                 [key: string]: unknown;
@@ -812,9 +809,9 @@ export interface components {
             postal_code?: string | null;
             province?: string | null;
             /**
-             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
-             *     app without the matching `customer_data:*` scope. They are absent from the
-             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             * @description Personal fields left out for this caller: an API key or app without the matching
+             *     `customer_data:*` scope. They are absent from the object then, whatever the schema
+             *     says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
         };
@@ -851,7 +848,7 @@ export interface components {
             /** @description Enabled, offered in the cart's market and channel, in the order to show them. */
             items: components["schemas"]["CartPaymentMethodResponse"][];
         };
-        /** @description A cart's payment, started (design note 0031). */
+        /** @description A cart's payment, started. */
         CartPaymentResponse: {
             /** @description What it collects: the cart's total. */
             amount: components["schemas"]["Money"];
@@ -875,15 +872,15 @@ export interface components {
             market: components["schemas"]["MarketId"];
             /**
              * @description Whether the buyer ticked "Email me with news and offers" (`PUT …/marketing`):
-             *     checkout records the consent then (design note 0032, §5).
+             *     checkout records the consent then.
              */
             marketing_opt_in: boolean;
             order?: components["schemas"]["OrderId"] | null;
             payment_method?: components["schemas"]["PaymentMethodId"] | null;
             /**
-             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
-             *     app without the matching `customer_data:*` scope. They are absent from the
-             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             * @description Personal fields left out for this caller: an API key or app without the matching
+             *     `customer_data:*` scope. They are absent from the object then, whatever the schema
+             *     says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
             shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
@@ -937,7 +934,7 @@ export interface components {
             next_action?: components["schemas"]["NextActionResponse"] | null;
             payment_error?: components["schemas"]["Error"] | null;
         };
-        /** @description A channel's marketing consent (design note 0032, §5). */
+        /** @description A channel's marketing consent. */
         ConsentResponse: {
             /** @description When the customer last said so, RFC 3339 in UTC; absent while never asked. */
             consented_at?: string | null;
@@ -1020,10 +1017,7 @@ export interface components {
          * @example ana@example.com
          */
         Email: string;
-        /**
-         * @description Every error body, for the OpenAPI documents (design note 0010, S9). `ApiError`
-         *     serializes as this shape.
-         */
+        /** @description Every error body, for the OpenAPI documents. `ApiError` serializes as this shape. */
         Error: {
             /** @description Stable snake_case code: what clients match on. */
             code: string;
@@ -1055,8 +1049,8 @@ export interface components {
              */
             count: number;
             /**
-             * @description What to show for it: a `choice` field's label, "Yes" or "No" for a `boolean` field
-             *     (design note 0033, §9); `null` for every other facet, whose value is its own label.
+             * @description What to show for it: a `choice` field's label, "Yes" or "No" for a `boolean` field;
+             *     `null` for every other facet, whose value is its own label.
              */
             label?: string | null;
             /**
@@ -1066,10 +1060,10 @@ export interface components {
             value: string;
         };
         /**
-         * @description `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no
-         *     serde and renaming a variant can't silently change the API.
-         *     Derived from the order's payments (design note 0027, PA7): manual payments use
-         *     `pending`, `paid` and `voided`; the rest come with providers that move money so.
+         * @description `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no serde and
+         *     renaming a variant can't silently change the API. Derived from the order's payments:
+         *     manual payments use `pending`, `paid` and `voided`; the rest come with providers that
+         *     move money so.
          *
          *     Known values: `pending`, `authorized`, `partially_paid`, `paid`, `partially_refunded`, `refunded`, `voided`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
@@ -1170,7 +1164,7 @@ export interface components {
              */
             currency: string;
         };
-        /** @description What the shopper must do next to pay (design note 0027, §3; 0029, §7). */
+        /** @description What the shopper must do next to pay. */
         NextActionResponse: {
             instructions: string;
             /** @enum {string} */
@@ -1219,9 +1213,9 @@ export interface components {
             /** @description The provider's ID for it, when it gives one. */
             provider_message_id?: string | null;
             /**
-             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
-             *     app without the matching `customer_data:*` scope. They are absent from the
-             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             * @description Personal fields left out for this caller: an API key or app without the matching
+             *     `customer_data:*` scope. They are absent from the object then, whatever the schema
+             *     says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
             sent_at?: string | null;
@@ -1304,7 +1298,7 @@ export interface components {
         };
         OrderResponse: {
             cart: components["schemas"]["CartId"];
-            /** @description The sales channel it was placed through (design note 0020). */
+            /** @description The sales channel it was placed through. */
             channel: components["schemas"]["ChannelId"];
             country: components["schemas"]["CountryCode"];
             /** @description When it was created, RFC 3339 in UTC. */
@@ -1325,9 +1319,9 @@ export interface components {
             /** @description RFC 3339, UTC. */
             placed_at: string;
             /**
-             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
-             *     app without the matching `customer_data:*` scope. They are absent from the
-             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             * @description Personal fields left out for this caller: an API key or app without the matching
+             *     `customer_data:*` scope. They are absent from the object then, whatever the schema
+             *     says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
             shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
@@ -1363,7 +1357,7 @@ export interface components {
             service?: string | null;
             tax?: components["schemas"]["OrderTaxResponse"] | null;
         };
-        /** @description A page of a list, newest first (design note 0012). */
+        /** @description A page of a list, newest first. */
         OrderSummaryPage: {
             /** @description Whether there are more after these. */
             has_more: boolean;
@@ -1375,13 +1369,10 @@ export interface components {
         OrderSummaryResponse: {
             /** @description When it was cancelled, RFC 3339 in UTC; `null` if it wasn't. */
             cancelled_at?: string | null;
-            /** @description The sales channel it was placed through (design note 0020). */
+            /** @description The sales channel it was placed through. */
             channel: components["schemas"]["ChannelId"];
             country: components["schemas"]["CountryCode"];
-            /**
-             * @description The custom field values `?custom_fields=` asked for (design note 0033); absent
-             *     without it.
-             */
+            /** @description The custom field values `?custom_fields=` asked for; absent without it. */
             custom_fields?: {
                 [key: string]: unknown;
             } | null;
@@ -1403,9 +1394,9 @@ export interface components {
             /** @description RFC 3339, UTC. */
             placed_at: string;
             /**
-             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
-             *     app without the matching `customer_data:*` scope. They are absent from the
-             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             * @description Personal fields left out for this caller: an API key or app without the matching
+             *     `customer_data:*` scope. They are absent from the object then, whatever the schema
+             *     says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
             total: components["schemas"]["Money"];
@@ -1470,15 +1461,15 @@ export interface components {
             voided_at?: string | null;
         };
         /**
-         * @description `PaymentStatus` on the wire (design note 0027, PA7).
+         * @description `PaymentStatus` on the wire.
          *
          *     Known values: `pending`, `authorized`, `processing`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         PaymentStatusDto: string;
         /**
-         * @description A storefront's view of an order it placed: the order with its access token, the key
-         *     to reading it again (`GET /storefront/orders/{id}?token=`; design note 0024, §7).
+         * @description A storefront's view of an order it placed: the order with its access token, the key to
+         *     reading it again (`GET /storefront/orders/{id}?token=`).
          */
         PlacedOrderResponse: components["schemas"]["OrderResponse"] & {
             /**
@@ -1532,9 +1523,9 @@ export interface components {
             postal_code?: string | null;
             province?: string | null;
             /**
-             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
-             *     app without the matching `customer_data:*` scope. They are absent from the
-             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             * @description Personal fields left out for this caller: an API key or app without the matching
+             *     `customer_data:*` scope. They are absent from the object then, whatever the schema
+             *     says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
         };
@@ -1544,8 +1535,8 @@ export interface components {
          */
         ProductId: string;
         /**
-         * @description One item of a product's media list (design note 0014, section 7): what a page needs
-         *     to render it. The asset's own route has the rest.
+         * @description One item of a product's media list: what a page needs to render it. The asset's own
+         *     route has the rest.
          */
         ProductMediaResponse: {
             /** @description The asset's alt text. */
@@ -1726,10 +1717,7 @@ export interface components {
             ancestors: components["schemas"]["CategoryRef"][];
             /** @description Its shown children, in order. */
             children: components["schemas"]["CategoryRef"][];
-            /**
-             * @description The custom field values the merchant shows storefronts (`access.storefront:
-             *     read`, design note 0033).
-             */
+            /** @description The custom field values the merchant shows storefronts (`access.storefront: read`). */
             custom_fields: {
                 [key: string]: unknown;
             };
@@ -1770,9 +1758,9 @@ export interface components {
             items: components["schemas"]["StorefrontCustomFieldDefinitionResponse"][];
         };
         /**
-         * @description A field a storefront reads values of: what to call it, where it goes and how to show
-         *     its values (design note 0033, §6.2). Values arrive on products', variants' and
-         *     categories' `custom_fields`, keyed by `field`.
+         * @description A field a storefront reads values of: what to call it, where it goes and how to show its
+         *     values. Values arrive on products', variants' and categories' `custom_fields`, keyed by
+         *     `field`.
          */
         StorefrontCustomFieldDefinitionResponse: {
             /**
@@ -1791,7 +1779,7 @@ export interface components {
              * @description On its owner type's form, from 0: the merchant's order.
              */
             position: number;
-            /** @description `text`, `integer`, `choice`, `list.text`, … (design note 0033, §3). */
+            /** @description `text`, `integer`, `choice`, `list.text`, …. */
             type: string;
         };
         StorefrontExtensionsResponse: {
@@ -1800,20 +1788,19 @@ export interface components {
             proxies: components["schemas"]["ProxyExtension"][];
         };
         /**
-         * @description A product as a storefront sees it (design note 0010, S5): active products only, without
-         *     admin fields. A draft or archived product is `404 product_not_found`, the same as one
-         *     that doesn't exist, so a storefront can't tell them apart.
+         * @description A product as a storefront sees it: active products only, without admin fields. A draft
+         *     or archived product is `404 product_not_found`, the same as one that doesn't exist, so a
+         *     storefront can't tell them apart.
          *
-         *     Prices and stock are the shopper's: with `country`, each variant carries its price
-         *     in that country's market and whether it can be bought now (design note 0021, SU7),
-         *     priced as a cart prices it. Without `country`, there are none: a product's base price
-         *     isn't what any shopper pays.
+         *     Prices and stock are the shopper's: with `country`, each variant carries its price in
+         *     that country's market and whether it can be bought now, priced as a cart prices it.
+         *     Without `country`, there are none: a product's base price isn't what any shopper pays.
          */
         StorefrontProductResponse: {
             currency?: components["schemas"]["Currency"] | null;
             /**
-             * @description The custom field values the merchant shows storefronts (`access.storefront:
-             *     read`, design note 0033), `{"custom.material": "wool", …}`.
+             * @description The custom field values the merchant shows storefronts (`access.storefront: read`),
+             *     `{"custom.material": "wool", …}`.
              */
             custom_fields: {
                 [key: string]: unknown;
@@ -1841,8 +1828,8 @@ export interface components {
             vendor?: string | null;
         };
         /**
-         * @description What a storefront sees of the store (design note 0021, SU4): what a header, footer
-         *     or contact page shows. Legal details stay in the admin until a storefront needs them.
+         * @description What a storefront sees of the store: what a header, footer or contact page shows. Legal
+         *     details stay in the admin until a storefront needs them.
          */
         StorefrontStoreResponse: {
             contact_email?: components["schemas"]["Email"] | null;
@@ -1853,7 +1840,7 @@ export interface components {
             name: string;
         };
         /**
-         * @description A storefront target (design note 0029, §5).
+         * @description A storefront target.
          *
          *     Known values: `checkout.payment`, `product.block`, `cart.block`, `order.confirmation`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
@@ -1910,8 +1897,8 @@ export interface components {
             reason: string;
         };
         /**
-         * @description JSON Merge Patch: only the fields sent change, `null` clears one. The email isn't
-         *     here: it's what the customer signs in with (design note 0034, §8).
+         * @description JSON Merge Patch: only the fields sent change, `null` clears one. The email isn't here:
+         *     it's what the customer signs in with.
          */
         UpdateAccountRequest: {
             first_name?: string | null;
@@ -5459,8 +5446,8 @@ export interface operations {
                 /** @description Only what can (`true`) or can't (`false`) be sold now. */
                 available?: boolean;
                 /**
-                 * @description Only products in this category or one below it (design note 0022); a hidden
-                 *     category is `404 category_not_found`.
+                 * @description Only products in this category or one below it; a hidden category is `404
+                 *     category_not_found`.
                  */
                 category?: components["schemas"]["CategoryId"];
                 sort?: "relevance" | "newest" | "price_asc" | "price_desc" | "title";

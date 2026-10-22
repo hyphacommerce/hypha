@@ -1,8 +1,8 @@
 "use client";
 
-// A reference field's input (design note 0033, §3): the target's prefixed ID, picked
-// where the admin has a picker (products from the product picker, categories from the
-// tree) or typed, and named under the input once looked up.
+// A reference field's input: the target's prefixed ID, picked where the admin has a
+// picker (products from the product picker, categories from the tree) or typed, and
+// named under the input once looked up.
 
 import { Button } from "@astryxdesign/core/Button";
 import { HStack, VStack } from "@astryxdesign/core/Layout";

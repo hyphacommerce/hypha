@@ -1,5 +1,5 @@
-//! Invites (design note 0008, section 5): how staff join. An admin invites an email
-//! with a role; the emailed token lets the invitee set a name and password.
+//! Invites: how staff join. An admin invites an email with a role; the emailed token lets
+//! the invitee set a name and password.
 
 use core::time::Duration;
 

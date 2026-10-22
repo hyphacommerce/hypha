@@ -1,7 +1,7 @@
 "use client";
 
-// API keys (design note 0008): a paged list on the shared table, making a key (its token
-// shown once), and revoking one.
+// API keys: a paged list on the shared table, making a key (its token shown once), and
+// revoking one.
 
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Badge } from "@astryxdesign/core/Badge";

@@ -1,4 +1,4 @@
-/// Optimistic-concurrency version of a stored aggregate (design note 0001, 3.2).
+/// Optimistic-concurrency version of a stored aggregate.
 ///
 /// `Version::NEW` (0) means "never stored". A repository's `insert` stores version 1
 /// and each successful `update` adds one. An `update` from an older version fails with

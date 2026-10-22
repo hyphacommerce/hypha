@@ -7,8 +7,8 @@ import { loaded, sessionClient } from "@/lib/hypha";
 
 import { AppsCard } from "./apps";
 
-/** Settings → Apps (design note 0016, section 8): external apps, their signing secrets,
- * and the events they get as webhooks. */
+/** Settings → Apps: external apps, their signing secrets, and the events they get as
+ * webhooks. */
 export default async function AppsSettingsPage() {
   const client = await sessionClient();
   const apps = await client.GET("/admin/apps").then(loaded);

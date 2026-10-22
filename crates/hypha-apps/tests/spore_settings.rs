@@ -1,5 +1,5 @@
-//! A spore's settings (design note 0030, §8): checked against its schema and by the
-//! spore, secret fields sealed and never answered, read back unsealed by the spore.
+//! A spore's settings: checked against its schema and by the spore, secret fields sealed
+//! and never answered, read back unsealed by the spore.
 
 use hypha_apps::{
     AppKey, CommandError, SettingsProblem, SettingsSchema, SporeRegistration, SporeSettingsRepo,

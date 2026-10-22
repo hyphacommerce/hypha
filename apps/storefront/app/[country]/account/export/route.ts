@@ -1,5 +1,5 @@
-// The account's data as a download (design note 0034, §3): the API's export, as the
-// signed-in shopper, handed over as a JSON file.
+// The account's data as a download: the API's export, as the signed-in shopper,
+// handed over as a JSON file.
 
 import { type NextRequest, NextResponse } from "next/server";
 

@@ -14,8 +14,8 @@ use super::{
     users::{invite, role_id, user},
 };
 
-/// Runs the `HasBatch` scenarios of the staff flows (design note 0008): accepting an
-/// invite, the owner's first start, a password reset.
+/// Runs the `HasBatch` scenarios of the staff flows: accepting an invite, the owner's first
+/// start, a password reset.
 pub async fn staff_batch<S>(make: impl AsyncFn() -> S)
 where
     S: HasBatch
@@ -56,9 +56,8 @@ where
     delete_identity(&make().await).await;
 }
 
-/// An erased or deleted customer's account (design note 0034, AC10): the identity goes
-/// at the version it was loaded at, its sessions are revoked in the same commit; a stale
-/// version writes nothing.
+/// An erased or deleted customer's account: the identity goes at the version it was loaded
+/// at, its sessions are revoked in the same commit; a stale version writes nothing.
 async fn delete_identity<S>(ports: &S)
 where
     S: HasBatch + HasIdentities + HasSessions,

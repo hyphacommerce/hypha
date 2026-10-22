@@ -1,10 +1,10 @@
 "use client";
 
-// Getting an app in (design note 0029, §4.1). A public app installs from its own site,
-// which owns the OAuth flow (its PKCE verifier and redirect): "Install app" opens the
-// app's install route, `GET <app_url>/install?api=<this store's API>`
-// (docs/apps/admin-integration.md), and Hypha brings the staff member back to the
-// consent page. A private app, a store's own integration, is its manifest uploaded here.
+// Getting an app in. A public app installs from its own site, which owns the OAuth flow
+// (its PKCE verifier and redirect): "Install app" opens the app's install route, `GET
+// <app_url>/install?api=<this store's API>` (docs/apps/admin-integration.md), and Hypha
+// brings the staff member back to the consent page. A private app, a store's own
+// integration, is its manifest uploaded here.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

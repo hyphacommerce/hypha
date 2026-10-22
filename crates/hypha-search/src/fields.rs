@@ -1,6 +1,5 @@
-//! Custom fields as search facets (design note 0033, §9): which fields may be facets,
-//! the facet values a stored value gives, and loading a batch of products' values for
-//! their documents.
+//! Custom fields as search facets: which fields may be facets, the facet values a stored
+//! value gives, and loading a batch of products' values for their documents.
 
 use std::collections::{BTreeMap, BTreeSet};
 

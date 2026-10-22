@@ -1,9 +1,8 @@
 //! `payments.start` v2, `payments.status`, `payments.capture`, `payments.void` and
-//! `payments.refund` v1 (design notes 0029 §3.1, 0031): how a payment app collects a
-//! cart's money before its order exists, and settles it after. Results the app learns
-//! later (a card authorized, a refund settled) come back through
-//! `POST /admin/payments/{id}/events`, not through these answers; Hypha asks
-//! `payments.status` when the shopper says they paid before the app reported it.
+//! `payments.refund` v1: how a payment app collects a cart's money before its order exists,
+//! and settles it after. Results the app learns later (a card authorized, a refund settled)
+//! come back through `POST /admin/payments/{id}/events`, not through these answers; Hypha
+//! asks `payments.status` when the shopper says they paid before the app reported it.
 
 use core::time::Duration;
 
@@ -15,8 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ExtensionPoint, OnFailure};
 
-/// The shopper starts paying for a cart with a method whose provider is the app (version
-/// 2: before the order exists, design note 0031).
+/// The shopper starts paying for a cart with a method whose provider is the app (version 2:
+/// before the order exists).
 pub struct PaymentsStart;
 
 impl ExtensionPoint for PaymentsStart {
@@ -60,8 +59,8 @@ impl ExtensionPoint for PaymentsStart {
     }
 }
 
-/// What Hypha sends to start a payment. Settings for the method stay with the app (it
-/// keeps its own, design note 0029, §4.2): the method's ID is enough to find them.
+/// What Hypha sends to start a payment. Settings for the method stay with the app (it keeps
+/// its own): the method's ID is enough to find them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PaymentStartRequest {
@@ -94,8 +93,8 @@ pub struct PaymentStartRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "openapi", schema(required = false))]
     pub return_url: Option<String>,
-    /// The buyer's email (for the provider's receipt). Personal data (design note 0029,
-    /// AP10): absent unless the app's grant has `customer_data:email`.
+    /// The buyer's email (for the provider's receipt). Personal data: absent unless the
+    /// app's grant has `customer_data:email`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "openapi", schema(required = false))]
     pub customer_email: Option<Email>,
@@ -119,9 +118,8 @@ pub struct PaymentStartResponse {
 pub enum NextAction {
     /// Send the buyer to the provider's page.
     Redirect { url: String },
-    /// Mount the app's storefront element (a custom element, design note 0029, §7)
-    /// with these properties (a Stripe client secret, …), and wait for its
-    /// `hypha:payment-confirmed` event.
+    /// Mount the app's storefront element (a custom element) with these properties (a
+    /// Stripe client secret, …), and wait for its `hypha:payment-confirmed` event.
     ClientWidget {
         element: String,
         /// Any JSON object: the element's own properties.
@@ -135,8 +133,8 @@ pub enum NextAction {
     Instructions { text: String },
 }
 
-/// Hypha asks where a payment the app started is (design note 0031, §4): the shopper's
-/// storefront says they paid, and the app hasn't reported it yet.
+/// Hypha asks where a payment the app started is: the shopper's storefront says they paid,
+/// and the app hasn't reported it yet.
 pub struct PaymentsStatus;
 
 impl ExtensionPoint for PaymentsStatus {
@@ -235,8 +233,8 @@ payment_action!(PaymentsRefund, "payments.refund");
 pub struct PaymentActionRequest {
     /// The payment (`pay_…`).
     pub payment: PaymentId,
-    /// The cart it was started for, and its order once placed: absent when Hypha gives
-    /// back the money of a cart whose order it couldn't place (design note 0031, §3).
+    /// The cart it was started for, and its order once placed: absent when Hypha gives back
+    /// the money of a cart whose order it couldn't place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "openapi", schema(required = false))]
     pub cart: Option<CartId>,

@@ -1,6 +1,6 @@
-//! The `log` email sender (design note 0028, §5), the default: every email is written to
-//! the log instead of being sent, as before notifications. Development only; the hosts
-//! warn on startup when it's in effect.
+//! The `log` email sender, the default: every email is written to the log instead of being
+//! sent, as before notifications. Development only; the hosts warn on startup when it's in
+//! effect.
 
 use hypha_notifications::{EmailSender, OutgoingEmail, SendError, Sent};
 

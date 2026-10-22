@@ -1,8 +1,8 @@
 "use client";
 
-// The header's search (design note 0024, §7): suggestions as the shopper types (the
-// first five results, through a server action, so the key stays on the server), and the
-// first row searches everything for the words typed.
+// The header's search: suggestions as the shopper types (the first five results,
+// through a server action, so the key stays on the server), and the first row searches
+// everything for the words typed.
 
 import { HStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";

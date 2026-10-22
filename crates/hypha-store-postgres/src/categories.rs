@@ -1,4 +1,4 @@
-//! Categories and their membership (design note 0022).
+//! Categories and their membership.
 
 use std::collections::HashMap;
 

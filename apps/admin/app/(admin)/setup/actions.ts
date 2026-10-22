@@ -1,8 +1,7 @@
 "use server";
 
-// The setup wizard's steps (design note 0024, AU11). Each saves through the same routes
-// as the screen it stands in for, and returns instead of redirecting, so the wizard
-// moves on to the next step.
+// The setup wizard's steps. Each saves through the same routes as the screen it stands
+// in for, and returns instead of redirecting, so the wizard moves on to the next step.
 
 import { revalidatePath } from "next/cache";
 

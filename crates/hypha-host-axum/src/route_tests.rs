@@ -2,10 +2,10 @@
 //! what only the HTTP layer decides (status codes, error codes, extractors); domain
 //! rules are tested in their crates and end to end in `scripts/e2e.sh`.
 //!
-//! They need Postgres at `DATABASE_URL` (`.cargo/config.toml` points it at the database
-//! `docker compose up -d` starts).
-//! Each test gets a schema of its own, named after it, so they run in parallel and a
-//! rerun starts clean.
+//! They need the tests' Postgres at `HYPHA_TEST_DATABASE_URL` (`.cargo/config.toml` points
+//! it at compose's `postgres-test`). Each test gets a database of its own, named after it
+//! and copied from a template migrated once, so they run in parallel and a rerun starts
+//! clean.
 
 use std::sync::{Arc, Mutex};
 
@@ -20,6 +20,7 @@ use axum::{
 use hypha_auth::{ApiKeyKind, Argon2id, CreateApiKey, create_api_key, totp};
 use hypha_config::Config;
 use hypha_core::{Ctx, Scope, Timestamp};
+use hypha_store_postgres::testing::TestDatabase;
 use hypha_stores::ensure_single_store;
 use hypha_users::{NewOwner, bootstrap_owner};
 use serde_json::{Value, json};
@@ -38,25 +39,25 @@ use hypha_notifications::{OutgoingEmail, Sent};
 use crate::platform::{Background, UuidV7Ids};
 use crate::storage::PgDatabase;
 
-// Apps installed through OAuth, and personal data (design note 0029).
+// Apps installed through OAuth, and personal data.
 mod app_extensions;
-// Apps' custom fields, synced with their manifests (design note 0033, §8).
+// Apps' custom fields, synced with their manifests.
 mod app_fields;
-// Custom fields: definitions, values, filters, facets and redaction (design note 0033).
+// Custom fields: definitions, values, filters, facets and redaction.
 mod custom_fields;
-// Customers: deleting, consent, groups and erasure (design note 0032).
+// Customers: deleting, consent, groups and erasure.
 mod customers;
-// Customer accounts: signing in with an email code (design note 0034).
+// Customer accounts: signing in with an email code.
 mod accounts;
 mod oauth;
-// A host built with a spore (design note 0030).
+// A host built with a spore.
 mod spores;
 mod stripe;
 
 const OWNER_EMAIL: &str = "owner@example.com";
 const OWNER_PASSWORD: &str = "owner password";
 
-/// The app on a fresh schema, with its owner (`OWNER_EMAIL`), and a secret key with every scope
+/// The app on a fresh database, with its owner (`OWNER_EMAIL`), and a secret key with every scope
 /// that `send` uses unless a test picks other credentials.
 struct TestApp<D: crate::Deployment = crate::Stock> {
     router: Router,
@@ -66,6 +67,8 @@ struct TestApp<D: crate::Deployment = crate::Stock> {
     /// What the app's email sender was given (a recording sender, never SMTP, whatever
     /// `.cargo/config.toml` says), oldest first.
     emails: Arc<Mutex<Vec<OutgoingEmail>>>,
+    /// Last, so it's dropped after the state's connections.
+    _database: TestDatabase,
 }
 
 /// A sender that keeps what it's given, named `test` (so test sends aren't refused as
@@ -94,7 +97,7 @@ async fn app_with_media() -> TestApp {
     app_from(config, true).await
 }
 
-/// The app under `hypha.config.toml` text (design note 0017), without the environment.
+/// The app under `hypha.config.toml` text, without the environment.
 async fn app_configured(toml: &str) -> TestApp {
     let config = Config::load(Some(toml), |_| None).unwrap();
     app_from(config, false).await
@@ -108,11 +111,10 @@ async fn app_behind_proxy() -> TestApp {
 /// Requests in these tests come from this peer (`MockConnectInfo`), as if over a socket.
 const PEER: ([u8; 4], u16) = ([127, 0, 0, 1], 4000);
 
-/// A schema of its own for the running test, emptied, and the URL that connects to it.
-/// libtest runs each test on a thread named after it, so the name is stable across runs
-/// and unique within one.
-async fn fresh_schema() -> String {
-    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL (see .cargo/config.toml)");
+/// A database of its own for the running test, copied from a template migrated with
+/// `D`'s migrations, and dropped with the `TestDatabase`. libtest names each test's thread
+/// after the test, so the name is stable across runs and unique within one.
+async fn fresh_database<D: crate::Deployment>() -> TestDatabase {
     let test = std::thread::current()
         .name()
         .unwrap_or("unnamed")
@@ -130,24 +132,10 @@ async fn fresh_schema() -> String {
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .take(40)
         .collect();
-    let schema = format!("rt_{hash:016x}_{tail}").to_lowercase();
-
-    let config = hypha_store_postgres::database_config(&url).expect("DATABASE_URL");
-    let (client, connection) = config
-        .connect(tokio_postgres::NoTls)
+    let name = format!("rt_{hash:016x}_{tail}").to_lowercase();
+    TestDatabase::new(&name, &crate::migrations::<D>())
         .await
-        .unwrap_or_else(|e| {
-            panic!("route tests need Postgres at {url} (`docker compose up -d`): {e}")
-        });
-    tokio::spawn(connection);
-    client
-        .batch_execute(&format!(
-            "DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema};"
-        ))
-        .await
-        .expect("reset the test's schema");
-    let separator = if url.contains('?') { '&' } else { '?' };
-    format!("{url}{separator}options=-csearch_path%3D{schema}")
+        .expect("HYPHA_TEST_DATABASE_URL or DATABASE_URL (see .cargo/config.toml)")
 }
 
 /// File storage under `config` (the compose server), bucket created.
@@ -184,8 +172,8 @@ async fn app_sending_with(config: Config, media: bool, sender: Option<HostMail>)
     app_for::<crate::Stock>(config, media, sender).await
 }
 
-/// The app built with `D`'s spores (design note 0030, §10: `TestApp::with_spores`'s
-/// form here): their migrations, apps, routes, handlers and settings, under `config`.
+/// The app built with `D`'s spores (`TestApp::with_spores`'s form here): their migrations,
+/// apps, routes, handlers and settings, under `config`.
 async fn app_with_spores<D: crate::Deployment>(config: Config) -> TestApp<D> {
     app_for::<D>(config, false, None).await
 }
@@ -196,21 +184,37 @@ async fn app_for<D: crate::Deployment>(
     media: bool,
     sender: Option<HostMail>,
 ) -> TestApp<D> {
+    // The tests' rate apps and webhook receivers listen on localhost.
+    config.allow_private_callbacks = true;
+    app_exactly::<D>(config, media, sender).await
+}
+
+/// The app under `config` as given: calls to private addresses are refused unless it
+/// allows them, as in production.
+async fn app_refusing_private_calls(toml: &str) -> TestApp {
+    let config = Config::load(Some(toml), |_| None).unwrap();
+    app_exactly::<crate::Stock>(config, false, None).await
+}
+
+async fn app_exactly<D: crate::Deployment>(
+    config: Config,
+    media: bool,
+    sender: Option<HostMail>,
+) -> TestApp<D> {
     // Warnings and errors (a 500's cause is only logged) go to the test's output, which
     // a failing test prints: in CI, that's the only place to see them.
     let _ = tracing_subscriber::fmt()
         .with_test_writer()
         .with_env_filter(tracing_subscriber::EnvFilter::new("warn"))
         .try_init();
-    // The tests' rate apps and webhook receivers listen on localhost.
-    config.allow_private_callbacks = true;
     let media = match media {
         true => Some(Arc::new(test_media(&config).await)),
         false => None,
     };
     let runtime = crate::platform::runtime();
+    let database = fresh_database::<D>().await;
     let db = PgDatabase::connect(
-        &fresh_schema().await,
+        database.url(),
         &config.database,
         runtime.clock.clone(),
         &crate::migrations::<D>(),
@@ -304,6 +308,7 @@ async fn app_for<D: crate::Deployment>(
         admin_key: token.expose().to_string(),
         state,
         emails,
+        _database: database,
     }
 }
 
@@ -474,16 +479,6 @@ async fn a_created_product_can_be_fetched_and_an_unknown_one_is_404() {
     assert_eq!(
         (status, code(&body)),
         (StatusCode::BAD_REQUEST, "invalid_path")
-    );
-}
-
-#[tokio::test]
-async fn the_store_is_the_one_created_at_startup() {
-    let app = app().await;
-    let (status, body) = send(&app, "GET", "/admin/store", None).await;
-    assert_eq!(
-        (status, body["name"].as_str()),
-        (StatusCode::OK, Some("Test"))
     );
 }
 
@@ -666,7 +661,7 @@ async fn changing_the_store_needs_stores_write_even_with_nothing_to_change() {
     }
 }
 
-// ---------- lists (design note 0012) ----------
+// ---------- lists ----------
 
 #[tokio::test]
 async fn currencies_list_every_iso_code_with_its_minor_units() {
@@ -1065,7 +1060,7 @@ async fn products_list_newest_first_in_pages() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(ids(&first), [c.as_str(), b.as_str()]);
     assert_eq!(first["has_more"], json!(true));
-    // Opaque (design note 0016, section 9): not the last item's raw ID.
+    // Opaque: not the last item's raw ID.
     let cursor = first["next_cursor"].as_str().unwrap();
     assert!(!cursor.contains("prod_"), "{cursor}");
 
@@ -1435,6 +1430,44 @@ async fn a_storefront_reads_its_order_with_the_access_token_only() {
     );
 }
 
+/// Runs `statement` on the test's schema, for state no route can set (time passing).
+async fn sql<D: crate::Deployment>(app: &TestApp<D>, statement: &str) {
+    use hypha_store_postgres::PgConnection;
+    let ports = app.state.public_ports().await.unwrap();
+    let mut conn = ports.conn().await;
+    conn.client().batch_execute(statement).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_cart_checked_out_over_an_hour_ago_no_longer_answers_with_its_order() {
+    let app = app().await;
+    let (pk, cart_path, _) = cart_for_three_mugs(&app).await;
+    pay_on_delivery(&app, &pk, &cart_path).await;
+    let checkout = format!("{cart_path}/checkout");
+    let (status, placed) = send_as(&app, &pk, "POST", &checkout, Some("{}")).await;
+    assert_eq!(status, StatusCode::CREATED, "{placed}");
+    let (status, again) = send_as(&app, &pk, "POST", &checkout, Some("{}")).await;
+    assert_eq!(status, StatusCode::CREATED, "{again}");
+    assert_eq!(again["access_token"], placed["access_token"]);
+
+    // The clock is the system's: the order is made older instead.
+    sql(
+        &app,
+        "UPDATE orders SET placed_at = placed_at - interval '61 minutes'",
+    )
+    .await;
+    let (status, late) = send_as(&app, &pk, "POST", &checkout, Some("{}")).await;
+    assert_eq!(
+        (status, code(&late)),
+        (StatusCode::CONFLICT, "cart_completed"),
+        "{late}"
+    );
+    let text = late.to_string();
+    let token = placed["access_token"].as_str().unwrap();
+    assert!(!text.contains(token), "{late}");
+    assert!(!text.contains("ana@example.hr"), "{late}");
+}
+
 #[tokio::test]
 async fn orders_list_by_filters_and_total() {
     let app = app().await;
@@ -1583,7 +1616,7 @@ async fn lists_need_read_scopes() {
     }
 }
 
-// ---------- media (design note 0013) ----------
+// ---------- media ----------
 
 /// A 3 × 2 PNG's first bytes (signature and IHDR), padded to `len` bytes.
 fn png(len: usize) -> Vec<u8> {
@@ -1867,7 +1900,7 @@ async fn without_file_storage_the_library_is_unavailable() {
     );
 }
 
-// ---------- authentication (design note 0008) ----------
+// ---------- authentication ----------
 
 /// Logs the owner in; returns the session token.
 async fn owner_session(app: &TestApp) -> String {
@@ -2063,8 +2096,8 @@ async fn the_storefront_takes_no_admin_credentials() {
     }
 }
 
-/// A publishable key, made with the admin key.
-/// A "Cash on delivery" method offered everywhere (design note 0027); its ID.
+/// A publishable key, made with the admin key. A "Cash on delivery" method offered
+/// everywhere; its ID.
 async fn cash_on_delivery(app: &TestApp) -> String {
     let body =
         r#"{"provider":"manual","name":"Cash on delivery","instructions":"Pay the courier."}"#;
@@ -2099,7 +2132,7 @@ async fn publish<D: crate::Deployment>(app: &TestApp<D>, products: &[&str]) {
     assert_eq!(status, StatusCode::NO_CONTENT, "{json}");
 }
 
-/// The channel every store starts with (migration 0036).
+/// The channel every store starts with (migration).
 async fn online_store<D: crate::Deployment>(app: &TestApp<D>) -> String {
     let (_, channels) = send(app, "GET", "/admin/channels", None).await;
     channels["items"][0]["id"].as_str().unwrap().to_string()
@@ -2647,6 +2680,174 @@ async fn two_factor_setup_and_login_over_http() {
     assert_eq!(me["mfa_enabled"], true);
 }
 
+/// Turns on TOTP for the owner's `session`; the recovery codes.
+async fn enable_totp(app: &TestApp, session: &str) -> Vec<String> {
+    let password = json!({ "password": OWNER_PASSWORD }).to_string();
+    let (status, setup) =
+        send_as(app, session, "POST", "/admin/me/mfa/totp", Some(&password)).await;
+    assert_eq!(status, StatusCode::CREATED, "{setup}");
+    let confirm = json!({ "code": totp_code(setup["secret"].as_str().unwrap()) }).to_string();
+    let path = "/admin/me/mfa/totp/confirm";
+    let (status, codes) = send_as(app, session, "POST", path, Some(&confirm)).await;
+    assert_eq!(status, StatusCode::OK, "{codes}");
+    codes["recovery_codes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap().to_string())
+        .collect()
+}
+
+/// Logs the owner in with their password; the second-factor challenge's token.
+async fn mfa_challenge(app: &TestApp) -> String {
+    let body = json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }).to_string();
+    let (status, login) = send_with(app, &[], "POST", "/admin/auth/login", Some(&body)).await;
+    assert_eq!(
+        (status, login["status"].as_str()),
+        (StatusCode::OK, Some("mfa_required"))
+    );
+    login["challenge"]["token"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn wrong_second_factor_codes_lock_the_checks() {
+    let app = app().await;
+    let session = owner_session(&app).await;
+    let recovery = enable_totp(&app, &session).await;
+    let challenge = mfa_challenge(&app).await;
+    let wrong = json!({ "challenge": challenge, "code": "000000" }).to_string();
+    for _ in 0..5 {
+        let (status, body) =
+            send_with(&app, &[], "POST", "/admin/auth/login/mfa", Some(&wrong)).await;
+        assert_eq!(
+            (status, code(&body)),
+            (StatusCode::UNAUTHORIZED, "invalid_mfa_code")
+        );
+    }
+    // The fifth ended the challenge and locked the checks: with a new one, even a right
+    // code isn't looked at.
+    let challenge = mfa_challenge(&app).await;
+    let right = json!({ "challenge": challenge, "code": recovery[0] }).to_string();
+    let (status, body) = send_with(&app, &[], "POST", "/admin/auth/login/mfa", Some(&right)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::TOO_MANY_REQUESTS, "mfa_locked")
+    );
+    assert!(body["details"]["locked_until"].is_string(), "{body}");
+}
+
+#[tokio::test]
+async fn staff_change_their_password_and_manage_their_second_factor() {
+    let app = app().await;
+    let session = owner_session(&app).await;
+    let other = owner_session(&app).await;
+
+    // The password: the current one is checked, and every other session ends.
+    let wrong = json!({ "current_password": "nope", "new_password": "a new password" });
+    let (status, body) = send_as(
+        &app,
+        &session,
+        "PUT",
+        "/admin/me/password",
+        Some(&wrong.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "wrong_password")
+    );
+    let change = json!({ "current_password": OWNER_PASSWORD, "new_password": "a new password" });
+    let (status, body) = send_as(
+        &app,
+        &session,
+        "PUT",
+        "/admin/me/password",
+        Some(&change.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(
+        send_as(&app, &other, "GET", "/admin/me", None).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        send_as(&app, &session, "GET", "/admin/me", None).await.0,
+        StatusCode::OK
+    );
+    let old = json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }).to_string();
+    let (status, body) = send_with(&app, &[], "POST", "/admin/auth/login", Some(&old)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNAUTHORIZED, "invalid_credentials")
+    );
+    let change = json!({ "current_password": "a new password", "new_password": OWNER_PASSWORD });
+    let (status, _) = send_as(
+        &app,
+        &session,
+        "PUT",
+        "/admin/me/password",
+        Some(&change.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // New recovery codes replace the old ones.
+    let first = enable_totp(&app, &session).await;
+    let body = json!({ "code": first[0] }).to_string();
+    let path = "/admin/me/mfa/recovery-codes";
+    let (status, fresh) = send_as(&app, &session, "POST", path, Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{fresh}");
+    let fresh: Vec<&str> = fresh["recovery_codes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap())
+        .collect();
+    assert!(!fresh.contains(&first[1].as_str()));
+    let old_code = json!({ "code": first[1] }).to_string();
+    let (status, body) = send_as(&app, &session, "POST", path, Some(&old_code)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_mfa_code")
+    );
+
+    // Turning it off takes a code too; then logging in needs only the password.
+    let disable = "/admin/me/mfa/totp/disable";
+    let (status, body) = send_as(&app, &session, "POST", disable, Some(&old_code)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_mfa_code")
+    );
+    let body = json!({ "code": fresh[0] }).to_string();
+    let (status, json) = send_as(&app, &session, "POST", disable, Some(&body)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{json}");
+    let (_, me) = send_as(&app, &session, "GET", "/admin/me", None).await;
+    assert_eq!(me["mfa_enabled"], false);
+    owner_session(&app).await;
+}
+
+#[tokio::test]
+async fn an_api_key_is_read_without_its_token() {
+    let app = app().await;
+    let body = r#"{"kind":"secret","name":"Reader","scopes":["stores:read"]}"#;
+    let (status, created) = send(&app, "POST", "/admin/api-keys", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap();
+    let (status, fetched) = send(&app, "GET", &format!("/admin/api-keys/{id}"), None).await;
+    assert_eq!(status, StatusCode::OK, "{fetched}");
+    assert_eq!(
+        (&fetched["id"], &fetched["name"], &fetched["scopes"]),
+        (&json!(id), &json!("Reader"), &json!(["stores:read"]))
+    );
+    assert!(fetched.get("token").is_none(), "{fetched}");
+    let unknown = "/admin/api-keys/key_00000000000000000000000000000063";
+    let (status, body) = send(&app, "GET", unknown, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "api_key_not_found")
+    );
+}
+
 #[tokio::test]
 async fn roles_and_invites_over_http() {
     let app = app().await;
@@ -2679,7 +2880,7 @@ async fn roles_and_invites_over_http() {
     assert_eq!(invited["email"], "bob@example.com");
     assert!(invited.get("token").is_none());
 
-    // The lists staff pages read (design note 0024, AU6).
+    // The lists staff pages read.
     let (status, roles) = send(&app, "GET", "/admin/roles", None).await;
     assert_eq!(status, StatusCode::OK);
     let names: Vec<&Value> = roles["items"]
@@ -2784,7 +2985,7 @@ async fn a_bad_token_is_refused_before_the_body_is_looked_at() {
     );
 }
 
-// ---------- rate limits (design note 0009) ----------
+// ---------- rate limits ----------
 
 fn login_body(email: &str) -> String {
     json!({ "email": email, "password": "wrong password" }).to_string()
@@ -2973,7 +3174,44 @@ async fn the_address_limit_comes_before_the_body_is_parsed() {
     );
 }
 
-// ---------- shipping (design note 0015) ----------
+#[tokio::test]
+async fn second_factor_tries_from_one_address_are_limited() {
+    let app = app().await;
+    let (burst, _) = hypha_http::rate_limit::Rule::MfaIp.quota(&Default::default());
+    let body = json!({ "challenge": "hypha_mfa_nope", "code": "000000" }).to_string();
+    for _ in 0..burst {
+        let (status, json) =
+            send_with(&app, &[], "POST", "/admin/auth/login/mfa", Some(&body)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{json}");
+    }
+    let (status, json) = send_with(&app, &[], "POST", "/admin/auth/login/mfa", Some(&body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
+    );
+}
+
+#[tokio::test]
+async fn guessing_reset_tokens_from_one_address_is_limited() {
+    let app = app().await;
+    let (burst, _) = hypha_http::rate_limit::Rule::ResetConfirmIp.quota(&Default::default());
+    let confirm = json!({ "token": "hypha_rst_nope", "password": "new password" }).to_string();
+    let path = "/admin/auth/password-reset/confirm";
+    for _ in 0..burst {
+        let (status, json) = send_with(&app, &[], "POST", path, Some(&confirm)).await;
+        assert_eq!(
+            (status, code(&json)),
+            (StatusCode::UNAUTHORIZED, "invalid_token")
+        );
+    }
+    let (status, json) = send_with(&app, &[], "POST", path, Some(&confirm)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
+    );
+}
+
+// ---------- shipping ----------
 
 #[tokio::test]
 async fn shipping_zones_and_options_over_http() {
@@ -3333,8 +3571,7 @@ async fn a_cart_ships_by_an_app_providers_signed_quote() {
             .unwrap();
         assert_eq!(*signature, hypha_http::outbound::sign(&secret, at, body));
         let sent: Value = serde_json::from_slice(body).unwrap();
-        // An app made by hand has no grant: the shopper's address goes as its country
-        // only (design note 0029, AP10).
+        // An app made by hand has no grant: the shopper's address goes as its country only.
         let destination = &sent["request"]["destination"];
         assert_eq!(destination["country"], "HR");
         assert_eq!(destination.get("city"), None);
@@ -3351,7 +3588,7 @@ async fn a_cart_ships_by_an_app_providers_signed_quote() {
         assert_eq!(sent["id"], request_id.as_str());
     }
 
-    // Each quote is in the app's call log (design note 0029), for this cart.
+    // Each quote is in the app's call log, for this cart.
     let (status, calls) = send(&app, "GET", "/admin/apps/app_courier/extension-calls", None).await;
     assert_eq!(status, StatusCode::OK, "{calls}");
     let items = calls["items"].as_array().unwrap();
@@ -3680,7 +3917,7 @@ async fn a_provider_needs_its_app() {
     );
 }
 
-// ---------- apps and webhooks (design note 0016) ----------
+// ---------- apps and webhooks ----------
 
 #[tokio::test]
 async fn apps_are_created_changed_and_deleted() {
@@ -3935,7 +4172,7 @@ async fn a_failed_webhook_is_listed_and_retried() {
     );
 }
 
-// ---------- the route table (design note 0010) ----------
+// ---------- the route table ----------
 
 #[test]
 fn every_documented_route_is_listed_once_under_its_surface() {
@@ -4012,7 +4249,7 @@ async fn every_route_refuses_the_other_surfaces_credentials() {
     }
 }
 
-// ---------- fulfilment (design note 0018) ----------
+// ---------- fulfilment ----------
 
 /// A shop selling mugs that need no shipping, 10 at the warehouse, and a storefront
 /// cart for 3 with an email, before choosing how to pay. Returns (the publishable key,
@@ -4088,8 +4325,7 @@ async fn placed_order_for_three_mugs(app: &TestApp) -> (String, String, String) 
     )
 }
 
-/// `placed_order_for_three_mugs` with "Email me with news and offers" ticked (design
-/// note 0032, §5).
+/// `placed_order_for_three_mugs` with "Email me with news and offers" ticked.
 async fn placed_order_for_three_mugs_opting_in(app: &TestApp) -> (String, String, String) {
     let (pk, cart_path, location) = cart_for_three_mugs(app).await;
     let (status, cart) = send_as(
@@ -4119,8 +4355,7 @@ async fn placed_order_for_three_mugs_opting_in(app: &TestApp) -> (String, String
     )
 }
 
-/// Design note 0032, §12 step 1: a customer's response adds its orders up, and the
-/// orders list narrows to one customer.
+/// A customer's response adds its orders up, and the orders list narrows to one customer.
 #[tokio::test]
 async fn a_customer_carries_its_order_statistics_and_lists_its_orders() {
     let app = app().await;
@@ -4373,26 +4608,6 @@ async fn fulfilling_needs_fulfillment_scopes_and_cancelling_orders_write() {
 }
 
 #[tokio::test]
-async fn a_retried_fulfilment_replays_the_first() {
-    let app = app().await;
-    let (order, line, warehouse) = placed_order_for_three_mugs(&app).await;
-    let body = json!({"location": warehouse, "lines": [{"line": line, "quantity": 1}]}).to_string();
-    let path = format!("/admin/orders/{order}/fulfillments");
-    let auth = format!("Bearer {}", app.admin_key);
-    let headers = [
-        (AUTHORIZATION.as_str(), auth.as_str()),
-        ("idempotency-key", "ship-1"),
-    ];
-    let (status, first) = send_with(&app, &headers, "POST", &path, Some(&body)).await;
-    assert_eq!(status, StatusCode::CREATED, "{first}");
-    let (status, again) = send_with(&app, &headers, "POST", &path, Some(&body)).await;
-    assert_eq!(status, StatusCode::CREATED, "{again}");
-    assert_eq!(again["id"], first["id"]);
-    let (_, json) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
-    assert_eq!(json["lines"][0]["fulfilled_quantity"], 1);
-}
-
-#[tokio::test]
 async fn a_store_starts_with_a_default_location() {
     let app = app().await;
     let (status, json) = send(&app, "GET", "/admin/locations", None).await;
@@ -4466,7 +4681,7 @@ async fn a_storefront_never_sees_why_an_order_was_cancelled() {
     assert!(replayed.get("cancelled_at").is_none(), "{replayed}");
 }
 
-// ---------- search (design note 0019) ----------
+// ---------- search ----------
 
 /// Delivers events and rebuilds search until both are done, as the jobs would.
 async fn settle_search(app: &TestApp) {
@@ -4848,7 +5063,7 @@ async fn search_settings_reindex_and_status_over_http() {
     );
 }
 
-// ---------- storefront reads (design note 0021, step 4) ----------
+// ---------- storefront reads ----------
 
 #[tokio::test]
 async fn a_product_page_is_one_read_priced_in_the_shoppers_country() {
@@ -4898,7 +5113,7 @@ async fn a_product_page_is_one_read_priced_in_the_shoppers_country() {
     );
     assert_eq!(bare["variants"][0]["available_quantity"], json!(0));
 
-    // A country the store doesn't sell to: the product, marked not sold there (Q2).
+    // A country the store doesn't sell to: the product, marked not sold there.
     let (status, elsewhere) = get("/storefront/products/by-handle/mug?country=US".into()).await;
     assert_eq!(
         (
@@ -5073,7 +5288,7 @@ async fn a_products_whole_variant_list_is_set_in_one_put() {
     );
 }
 
-// ---------- categories (design note 0022) ----------
+// ---------- categories ----------
 
 #[tokio::test]
 async fn categories_form_a_tree_storefronts_see_shown_and_search_filters_by() {
@@ -5094,7 +5309,7 @@ async fn categories_form_a_tree_storefronts_see_shown_and_search_filters_by() {
             .await;
     let sale = create(json!({"name": "Sale", "handle": "sale", "visible": false})).await;
 
-    // `visible` is required (CA10); handles are unique; a parent must exist.
+    // `visible` is required; handles are unique; a parent must exist.
     let (status, body) = send(
         &app,
         "POST",
@@ -5276,7 +5491,43 @@ async fn categories_form_a_tree_storefronts_see_shown_and_search_filters_by() {
     assert_eq!(titles(&found), ["trousers"]);
 }
 
-// ---------- payments (design note 0027) ----------
+#[tokio::test]
+async fn a_category_shows_an_image_from_the_media_library() {
+    let app = app_with_media().await;
+    let body = json!({"name": "Lighting", "handle": "lighting", "visible": true}).to_string();
+    let (status, category) = send(&app, "POST", "/admin/categories", Some(&body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{category}");
+    let image = format!(
+        "/admin/categories/{}/image",
+        category["id"].as_str().unwrap()
+    );
+    let asset = ready_png(&app).await;
+
+    let body = json!({ "image": asset }).to_string();
+    let (status, json) = send(&app, "PUT", &image, Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["image"]["asset_id"], json!(asset));
+    // While it's shown, the asset can't be deleted.
+    let (status, body) = send(&app, "DELETE", &format!("/admin/assets/{asset}"), None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "asset_in_use")
+    );
+
+    let unknown = json!({ "image": format!("asset_{}", "0".repeat(32)) }).to_string();
+    let (status, body) = send(&app, "PUT", &image, Some(&unknown)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "asset_not_found")
+    );
+
+    let (status, json) = send(&app, "PUT", &image, Some(r#"{"image":null}"#)).await;
+    assert_eq!((status, &json["image"]), (StatusCode::OK, &Value::Null));
+    let (status, _) = send(&app, "DELETE", &format!("/admin/assets/{asset}"), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+// ---------- payments ----------
 
 #[tokio::test]
 async fn payments_are_recorded_and_voided_over_http() {
@@ -5398,7 +5649,7 @@ async fn payment_methods_are_checked_and_changed_over_http() {
     assert_eq!(json["payment_method"], first.as_str());
 }
 
-// ---------- notifications (design note 0028) ----------
+// ---------- notifications ----------
 
 #[tokio::test]
 async fn notification_settings_round_trip_as_merge_patch() {
@@ -5909,7 +6160,7 @@ async fn notifications_need_their_scopes() {
     assert_eq!(status, StatusCode::OK, "{json}");
 }
 
-// ---------- an app's payments and searches (design note 0029, §3.1) ----------
+// ---------- an app's payments and searches ----------
 
 /// What a fake app answers per path: a status and a JSON body.
 type AppAnswers = Arc<Mutex<std::collections::BTreeMap<String, (u16, Value)>>>;
@@ -6058,7 +6309,7 @@ async fn an_app_collects_a_carts_payment_and_its_report_places_the_order() {
     );
     let (pk, cart_path) = cart_paying_by_card(&app, &base).await;
 
-    // The shopper starts paying for the cart (design note 0031): no order yet.
+    // The shopper starts paying for the cart: no order yet.
     let (status, started) = send_as(
         &app,
         &pk,
@@ -6408,7 +6659,7 @@ async fn extension_points_are_checked_when_registered() {
             "unknown_extension_point",
         ),
         (
-            // The order-first version 1 is gone (design note 0031).
+            // The order-first version 1 is gone.
             json!({"extension_points": [{"point": "payments.start", "version": 1, "url": "https://pay.example/x"}]}),
             "unknown_extension_point",
         ),

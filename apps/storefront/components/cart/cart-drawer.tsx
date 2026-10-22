@@ -1,8 +1,8 @@
 "use client";
 
-// The cart in a drawer (design note 0024, §7): a dialog against the page's end edge,
-// opened from the header and after adding to the cart, with the lines, the subtotal and
-// the way on to the cart page and checkout.
+// The cart in a drawer: a dialog against the page's end edge, opened from the header
+// and after adding to the cart, with the lines, the subtotal and the way on to the cart
+// page and checkout.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

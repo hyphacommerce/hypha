@@ -1,5 +1,5 @@
-//! How long a customer's code and session last (design note 0034, AC5): set from
-//! `hypha.config.toml`'s `[customers]` by the host, defaults here.
+//! How long a customer's code and session last: set from `hypha.config.toml`'s
+//! `[customers]` by the host, defaults here.
 
 use core::time::Duration;
 

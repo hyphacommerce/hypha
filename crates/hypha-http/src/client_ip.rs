@@ -1,4 +1,4 @@
-//! Which client a request comes from, for rate limits (design note 0009, R4 and R5).
+//! Which client a request comes from, for rate limits.
 //!
 //! The socket's peer address, unless that peer is a proxy listed in
 //! `server.trusted_proxies` (`HYPHA_TRUSTED_PROXIES`): then `X-Forwarded-For`, read right to left up to the first
@@ -77,9 +77,9 @@ fn canonical(ip: IpAddr) -> IpAddr {
     }
 }
 
-/// The rate-limit key for `ip`: an IPv4 address whole, an IPv6 address by its /64,
-/// since one customer usually gets a whole /64 and could otherwise rotate through
-/// billions of keys (0009, R5).
+/// The rate-limit key for `ip`: an IPv4 address whole, an IPv6 address by its /64, since
+/// one customer usually gets a whole /64 and could otherwise rotate through billions of
+/// keys.
 pub fn limit_key(ip: IpAddr) -> String {
     match canonical(ip) {
         IpAddr::V4(v4) => v4.to_string(),

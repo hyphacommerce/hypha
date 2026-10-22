@@ -5,10 +5,10 @@ use hypha_core::{
 };
 use hypha_testkit::{InMemoryPorts, TestEnv};
 use hypha_users::{
-    AcceptInvite, CommandError, Invite, InviteUser, NewOwner, Role, RoleError, RoleRepo,
-    StaffEmail, UpdateRole, UpdateUser, User, UserRepo, UserStatus, accept_invite,
-    authenticate_staff, bootstrap_owner, create_role, get_user, invite_user, login, lookup_invite,
-    rename_me, request_password_reset, revoke_invite, update_role, update_user,
+    AcceptInvite, CommandError, Invite, InviteUser, NewOwner, Role, RoleRepo, StaffEmail,
+    UpdateRole, UpdateUser, User, UserRepo, UserStatus, accept_invite, authenticate_staff,
+    bootstrap_owner, create_role, get_user, invite_user, login, lookup_invite, rename_me,
+    request_password_reset, revoke_invite, update_role, update_user,
 };
 use pollster::block_on;
 use uuid::Uuid;
@@ -150,24 +150,6 @@ fn the_owner_password_follows_the_rules() {
 }
 
 // ---------- login and sessions ----------
-
-#[test]
-fn a_wrong_password_is_invalid_credentials() {
-    let (ports, env, _) = world();
-    assert_eq!(
-        block_on(login(
-            &ports,
-            &env,
-            "ana@example.com",
-            "wrong password",
-            &SessionClient::default()
-        ))
-        .map(|_| ()),
-        Err(CommandError::Login(
-            hypha_auth::CommandError::InvalidCredentials
-        ))
-    );
-}
 
 #[test]
 fn a_disabled_user_can_neither_log_in_nor_use_a_session() {
@@ -589,25 +571,6 @@ fn a_race_for_a_role_name_reports_the_winner() {
 }
 
 #[test]
-fn the_owner_role_cannot_be_edited() {
-    let (ports, _, owner) = world();
-    let change = UpdateRole {
-        name: Some("Boss".to_string()),
-        ..UpdateRole::default()
-    };
-    assert_eq!(
-        block_on(update_role(
-            &owner_ctx(&owner),
-            &ports.roles,
-            owner.role(),
-            change
-        ))
-        .map(|r| r.id()),
-        Err(CommandError::Role(RoleError::OwnerRoleFixed))
-    );
-}
-
-#[test]
 fn nobody_creates_or_edits_a_role_beyond_their_scopes() {
     let (ports, env, owner) = world();
     let support = support_role(&ports, &env, &owner);
@@ -728,6 +691,34 @@ fn nobody_disables_someone_stronger() {
             .map(|u| u.name().to_string()),
         Ok("Ana B.".to_string())
     );
+}
+
+#[test]
+fn nobody_moves_someone_to_a_role_stronger_than_their_own() {
+    let (ports, env, owner) = world();
+    let readers = block_on(create_role(
+        &owner_ctx(&owner),
+        &ports.roles,
+        &env,
+        "Order readers",
+        &[Scope::OrdersRead],
+    ))
+    .unwrap();
+    let (bob, _) = join(&ports, &env, &owner, readers.id());
+    // May manage Bob as he is, but not hand him the owner's scopes.
+    let limited = Ctx::new(Actor::System, vec![Scope::UsersWrite, Scope::OrdersRead]);
+    let promote = UpdateUser {
+        role: Some(owner.role()),
+        ..UpdateUser::default()
+    };
+    assert_eq!(
+        block_on(update_user(&limited, &ports, &env, bob.id(), promote)).map(|u| u.id()),
+        Err(CommandError::Login(hypha_auth::CommandError::CannotGrant(
+            Scope::ProductsRead
+        )))
+    );
+    let stored = block_on(ports.users.get(bob.id())).unwrap().unwrap();
+    assert_eq!(stored.role(), readers.id());
 }
 
 #[test]

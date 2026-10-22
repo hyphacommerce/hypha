@@ -1,10 +1,9 @@
-//! Mail (design note 0028, NT2): the workflow that turns orders, fulfilments, payments
-//! and the store into emails. It builds each template's context (`context.rs`, the
-//! templates' variables, a contract), queues emails on order events with the `Mailer`
-//! handler, sends what's queued (the send job's steps, `send.rs`),
-//! and holds the commands that need other domains: saving the settings with the logo's
-//! asset usage, saving templates checked against their samples, previews, test sends,
-//! resends and the staff flows' direct emails.
+//! Mail: the workflow that turns orders, fulfilments, payments and the store into emails.
+//! It builds each template's context (`context.rs`, the templates' variables, a contract),
+//! queues emails on order events with the `Mailer` handler, sends what's queued (the send
+//! job's steps, `send.rs`), and holds the commands that need other domains: saving the
+//! settings with the logo's asset usage, saving templates checked against their samples,
+//! previews, test sends, resends and the staff flows' direct emails.
 //!
 //! What it needs besides repositories comes in through `MailEnv` (the sender, links,
 //! the store), which hosts implement once.

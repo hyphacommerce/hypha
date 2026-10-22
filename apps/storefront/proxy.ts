@@ -1,8 +1,8 @@
-// Routing by country (design note 0023, SF3, SF4). With folders (the default), a path
-// that doesn't start with a country the store sells to is redirected to the shopper's
-// country folder. In a single tree (`STOREFRONT_ROUTING=single`), every page request is
-// rewritten to that folder internally, so URLs carry no country. The country comes from
-// the `country` cookie, then the host's geolocation header, then the store's first.
+// Routing by country. With folders (the default), a path that doesn't start with a
+// country the store sells to is redirected to the shopper's country folder. In a single
+// tree (`STOREFRONT_ROUTING=single`), every page request is rewritten to that folder
+// internally, so URLs carry no country. The country comes from the `country` cookie,
+// then the host's geolocation header, then the store's first.
 
 import { type NextRequest, NextResponse } from "next/server";
 

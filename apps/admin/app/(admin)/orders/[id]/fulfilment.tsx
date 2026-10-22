@@ -1,7 +1,7 @@
 "use client";
 
-// Shipping an order, and taking it back (design note 0018): the fulfil dialog, the
-// shipments card and the cancel dialog of the order page.
+// Shipping an order, and taking it back: the fulfil dialog, the shipments card and
+// the cancel dialog of the order page.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

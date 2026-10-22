@@ -6,10 +6,10 @@ license.workspace = true
 publish = false
 
 [dependencies]
-# First-party spores, built in by a feature (design note 0030, §9): `--features
-# spore-stripe`. The stock binary has none.
+# First-party spores, built in by a feature: `--features spore-stripe`. The
+# stock binary has none.
 hypha-spore-stripe = { path = "../../spores/stripe", optional = true }
-# The routes, the state and everything but the runtime (design note 0026, W3).
+# The routes, the state and everything but the runtime.
 hypha-http = { path = "../hypha-http" }
 hypha-dispatch = { path = "../hypha-dispatch" }
 hypha-payments = { path = "../hypha-payments" }
@@ -20,11 +20,11 @@ hypha-config = { path = "../hypha-config" }
 hypha-inventory = { path = "../hypha-inventory" }
 hypha-search-index = { path = "../hypha-search-index" }
 hypha-store-postgres = { path = "../hypha-store-postgres" }
-# The spores a deployment is built with (design note 0030, `host!`).
+# The spores a deployment is built with (`host!`).
 hypha-spore-core = { path = "../hypha-spore-core" }
 # Registering each spore's app at startup.
 hypha-apps = { path = "../hypha-apps" }
-# Syncing each spore's custom fields at startup (design note 0033, §8).
+# Syncing each spore's custom fields at startup.
 hypha-custom-fields = { path = "../hypha-custom-fields" }
 hypha-store-s3 = { path = "../hypha-store-s3" }
 hypha-stores = { path = "../hypha-stores" }
@@ -51,8 +51,8 @@ tokio-postgres = "0.7.18"
 tokio-postgres-rustls = "0.14"
 rustls-platform-verifier = "0.7"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
-# The SMTP email sender (`email.rs`, design note 0028): Tokio and rustls with aws-lc-rs,
-# certificates checked by the OS's verifier as Postgres's are; no native-tls/OpenSSL.
+# The SMTP email sender (`email.rs`): Tokio and rustls with aws-lc-rs, certificates
+# checked by the OS's verifier as Postgres's are; no native-tls/OpenSSL.
 lettre = { version = "0.11.23", default-features = false, features = ["smtp-transport", "pool", "hostname", "builder", "tokio1-rustls", "aws-lc-rs", "rustls-platform-verifier"] }
 # `config rate-limits` prints JSON.
 serde_json.workspace = true
@@ -60,18 +60,19 @@ serde_json.workspace = true
 toml = "0.9"
 
 [features]
-# The Stripe spore (design note 0030, SP9).
+# The Stripe spore.
 spore-stripe = ["dep:hypha-spore-stripe"]
 
 [dev-dependencies]
-# The first-party Stripe spore, for route tests of a host built with it (design note
-# 0030, SP9); the stock binary has no spores.
+# The first-party Stripe spore, for route tests of a host built with it; the stock
+# binary has no spores.
 hypha-spore-stripe = { path = "../../spores/stripe" }
 url = "2.5"
 # A test host for building spores (`hypha_spore_core::env::testing`).
 hypha-spore-core = { path = "../hypha-spore-core", features = ["testing"] }
 serde.workspace = true
-# The route tests (`route_tests.rs`).
+# The route tests (`route_tests.rs`), each on a copy of a migrated template.
+hypha-store-postgres = { path = "../hypha-store-postgres", features = ["testing"] }
 hypha-auth = { path = "../hypha-auth" }
 hypha-markets = { path = "../hypha-markets" }
 hypha-products = { path = "../hypha-products" }

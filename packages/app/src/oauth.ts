@@ -1,7 +1,7 @@
-// The app's side of installing (design note 0029, §4.1, AP5): OAuth 2.1, authorization
-// code with PKCE (S256). The app's client ID is its manifest URL, so there's nothing to
-// register: send the browser to `createAuthorizationUrl`, keep the verifier and state
-// (a cookie, the app's session), and exchange the code on the redirect.
+// The app's side of installing: OAuth 2.1, authorization code with PKCE (S256). The
+// app's client ID is its manifest URL, so there's nothing to register: send the browser
+// to `createAuthorizationUrl`, keep the verifier and state (a cookie, the app's
+// session), and exchange the code on the redirect.
 
 import { isRecord, randomBytes, sha256, toBase64Url, utf8 } from "./encoding.ts";
 

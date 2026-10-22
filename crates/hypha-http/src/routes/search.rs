@@ -1,5 +1,5 @@
-//! Search (design note 0019): the storefront's search and product listing, and the
-//! admin's settings, reindex and status.
+//! Search: the storefront's search and product listing, and the admin's settings, reindex
+//! and status.
 
 use std::collections::BTreeMap;
 
@@ -96,8 +96,8 @@ pub struct SearchParams {
     price_max: Option<i64>,
     /// Only what can (`true`) or can't (`false`) be sold now.
     available: Option<bool>,
-    /// Only products in this category or one below it (design note 0022); a hidden
-    /// category is `404 category_not_found`.
+    /// Only products in this category or one below it; a hidden category is `404
+    /// category_not_found`.
     #[param(value_type = Option<CategoryId>)]
     category: Option<CategoryId>,
     #[param(inline)]
@@ -156,8 +156,8 @@ pub struct FacetValueResponse {
     /// As `filter` takes it: a `choice` field's value is its key, a `boolean` field's
     /// `true` or `false`.
     value: String,
-    /// What to show for it: a `choice` field's label, "Yes" or "No" for a `boolean` field
-    /// (design note 0033, §9); `null` for every other facet, whose value is its own label.
+    /// What to show for it: a `choice` field's label, "Yes" or "No" for a `boolean` field;
+    /// `null` for every other facet, whose value is its own label.
     label: Option<String>,
     /// Results (as grouped) with this value, ignoring this facet's own filter.
     count: u64,
@@ -189,11 +189,11 @@ pub struct SearchResponse {
     next_cursor: Option<String>,
 }
 
-/// Searches the products the shopper's market sells, priced and stocked there; without
-/// `q`, the market's product listing. Pages go at most 1,000 results deep. With a search
-/// app set (`search_app` in the settings), the app chooses and orders the results
-/// (`search.query`, design note 0029) and Hypha shows its own prices and stock for them;
-/// `price` is then `null`. When the app fails, the built-in engine answers.
+/// Searches the products the shopper's market sells, priced and stocked there; without `q`,
+/// the market's product listing. Pages go at most 1,000 results deep. With a search app set
+/// (`search_app` in the settings), the app chooses and orders the results (`search.query`)
+/// and Hypha shows its own prices and stock for them; `price` is then `null`. When the app
+/// fails, the built-in engine answers.
 #[utoipa::path(
     get,
     path = "/storefront/search",
@@ -344,8 +344,8 @@ pub struct SearchSettingsResponse {
     /// The facets storefronts show, in order. Empty: the defaults (product type,
     /// vendor, the market's most used options, tags).
     facets: Vec<FacetSettingResponse>,
-    /// The app that answers storefront searches (`search.query`, design note 0029);
-    /// `null` for the built-in engine, which also answers whenever the app fails.
+    /// The app that answers storefront searches (`search.query`); `null` for the built-in
+    /// engine, which also answers whenever the app fails.
     search_app: Option<String>,
 }
 

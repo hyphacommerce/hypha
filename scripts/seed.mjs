@@ -584,7 +584,7 @@ async function main() {
   console.log("Notification settings");
   // Emails in the shop's colours (clay 700, the theme's accent), new orders to the owner,
   // and order links into the storefront: `/order/<id>?token=` keeps the token in the
-  // buyer's cookie and opens the confirmation (design note 0028, §7).
+  // buyer's cookie and opens the confirmation.
   await admin.patch("/admin/notification-settings", {
     accent: "#953f21",
     sender_name: "Lumen & Loom",
@@ -861,7 +861,7 @@ async function main() {
   }
 
   console.log("Payment methods");
-  // Manual ones (design note 0027): the shopper is told how to pay, staff mark it paid.
+  // Manual ones: the shopper is told how to pay, staff mark it paid.
   const cashOnDelivery = await admin.post("/admin/payment-methods", {
     provider: "manual",
     name: "Cash on delivery",
@@ -1053,15 +1053,15 @@ async function main() {
   }
 
   console.log("Customer labels and notes");
-  // The well-known customer fields (design note 0032, CD11), created from the API's
-  // suggestions as the admin's "Add" would: `custom.tags` (labels) and `custom.note`.
+  // The well-known customer fields, created from the API's suggestions as the admin's
+  // "Add" would: `custom.tags` (labels) and `custom.note`.
   const suggested = await admin.get(
     "/admin/custom-field-definitions/suggestions?owner_type=customer",
   );
   for (const { why: _why, existing: taken, field: _field, ...body } of suggested.items) {
     if (!taken) await admin.post("/admin/custom-field-definitions", body);
   }
-  // A group (design note 0032, §6): what group prices and payment methods will point at.
+  // A group: what group prices and payment methods will point at.
   const wholesale = await admin.post("/admin/customer-groups", {
     name: "Wholesale",
     handle: "wholesale",

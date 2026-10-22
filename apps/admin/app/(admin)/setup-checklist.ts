@@ -1,10 +1,10 @@
-// The home page's setup checklist (design note 0021, SU9): worked out by the API on
-// every render, never stored. A step the user's scopes can't read counts as not done,
-// so the page still renders.
+// The home page's setup checklist: worked out by the API on every render, never
+// stored. A step the user's scopes can't read counts as not done, so the page still
+// renders.
 
 import { sessionClient } from "@/lib/hypha";
 
-/** Which step: the setup wizard (design note 0024, AU11) groups them by these. */
+/** Which step: the setup wizard groups them by these. */
 export type SetupKey =
   | "store"
   | "market"
@@ -26,7 +26,7 @@ export type SetupStep = {
 /** Which steps are done. */
 export async function setupDone(): Promise<Record<SetupKey, boolean>> {
   const client = await sessionClient();
-  // One read (design note 0025, §6): the API checks each step with the caller's scopes.
+  // One read: the API checks each step with the caller's scopes.
   const { data } = await client.GET("/admin/setup/checklist");
   return (
     data ?? {

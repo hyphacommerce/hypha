@@ -1,11 +1,11 @@
-//! What the host hands a spore when it builds it (design note 0030, §4 and §8): HTTP,
-//! time, IDs, randomness, the `SecretBox`, and the spore's own section of
-//! `hypha.config.toml` (`[spores.<name>]`), which it parses itself.
+//! What the host hands a spore when it builds it: HTTP, time, IDs, randomness, the
+//! `SecretBox`, and the spore's own section of `hypha.config.toml` (`[spores.<name>]`),
+//! which it parses itself.
 //!
-//! Everything is a shared, `Send + Sync` capability, so a spore can keep its `SporeEnv`
-//! (or clones of it) for as long as it lives, and nothing here is tied to a runtime: the
-//! native host gives Tokio's and the operating system's, a Workers host the runtime's
-//! (`fetch`, `Date.now()`), and tests their own (SP8).
+//! Everything is a shared, `Send + Sync` capability, so a spore can keep its `SporeEnv` (or
+//! clones of it) for as long as it lives, and nothing here is tied to a runtime: the native
+//! host gives Tokio's and the operating system's, a Workers host the runtime's (`fetch`,
+//! `Date.now()`), and tests their own.
 
 use std::fmt;
 use std::future::Future;
@@ -193,9 +193,9 @@ impl SporeEnv {
         self.name
     }
 
-    /// Its app's ID (design note 0030, §3), what it acts as (`Actor::App`) when it calls
-    /// commands itself, outside a request a caller made (a provider's webhook): `None`
-    /// before the host registered it.
+    /// Its app's ID, what it acts as (`Actor::App`) when it calls commands itself, outside
+    /// a request a caller made (a provider's webhook): `None` before the host registered
+    /// it.
     pub async fn app_id<P: hypha_apps::HasApps + ?Sized>(
         &self,
         ports: &P,
@@ -207,9 +207,9 @@ impl SporeEnv {
         Ok(ports.apps().get(&key).await?.map(|app| app.id()))
     }
 
-    /// Its section of `hypha.config.toml`, `[spores.<name>]`, as written: operator
-    /// settings (an API base for tests, a timeout), never the merchant's (those are its
-    /// settings, design note 0030, §8) and never secrets.
+    /// Its section of `hypha.config.toml`, `[spores.<name>]`, as written: operator settings
+    /// (an API base for tests, a timeout), never the merchant's (those are its settings)
+    /// and never secrets.
     pub fn config(&self) -> &toml::Table {
         &self.config
     }
@@ -227,9 +227,9 @@ impl SporeEnv {
 }
 
 impl SporeEnv {
-    /// Its settings as the merchant saved them (design note 0030, §8), secret fields
-    /// opened, read into `T` through `ports` (any with `HasSporeSettings`: a request's,
-    /// a handler's). `None` before they're first saved.
+    /// Its settings as the merchant saved them, secret fields opened, read into `T` through
+    /// `ports` (any with `HasSporeSettings`: a request's, a handler's). `None` before
+    /// they're first saved.
     pub async fn settings<T: DeserializeOwned, P: HasSporeSettings + ?Sized>(
         &self,
         ports: &P,
@@ -262,12 +262,12 @@ impl SporeEnv {
         Ok((ctx, CallerKind::Spore(key)))
     }
 
-    /// Writes `owner`'s custom fields as the spore (design note 0033, §5.1): its own
-    /// `spore_<name>.*` fields, which only it writes (and staff, where a field's
-    /// `access.admin` is `read_write`), and `custom.*` ones its scopes allow. `values`
-    /// is a JSON Merge Patch by full key (`{"spore_loyalty.points": 120}`, `null`
-    /// removes). Like every write, it needs the owner's write scope (`products:write`,
-    /// …) among the spore's `SCOPES`, and the owner must exist (the caller loaded it).
+    /// Writes `owner`'s custom fields as the spore: its own `spore_<name>.*` fields, which
+    /// only it writes (and staff, where a field's `access.admin` is `read_write`), and
+    /// `custom.*` ones its scopes allow. `values` is a JSON Merge Patch by full key
+    /// (`{"spore_loyalty.points": 120}`, `null` removes). Like every write, it needs the
+    /// owner's write scope (`products:write`, …) among the spore's `SCOPES`, and the owner
+    /// must exist (the caller loaded it).
     pub async fn set_custom_fields<P>(
         &self,
         ports: &P,
@@ -395,7 +395,7 @@ impl Random for SporeEnv {
 }
 
 /// The host's `SecretBox` (`HYPHA_SECRET_KEY`), for what a spore seals itself; its
-/// settings' secret fields are sealed and opened by core (§8).
+/// settings' secret fields are sealed and opened by core.
 impl SecretBox for SporeEnv {
     fn seal(&self, plaintext: &[u8], context: &[u8], nonce: [u8; 24]) -> Sealed {
         self.host.secrets.seal(plaintext, context, nonce)

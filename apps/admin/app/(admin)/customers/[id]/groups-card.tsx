@@ -1,6 +1,6 @@
 "use client";
 
-// The customer's groups (design note 0032, §6), set whole from the groups the store has.
+// The customer's groups, set whole from the groups the store has.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

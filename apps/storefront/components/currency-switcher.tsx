@@ -1,9 +1,9 @@
 "use client";
 
-// The currency switcher (design note 0024, §7). The shopper's country is found for them
-// (the `country` cookie, else the host's geolocation, in `proxy.ts`), so the header only
-// offers the currencies the store sells in, as Shopify themes do. Picking one moves the
-// shopper to a country that pays in it (theirs, if it does) and remembers it.
+// The currency switcher. The shopper's country is found for them (the `country` cookie,
+// else the host's geolocation, in `proxy.ts`), so the header only offers the currencies
+// the store sells in, as Shopify themes do. Picking one moves the shopper to a country
+// that pays in it (theirs, if it does) and remembers it.
 
 import { Selector } from "@astryxdesign/core/Selector";
 import { usePathname } from "next/navigation";

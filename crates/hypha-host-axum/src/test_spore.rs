@@ -1,8 +1,7 @@
-//! A spore for the route tests (design note 0030): one table, one event handler, a
-//! payment provider, a configuration section, settings with a secret, a custom field
-//! (design note 0033, §8), a block and an action, and a route on each surface
-//! (`crate::test_spore_routes`, declared at the crate root as `spore_routes!` asks).
-//! The stock build has no spores.
+//! A spore for the route tests: one table, one event handler, a payment provider, a
+//! configuration section, settings with a secret, a custom field, a block and an action,
+//! and a route on each surface (`crate::test_spore_routes`, declared at the crate root as
+//! `spore_routes!` asks). The stock build has no spores.
 
 use axum::{Json, extract::State};
 use hypha_apps::Target;

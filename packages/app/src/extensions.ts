@@ -1,9 +1,9 @@
-// Answering extension points (design note 0029, §3, §15): Hypha POSTs the point's request
-// as JSON with `Hypha-Signature`, `Hypha-Extension`, `Hypha-Extension-Version`,
-// `Idempotency-Key` and `Hypha-Store`, and takes a 2xx whose body matches the point's
-// response. `extensionHandler` is a fetch handler (Workers' `fetch`, Hono, Next.js route
-// handlers, Node through any Request/Response adapter) that checks the signature and
-// dispatches by `Hypha-Extension` to the handlers defined with `defineExtensionHandler`.
+// Answering extension points: Hypha POSTs the point's request as JSON with
+// `Hypha-Signature`, `Hypha-Extension`, `Hypha-Extension-Version`, `Idempotency-Key` and
+// `Hypha-Store`, and takes a 2xx whose body matches the point's response.
+// `extensionHandler` is a fetch handler (Workers' `fetch`, Hono, Next.js route handlers,
+// Node through any Request/Response adapter) that checks the signature and dispatches by
+// `Hypha-Extension` to the handlers defined with `defineExtensionHandler`.
 
 import type { ExtensionPoints } from "./generated/extensions.ts";
 import { DEFAULT_TOLERANCE_SECONDS, SIGNATURE_HEADER, verifySignature } from "./signature.ts";

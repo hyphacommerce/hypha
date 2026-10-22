@@ -8,10 +8,10 @@ use crate::{Customer, CustomerFilter, CustomerGroup, CustomerSort, CustomerSumma
 
 pub mod keys {
     pub const CUSTOMER_ID: &str = "customer_id";
-    /// One customer per email (design note 0005, C2).
+    /// One customer per email.
     pub const CUSTOMER_EMAIL: &str = "customer_email";
     pub const CUSTOMER_GROUP_ID: &str = "customer_group_id";
-    /// A group's handle is unique among groups (design note 0032, §6).
+    /// A group's handle is unique among groups.
     pub const CUSTOMER_GROUP_HANDLE: &str = "customer_group_handle";
     /// So is its name, ignoring case.
     pub const CUSTOMER_GROUP_NAME: &str = "customer_group_name";
@@ -21,10 +21,10 @@ pub mod keys {
 pub trait CustomerRepo {
     async fn get(&self, id: CustomerId) -> Result<Option<Customer>, RepoError>;
     async fn get_by_email(&self, email: &Email) -> Result<Option<Customer>, RepoError>;
-    /// A page of customer summaries in `sort`'s order (design note 0024): those after
-    /// `page.after` by `CustomerSort::key` and then ID, only those `filter` matches. Each
-    /// equals `Customer::summary` of the stored customer. A position whose key doesn't
-    /// fit the sort (`CustomerSort::fits`) is a `Backend` error.
+    /// A page of customer summaries in `sort`'s order: those after `page.after` by
+    /// `CustomerSort::key` and then ID, only those `filter` matches. Each equals
+    /// `Customer::summary` of the stored customer. A position whose key doesn't fit the
+    /// sort (`CustomerSort::fits`) is a `Backend` error.
     async fn list(
         &self,
         filter: &CustomerFilter,
@@ -33,9 +33,8 @@ pub trait CustomerRepo {
     ) -> Result<Page<CustomerSummary>, RepoError>;
     async fn insert(&self, customer: &mut Customer) -> Result<(), RepoError>;
     async fn update(&self, customer: &mut Customer) -> Result<(), RepoError>;
-    /// Up to `limit` customers whose requested erasure is due at `now`
-    /// (`erasure_due_at <= now`, not erased yet), oldest due first: the erasure job's
-    /// batch (design note 0032, §7.3).
+    /// Up to `limit` customers whose requested erasure is due at `now` (`erasure_due_at <=
+    /// now`, not erased yet), oldest due first: the erasure job's batch.
     async fn due_for_erasure(
         &self,
         now: Timestamp,
@@ -61,8 +60,8 @@ pub trait StageCustomers {
     fn delete_customer(&mut self, customer: &mut Customer);
 }
 
-/// Customer groups and who's in each (design note 0032, §6). Membership is read and
-/// written in sets, like a category's products.
+/// Customer groups and who's in each. Membership is read and written in sets, like a
+/// category's products.
 #[allow(async_fn_in_trait)]
 pub trait CustomerGroupRepo {
     async fn get(&self, id: CustomerGroupId) -> Result<Option<CustomerGroup>, RepoError>;
@@ -86,7 +85,7 @@ pub trait CustomerGroupRepo {
         group: CustomerGroupId,
         customers: &[CustomerId],
     ) -> Result<(), RepoError>;
-    /// A page of the group's customers, newest first (design note 0012).
+    /// A page of the group's customers, newest first.
     async fn member_page(
         &self,
         group: CustomerGroupId,

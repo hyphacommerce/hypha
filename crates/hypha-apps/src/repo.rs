@@ -27,9 +27,8 @@ pub trait AppRepo {
     async fn delete(&self, key: &AppKey) -> Result<(), RepoError>;
 }
 
-/// Stages app writes in a `hypha_core::HasBatch` batch (installing an app writes it
-/// with the OAuth request and code, design note 0029). Like the repo's writes, staging
-/// takes the app's events.
+/// Stages app writes in a `hypha_core::HasBatch` batch (installing an app writes it with
+/// the OAuth request and code). Like the repo's writes, staging takes the app's events.
 pub trait StageApps {
     /// What `AppRepo::insert` would write; `APP_KEY` on commit.
     fn insert_app(&mut self, app: &mut App);

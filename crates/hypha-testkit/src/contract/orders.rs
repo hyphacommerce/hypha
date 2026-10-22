@@ -178,7 +178,7 @@ async fn updates<R: OrderRepo>(repo: &R) {
     assert_eq!(edited.version(), Version::new(3));
     assert_eq!(repo.get(o.id()).await, Ok(Some(edited)));
 
-    // Every payment status is stored (design note 0027, PA7).
+    // Every payment status is stored.
     for status in FinancialStatus::ALL {
         let mut current = repo.get(o.id()).await.unwrap().unwrap();
         current.set_financial_status(status);

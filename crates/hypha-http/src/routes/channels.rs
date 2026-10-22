@@ -1,5 +1,4 @@
-//! Sales channels (design note 0020): where products are sold, and publishing products
-//! to them.
+//! Sales channels: where products are sold, and publishing products to them.
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_channels::{

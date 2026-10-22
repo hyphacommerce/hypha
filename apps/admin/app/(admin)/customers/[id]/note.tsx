@@ -1,8 +1,8 @@
 "use client";
 
-// The staff note (design note 0032, CD2 and CD11): the well-known `custom.note` field as
-// its own card, personal, so a role without `customer_data:profile` sees it hidden. Where
-// the field doesn't exist yet, staff who may define fields are offered to create it.
+// The staff note: the well-known `custom.note` field as its own card, personal, so a role
+// without `customer_data:profile` sees it hidden. Where the field doesn't exist yet,
+// staff who may define fields are offered to create it.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

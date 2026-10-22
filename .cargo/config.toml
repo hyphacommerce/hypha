@@ -4,6 +4,8 @@
 # environment win (`force = false`), so the same tests can run against R2.
 [env]
 DATABASE_URL = { value = "postgres://hypha:hypha@localhost:5432/hypha", force = false }
+# The tests' server (compose's `postgres-test`): throwaway databases, tuned for speed.
+HYPHA_TEST_DATABASE_URL = { value = "postgres://hypha:hypha@localhost:5433/hypha", force = false }
 HYPHA_S3_ENDPOINT = { value = "http://localhost:8333", force = false }
 HYPHA_S3_REGION = { value = "us-east-1", force = false }
 HYPHA_S3_BUCKET = { value = "hypha-media", force = false }
@@ -11,7 +13,7 @@ HYPHA_S3_ACCESS_KEY_ID = { value = "hypha", force = false }
 HYPHA_S3_SECRET_ACCESS_KEY = { value = "hypha-dev-secret", force = false }
 # The compose server starts empty; `cargo run` creates the bucket.
 HYPHA_S3_CREATE_BUCKET = { value = "true", force = false }
-# Emails go to Mailpit (design note 0028, §6): readable at http://localhost:8025.
+# Emails go to Mailpit: readable at http://localhost:8025.
 HYPHA_EMAIL_SENDER = { value = "smtp", force = false }
 HYPHA_EMAIL_FROM = { value = "shop@hypha.localhost", force = false }
 HYPHA_SMTP_HOST = { value = "localhost", force = false }

@@ -48,8 +48,8 @@ pub async fn payment_method_delete<S: HasPaymentMethods + HasPayments>(make: imp
     open_payments_keep_their_method(&make().await).await;
 }
 
-/// Runs the batch scenarios for payments (design note 0027): a payment and its order
-/// commit together, with their events, or not at all.
+/// Runs the batch scenarios for payments: a payment and its order commit together, with
+/// their events, or not at all.
 pub async fn payment_batch<S>(make: impl AsyncFn() -> S)
 where
     S: HasBatch + HasOrders + HasPayments + HasOutbox,
@@ -307,7 +307,7 @@ async fn lists_for_order<R: PaymentRepo>(repo: &R) {
     assert_eq!(listed[1], voided);
 }
 
-/// Payment `n` started for cart `cart` before its order (design note 0031).
+/// Payment `n` started for cart `cart` before its order.
 fn cart_payment(n: u128, cart: u128) -> Payment {
     Payment::new(NewPayment {
         id: pid(n),
@@ -373,7 +373,7 @@ async fn open_payments_keep_their_method<S: HasPaymentMethods + HasPayments>(por
         ports.payment_methods().delete(&m).await,
         Err(RepoError::StaleVersion)
     );
-    // A processing payment holds its method too (design note 0031).
+    // A processing payment holds its method too.
     let mut third = method(3, 2);
     ports.payment_methods().insert(&mut third).await.unwrap();
     let mut slow = payment(3, 3, 3);

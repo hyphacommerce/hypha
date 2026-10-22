@@ -1,14 +1,11 @@
-//! The job runner (design note 0016, section 7): one task per job, each running its
-//! step (`hypha_http::jobs`) every interval, again at once while there's more, and
-//! stopping after the step in flight (`Jobs::stop`).
+//! The job runner: one task per job, each running its step (`hypha_http::jobs`) every interval, again at once while
+//! there's more, and stopping after the step in flight (`Jobs::stop`).
 //!
-//! An idle job looks less and less often (design note 0025, §6): each round that finds
-//! nothing doubles the wait, up to `jobs.idle_interval`, and finding work brings it back
-//! to the interval. Work doesn't wait for that: a write that commits events (or retries
-//! a delivery) wakes the dispatcher (`AfterWrites`, through `Wake`), a dispatch step that did something wakes search
-//! sync, and queueing an email (the `Mailer` handler, a resend) wakes the send job
-//! (`MailQueued`). So a quiet store costs the database a query a minute, not several a
-//! second.
+//! An idle job looks less and less often: each round that finds nothing doubles the wait, up to
+//! `jobs.idle_interval`, and finding work brings it back to the interval. Work doesn't wait for that: a write that
+//! commits events (or retries a delivery) wakes the dispatcher (`AfterWrites`, through `Wake`), a dispatch step that
+//! did something wakes search sync, and queueing an email (the `Mailer` handler, a resend) wakes the send job
+//! (`MailQueued`). So a quiet store costs the database a query a minute, not several a second.
 
 use std::{future::Future, sync::Arc, time::Duration};
 

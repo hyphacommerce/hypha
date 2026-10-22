@@ -18,8 +18,7 @@ pub enum CommandError {
     Customer(#[from] hypha_customers::CustomerError),
     #[error("customer {0} not found")]
     CustomerNotFound(CustomerId),
-    /// Placed orders are never deleted, so neither is their customer: erase instead
-    /// (design note 0032, CD7).
+    /// Placed orders are never deleted, so neither is their customer: erase instead.
     #[error("customer {customer} has {orders} order(s): erase it instead of deleting it")]
     CustomerHasOrders { customer: CustomerId, orders: u64 },
 }
@@ -60,11 +59,11 @@ async fn load<S: HasCustomers>(ports: &S, id: CustomerId) -> Result<Customer, Co
         .ok_or(CommandError::CustomerNotFound(id))
 }
 
-/// Removes a customer that has no orders (design note 0032, CD7, §7.2): the row, its
-/// address book and memberships go; its carts are unlinked (`customer` cleared, the
-/// email kept: a cart without an order is the shopper's own data); its custom field
-/// values follow `customer.deleted` (`CustomFieldCleanup`). One with orders is refused
-/// (`customer_has_orders`): erase it instead.
+/// Removes a customer that has no orders: the row, its address book and memberships go; its
+/// carts are unlinked (`customer` cleared, the email kept: a cart without an order is the
+/// shopper's own data); its custom field values follow `customer.deleted`
+/// (`CustomFieldCleanup`). One with orders is refused (`customer_has_orders`): erase it
+/// instead.
 pub async fn delete_customer<S: PrivacyPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -98,7 +97,7 @@ where
     for cart in &mut carts {
         batch.update_cart(cart);
     }
-    // Their account goes with them (design note 0034, AC10).
+    // Their account goes with them.
     if let Some(identity) = &account {
         batch.revoke_sessions(identity.id(), None, clock.now());
         batch.delete_identity(identity);

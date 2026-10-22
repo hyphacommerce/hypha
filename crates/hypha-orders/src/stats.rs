@@ -1,7 +1,7 @@
-//! What a customer's orders add up to (design note 0032, §8 and §12 step 1): shown on
-//! the customer's page and, later, what segments filter on. A read model like
-//! `OrderSummary`: adapters may compute it in storage, and the repository contract
-//! checks it equals `OrderStats::of` the stored orders.
+//! What a customer's orders add up to: shown on the customer's page and, later, what
+//! segments filter on. A read model like `OrderSummary`: adapters may compute it in
+//! storage, and the repository contract checks it equals `OrderStats::of` the stored
+//! orders.
 
 use hypha_core::{Money, Timestamp};
 
@@ -12,8 +12,8 @@ use crate::Order;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OrderStats {
     pub orders_count: u64,
-    /// Cancelled orders, counted apart: they add up to nothing, but a customer with
-    /// any order can't be deleted, only erased (design note 0032, CD7).
+    /// Cancelled orders, counted apart: they add up to nothing, but a customer with any
+    /// order can't be deleted, only erased.
     pub cancelled_count: u64,
     pub first_order_at: Option<Timestamp>,
     pub last_order_at: Option<Timestamp>,

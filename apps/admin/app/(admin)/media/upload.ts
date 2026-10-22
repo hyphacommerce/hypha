@@ -6,10 +6,10 @@ import { completeUpload, startUpload } from "./actions";
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif", "image/gif"];
 const VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
 
-/** What the API accepts (design note 0013); it checks again, by the file's contents. */
+/** What the API accepts; it checks again, by the file's contents. */
 export const ACCEPT_ANY = [...IMAGE_TYPES, ...VIDEO_TYPES, "application/pdf"].join(",");
 
-/** What a product's media list takes: images and videos (design note 0014, Q6). */
+/** What a product's media list takes: images and videos. */
 export const ACCEPT_PRODUCT_MEDIA = [...IMAGE_TYPES, ...VIDEO_TYPES].join(",");
 
 /** The largest file of any kind (videos); the API enforces each kind's limit. */

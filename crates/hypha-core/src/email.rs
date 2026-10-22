@@ -3,7 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// An email address, trimmed and lowercased (design note 0005, C7).
+/// An email address, trimmed and lowercased.
 ///
 /// Lowercasing makes the comparison case-insensitive, so `Ana@Example.com` and
 /// `ana@example.com` are one customer. Validation is deliberately shallow: whether an
@@ -53,8 +53,8 @@ impl Email {
         &self.0
     }
 
-    /// The domain erasure writes addresses under (design note 0032, CD10): `.invalid` is
-    /// reserved (RFC 2606), so no such address can ever receive mail.
+    /// The domain erasure writes addresses under: `.invalid` is reserved (RFC 2606), so no
+    /// such address can ever receive mail.
     pub const PLACEHOLDER_DOMAIN: &str = "redacted.invalid";
 
     /// The address an erased customer keeps, since email stays mandatory and unique:

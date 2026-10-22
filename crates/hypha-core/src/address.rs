@@ -19,8 +19,8 @@ pub struct AddressParts {
     pub phone: Option<String>,
 }
 
-/// A postal address, validated (design note 0005, C4). Shared by customers' address
-/// books and, later, the addresses orders snapshot.
+/// A postal address, validated. Shared by customers' address books and, later, the
+/// addresses orders snapshot.
 ///
 /// Every text field is trimmed; an empty optional field becomes `None`. Last name, first
 /// address line and city are required. Postal code formats aren't checked yet.

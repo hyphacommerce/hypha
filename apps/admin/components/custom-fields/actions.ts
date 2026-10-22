@@ -1,7 +1,7 @@
 "use server";
 
-// What the custom fields cards and inputs ask the API (design note 0033): an owner's
-// values, writing them, and naming a reference's target.
+// What the custom fields cards and inputs ask the API: an owner's values, writing
+// them, and naming a reference's target.
 
 import { revalidatePath } from "next/cache";
 

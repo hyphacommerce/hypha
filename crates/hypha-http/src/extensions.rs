@@ -1,7 +1,6 @@
-//! The host's `ExtensionCaller` (design note 0029, §3): calls to apps' extension points
-//! go out as every call to a merchant URL does, through the host's `HostCalls` (signed
-//! by `outbound::prepare`, public addresses only natively, `fetch` on Workers), with the
-//! store named in `Hypha-Store`.
+//! The host's `ExtensionCaller`: calls to apps' extension points go out as every call to a
+//! merchant URL does, through the host's `HostCalls` (signed by `outbound::prepare`, public
+//! addresses only natively, `fetch` on Workers), with the store named in `Hypha-Store`.
 
 use hypha_core::{Clock, StoreId};
 use hypha_extensions::{Answer, ExtensionCaller, OutgoingCall, STORE_HEADER, TransportError};

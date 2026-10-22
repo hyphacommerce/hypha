@@ -1,10 +1,10 @@
-# The TypeScript side of the repository (design note 0011): apps and shared packages.
-# The Rust side is the Cargo workspace in Cargo.toml.
+# The TypeScript side of the repository: apps and shared packages. The Rust side is
+# the Cargo workspace in Cargo.toml.
 packages:
   - "apps/*"
   - "packages/*"
 # pnpm holds back packages published very recently (a supply-chain guard). These exact
-# versions are the ones design note 0011 pins, newer than that window when chosen;
+# versions are the ones the TypeScript apps pin, newer than that window when chosen;
 # listing them is a deliberate exception, to drop as they age.
 minimumReleaseAgeExclude:
   - "@cloudflare/build-output-utils@0.9.2"

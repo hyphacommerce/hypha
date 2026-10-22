@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+# !/usr/bin/env bash
 # Starts everything for local development: the compose services, the API on
 # 127.0.0.1:3917 (what the apps' .env.example files name), the admin on :3001 and the
 # storefront on :3002. Ctrl+C stops all three; the compose services keep running
@@ -16,8 +16,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# First-party spores to build the API with (design note 0030, §9): HYPHA_SPORES=stripe
-# (comma-separated) turns on each one's `spore-<name>` feature.
+# First-party spores to build the API with: HYPHA_SPORES=stripe (comma-separated)
+# turns on each one's `spore-<name>` feature.
 SPORE_FEATURES=""
 # `:-`: set -u refuses an unset variable (bash 4+).
 spores="${HYPHA_SPORES:-}"

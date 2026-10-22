@@ -1,5 +1,5 @@
-//! Managing channels and publishing products to them (design note 0020). Channels need
-//! `channels:*`; publishing is how a product is presented, so `products:write`.
+//! Managing channels and publishing products to them. Channels need `channels:*`;
+//! publishing is how a product is presented, so `products:write`.
 
 use std::collections::{BTreeSet, HashMap};
 

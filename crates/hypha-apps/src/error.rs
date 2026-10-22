@@ -31,23 +31,23 @@ pub enum AppError {
     /// Narrowing can only take scopes away: more needs an authorization staff approve.
     #[error("the grant doesn't have {0}; adding scopes takes a new authorization")]
     GrantNotNarrower(Scope),
-    /// A point (or a version of it) this build doesn't know (design note 0029, §3).
+    /// A point (or a version of it) this build doesn't know.
     #[error("no extension point {point:?} version {version}")]
     UnknownExtensionPoint { point: String, version: u16 },
     #[error("extension point {0:?} is listed twice")]
     DuplicateExtensionPoint(String),
-    /// An app installed from its manifest registers its points there (§4.1 step 5);
-    /// staff set endpoints only for apps made by hand.
+    /// An app installed from its manifest registers its points there; staff set endpoints
+    /// only for apps made by hand.
     #[error("app {0} registers its extension points in its manifest")]
     EndpointsFromManifest(AppKey),
-    /// A spore is built into the API (design note 0030, SP2): staff enable or disable
-    /// it; its name, scopes and what it implements are the build's.
+    /// A spore is built into the API: staff enable or disable it; its name, scopes and what
+    /// it implements are the build's.
     #[error("{0} is built into the API: only enabling or disabling it is staff's")]
     BuiltIn(AppKey),
     /// Syncing a spore's registration onto an app that isn't one (a host bug).
     #[error("{0} is not a spore")]
     NotASpore(AppKey),
-    /// A spore staff disabled: its routes and UI answer nothing (design note 0030, §3).
+    /// A spore staff disabled: its routes and UI answer nothing.
     #[error("{0} is disabled")]
     Disabled(AppKey),
 }

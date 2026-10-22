@@ -1,5 +1,4 @@
-//! Customer accounts (design note 0034): a code emailed, a session beside the publishable
-//! key, signing out.
+//! Customer accounts: a code emailed, a session beside the publishable key, signing out.
 
 use serde_json::json;
 
@@ -93,7 +92,7 @@ async fn a_customer_signs_in_with_an_emailed_code_and_signs_out() {
     assert_eq!(json["customer"]["email"], "nina@example.com");
     assert!(json["expires_at"].is_string());
     let customer = json["customer"]["id"].as_str().unwrap().to_string();
-    // The customer was created at the first request (AC2), and the admin sees them.
+    // The customer was created at the first request, and the admin sees them.
     let (status, admin) = send(&app, "GET", &format!("/admin/customers/{customer}"), None).await;
     assert_eq!(status, StatusCode::OK, "{admin}");
     assert_eq!(admin["email"], "nina@example.com");
@@ -231,7 +230,62 @@ async fn asking_for_a_code_answers_the_same_for_any_address_and_is_rate_limited(
     );
 }
 
-// ---------- the account (design note 0034, §3) ----------
+// Six digits are few: guesses must stay slow from any one address, and at any one email.
+#[tokio::test]
+async fn guessing_login_codes_from_one_address_is_limited() {
+    let app = app().await;
+    let pk = publishable(&app).await;
+    let (burst, _) = hypha_http::rate_limit::Rule::CustomerLoginIp.quota(&Default::default());
+    for n in 0..burst {
+        // Different emails, so only the per-address limit can trip.
+        let (status, json) =
+            login(&app, &pk, &format!("guess{n}@example.com"), "000000", None).await;
+        assert_eq!(
+            (status, code(&json)),
+            (StatusCode::UNAUTHORIZED, "invalid_code")
+        );
+    }
+    let (status, json) = login(&app, &pk, "again@example.com", "000000", None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
+    );
+}
+
+#[tokio::test]
+async fn guessing_one_emails_code_is_limited_per_address() {
+    let app = app_behind_proxy().await;
+    let pk = publishable(&app).await;
+    let (burst, _) =
+        hypha_http::rate_limit::Rule::CustomerLoginEmailFromIp.quota(&Default::default());
+    let body = json!({ "email": "nina@example.com", "code": "000000" }).to_string();
+    let path = "/storefront/auth/login";
+    let attacker = [
+        ("x-publishable-key", pk.as_str()),
+        ("x-forwarded-for", "203.0.113.66"),
+    ];
+    for _ in 0..burst {
+        let (status, _) = send_with(&app, &attacker, "POST", path, Some(&body)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    let (status, json) = send_with(&app, &attacker, "POST", path, Some(&body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
+    );
+    // From elsewhere, the same email is only a wrong code.
+    let shopper = [
+        ("x-publishable-key", pk.as_str()),
+        ("x-forwarded-for", "198.51.100.7"),
+    ];
+    let (status, json) = send_with(&app, &shopper, "POST", path, Some(&body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNAUTHORIZED, "invalid_code")
+    );
+}
+
+// ---------- the account ----------
 
 /// Signs `email` in and answers (the publishable key, the session token).
 async fn signed_in(app: &TestApp, email: &str) -> (String, String) {
@@ -535,7 +589,7 @@ async fn the_account_lists_its_own_orders_exports_its_data_and_asks_for_erasure(
     );
 }
 
-// ---------- the cart and the admin (design note 0034, §4 and §7) ----------
+// ---------- the cart and the admin ----------
 
 #[tokio::test]
 async fn a_signed_in_shoppers_cart_is_theirs_from_the_start_and_keeps_their_email() {
@@ -641,7 +695,7 @@ async fn the_admin_sees_the_account_and_signs_it_out_everywhere_and_deleting_the
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    // Signing in again works; deleting the customer takes the account with it (AC10).
+    // Signing in again works; deleting the customer takes the account with it.
     let (_, token) = signed_in(&app, "nina@example.com").await;
     let (status, _) = send(&app, "DELETE", &format!("/admin/customers/{id}"), None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);

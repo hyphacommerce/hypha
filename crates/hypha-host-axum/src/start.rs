@@ -27,10 +27,9 @@ use hypha_spore_core::SporeSet;
 use crate::{Deployment, calls, email, platform, runner};
 
 /// `hypha-host-axum openapi [DIR]` writes the OpenAPI documents to `DIR` (default
-/// `openapi`) and exits (design note 0010, S6). Run it after changing routes or DTOs;
-/// a test fails while the committed files are out of date. A build with spores
-/// documents their routes too, a tag per spore (design note 0030, §7); the committed
-/// files are the stock build's.
+/// `openapi`) and exits. Run it after changing routes or DTOs; a test fails while the
+/// committed files are out of date. A build with spores documents their routes too, a tag
+/// per spore; the committed files are the stock build's.
 fn write_openapi<D: Deployment>(dir: &str) -> std::io::Result<()> {
     use hypha_http::routes::openapi::{
         Doc, EXTENSIONS_FILE, document_json_with, extensions_document_json,
@@ -48,9 +47,8 @@ fn write_openapi<D: Deployment>(dir: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Reads the configuration (design note 0017): the file `HYPHA_CONFIG` names, else
-/// `hypha.config.toml` if it's there, under the environment. `Ok` with the file read,
-/// if any.
+/// Reads the configuration: the file `HYPHA_CONFIG` names, else `hypha.config.toml` if it's
+/// there, under the environment. `Ok` with the file read, if any.
 fn load_config() -> Result<(Config, Option<String>), String> {
     let named = std::env::var("HYPHA_CONFIG").ok().filter(|p| !p.is_empty());
     let path = named
@@ -72,11 +70,11 @@ fn load_config() -> Result<(Config, Option<String>), String> {
 }
 
 /// `hypha-host-axum config` prints the settings in effect; `config schema [PATH]` writes
-/// the file's JSON Schema to `PATH` (default `hypha.config.schema.json`; a test fails
-/// while the committed one is stale); `config rate-limits` prints a Worker's Rate
-/// Limiting bindings under the quotas in effect, as JSON (`{"slots": 100, "bindings":
-/// [{"rule": "login_ip", "binding": "RL_LOGIN_IP", "slot": 0, "limit": 12, "period":
-/// 60}, …]}`), which `hypha deploy` copies into `wrangler.toml` (design note 0026, W8).
+/// the file's JSON Schema to `PATH` (default `hypha.config.schema.json`; a test fails while
+/// the committed one is stale); `config rate-limits` prints a Worker's Rate Limiting
+/// bindings under the quotas in effect, as JSON (`{"slots": 100, "bindings": [{"rule":
+/// "login_ip", "binding": "RL_LOGIN_IP", "slot": 0, "limit": 12, "period": 60}, …]}`),
+/// which `hypha deploy` copies into `wrangler.toml`.
 fn config_command(args: &[String]) -> Result<(), String> {
     if args.first().map(String::as_str) == Some("rate-limits") {
         use hypha_http::rate_limit::{BINDING_SLOTS, BINDING_WINDOW};
@@ -156,8 +154,8 @@ async fn main<D: Deployment>() {
             std::process::exit(1);
         }
     }
-    // `setup` prepares the database as a start would, then exits (design note 0026,
-    // W9): for hosts that can't, such as a Worker.
+    // `setup` prepares the database as a start would, then exits: for hosts that can't,
+    // such as a Worker.
     let setup_only = args.get(1).is_some();
 
     tracing_subscriber::fmt()
@@ -246,9 +244,8 @@ async fn main<D: Deployment>() {
     serve(prepared).await;
 }
 
-/// With no staff user yet, `HYPHA_OWNER_EMAIL` and `HYPHA_OWNER_PASSWORD` (and
-/// optionally `HYPHA_OWNER_NAME`) create the owner (design note 0008, A11). Ignored once
-/// anyone exists.
+/// With no staff user yet, `HYPHA_OWNER_EMAIL` and `HYPHA_OWNER_PASSWORD` (and optionally
+/// `HYPHA_OWNER_NAME`) create the owner. Ignored once anyone exists.
 async fn ensure_owner<S: Storage>(state: &AppState<S>) -> Result<(), String> {
     let ports = state
         .public_ports()
@@ -282,7 +279,7 @@ async fn ensure_owner<S: Storage>(state: &AppState<S>) -> Result<(), String> {
 }
 
 /// A store with no location gets "Default", so it can fulfil orders before it sets up
-/// stock (design note 0018).
+/// stock.
 async fn ensure_location<S: Storage>(state: &AppState<S>) -> Result<(), String> {
     let ports = state
         .public_ports()
@@ -298,8 +295,8 @@ async fn ensure_location<S: Storage>(state: &AppState<S>) -> Result<(), String> 
     Ok(())
 }
 
-/// An empty engine (a new database, or a new engine) is filled by a full rebuild: the
-/// sync job works it like any other mark (design note 0019, section 5).
+/// An empty engine (a new database, or a new engine) is filled by a full rebuild: the sync
+/// job works it like any other mark.
 async fn ensure_search_index<S: Storage>(state: &AppState<S>) -> Result<(), String> {
     use hypha_search_index::SearchIndex;
     let ports = state
@@ -321,9 +318,9 @@ async fn ensure_search_index<S: Storage>(state: &AppState<S>) -> Result<(), Stri
     Ok(())
 }
 
-/// Each spore this host is built with gets its app (design note 0030, §3), as the system:
-/// created with its scopes the first time, its title and scopes brought up to date after;
-/// then its custom fields are synced (`Spore::custom_fields`).
+/// Each spore this host is built with gets its app, as the system: created with its scopes
+/// the first time, its title and scopes brought up to date after; then its custom fields
+/// are synced (`Spore::custom_fields`).
 pub(crate) async fn register_spores<D: Deployment>(
     state: &AppState<PgStorage<D>>,
 ) -> Result<(), String> {
@@ -343,8 +340,8 @@ pub(crate) async fn register_spores<D: Deployment>(
                 .map_err(|e| format!("spore {:?}: {e}", spore.name))?;
         tracing::info!(app = %app.key(), enabled = app.enabled(), "spore");
     }
-    // Their custom fields, in the namespaces of the apps just registered (design note
-    // 0033, §8): a changed type stops the start, naming the spore and the field.
+    // Their custom fields, in the namespaces of the apps just registered: a changed type
+    // stops the start, naming the spore and the field.
     hypha_spore_core::sync_custom_fields::<D::Spores, _>(&ports, &state.env).await
 }
 
@@ -386,7 +383,7 @@ pub(crate) async fn prepare<D: Deployment>(
     config: Config,
 ) -> Prepared<D> {
     let ids = runtime.ids.clone();
-    // One store per deployment (design note 0006, model A): created on first start.
+    // One store per deployment (model A): created on first start.
     let name = std::env::var("HYPHA_STORE_NAME").unwrap_or_else(|_| "My store".to_string());
     let store = match db.store().await {
         Ok(directory) => ensure_single_store(&Ctx::system(), &directory, &ids, &name)
@@ -462,8 +459,8 @@ pub(crate) async fn prepare<D: Deployment>(
         },
         &runtime,
     ));
-    // Each spore is built with the host's capabilities and its `[spores.<name>]` section
-    // (design note 0030, §4); its HTTP goes through the client apps are called with.
+    // Each spore is built with the host's capabilities and its `[spores.<name>]` section;
+    // its HTTP goes through the client apps are called with.
     let spores = hypha_http::spores::spore_host(&env, calls::host_calls(client.clone()), outbound);
     let storage = match PgStorage::<D>::new(db, Arc::clone(&mail), &spores, &config.spores) {
         Ok(storage) => storage,
@@ -526,7 +523,7 @@ async fn serve<D: Deployment>(prepared: Prepared<D>) {
     } = prepared;
     let config = &state.config;
     let trusted_proxies = &config.server.trusted_proxies;
-    // The one setting that silently goes wrong behind a proxy (design note 0009, §8).
+    // The one setting that silently goes wrong behind a proxy.
     if trusted_proxies.is_empty() {
         tracing::info!(
             "rate limits key clients by their socket address; behind a proxy or load \

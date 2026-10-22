@@ -1,7 +1,7 @@
-//! Where assets are used (design notes 0013, section 6, and 0014, E9). Usages are
-//! recorded by whoever attaches an asset, in the same batch as the owner's write, so
-//! "used by" is one lookup and an asset in use can't be deleted. Media never knows the
-//! owners: their kind is a string, so spores can register their own.
+//! Where assets are used. Usages are recorded by whoever attaches an asset, in the
+//! same batch as the owner's write, so "used by" is one lookup and an asset in use can't be
+//! deleted. Media never knows the owners: their kind is a string, so spores can register
+//! their own.
 
 use std::{fmt, str::FromStr};
 
@@ -48,7 +48,7 @@ impl UsageOwner {
         }
     }
 
-    /// A category's image (design note 0022, CA9).
+    /// A category's image.
     pub fn category(id: hypha_core::CategoryId) -> Self {
         Self {
             kind: Self::CATEGORY.to_string(),
@@ -56,8 +56,8 @@ impl UsageOwner {
         }
     }
 
-    /// The store's notification settings, whose logo is an asset (design note 0028,
-    /// §2): one per store, so its ID is fixed.
+    /// The store's notification settings, whose logo is an asset: one per store, so its ID
+    /// is fixed.
     pub fn notification_settings() -> Self {
         Self {
             kind: Self::NOTIFICATION_SETTINGS.to_string(),

@@ -1,7 +1,7 @@
-// The well-known customer fields (design note 0032, CD11): `custom.tags` (labels) and
-// `custom.note` (the staff note). They're ordinary merchant definitions the API suggests
-// (`GET /admin/custom-field-definitions/suggestions`); the admin offers them in one click
-// and renders them in place (chips under the name, a note card) when they exist with the
+// The well-known customer fields: `custom.tags` (labels) and `custom.note` (the staff
+// note). They're ordinary merchant definitions the API suggests (`GET
+// /admin/custom-field-definitions/suggestions`); the admin offers them in one click and
+// renders them in place (chips under the name, a note card) when they exist with the
 // shape it expects. Safe for client components: types and pure functions only.
 
 import type { AdminSchemas } from "@hypha/sdk/admin";

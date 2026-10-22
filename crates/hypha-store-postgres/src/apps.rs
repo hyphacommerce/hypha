@@ -1,5 +1,4 @@
-//! External apps (design note 0016, section 8), with the manifest and grant of those
-//! installed through OAuth (design note 0029).
+//! External apps, with the manifest and grant of those installed through OAuth.
 
 use hypha_apps::{App, AppKey, AppRepo, AppSnapshot, GrantSnapshot};
 use hypha_core::{

@@ -1,8 +1,8 @@
 "use client";
 
-// A variant's custom fields (design note 0033, §9): the variants table has no room for
-// them, so each saved variant opens them in a dialog, read fresh and saved at once, apart
-// from the product's draft (like its stock).
+// A variant's custom fields: the variants table has no room for them, so each saved
+// variant opens them in a dialog, read fresh and saved at once, apart from the product's
+// draft (like its stock).
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

@@ -1,8 +1,8 @@
-// Installing the co-located apps (design note 0029, §9 and §4.1): the deploy runs them,
-// but only a staff member installs one, on its consent page, like any app's. For each
-// app the store hasn't installed, `hypha deploy` (and `hypha apps install`) prints and
-// opens `<app_url>/install?api=<the API's public URL>`, the convention every admin's
-// "Install app" uses; `hypha apps status` says which are.
+// Installing the co-located apps: the deploy runs them, but only a staff member
+// installs one, on its consent page, like any app's. For each app the store hasn't
+// installed, `hypha deploy` (and `hypha apps install`) prints and opens
+// `<app_url>/install?api=<the API's public URL>`, the convention every admin's "Install
+// app" uses; `hypha apps status` says which are.
 
 import { getJson, Staff } from "./api.ts";
 import { type AppEntry, appUrl } from "./apps.ts";

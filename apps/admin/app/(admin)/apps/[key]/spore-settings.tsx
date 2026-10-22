@@ -11,7 +11,7 @@ import { useState, useTransition } from "react";
 
 import { saveSporeSettings } from "../actions";
 
-/** One property of a spore's settings schema: the subset the API accepts (design note 0030, §8). */
+/** One property of a spore's settings schema: the subset the API accepts. */
 type Property = {
   type: "string" | "integer" | "number" | "boolean";
   title?: string;

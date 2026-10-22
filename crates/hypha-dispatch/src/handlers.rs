@@ -1,17 +1,16 @@
-//! The dispatcher's own handler (design note 0016, section 6). Handlers are
-//! `hypha_core::EventHandler`s; the host lists the set it runs (design note 0019,
-//! section 5), so other crates and spores add theirs without this crate knowing.
+//! The dispatcher's own handler. Handlers are `hypha_core::EventHandler`s; the host lists
+//! the set it runs, so other crates and spores add theirs without this crate knowing.
 //!
-//! Handlers must be idempotent: a lease can run out mid-run and the delivery runs again
-//! (EV7). Each one's writes are commands of their own, run as `Actor::System`.
+//! Handlers must be idempotent: a lease can run out mid-run and the delivery runs again.
+//! Each one's writes are commands of their own, run as `Actor::System`.
 
 use hypha_core::{Ctx, Event, EventHandler, HasBatch, StageEvents, StoredEvent, VariantId};
 use hypha_inventory::{HasInventoryItems, InventoryError, InventoryItemRepo};
 use hypha_markets::{HasPriceLists, PriceListRepo, StageFixedPrices, remove_fixed_prices};
 use hypha_products::{ProductDeleted, VariantRemoved};
 
-/// Cleans up what other domains keep for a removed variant (design note 0014, §4), and
-/// for each variant of a deleted product (design note 0033, §6.3).
+/// Cleans up what other domains keep for a removed variant, and for each variant of a
+/// deleted product.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct VariantCleanup;
 
@@ -54,12 +53,11 @@ where
     Ok(())
 }
 
-/// Removes the variant's fixed prices from every price list,
-/// and deletes its inventory item. While units are still reserved on it (open orders
-/// count on them) the item is retired instead, and goes with its last reservation when
-/// the orders are fulfilled or cancelled (design note 0016, Q5; 0018). Each write
-/// records its own events. Running again finds nothing left to do; a write that lost a
-/// race fails the run, and the retry sees the item as it is then.
+/// Removes the variant's fixed prices from every price list, and deletes its inventory
+/// item. While units are still reserved on it (open orders count on them) the item is
+/// retired instead, and goes with its last reservation when the orders are fulfilled or
+/// cancelled. Each write records its own events. Running again finds nothing left to do; a
+/// write that lost a race fails the run, and the retry sees the item as it is then.
 async fn clean_variant<P>(ports: &P, variant: VariantId) -> Result<(), String>
 where
     P: HasPriceLists + HasInventoryItems + HasBatch<Batch: StageFixedPrices + StageEvents>,

@@ -1,7 +1,6 @@
-//! What OAuth does about an app's custom fields (design note 0033, §8): it refuses a
-//! manifest that retypes one before any consent page, says which manifest a write
-//! applies (the HTTP layer syncs the fields from it in the same batch), and lets a
-//! refresh that drops data wait for staff.
+//! What OAuth does about an app's custom fields: it refuses a manifest that retypes one
+//! before any consent page, says which manifest a write applies (the HTTP layer syncs the
+//! fields from it in the same batch), and lets a refresh that drops data wait for staff.
 
 use std::collections::HashMap;
 

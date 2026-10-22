@@ -1,7 +1,7 @@
-//! Concurrent order actions against a real Postgres, each request on its own connection
-//! (design note 0018, section 3): fulfilments racing for one line never ship more than
-//! was ordered, and a fulfilment racing a cancellation leaves the order either shipped
-//! or cancelled, with the stock to match.
+//! Concurrent order actions against a real Postgres, each request on its own connection:
+//! fulfilments racing for one line never ship more than was ordered, and a fulfilment
+//! racing a cancellation leaves the order either shipped or cancelled, with the stock to
+//! match.
 //!
 //! Needs `DATABASE_URL` like the contract tests; skips itself without it.
 
@@ -162,7 +162,7 @@ async fn state(store: &PgStore<Client>) -> (u32, usize, i64, i64) {
 
 #[tokio::test]
 async fn fulfilments_racing_for_one_line_never_ship_more_than_was_ordered() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping the fulfilment race test");
         return;
     };
@@ -204,7 +204,7 @@ async fn fulfilments_racing_for_one_line_never_ship_more_than_was_ordered() {
 
 #[tokio::test]
 async fn a_fulfilment_racing_a_cancellation_leaves_one_or_the_other() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping the fulfilment race test");
         return;
     };

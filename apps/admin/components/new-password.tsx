@@ -1,8 +1,8 @@
 "use client";
 
 // A new password typed twice, for the invite, the reset and the account page. The API
-// holds the rule (8 to 128 characters, design note 0008 §5); this only catches a typo
-// before the round trip.
+// holds the rule (8 to 128 characters); this only catches a typo before the round
+// trip.
 
 import { VStack } from "@astryxdesign/core/Layout";
 import { TextInput } from "@astryxdesign/core/TextInput";

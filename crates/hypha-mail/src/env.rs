@@ -1,9 +1,8 @@
-//! What sending needs besides the store's repositories (design note 0028, §11): the
-//! sender, the operator's from address, how the host makes links (the admin's, an
-//! order's access token, a file's URL), the store it serves, time and IDs, and how the
-//! send job is woken. A host
-//! implements `MailEnv` once, over what it holds; the `Mailer` handler keeps one, and
-//! the commands take one like `ids` and `clock`.
+//! What sending needs besides the store's repositories: the sender, the operator's from
+//! address, how the host makes links (the admin's, an order's access token, a file's URL),
+//! the store it serves, time and IDs, and how the send job is woken. A host implements
+//! `MailEnv` once, over what it holds; the `Mailer` handler keeps one, and the commands
+//! take one like `ids` and `clock`.
 
 use std::sync::Arc;
 
@@ -12,7 +11,7 @@ use hypha_media::Asset;
 use hypha_notifications::EmailSender;
 
 /// The non-storage inputs of every send. No `Send` bound, like every port: a host on
-/// concrete types proves its futures `Send` (CLAUDE.md, hard constraints).
+/// concrete types proves its futures `Send`.
 #[allow(async_fn_in_trait)]
 pub trait MailEnv {
     type Sender: EmailSender;
@@ -32,8 +31,8 @@ pub trait MailEnv {
     /// merchant's sender name goes with it.
     fn sender_address(&self) -> &Email;
 
-    /// The store this deployment serves (design note 0006: the host resolved it), read
-    /// for its name, contact email and time zone.
+    /// The store this deployment serves (the host resolved it), read for its name, contact
+    /// email and time zone.
     fn store(&self) -> StoreId;
 
     /// Where the admin panel lives (`server.admin_url`, no trailing `/`), for links in

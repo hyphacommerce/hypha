@@ -1,8 +1,8 @@
-// What the store's products actually have, for Settings → Search to offer as choices
-// (design note 0024, section 6): option names with their values, vendors, product types
-// and tags, with how many of the scanned products use each. Read from the newest
-// products (summaries for vendors and types, whole products for options and tags), so
-// a large catalog costs a few requests, not one per product.
+// What the store's products actually have, for Settings → Search to offer as choices:
+// option names with their values, vendors, product types and tags, with how many of the
+// scanned products use each. Read from the newest products (summaries for vendors and
+// types, whole products for options and tags), so a large catalog costs a few requests,
+// not one per product.
 
 import type { sessionClient } from "@/lib/hypha";
 
@@ -18,10 +18,10 @@ export type SearchCatalog = {
   productTypes: Counted[];
   tags: Counted[];
   /**
-   * Custom fields search can filter by (design note 0033, §9): product and variant
-   * fields that are filterable, readable by storefronts, and text, choice, true/false or
-   * integer (or a list of those). `key` is the facet's (`field.custom.material`); values
-   * are those in use, a choice's by its label.
+   * Custom fields search can filter by: product and variant fields that are filterable,
+   * readable by storefronts, and text, choice, true/false or integer (or a list of
+   * those). `key` is the facet's (`field.custom.material`); values are those in use, a
+   * choice's by its label.
    */
   fields: { key: string; name: string; count: number; values: Counted[] }[];
   /** How many products the choices come from, and whether the store has more. */

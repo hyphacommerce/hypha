@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+# !/usr/bin/env bash
 # Runs the production builds locally, to see how they behave: the API built with
 # `--release`, and the admin and storefront built (`vite build`) and served from that
 # build (`vite preview`: the built worker in workerd, as on Cloudflare). Same ports,
@@ -14,8 +14,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# First-party spores to build the API with (design note 0030, §9): HYPHA_SPORES=stripe
-# (comma-separated) turns on each one's `spore-<name>` feature.
+# First-party spores to build the API with: HYPHA_SPORES=stripe (comma-separated)
+# turns on each one's `spore-<name>` feature.
 SPORE_FEATURES=""
 # `:-`: set -u refuses an unset variable (bash 4+).
 spores="${HYPHA_SPORES:-}"

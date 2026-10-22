@@ -1,5 +1,5 @@
-// Payments in the admin (design note 0027): the method presets staff start from, and
-// which orders staff can still mark paid. Plain data, for server and client code alike.
+// Payments in the admin: the method presets staff start from, and which orders staff
+// can still mark paid. Plain data, for server and client code alike.
 
 /** A starting point for a new method: all `manual`, staff record the money. */
 export type PaymentPreset = {
@@ -38,7 +38,7 @@ export const PAYMENT_PRESETS: PaymentPreset[] = [
 ];
 
 /** A provider a method can name besides `manual`: an installed app answering
- * `payments.start` (design note 0029, §3.1), or a spore built into the API (0030). */
+ * `payments.start`, or a spore built into the API. */
 export type PaymentApp = { key: string; name: string; isBuiltIn: boolean };
 
 /**
@@ -53,10 +53,10 @@ export function providerLabel(provider: string): string {
 }
 
 /**
- * Whether staff can mark the order paid, by the API's rule (design note 0027, §5): not
- * cancelled, no `authorized` payment (only its provider can capture it), and either a
- * `pending` payment to record or, with no open payment, a `pending` order (the API then
- * records a manual payment of the total). Any other status means money moved already
+ * Whether staff can mark the order paid, by the API's rule: not cancelled, no
+ * `authorized` payment (only its provider can capture it), and either a `pending`
+ * payment to record or, with no open payment, a `pending` order (the API then records a
+ * manual payment of the total). Any other status means money moved already
  * (`order_not_payable`). Without its payments (a list's summary), only `pending` orders.
  */
 export function canMarkPaid(order: {

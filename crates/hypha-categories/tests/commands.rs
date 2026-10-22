@@ -1,5 +1,5 @@
-//! The category commands (design note 0022): the tree's rules, sibling positions,
-//! membership and what the storefront sees.
+//! The category commands: the tree's rules, sibling positions, membership and what the
+//! storefront sees.
 
 use hypha_categories::{
     Category, CategoryError, CategoryRepo, CategorySettings, CommandError, CreateCategory,
@@ -402,6 +402,44 @@ fn writes_need_products_write() {
             Scope::ProductsWrite
         )))
     );
+    let home = w.create("Home", None);
+    let rename = UpdateCategory {
+        name: Some("House".to_string()),
+        ..UpdateCategory::default()
+    };
+    let results = [
+        block_on(update_category(
+            &reader,
+            &w.ports,
+            &w.settings,
+            home,
+            rename,
+        ))
+        .map(|_| ()),
+        block_on(delete_category(&reader, &w.ports, home)),
+        block_on(add_category_products(&reader, &w.ports, home, vec![pid(1)])),
+        block_on(remove_category_products(
+            &reader,
+            &w.ports,
+            home,
+            vec![pid(1)],
+        )),
+        block_on(set_product_categories(
+            &reader,
+            &w.ports,
+            pid(1),
+            vec![home],
+        ))
+        .map(|_| ()),
+    ];
+    for result in results {
+        assert_eq!(
+            result,
+            Err(CommandError::Auth(AuthError::MissingScope(
+                Scope::ProductsWrite
+            )))
+        );
+    }
 }
 
 /// A filter every category matches: no one holds this field.

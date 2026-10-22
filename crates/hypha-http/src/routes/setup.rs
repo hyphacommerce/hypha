@@ -1,6 +1,6 @@
-//! The setup checklist (design note 0021, SU9): whether each first step is done,
-//! worked out from the data on every call, never stored. One call for what the admin's
-//! home page asked of six routes plus two per sampled product (design note 0025, §6).
+//! The setup checklist: whether each first step is done, worked out from the data on every
+//! call, never stored. One call for what the admin's home page asked of six routes plus two
+//! per sampled product.
 
 use axum::{Json, extract::State};
 use hypha_auth::{ApiKeyKind, HasApiKeys, list_api_keys};
@@ -45,8 +45,8 @@ pub struct SetupChecklistResponse {
     publish: bool,
     /// A publishable key that isn't revoked exists (`api_keys:read`).
     key: bool,
-    /// A payment method is enabled (`payments:read`; design note 0027): without one,
-    /// checkout refuses carts with something to pay.
+    /// A payment method is enabled (`payments:read`): without one, checkout refuses carts
+    /// with something to pay.
     payment: bool,
 }
 

@@ -1,5 +1,5 @@
-//! What happens to orders, as events (design note 0016, section 4). Contract types: a
-//! reshaped field is a new `VERSION`, never an edit.
+//! What happens to orders, as events. Contract types: a reshaped field is a new `VERSION`,
+//! never an edit.
 
 use hypha_core::{ChannelId, CustomerId, Event, Money, OrderId};
 use serde::Serialize;
@@ -12,7 +12,7 @@ pub struct OrderPlaced {
     pub order: OrderId,
     pub number: i64,
     pub customer: CustomerId,
-    /// Where it was placed (design note 0020): an added field, so still version 1.
+    /// Where it was placed: an added field, so still version 1.
     pub channel: ChannelId,
     pub total: Money,
 }
@@ -35,9 +35,8 @@ impl Event for OrderPaid {
     const VERSION: u16 = 1;
 }
 
-/// `order.fulfillment_status_changed`: a fulfilment (or its cancellation) moved the
-/// order between `unfulfilled`, `partially_fulfilled` and `fulfilled` (design note
-/// 0018).
+/// `order.fulfillment_status_changed`: a fulfilment (or its cancellation) moved the order
+/// between `unfulfilled`, `partially_fulfilled` and `fulfilled`.
 #[derive(Debug, Serialize)]
 pub struct OrderFulfillmentStatusChanged {
     pub order: OrderId,
@@ -56,8 +55,8 @@ impl Event for OrderFulfillmentStatusChanged {
 pub struct OrderCancelled {
     pub order: OrderId,
     pub reason: &'static str,
-    /// Whether staff chose to email the buyer about it (design note 0028, NT7): the
-    /// `Mailer` sends `order_cancelled` only then. An added field, so still version 1.
+    /// Whether staff chose to email the buyer about it: the `Mailer` sends
+    /// `order_cancelled` only then. An added field, so still version 1.
     pub notify_customer: bool,
 }
 

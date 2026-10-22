@@ -1,8 +1,7 @@
 "use client";
 
-// The account's forms (design note 0034, §3): the profile, an address, the marketing
-// boxes, privacy, signing out. Each saves through its server action, which answers with
-// the page re-rendered.
+// The account's forms: the profile, an address, the marketing boxes, privacy, signing
+// out. Each saves through its server action, which answers with the page re-rendered.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

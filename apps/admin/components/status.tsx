@@ -21,7 +21,7 @@ export function ProductStatusBadge({ status }: { status: AdminSchemas["ProductSt
 // unknown one shows as it is.
 type Variant = "success" | "neutral" | "warning" | "info" | "error";
 
-/** An order's payment status (design note 0027, PA7). */
+/** An order's payment status. */
 const PAYMENT: Record<string, { label: string; variant: Variant }> = {
   pending: { label: "Payment pending", variant: "warning" },
   authorized: { label: "Authorized", variant: "info" },

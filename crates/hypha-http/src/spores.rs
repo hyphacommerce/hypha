@@ -1,5 +1,5 @@
-//! Spores in the HTTP layer (design note 0030): the host's capabilities as a spore's
-//! environment (`spore_host`), and spores' routes (`spore_routes!`, `gate`).
+//! Spores in the HTTP layer: the host's capabilities as a spore's environment
+//! (`spore_host`), and spores' routes (`spore_routes!`, `gate`).
 
 use std::sync::Arc;
 
@@ -79,7 +79,7 @@ fn http_error(e: CallError) -> HttpError {
     }
 }
 
-// ---------- routes (design note 0030, §7) ----------
+// ---------- routes ----------
 
 /// Which surface a spore's route is on, by its prefix: `public` (`/spores/<name>/…`, no
 /// credentials, rate limited per client address by `Rule::SporePublic`), `admin`
@@ -192,8 +192,8 @@ async fn admit<S: Storage>(
     }
 }
 
-/// The built spore `T` this host runs, for its route handlers (design note 0030, §7):
-/// `let stripe = spore::<Stripe, S>(&state)?;`.
+/// The built spore `T` this host runs, for its route handlers: `let stripe =
+/// spore::<Stripe, S>(&state)?;`.
 pub fn spore<T: hypha_spore_core::Spore, S: Storage>(state: &AppState<S>) -> Result<&T, ApiError> {
     hypha_spore_core::spore::<T, S::Ports<'static>>(state.storage.spores())
         .ok_or_else(|| ApiError::internal(format!("spore {:?} isn't built in", T::NAME)))
@@ -241,8 +241,8 @@ macro_rules! __spore_doc {
     };
 }
 
-/// A spore's routes (design note 0030, §7), in `route_table!`'s shape. Invoke it at your
-/// crate's root; handler paths are from there (`module::handler`):
+/// A spore's routes, in `route_table!`'s shape. Invoke it at your crate's root; handler paths are from
+/// there (`module::handler`):
 ///
 /// ```ignore
 /// hypha_spore::spore_routes! { crate::stripe_routes for Stripe:

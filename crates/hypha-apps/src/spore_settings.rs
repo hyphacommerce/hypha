@@ -1,6 +1,6 @@
-//! A spore's settings (design note 0030, §8): what the merchant sets for a spore built
-//! into the API (a Stripe secret key, a webhook signing secret), one record per spore,
-//! saved through core rather than a store each spore builds.
+//! A spore's settings: what the merchant sets for a spore built into the API (a Stripe
+//! secret key, a webhook signing secret), one record per spore, saved through core rather
+//! than a store each spore builds.
 //!
 //! A spore describes its form with a JSON Schema (`SettingsSchema`: the subset every
 //! admin can render, checked when the host starts), marks fields that hold secrets

@@ -1,6 +1,5 @@
-//! Apps installed through OAuth and personal data (design note 0029, AP5, AP10): the
-//! whole dance over HTTP, and the redaction contract on every admin route that returns
-//! customers, orders, carts or emails.
+//! Apps installed through OAuth and personal data: the whole dance over HTTP, and the
+//! redaction contract on every admin route that returns customers, orders, carts or emails.
 
 use axum::{
     Router,
@@ -485,7 +484,93 @@ async fn without_an_admin_url_there_is_no_consent_page() {
     );
 }
 
-// ---------- personal data (AP10) ----------
+#[tokio::test]
+async fn an_app_reading_a_custom_fields_event_sees_only_the_fields_it_may_read() {
+    let app = oauth_app().await;
+    let (base, _) = local_app(&["apps:read", "customers:read"]).await;
+    let token = install(&app, &base, None).await["access_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for body in [
+        json!({"owner_type": "customer", "key": "birthday", "type": "date", "name": "Birthday",
+               "personal": true}),
+        json!({"owner_type": "customer", "key": "tier", "type": "text", "name": "Tier"}),
+    ] {
+        let (status, json) = send(
+            &app,
+            "POST",
+            "/admin/custom-field-definitions",
+            Some(&body.to_string()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{json}");
+    }
+    let (_, customer) = send(
+        &app,
+        "POST",
+        "/admin/customers",
+        Some(r#"{"email":"ana@example.com"}"#),
+    )
+    .await;
+    let path = format!(
+        "/admin/customers/{}/custom-fields",
+        customer["id"].as_str().unwrap()
+    );
+    let body = json!({"custom_fields": {"custom.birthday": "1990-05-04", "custom.tier": "gold"}});
+    let (status, json) = send(&app, "PATCH", &path, Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let event = outbox_events(&app)
+        .await
+        .into_iter()
+        .find(|e| e.event_type == "customer.custom_fields_updated")
+        .unwrap();
+    let uri = format!("/admin/events/{}", hypha_core::EventId::from_uuid(event.id));
+
+    let (status, seen) = send_as(&app, &token, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{seen}");
+    assert_eq!(
+        seen["data"]["changes"],
+        json!([{"key": "custom.tier", "value": "gold"}]),
+        "{seen}"
+    );
+    let owner = owner_session(&app).await;
+    let (status, seen) = send_as(&app, &owner, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{seen}");
+    let changes = seen["data"]["changes"].to_string();
+    assert!(
+        changes.contains("custom.birthday") && changes.contains("custom.tier"),
+        "{seen}"
+    );
+}
+
+#[tokio::test]
+async fn a_client_id_at_a_private_address_is_never_fetched() {
+    let app =
+        super::app_refusing_private_calls("[server]\nadmin_url = \"http://admin.test\"").await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let hits = Arc::new(Mutex::new(0));
+    let counted = Arc::clone(&hits);
+    let router = Router::new().fallback(move || {
+        let counted = Arc::clone(&counted);
+        async move {
+            *counted.lock().unwrap() += 1;
+            StatusCode::NOT_FOUND
+        }
+    });
+    tokio::spawn(async move { axum::serve(listener, router).await });
+
+    let (status, location, body) = raw(&app, "GET", &authorize_uri(&base, None), None).await;
+    assert_eq!(
+        (status, location, code(&body)),
+        (StatusCode::BAD_REQUEST, None, "manifest_unreachable"),
+        "{body}"
+    );
+    assert_eq!(*hits.lock().unwrap(), 0, "the private address was called");
+}
+
+// ---------- personal data ----------
 
 /// Values that must never reach a caller without the `customer_data:*` scopes.
 const PII: [&str; 10] = [
@@ -498,7 +583,7 @@ const PII: [&str; 10] = [
     "Piicity",
     "PII-10000",
     "Piiprovince",
-    // A personal custom field's value (design note 0033, §5.2).
+    // A personal custom field's value.
     "Piinote",
 ];
 
@@ -558,6 +643,34 @@ async fn personal_data(app: &TestApp) -> (String, String, String) {
     (order, customer, cart)
 }
 
+/// Another mug, ordered through the storefront with the first order's email; its ID.
+async fn another_order(app: &TestApp) -> String {
+    let (_, products) = send(app, "GET", "/admin/products?limit=1", None).await;
+    let product = products["items"][0]["id"].as_str().unwrap();
+    let (_, product) = send(app, "GET", &format!("/admin/products/{product}"), None).await;
+    let pk = publishable(app).await;
+    let (_, cart) = send_as(
+        app,
+        &pk,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    let cart_path = format!("/storefront/carts/{}", cart["id"].as_str().unwrap());
+    let line = json!({"variant": product["variants"][0]["id"], "quantity": 1}).to_string();
+    let (status, json) =
+        send_as(app, &pk, "POST", &format!("{cart_path}/lines"), Some(&line)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let email = r#"{"email":"ana@example.hr"}"#;
+    send_as(app, &pk, "PUT", &format!("{cart_path}/email"), Some(email)).await;
+    pay_on_delivery(app, &pk, &cart_path).await;
+    let checkout = format!("{cart_path}/checkout");
+    let (status, order) = send_as(app, &pk, "POST", &checkout, Some("{}")).await;
+    assert_eq!(status, StatusCode::CREATED, "{order}");
+    order["id"].as_str().unwrap().to_string()
+}
+
 #[tokio::test]
 async fn no_admin_route_shows_personal_data_without_its_scopes() {
     let app = oauth_app().await;
@@ -565,7 +678,7 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
     // The order's email is the checkout's; make it a known one too.
     let (_, placed) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
     let order_email = placed["email"].as_str().unwrap().to_string();
-    // Personal custom fields on the customer and the order (design note 0033, §5.2).
+    // Personal custom fields on the customer and the order.
     let mut definitions = Vec::new();
     for (owner, path) in [
         (
@@ -594,8 +707,9 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
     let (base, _) = local_app(&[
         "orders:write",
         "customers:write",
+        "customers:erase",
         "carts:write",
-        "notifications:read",
+        "notifications:write",
         "apps:read",
         "customer_data:email",
     ])
@@ -603,16 +717,40 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
     let tokens = install(
         &app,
         &base,
-        Some("orders:write customers:write carts:write notifications:read apps:read"),
+        Some(
+            "orders:write customers:write customers:erase carts:write notifications:write \
+             apps:read",
+        ),
     )
     .await;
     let app_token = tokens["access_token"].as_str().unwrap().to_string();
     let secret = key(
         &app,
         json!({"kind": "secret", "name": "dashboard", "scopes":
-            ["orders:write", "customers:write", "carts:write", "notifications:read", "apps:read"]}),
+            ["orders:write", "customers:write", "customers:erase", "carts:write",
+             "notifications:write", "apps:read"]}),
     )
     .await;
+
+    // What the write routes below act on: the customer's address, the order's email record
+    // (queued when its event is dispatched), and an order for each caller to cancel.
+    let (_, one) = send(&app, "GET", &format!("/admin/customers/{customer}"), None).await;
+    let address_id = one["addresses"][0]["id"].as_str().unwrap().to_string();
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let (_, sent) = send(
+        &app,
+        "GET",
+        &format!("/admin/notifications?order={order}"),
+        None,
+    )
+    .await;
+    let notification = sent["items"][0]["id"].as_str().unwrap().to_string();
+    let to_cancel = [another_order(&app).await, another_order(&app).await];
+    let address = json!({"first_name": "Piiana", "last_name": "Piihorvat", "company": "Acme",
+        "line1": "Piistreet 1", "city": "Piicity", "postal_code": "PII-10000",
+        "country": "HR", "phone": "+385 PII 1"})
+    .to_string();
+    let consent = json!({"state": "subscribed"}).to_string();
 
     let link = json!({"customer": customer}).to_string();
     let routes: Vec<(&str, String, Option<String>)> = vec![
@@ -644,9 +782,41 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
             None,
         ),
         ("GET", format!("/admin/orders/{order}/custom-fields"), None),
+        (
+            "POST",
+            format!("/admin/customers/{customer}/addresses"),
+            Some(address.clone()),
+        ),
+        (
+            "PUT",
+            format!("/admin/customers/{customer}/addresses/{address_id}"),
+            Some(address.clone()),
+        ),
+        (
+            "PUT",
+            format!("/admin/customers/{customer}/groups"),
+            Some(r#"{"groups": []}"#.to_string()),
+        ),
+        (
+            "PUT",
+            format!("/admin/customers/{customer}/marketing/email"),
+            Some(consent),
+        ),
+        ("POST", format!("/admin/customers/{customer}/erasure"), None),
+        (
+            "DELETE",
+            format!("/admin/customers/{customer}/erasure"),
+            None,
+        ),
+        ("GET", format!("/admin/notifications/{notification}"), None),
+        (
+            "POST",
+            format!("/admin/notifications/{notification}/resend"),
+            None,
+        ),
     ];
-    // The export carries everything (design note 0032, §7.4), so it needs every
-    // `customer_data:*` scope rather than redaction: refused outright here.
+    // The export carries everything, so it needs every `customer_data:*` scope rather than
+    // redaction: refused outright here.
     for token in [&app_token, &secret] {
         let (status, json) = send_as(
             &app,
@@ -662,8 +832,20 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
             "the order's email in {json}"
         );
     }
-    for token in [&app_token, &secret] {
-        for (method, path, body) in &routes {
+    for (n, token) in [&app_token, &secret].into_iter().enumerate() {
+        // Writes each caller makes once: a new customer, an order of its own cancelled.
+        let new_customer = json!({"email": format!("pii-new{n}@example.hr"),
+            "first_name": "Piiana", "last_name": "Piihorvat", "phone": "+385 PII 1"})
+        .to_string();
+        let once = [
+            ("POST", "/admin/customers".to_string(), Some(new_customer)),
+            (
+                "POST",
+                format!("/admin/orders/{}/cancel", to_cancel[n]),
+                Some(r#"{"reason": "customer"}"#.to_string()),
+            ),
+        ];
+        for (method, path, body) in routes.iter().chain(&once) {
             let (status, json) = send_as(&app, token, method, path, body.as_deref()).await;
             assert!(status.is_success(), "{method} {path}: {status} {json}");
             assert_eq!(leaks(&json), Vec::<&str>::new(), "{method} {path}: {json}");
@@ -867,4 +1049,95 @@ async fn a_private_apps_manifest_is_uploaded_and_its_approval_shows_its_credenti
     let (status, body) = send_as(&app, &owner, "GET", "/admin/apps/app_rates", None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["installed"], true);
+}
+
+#[tokio::test]
+async fn staff_deny_an_install_and_the_app_hears_why() {
+    let app = oauth_app().await;
+    let (base, _) = local_app(&["orders:read"]).await;
+    let (status, location, body) = raw(&app, "GET", &authorize_uri(&base, None), None).await;
+    assert_eq!(status, StatusCode::FOUND, "{body}");
+    let request = query_param(&location.unwrap(), "request").unwrap();
+    let owner = owner_session(&app).await;
+    let deny = format!("/admin/oauth/requests/{request}/deny");
+    let (status, answer) = send_as(&app, &owner, "POST", &deny, None).await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    let to = answer["redirect_to"].as_str().unwrap();
+    assert!(to.starts_with(&format!("{base}/callback?")), "{to}");
+    assert_eq!(
+        (
+            query_param(to, "error").as_deref(),
+            query_param(to, "state").as_deref(),
+            query_param(to, "code")
+        ),
+        (Some("access_denied"), Some("st4te"), None)
+    );
+    // Decided once: neither approving nor denying again changes it.
+    let approve = format!("/admin/oauth/requests/{request}/approve");
+    for path in [&deny, &approve] {
+        let (status, body) = send_as(&app, &owner, "POST", path, None).await;
+        assert_eq!(
+            (status, code(&body)),
+            (StatusCode::CONFLICT, "oauth_request_decided")
+        );
+    }
+    let (status, _) = send(&app, "GET", "/admin/apps/app_helper", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "nothing was installed");
+}
+
+#[tokio::test]
+async fn an_app_may_report_only_on_its_own_payments() {
+    let app = oauth_app().await;
+    let (card, _, _) = fake_app(&[("/start", 200, card_widget())]).await;
+    let (pk, cart_path) = cart_paying_by_card(&app, &card).await;
+    let (status, started) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/payment"),
+        Some(r#"{"return_url":"https://shop.example/back"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let payment = started["payment"].as_str().unwrap();
+
+    // Another app, allowed to write payments, but this one is `app_card`'s.
+    let (base, _) = local_app(&["payments:write"]).await;
+    let tokens = install(&app, &base, None).await;
+    let auth = format!("Bearer {}", tokens["access_token"].as_str().unwrap());
+    let (status, body) = send_with(
+        &app,
+        &[
+            (AUTHORIZATION.as_str(), &auth),
+            ("idempotency-key", "evt_1"),
+        ],
+        "POST",
+        &format!("/admin/payments/{payment}/events"),
+        Some(r#"{"type":"authorized"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "payment_not_yours")
+    );
+    let (_, unchanged) = send(&app, "GET", &format!("/admin/payments/{payment}"), None).await;
+    assert_eq!(unchanged["status"], "pending");
+}
+
+#[tokio::test]
+async fn the_oauth_routes_are_limited_per_address() {
+    let app = oauth_app().await;
+    let (burst, _) = hypha_http::rate_limit::Rule::OAuthIp.quota(&Default::default());
+    let form = || {
+        Some(encode(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", "nope"),
+        ]))
+    };
+    for _ in 0..burst {
+        let (status, _, body) = raw(&app, "POST", "/oauth/token", form()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    }
+    let (status, _, _) = raw(&app, "POST", "/oauth/token", form()).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
 }

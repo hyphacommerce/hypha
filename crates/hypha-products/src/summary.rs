@@ -1,7 +1,7 @@
-//! What a list of products shows (design note 0012, L7): no options or variants, so a
-//! page costs the same however many variants its products have. A read model, not an
-//! aggregate: adapters may compute it in storage (Postgres aggregates it in SQL), and
-//! the repository contract checks it equals `Product::summary`.
+//! What a list of products shows: no options or variants, so a page costs the same however
+//! many variants its products have. A read model, not an aggregate: adapters may compute it
+//! in storage (Postgres aggregates it in SQL), and the repository contract checks it equals
+//! `Product::summary`.
 
 use hypha_core::{AssetId, Currency, Price, ProductId, Stamped, Stamps};
 
@@ -19,9 +19,9 @@ pub struct ProductSummary {
     /// The lowest and highest base price in each currency the variants are priced in,
     /// ordered by currency code (variants may be priced in different currencies).
     pub price_ranges: Vec<PriceRange>,
-    /// The first item of the product's media (design note 0014).
+    /// The first item of the product's media.
     pub featured_media: Option<AssetId>,
-    /// When the product was stored and last changed (design note 0016).
+    /// When the product was stored and last changed.
     pub stamps: Option<Stamps>,
 }
 

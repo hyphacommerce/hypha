@@ -22,9 +22,8 @@ export type Image = {
   args?: string[];
 };
 
-/** The images: the API, built with the deployment's spores (design note 0030, §9: its
- * first-party ones as features, or `hostCrate`, its own host crate, when it has others),
- * and the apps. */
+/** The images: the API, built with the deployment's spores (its first-party ones as
+ * features, or `hostCrate`, its own host crate, when it has others), and the apps. */
 export function images(apps: App[], spores: SporeEntry[] = [], hostCrate?: string): Image[] {
   const features = sporeFeatures(spores);
   return [
@@ -49,8 +48,8 @@ export function images(apps: App[], spores: SporeEntry[] = [], hostCrate?: strin
   ];
 }
 
-/** A co-located app's image (design note 0029, §9): its own Dockerfile, in its clone,
- * which holds the Node bundle built here (`apps.ts`). */
+/** A co-located app's image: its own Dockerfile, in its clone, which holds the Node bundle
+ * built here (`apps.ts`). */
 export function appImage(entry: AppEntry, clone: string): Image {
   return {
     name: service(entry),

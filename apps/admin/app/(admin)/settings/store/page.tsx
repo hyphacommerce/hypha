@@ -11,7 +11,7 @@ import { loadCountries, requireStore } from "@/lib/hypha";
 import { SetupGuideCard } from "./setup-guide-card";
 import { StoreForm } from "./store-form";
 
-/** Settings → Store (design note 0021, SU4): the store's name and details. */
+/** Settings → Store: the store's name and details. */
 export default async function StoreSettingsPage() {
   // The store is the layout's read too (`loadStore`): one call for both.
   const [store, countries] = await Promise.all([requireStore(), loadCountries()]);

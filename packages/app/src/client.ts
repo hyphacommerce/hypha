@@ -1,9 +1,9 @@
-// Calling the admin API as an app (design note 0029, §2): an access token that refreshes
-// itself. Refresh tokens rotate and a reused one revokes the grant, so refreshes are
-// single-flight per client, and run inside the `TokenStore`'s `withLock` when it has one:
-// several processes sharing one installation give it a lock that spans them (a database
-// row lock, a Durable Object), and the refresh inside reads the tokens again first, so
-// the process that waited uses the pair the other one stored.
+// Calling the admin API as an app: an access token that refreshes itself. Refresh tokens
+// rotate and a reused one revokes the grant, so refreshes are single-flight per client,
+// and run inside the `TokenStore`'s `withLock` when it has one: several processes sharing
+// one installation give it a lock that spans them (a database row lock, a Durable
+// Object), and the refresh inside reads the tokens again first, so the process that
+// waited uses the pair the other one stored.
 
 import type { AdminPaths } from "@hypha/sdk/admin";
 import createClient from "openapi-fetch";

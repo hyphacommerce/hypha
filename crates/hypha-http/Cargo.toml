@@ -4,7 +4,7 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 publish = false
-description = "Hypha's HTTP layer (design note 0026, W3): routes, extractors, errors, DTOs, OpenAPI and the host state, shared by the hosts."
+description = "Hypha's HTTP layer: routes, extractors, errors, DTOs, OpenAPI and the host state, shared by the hosts."
 
 [dependencies]
 hypha-core = { workspace = true, features = ["openapi"] }
@@ -40,12 +40,12 @@ hypha-extensions = { path = "../hypha-extensions", features = ["openapi"] }
 hypha-mail = { path = "../hypha-mail" }
 hypha-store-s3 = { path = "../hypha-store-s3" }
 hypha-config = { path = "../hypha-config" }
-# Spores built into the API (design note 0030): their environment, settings, routes and UI.
+# Spores built into the API: their environment, settings, routes and UI.
 hypha-spore-core = { path = "../hypha-spore-core" }
 utoipa = "6"
 pastey = "0.2"
 ipnet = "2"
-# No Tokio: the hosts serve (design note 0026, W2).
+# No Tokio: the hosts serve.
 axum = { version = "0.8", default-features = false, features = ["json", "query", "form", "matched-path", "original-uri", "macros"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -63,7 +63,6 @@ url = "2.5"
 
 [dev-dependencies]
 pollster = "0.4"
-tower = { version = "0.5.3", features = ["util"] }
 
 [lints]
 workspace = true

@@ -7,7 +7,7 @@ use crate::{
     types::{FieldType, FieldTypeError, ValidationError},
 };
 
-/// A definition breaking its own rules (§2).
+/// A definition breaking its own rules.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DefinitionError {
     #[error(transparent)]

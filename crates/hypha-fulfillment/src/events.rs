@@ -1,5 +1,5 @@
-//! What happens to fulfilments, as events (design note 0018, section 4). Contract
-//! types: a reshaped field is a new `VERSION`, never an edit.
+//! What happens to fulfilments, as events. Contract types: a reshaped field is a new
+//! `VERSION`, never an edit.
 
 use hypha_core::{Event, FulfillmentId, LocationId, OrderId, OrderLineId};
 use serde::Serialize;
@@ -29,9 +29,8 @@ pub struct FulfillmentCreated {
     pub location: LocationId,
     pub lines: Vec<ShippedLine>,
     pub tracking: Vec<TrackingData>,
-    /// Whether staff chose to email the buyer a shipping confirmation (design note
-    /// 0028, NT7): the `Mailer` sends `order_shipped` only then. An added field, so
-    /// still version 1.
+    /// Whether staff chose to email the buyer a shipping confirmation: the `Mailer` sends
+    /// `order_shipped` only then. An added field, so still version 1.
     pub notify_customer: bool,
 }
 
@@ -46,9 +45,8 @@ pub struct FulfillmentUpdated {
     pub fulfillment: FulfillmentId,
     pub order: OrderId,
     pub tracking: Vec<TrackingData>,
-    /// Whether staff chose to email the buyer the new tracking (design note 0028,
-    /// NT7): the `Mailer` sends `order_tracking_updated` only then. An added field, so
-    /// still version 1.
+    /// Whether staff chose to email the buyer the new tracking: the `Mailer` sends
+    /// `order_tracking_updated` only then. An added field, so still version 1.
     pub notify_customer: bool,
 }
 

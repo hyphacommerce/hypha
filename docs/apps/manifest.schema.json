@@ -1,7 +1,7 @@
 {
   "$defs": {
     "AdminAccess": {
-      "description": "Whether staff may write an app's field (design note 0033, §5.1).",
+      "description": "Whether staff may write an app's field.",
       "enum": [
         "read",
         "read_write"
@@ -100,7 +100,7 @@
       "type": "object"
     },
     "CustomFieldOwnerType": {
-      "description": "What a field is on (design note 0033, Q3).",
+      "description": "What a field is on.",
       "enum": [
         "product",
         "variant",
@@ -205,7 +205,7 @@
         },
         "validations": {
           "additionalProperties": true,
-          "description": "The type's validations (`max_length`, `choices`, …), design note 0033 §3.",
+          "description": "The type's validations (`max_length`, `choices`, …).",
           "type": "object"
         }
       },
@@ -386,7 +386,7 @@
       "type": "object"
     },
     "TypeName": {
-      "description": "A custom field's type (design note 0033, §3): one value, or `list.<type>`.",
+      "description": "A custom field's type: one value, or `list.<type>`.",
       "enum": [
         "text",
         "multiline_text",
@@ -444,7 +444,7 @@
       "type": "string"
     },
     "custom_fields": {
-      "description": "The custom fields the app keeps on Hypha's objects, in its own namespace\n(`app_<name>.<key>`, design note 0033, §8): created when staff approve the app,\nupdated when they approve a refreshed manifest, deleted when a refreshed\nmanifest no longer declares them.",
+      "description": "The custom fields the app keeps on Hypha's objects, in its own namespace\n(`app_<name>.<key>`): created when staff approve the app, updated when they approve\na refreshed manifest, deleted when a refreshed manifest no longer declares them.",
       "items": {
         "$ref": "#/$defs/ManifestCustomField"
       },

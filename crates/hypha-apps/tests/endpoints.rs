@@ -1,6 +1,5 @@
-//! Where an app answers an extension point (design note 0029, §3 "Registering", §4.1
-//! step 5): an app made by hand where staff set, one installed through OAuth where its
-//! manifest says, while its grant has the point's scope.
+//! Where an app answers an extension point: an app made by hand where staff set, one
+//! installed through OAuth where its manifest says, while its grant has the point's scope.
 
 use hypha_apps::{
     App, AppError, AppManifest, AppRepo, CommandError, EndpointInput, ExtensionEndpoint,

@@ -52,8 +52,8 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
     /// 0017, 0044); the position is a row comparison, `(key, id) > ($key, $id)`.
     ///
     /// The text filter is `strpos` on `lower(…)`, not `ILIKE`: the merchant's `%` and `_`
-    /// are plain characters, with nothing to escape. It scans (no trigram index: design
-    /// note 0019, SE9), which suits an admin list; shoppers search the index.
+    /// are plain characters, with nothing to escape. It scans (no trigram index), which
+    /// suits an admin list; shoppers search the index.
     async fn list(
         &self,
         filter: &ProductFilter,
@@ -360,12 +360,12 @@ pub(crate) async fn update_product(
     Ok(written)
 }
 
-/// `StageProducts::delete_product` inside the caller's transaction, in one statement:
-/// the product at `version` (its options, values, variants and media cascade), and the
-/// rows that only name it in other modules' tables, which have no foreign key to it
-/// (catalog, channel and category membership, its tax class; design note 0033, 6.3).
-/// Fixed prices, inventory items and search documents are per variant and cleaned up by
-/// handlers on `product.deleted`; carts and orders keep their lines.
+/// `StageProducts::delete_product` inside the caller's transaction, in one statement: the
+/// product at `version` (its options, values, variants and media cascade), and the rows
+/// that only name it in other modules' tables, which have no foreign key to it (catalog,
+/// channel and category membership, its tax class). Fixed prices, inventory items and
+/// search documents are per variant and cleaned up by handlers on `product.deleted`; carts
+/// and orders keep their lines.
 pub(crate) async fn delete_product(
     tx: &impl Queries,
     id: ProductId,

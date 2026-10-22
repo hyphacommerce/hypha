@@ -1,5 +1,5 @@
-//! The handlers and payment providers the native host runs (`handlers.rs`,
-//! `payments.rs`, joined with its spores' by `PgStorage`), checked against its storage.
+//! The handlers and payment providers the native host runs (core's from `hypha-http`,
+//! joined with its spores' by `PgStorage`), checked against its storage.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -39,7 +39,10 @@ fn built() -> Built<<Stock as Deployment>::Spores> {
 
 #[test]
 fn handler_names_are_unique_snake_case() {
-    let handlers = Union((crate::handlers::core_handlers(mail()), built().handlers));
+    let handlers = Union((
+        hypha_http::handlers::core_handlers(mail()),
+        built().handlers,
+    ));
     let names = EventHandlers::<PgPorts>::names(&handlers);
     let unique: HashSet<_> = names.iter().collect();
     assert_eq!(unique.len(), names.len(), "{names:?}");
@@ -56,7 +59,11 @@ fn handler_names_are_unique_snake_case() {
 
 #[test]
 fn provider_keys_are_unique() {
-    let keys = Union((crate::payments::CORE_PROVIDERS, built().payment_providers)).keys();
+    let keys = Union((
+        hypha_http::payments::CORE_PROVIDERS,
+        built().payment_providers,
+    ))
+    .keys();
     let unique: HashSet<_> = keys.iter().collect();
     assert_eq!(unique.len(), keys.len(), "{keys:?}");
 }

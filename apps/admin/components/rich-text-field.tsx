@@ -18,11 +18,11 @@ import { useEffect, useEffectEvent, useRef } from "react";
 const LOAD = "hypha-load";
 
 /**
- * An HTML field edited as rich text (design note 0024, AU9): the value is HTML in and
- * out, as the API stores it, and the API still sanitises what's saved. Controlled like
- * a `TextArea`: `onChange` gets the new HTML ("" when empty) only when someone edits,
- * so loading a description doesn't count as a change. A new `value` from outside (a
- * discard, what a save stored) replaces the content.
+ * An HTML field edited as rich text: the value is HTML in and out, as the API stores
+ * it, and the API still sanitises what's saved. Controlled like a `TextArea`:
+ * `onChange` gets the new HTML ("" when empty) only when someone edits, so loading a
+ * description doesn't count as a change. A new `value` from outside (a discard, what a
+ * save stored) replaces the content.
  */
 export function RichTextField({
   label,

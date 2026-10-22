@@ -1,6 +1,6 @@
-//! The OpenAPI documents (design note 0010, S6-S10): one per surface, built from the
-//! route table, so every routed handler is documented (a handler without
-//! `#[utoipa::path]` doesn't compile into the table) and nothing unrouted is.
+//! The OpenAPI documents (S6-S10): one per surface, built from the route table, so every
+//! routed handler is documented (a handler without `#[utoipa::path]` doesn't compile into
+//! the table) and nothing unrouted is.
 //!
 //! Each handler's annotation gives what only it knows: its body, its success response,
 //! its path parameters and its scopes (`x-hypha-scopes`). The rest is filled in here
@@ -106,8 +106,7 @@ pub struct Row {
     /// clients generate from the documents: a change shows up in the committed files.
     pub operation_id: String,
     pub tag: String,
-    /// Needs no credentials whatever its annotation says: a spore's public route
-    /// (design note 0030, §7).
+    /// Needs no credentials whatever its annotation says: a spore's public route.
     pub public: bool,
     /// What the handler's `#[utoipa::path]` says (checked against `method` and `path`).
     pub annotated_path: fn() -> String,
@@ -187,8 +186,8 @@ fn error_response(description: &str) -> RefOr<utoipa::openapi::Response> {
         .into()
 }
 
-/// The error responses every route of this shape can give (design note 0010, S9),
-/// unless its annotation already describes that status.
+/// The error responses every route of this shape can give, unless its annotation already
+/// describes that status.
 fn add_standard_errors(op: &mut Operation, row: &Row, secured: bool) {
     let has_body = op.request_body.is_some();
     let has_path_params = row.path.contains('{');
@@ -302,8 +301,8 @@ pub fn document(doc: Doc) -> OpenApi {
     document_with(doc, Vec::new())
 }
 
-/// The document for `doc`, built from the route table and `extra` rows: a build's
-/// spores' routes (design note 0030, §7), tagged by spore.
+/// The document for `doc`, built from the route table and `extra` rows: a build's spores'
+/// routes, tagged by spore.
 pub fn document_with(doc: Doc, extra: Vec<Row>) -> OpenApi {
     let (scheme_name, scheme) = doc.security_scheme();
     let mut paths = Paths::new();
@@ -370,8 +369,8 @@ fn pretty(api: OpenApi) -> String {
 /// meets a value it doesn't know, so they stay closed.
 const CLOSED_ENUMS: &[&str] = &["KindRequest", "StatusRequest"];
 
-/// The extension that marks an enum as open (design note 0016, section 9). The SDK
-/// generator turns such an enum into `"a" | "b" | (string & {})`.
+/// The extension that marks an enum as open. The SDK generator turns such an enum into `"a"
+/// | "b" | (string & {})`.
 pub(crate) const OPEN_ENUM: &str = "x-hypha-open-enum";
 
 /// Marks every enum a response can carry as open: statuses, currencies, kinds and
@@ -430,7 +429,7 @@ fn mark_open_enums(document: &mut Value) {
     }
 }
 
-// ---------- the extensions document (design note 0029, AP3) ----------
+// ---------- the extensions document ----------
 
 /// The committed file of the extensions document (`openapi/extensions.json`).
 pub const EXTENSIONS_FILE: &str = "extensions.json";
@@ -475,11 +474,9 @@ impl PointDoc {
 fn points() -> Vec<PointDoc> {
     use hypha_extensions as x;
     vec![
-        PointDoc::of::<x::ShippingRates>(
-            "Price a cart's shipping group (design note 0015, §5's rate callback).",
-        ),
+        PointDoc::of::<x::ShippingRates>("Price a cart's shipping group."),
         PointDoc::of::<x::PaymentsStart>(
-            "Start paying for a cart at checkout, before its order exists (design note 0031): what the buyer does next.",
+            "Start paying for a cart at checkout, before its order exists: what the buyer does next.",
         ),
         PointDoc::of::<x::PaymentsStatus>(
             "Say where a payment the app started is, when the shopper says they paid before the app reported it.",
@@ -490,9 +487,7 @@ fn points() -> Vec<PointDoc> {
         PointDoc::of::<x::SearchQuery>(
             "Answer a storefront search with product and variant IDs in order.",
         ),
-        PointDoc::of::<x::RunAdminAction>(
-            "Run one of the app's admin actions, pressed by staff (design note 0029, §6.1).",
-        ),
+        PointDoc::of::<x::RunAdminAction>("Run one of the app's admin actions, pressed by staff."),
     ]
 }
 
@@ -618,7 +613,7 @@ pub fn extensions_document() -> OpenApi {
     let schemas: BTreeMap<String, RefOr<Schema>> = schemas.into_iter().collect();
     let mut info = Info::new("Hypha Extension Points", env!("CARGO_PKG_VERSION"));
     info.description = Some(
-        "The synchronous calls Hypha makes to apps mid-flow (design note 0029): each is a \
+        "The synchronous calls Hypha makes to apps mid-flow: each is a \
          versioned contract an app implements by registering a URL for it. A reshaped \
          request or response is a new version."
             .to_string(),
@@ -676,7 +671,7 @@ mod tests {
         let json: Value = serde_json::from_str(&document_json(Doc::Admin)).unwrap();
         let schema = |name: &str| json["components"]["schemas"][name].clone();
         assert_eq!(schema("FulfillmentStatusDto")[OPEN_ENUM], Value::Bool(true));
-        // Every ISO code is accepted (design note 0021, SU1): a pattern, not an enum.
+        // Every ISO code is accepted: a pattern, not an enum.
         assert_eq!(schema("Currency").get("enum"), None);
         assert_eq!(schema("KindRequest").get(OPEN_ENUM), None);
     }

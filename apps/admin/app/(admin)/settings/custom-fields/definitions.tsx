@@ -76,7 +76,7 @@ export function DefinitionsCard({
   owner: OwnerType;
   /** The owner type's definitions, in their order. */
   definitions: Definition[];
-  /** The well-known fields the merchant doesn't have yet (design note 0032, CD11). */
+  /** The well-known fields the merchant doesn't have yet. */
   suggestions: Suggestion[];
   /** `custom_fields:write`: the merchant's fields can change. */
   canWrite: boolean;
@@ -236,8 +236,8 @@ export function DefinitionsCard({
 }
 
 /**
- * The well-known fields worth having (design note 0032, CD11), each created with one
- * click from the body the API suggests. Once created they're ordinary fields above.
+ * The well-known fields worth having, each created with one click from the body the
+ * API suggests. Once created they're ordinary fields above.
  */
 function SuggestionsCard({
   suggestions,
@@ -409,7 +409,7 @@ function count(text: string, what: string): number | undefined | { error: string
   return /^\d+$/.test(t) ? Number(t) : { error: `${what} is a whole number.` };
 }
 
-/** A `min`/`max` in the type's own terms (design note 0033, §3). */
+/** A `min`/`max` in the type's own terms. */
 type Bound = number | string | { value: string; unit: string };
 
 function bound(form: Form, text: string, what: string): Bound | undefined | { error: string } {

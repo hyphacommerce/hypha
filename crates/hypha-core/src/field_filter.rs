@@ -1,10 +1,9 @@
-//! Filters on custom fields (design note 0033, §7): what a list route's
-//! `field[custom.material]=wool` becomes once `hypha-custom-fields` has checked it
-//! against its definition (filterable, readable, the operand parsed by the field's
-//! type). The products, categories, customers and orders list filters carry them
-//! opaquely, and storage adapters turn each into a predicate on the values' derived
-//! `scalar_text` / `scalar_num` columns or on the value itself (lists), so those crates
-//! never depend on custom fields.
+//! Filters on custom fields: what a list route's `field[custom.material]=wool` becomes once
+//! `hypha-custom-fields` has checked it against its definition (filterable, readable, the
+//! operand parsed by the field's type). The products, categories, customers and orders list
+//! filters carry them opaquely, and storage adapters turn each into a predicate on the
+//! values' derived `scalar_text` / `scalar_num` columns or on the value itself (lists), so
+//! those crates never depend on custom fields.
 
 use crate::CustomFieldDefinitionId;
 

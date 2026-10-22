@@ -1,10 +1,9 @@
 "use client";
 
-// Checkout's forms (design note 0024, §7): contact and address, a shipping option per
-// group, how the shopper pays, and "Place order" (a manual method) or the payment
-// itself (an online one, paid before the order exists: design note 0031). Each saves
-// through its server action, which answers with the page re-rendered from the cart
-// (`refresh()`).
+// Checkout's forms: contact and address, a shipping option per group, how the shopper
+// pays, and "Place order" (a manual method) or the payment itself (an online one,
+// paid before the order exists). Each saves through its server action, which answers
+// with the page re-rendered from the cart (`refresh()`).
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -43,9 +42,9 @@ export function DetailsForm({
   country: string;
   countryName: string;
   initial: Details;
-  /** Whether the shopper ticked "Email me with news and offers" (design note 0032, §5). */
+  /** Whether the shopper ticked "Email me with news and offers". */
   initialOptIn: boolean;
-  /** A signed-in shopper's cart keeps their account's email (design note 0034, §4). */
+  /** A signed-in shopper's cart keeps their account's email. */
   emailFixed?: boolean;
   /** Whether the cart already has them (the button says "Update"). */
   saved: boolean;
@@ -346,8 +345,8 @@ const CONFIRM_DELAY_MS = 2000;
 
 /**
  * What the checkout's payment form (in the payment step) and its "Pay" button (in the
- * summary) share (design note 0031): Shopify's way, the provider's form appears once the
- * method is chosen and the summary's one button pays with it.
+ * summary) share: Shopify's way, the provider's form appears once the method is chosen
+ * and the summary's one button pays with it.
  */
 type OnlinePayment = {
   /** The mounted payment element, for `submit()`. */
@@ -443,9 +442,9 @@ export function CheckoutPayment({
 
 /**
  * The online method's payment form, under the method once it's chosen and the cart is
- * ready (design note 0031): it starts the cart's payment and mounts the provider's
- * element (its own button hidden: the summary's "Pay" pays). Restarted (by its `key`)
- * when the method or the total changes.
+ * ready: it starts the cart's payment and mounts the provider's element (its own
+ * button hidden: the summary's "Pay" pays). Restarted (by its `key`) when the method
+ * or the total changes.
  */
 export function OnlinePaymentForm({
   country,

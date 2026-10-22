@@ -1,4 +1,4 @@
-//! Deleting a customer (design note 0032, CD7, §7.2).
+//! Deleting a customer.
 
 use hypha_auth::{IdentityRepo as _, SessionRepo as _};
 use hypha_cart::{Cart, CartRepo};
@@ -22,7 +22,7 @@ fn clock() -> hypha_testkit::FixedClock {
     hypha_testkit::FixedClock::default()
 }
 
-/// Ana has an account (design note 0034): an identity and a live session.
+/// Ana has an account: an identity and a live session.
 fn with_account(ports: &InMemoryPorts) -> hypha_auth::Session {
     use hypha_auth::{Identity, IdentityRepo, Principal, Session, SessionRepo, TokenHash};
     let mut identity = Identity::with_email_code(
@@ -122,7 +122,7 @@ fn deletes_a_customer_without_orders_and_unlinks_its_carts() {
         Ok(())
     );
     assert_eq!(block_on(ports.customers.get(ana_id())), Ok(None));
-    // Their account went with them (design note 0034, AC10).
+    // Their account went with them.
     assert_eq!(
         block_on(ports.identities.get(session.identity())),
         Ok(None),

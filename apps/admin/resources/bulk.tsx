@@ -1,9 +1,9 @@
 "use client";
 
-// Bulk actions for the lists' selection bars (design note 0024, section 6): products
-// change status, channels and categories; orders are marked paid. Taking something away
-// (archiving, unpublishing, leaving a category) asks first. The outcome shows in a
-// banner above the list, with each row that failed and why.
+// Bulk actions for the lists' selection bars: products change status, channels and
+// categories; orders are marked paid. Taking something away (archiving, unpublishing,
+// leaving a category) asks first. The outcome shows in a banner above the list, with
+// each row that failed and why.
 
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -349,8 +349,8 @@ export function OrderBulkActions({
 }
 
 /**
- * The selection bar's actions for customers (design note 0032, CD1): add a label to, or
- * take one off, the selected customers, when the merchant has the labels field.
+ * The selection bar's actions for customers: add a label to, or take one off, the
+ * selected customers, when the merchant has the labels field.
  */
 export function CustomerBulkActions({
   selected,
@@ -363,7 +363,7 @@ export function CustomerBulkActions({
   clear: () => void;
   /** The well-known `custom.tags` definition, when the merchant has it. */
   labels?: Definition;
-  /** The store's customer groups (design note 0032, §6). */
+  /** The store's customer groups. */
   groups?: Group[];
   onDone: (outcome: BulkOutcome) => void;
 }) {

@@ -12,7 +12,7 @@ import { presentFields } from "@/lib/custom-fields";
 import { readListingPage } from "@/lib/listing-data";
 import { link } from "@/lib/site";
 
-/** Static, refreshed at most every five minutes (design note 0024, §7). */
+/** Static, refreshed at most every five minutes. */
 export const revalidate = 300;
 
 /** None ahead (no API at build time): each category renders on its first visit, then
@@ -37,10 +37,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 /**
- * A category (design note 0023, §3): its breadcrumb and subcategories, then its
- * products, those of its subcategories included, through search (0022, CA3). A hidden
- * category is a 404. The page is static with its first page of products; filtering,
- * sorting and paging read the rest in the browser (`Listing`).
+ * A category: its breadcrumb and subcategories, then its products, those of its
+ * subcategories included, through search. A hidden category is a 404. The page is
+ * static with its first page of products; filtering, sorting and paging read the rest
+ * in the browser (`Listing`).
  */
 export default async function CategoryPage({ params }: Props) {
   const { country: folder, handle } = await params;
@@ -56,7 +56,7 @@ export default async function CategoryPage({ params }: Props) {
     }),
     fieldContext(country, category.custom_fields),
   ]);
-  // The merchant's custom fields shown to storefronts (design note 0033, §6.2).
+  // The merchant's custom fields shown to storefronts.
   const fields = presentFields("category", category.custom_fields, context);
   const productBase = link(code, "/p");
 

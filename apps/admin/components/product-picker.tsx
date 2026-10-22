@@ -1,9 +1,9 @@
 "use client";
 
-// Picking products (design note 0024, section 6): one dialog for every place that adds
-// products to something (a category, a catalog, a fixed price). It lists products as
-// soon as it opens, narrows them as you type and by status, shows each with its image,
-// handle and status, and marks the ones already there so they can't be picked twice.
+// Picking products: one dialog for every place that adds products to something (a
+// category, a catalog, a fixed price). It lists products as soon as it opens, narrows
+// them as you type and by status, shows each with its image, handle and status, and
+// marks the ones already there so they can't be picked twice.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";

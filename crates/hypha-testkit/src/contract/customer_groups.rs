@@ -37,9 +37,9 @@ async fn customers<S: HasCustomers>(ports: &S, ns: &[u128]) -> Vec<CustomerId> {
     ids
 }
 
-/// Runs every `CustomerGroupRepo` scenario (design note 0032, §6), each on fresh ports
-/// from `make`: the groups themselves, their keys, membership as sets, the customer
-/// list's group filter, and the batch's group writes.
+/// Runs every `CustomerGroupRepo` scenario, each on fresh ports from `make`: the groups
+/// themselves, their keys, membership as sets, the customer list's group filter, and the
+/// batch's group writes.
 pub async fn customer_group_repo<S>(make: impl AsyncFn() -> S)
 where
     S: HasCustomers + HasCustomerGroups + HasBatch,

@@ -2,7 +2,7 @@
   "name": "storefront",
   "version": "0.1.0",
   "private": true,
-  "description": "Hypha's storefront: a server-rendered shop on Next.js, vinext and Astryx (design notes 0023, 0024).",
+  "description": "Hypha's storefront: a server-rendered shop on Next.js, vinext and Astryx.",
   "type": "module",
   "imports": {
     "#api-fetch": {
@@ -14,7 +14,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "start": "vite preview",
-    "deploy": "vinext-cloudflare deploy",
+    "test": "node --test lib/*.test.ts",
     "typecheck": "node scripts/clean-next-types.mjs && tsc --noEmit",
     "theme:build": "astryx theme build theme/shopTheme.ts --out theme/shop.css",
     "theme:check": "astryx theme build theme/shopTheme.ts --out theme/shop.css --check"
@@ -23,6 +23,7 @@
     "@astryxdesign/core": "0.7.1",
     "@astryxdesign/theme-neutral": "0.7.1",
     "@heroicons/react": "2.2.0",
+    "@hypha/app": "workspace:*",
     "@hypha/sdk": "workspace:*",
     "@hypha/storefront-elements": "workspace:*",
     "@stylexjs/stylex": "0.19.1",

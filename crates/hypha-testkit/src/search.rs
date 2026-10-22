@@ -1,5 +1,5 @@
-//! Search in memory (design note 0019): an engine that runs the reference semantics,
-//! the queue of marks, and the settings record.
+//! Search in memory: an engine that runs the reference semantics, the queue of marks, and
+//! the settings record.
 
 use std::{collections::BTreeMap, sync::Mutex};
 
@@ -207,10 +207,9 @@ impl SearchSettingsRepo for InMemorySearchSettingsRepo {
     }
 }
 
-/// Documents for engine tests (design note 0019): two markets; shirts with options
-/// split by colour, a product without options, ties on price and creation time, a
-/// title beyond ASCII and unavailable variants. Channel 1 sells products 1–3, channel 2
-/// products 1 and 4 (design note 0020). Custom field facets (design note 0033, §9):
+/// Documents for engine tests: two markets; shirts with options split by colour, a product
+/// without options, ties on price and creation time, a title beyond ASCII and unavailable
+/// variants. Channel 1 sells products 1–3, channel 2 products 1 and 4. Custom field facets:
 /// `custom.material` (one shirt variant's own value over its product's), a list
 /// `custom.care`, a boolean `custom.organic`.
 pub fn search_fixture() -> Vec<SearchDocument> {

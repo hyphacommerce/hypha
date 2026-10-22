@@ -1,20 +1,19 @@
-//! The client's address on Workers (design note 0026, W8; 0009). From the internet,
-//! Cloudflare sets `CF-Connecting-IP` and a client can't. The admin and storefront
-//! Workers call the API through Service Bindings, which bypass the edge: there the header
-//! is whatever the caller wrote, so it isn't read. A call that carries the deployment's
-//! caller key (`X-Hypha-Caller`, a secret only our Workers hold) is one of ours, and then
-//! the caller's `X-Forwarded-For` names the client, as a trusted proxy's does natively.
+//! The client's address on Workers. From the internet, Cloudflare sets `CF-Connecting-IP`
+//! and a client can't. The admin and storefront Workers call the API through Service
+//! Bindings, which bypass the edge: there the header is whatever the caller wrote, so it
+//! isn't read. A call that carries the deployment's caller key (`X-Hypha-Caller`, a secret
+//! only our Workers hold) is one of ours, and then the caller's `X-Forwarded-For` names the
+//! client, as a trusted proxy's does natively.
 //!
 //! Not the binding's props, which would need no secret: Cloudflare drops them when the
-//! called Worker has a placement, and the API's is next to its database (W12).
+//! called Worker has a placement, and the API's is next to its database.
 //!
-//! A co-located app (design note 0029, §9) calls through a binding too, without the key
-//! (apps are untrusted): its calls carry no `CF-Connecting-IP` (Cloudflare sets it on
-//! every request from the internet), and they share one address, `BOUND_APPS`, rather
-//! than fail for want of one. Not the one our own Workers' calls made for no client
-//! share (`OUR_WORKERS`): rate limits key by address (an IPv6 one by its /64), so an
-//! app spending its limit can't spend our Workers' too.
-//! Portable, so its tests run natively.
+//! A co-located app calls through a binding too, without the key (apps are untrusted): its
+//! calls carry no `CF-Connecting-IP` (Cloudflare sets it on every request from the
+//! internet), and they share one address, `BOUND_APPS`, rather than fail for want of one.
+//! Not the one our own Workers' calls made for no client share (`OUR_WORKERS`): rate limits
+//! key by address (an IPv6 one by its /64), so an app spending its limit can't spend our
+//! Workers' too. Portable, so its tests run natively.
 
 use std::net::{IpAddr, Ipv6Addr};
 

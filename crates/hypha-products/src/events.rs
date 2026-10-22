@@ -1,8 +1,8 @@
-//! What happens to products, as events (design note 0016, section 4). Contract types: a
-//! field renamed or reshaped is a new `VERSION`, never an edit.
+//! What happens to products, as events. Contract types: a field renamed or reshaped is a
+//! new `VERSION`, never an edit.
 //!
-//! Payloads carry the subject and what changed, not the product: a consumer that needs
-//! it fetches it (Q2).
+//! Payloads carry the subject and what changed, not the product: a consumer that needs it
+//! fetches it.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -25,9 +25,9 @@ impl Event for ProductCreated {
     const VERSION: u16 = 1;
 }
 
-/// `product.updated`: which of the product's own fields changed, among `title`,
-/// `handle`, `status`, `description`, `vendor`, `product_type`, `tags`, `options`,
-/// `media` and `variant_order` (the variants were reordered; design note 0021, Q1).
+/// `product.updated`: which of the product's own fields changed, among `title`, `handle`,
+/// `status`, `description`, `vendor`, `product_type`, `tags`, `options`, `media` and
+/// `variant_order` (the variants were reordered).
 #[derive(Debug, Serialize)]
 pub struct ProductUpdated {
     pub product: ProductId,
@@ -65,8 +65,8 @@ impl Event for VariantUpdated {
     const VERSION: u16 = 1;
 }
 
-/// `product.variant_removed`: other domains clean up what they keep for the variant
-/// (fixed prices, its inventory item; design note 0014, section 4).
+/// `product.variant_removed`: other domains clean up what they keep for the variant (fixed
+/// prices, its inventory item).
 #[derive(Debug, Serialize)]
 pub struct VariantRemoved {
     pub product: ProductId,
@@ -80,7 +80,7 @@ impl Event for VariantRemoved {
 
 /// `product.deleted`: the product is gone, with its variants (listed, so other domains
 /// clean up what they keep for each, as for `product.variant_removed`) and its options.
-/// Orders keep their lines: they hold copies (design note 0033, section 6.3).
+/// Orders keep their lines: they hold copies.
 #[derive(Debug, Serialize)]
 pub struct ProductDeleted {
     pub product: ProductId,

@@ -62,10 +62,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * What installed apps add to an admin (design note 0029, §6), for `target` or every
-         *     admin target: embedded pages, declarative blocks, actions and settings forms. Only
-         *     apps installed through OAuth and enabled contribute, and only where their grant
-         *     reads the target's object (`orders:read` for order targets, …).
+         * What installed apps add to an admin, for `target` or every admin target: embedded pages,
+         *     declarative blocks, actions and settings forms. Only apps installed through OAuth and
+         *     enabled contribute, and only where their grant reads the target's object (`orders:read`
+         *     for order targets, …).
          */
         get: operations["admin.app_extensions.list_admin"];
         put?: never;
@@ -86,11 +86,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Runs an app's admin action (design note 0029, §6.1): Hypha calls the action's URL
-         *     (`admin.action` v1, `openapi/extensions.json`; in the app's call log) and returns
-         *     the app's answer. 502 `app_unavailable` when the app fails or answers something
-         *     else. The caller needs `apps:read` and to read the target's object; an action that
-         *     names an extension point is `409 app_action_has_point`.
+         * Runs an app's admin action: Hypha calls the action's URL (`admin.action` v1,
+         *     `openapi/extensions.json`; in the app's call log) and returns the app's answer. 502
+         *     `app_unavailable` when the app fails or answers something else. The caller needs
+         *     `apps:read` and to read the target's object; an action that names an extension point is
+         *     `409 app_action_has_point`.
          */
         post: operations["admin.app_extensions.run_action"];
         delete?: never;
@@ -107,11 +107,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * An app's block for the objects in the query (design note 0029, §6.2): Hypha fetches
-         *     the block's URL from the app (a signed `GET` with the context in the query and in
-         *     `Hypha-*` headers, and a session token in `Authorization` for staff), checks the
-         *     tree, and returns it; nothing is cached. 502 `app_unavailable` when the app fails or
-         *     answers something that isn't a v1 tree (the call log says which).
+         * An app's block for the objects in the query: Hypha fetches the block's URL from the app
+         *     (a signed `GET` with the context in the query and in `Hypha-*` headers, and a session
+         *     token in `Authorization` for staff), checks the tree, and returns it; nothing is cached.
+         *     502 `app_unavailable` when the app fails or answers something that isn't a v1 tree (the
+         *     call log says which).
          */
         get: operations["admin.app_extensions.fetch_block"];
         put?: never;
@@ -131,8 +131,7 @@ export interface paths {
         };
         /**
          * The store's admin origins, from configuration (`server.admin_url`), for an app's
-         *     `frame-ancestors` (design note 0029, §6.3). Any admin caller, an app's token
-         *     included.
+         *     `frame-ancestors`. Any admin caller, an app's token included.
          */
         get: operations["admin.app_extensions.origins"];
         put?: never;
@@ -153,10 +152,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * A staff member's session token for an installed app (design note 0029, §6.3): its
-         *     claims are the API's base URL (`iss`), the app (`aud`), the staff member (`sub`), the
-         *     store, and the app's scopes as far as the staff member holds them (`scope`). Staff
-         *     sessions only (API keys: `401 session_required`).
+         * A staff member's session token for an installed app: its claims are the API's base URL
+         *     (`iss`), the app (`aud`), the staff member (`sub`), the store, and the app's scopes as
+         *     far as the staff member holds them (`scope`). Staff sessions only (API keys: `401
+         *     session_required`).
          */
         post: operations["admin.app_extensions.session"];
         delete?: never;
@@ -193,12 +192,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Uploads a private app's manifest (a store's own integration with no public site,
-         *     design note 0029, §4.1): it becomes a pending authorization request for the consent
-         *     page, whose approval installs the app and answers with its tokens. Staff sessions
-         *     only (an API key can't install apps); `apps:write`. 422 `manifest_invalid` with
-         *     `details.errors`; 409 `app_installed_from_url` when the key is an app installed from
-         *     its manifest URL.
+         * Uploads a private app's manifest (a store's own integration with no public site): it
+         *     becomes a pending authorization request for the consent page, whose approval installs
+         *     the app and answers with its tokens. Staff sessions only (an API key can't install
+         *     apps); `apps:write`. 422 `manifest_invalid` with `details.errors`; 409
+         *     `app_installed_from_url` when the key is an app installed from its manifest URL.
          */
         post: operations["admin.oauth.create_private"];
         delete?: never;
@@ -222,11 +220,10 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Uninstalls an app installed through OAuth (design note 0029, §4.1): every token is
-         *     revoked, its registrations removed, and it's sent `app.uninstalled` as its last
-         *     webhook; it's listed as uninstalled until a second `DELETE`. Any other app (made by
-         *     hand, or uninstalled already) is removed, its rate settings with it; deliveries still
-         *     due to it fail.
+         * Uninstalls an app installed through OAuth: every token is revoked, its registrations
+         *     removed, and it's sent `app.uninstalled` as its last webhook; it's listed as uninstalled
+         *     until a second `DELETE`. Any other app (made by hand, or uninstalled already) is
+         *     removed, its rate settings with it; deliveries still due to it fail.
          */
         delete: operations["admin.apps.delete"];
         options?: never;
@@ -341,10 +338,10 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Narrows an installed app's grant (design note 0029, §4.1): the scopes left out stop
-         *     working at once, for tokens held already too, and the app is sent
-         *     `app.grant_changed`. Adding a scope takes a new authorization staff approve
-         *     (`grant_not_narrower`, 422); an app that isn't installed is `app_not_installed`, 409.
+         * Narrows an installed app's grant: the scopes left out stop working at once, for tokens
+         *     held already too, and the app is sent `app.grant_changed`. Adding a scope takes a new
+         *     authorization staff approve (`grant_not_narrower`, 422); an app that isn't installed is
+         *     `app_not_installed`, 409.
          */
         patch: operations["admin.apps.narrow"];
         trace?: never;
@@ -356,7 +353,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Forwards a `GET` to the app's admin proxy (design note 0029, §8), signed, with `Hypha-Store`, `Hypha-Staff` (staff sessions), `Hypha-Scopes`, `Hypha-Path` and a session token in `Authorization` for staff. */
+        /** Forwards a `GET` to the app's admin proxy, signed, with `Hypha-Store`, `Hypha-Staff` (staff sessions), `Hypha-Scopes`, `Hypha-Path` and a session token in `Authorization` for staff. */
         get: operations["admin.app_extensions.admin_proxy_get"];
         /** Forwards a `PUT` to the app's admin proxy, as `POST` does. */
         put: operations["admin.app_extensions.admin_proxy_put"];
@@ -380,15 +377,13 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Fetches an installed app's manifest again (design note 0029, §4.2) and applies its
-         *     registrations (webhooks, UI) and its custom fields (design note 0033, §8). Scopes it
-         *     no longer asks for leave the grant at once; new ones, or fields it no longer declares
-         *     (whose values would be deleted), make an authorization request staff approve
-         *     (`consent_required`): approving widens the grant and syncs the fields, and the app
-         *     then gets tokens with the new scopes from `/oauth/authorize` without asking again.
-         *     A manifest that changes a field's type is `manifest_invalid`. Staff with `apps:write`, or the app itself with its token.
-         *     `manifest_unreachable` / `manifest_invalid` (422) when the manifest can't be used;
-         *     `app_not_installed` (409) for an app not installed through OAuth.
+         * Fetches an installed app's manifest again and applies its registrations (webhooks, UI) and its custom fields. Scopes it
+         *     no longer asks for leave the grant at once; new ones, or fields it no longer declares (whose values would be deleted),
+         *     make an authorization request staff approve (`consent_required`): approving widens the grant and syncs the fields, and
+         *     the app then gets tokens with the new scopes from `/oauth/authorize` without asking again. A manifest that changes a
+         *     field's type is `manifest_invalid`. Staff with `apps:write`, or the app itself with its token. `manifest_unreachable` /
+         *     `manifest_invalid` (422) when the manifest can't be used; `app_not_installed` (409) for an app not installed through
+         *     OAuth.
          */
         post: operations["admin.app_extensions.refresh"];
         delete?: never;
@@ -425,17 +420,16 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * A spore's settings (design note 0030, §8) and the form for them: the values the
-         *     merchant set, secret fields as `{"set": …}` only. For a spore built into the API;
-         *     an app keeps its own settings (`app_not_found` for an app key), and a spore that
-         *     takes none is `app_settings_not_found`.
+         * A spore's settings and the form for them: the values the merchant set, secret fields as
+         *     `{"set": …}` only. For a spore built into the API; an app keeps its own settings
+         *     (`app_not_found` for an app key), and a spore that takes none is
+         *     `app_settings_not_found`.
          */
         get: operations["admin.apps.settings"];
         /**
-         * Saves a spore's settings (design note 0030, §8): checked against its schema, then by
-         *     the spore itself (422 `settings_invalid`, every problem in `details.errors` with the
-         *     field as its `path`); secret fields are sealed under `HYPHA_SECRET_KEY` and never
-         *     answered.
+         * Saves a spore's settings: checked against its schema, then by the spore itself (422
+         *     `settings_invalid`, every problem in `details.errors` with the field as its `path`);
+         *     secret fields are sealed under `HYPHA_SECRET_KEY` and never answered.
          */
         put: operations["admin.apps.save_settings"];
         post?: never;
@@ -597,11 +591,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 202 at once, whether or not the email belongs to anyone: the work (finding the
-         *     account, storing the reset, sending the email) runs on its own task, so neither the
-         *     answer nor its timing tells which emails exist. The one other answer is 429
-         *     `rate_limited` (design note 0009), which depends on the caller's address and the
-         *     email asked about, never on whether the account exists.
+         * 202 at once, whether or not the email belongs to anyone: the work (finding the account,
+         *     storing the reset, sending the email) runs on its own task, so neither the answer nor
+         *     its timing tells which emails exist. The one other answer is 429 `rate_limited`, which
+         *     depends on the caller's address and the email asked about, never on whether the account
+         *     exists.
          */
         post: operations["admin.auth.request_reset"];
         delete?: never;
@@ -722,9 +716,9 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Every category, as a tree. With `field[…]` filters on custom fields (design note
-         *     0033, §7), only the matching categories, flat (each without `children`), in tree
-         *     order. `custom_fields` adds those values to each node.
+         * Every category, as a tree. With `field[…]` filters on custom fields, only the matching
+         *     categories, flat (each without `children`), in tree order. `custom_fields` adds those
+         *     values to each node.
          */
         get: operations["admin.categories.list"];
         put?: never;
@@ -936,10 +930,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * The well-known fields a merchant may want (design note 0032, CD11: customers' labels
-         *     `custom.tags` and note `custom.note`), each with the body that creates it and the
-         *     merchant's definition of its key when there is one. They're conventions: nothing
-         *     creates them but a click here or `pnpm seed`.
+         * The well-known fields a merchant may want (customers' labels `custom.tags` and note
+         *     `custom.note`), each with the body that creates it and the merchant's definition of its
+         *     key when there is one. They're conventions: nothing creates them but a click here or
+         *     `pnpm seed`.
          */
         get: operations["admin.custom_fields.suggestions"];
         put?: never;
@@ -1021,12 +1015,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Adds and removes items of one list field on 1 to 250 owners (design note 0033, CF6):
-         *     done in the database under each value's lock, so concurrent writers both land.
-         *     Adding what's there or removing what isn't changes nothing and records nothing. An
-         *     owner whose list would break `max_items`/`min_items` fails the whole call (`409
-         *     too_many_items` / `too_few_items`, naming it). Needs the field's owner type's write
-         *     scope.
+         * Adds and removes items of one list field on 1 to 250 owners: done in the database under
+         *     each value's lock, so concurrent writers both land. Adding what's there or removing what
+         *     isn't changes nothing and records nothing. An owner whose list would break
+         *     `max_items`/`min_items` fails the whole call (`409 too_many_items` / `too_few_items`,
+         *     naming it). Needs the field's owner type's write scope.
          */
         post: operations["admin.custom_fields.change_items"];
         delete?: never;
@@ -1151,10 +1144,10 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Deletes a customer that has no orders (design note 0032, CD7): the row, its address
-         *     book and memberships go, its carts are unlinked (email kept), and its custom field
-         *     values follow `customer.deleted`. One with orders, cancelled ones included, is
-         *     refused with `409 customer_has_orders`: request its erasure instead.
+         * Deletes a customer that has no orders: the row, its address book and memberships go, its
+         *     carts are unlinked (email kept), and its custom field values follow `customer.deleted`.
+         *     One with orders, cancelled ones included, is refused with `409 customer_has_orders`:
+         *     request its erasure instead.
          */
         delete: operations["admin.customers.remove"];
         options?: never;
@@ -1234,12 +1227,11 @@ export interface paths {
         put?: never;
         /**
          * Asks for the customer's personal data to be erased after the cancel window
-         *     (`customers.erasure_delay`, 10 days by default; design note 0032, §7.3), recording
-         *     `customer.erasure_requested`. The job then removes names, contact details, addresses,
-         *     consents and personal custom fields from the customer and its orders, carts and email
-         *     records, keeps the orders themselves, and records `customer.redacted` for apps. Needs
-         *     `customers:erase`; `409 erasure_already_requested` while one is pending, `409
-         *     customer_erased` after.
+         *     (`customers.erasure_delay`, 10 days by default), recording `customer.erasure_requested`.
+         *     The job then removes names, contact details, addresses, consents and personal custom
+         *     fields from the customer and its orders, carts and email records, keeps the orders
+         *     themselves, and records `customer.redacted` for apps. Needs `customers:erase`; `409
+         *     erasure_already_requested` while one is pending, `409 customer_erased` after.
          */
         post: operations["admin.customers.request_erasure"];
         /**
@@ -1284,8 +1276,8 @@ export interface paths {
         };
         get?: never;
         /**
-         * Makes `groups` the customer's groups (design note 0032, §6): one write, an event per
-         *     group whose membership changed.
+         * Makes `groups` the customer's groups: one write, an event per group whose membership
+         *     changed.
          */
         put: operations["admin.customers.set_groups"];
         post?: never;
@@ -1304,10 +1296,10 @@ export interface paths {
         };
         get?: never;
         /**
-         * Records a customer's marketing consent for a channel (`email` or `sms`; design note
-         *     0032, §5). The newest `consented_at` wins, so a delayed sync can't overwrite a newer
-         *     opt-out: an older write answers `applied: false`. SMS needs a phone (`409
-         *     consent_needs_phone`); an erased customer is read-only (`409 customer_erased`).
+         * Records a customer's marketing consent for a channel (`email` or `sms`). The newest
+         *     `consented_at` wins, so a delayed sync can't overwrite a newer opt-out: an older write
+         *     answers `applied: false`. SMS needs a phone (`409 consent_needs_phone`); an erased
+         *     customer is read-only (`409 customer_erased`).
          */
         put: operations["admin.customers.set_consent"];
         post?: never;
@@ -1327,8 +1319,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Signs the customer out of every device (design note 0034, §7): every session of their
-         *     account is revoked. Nothing to do for a customer without one.
+         * Signs the customer out of every device: every session of their account is revoked.
+         *     Nothing to do for a customer without one.
          */
         post: operations["admin.customers.revoke_sessions"];
         delete?: never;
@@ -2164,15 +2156,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Records that the order's money arrived (a bank transfer, cash from the courier;
-         *     design note 0027, §5): its pending payments become `paid`, with the `reference` when
-         *     given, and so does the order. A `pending` order without an open payment gets a
-         *     `manual` one of its total, paid on the spot. The body is optional (none, `{}` or
-         *     `{"reference": …}`). Marking a paid order again changes nothing. Refused (409): a
-         *     cancelled order (`order_cancelled`), an authorized payment (`payment_authorized`,
-         *     `details.payment`: only its provider can capture it), and any other payment status
-         *     (`order_not_payable`, `details.financial_status`: partially paid, refunded or
-         *     voided, where money moved already).
+         * Records that the order's money arrived (a bank transfer, cash from the courier): its
+         *     pending payments become `paid`, with the `reference` when given, and so does the order.
+         *     A `pending` order without an open payment gets a `manual` one of its total, paid on the
+         *     spot. The body is optional (none, `{}` or `{"reference": …}`). Marking a paid order
+         *     again changes nothing. Refused (409): a cancelled order (`order_cancelled`), an
+         *     authorized payment (`payment_authorized`, `details.payment`: only its provider can
+         *     capture it), and any other payment status (`order_not_payable`,
+         *     `details.financial_status`: partially paid, refunded or voided, where money moved
+         *     already).
          */
         post: operations["admin.orders.mark_paid"];
         delete?: never;
@@ -2233,9 +2225,9 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * The providers a payment method may name now: `manual`, each enabled spore's (design
-         *     note 0030), and each installed, enabled app answering `payments.start`. What an
-         *     admin offers when creating a method.
+         * The providers a payment method may name now: `manual`, each enabled spore's, and each
+         *     installed, enabled app answering `payments.start`. What an admin offers when creating a
+         *     method.
          */
         get: operations["admin.payments.list_providers"];
         put?: never;
@@ -2277,16 +2269,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Asks the payment's app to capture an authorized payment (`payments.capture`). 202:
-         *     the app accepted; the payment becomes `paid` when the app reports it, or at once (in
-         *     the answer's `payment`) when a provider built into the API says it's done (a spore,
-         *     design note 0030). Refused by the
-         *     provider: `409 payment_refused` with its `reason`. Not authorized: `409
+         * Asks the payment's app to capture an authorized payment (`payments.capture`). 202: the
+         *     app accepted; the payment becomes `paid` when the app reports it, or at once (in the
+         *     answer's `payment`) when a provider built into the API says it's done (a spore). Refused
+         *     by the provider: `409 payment_refused` with its `reason`. Not authorized: `409
          *     invalid_payment_transition`; a `manual` payment: `409 payment_action_unsupported`; the
-         *     app gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent,
-         *     is passed to the app (retry a timed-out request with the same one); without it each
-         *     request is a new attempt with its own key, so asking again after a refusal is asked
-         *     anew, not answered with the refusal.
+         *     app gave no usable answer: `502 app_unavailable`. The `Idempotency-Key`, when sent, is
+         *     passed to the app (retry a timed-out request with the same one); without it each request
+         *     is a new attempt with its own key, so asking again after a refusal is asked anew, not
+         *     answered with the refusal.
          */
         post: operations["admin.payments.capture"];
         delete?: never;
@@ -2305,14 +2296,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * What a payment's provider reports (design note 0029, §3.1): a payment app tells
-         *     Hypha what its provider did (Stripe's webhook landed on the app). Moves the payment
-         *     and its order's payment status in one batch, recording `payment.authorized`,
-         *     `.paid`, `.failed`, `.voided` or `.refunded` (and `order.paid`). Reporting the
-         *     status a payment is in already changes nothing. Send an `Idempotency-Key` (the
-         *     provider's event ID): a retry with it answers as the first did. A refund is counted
-         *     once per `reference` (the provider's refund ID), whatever the key. A move the payment's status doesn't allow is `409
-         *     invalid_payment_transition`; a refund that doesn't fit, `422 invalid_refund_amount`.
+         * What a payment's provider reports: a payment app tells Hypha what its provider did (Stripe's webhook landed on the
+         *     app). Moves the payment and its order's payment status in one batch, recording `payment.authorized`, `.paid`,
+         *     `.failed`, `.voided` or `.refunded` (and `order.paid`). Reporting the status a payment is in already changes
+         *     nothing. Send an `Idempotency-Key` (the provider's event ID): a retry with it answers as the first did. A refund is
+         *     counted once per `reference` (the provider's refund ID), whatever the key. A move the payment's status doesn't allow
+         *     is `409 invalid_payment_transition`; a refund that doesn't fit, `422 invalid_refund_amount`.
          */
         post: operations["admin.payments.report_event"];
         delete?: never;
@@ -2450,11 +2439,11 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Deletes a product with its variants and options, whatever its status (design note
-         *     0033, section 6.3). Its media stay in the library; its catalog, channel and category
-         *     membership go with it, and its fixed prices, stock records and search listings
-         *     shortly after (`product.deleted`). Orders keep their lines; carts show its lines as
-         *     unavailable until they're removed. Archive instead to keep it.
+         * Deletes a product with its variants and options, whatever its status. Its media stay in
+         *     the library; its catalog, channel and category membership go with it, and its fixed
+         *     prices, stock records and search listings shortly after (`product.deleted`). Orders keep
+         *     their lines; carts show its lines as unavailable until they're removed. Archive instead
+         *     to keep it.
          */
         delete: operations["admin.products.remove"];
         options?: never;
@@ -2530,8 +2519,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * A product's stock, every variant at once: what the product editor shows, in one
-         *     call instead of one per variant (design note 0025, §6).
+         * A product's stock, every variant at once: what the product editor shows, in one call
+         *     instead of one per variant.
          */
         get: operations["admin.inventory.fetch_product_inventory"];
         put?: never;
@@ -2571,7 +2560,7 @@ export interface paths {
         };
         get?: never;
         /**
-         * Replaces a product's options and their values (design note 0014, section 3).
+         * Replaces a product's options and their values.
          * @description Options and values sent with their `id` are kept; the rest are new. A variant that
          *     uses a removed value must be listed in `remove_variants` (else `409
          *     option_value_in_use`, with the variants in `details`). Removing an option drops it
@@ -2612,8 +2601,8 @@ export interface paths {
         };
         get?: never;
         /**
-         * Sets a product's whole variant list in one write (design note 0021, Q1): all or
-         *     nothing, with one set of events. A variant keeps its media.
+         * Sets a product's whole variant list in one write: all or nothing, with one set of
+         *     events. A variant keeps its media.
          */
         put: operations["admin.products.set_variants"];
         /** Adds a variant: one combination of option values that isn't taken yet. */
@@ -2783,10 +2772,7 @@ export interface paths {
         /** The external apps registered as rate providers. */
         get: operations["admin.shipping.list_providers"];
         put?: never;
-        /**
-         * Makes an app (design note 0016, EV11) a rate provider (design note 0015, section 5):
-         *     Hypha POSTs it rate requests signed with the app's secret.
-         */
+        /** Makes an app a rate provider: Hypha POSTs it rate requests signed with the app's secret. */
         post: operations["admin.shipping.create_provider"];
         delete?: never;
         options?: never;
@@ -2964,7 +2950,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Every tax class, oldest first (design note 0021, SU3). */
+        /** Every tax class, oldest first. */
         get: operations["admin.taxes.list_classes"];
         put?: never;
         /** Creates a tax class. */
@@ -3096,7 +3082,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A variant's stock, whether or not it has an item (design note 0004, I3). */
+        /** A variant's stock, whether or not it has an item. */
         get: operations["admin.inventory.fetch_variant_inventory"];
         put?: never;
         post?: never;
@@ -3119,7 +3105,7 @@ export interface components {
             session: components["schemas"]["SessionResponse"];
             user: components["schemas"]["UserResponse"];
         };
-        /** @description What the admin knows of a customer's account (design note 0034, §7). */
+        /** @description What the admin knows of a customer's account. */
         AccountFactsResponse: {
             /**
              * Format: int32
@@ -3217,9 +3203,9 @@ export interface components {
             postal_code?: string | null;
             province?: string | null;
             /**
-             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
-             *     app without the matching `customer_data:*` scope. They are absent from the
-             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             * @description Personal fields left out for this caller: an API key or app without the matching
+             *     `customer_data:*` scope. They are absent from the object then, whatever the schema
+             *     says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
         };
@@ -3249,18 +3235,14 @@ export interface components {
             /** @description When it was cancelled, RFC 3339 in UTC; `null` if it wasn't. */
             cancelled_at?: string | null;
             /**
-             * @description Its custom field values the caller may read (design note 0033); `PATCH
-             *     /admin/orders/{id}/custom-fields` writes them. A personal one is left out
-             *     without `customer_data:profile` and listed in `redacted` as
-             *     `custom_fields.<key>`.
+             * @description Its custom field values the caller may read; `PATCH
+             *     /admin/orders/{id}/custom-fields` writes them. A personal one is left out without
+             *     `customer_data:profile` and listed in `redacted` as `custom_fields.<key>`.
              */
             custom_fields: {
                 [key: string]: unknown;
             };
-            /**
-             * @description Its payments, newest first (design note 0027): the method, status and
-             *     instructions of each.
-             */
+            /** @description Its payments, newest first: the method, status and instructions of each. */
             payments: components["schemas"]["PaymentResponse"][];
             /**
              * @description Per line with anything left, in line order; empty once everything shipped or the
@@ -3269,7 +3251,7 @@ export interface components {
             unfulfilled: components["schemas"]["UnfulfilledDto"][];
         };
         /**
-         * @description An admin target (design note 0029, §5): a slot any admin may implement.
+         * @description An admin target: a slot any admin may implement.
          *
          *     Known values: `apps.page`, `settings.app`, `order.details`, `order.payment`, `order.fulfillment`, `product.details`, `customer.details`, `payment`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
@@ -3280,7 +3262,7 @@ export interface components {
          * @example key_0190f1a2b3c47d8e9f00112233445566
          */
         ApiKeyId: string;
-        /** @description A page of a list, newest first (design note 0012). */
+        /** @description A page of a list, newest first. */
         ApiKeyPage: {
             /** @description Whether there are more after these. */
             has_more: boolean;
@@ -3351,14 +3333,14 @@ export interface components {
             /** @description `app_<name>`, or `spore_<name>` for a spore. */
             key: string;
             /**
-             * @description An external `app`, or a `spore` built into the API (design note 0030): staff
-             *     only enable or disable a spore.
+             * @description An external `app`, or a `spore` built into the API: staff only enable or disable a
+             *     spore.
              */
             kind: components["schemas"]["AppKind"];
             /**
-             * @description A spore this API isn't built with any more (taken out of the deployment, design
-             *     note 0030, Q7): its app, settings and tables stay, and it does nothing until a
-             *     build has it again. Always `false` for an external app.
+             * @description A spore this API isn't built with any more (taken out of the deployment): its app,
+             *     settings and tables stay, and it does nothing until a build has it again. Always
+             *     `false` for an external app.
              */
             missing: boolean;
             name: string;
@@ -3390,7 +3372,7 @@ export interface components {
          * @enum {string}
          */
         AssetKindDto: string;
-        /** @description A page of a list, newest first (design note 0012). */
+        /** @description A page of a list, newest first. */
         AssetPage: {
             /** @description Whether there are more after these. */
             has_more: boolean;
@@ -3439,7 +3421,7 @@ export interface components {
          * @enum {string}
          */
         AssetStatusDto: string;
-        /** @description A page of a list, newest first (design note 0012). */
+        /** @description A page of a list, newest first. */
         AssetUsagePage: {
             /** @description Whether there are more after these. */
             has_more: boolean;
@@ -3495,7 +3477,7 @@ export interface components {
             reason: components["schemas"]["CancelReasonDto"];
         };
         /**
-         * @description `CancelReason` on the wire (design note 0018).
+         * @description `CancelReason` on the wire.
          *
          *     Known values: `customer`, `inventory`, `fraud`, `declined`, `staff`, `other`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
@@ -3520,15 +3502,15 @@ export interface components {
             market: components["schemas"]["MarketId"];
             /**
              * @description Whether the buyer ticked "Email me with news and offers" (`PUT …/marketing`):
-             *     checkout records the consent then (design note 0032, §5).
+             *     checkout records the consent then.
              */
             marketing_opt_in: boolean;
             order?: components["schemas"]["OrderId"] | null;
             payment_method?: components["schemas"]["PaymentMethodId"] | null;
             /**
-             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
-             *     app without the matching `customer_data:*` scope. They are absent from the
-             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             * @description Personal fields left out for this caller: an API key or app without the matching
+             *     `customer_data:*` scope. They are absent from the object then, whatever the schema
+             *     says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
             shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
@@ -3558,7 +3540,7 @@ export interface components {
          * @example cat_0190f1a2b3c47d8e9f00112233445566
          */
         CatalogId: string;
-        /** @description A page of a list, newest first (design note 0012). */
+        /** @description A page of a list, newest first. */
         CatalogProductPage: {
             /** @description Whether there are more after these. */
             has_more: boolean;
@@ -3595,10 +3577,7 @@ export interface components {
         /** @description A category in the admin's tree: what a list of categories shows, with its children. */
         CategoryNode: {
             children: components["schemas"]["CategoryNode"][];
-            /**
-             * @description The custom field values `?custom_fields=` asked for (design note 0033); absent
-             *     without it.
-             */
+            /** @description The custom field values `?custom_fields=` asked for; absent without it. */
             custom_fields?: {
                 [key: string]: unknown;
             } | null;
@@ -3612,7 +3591,7 @@ export interface components {
             position: number;
             visible: boolean;
         };
-        /** @description A page of a list, newest first (design note 0012). */
+        /** @description A page of a list, newest first. */
         CategoryProductPage: {
             /** @description Whether there are more after these. */
             has_more: boolean;
@@ -3648,7 +3627,7 @@ export interface components {
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;
             /**
-             * @description Its custom field values the caller may read (design note 0033); `PATCH
+             * @description Its custom field values the caller may read; `PATCH
              *     /admin/categories/{id}/custom-fields` writes them.
              */
             custom_fields: {
@@ -3763,10 +3742,7 @@ export interface components {
             /** @description The app's own version. */
             version: string;
         };
-        /**
-         * @description A custom field the app declares (design note 0033, §8), always in its own namespace
-         *     (`app_<name>.<key>`).
-         */
+        /** @description A custom field the app declares, always in its own namespace (`app_<name>.<key>`). */
         ConsentCustomField: {
             key: string;
             name: string;
@@ -3803,7 +3779,7 @@ export interface components {
             scopes: components["schemas"]["Scope"][];
             status: components["schemas"]["OAuthRequestStatus"];
         };
-        /** @description A channel's marketing consent (design note 0032, §5). */
+        /** @description A channel's marketing consent. */
         ConsentResponse: {
             /** @description When the customer last said so, RFC 3339 in UTC; absent while never asked. */
             consented_at?: string | null;
@@ -3908,7 +3884,7 @@ export interface components {
              * @description Among its siblings, from 0; absent or past the end: last.
              */
             position?: number | null;
-            /** @description Whether the storefront shows it. Required: there's no default (CA10). */
+            /** @description Whether the storefront shows it. Required: there's no default. */
             visible: boolean;
         };
         CreateChannelRequest: {
@@ -4077,7 +4053,7 @@ export interface components {
              */
             name: string;
         };
-        /** @description Who sees and writes a field's values (design note 0033, §5). */
+        /** @description Who sees and writes a field's values. */
         CustomFieldAccess: {
             admin: components["schemas"]["CustomFieldAdminAccess"];
             storefront: components["schemas"]["CustomFieldStorefrontAccess"];
@@ -4090,7 +4066,7 @@ export interface components {
          * @enum {string}
          */
         CustomFieldAdminAccess: string;
-        /** @description What a field's values can be used for (§7). */
+        /** @description What a field's values can be used for. */
         CustomFieldCapabilities: {
             /**
              * @description A filter on its owner's admin list (`field[custom.material]=wool`); at most 50
@@ -4168,7 +4144,7 @@ export interface components {
             position: number;
             /** @description Only its app (and staff) read it. */
             private: boolean;
-            /** @description `text`, `integer`, `choice`, `list.text`, … (design note 0033, §3). */
+            /** @description `text`, `integer`, `choice`, `list.text`, …. */
             type: string;
             updated_at: string;
             validations: components["schemas"]["CustomFieldValidations"];
@@ -4180,10 +4156,7 @@ export interface components {
          * @enum {string}
          */
         CustomFieldStorefrontAccess: string;
-        /**
-         * @description A definition's validations; which apply depends on its type (design note 0033, §3).
-         *     Absent ones don't apply.
-         */
+        /** @description A definition's validations; which apply depends on its type. Absent ones don't apply. */
         CustomFieldValidations: {
             /** @description `choice` (required): at most 128. */
             choices?: components["schemas"]["CustomFieldChoice"][] | null;
@@ -4250,7 +4223,7 @@ export interface components {
                 [key: string]: number;
             };
         };
-        /** @description Everything Hypha holds about a customer, as one document (design note 0032, §7.4). */
+        /** @description Everything Hypha holds about a customer, as one document. */
         CustomerExportResponse: {
             customer: components["schemas"]["CustomerResponse"];
             /** @description The emails sent about the orders. */
@@ -4289,14 +4262,14 @@ export interface components {
             addresses: components["schemas"]["AddressResponse"][];
             /**
              * @description Whether `DELETE /admin/customers/{id}` would work: only while the customer has no
-             *     orders, cancelled ones included (design note 0032, CD7). Otherwise erase it.
+             *     orders, cancelled ones included. Otherwise erase it.
              */
             can_delete: boolean;
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;
             /**
-             * @description Its custom field values the caller may read, `{"custom.tier": "gold", …}`
-             *     (design note 0033); `PATCH /admin/customers/{id}/custom-fields` writes them.
+             * @description Its custom field values the caller may read, `{"custom.tier": "gold", …}`; `PATCH
+             *     /admin/customers/{id}/custom-fields` writes them.
              */
             custom_fields: {
                 [key: string]: unknown;
@@ -4305,13 +4278,13 @@ export interface components {
             default_shipping_address?: components["schemas"]["AddressId"] | null;
             email: components["schemas"]["Email"];
             /**
-             * @description Consent to marketing by email (design note 0032, §5); `PUT
-             *     /admin/customers/{id}/marketing/email` changes it.
+             * @description Consent to marketing by email; `PUT /admin/customers/{id}/marketing/email` changes
+             *     it.
              */
             email_marketing: components["schemas"]["ConsentResponse"];
             /**
-             * @description When the customer's personal data was erased, RFC 3339 in UTC (design note 0032,
-             *     §7.3): the customer is read-only then and its email a placeholder.
+             * @description When the customer's personal data was erased, RFC 3339 in UTC: the customer is
+             *     read-only then and its email a placeholder.
              */
             erased_at?: string | null;
             /**
@@ -4320,21 +4293,18 @@ export interface components {
              */
             erasure_due_at?: string | null;
             first_name?: string | null;
-            /**
-             * @description The customer groups it's in (design note 0032, §6), sorted; `PUT
-             *     /admin/customers/{id}/groups` sets them.
-             */
+            /** @description The customer groups it's in, sorted; `PUT /admin/customers/{id}/groups` sets them. */
             groups: components["schemas"]["CustomerGroupId"][];
             id: components["schemas"]["CustomerId"];
             last_name?: string | null;
-            /** @description What the customer's orders add up to (design note 0032). */
+            /** @description What the customer's orders add up to. */
             orders: components["schemas"]["OrderStatsResponse"];
             phone?: string | null;
             /**
-             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
-             *     app without the matching `customer_data:*` scope (`custom_fields.<key>` for a
-             *     personal custom field, without `customer_data:profile`). They are absent from the
-             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             * @description Personal fields left out for this caller: an API key or app without the matching
+             *     `customer_data:*` scope (`custom_fields.<key>` for a personal custom field, without
+             *     `customer_data:profile`). They are absent from the object then, whatever the schema
+             *     says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
             /** @description Consent to marketing by SMS; needs a phone. */
@@ -4342,7 +4312,7 @@ export interface components {
             /** @description When it last changed, RFC 3339 in UTC. */
             updated_at: string;
         };
-        /** @description A page of a list, newest first (design note 0012). */
+        /** @description A page of a list, newest first. */
         CustomerSummaryPage: {
             /** @description Whether there are more after these. */
             has_more: boolean;
@@ -4350,7 +4320,7 @@ export interface components {
             /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
             next_cursor?: string | null;
         };
-        /** @description A customer in a list: without the address book (design note 0024). */
+        /** @description A customer in a list: without the address book. */
         CustomerSummaryResponse: {
             /**
              * Format: int64
@@ -4359,10 +4329,7 @@ export interface components {
             address_count: number;
             /** @description When the customer was created, RFC 3339 in UTC. */
             created_at: string;
-            /**
-             * @description The custom field values `?custom_fields=` asked for (design note 0033); absent
-             *     without it.
-             */
+            /** @description The custom field values `?custom_fields=` asked for; absent without it. */
             custom_fields?: {
                 [key: string]: unknown;
             } | null;
@@ -4372,9 +4339,9 @@ export interface components {
             last_name?: string | null;
             phone?: string | null;
             /**
-             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
-             *     app without the matching `customer_data:*` scope. They are absent from the
-             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             * @description Personal fields left out for this caller: an API key or app without the matching
+             *     `customer_data:*` scope. They are absent from the object then, whatever the schema
+             *     says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
             /** @description When the customer last changed, RFC 3339 in UTC. */
@@ -4392,7 +4359,7 @@ export interface components {
          * @example dlv_0190f1a2b3c47d8e9f00112233445566
          */
         DeliveryId: string;
-        /** @description A page of a list, newest first (design note 0012). */
+        /** @description A page of a list, newest first. */
         DeliveryPage: {
             /** @description Whether there are more after these. */
             has_more: boolean;
@@ -4432,10 +4399,7 @@ export interface components {
          * @example ana@example.com
          */
         Email: string;
-        /**
-         * @description Every error body, for the OpenAPI documents (design note 0010, S9). `ApiError`
-         *     serializes as this shape.
-         */
+        /** @description Every error body, for the OpenAPI documents. `ApiError` serializes as this shape. */
         Error: {
             /** @description Stable snake_case code: what clients match on. */
             code: string;
@@ -4451,10 +4415,7 @@ export interface components {
             /** @description `user`, `agent`, `api_key`, `app` or `system`. */
             type: string;
         };
-        /**
-         * @description An event as apps receive it (design note 0016, EV5), and as
-         *     `GET /admin/events/{id}` shows it.
-         */
+        /** @description An event as apps receive it, and as `GET /admin/events/{id}` shows it. */
         EventEnvelope: {
             actor: components["schemas"]["EventActor"];
             /** @description The facts of the change; see the event catalog. */
@@ -4484,8 +4445,8 @@ export interface components {
             type: string;
             /**
              * Format: int64
-             * @description Its version after the change, when it has one: deliveries can arrive out of
-             *     order, and a consumer drops an event older than one it applied (EV7).
+             * @description Its version after the change, when it has one: deliveries can arrive out of order,
+             *     and a consumer drops an event older than one it applied.
              */
             version?: number | null;
         };
@@ -4509,7 +4470,7 @@ export interface components {
          * @enum {string}
          */
         ExtensionCallOutcome: string;
-        /** @description A page of a list, newest first (design note 0012). */
+        /** @description A page of a list, newest first. */
         ExtensionCallPage: {
             /** @description Whether there are more after these. */
             has_more: boolean;
@@ -4593,10 +4554,10 @@ export interface components {
             label?: string | null;
         };
         /**
-         * @description `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no
-         *     serde and renaming a variant can't silently change the API.
-         *     Derived from the order's payments (design note 0027, PA7): manual payments use
-         *     `pending`, `paid` and `voided`; the rest come with providers that move money so.
+         * @description `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no serde and
+         *     renaming a variant can't silently change the API. Derived from the order's payments:
+         *     manual payments use `pending`, `paid` and `voided`; the rest come with providers that
+         *     move money so.
          *
          *     Known values: `pending`, `authorized`, `partially_paid`, `paid`, `partially_refunded`, `refunded`, `voided`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
@@ -4612,7 +4573,7 @@ export interface components {
             price: components["schemas"]["Money"];
             variant: components["schemas"]["VariantId"];
         };
-        /** @description A page of a list, newest first (design note 0012). */
+        /** @description A page of a list, newest first. */
         FixedPricePage: {
             /** @description Whether there are more after these. */
             has_more: boolean;
@@ -4687,7 +4648,7 @@ export interface components {
             /** @description `pending`, `approved` or `denied`. */
             status: string;
         };
-        /** @description The scopes staff approved for an app installed through OAuth (design note 0029). */
+        /** @description The scopes staff approved for an app installed through OAuth. */
         GrantResponse: {
             approved_at: string;
             /** @description Who approved (or last narrowed) it. */
@@ -4978,7 +4939,7 @@ export interface components {
          * @example ntf_0190f1a2b3c47d8e9f00112233445566
          */
         NotificationId: string;
-        /** @description A page of a list, newest first (design note 0012). */
+        /** @description A page of a list, newest first. */
         NotificationPage: {
             /** @description Whether there are more after these. */
             has_more: boolean;
@@ -5015,9 +4976,9 @@ export interface components {
             /** @description The provider's ID for it, when it gives one. */
             provider_message_id?: string | null;
             /**
-             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
-             *     app without the matching `customer_data:*` scope. They are absent from the
-             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             * @description Personal fields left out for this caller: an API key or app without the matching
+             *     `customer_data:*` scope. They are absent from the object then, whatever the schema
+             *     says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
             sent_at?: string | null;
@@ -5179,7 +5140,7 @@ export interface components {
         };
         OrderResponse: {
             cart: components["schemas"]["CartId"];
-            /** @description The sales channel it was placed through (design note 0020). */
+            /** @description The sales channel it was placed through. */
             channel: components["schemas"]["ChannelId"];
             country: components["schemas"]["CountryCode"];
             /** @description When it was created, RFC 3339 in UTC. */
@@ -5200,9 +5161,9 @@ export interface components {
             /** @description RFC 3339, UTC. */
             placed_at: string;
             /**
-             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
-             *     app without the matching `customer_data:*` scope. They are absent from the
-             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             * @description Personal fields left out for this caller: an API key or app without the matching
+             *     `customer_data:*` scope. They are absent from the object then, whatever the schema
+             *     says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
             shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
@@ -5239,8 +5200,8 @@ export interface components {
             tax?: components["schemas"]["OrderTaxResponse"] | null;
         };
         /**
-         * @description A customer's orders, added up over those that weren't cancelled (design note 0032,
-         *     §8): `GET /admin/orders?customer=` lists them.
+         * @description A customer's orders, added up over those that weren't cancelled: `GET
+         *     /admin/orders?customer=` lists them.
          */
         OrderStatsResponse: {
             /** @description Their totals, one per currency the customer paid in, by currency code. */
@@ -5261,7 +5222,7 @@ export interface components {
             /** @description When the last of them was placed, RFC 3339 in UTC; absent without orders. */
             last_placed_at?: string | null;
         };
-        /** @description A page of a list, newest first (design note 0012). */
+        /** @description A page of a list, newest first. */
         OrderSummaryPage: {
             /** @description Whether there are more after these. */
             has_more: boolean;
@@ -5273,13 +5234,10 @@ export interface components {
         OrderSummaryResponse: {
             /** @description When it was cancelled, RFC 3339 in UTC; `null` if it wasn't. */
             cancelled_at?: string | null;
-            /** @description The sales channel it was placed through (design note 0020). */
+            /** @description The sales channel it was placed through. */
             channel: components["schemas"]["ChannelId"];
             country: components["schemas"]["CountryCode"];
-            /**
-             * @description The custom field values `?custom_fields=` asked for (design note 0033); absent
-             *     without it.
-             */
+            /** @description The custom field values `?custom_fields=` asked for; absent without it. */
             custom_fields?: {
                 [key: string]: unknown;
             } | null;
@@ -5301,9 +5259,9 @@ export interface components {
             /** @description RFC 3339, UTC. */
             placed_at: string;
             /**
-             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
-             *     app without the matching `customer_data:*` scope. They are absent from the
-             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             * @description Personal fields left out for this caller: an API key or app without the matching
+             *     `customer_data:*` scope. They are absent from the object then, whatever the schema
+             *     says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
             total: components["schemas"]["Money"];
@@ -5527,7 +5485,7 @@ export interface components {
             voided_at?: string | null;
         };
         /**
-         * @description `PaymentStatus` on the wire (design note 0027, PA7).
+         * @description `PaymentStatus` on the wire.
          *
          *     Known values: `pending`, `authorized`, `processing`, `paid`, `failed`, `voided`, `partially_refunded`, `refunded`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
@@ -5568,9 +5526,9 @@ export interface components {
             postal_code?: string | null;
             province?: string | null;
             /**
-             * @description Personal fields left out for this caller (design note 0029, AP10): an API key or
-             *     app without the matching `customer_data:*` scope. They are absent from the
-             *     object then, whatever the schema says. Never sent to staff or storefronts.
+             * @description Personal fields left out for this caller: an API key or app without the matching
+             *     `customer_data:*` scope. They are absent from the object then, whatever the schema
+             *     says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
         };
@@ -5603,8 +5561,8 @@ export interface components {
             min: components["schemas"]["Money"];
         };
         /**
-         * @description What a private app's integration needs to act, shown once (design note 0029, "As
-         *     built: the admin's app UI and private apps").
+         * @description What a private app's integration needs to act, shown once ("As built: the admin's app UI
+         *     and private apps").
          */
         PrivateAppCredentials: {
             /** @description `hypha_at_…`: send as `Authorization: Bearer`. An hour. */
@@ -5636,10 +5594,7 @@ export interface components {
          *     `hypha-app.json` would hold.
          */
         PrivateAppRequest: {
-            /**
-             * @description The manifest (design note 0029, §4). Checked like a served one, except that
-             *     `redirect_uris` may be empty.
-             */
+            /** @description The manifest. Checked like a served one, except that `redirect_uris` may be empty. */
             manifest: {
                 [key: string]: unknown;
             };
@@ -5681,8 +5636,8 @@ export interface components {
             items: components["schemas"]["InventoryResponse"][];
         };
         /**
-         * @description One item of a product's media list (design note 0014, section 7): what a page needs
-         *     to render it. The asset's own route has the rest.
+         * @description One item of a product's media list: what a page needs to render it. The asset's own
+         *     route has the rest.
          */
         ProductMediaResponse: {
             /** @description The asset's alt text. */
@@ -5711,18 +5666,15 @@ export interface components {
             width?: number | null;
         };
         ProductResponse: {
-            /** @description The categories it's directly in, sorted (design note 0022). */
+            /** @description The categories it's directly in, sorted. */
             categories: components["schemas"]["CategoryId"][];
-            /**
-             * @description The sales channels it is published to, sorted (design note 0020); a new product
-             *     is in none.
-             */
+            /** @description The sales channels it is published to, sorted; a new product is in none. */
             channels: components["schemas"]["ChannelId"][];
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;
             /**
-             * @description Its custom field values the caller may read, `{"custom.material": "wool", …}`
-             *     (design note 0033); `PATCH /admin/products/{id}/custom-fields` writes them.
+             * @description Its custom field values the caller may read, `{"custom.material": "wool", …}`;
+             *     `PATCH /admin/products/{id}/custom-fields` writes them.
              */
             custom_fields: {
                 [key: string]: unknown;
@@ -5756,7 +5708,7 @@ export interface components {
          * @enum {string}
          */
         ProductStatus: string;
-        /** @description A page of a list, newest first (design note 0012). */
+        /** @description A page of a list, newest first. */
         ProductSummaryPage: {
             /** @description Whether there are more after these. */
             has_more: boolean;
@@ -5765,20 +5717,17 @@ export interface components {
             next_cursor?: string | null;
         };
         /**
-         * @description A product in a list: what a table of products shows, without options or variants
-         *     (design note 0012, L7). `GET /admin/products/{id}` has the rest.
+         * @description A product in a list: what a table of products shows, without options or variants. `GET
+         *     /admin/products/{id}` has the rest.
          */
         ProductSummaryResponse: {
-            /** @description The categories it's directly in, sorted (design note 0022). */
+            /** @description The categories it's directly in, sorted. */
             categories: components["schemas"]["CategoryId"][];
-            /** @description The sales channels it is published to, sorted (design note 0020). */
+            /** @description The sales channels it is published to, sorted. */
             channels: components["schemas"]["ChannelId"][];
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;
-            /**
-             * @description The custom field values `?custom_fields=` asked for (design note 0033); absent
-             *     without it.
-             */
+            /** @description The custom field values `?custom_fields=` asked for; absent without it. */
             custom_fields?: {
                 [key: string]: unknown;
             } | null;
@@ -5871,10 +5820,7 @@ export interface components {
          */
         RoleId: string;
         RoleListResponse: {
-            /**
-             * @description Oldest first. A store has a handful, so they come in one list (design note 0024,
-             *     AU6).
-             */
+            /** @description Oldest first. A store has a handful, so they come in one list. */
             items: components["schemas"]["RoleResponse"][];
         };
         RoleResponse: {
@@ -5938,8 +5884,8 @@ export interface components {
              */
             facets: components["schemas"]["FacetSettingResponse"][];
             /**
-             * @description The app that answers storefront searches (`search.query`, design note 0029);
-             *     `null` for the built-in engine, which also answers whenever the app fails.
+             * @description The app that answers storefront searches (`search.query`); `null` for the built-in
+             *     engine, which also answers whenever the app fails.
              */
             search_app?: string | null;
             /**
@@ -6124,7 +6070,7 @@ export interface components {
              */
             variants: components["schemas"]["SetVariantRequest"][];
         };
-        /** @description An app's settings form (§6.1): render the JSON Schema, save through the admin proxy. */
+        /** @description An app's settings form: render the JSON Schema, save through the admin proxy. */
         SettingsExtension: {
             app: string;
             /** @description Whether the app has an admin proxy to save to. */
@@ -6143,8 +6089,8 @@ export interface components {
             /** @description A market exists (`markets:read`). */
             market: boolean;
             /**
-             * @description A payment method is enabled (`payments:read`; design note 0027): without one,
-             *     checkout refuses carts with something to pay.
+             * @description A payment method is enabled (`payments:read`): without one, checkout refuses carts
+             *     with something to pay.
              */
             payment: boolean;
             /** @description A product is active (`products:read`). */
@@ -6270,7 +6216,7 @@ export interface components {
             contact_email?: components["schemas"]["Email"] | null;
             /**
              * @description The language the store's content (titles, descriptions, option labels) is written
-             *     in (design note 0021, SU5).
+             *     in.
              */
             default_language: components["schemas"]["Language"];
             /** @description Plain text, at most 500 characters. */
@@ -6280,7 +6226,7 @@ export interface components {
             /** @description The registered business name, for invoices and legal pages. */
             legal_name?: string | null;
             name: string;
-            /** @description How far the admin's setup guide got (design note 0024, AU11). */
+            /** @description How far the admin's setup guide got. */
             setup: components["schemas"]["SetupProgressResponse"];
             timezone?: components["schemas"]["Timezone"] | null;
         };
@@ -6289,8 +6235,8 @@ export interface components {
             items: components["schemas"]["SuggestedDefinitionResponse"][];
         };
         /**
-         * @description A field worth having (design note 0032, CD11): the body `POST
-         *     /admin/custom-field-definitions` takes to create it, and why.
+         * @description A field worth having: the body `POST /admin/custom-field-definitions` takes to create
+         *     it, and why.
          */
         SuggestedDefinitionResponse: {
             access: components["schemas"]["CustomFieldAccess"];
@@ -6397,7 +6343,7 @@ export interface components {
             /** @description `http://` or `https://`, at most 2048 characters. */
             url?: string | null;
         };
-        /** @description Units of a line still to ship, and where they wait (design note 0018, FU4). */
+        /** @description Units of a line still to ship, and where they wait. */
         UnfulfilledDto: {
             line: components["schemas"]["OrderLineId"];
             location?: components["schemas"]["LocationId"] | null;
@@ -6625,8 +6571,8 @@ export interface components {
              */
             setup_finished?: boolean;
             /**
-             * @description The setup guide step the merchant is on: 1 to 40 lowercase letters, digits, `-`
-             *     or `_`, named by the admin (design note 0024, AU11). `null` clears it.
+             * @description The setup guide step the merchant is on: 1 to 40 lowercase letters, digits, `-` or
+             *     `_`, named by the admin. `null` clears it.
              */
             setup_step?: string | null;
             /** @description An IANA name such as `Europe/Belgrade`; `null` clears it. */
@@ -6685,10 +6631,7 @@ export interface components {
          */
         UserId: string;
         UserListResponse: {
-            /**
-             * @description Oldest first. A store's staff is a short list, so it comes whole (design note
-             *     0024, AU6).
-             */
+            /** @description Oldest first. A store's staff is a short list, so it comes whole. */
             items: components["schemas"]["UserResponse"][];
         };
         UserResponse: {
@@ -6722,8 +6665,8 @@ export interface components {
         VariantId: string;
         VariantResponse: {
             /**
-             * @description Its own custom field values the caller may read (variant fields, design note
-             *     0033); `PATCH /admin/variants/{id}/custom-fields` writes them.
+             * @description Its own custom field values the caller may read (variant fields); `PATCH
+             *     /admin/variants/{id}/custom-fields` writes them.
              */
             custom_fields: {
                 [key: string]: unknown;
@@ -10910,7 +10853,7 @@ export interface operations {
     "admin.categories.list": {
         parameters: {
             query?: {
-                /** @description Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
+                /** @description Filters on custom fields, only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
                 field?: {
                     [key: string]: string | {
                         eq?: string;
@@ -13980,10 +13923,10 @@ export interface operations {
                  *     (sorting by email or name, the matching one).
                  */
                 q?: string;
-                /** @description Only customers in this group (design note 0032, §6). */
+                /** @description Only customers in this group. */
                 group?: components["schemas"]["CustomerGroupId"];
                 sort?: "newest" | "oldest" | "email_asc" | "email_desc" | "name_asc" | "name_desc";
-                /** @description Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
+                /** @description Filters on custom fields, only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
                 field?: {
                     [key: string]: string | {
                         eq?: string;
@@ -19429,7 +19372,7 @@ export interface operations {
                 fulfillment_status?: components["schemas"]["FulfillmentStatusDto"][];
                 /** @description Only cancelled orders (`true`), or only those that aren't (`false`). */
                 cancelled?: boolean;
-                /** @description Only this customer's orders (design note 0032). */
+                /** @description Only this customer's orders. */
                 customer?: components["schemas"]["CustomerId"];
                 /** @description Only orders placed through this sales channel. */
                 channel?: components["schemas"]["ChannelId"];
@@ -19442,7 +19385,7 @@ export interface operations {
                 /** @description Only orders placed before this instant (RFC 3339). */
                 placed_before?: string;
                 sort?: "newest" | "oldest" | "total_desc" | "total_asc";
-                /** @description Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
+                /** @description Filters on custom fields, only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
                 field?: {
                     [key: string]: string | {
                         eq?: string;
@@ -21740,7 +21683,7 @@ export interface operations {
                  */
                 channel?: components["schemas"]["ChannelId"];
                 sort?: "newest" | "oldest" | "title_asc" | "title_desc" | "updated_desc" | "updated_asc";
-                /** @description Filters on custom fields (design note 0033, §7), only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
+                /** @description Filters on custom fields, only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
                 field?: {
                     [key: string]: string | {
                         eq?: string;

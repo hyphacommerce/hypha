@@ -1,21 +1,20 @@
-//! Rate limits on the routes that need no credentials (design note 0009), and on the
-//! storefront routes that call rate apps (design note 0015).
+//! Rate limits on the routes that need no credentials, and on the storefront routes that
+//! call rate apps.
 //!
 //! `RateLimiter` is the port: one `check` per rule and key. The host gives one
 //! (`host::HostLimiter`): `hypha-host-axum` keeps the counts in its process with
-//! `governor`, a Workers host uses Cloudflare's Rate Limiting binding (design note 0026,
-//! W8).
+//! `governor`, a Workers host uses Cloudflare's Rate Limiting binding.
 
 use std::time::Duration;
 
 use hypha_config::RateLimits;
 
-/// Every limit, with its quota in `quota`: a closed list, so a handler can't invent a
-/// limit and all of them are in one place (0009, section 3).
+/// Every limit, with its quota in `quota`: a closed list, so a handler can't invent a limit
+/// and all of them are in one place.
 ///
-/// Strict limits by email are keyed by email *and* address (`pair_key`): keyed by the
-/// email alone, one stranger sending a request per refill period would keep a real
-/// user locked out for as long as they liked (third review of 0009).
+/// Strict limits by email are keyed by email *and* address (`pair_key`): keyed by the email
+/// alone, one stranger sending a request per refill period would keep a real user locked
+/// out for as long as they liked (third review of).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Rule {
     /// `POST /admin/auth/login`, per client address.
@@ -26,7 +25,7 @@ pub enum Rule {
     /// many addresses, while locking someone out takes a great many of them.
     LoginEmail,
     /// `POST /admin/auth/login/mfa`, per client address. Per account, the second-factor
-    /// lockout already counts (0008).
+    /// lockout already counts.
     MfaIp,
     /// `POST /admin/auth/password-reset`, per client address.
     ResetIp,
@@ -39,27 +38,23 @@ pub enum Rule {
     ResetConfirmIp,
     /// `POST /admin/invites/accept`, per client address.
     InviteIp,
-    /// `GET /storefront/carts/{id}/shipping-options`, `PUT …/shipping/{group_id}` and
-    /// `POST …/checkout`, per cart: each may call rate apps for seconds while holding a
-    /// database connection, so a flood would starve the pool (0015, section 9). Per cart
-    /// rather than per address, since a server-rendered storefront sends every shopper's
-    /// requests from one address. Checked after the publishable key, so only callers
-    /// of this store count.
+    /// `GET /storefront/carts/{id}/shipping-options`, `PUT …/shipping/{group_id}` and `POST
+    /// …/checkout`, per cart: each may call rate apps for seconds while holding a database
+    /// connection, so a flood would starve the pool. Per cart rather than per address,
+    /// since a server-rendered storefront sends every shopper's requests from one address.
+    /// Checked after the publishable key, so only callers of this store count.
     ShippingQuotesCart,
     /// `POST /storefront/carts`, per client address: without it, new carts would get
     /// around the per-cart limit above. A server-rendered storefront passes each
     /// shopper's address in `X-Forwarded-For` and is listed in `HYPHA_TRUSTED_PROXIES`.
     CartCreateIp,
     /// `GET /oauth/authorize`, `POST /oauth/token` and `POST /oauth/revoke`, per client
-    /// address (design note 0029): they need no credentials, and token guessing must be
-    /// slow.
+    /// address: they need no credentials, and token guessing must be slow.
     OAuthIp,
-    /// A spore's public routes (`/spores/<name>/…`, design note 0030, §7), per client
-    /// address: one rule for every spore, so a build's spores don't change a Worker's
-    /// Rate Limiting bindings.
+    /// A spore's public routes (`/spores/<name>/…`), per client address: one rule for every
+    /// spore, so a build's spores don't change a Worker's Rate Limiting bindings.
     SporePublic,
-    /// `POST /storefront/auth/code`, per client address (design note 0034): each sends an
-    /// email.
+    /// `POST /storefront/auth/code`, per client address: each sends an email.
     CodeIp,
     /// `POST /storefront/auth/code`, per email and address.
     CodeEmailFromIp,
@@ -114,9 +109,9 @@ impl Rule {
         }
     }
 
-    /// The Cloudflare Rate Limiting binding that caps this rule across a Worker's
-    /// isolates (design note 0026, W8): its configuration key in capitals. A contract
-    /// with deployments, like the key: never renamed.
+    /// The Cloudflare Rate Limiting binding that caps this rule across a Worker's isolates:
+    /// its configuration key in capitals. A contract with deployments, like the key: never
+    /// renamed.
     pub fn binding(self) -> &'static str {
         match self {
             Rule::LoginIp => "RL_LOGIN_IP",
@@ -171,8 +166,7 @@ impl Rule {
         burst.saturating_add(u32::try_from(more).unwrap_or(u32::MAX))
     }
 
-    /// `(burst, one more every)` under `limits` (`[rate_limits]`, design note 0017; the
-    /// defaults are 0009's, section 3).
+    /// `(burst, one more every)` under `limits` (`[rate_limits]`).
     pub fn quota(self, limits: &RateLimits) -> (u32, Duration) {
         let quota = match self {
             Rule::LoginIp => limits.login_ip,

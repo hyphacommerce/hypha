@@ -62,22 +62,21 @@ impl FromStr for ProductStatus {
 pub struct Product {
     id: ProductId,
     version: Version,
-    /// When it was stored and last changed, set by the adapter (design note 0016).
+    /// When it was stored and last changed, set by the adapter.
     stamps: Option<Stamps>,
     handle: Handle,
     title: String,
     status: ProductStatus,
-    /// What it says about itself (design note 0019, section 2).
+    /// What it says about itself.
     description: Option<Description>,
     vendor: Option<String>,
     product_type: Option<String>,
     tags: Vec<String>,
     options: Vec<ProductOption>,
     variants: Vec<Variant>,
-    /// Ordered; the first is the featured item. Asset IDs only: products don't know
-    /// assets (design note 0014, E8).
+    /// Ordered; the first is the featured item. Asset IDs only: products don't know assets.
     media: Vec<AssetId>,
-    /// What changed since it was loaded, for its events (design note 0016).
+    /// What changed since it was loaded, for its events.
     changes: Changes,
 }
 
@@ -109,9 +108,9 @@ impl Stamped for Product {
 }
 
 impl Product {
-    /// Keeps a product one load, however large the catalog (design note 0014, Q5).
+    /// Keeps a product one load, however large the catalog.
     pub const MAX_VARIANTS: usize = 2048;
-    /// Shopify's limit (design note 0013, section 5).
+    /// Shopify's limit.
     pub const MAX_MEDIA: usize = 250;
 
     pub fn new_simple(
@@ -257,9 +256,9 @@ impl Product {
         }
     }
 
-    /// Records that the product is being deleted, in any status (design note 0033,
-    /// section 6.3): its only event is then `product.deleted`, listing its variants.
-    /// Stage it with `StageProducts::delete_product`, which takes that event.
+    /// Records that the product is being deleted, in any status: its only event is then
+    /// `product.deleted`, listing its variants. Stage it with
+    /// `StageProducts::delete_product`, which takes that event.
     pub fn delete(&mut self) {
         let variants = self.variants.iter().map(|v| v.id()).collect();
         self.changes.deleted(variants);
@@ -384,10 +383,10 @@ fn validate_options(options: &[ProductOption]) -> Result<(), ProductError> {
     Ok(())
 }
 
-/// Plain-data form of a `Product` for storage adapters (design note 0001, 3.4).
-/// Adapters only ever read and write snapshots: `Product::snapshot` to save,
-/// `Product::restore` to load. `restore` re-validates every invariant, so bad stored
-/// data fails loudly instead of becoming an invalid `Product`.
+/// Plain-data form of a `Product` for storage adapters. Adapters only ever read and write
+/// snapshots: `Product::snapshot` to save, `Product::restore` to load. `restore`
+/// re-validates every invariant, so bad stored data fails loudly instead of becoming an
+/// invalid `Product`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProductSnapshot {
     pub id: ProductId,

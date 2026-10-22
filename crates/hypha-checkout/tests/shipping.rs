@@ -1,4 +1,4 @@
-//! Checkout with shipping (design note 0015, section 7, SH9, SH12).
+//! Checkout with shipping.
 
 use std::sync::Mutex;
 

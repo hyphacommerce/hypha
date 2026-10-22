@@ -1,6 +1,5 @@
-//! The reference semantics (design note 0019, section 4), worked out by hand on the
-//! testkit's fixture. Engines are held to the reference by the contract; this holds the
-//! reference to the note.
+//! The reference semantics, worked out by hand on the testkit's fixture. Engines are held
+//! to the reference by the contract; this holds the reference to the note.
 //!
 //! Market 1: Linen Shirt (1, oldest; split by colour: Red is S 3000 and M 3200 out of
 //! stock, Blue is S 2800), Cotton Shirt (2; Red L and Green L, both 1500), Čaša Mug (3,

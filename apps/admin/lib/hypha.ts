@@ -1,6 +1,6 @@
-// Server-only: how the admin's server talks to the Hypha admin API (design note 0011,
-// P4). The staff session lives in an httpOnly cookie that page scripts can't read; only
-// code here sends it to the API. Never import this from a "use client" file.
+// Server-only: how the admin's server talks to the Hypha admin API. The staff session
+// lives in an httpOnly cookie that page scripts can't read; only code here sends it to
+// the API. Never import this from a "use client" file.
 
 import { apiFetch } from "#api-fetch";
 import { type AdminSchemas, type ApiError, createAdminClient } from "@hypha/sdk/admin";
@@ -11,6 +11,7 @@ import { referenceLifetime, sessionFetch } from "./api-cache";
 import type { Currencies } from "./format";
 import { describeProblem, problemOf } from "./notifications";
 import type { Country } from "./regions";
+import { safeNext } from "./safe-next";
 
 const SESSION_COOKIE = "hypha_admin_session";
 /** A pending login's second-factor challenge, for the few minutes it lives. */
@@ -29,18 +30,18 @@ function apiUrl(): string {
 }
 
 /**
- * The API's address as apps and browsers reach it (an app's install route takes it,
- * design note 0029): `HYPHA_PUBLIC_API_URL`, else `HYPHA_API_URL` when the admin calls
- * the API at its public address anyway.
+ * The API's address as apps and browsers reach it (an app's install route takes it):
+ * `HYPHA_PUBLIC_API_URL`, else `HYPHA_API_URL` when the admin calls the API at its
+ * public address anyway.
  */
 export function publicApiUrl(): string {
   return (process.env.HYPHA_PUBLIC_API_URL ?? apiUrl()).replace(/\/+$/, "");
 }
 
 /**
- * The user's address, passed on so Hypha's per-address rate limits (design note 0009)
- * count the user, not the admin server. Hypha only believes it when the admin's address
- * is in `HYPHA_TRUSTED_PROXIES`.
+ * The user's address, passed on so Hypha's per-address rate limits count the user, not
+ * the admin server. Hypha only believes it when the admin's address is in
+ * `HYPHA_TRUSTED_PROXIES`.
  *
  * Only from a source the browser can't forge: Cloudflare's `cf-connecting-ip` (set on
  * Workers), or, when `ADMIN_TRUST_X_FORWARDED_FOR=true` because the admin runs behind
@@ -83,8 +84,7 @@ export async function sessionClient() {
   if (!token) redirect("/login");
   // On Workers (through the API's binding) only reference data that no write changes is
   // cached across requests: an isolate that didn't see a write would keep serving the
-  // old read (design note 0025, §4). Elsewhere one server sees every write, so its cache
-  // stays right.
+  // old read. Elsewhere one server sees every write, so its cache stays right.
   const bound = apiFetch();
   const client = createAdminClient(
     apiUrl(),
@@ -176,38 +176,10 @@ async function sessionExpired(): Promise<never> {
   redirect(`/session-expired?next=${encodeURIComponent(safeNext(back))}`);
 }
 
-/** The pages outside the login, which make no sense to come back to after it. */
-const PUBLIC_PAGES = [
-  "/login",
-  "/session-expired",
-  "/invite",
-  "/forgot-password",
-  "/reset-password",
-];
-
-/**
- * A path on this admin to go to after signing in, or "/". Only plain local paths: never
- * another origin (`//evil.example`, `/\\evil.example`), nor the login pages themselves.
- */
-export function safeNext(path: string | null | undefined): string {
-  if (!path || !path.startsWith("/") || path.startsWith("//") || path.startsWith("/\\")) {
-    return "/";
-  }
-  if (
-    PUBLIC_PAGES.some(
-      (page) => path === page || path.startsWith(`${page}/`) || path.startsWith(`${page}?`),
-    )
-  ) {
-    return "/";
-  }
-  return path;
-}
-
 /**
  * Where to land after signing in with `token`: `next`, except that an empty store (no
- * market and no product) starts at the setup wizard (design note 0024, AU11). A read the
- * user's scopes don't allow counts as not empty, so nobody is sent somewhere they can't
- * act.
+ * market and no product) starts at the setup wizard. A read the user's scopes don't
+ * allow counts as not empty, so nobody is sent somewhere they can't act.
  */
 export async function landing(token: string, next: string): Promise<string> {
   if (next !== "/") return next;
@@ -637,8 +609,8 @@ export function describe(error: ApiError): string {
   }
 }
 
-/** Sales channels' names by ID (design note 0020). Empty without `channels:read`, so a
- * page that only labels channels still shows, with their IDs. */
+/** Sales channels' names by ID. Empty without `channels:read`, so a page that only labels
+ * channels still shows, with their IDs. */
 export async function channelNames(
   client: Awaited<ReturnType<typeof sessionClient>>,
 ): Promise<Map<string, string>> {
@@ -647,9 +619,9 @@ export async function channelNames(
 }
 
 /**
- * Minor units by currency (`GET /admin/currencies`, design note 0021), fetched once per
- * request: the layout, which provides it to client components (`useCurrencies`), and the
- * page's own server code share one result.
+ * Minor units by currency (`GET /admin/currencies`), fetched once per request: the
+ * layout, which provides it to client components (`useCurrencies`), and the page's own
+ * server code share one result.
  */
 export const loadCurrencies = perRequest(async (): Promise<Currencies> => {
   const client = await sessionClient();
@@ -684,9 +656,9 @@ export async function loadTimeZone(): Promise<string> {
 }
 
 /**
- * How far the setup guide got (design note 0024, AU11): the guide, its nav item and the
- * home page's checklist show only until it's finished. `null` when the staff member
- * can't read the store: then nothing about the guide shows.
+ * How far the setup guide got: the guide, its nav item and the home page's checklist
+ * show only until it's finished. `null` when the staff member can't read the store:
+ * then nothing about the guide shows.
  */
 export async function loadSetup(): Promise<{ step: string | null; isFinished: boolean } | null> {
   const store = await loadStore();
@@ -704,8 +676,8 @@ export const loadCountries = perRequest(async (): Promise<Country[]> => {
 });
 
 /**
- * The store's payment methods in the order shoppers see them (`GET /admin/payment-methods`,
- * design note 0027), once per request. `null` when the staff member lacks
+ * The store's payment methods in the order shoppers see them (`GET
+ * /admin/payment-methods`), once per request. `null` when the staff member lacks
  * `payments:read`, so pages that only mention payments still show.
  */
 export const loadPaymentMethods = perRequest(
@@ -718,9 +690,9 @@ export const loadPaymentMethods = perRequest(
 );
 
 /**
- * The notification settings (`GET /admin/notification-settings`, design note 0028), once
- * per request: the settings page and a template's editor (whether a test can be sent)
- * share it. `null` without `notifications:read`.
+ * The notification settings (`GET /admin/notification-settings`), once per request: the
+ * settings page and a template's editor (whether a test can be sent) share it. `null`
+ * without `notifications:read`.
  */
 export const loadNotificationSettings = perRequest(
   async (): Promise<AdminSchemas["NotificationSettingsResponse"] | null> => {

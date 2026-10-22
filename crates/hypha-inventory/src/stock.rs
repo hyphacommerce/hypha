@@ -24,15 +24,15 @@ pub enum Availability {
 /// `LocationRepo::serving`) for exactly the variants it is about to check.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StockContext {
-    /// Items of the variants being checked. A variant with none is untracked (I3).
+    /// Items of the variants being checked. A variant with none is untracked.
     pub items: HashMap<VariantId, InventoryItem>,
     /// The locations that serve the market.
     pub locations: Vec<Location>,
 }
 
 impl StockContext {
-    /// The stock of `variants` in the locations serving `market`, in 2 queries (design
-    /// note 0019, section 8: carts and search documents load it the same way).
+    /// The stock of `variants` in the locations serving `market`, in 2 queries (carts and
+    /// search documents load it the same way).
     pub async fn load<S: HasInventoryItems + HasLocations>(
         ports: &S,
         market: MarketId,

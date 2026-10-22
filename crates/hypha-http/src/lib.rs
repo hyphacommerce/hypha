@@ -1,12 +1,11 @@
-//! Hypha's HTTP layer (design note 0026, W3): the routes, their extractors, error
-//! mapping and DTOs, the OpenAPI documents and the host state, as a library the hosts
-//! build on. `hypha-host-axum` is the binary that serves it; a Workers host will be the
-//! second (0026).
+//! Hypha's HTTP layer: the routes, their extractors, error mapping and DTOs, the OpenAPI
+//! documents and the host state, as a library the hosts build on. `hypha-host-axum` is the
+//! binary that serves it; a Workers host will be the second.
 //!
-//! What only a runtime can do (time, IDs, randomness, CPU-heavy work, background work,
-//! rate limits, outbound HTTP) comes from the host (`host.rs`); the storage too
+//! What only a runtime can do (time, IDs, randomness, CPU-heavy work, background work, rate
+//! limits, outbound HTTP) comes from the host (`host.rs`); the storage too
 //! (`state::Storage`). So this crate holds no runtime: the Postgres pool, the job runner
-//! and the Tokio pieces are `hypha-host-axum`'s (design note 0026, §1).
+//! and the Tokio pieces are `hypha-host-axum`'s.
 
 pub mod app_endpoints;
 pub mod app_fields;
@@ -15,6 +14,7 @@ pub mod email;
 pub mod error;
 pub mod extensions;
 pub mod extract;
+pub mod handlers;
 pub mod host;
 pub mod jobs;
 pub mod key_cache;

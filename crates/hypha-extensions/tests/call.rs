@@ -2,13 +2,16 @@
 
 use std::{cell::RefCell, time::Duration};
 
-use hypha_core::{AppKey, Clock, IdGenerator, Timestamp};
-use hypha_extensions::{
-    Answer, CallOutcome, EXTENSION_HEADER, EXTENSION_VERSION_HEADER, Endpoint, ExtensionCaller,
-    ExtensionError, ExtensionPoint, IDEMPOTENCY_KEY_HEADER, MAX_ANSWER_BYTES, OnFailure,
-    OutgoingCall, TransportError, call,
+use hypha_core::{
+    AppKey, Clock, ExtensionCallId, IdGenerator, Page, PageRequest, RepoError, Timestamp,
 };
-use hypha_testkit::{FixedClock, InMemoryExtensionCallRepo, SequentialIds};
+use hypha_extensions::{
+    Answer, CallOutcome, EXTENSION_HEADER, EXTENSION_VERSION_HEADER, Endpoint, ExtensionCall,
+    ExtensionCallRepo, ExtensionCaller, ExtensionError, ExtensionPoint, ExtensionSettings,
+    IDEMPOTENCY_KEY_HEADER, MAX_ANSWER_BYTES, OnFailure, OutgoingCall, TransportError, call,
+    prune_calls,
+};
+use hypha_testkit::{FixedClock, InMemoryExtensionCallRepo, InMemoryPorts, SequentialIds};
 use pollster::block_on;
 use serde::{Deserialize, Serialize};
 
@@ -359,4 +362,80 @@ fn each_call_is_recorded_once_with_its_own_id() {
     assert_eq!(calls.len(), 2);
     assert_ne!(calls[0].id, calls[1].id);
     assert_eq!(calls[0].correlation, None);
+}
+
+/// A call log whose every write fails.
+struct BrokenLog;
+
+impl ExtensionCallRepo for BrokenLog {
+    async fn insert(&self, _: &ExtensionCall) -> Result<(), RepoError> {
+        Err(RepoError::Backend("the log is down".to_string()))
+    }
+
+    async fn list_for_app(
+        &self,
+        _: &AppKey,
+        _: PageRequest<ExtensionCallId>,
+    ) -> Result<Page<ExtensionCall>, RepoError> {
+        Err(RepoError::Backend("the log is down".to_string()))
+    }
+
+    async fn prune(&self, _: Timestamp, _: u32) -> Result<u32, RepoError> {
+        Err(RepoError::Backend("the log is down".to_string()))
+    }
+}
+
+#[test]
+fn a_call_that_cant_be_recorded_still_answers() {
+    let fake = FakeApp::ok(200, r#"{"n": 8}"#);
+    let key = app();
+    let endpoint = Endpoint {
+        app: &key,
+        url: "https://echo.example/x",
+        secret: "s",
+        timeout: None,
+        headers: &[],
+    };
+    assert_eq!(
+        block_on(call::<Echo>(
+            &fake,
+            &BrokenLog,
+            &env(),
+            &endpoint,
+            &Ask { n: 4 },
+            "k",
+            None,
+        )),
+        Ok(Reply { n: 8 })
+    );
+}
+
+fn recorded_at(started_at: Timestamp, n: u128) -> ExtensionCall {
+    ExtensionCall {
+        id: ExtensionCallId::from_uuid(uuid::Uuid::from_u128(n)),
+        app: app(),
+        point: Echo::NAME.to_string(),
+        version: Echo::VERSION,
+        started_at,
+        duration_ms: 10,
+        outcome: CallOutcome::Ok,
+        status: Some(200),
+        error: None,
+        correlation: None,
+    }
+}
+
+#[test]
+fn pruning_drops_calls_older_than_the_cutoff_and_keeps_the_rest() {
+    let ports = InMemoryPorts::default();
+    let clock = env().clock;
+    let settings = ExtensionSettings::default();
+    let cutoff = clock.now().minus(settings.keep_calls);
+    let inside = recorded_at(cutoff, 1);
+    let outside = recorded_at(Timestamp::from_unix_micros(cutoff.unix_micros() - 1), 2);
+    block_on(ports.extension_calls.insert(&inside)).unwrap();
+    block_on(ports.extension_calls.insert(&outside)).unwrap();
+    let progress = block_on(prune_calls(&ports, &clock, &settings, 10)).unwrap();
+    assert_eq!(progress.done, 1);
+    assert_eq!(ports.extension_calls.all(), [inside]);
 }

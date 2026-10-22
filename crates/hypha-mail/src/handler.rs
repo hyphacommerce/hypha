@@ -1,14 +1,18 @@
-//! `Mailer` (design note 0028, §4, NT7): the event handler that queues emails to buyers
-//! and staff about orders. It renders and records; the send job sends.
+//! `Mailer`: the event handler that queues emails to buyers and staff about orders. It
+//! renders and records; the send job sends.
 
-use hypha_core::{Email, EventHandler, EventId, FulfillmentId, OrderId, StoredEvent, Timezone};
-use hypha_fulfillment::{Fulfillment, FulfillmentRepo, HasFulfillments};
+use hypha_core::{
+    Email, Event, EventHandler, EventId, FulfillmentId, OrderId, StoredEvent, Timezone,
+};
+use hypha_fulfillment::{
+    Fulfillment, FulfillmentCreated, FulfillmentRepo, FulfillmentUpdated, HasFulfillments,
+};
 use hypha_media::HasAssets;
 use hypha_notifications::{
     HasNotificationSettings, HasNotificationTemplates, HasNotifications, Notification,
     NotificationRepo, TemplateKey,
 };
-use hypha_orders::{HasOrders, Order, OrderRepo};
+use hypha_orders::{HasOrders, Order, OrderCancelled, OrderPlaced, OrderRepo};
 use hypha_payments::{HasPayments, Payment, newest_payment};
 use hypha_stores::StoreRepo;
 use serde::Deserialize;
@@ -22,9 +26,9 @@ use crate::{
     send::{Branding, Message, Sources, branding, queue, render_for_sending, skip},
 };
 
-/// Every repository mailing reads or writes, so a host names one bound. The store's
-/// row is read through `StoreRepo` on the same ports: one store per deployment (design
-/// note 0006, model A) keeps it in the store's database.
+/// Every repository mailing reads or writes, so a host names one bound. The store's row is
+/// read through `StoreRepo` on the same ports: one store per deployment (model A) keeps it
+/// in the store's database.
 pub trait MailPorts:
     HasOrders
     + HasFulfillments
@@ -51,12 +55,12 @@ impl<T> MailPorts for T where
 }
 
 /// The event types the mailer answers.
-pub const ORDER_PLACED: &str = "order.placed";
-pub const ORDER_CANCELLED: &str = "order.cancelled";
-pub const FULFILLMENT_CREATED: &str = "fulfillment.created";
-pub const FULFILLMENT_UPDATED: &str = "fulfillment.updated";
+pub const ORDER_PLACED: &str = <OrderPlaced as Event>::TYPE;
+pub const ORDER_CANCELLED: &str = <OrderCancelled as Event>::TYPE;
+pub const FULFILLMENT_CREATED: &str = <FulfillmentCreated as Event>::TYPE;
+pub const FULFILLMENT_UPDATED: &str = <FulfillmentUpdated as Event>::TYPE;
 
-/// Emails about orders, on their events (design note 0028, §4):
+/// Emails about orders, on their events:
 /// - `order.placed`: `order_confirmation` to the buyer, `staff_new_order` to each staff
 ///   recipient;
 /// - `order.cancelled`, `fulfillment.created`, `fulfillment.updated`: `order_cancelled`,
@@ -241,7 +245,7 @@ async fn queue_template<E: MailEnv, P: MailPorts>(
             event: Some(event),
             order: Some(about.order.id()),
         };
-        // An erased customer's placeholder can't receive mail (design note 0032, CD10).
+        // An erased customer's placeholder can't receive mail.
         if message.to.is_placeholder() {
             records.push(crate::send::skip_as(env, ports, &message, crate::send::ERASED).await?);
             continue;

@@ -1,6 +1,5 @@
-//! The OAuth 2.1 flow that installs apps (design note 0029, AP5, §4.1): authorization
-//! requests, staff's consent, codes, tokens with rotation, revocation, grants and
-//! uninstalling.
+//! The OAuth 2.1 flow that installs apps: authorization requests, staff's consent, codes,
+//! tokens with rotation, revocation, grants and uninstalling.
 
 use core::time::Duration;
 
@@ -27,9 +26,9 @@ use crate::{
     },
 };
 
-/// How long a request waits for staff (§4.1 step 2).
+/// How long a request waits for staff.
 pub const REQUEST_LIFETIME: Duration = Duration::from_secs(10 * 60);
-/// How long a code works (§15).
+/// How long a code works.
 pub const CODE_LIFETIME: Duration = Duration::from_secs(60);
 /// How long an access token works.
 pub const ACCESS_TOKEN_LIFETIME: Duration = Duration::from_secs(60 * 60);
@@ -97,8 +96,8 @@ pub async fn authorize<S: OAuthPorts>(
     {
         return Err(UnredirectableError::OtherManifest(manifest.key().clone()).into());
     }
-    // A field's type is part of its identity (design note 0033, CF3): a manifest that
-    // changes one can never be approved, so it doesn't reach the consent page.
+    // A field's type is part of its identity: a manifest that changes one can never be
+    // approved, so it doesn't reach the consent page.
     if let Some(installed) = app.as_ref().and_then(|a| a.manifest()) {
         check_retypes(&installed.manifest, &manifest)
             .map_err(|e| UnredirectableError::Manifest(e.into()))?;
@@ -328,11 +327,11 @@ impl Approval {
     }
 }
 
-/// A write a command prepared without committing it (design note 0033, §8): what it
-/// decided (`answer`), its writes staged in `batch`, and the manifest the write applies
-/// to the app, if it applies one. The caller stages what this crate can't see in the
-/// same batch (the HTTP layer syncs the app's custom fields from `applies`), then
-/// commits: the app and what hangs off its manifest change together or not at all.
+/// A write a command prepared without committing it: what it decided (`answer`), its writes
+/// staged in `batch`, and the manifest the write applies to the app, if it applies one. The
+/// caller stages what this crate can't see in the same batch (the HTTP layer syncs the
+/// app's custom fields from `applies`), then commits: the app and what hangs off its
+/// manifest change together or not at all.
 #[derive(Debug)]
 pub struct Prepared<B, T> {
     pub batch: B,
@@ -504,13 +503,12 @@ fn approve_private<B: StageApps + StageOAuth>(
     })
 }
 
-/// A private app's manifest, uploaded by staff (design note 0029, §4.1 "Private
-/// apps"): checked like a served one except that it may list no `redirect_uris`, and
-/// stored as a pending authorization request under the client ID
-/// `urn:hypha:private:<key>` for the consent page. Approving it installs the app and
-/// answers with its tokens (`Approval::Credentials`). A hand-made app (0016) with the
-/// same key becomes this private app on approval; one installed from a served manifest
-/// can't be replaced by an upload (`app_installed_from_url`).
+/// A private app's manifest, uploaded by staff: checked like a served one except that it
+/// may list no `redirect_uris`, and stored as a pending authorization request under the
+/// client ID `urn:hypha:private:<key>` for the consent page. Approving it installs the app
+/// and answers with its tokens (`Approval::Credentials`). A hand-made app with the same key
+/// becomes this private app on approval; one installed from a served manifest can't be
+/// replaced by an upload (`app_installed_from_url`).
 pub async fn request_private_app<S: OAuthPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -951,17 +949,17 @@ pub async fn refresh_manifest<S: OAuthPorts>(
     Ok(prepared.answer)
 }
 
-/// Fetches an installed app's manifest again from its URL and applies it (design note
-/// 0029, §4.2, `POST /admin/apps/{key}/refresh`). Staff with `apps:write` do it, or
-/// the app itself with its own token. New scopes aren't granted here: they make a
-/// pending authorization request (no code: approving changes the grant, and the app
-/// then asks `/oauth/authorize` for tokens with them, approved at once).
+/// Fetches an installed app's manifest again from its URL and applies it (`POST
+/// /admin/apps/{key}/refresh`). Staff with `apps:write` do it, or the app itself with its
+/// own token. New scopes aren't granted here: they make a pending authorization request (no
+/// code: approving changes the grant, and the app then asks `/oauth/authorize` for tokens
+/// with them, approved at once).
 ///
-/// `drops_data` says whether applying a manifest deletes data staff should see go
-/// first: the HTTP layer answers whether it removes custom fields (design note 0033,
-/// §8). Such a refresh waits for consent like new scopes do. Staged, not committed
-/// (`Prepared`): `applies` is the manifest when the app's fields change now (an
-/// `Updated` refresh), `None` when they wait for the approval.
+/// `drops_data` says whether applying a manifest deletes data staff should see go first:
+/// the HTTP layer answers whether it removes custom fields. Such a refresh waits for
+/// consent like new scopes do. Staged, not committed (`Prepared`): `applies` is the
+/// manifest when the app's fields change now (an `Updated` refresh), `None` when they wait
+/// for the approval.
 pub async fn prepare_refresh<S: OAuthPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -1006,13 +1004,13 @@ pub async fn prepare_refresh<S: OAuthPorts>(
         .filter(|s| asked.contains(s))
         .copied()
         .collect();
-    // Refuses a manifest that changes a field's type (design note 0033, CF3).
+    // Refuses a manifest that changes a field's type.
     app.apply_manifest(InstalledManifest {
         url: installed.url.clone(),
         manifest: manifest.clone(),
         fetched_at: now,
     })?;
-    // Fewer scopes take effect at once (§4.1); the approver stays who approved them.
+    // Fewer scopes take effect at once; the approver stays who approved them.
     if kept.len() != grant.scopes().len() {
         app.set_grant(Grant::new(&kept, grant.approved_by(), grant.approved_at()));
     }

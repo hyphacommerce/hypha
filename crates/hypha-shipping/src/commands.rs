@@ -1,5 +1,5 @@
-//! The shipping setup a merchant (or an admin agent) manages: zones and their options,
-//! and the external apps that calculate rates (design note 0015, section 8).
+//! The shipping setup a merchant (or an admin agent) manages: zones and their options, and
+//! the external apps that calculate rates.
 
 use hypha_core::{
     AuthError, CountryCode, CountryError, Ctx, ErrorCode, IdGenerator, MoneyError, RepoError,

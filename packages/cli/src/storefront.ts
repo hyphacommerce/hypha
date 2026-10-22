@@ -1,8 +1,7 @@
-// Connecting the storefront to the API, after the first start: a publishable key for
-// the Online Store channel, on a server the storefront registered as an app whose
-// webhook refreshes its static pages (design note 0024, §7), and the emails' order links
-// pointed at it (design note 0028, §2). What `pnpm seed` does locally, done once per
-// deployment, as the owner.
+// Connecting the storefront to the API, after the first start: a publishable key for the
+// Online Store channel, on a server the storefront registered as an app whose webhook
+// refreshes its static pages, and the emails' order links pointed at it. What `pnpm
+// seed` does locally, done once per deployment, as the owner.
 
 import { type Staff } from "./api.ts";
 import { type Deployment, url } from "./deployment.ts";
@@ -17,7 +16,7 @@ const EVENTS = [
   "category.*",
   "market.*",
   // Custom field definitions: one shown to storefronts, or no longer, changes product
-  // and category pages (design note 0033, §6.2).
+  // and category pages.
   "custom_field_definition.*",
 ];
 

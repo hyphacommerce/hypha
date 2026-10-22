@@ -10,7 +10,7 @@ import { useState, useTransition } from "react";
 
 import { reopenSetup } from "../../setup/actions";
 
-/** Shows the put-away setup guide again (design note 0024, AU11). */
+/** Shows the put-away setup guide again. */
 export function SetupGuideCard() {
   const router = useRouter();
   const [error, setError] = useState<string>();

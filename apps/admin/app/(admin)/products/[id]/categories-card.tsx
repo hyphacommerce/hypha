@@ -12,8 +12,8 @@ import { type CategoryNode, flatten } from "@/lib/categories";
 import type { Draft } from "./draft";
 
 /**
- * The categories the product is in (design note 0022, section 5): part of the editor's
- * draft, saved with the bar like its details and publishing.
+ * The categories the product is in: part of the editor's draft, saved with the bar
+ * like its details and publishing.
  */
 export function CategoriesCard({
   tree,
