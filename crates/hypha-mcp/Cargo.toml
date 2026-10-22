@@ -1,0 +1,18 @@
+[package]
+name = "hypha-mcp"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "The Model Context Protocol server: JSON-RPC, versions and tools, behind an Operations port."
+
+[dependencies]
+hypha-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+pollster = "0.4"
+
+[lints]
+workspace = true
