@@ -34,7 +34,7 @@ pub use events::{
 };
 pub use grant::{
     Access, Grant, GrantError, GrantInput, MAX_OPERATIONS, NEVER_GRANTED, PROPOSE_ONLY,
-    Permissions, WriteMode, WritesCap, effective,
+    Permissions, WriteMode, WritesCap, effective, suggested_grant,
 };
 pub use hypha_core::{OperationId, OperationIdError};
 pub use proposal::{

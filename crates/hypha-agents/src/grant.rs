@@ -293,6 +293,30 @@ impl Grant {
     }
 }
 
+/// The grant a consent page offers a person connecting a client, for them to change: every
+/// scope they `hold` that an agent may have, reads as reads and writes to `propose`, no
+/// personal data and no allowlist. A client that asked for scopes (`requested`, non-empty)
+/// is offered only those, with the reads its writes imply.
+pub fn suggested_grant(holds: impl Fn(Scope) -> bool, requested: &[Scope]) -> Grant {
+    let wanted = |s: Scope| {
+        requested.is_empty()
+            || requested.contains(&s)
+            || requested.iter().any(|r| s.implied_by() == Some(*r))
+    };
+    let offered = || {
+        Scope::ALL
+            .into_iter()
+            .filter(|s| !NEVER_GRANTED.contains(s) && holds(*s) && wanted(*s))
+    };
+    let read = offered().filter(|s| kind(*s) == Kind::Read).collect();
+    let write = offered()
+        .filter(|s| kind(*s) == Kind::Write)
+        .map(|s| (s, WriteMode::Propose))
+        .collect();
+    // Every part was filtered by the rules `from_parts` checks.
+    Grant::from_parts(read, write, Vec::new(), None).unwrap_or_default()
+}
+
 /// The operator's cap on what any agent may write (`agents.writes`), applied at every
 /// request after the grant: `Propose` turns every `Apply` into `Propose`, `Off` leaves
 /// agents read-only. The grant stays as staff set it, so lifting the cap restores it.
@@ -807,5 +831,36 @@ mod tests {
                 "{scope}"
             );
         }
+    }
+
+    #[test]
+    fn a_suggested_grant_reads_and_proposes_what_the_person_holds() {
+        let held = [
+            Scope::OrdersRead,
+            Scope::OrdersWrite,
+            Scope::ProductsRead,
+            Scope::UsersWrite,
+            Scope::CustomerDataEmail,
+            Scope::CustomersErase,
+        ];
+        let holds = |s: Scope| held.contains(&s);
+        let grant = suggested_grant(holds, &[]);
+        assert_eq!(grant.read(), [Scope::ProductsRead, Scope::OrdersRead]);
+        assert_eq!(
+            grant.write(),
+            [
+                (Scope::CustomersErase, WriteMode::Propose),
+                (Scope::OrdersWrite, WriteMode::Propose)
+            ]
+        );
+        assert!(grant.customer_data().is_empty(), "no personal data");
+        assert!(
+            !grant.scopes().contains(&Scope::UsersWrite),
+            "never granted"
+        );
+
+        let asked = suggested_grant(holds, &[Scope::OrdersWrite, Scope::InventoryRead]);
+        assert_eq!(asked.read(), [Scope::OrdersRead]);
+        assert_eq!(asked.write(), [(Scope::OrdersWrite, WriteMode::Propose)]);
     }
 }
