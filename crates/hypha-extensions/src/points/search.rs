@@ -22,6 +22,7 @@ impl ExtensionPoint for SearchQuery {
     const ON_FAILURE: OnFailure = OnFailure::Fallback;
     /// It answers with products and variants, so it reads them.
     const SCOPE: Scope = Scope::ProductsRead;
+    const READ_ONLY: bool = true;
     type Request = SearchQueryRequest;
     type Response = SearchQueryResponse;
 

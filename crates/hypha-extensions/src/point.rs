@@ -27,6 +27,10 @@ pub trait ExtensionPoint {
     /// here (a point needing a scope the grant lacks isn't called). Apps made by hand, with
     /// no grant, are called on what staff registered for them.
     const SCOPE: Scope;
+    /// Whether answering changes nothing, at the app or anywhere else (rates, search
+    /// results, a payment's status). A preview of a write calls only such points; any
+    /// other stops the preview where it would have been called.
+    const READ_ONLY: bool;
     /// The body Hypha sends.
     type Request: Serialize;
     /// The body a 2xx answer must parse as; anything else is an `invalid` call.
@@ -99,6 +103,7 @@ mod tests {
         const TIMEOUT: Duration = Duration::from_secs(1);
         const ON_FAILURE: OnFailure = OnFailure::FailClosed;
         const SCOPE: Scope = Scope::OrdersRead;
+        const READ_ONLY: bool = false;
         type Request = ();
         type Response = u8;
     }
@@ -110,6 +115,7 @@ mod tests {
         const TIMEOUT: Duration = Duration::from_secs(1);
         const ON_FAILURE: OnFailure = OnFailure::Fallback;
         const SCOPE: Scope = Scope::OrdersRead;
+        const READ_ONLY: bool = false;
         type Request = ();
         type Response = u8;
     }

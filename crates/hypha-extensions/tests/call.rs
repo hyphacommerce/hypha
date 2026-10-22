@@ -34,6 +34,7 @@ impl ExtensionPoint for Echo {
     const TIMEOUT: Duration = Duration::from_millis(1500);
     const ON_FAILURE: OnFailure = OnFailure::FailClosed;
     const SCOPE: hypha_core::Scope = hypha_core::Scope::OrdersRead;
+    const READ_ONLY: bool = true;
     type Request = Ask;
     type Response = Reply;
 

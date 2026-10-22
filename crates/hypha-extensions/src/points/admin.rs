@@ -26,6 +26,7 @@ impl ExtensionPoint for RunAdminAction {
     /// target's scope (`hypha_apps::Target::scope`), for the grant and the caller. This
     /// names what the caller needs besides.
     const SCOPE: Scope = Scope::AppsRead;
+    const READ_ONLY: bool = false;
     type Request = AdminActionRequest;
     type Response = AdminActionResponse;
 

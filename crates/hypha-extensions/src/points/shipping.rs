@@ -22,6 +22,7 @@ impl ExtensionPoint for ShippingRates {
     /// The rate settings it answers for are shipping's. The destination's street and
     /// postal code are personal data besides (`customer_data:address`, AP10).
     const SCOPE: Scope = Scope::ShippingRead;
+    const READ_ONLY: bool = true;
     type Request = RateCallbackRequest;
     type Response = RatesResponse;
 

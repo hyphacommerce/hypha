@@ -27,6 +27,12 @@ pub const MAX_ANSWER_BYTES: usize = 256 * 1024;
 /// type and the store added by the host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutgoingCall<'a> {
+    /// The point called (`P::NAME`) and whether it's read-only (`P::READ_ONLY`): a host
+    /// previewing a write sends only read-only calls.
+    pub point: &'static str,
+    pub read_only: bool,
+    /// The app answering.
+    pub app: &'a AppKey,
     pub url: &'a str,
     /// The app's secret, in plain text, for the signature.
     pub secret: &'a str,
@@ -110,6 +116,9 @@ pub async fn call<P: ExtensionPoint>(
     let started_at = env.now();
     let sent = caller
         .send(OutgoingCall {
+            point: P::NAME,
+            read_only: P::READ_ONLY,
+            app: endpoint.app,
             url: endpoint.url,
             secret: endpoint.secret,
             headers,

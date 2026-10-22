@@ -27,6 +27,7 @@ impl ExtensionPoint for PaymentsStart {
     /// A payment app reports what happened through `POST /admin/payments/{id}/events`,
     /// which takes `payments:write`: without it, it can't do its job.
     const SCOPE: Scope = Scope::PaymentsWrite;
+    const READ_ONLY: bool = false;
     type Request = PaymentStartRequest;
     type Response = PaymentStartResponse;
 
@@ -144,6 +145,7 @@ impl ExtensionPoint for PaymentsStatus {
     /// `app_unavailable`: checkout waits for the app's report (`payment_pending`).
     const ON_FAILURE: OnFailure = OnFailure::FailClosed;
     const SCOPE: Scope = Scope::PaymentsWrite;
+    const READ_ONLY: bool = true;
     type Request = PaymentStatusRequest;
     type Response = PaymentStatusResponse;
 }
@@ -217,6 +219,7 @@ macro_rules! payment_action {
             /// `app_unavailable`: nothing changes on the payment.
             const ON_FAILURE: OnFailure = OnFailure::FailClosed;
             const SCOPE: Scope = Scope::PaymentsWrite;
+            const READ_ONLY: bool = false;
             type Request = PaymentActionRequest;
             type Response = PaymentActionResponse;
         }
