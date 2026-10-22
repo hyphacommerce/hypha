@@ -1,5 +1,32 @@
 {
   "components": {
+    "parameters": {
+      "HyphaPreview": {
+        "description": "`1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write.",
+        "in": "header",
+        "name": "Hypha-Preview",
+        "required": false,
+        "schema": {
+          "enum": [
+            "1",
+            "0"
+          ],
+          "type": "string"
+        }
+      }
+    },
+    "responses": {
+      "Preview": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PreviewResponse"
+            }
+          }
+        },
+        "description": "The write previewed (`Hypha-Preview: 1`): what it would have answered and recorded. Nothing of it was kept."
+      }
+    },
     "schemas": {
       "AcceptInviteRequest": {
         "additionalProperties": false,
@@ -1111,6 +1138,79 @@
           "tree"
         ],
         "type": "object"
+      },
+      "BlockedBy": {
+        "description": "The effect outside the database a preview couldn't run.",
+        "oneOf": [
+          {
+            "description": "A call to an app's extension point that changes something (`payments.refund`).",
+            "properties": {
+              "app": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "extension_call"
+                ],
+                "type": "string"
+              },
+              "point": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "point",
+              "app",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Any other call out (a manifest, a spore's provider).",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "outbound_call"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The media storage (checking or removing a file).",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "media_storage"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A URL to upload a file to the media storage.",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "media_upload"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "CancelOrderRequest": {
         "additionalProperties": false,
@@ -6818,6 +6918,139 @@
         ],
         "type": "object"
       },
+      "PreviewBody": {
+        "description": "What the write would have done; nothing of it was kept.",
+        "properties": {
+          "blocked_by": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlockedBy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "calls": {
+            "description": "The read-only extension points it called (`shipping.rates`, `search.query`,\n`payments.status`): those are called for real.",
+            "items": {
+              "$ref": "#/components/schemas/PreviewCall"
+            },
+            "type": "array"
+          },
+          "complete": {
+            "description": "Whether the write ran to its end. `false`: it reached an effect outside the\ndatabase a preview can't run (`blocked_by`), and stopped there; what it did up to\nthen is listed.",
+            "type": "boolean"
+          },
+          "emails": {
+            "description": "The emails it would have sent while answering. Emails sent later because of its\nevents (an order's confirmation) aren't listed.",
+            "items": {
+              "$ref": "#/components/schemas/PreviewEmail"
+            },
+            "type": "array"
+          },
+          "events": {
+            "description": "The events it would have recorded, in order, as the caller may see them.",
+            "items": {
+              "$ref": "#/components/schemas/PreviewEvent"
+            },
+            "type": "array"
+          },
+          "response": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PreviewedResponse",
+                "description": "What the route would have answered: its status and body, redacted as it would\nbe. `null` when the write stopped at a blocked effect."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "complete",
+          "events",
+          "emails",
+          "calls"
+        ],
+        "type": "object"
+      },
+      "PreviewCall": {
+        "description": "A read-only extension point the write called.",
+        "properties": {
+          "app": {
+            "description": "The app that answered (`app_rates`).",
+            "type": "string"
+          },
+          "point": {
+            "description": "`shipping.rates`, `search.query` or `payments.status`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "point",
+          "app"
+        ],
+        "type": "object"
+      },
+      "PreviewEmail": {
+        "description": "An email the write would have sent.",
+        "properties": {
+          "redacted": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "template": {
+            "description": "The template's key (`staff_invite`).",
+            "type": "string"
+          },
+          "to": {
+            "description": "Absent without `customer_data:email` (listed in `redacted`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "template",
+          "subject"
+        ],
+        "type": "object"
+      },
+      "PreviewEvent": {
+        "description": "An event the write would have recorded: as webhooks carry it, without the ID, actor and\ntime it would have had.",
+        "properties": {
+          "data": {
+            "type": "object"
+          },
+          "subject": {
+            "description": "The prefixed ID of what it's about (`prod_…`).",
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "version",
+          "subject",
+          "data"
+        ],
+        "type": "object"
+      },
       "PreviewNotificationRequest": {
         "additionalProperties": false,
         "description": "Unsaved sources to render.",
@@ -6849,6 +7082,36 @@
         },
         "required": [
           "html"
+        ],
+        "type": "object"
+      },
+      "PreviewResponse": {
+        "description": "What a previewed write answers.",
+        "properties": {
+          "preview": {
+            "$ref": "#/components/schemas/PreviewBody"
+          }
+        },
+        "required": [
+          "preview"
+        ],
+        "type": "object"
+      },
+      "PreviewedResponse": {
+        "description": "The route's answer, had the write run.",
+        "properties": {
+          "body": {
+            "type": "object"
+          },
+          "status": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "body"
         ],
         "type": "object"
       },
@@ -10111,6 +10374,11 @@
       },
       "post": {
         "operationId": "admin.api_keys.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -10140,7 +10408,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -10222,6 +10490,9 @@
         "tags": [
           "api_keys"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "api_keys:write"
         ]
@@ -10327,6 +10598,9 @@
             "schema": {
               "$ref": "#/components/schemas/ApiKeyId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -10348,7 +10622,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -10410,6 +10684,9 @@
         "tags": [
           "api_keys"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "api_keys:write"
         ]
@@ -10517,6 +10794,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -10548,7 +10828,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -10640,6 +10920,9 @@
         "tags": [
           "app_extensions"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:read"
         ]
@@ -10863,6 +11146,9 @@
               "pattern": "^(app|spore)_[a-z][a-z0-9_]*$",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -10884,7 +11170,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -10946,6 +11232,9 @@
         "tags": [
           "app_extensions"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:read"
         ]
@@ -11011,6 +11300,11 @@
       },
       "post": {
         "operationId": "admin.apps.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -11040,7 +11334,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -11122,6 +11416,9 @@
         "tags": [
           "apps"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:write"
         ]
@@ -11130,6 +11427,11 @@
     "/admin/apps/private": {
       "post": {
         "operationId": "admin.oauth.create_private",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -11159,7 +11461,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -11241,6 +11543,9 @@
         "tags": [
           "oauth"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:write"
         ]
@@ -11259,6 +11564,9 @@
               "pattern": "^(app|spore)_[a-z][a-z0-9_]*$",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -11273,7 +11581,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -11335,6 +11643,9 @@
         "tags": [
           "apps"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:write"
         ]
@@ -11440,6 +11751,9 @@
               "pattern": "^(app|spore)_[a-z][a-z0-9_]*$",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -11471,7 +11785,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -11563,6 +11877,9 @@
         "tags": [
           "apps"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:write"
         ]
@@ -11720,6 +12037,9 @@
             "schema": {
               "$ref": "#/components/schemas/DeliveryId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -11741,7 +12061,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -11803,6 +12123,9 @@
         "tags": [
           "apps"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:write"
         ]
@@ -12032,6 +12355,9 @@
               "pattern": "^(app|spore)_[a-z][a-z0-9_]*$",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -12063,7 +12389,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -12155,6 +12481,9 @@
         "tags": [
           "apps"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:write"
         ]
@@ -12173,6 +12502,9 @@
               "pattern": "^(app|spore)_[a-z][a-z0-9_]*$",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -12204,7 +12536,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -12296,6 +12628,9 @@
         "tags": [
           "apps"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:write"
         ]
@@ -12324,6 +12659,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -12338,7 +12676,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -12410,6 +12748,9 @@
         "tags": [
           "app_extensions"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:read"
         ]
@@ -12538,6 +12879,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -12552,7 +12896,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -12624,6 +12968,9 @@
         "tags": [
           "app_extensions"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:read"
         ]
@@ -12650,6 +12997,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -12664,7 +13014,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -12736,6 +13086,9 @@
         "tags": [
           "app_extensions"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:read"
         ]
@@ -12762,6 +13115,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -12776,7 +13132,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -12848,6 +13204,9 @@
         "tags": [
           "app_extensions"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:read"
         ]
@@ -12866,6 +13225,9 @@
               "pattern": "^(app|spore)_[a-z][a-z0-9_]*$",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -12887,7 +13249,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -12949,6 +13311,9 @@
         "tags": [
           "app_extensions"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:write"
         ]
@@ -12967,6 +13332,9 @@
               "pattern": "^(app|spore)_[a-z][a-z0-9_]*$",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -12988,7 +13356,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -13050,6 +13418,9 @@
         "tags": [
           "apps"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:write"
         ]
@@ -13157,6 +13528,9 @@
               "pattern": "^spore_[a-z][a-z0-9_]*$",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -13188,7 +13562,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -13280,6 +13654,9 @@
         "tags": [
           "apps"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:write"
         ]
@@ -13422,6 +13799,11 @@
       },
       "post": {
         "operationId": "admin.assets.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -13451,7 +13833,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -13533,6 +13915,9 @@
         "tags": [
           "assets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "media:write"
         ]
@@ -13550,6 +13935,9 @@
             "schema": {
               "$ref": "#/components/schemas/AssetId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -13564,7 +13952,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -13626,6 +14014,9 @@
         "tags": [
           "assets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "media:write"
         ]
@@ -13727,6 +14118,9 @@
             "schema": {
               "$ref": "#/components/schemas/AssetId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -13758,7 +14152,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -13850,6 +14244,9 @@
         "tags": [
           "assets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "media:write"
         ]
@@ -13866,6 +14263,9 @@
             "schema": {
               "$ref": "#/components/schemas/AssetId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -13887,7 +14287,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -13949,6 +14349,9 @@
         "tags": [
           "assets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "media:write"
         ]
@@ -14077,6 +14480,11 @@
     "/admin/auth/login": {
       "post": {
         "operationId": "admin.auth.login",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -14106,7 +14514,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -14185,12 +14593,20 @@
         "summary": "The first login step. 401 `invalid_credentials` for a wrong email or password (or a\ndisabled account), deliberately the same answer.",
         "tags": [
           "auth"
-        ]
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        }
       }
     },
     "/admin/auth/login/mfa": {
       "post": {
         "operationId": "admin.auth.finish_login",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -14220,7 +14636,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -14299,15 +14715,33 @@
         "summary": "The second step, when the first answered `mfa_required`. A wrong code is 401\n`invalid_mfa_code`; the fifth wrong code ends the challenge (then `invalid_token`).",
         "tags": [
           "auth"
-        ]
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        }
       }
     },
     "/admin/auth/logout": {
       "post": {
         "operationId": "admin.auth.logout",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "responses": {
           "204": {
             "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -14359,12 +14793,20 @@
         "tags": [
           "auth"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-staff-session": true
       }
     },
     "/admin/auth/password-reset": {
       "post": {
         "operationId": "admin.auth.request_reset",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -14387,7 +14829,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "409": {
             "content": {
@@ -14456,12 +14898,20 @@
         "summary": "202 at once, whether or not the email belongs to anyone: the work (finding the account,\nstoring the reset, sending the email) runs on its own task, so neither the answer nor\nits timing tells which emails exist. The one other answer is 429 `rate_limited`, which\ndepends on the caller's address and the email asked about, never on whether the account\nexists.",
         "tags": [
           "auth"
-        ]
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        }
       }
     },
     "/admin/auth/password-reset/confirm": {
       "post": {
         "operationId": "admin.auth.confirm_reset",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -14484,7 +14934,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -14563,7 +15013,10 @@
         "summary": "Sets the new password and logs out every session of the account.",
         "tags": [
           "auth"
-        ]
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        }
       }
     },
     "/admin/carts/{id}/customer": {
@@ -14577,6 +15030,9 @@
             "schema": {
               "$ref": "#/components/schemas/CartId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -14608,7 +15064,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -14700,6 +15156,9 @@
         "tags": [
           "carts"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "carts:write",
           "customers:read"
@@ -14709,6 +15168,11 @@
     "/admin/catalogs": {
       "post": {
         "operationId": "admin.markets.create_catalog",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -14738,7 +15202,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -14820,6 +15284,9 @@
         "tags": [
           "markets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "markets:write"
         ]
@@ -14925,6 +15392,9 @@
             "schema": {
               "$ref": "#/components/schemas/CatalogId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -14956,7 +15426,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -15048,6 +15518,9 @@
         "tags": [
           "markets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "pricing:write"
         ]
@@ -15064,6 +15537,9 @@
             "schema": {
               "$ref": "#/components/schemas/CatalogId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -15088,7 +15564,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -15180,6 +15656,9 @@
         "tags": [
           "markets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "markets:write"
         ]
@@ -15313,6 +15792,9 @@
             "schema": {
               "$ref": "#/components/schemas/CatalogId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -15337,7 +15819,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -15429,6 +15911,9 @@
         "tags": [
           "markets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "markets:write"
         ]
@@ -15556,6 +16041,11 @@
       },
       "post": {
         "operationId": "admin.categories.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -15585,7 +16075,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -15667,6 +16157,9 @@
         "tags": [
           "categories"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -15683,6 +16176,9 @@
             "schema": {
               "$ref": "#/components/schemas/CategoryId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -15697,7 +16193,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -15759,6 +16255,9 @@
         "tags": [
           "categories"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -15860,6 +16359,9 @@
             "schema": {
               "$ref": "#/components/schemas/CategoryId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -15891,7 +16393,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -15983,6 +16485,9 @@
         "tags": [
           "categories"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -16086,6 +16591,9 @@
             "schema": {
               "$ref": "#/components/schemas/CategoryId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -16117,7 +16625,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -16209,6 +16717,9 @@
         "tags": [
           "custom_fields"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -16225,6 +16736,9 @@
             "schema": {
               "$ref": "#/components/schemas/CategoryId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -16256,7 +16770,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -16348,6 +16862,9 @@
         "tags": [
           "categories"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -16364,6 +16881,9 @@
             "schema": {
               "$ref": "#/components/schemas/CategoryId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -16388,7 +16908,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -16480,6 +17000,9 @@
         "tags": [
           "categories"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -16612,6 +17135,9 @@
             "schema": {
               "$ref": "#/components/schemas/CategoryId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -16636,7 +17162,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -16728,6 +17254,9 @@
         "tags": [
           "categories"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -16793,6 +17322,11 @@
       },
       "post": {
         "operationId": "admin.channels.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -16822,7 +17356,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -16904,6 +17438,9 @@
         "tags": [
           "channels"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "channels:write"
         ]
@@ -17007,6 +17544,9 @@
             "schema": {
               "$ref": "#/components/schemas/ChannelId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -17038,7 +17578,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -17130,6 +17670,9 @@
         "tags": [
           "channels"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "channels:write"
         ]
@@ -17146,6 +17689,9 @@
             "schema": {
               "$ref": "#/components/schemas/ChannelId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -17170,7 +17716,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -17262,6 +17808,9 @@
         "tags": [
           "channels"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -17276,6 +17825,9 @@
             "schema": {
               "$ref": "#/components/schemas/ChannelId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -17300,7 +17852,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -17392,6 +17944,9 @@
         "tags": [
           "channels"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -17601,6 +18156,11 @@
       },
       "post": {
         "operationId": "admin.custom_fields.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -17630,7 +18190,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -17712,6 +18272,9 @@
         "tags": [
           "custom_fields"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "custom_fields:write"
         ]
@@ -17817,6 +18380,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomFieldDefinitionId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -17831,7 +18397,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -17893,6 +18459,9 @@
         "tags": [
           "custom_fields"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "custom_fields:write"
         ]
@@ -17994,6 +18563,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomFieldDefinitionId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -18025,7 +18597,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -18117,6 +18689,9 @@
         "tags": [
           "custom_fields"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "custom_fields:write"
         ]
@@ -18133,6 +18708,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomFieldDefinitionId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -18164,7 +18742,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -18256,6 +18834,9 @@
         "tags": [
           "custom_fields"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "custom_fields:write"
         ]
@@ -18370,6 +18951,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomFieldDefinitionId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -18401,7 +18985,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -18493,6 +19077,9 @@
         "tags": [
           "custom_fields"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": []
       }
     },
@@ -18507,6 +19094,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomFieldDefinitionId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -18531,7 +19121,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -18623,6 +19213,9 @@
         "tags": [
           "custom_fields"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": []
       }
     },
@@ -18686,6 +19279,11 @@
       },
       "post": {
         "operationId": "admin.customer_groups.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -18715,7 +19313,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -18797,6 +19395,9 @@
         "tags": [
           "customer_groups"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:write"
         ]
@@ -18813,6 +19414,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomerGroupId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -18827,7 +19431,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -18889,6 +19493,9 @@
         "tags": [
           "customer_groups"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:write"
         ]
@@ -18990,6 +19597,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomerGroupId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -19021,7 +19631,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -19113,6 +19723,9 @@
         "tags": [
           "customer_groups"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:write"
         ]
@@ -19129,6 +19742,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomerGroupId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -19153,7 +19769,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -19245,6 +19861,9 @@
         "tags": [
           "customer_groups"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:write"
         ]
@@ -19259,6 +19878,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomerGroupId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -19283,7 +19905,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -19375,6 +19997,9 @@
         "tags": [
           "customer_groups"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:write"
         ]
@@ -19569,6 +20194,11 @@
       },
       "post": {
         "operationId": "admin.customers.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -19598,7 +20228,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -19680,6 +20310,9 @@
         "tags": [
           "customers"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:write"
         ]
@@ -19696,6 +20329,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomerId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -19710,7 +20346,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -19772,6 +20408,9 @@
         "tags": [
           "customers"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:write"
         ]
@@ -19873,6 +20512,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomerId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -19904,7 +20546,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -19996,6 +20638,9 @@
         "tags": [
           "customers"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:write"
         ]
@@ -20012,6 +20657,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomerId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -20043,7 +20691,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -20135,6 +20783,9 @@
         "tags": [
           "customers"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:write"
         ]
@@ -20159,6 +20810,9 @@
             "schema": {
               "$ref": "#/components/schemas/AddressId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -20180,7 +20834,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -20242,6 +20896,9 @@
         "tags": [
           "customers"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:write"
         ]
@@ -20264,6 +20921,9 @@
             "schema": {
               "$ref": "#/components/schemas/AddressId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -20295,7 +20955,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -20387,6 +21047,9 @@
         "tags": [
           "customers"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:write"
         ]
@@ -20490,6 +21153,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomerId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -20521,7 +21187,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -20613,6 +21279,9 @@
         "tags": [
           "custom_fields"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:write"
         ]
@@ -20629,6 +21298,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomerId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -20650,7 +21322,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -20712,6 +21384,9 @@
         "tags": [
           "customers"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:erase"
         ]
@@ -20726,6 +21401,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomerId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -20747,7 +21425,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -20809,6 +21487,9 @@
         "tags": [
           "customers"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:erase"
         ]
@@ -20915,6 +21596,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomerId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -20946,7 +21630,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -21038,6 +21722,9 @@
         "tags": [
           "customers"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:write"
         ]
@@ -21064,6 +21751,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -21095,7 +21785,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -21187,6 +21877,9 @@
         "tags": [
           "customers"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:write"
         ]
@@ -21203,6 +21896,9 @@
             "schema": {
               "$ref": "#/components/schemas/CustomerId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -21217,7 +21913,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -21279,6 +21975,9 @@
         "tags": [
           "customers"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "customers:write"
         ]
@@ -21471,6 +22170,9 @@
             "schema": {
               "$ref": "#/components/schemas/FulfillmentId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -21502,7 +22204,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -21594,6 +22296,9 @@
         "tags": [
           "fulfillments"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "fulfillments:write"
         ]
@@ -21610,6 +22315,9 @@
             "schema": {
               "$ref": "#/components/schemas/FulfillmentId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -21631,7 +22339,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -21693,6 +22401,9 @@
         "tags": [
           "fulfillments"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "fulfillments:write"
         ]
@@ -21701,6 +22412,11 @@
     "/admin/inventory-items": {
       "post": {
         "operationId": "admin.inventory.create_item",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -21730,7 +22446,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -21812,6 +22528,9 @@
         "tags": [
           "inventory"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "inventory:write"
         ]
@@ -21915,6 +22634,9 @@
             "schema": {
               "$ref": "#/components/schemas/InventoryItemId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -21946,7 +22668,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -22038,6 +22760,9 @@
         "tags": [
           "inventory"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "inventory:write"
         ]
@@ -22062,6 +22787,9 @@
             "schema": {
               "$ref": "#/components/schemas/LocationId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -22093,7 +22821,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -22185,6 +22913,9 @@
         "tags": [
           "inventory"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "inventory:write"
         ]
@@ -22209,6 +22940,9 @@
             "schema": {
               "$ref": "#/components/schemas/LocationId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -22240,7 +22974,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -22332,6 +23066,9 @@
         "tags": [
           "inventory"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "inventory:write"
         ]
@@ -22397,6 +23134,11 @@
       },
       "post": {
         "operationId": "admin.staff.invite",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -22426,7 +23168,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -22508,6 +23250,9 @@
         "tags": [
           "staff"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "users:write"
         ]
@@ -22516,6 +23261,11 @@
     "/admin/invites/accept": {
       "post": {
         "operationId": "admin.auth.accept_invite",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -22545,7 +23295,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -22624,12 +23374,20 @@
         "summary": "Creates the invited user and logs them in.",
         "tags": [
           "auth"
-        ]
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        }
       }
     },
     "/admin/invites/lookup": {
       "post": {
         "operationId": "admin.auth.lookup_invite",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -22659,7 +23417,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -22738,7 +23496,10 @@
         "summary": "The invite behind a token, for the page its link opens. Rate limited with accepting\n(per address), since both take a token.",
         "tags": [
           "auth"
-        ]
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        }
       }
     },
     "/admin/invites/{id}": {
@@ -22752,6 +23513,9 @@
             "schema": {
               "$ref": "#/components/schemas/InviteId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -22766,7 +23530,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -22828,6 +23592,9 @@
         "tags": [
           "staff"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "users:write"
         ]
@@ -22893,6 +23660,11 @@
       },
       "post": {
         "operationId": "admin.inventory.create_location",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -22922,7 +23694,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -23004,6 +23776,9 @@
         "tags": [
           "inventory"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "inventory:write"
         ]
@@ -23107,6 +23882,9 @@
             "schema": {
               "$ref": "#/components/schemas/LocationId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -23138,7 +23916,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -23230,6 +24008,9 @@
         "tags": [
           "inventory"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "inventory:write"
         ]
@@ -23295,6 +24076,11 @@
       },
       "post": {
         "operationId": "admin.markets.create_market",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -23324,7 +24110,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -23406,6 +24192,9 @@
         "tags": [
           "markets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "markets:write"
         ]
@@ -23509,6 +24298,9 @@
             "schema": {
               "$ref": "#/components/schemas/MarketId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -23540,7 +24332,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -23632,6 +24424,9 @@
         "tags": [
           "markets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "markets:write"
         ]
@@ -23648,6 +24443,9 @@
             "schema": {
               "$ref": "#/components/schemas/MarketId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -23679,7 +24477,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -23771,6 +24569,9 @@
         "tags": [
           "markets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "markets:write"
         ]
@@ -23795,6 +24596,9 @@
             "schema": {
               "$ref": "#/components/schemas/CountryCode"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -23816,7 +24620,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -23878,6 +24682,9 @@
         "tags": [
           "markets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "markets:write"
         ]
@@ -23941,6 +24748,11 @@
       },
       "patch": {
         "operationId": "admin.me.update",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -23970,7 +24782,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -24052,12 +24864,20 @@
         "tags": [
           "me"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-staff-session": true
       }
     },
     "/admin/me/mfa/recovery-codes": {
       "post": {
         "operationId": "admin.me.recovery_codes",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -24087,7 +24907,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -24169,12 +24989,20 @@
         "tags": [
           "me"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-staff-session": true
       }
     },
     "/admin/me/mfa/totp": {
       "post": {
         "operationId": "admin.me.start_totp",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -24204,7 +25032,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -24286,12 +25114,20 @@
         "tags": [
           "me"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-staff-session": true
       }
     },
     "/admin/me/mfa/totp/confirm": {
       "post": {
         "operationId": "admin.me.confirm_totp",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -24321,7 +25157,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -24403,12 +25239,20 @@
         "tags": [
           "me"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-staff-session": true
       }
     },
     "/admin/me/mfa/totp/disable": {
       "post": {
         "operationId": "admin.me.disable_totp",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -24431,7 +25275,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -24513,12 +25357,20 @@
         "tags": [
           "me"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-staff-session": true
       }
     },
     "/admin/me/password": {
       "put": {
         "operationId": "admin.me.change_password",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -24541,7 +25393,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -24623,6 +25475,9 @@
         "tags": [
           "me"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-staff-session": true
       }
     },
@@ -24686,9 +25541,24 @@
     "/admin/me/sessions/revoke-others": {
       "post": {
         "operationId": "admin.me.revoke_other_sessions",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "responses": {
           "204": {
             "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -24740,6 +25610,9 @@
         "tags": [
           "me"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-staff-session": true
       }
     },
@@ -24754,6 +25627,9 @@
             "schema": {
               "$ref": "#/components/schemas/SessionId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -24768,7 +25644,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -24830,6 +25706,9 @@
         "tags": [
           "me"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-staff-session": true
       }
     },
@@ -24893,6 +25772,11 @@
       },
       "patch": {
         "operationId": "admin.notifications.update_settings",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -24922,7 +25806,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -25004,6 +25888,9 @@
         "tags": [
           "notifications"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "notifications:write"
         ]
@@ -25081,6 +25968,9 @@
               "pattern": "^[a-z_]+$",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -25102,7 +25992,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -25164,6 +26054,9 @@
         "tags": [
           "notifications"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "notifications:write"
         ]
@@ -25269,6 +26162,9 @@
               "pattern": "^[a-z_]+$",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -25300,7 +26196,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -25392,6 +26288,9 @@
         "tags": [
           "notifications"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "notifications:write"
         ]
@@ -25408,6 +26307,9 @@
               "pattern": "^[a-z_]+$",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -25439,7 +26341,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -25531,6 +26433,9 @@
         "tags": [
           "notifications"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "notifications:write"
         ]
@@ -25549,6 +26454,9 @@
               "pattern": "^[a-z_]+$",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -25580,7 +26488,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -25672,6 +26580,9 @@
         "tags": [
           "notifications"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "notifications:read"
         ]
@@ -25690,6 +26601,9 @@
               "pattern": "^[a-z_]+$",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -25721,7 +26635,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -25813,6 +26727,9 @@
         "tags": [
           "notifications"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "notifications:write"
         ]
@@ -26072,6 +26989,9 @@
             "schema": {
               "$ref": "#/components/schemas/NotificationId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -26093,7 +27013,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -26155,6 +27075,9 @@
         "tags": [
           "notifications"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "notifications:write"
         ]
@@ -26260,6 +27183,9 @@
             "schema": {
               "$ref": "#/components/schemas/OAuthRequestId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -26281,7 +27207,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -26343,6 +27269,9 @@
         "tags": [
           "oauth"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:write"
         ]
@@ -26359,6 +27288,9 @@
             "schema": {
               "$ref": "#/components/schemas/OAuthRequestId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -26380,7 +27312,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -26442,6 +27374,9 @@
         "tags": [
           "oauth"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "apps:write"
         ]
@@ -26811,6 +27746,9 @@
             "schema": {
               "$ref": "#/components/schemas/OrderId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -26842,7 +27780,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -26934,6 +27872,9 @@
         "tags": [
           "orders"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "orders:write"
         ]
@@ -27037,6 +27978,9 @@
             "schema": {
               "$ref": "#/components/schemas/OrderId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -27068,7 +28012,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -27160,6 +28104,9 @@
         "tags": [
           "custom_fields"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "orders:write"
         ]
@@ -27275,6 +28222,9 @@
                 "null"
               ]
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -27314,7 +28264,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -27406,6 +28356,9 @@
         "tags": [
           "fulfillments"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "fulfillments:write"
         ]
@@ -27422,6 +28375,9 @@
             "schema": {
               "$ref": "#/components/schemas/OrderId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -27460,7 +28416,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -27552,6 +28508,9 @@
         "tags": [
           "orders"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "orders:write"
         ]
@@ -27617,6 +28576,11 @@
       },
       "post": {
         "operationId": "admin.payments.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -27646,7 +28610,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -27728,6 +28692,9 @@
         "tags": [
           "payments"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "payments:write"
         ]
@@ -27744,6 +28711,9 @@
             "schema": {
               "$ref": "#/components/schemas/PaymentMethodId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -27758,7 +28728,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -27820,6 +28790,9 @@
         "tags": [
           "payments"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "payments:write"
         ]
@@ -27921,6 +28894,9 @@
             "schema": {
               "$ref": "#/components/schemas/PaymentMethodId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -27952,7 +28928,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -28044,6 +29020,9 @@
         "tags": [
           "payments"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "payments:write"
         ]
@@ -28220,6 +29199,9 @@
                 "null"
               ]
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -28251,7 +29233,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -28343,6 +29325,9 @@
         "tags": [
           "payments"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "orders:write"
         ]
@@ -28371,6 +29356,9 @@
                 "null"
               ]
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -28410,7 +29398,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -28502,6 +29490,9 @@
         "tags": [
           "payments"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "payments:write"
         ]
@@ -28530,6 +29521,9 @@
                 "null"
               ]
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -28561,7 +29555,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -28653,6 +29647,9 @@
         "tags": [
           "payments"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "orders:write"
         ]
@@ -28681,6 +29678,9 @@
                 "null"
               ]
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -28712,7 +29712,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -28804,6 +29804,9 @@
         "tags": [
           "payments"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "orders:write"
         ]
@@ -28869,6 +29872,11 @@
       },
       "post": {
         "operationId": "admin.markets.create_price_list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -28898,7 +29906,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -28980,6 +29988,9 @@
         "tags": [
           "markets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "pricing:write"
         ]
@@ -29083,6 +30094,9 @@
             "schema": {
               "$ref": "#/components/schemas/PriceListId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -29114,7 +30128,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -29206,6 +30220,9 @@
         "tags": [
           "markets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "pricing:write"
         ]
@@ -29222,6 +30239,9 @@
             "schema": {
               "$ref": "#/components/schemas/PriceListId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -29246,7 +30266,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -29338,6 +30358,9 @@
         "tags": [
           "markets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "pricing:write"
         ]
@@ -29471,6 +30494,9 @@
             "schema": {
               "$ref": "#/components/schemas/PriceListId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -29495,7 +30521,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -29587,6 +30613,9 @@
         "tags": [
           "markets"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "pricing:write"
         ]
@@ -29829,6 +30858,11 @@
       },
       "post": {
         "operationId": "admin.products.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -29858,7 +30892,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -29940,6 +30974,9 @@
         "tags": [
           "products"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -29956,6 +30993,9 @@
             "schema": {
               "$ref": "#/components/schemas/ProductId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -29970,7 +31010,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -30032,6 +31072,9 @@
         "tags": [
           "products"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -30133,6 +31176,9 @@
             "schema": {
               "$ref": "#/components/schemas/ProductId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -30164,7 +31210,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -30256,6 +31302,9 @@
         "tags": [
           "products"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -30272,6 +31321,9 @@
             "schema": {
               "$ref": "#/components/schemas/ProductId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -30303,7 +31355,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -30395,6 +31447,9 @@
         "tags": [
           "categories"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -30411,6 +31466,9 @@
             "schema": {
               "$ref": "#/components/schemas/ProductId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -30442,7 +31500,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -30534,6 +31592,9 @@
         "tags": [
           "channels"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -30637,6 +31698,9 @@
             "schema": {
               "$ref": "#/components/schemas/ProductId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -30668,7 +31732,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -30760,6 +31824,9 @@
         "tags": [
           "custom_fields"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -30866,6 +31933,9 @@
             "schema": {
               "$ref": "#/components/schemas/ProductId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -30897,7 +31967,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -30989,6 +32059,9 @@
         "tags": [
           "products"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -31006,6 +32079,9 @@
             "schema": {
               "$ref": "#/components/schemas/ProductId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -31037,7 +32113,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -31129,6 +32205,9 @@
         "tags": [
           "products"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -31145,6 +32224,9 @@
             "schema": {
               "$ref": "#/components/schemas/ProductId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -31176,7 +32258,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -31268,6 +32350,9 @@
         "tags": [
           "products"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -31284,6 +32369,9 @@
             "schema": {
               "$ref": "#/components/schemas/ProductId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -31315,7 +32403,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -31407,6 +32495,9 @@
         "tags": [
           "products"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -31421,6 +32512,9 @@
             "schema": {
               "$ref": "#/components/schemas/ProductId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -31452,7 +32546,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -31544,6 +32638,9 @@
         "tags": [
           "products"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -31568,6 +32665,9 @@
             "schema": {
               "$ref": "#/components/schemas/VariantId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -31589,7 +32689,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -31651,6 +32751,9 @@
         "tags": [
           "products"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -31673,6 +32776,9 @@
             "schema": {
               "$ref": "#/components/schemas/VariantId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -31704,7 +32810,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -31796,6 +32902,9 @@
         "tags": [
           "products"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -31820,6 +32929,9 @@
             "schema": {
               "$ref": "#/components/schemas/VariantId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -31851,7 +32963,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -31943,6 +33055,9 @@
         "tags": [
           "products"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -32008,6 +33123,11 @@
       },
       "post": {
         "operationId": "admin.staff.create_role",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -32037,7 +33157,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -32119,6 +33239,9 @@
         "tags": [
           "staff"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "users:write"
         ]
@@ -32222,6 +33345,9 @@
             "schema": {
               "$ref": "#/components/schemas/RoleId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -32253,7 +33379,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -32345,6 +33471,9 @@
         "tags": [
           "staff"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "users:write"
         ]
@@ -32353,6 +33482,11 @@
     "/admin/search/reindex": {
       "post": {
         "operationId": "admin.search.start_reindex",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "responses": {
           "202": {
             "content": {
@@ -32363,6 +33497,16 @@
               }
             },
             "description": "Queued"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -32414,6 +33558,9 @@
         "tags": [
           "search"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -32479,6 +33626,11 @@
       },
       "patch": {
         "operationId": "admin.search.update_settings",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -32508,7 +33660,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -32590,6 +33742,9 @@
         "tags": [
           "search"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]
@@ -32771,6 +33926,11 @@
       },
       "post": {
         "operationId": "admin.shipping.create_provider",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -32800,7 +33960,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -32882,6 +34042,9 @@
         "tags": [
           "shipping"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "shipping:write"
         ]
@@ -32901,6 +34064,9 @@
               "pattern": "^(app|spore)_[a-z][a-z0-9_]*$",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -32915,7 +34081,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -32977,6 +34143,9 @@
         "tags": [
           "shipping"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "shipping:write"
         ]
@@ -33084,6 +34253,9 @@
               "pattern": "^(app|spore)_[a-z][a-z0-9_]*$",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -33115,7 +34287,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -33207,6 +34379,9 @@
         "tags": [
           "shipping"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "shipping:write"
         ]
@@ -33364,6 +34539,11 @@
       },
       "post": {
         "operationId": "admin.shipping.create_zone",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -33393,7 +34573,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -33475,6 +34655,9 @@
         "tags": [
           "shipping"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "shipping:write"
         ]
@@ -33491,6 +34674,9 @@
             "schema": {
               "$ref": "#/components/schemas/ShippingZoneId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -33505,7 +34691,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -33567,6 +34753,9 @@
         "tags": [
           "shipping"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "shipping:write"
         ]
@@ -33668,6 +34857,9 @@
             "schema": {
               "$ref": "#/components/schemas/ShippingZoneId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -33699,7 +34891,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -33791,6 +34983,9 @@
         "tags": [
           "shipping"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "shipping:write"
         ]
@@ -33807,6 +35002,9 @@
             "schema": {
               "$ref": "#/components/schemas/ShippingZoneId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -33838,7 +35036,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -33930,6 +35128,9 @@
         "tags": [
           "shipping"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "shipping:write"
         ]
@@ -33946,6 +35147,9 @@
             "schema": {
               "$ref": "#/components/schemas/ShippingZoneId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -33977,7 +35181,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -34069,6 +35273,9 @@
         "tags": [
           "shipping"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "shipping:write"
         ]
@@ -34093,6 +35300,9 @@
             "schema": {
               "$ref": "#/components/schemas/ShippingOptionId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -34114,7 +35324,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -34176,6 +35386,9 @@
         "tags": [
           "shipping"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "shipping:write"
         ]
@@ -34198,6 +35411,9 @@
             "schema": {
               "$ref": "#/components/schemas/ShippingOptionId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -34229,7 +35445,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -34321,6 +35537,9 @@
         "tags": [
           "shipping"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "shipping:write"
         ]
@@ -34386,6 +35605,11 @@
       },
       "patch": {
         "operationId": "admin.stores.update",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -34415,7 +35639,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -34497,6 +35721,9 @@
         "tags": [
           "stores"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "stores:write"
         ]
@@ -34505,6 +35732,11 @@
     "/admin/tax-assignments": {
       "put": {
         "operationId": "admin.taxes.assign_class",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -34527,7 +35759,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -34609,6 +35841,9 @@
         "tags": [
           "taxes"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "taxes:write"
         ]
@@ -34674,6 +35909,11 @@
       },
       "post": {
         "operationId": "admin.taxes.create_class",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -34703,7 +35943,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -34785,6 +36025,9 @@
         "tags": [
           "taxes"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "taxes:write"
         ]
@@ -34850,6 +36093,11 @@
       },
       "post": {
         "operationId": "admin.taxes.create_region",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -34879,7 +36127,7 @@
                 }
               }
             },
-            "description": "A body that isn't JSON (`malformed_json`)."
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -34961,6 +36209,9 @@
         "tags": [
           "taxes"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "taxes:write"
         ]
@@ -35064,6 +36315,9 @@
             "schema": {
               "$ref": "#/components/schemas/TaxRegionId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -35095,7 +36349,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -35187,6 +36441,9 @@
         "tags": [
           "taxes"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "taxes:write"
         ]
@@ -35211,6 +36468,9 @@
             "schema": {
               "$ref": "#/components/schemas/TaxClassId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "responses": {
@@ -35232,7 +36492,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -35294,6 +36554,9 @@
         "tags": [
           "taxes"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "taxes:write"
         ]
@@ -35316,6 +36579,9 @@
             "schema": {
               "$ref": "#/components/schemas/TaxClassId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -35347,7 +36613,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -35439,6 +36705,9 @@
         "tags": [
           "taxes"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "taxes:write"
         ]
@@ -35601,6 +36870,9 @@
             "schema": {
               "$ref": "#/components/schemas/UserId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -35632,7 +36904,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -35724,6 +36996,9 @@
         "tags": [
           "staff"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "users:write"
         ]
@@ -35827,6 +37102,9 @@
             "schema": {
               "$ref": "#/components/schemas/VariantId"
             }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
           }
         ],
         "requestBody": {
@@ -35858,7 +37136,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -35950,6 +37228,9 @@
         "tags": [
           "custom_fields"
         ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
         "x-hypha-scopes": [
           "products:write"
         ]

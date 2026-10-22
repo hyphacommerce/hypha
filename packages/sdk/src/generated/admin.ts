@@ -3471,6 +3471,22 @@ export interface components {
              */
             tree: Record<string, never>;
         };
+        /** @description The effect outside the database a preview couldn't run. */
+        BlockedBy: {
+            app: string;
+            /** @enum {string} */
+            kind: "extension_call";
+            point: string;
+        } | {
+            /** @enum {string} */
+            kind: "outbound_call";
+        } | {
+            /** @enum {string} */
+            kind: "media_storage";
+        } | {
+            /** @enum {string} */
+            kind: "media_upload";
+        };
         CancelOrderRequest: {
             /** @description Email the buyer that the order is cancelled (`false` if absent). */
             notify?: boolean;
@@ -5532,6 +5548,57 @@ export interface components {
              */
             redacted?: string[] | null;
         };
+        /** @description What the write would have done; nothing of it was kept. */
+        PreviewBody: {
+            blocked_by?: components["schemas"]["BlockedBy"] | null;
+            /**
+             * @description The read-only extension points it called (`shipping.rates`, `search.query`,
+             *     `payments.status`): those are called for real.
+             */
+            calls: components["schemas"]["PreviewCall"][];
+            /**
+             * @description Whether the write ran to its end. `false`: it reached an effect outside the
+             *     database a preview can't run (`blocked_by`), and stopped there; what it did up to
+             *     then is listed.
+             */
+            complete: boolean;
+            /**
+             * @description The emails it would have sent while answering. Emails sent later because of its
+             *     events (an order's confirmation) aren't listed.
+             */
+            emails: components["schemas"]["PreviewEmail"][];
+            /** @description The events it would have recorded, in order, as the caller may see them. */
+            events: components["schemas"]["PreviewEvent"][];
+            response?: components["schemas"]["PreviewedResponse"] | null;
+        };
+        /** @description A read-only extension point the write called. */
+        PreviewCall: {
+            /** @description The app that answered (`app_rates`). */
+            app: string;
+            /** @description `shipping.rates`, `search.query` or `payments.status`. */
+            point: string;
+        };
+        /** @description An email the write would have sent. */
+        PreviewEmail: {
+            redacted?: string[];
+            subject: string;
+            /** @description The template's key (`staff_invite`). */
+            template: string;
+            /** @description Absent without `customer_data:email` (listed in `redacted`). */
+            to?: string | null;
+        };
+        /**
+         * @description An event the write would have recorded: as webhooks carry it, without the ID, actor and
+         *     time it would have had.
+         */
+        PreviewEvent: {
+            data: Record<string, never>;
+            /** @description The prefixed ID of what it's about (`prod_…`). */
+            subject: string;
+            type: string;
+            /** Format: int32 */
+            version: number;
+        };
         /** @description Unsaved sources to render. */
         PreviewNotificationRequest: {
             html: string;
@@ -5539,6 +5606,16 @@ export interface components {
             /** @description Empty for the layout. */
             subject?: string;
             text?: string | null;
+        };
+        /** @description What a previewed write answers. */
+        PreviewResponse: {
+            preview: components["schemas"]["PreviewBody"];
+        };
+        /** @description The route's answer, had the write run. */
+        PreviewedResponse: {
+            body: Record<string, never>;
+            /** Format: int32 */
+            status: number;
         };
         /**
          * @description A PriceListId: `pl_` and 32 hex digits.
@@ -6707,8 +6784,21 @@ export interface components {
         /** @description A capture or a void: of the whole payment, so the body is `{}`. */
         WholePaymentRequest: Record<string, never>;
     };
-    responses: never;
-    parameters: never;
+    responses: {
+        /** @description The write previewed (`Hypha-Preview: 1`): what it would have answered and recorded. Nothing of it was kept. */
+        Preview: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["PreviewResponse"];
+            };
+        };
+    };
+    parameters: {
+        /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+        HyphaPreview: "1" | "0";
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
@@ -6788,7 +6878,10 @@ export interface operations {
     "admin.api_keys.create": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -6807,7 +6900,7 @@ export interface operations {
                     "application/json": components["schemas"]["CreatedApiKeyResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6951,7 +7044,10 @@ export interface operations {
     "admin.api_keys.revoke": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ApiKeyId"];
             };
@@ -6968,7 +7064,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiKeyResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7086,7 +7182,10 @@ export interface operations {
     "admin.app_extensions.run_action": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example app_stripe */
                 app: string;
@@ -7110,7 +7209,7 @@ export interface operations {
                     "application/json": components["schemas"]["ActionResultResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7320,7 +7419,10 @@ export interface operations {
     "admin.app_extensions.session": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example app_stripe */
                 app: string;
@@ -7338,7 +7440,7 @@ export interface operations {
                     "application/json": components["schemas"]["SessionTokenResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7444,7 +7546,10 @@ export interface operations {
     "admin.apps.create": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -7463,7 +7568,7 @@ export interface operations {
                     "application/json": components["schemas"]["AppSecretResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7540,7 +7645,10 @@ export interface operations {
     "admin.oauth.create_private": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -7559,7 +7667,7 @@ export interface operations {
                     "application/json": components["schemas"]["PrivateAppResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7704,7 +7812,10 @@ export interface operations {
     "admin.apps.delete": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example app_erp */
                 key: string;
@@ -7720,7 +7831,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7779,7 +7890,10 @@ export interface operations {
     "admin.apps.update": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example app_erp */
                 key: string;
@@ -7801,7 +7915,7 @@ export interface operations {
                     "application/json": components["schemas"]["AppResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7971,7 +8085,10 @@ export interface operations {
     "admin.apps.retry": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example app_erp */
                 key: string;
@@ -7990,7 +8107,7 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8199,7 +8316,10 @@ export interface operations {
     "admin.apps.set_extension_points": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example app_stripe */
                 key: string;
@@ -8221,7 +8341,7 @@ export interface operations {
                     "application/json": components["schemas"]["ExtensionEndpointsDto"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8307,7 +8427,10 @@ export interface operations {
     "admin.apps.narrow": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example app_erp */
                 key: string;
@@ -8329,7 +8452,7 @@ export interface operations {
                     "application/json": components["schemas"]["AppResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8495,7 +8618,10 @@ export interface operations {
     "admin.app_extensions.admin_proxy_put": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example app_reviews */
                 key: string;
@@ -8516,7 +8642,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8584,7 +8710,10 @@ export interface operations {
     "admin.app_extensions.admin_proxy_post": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example app_reviews */
                 key: string;
@@ -8605,7 +8734,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8673,7 +8802,10 @@ export interface operations {
     "admin.app_extensions.admin_proxy_delete": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example app_reviews */
                 key: string;
@@ -8694,7 +8826,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8762,7 +8894,10 @@ export interface operations {
     "admin.app_extensions.admin_proxy_patch": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example app_reviews */
                 key: string;
@@ -8783,7 +8918,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8851,7 +8986,10 @@ export interface operations {
     "admin.app_extensions.refresh": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example app_erp */
                 key: string;
@@ -8869,7 +9007,7 @@ export interface operations {
                     "application/json": components["schemas"]["RefreshResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8928,7 +9066,10 @@ export interface operations {
     "admin.apps.rotate_secret": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example app_erp */
                 key: string;
@@ -8946,7 +9087,7 @@ export interface operations {
                     "application/json": components["schemas"]["AppSecretResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9073,7 +9214,10 @@ export interface operations {
     "admin.apps.save_settings": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example spore_stripe */
                 key: string;
@@ -9095,7 +9239,7 @@ export interface operations {
                     "application/json": components["schemas"]["SporeSettingsResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9259,7 +9403,10 @@ export interface operations {
     "admin.assets.create": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -9278,7 +9425,7 @@ export interface operations {
                     "application/json": components["schemas"]["CreateAssetResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9422,7 +9569,10 @@ export interface operations {
     "admin.assets.remove": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["AssetId"];
             };
@@ -9437,7 +9587,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9496,7 +9646,10 @@ export interface operations {
     "admin.assets.update": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["AssetId"];
             };
@@ -9517,7 +9670,7 @@ export interface operations {
                     "application/json": components["schemas"]["AssetResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9603,7 +9756,10 @@ export interface operations {
     "admin.assets.complete": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["AssetId"];
             };
@@ -9620,7 +9776,7 @@ export interface operations {
                     "application/json": components["schemas"]["AssetResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9760,7 +9916,10 @@ export interface operations {
     "admin.auth.login": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -9779,7 +9938,7 @@ export interface operations {
                     "application/json": components["schemas"]["LoginResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9856,7 +10015,10 @@ export interface operations {
     "admin.auth.finish_login": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -9875,7 +10037,7 @@ export interface operations {
                     "application/json": components["schemas"]["LoginResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9952,7 +10114,10 @@ export interface operations {
     "admin.auth.logout": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -9964,6 +10129,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
             401: {
@@ -10006,7 +10180,10 @@ export interface operations {
     "admin.auth.request_reset": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -10023,7 +10200,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10091,7 +10268,10 @@ export interface operations {
     "admin.auth.confirm_reset": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -10108,7 +10288,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10185,7 +10365,10 @@ export interface operations {
     "admin.carts.set_customer": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CartId"];
             };
@@ -10206,7 +10389,7 @@ export interface operations {
                     "application/json": components["schemas"]["CartResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10292,7 +10475,10 @@ export interface operations {
     "admin.markets.create_catalog": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -10311,7 +10497,7 @@ export interface operations {
                     "application/json": components["schemas"]["CatalogResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10455,7 +10641,10 @@ export interface operations {
     "admin.markets.assign_price_list": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CatalogId"];
             };
@@ -10476,7 +10665,7 @@ export interface operations {
                     "application/json": components["schemas"]["CatalogResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10643,7 +10832,10 @@ export interface operations {
     "admin.markets.add_products": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CatalogId"];
             };
@@ -10662,7 +10854,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10748,7 +10940,10 @@ export interface operations {
     "admin.markets.remove_products": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CatalogId"];
             };
@@ -10767,7 +10962,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10923,7 +11118,10 @@ export interface operations {
     "admin.categories.create": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -10942,7 +11140,7 @@ export interface operations {
                     "application/json": components["schemas"]["CategoryResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11086,7 +11284,10 @@ export interface operations {
     "admin.categories.delete": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CategoryId"];
             };
@@ -11101,7 +11302,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11160,7 +11361,10 @@ export interface operations {
     "admin.categories.update": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CategoryId"];
             };
@@ -11181,7 +11385,7 @@ export interface operations {
                     "application/json": components["schemas"]["CategoryResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11334,7 +11538,10 @@ export interface operations {
     "admin.custom_fields.update_category": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CategoryId"];
             };
@@ -11355,7 +11562,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomFieldsResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11441,7 +11648,10 @@ export interface operations {
     "admin.categories.set_image": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CategoryId"];
             };
@@ -11462,7 +11672,7 @@ export interface operations {
                     "application/json": components["schemas"]["CategoryResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11629,7 +11839,10 @@ export interface operations {
     "admin.categories.add_products": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CategoryId"];
             };
@@ -11648,7 +11861,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11734,7 +11947,10 @@ export interface operations {
     "admin.categories.remove_products": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CategoryId"];
             };
@@ -11753,7 +11969,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11886,7 +12102,10 @@ export interface operations {
     "admin.channels.create": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -11905,7 +12124,7 @@ export interface operations {
                     "application/json": components["schemas"]["ChannelResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12049,7 +12268,10 @@ export interface operations {
     "admin.channels.update": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ChannelId"];
             };
@@ -12070,7 +12292,7 @@ export interface operations {
                     "application/json": components["schemas"]["ChannelResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12156,7 +12378,10 @@ export interface operations {
     "admin.channels.publish": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ChannelId"];
             };
@@ -12175,7 +12400,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12261,7 +12486,10 @@ export interface operations {
     "admin.channels.unpublish": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ChannelId"];
             };
@@ -12280,7 +12508,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12519,7 +12747,10 @@ export interface operations {
     "admin.custom_fields.create": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -12538,7 +12769,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomFieldDefinitionResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12741,7 +12972,10 @@ export interface operations {
     "admin.custom_fields.remove": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomFieldDefinitionId"];
             };
@@ -12756,7 +12990,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12815,7 +13049,10 @@ export interface operations {
     "admin.custom_fields.update": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomFieldDefinitionId"];
             };
@@ -12836,7 +13073,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomFieldDefinitionResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12922,7 +13159,10 @@ export interface operations {
     "admin.custom_fields.move_to": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomFieldDefinitionId"];
             };
@@ -12943,7 +13183,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomFieldDefinitionResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13099,7 +13339,10 @@ export interface operations {
     "admin.custom_fields.change_items": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 definition: components["schemas"]["CustomFieldDefinitionId"];
             };
@@ -13120,7 +13363,7 @@ export interface operations {
                     "application/json": components["schemas"]["ListItemsResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13206,7 +13449,10 @@ export interface operations {
     "admin.custom_fields.set_values": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 definition: components["schemas"]["CustomFieldDefinitionId"];
             };
@@ -13225,7 +13471,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13358,7 +13604,10 @@ export interface operations {
     "admin.customer_groups.create": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -13377,7 +13626,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerGroupResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13521,7 +13770,10 @@ export interface operations {
     "admin.customer_groups.remove": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomerGroupId"];
             };
@@ -13536,7 +13788,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13595,7 +13847,10 @@ export interface operations {
     "admin.customer_groups.update": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomerGroupId"];
             };
@@ -13616,7 +13871,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerGroupResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13702,7 +13957,10 @@ export interface operations {
     "admin.customer_groups.add_customers": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomerGroupId"];
             };
@@ -13721,7 +13979,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13807,7 +14065,10 @@ export interface operations {
     "admin.customer_groups.remove_customers": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomerGroupId"];
             };
@@ -13826,7 +14087,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -14005,7 +14266,10 @@ export interface operations {
     "admin.customers.create": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -14024,7 +14288,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -14168,7 +14432,10 @@ export interface operations {
     "admin.customers.remove": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomerId"];
             };
@@ -14183,7 +14450,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -14242,7 +14509,10 @@ export interface operations {
     "admin.customers.update": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomerId"];
             };
@@ -14263,7 +14533,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -14349,7 +14619,10 @@ export interface operations {
     "admin.customers.add_address": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomerId"];
             };
@@ -14370,7 +14643,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -14456,7 +14729,10 @@ export interface operations {
     "admin.customers.update_address": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomerId"];
                 address_id: components["schemas"]["AddressId"];
@@ -14478,7 +14754,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -14564,7 +14840,10 @@ export interface operations {
     "admin.customers.remove_address": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomerId"];
                 address_id: components["schemas"]["AddressId"];
@@ -14582,7 +14861,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -14708,7 +14987,10 @@ export interface operations {
     "admin.custom_fields.update_customer": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomerId"];
             };
@@ -14729,7 +15011,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomFieldsResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -14815,7 +15097,10 @@ export interface operations {
     "admin.customers.request_erasure": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomerId"];
             };
@@ -14832,7 +15117,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -14891,7 +15176,10 @@ export interface operations {
     "admin.customers.cancel_erasure": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomerId"];
             };
@@ -14908,7 +15196,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -15034,7 +15322,10 @@ export interface operations {
     "admin.customers.set_groups": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomerId"];
             };
@@ -15055,7 +15346,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -15141,7 +15432,10 @@ export interface operations {
     "admin.customers.set_consent": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomerId"];
                 /**
@@ -15167,7 +15461,7 @@ export interface operations {
                     "application/json": components["schemas"]["ConsentUpdateResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -15253,7 +15547,10 @@ export interface operations {
     "admin.customers.revoke_sessions": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["CustomerId"];
             };
@@ -15268,7 +15565,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -15461,7 +15758,10 @@ export interface operations {
     "admin.fulfillments.update": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["FulfillmentId"];
             };
@@ -15482,7 +15782,7 @@ export interface operations {
                     "application/json": components["schemas"]["FulfillmentResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -15568,7 +15868,10 @@ export interface operations {
     "admin.fulfillments.cancel": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["FulfillmentId"];
             };
@@ -15585,7 +15888,7 @@ export interface operations {
                     "application/json": components["schemas"]["FulfillmentResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -15644,7 +15947,10 @@ export interface operations {
     "admin.inventory.create_item": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -15663,7 +15969,7 @@ export interface operations {
                     "application/json": components["schemas"]["InventoryResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -15807,7 +16113,10 @@ export interface operations {
     "admin.inventory.update_item": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["InventoryItemId"];
             };
@@ -15828,7 +16137,7 @@ export interface operations {
                     "application/json": components["schemas"]["InventoryResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -15914,7 +16223,10 @@ export interface operations {
     "admin.inventory.set_level": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["InventoryItemId"];
                 location_id: components["schemas"]["LocationId"];
@@ -15936,7 +16248,7 @@ export interface operations {
                     "application/json": components["schemas"]["InventoryResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16022,7 +16334,10 @@ export interface operations {
     "admin.inventory.adjust_level": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["InventoryItemId"];
                 location_id: components["schemas"]["LocationId"];
@@ -16044,7 +16359,7 @@ export interface operations {
                     "application/json": components["schemas"]["InventoryResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16177,7 +16492,10 @@ export interface operations {
     "admin.staff.invite": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -16196,7 +16514,7 @@ export interface operations {
                     "application/json": components["schemas"]["InviteResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16273,7 +16591,10 @@ export interface operations {
     "admin.auth.accept_invite": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -16292,7 +16613,7 @@ export interface operations {
                     "application/json": components["schemas"]["AcceptedResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16369,7 +16690,10 @@ export interface operations {
     "admin.auth.lookup_invite": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -16388,7 +16712,7 @@ export interface operations {
                     "application/json": components["schemas"]["InviteLookupResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16465,7 +16789,10 @@ export interface operations {
     "admin.staff.revoke_invite": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["InviteId"];
             };
@@ -16480,7 +16807,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16586,7 +16913,10 @@ export interface operations {
     "admin.inventory.create_location": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -16605,7 +16935,7 @@ export interface operations {
                     "application/json": components["schemas"]["LocationResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16749,7 +17079,10 @@ export interface operations {
     "admin.inventory.update_location": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["LocationId"];
             };
@@ -16770,7 +17103,7 @@ export interface operations {
                     "application/json": components["schemas"]["LocationResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16903,7 +17236,10 @@ export interface operations {
     "admin.markets.create_market": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -16922,7 +17258,7 @@ export interface operations {
                     "application/json": components["schemas"]["MarketResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17066,7 +17402,10 @@ export interface operations {
     "admin.markets.update_market": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["MarketId"];
             };
@@ -17087,7 +17426,7 @@ export interface operations {
                     "application/json": components["schemas"]["MarketResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17173,7 +17512,10 @@ export interface operations {
     "admin.markets.add_country": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["MarketId"];
             };
@@ -17194,7 +17536,7 @@ export interface operations {
                     "application/json": components["schemas"]["MarketResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17280,7 +17622,10 @@ export interface operations {
     "admin.markets.remove_country": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["MarketId"];
                 country: components["schemas"]["CountryCode"];
@@ -17298,7 +17643,7 @@ export interface operations {
                     "application/json": components["schemas"]["MarketResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17404,7 +17749,10 @@ export interface operations {
     "admin.me.update": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -17423,7 +17771,7 @@ export interface operations {
                     "application/json": components["schemas"]["MeResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17500,7 +17848,10 @@ export interface operations {
     "admin.me.recovery_codes": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -17519,7 +17870,7 @@ export interface operations {
                     "application/json": components["schemas"]["RecoveryCodesResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17596,7 +17947,10 @@ export interface operations {
     "admin.me.start_totp": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -17615,7 +17969,7 @@ export interface operations {
                     "application/json": components["schemas"]["TotpSetupResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17692,7 +18046,10 @@ export interface operations {
     "admin.me.confirm_totp": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -17711,7 +18068,7 @@ export interface operations {
                     "application/json": components["schemas"]["RecoveryCodesResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17788,7 +18145,10 @@ export interface operations {
     "admin.me.disable_totp": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -17805,7 +18165,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17882,7 +18242,10 @@ export interface operations {
     "admin.me.change_password": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -17899,7 +18262,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18023,7 +18386,10 @@ export interface operations {
     "admin.me.revoke_other_sessions": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -18035,6 +18401,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
             401: {
@@ -18077,7 +18452,10 @@ export interface operations {
     "admin.me.revoke_session": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["SessionId"];
             };
@@ -18092,7 +18470,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18198,7 +18576,10 @@ export interface operations {
     "admin.notifications.update_settings": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -18217,7 +18598,7 @@ export interface operations {
                     "application/json": components["schemas"]["NotificationSettingsResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18409,7 +18790,10 @@ export interface operations {
     "admin.notifications.save_template": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example order_confirmation */
                 key: string;
@@ -18431,7 +18815,7 @@ export interface operations {
                     "application/json": components["schemas"]["NotificationTemplateResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18517,7 +18901,10 @@ export interface operations {
     "admin.notifications.revert_template": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example order_confirmation */
                 key: string;
@@ -18535,7 +18922,7 @@ export interface operations {
                     "application/json": components["schemas"]["NotificationTemplateResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18594,7 +18981,10 @@ export interface operations {
     "admin.notifications.set_template_enabled": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example order_confirmation */
                 key: string;
@@ -18616,7 +19006,7 @@ export interface operations {
                     "application/json": components["schemas"]["NotificationTemplateResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18702,7 +19092,10 @@ export interface operations {
     "admin.notifications.preview": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example order_confirmation */
                 key: string;
@@ -18724,7 +19117,7 @@ export interface operations {
                     "application/json": components["schemas"]["RenderedNotificationResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18810,7 +19203,10 @@ export interface operations {
     "admin.notifications.send_test": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /** @example order_confirmation */
                 key: string;
@@ -18832,7 +19228,7 @@ export interface operations {
                     "application/json": components["schemas"]["TestNotificationResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -19061,7 +19457,10 @@ export interface operations {
     "admin.notifications.resend": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["NotificationId"];
             };
@@ -19078,7 +19477,7 @@ export interface operations {
                     "application/json": components["schemas"]["NotificationResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -19204,7 +19603,10 @@ export interface operations {
     "admin.oauth.approve_request": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["OAuthRequestId"];
             };
@@ -19221,7 +19623,7 @@ export interface operations {
                     "application/json": components["schemas"]["ConsentAnswer"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -19280,7 +19682,10 @@ export interface operations {
     "admin.oauth.deny_request": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["OAuthRequestId"];
             };
@@ -19297,7 +19702,7 @@ export interface operations {
                     "application/json": components["schemas"]["ConsentAnswer"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -19531,7 +19936,10 @@ export interface operations {
     "admin.orders.cancel": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["OrderId"];
             };
@@ -19552,7 +19960,7 @@ export interface operations {
                     "application/json": components["schemas"]["AdminOrderResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -19705,7 +20113,10 @@ export interface operations {
     "admin.custom_fields.update_order": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["OrderId"];
             };
@@ -19726,7 +20137,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomFieldsResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -19882,6 +20293,8 @@ export interface operations {
             header?: {
                 /** @description Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`. */
                 "Idempotency-Key"?: string | null;
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
             };
             path: {
                 id: components["schemas"]["OrderId"];
@@ -19905,7 +20318,7 @@ export interface operations {
                     "application/json": components["schemas"]["FulfillmentResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -19991,7 +20404,10 @@ export interface operations {
     "admin.orders.mark_paid": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["OrderId"];
             };
@@ -20013,7 +20429,7 @@ export interface operations {
                     "application/json": components["schemas"]["AdminOrderResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -20146,7 +20562,10 @@ export interface operations {
     "admin.payments.create": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -20165,7 +20584,7 @@ export interface operations {
                     "application/json": components["schemas"]["PaymentMethodResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -20309,7 +20728,10 @@ export interface operations {
     "admin.payments.delete": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["PaymentMethodId"];
             };
@@ -20324,7 +20746,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -20383,7 +20805,10 @@ export interface operations {
     "admin.payments.update": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["PaymentMethodId"];
             };
@@ -20404,7 +20829,7 @@ export interface operations {
                     "application/json": components["schemas"]["PaymentMethodResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -20607,6 +21032,8 @@ export interface operations {
             header?: {
                 /** @description Passed to the app, so a retried action is done once. Without one, each request is a new attempt with its own key (`<payment>:<action>:<uuid>`). */
                 "Idempotency-Key"?: string | null;
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
             };
             path: {
                 id: components["schemas"]["PaymentId"];
@@ -20628,7 +21055,7 @@ export interface operations {
                     "application/json": components["schemas"]["PaymentActionAcceptedResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -20717,6 +21144,8 @@ export interface operations {
             header?: {
                 /** @description Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`. */
                 "Idempotency-Key"?: string | null;
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
             };
             path: {
                 id: components["schemas"]["PaymentId"];
@@ -20740,7 +21169,7 @@ export interface operations {
                     "application/json": components["schemas"]["PaymentEventResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -20829,6 +21258,8 @@ export interface operations {
             header?: {
                 /** @description Passed to the app, so a retried refund gives back once. Without one, each request is a new attempt with its own key. */
                 "Idempotency-Key"?: string | null;
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
             };
             path: {
                 id: components["schemas"]["PaymentId"];
@@ -20850,7 +21281,7 @@ export interface operations {
                     "application/json": components["schemas"]["PaymentActionAcceptedResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -20939,6 +21370,8 @@ export interface operations {
             header?: {
                 /** @description Passed to the app, so a retried action is done once. Without one, each request is a new attempt with its own key (`<payment>:<action>:<uuid>`). */
                 "Idempotency-Key"?: string | null;
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
             };
             path: {
                 id: components["schemas"]["PaymentId"];
@@ -20960,7 +21393,7 @@ export interface operations {
                     "application/json": components["schemas"]["PaymentActionAcceptedResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21093,7 +21526,10 @@ export interface operations {
     "admin.markets.create_price_list": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -21112,7 +21548,7 @@ export interface operations {
                     "application/json": components["schemas"]["PriceListResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21256,7 +21692,10 @@ export interface operations {
     "admin.markets.update_price_list": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["PriceListId"];
             };
@@ -21277,7 +21716,7 @@ export interface operations {
                     "application/json": components["schemas"]["PriceListResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21444,7 +21883,10 @@ export interface operations {
     "admin.markets.set_fixed_prices": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["PriceListId"];
             };
@@ -21463,7 +21905,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21549,7 +21991,10 @@ export interface operations {
     "admin.markets.remove_fixed_prices": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["PriceListId"];
             };
@@ -21568,7 +22013,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21762,7 +22207,10 @@ export interface operations {
     "admin.products.create": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -21781,7 +22229,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProductResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21925,7 +22373,10 @@ export interface operations {
     "admin.products.remove": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ProductId"];
             };
@@ -21940,7 +22391,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21999,7 +22450,10 @@ export interface operations {
     "admin.products.update": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ProductId"];
             };
@@ -22020,7 +22474,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProductResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22106,7 +22560,10 @@ export interface operations {
     "admin.categories.set_for_product": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ProductId"];
             };
@@ -22127,7 +22584,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProductCategoriesResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22213,7 +22670,10 @@ export interface operations {
     "admin.channels.set_for_product": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ProductId"];
             };
@@ -22234,7 +22694,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProductChannelsResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22387,7 +22847,10 @@ export interface operations {
     "admin.custom_fields.update_product": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ProductId"];
             };
@@ -22408,7 +22871,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomFieldsResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22561,7 +23024,10 @@ export interface operations {
     "admin.products.set_media": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ProductId"];
             };
@@ -22582,7 +23048,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProductResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22668,7 +23134,10 @@ export interface operations {
     "admin.products.set_options": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ProductId"];
             };
@@ -22689,7 +23158,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProductResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22775,7 +23244,10 @@ export interface operations {
     "admin.products.set_status": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ProductId"];
             };
@@ -22796,7 +23268,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProductResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22882,7 +23354,10 @@ export interface operations {
     "admin.products.set_variants": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ProductId"];
             };
@@ -22903,7 +23378,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProductResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22989,7 +23464,10 @@ export interface operations {
     "admin.products.add_variant": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ProductId"];
             };
@@ -23010,7 +23488,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProductResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23096,7 +23574,10 @@ export interface operations {
     "admin.products.remove_variant": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ProductId"];
                 variant_id: components["schemas"]["VariantId"];
@@ -23114,7 +23595,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProductResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23173,7 +23654,10 @@ export interface operations {
     "admin.products.update_variant": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ProductId"];
                 variant_id: components["schemas"]["VariantId"];
@@ -23195,7 +23679,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProductResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23281,7 +23765,10 @@ export interface operations {
     "admin.products.set_variant_media": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ProductId"];
                 variant_id: components["schemas"]["VariantId"];
@@ -23303,7 +23790,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProductResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23436,7 +23923,10 @@ export interface operations {
     "admin.staff.create_role": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -23455,7 +23945,7 @@ export interface operations {
                     "application/json": components["schemas"]["RoleResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23599,7 +24089,10 @@ export interface operations {
     "admin.staff.update_role": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["RoleId"];
             };
@@ -23620,7 +24113,7 @@ export interface operations {
                     "application/json": components["schemas"]["RoleResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23706,7 +24199,10 @@ export interface operations {
     "admin.search.start_reindex": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -23719,6 +24215,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchStatusResponse"];
+                };
+            };
+            /** @description A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
@@ -23809,7 +24314,10 @@ export interface operations {
     "admin.search.update_settings": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -23828,7 +24336,7 @@ export interface operations {
                     "application/json": components["schemas"]["SearchSettingsResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24046,7 +24554,10 @@ export interface operations {
     "admin.shipping.create_provider": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -24065,7 +24576,7 @@ export interface operations {
                     "application/json": components["schemas"]["AppProviderResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24213,7 +24724,10 @@ export interface operations {
     "admin.shipping.delete_provider": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /**
                  * @description `app_<name>` or `spore_<name>`
@@ -24232,7 +24746,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24291,7 +24805,10 @@ export interface operations {
     "admin.shipping.update_provider": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 /**
                  * @description `app_<name>` or `spore_<name>`
@@ -24316,7 +24833,7 @@ export interface operations {
                     "application/json": components["schemas"]["AppProviderResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24520,7 +25037,10 @@ export interface operations {
     "admin.shipping.create_zone": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -24539,7 +25059,7 @@ export interface operations {
                     "application/json": components["schemas"]["ShippingZoneResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24683,7 +25203,10 @@ export interface operations {
     "admin.shipping.delete_zone": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ShippingZoneId"];
             };
@@ -24698,7 +25221,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24757,7 +25280,10 @@ export interface operations {
     "admin.shipping.update_zone": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ShippingZoneId"];
             };
@@ -24778,7 +25304,7 @@ export interface operations {
                     "application/json": components["schemas"]["ShippingZoneResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24864,7 +25390,10 @@ export interface operations {
     "admin.shipping.add_option": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ShippingZoneId"];
             };
@@ -24885,7 +25414,7 @@ export interface operations {
                     "application/json": components["schemas"]["ShippingZoneResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24971,7 +25500,10 @@ export interface operations {
     "admin.shipping.reorder_options": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ShippingZoneId"];
             };
@@ -24992,7 +25524,7 @@ export interface operations {
                     "application/json": components["schemas"]["ShippingZoneResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25078,7 +25610,10 @@ export interface operations {
     "admin.shipping.remove_option": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ShippingZoneId"];
                 option_id: components["schemas"]["ShippingOptionId"];
@@ -25096,7 +25631,7 @@ export interface operations {
                     "application/json": components["schemas"]["ShippingZoneResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25155,7 +25690,10 @@ export interface operations {
     "admin.shipping.update_option": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["ShippingZoneId"];
                 option_id: components["schemas"]["ShippingOptionId"];
@@ -25177,7 +25715,7 @@ export interface operations {
                     "application/json": components["schemas"]["ShippingZoneResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25310,7 +25848,10 @@ export interface operations {
     "admin.stores.update": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -25329,7 +25870,7 @@ export interface operations {
                     "application/json": components["schemas"]["StoreResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25406,7 +25947,10 @@ export interface operations {
     "admin.taxes.assign_class": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -25423,7 +25967,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25547,7 +26091,10 @@ export interface operations {
     "admin.taxes.create_class": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -25566,7 +26113,7 @@ export interface operations {
                     "application/json": components["schemas"]["TaxClassResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25690,7 +26237,10 @@ export interface operations {
     "admin.taxes.create_region": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -25709,7 +26259,7 @@ export interface operations {
                     "application/json": components["schemas"]["TaxRegionResponse"];
                 };
             };
-            /** @description A body that isn't JSON (`malformed_json`). */
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25853,7 +26403,10 @@ export interface operations {
     "admin.taxes.update_region": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["TaxRegionId"];
             };
@@ -25874,7 +26427,7 @@ export interface operations {
                     "application/json": components["schemas"]["TaxRegionResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25960,7 +26513,10 @@ export interface operations {
     "admin.taxes.set_region_class_rate": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["TaxRegionId"];
                 class_id: components["schemas"]["TaxClassId"];
@@ -25982,7 +26538,7 @@ export interface operations {
                     "application/json": components["schemas"]["TaxRegionResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -26068,7 +26624,10 @@ export interface operations {
     "admin.taxes.remove_region_class_rate": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["TaxRegionId"];
                 class_id: components["schemas"]["TaxClassId"];
@@ -26086,7 +26645,7 @@ export interface operations {
                     "application/json": components["schemas"]["TaxRegionResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -26259,7 +26818,10 @@ export interface operations {
     "admin.staff.update_user": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["UserId"];
             };
@@ -26280,7 +26842,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -26433,7 +26995,10 @@ export interface operations {
     "admin.custom_fields.update_variant": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+            };
             path: {
                 id: components["schemas"]["VariantId"];
             };
@@ -26454,7 +27019,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomFieldsResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
