@@ -1,6 +1,8 @@
 use hypha_core::{CustomerId, Keyset, OrderId, Page, PageRequest, RepoError};
 
-use crate::{Order, OrderFilter, OrderNumber, OrderSort, OrderStats, OrderSummary};
+use crate::{
+    Order, OrderFilter, OrderNumber, OrderSort, OrderStats, OrderSummary, SalesFigures, SalesQuery,
+};
 
 /// Uniqueness rules an `OrderRepo` enforces, reported as `RepoError::Duplicate(key)`.
 pub mod keys {
@@ -31,6 +33,10 @@ pub trait OrderRepo {
     /// What `customer`'s orders add up to: equals `OrderStats::of` the stored orders with
     /// that customer. An adapter may sum in storage.
     async fn stats_for(&self, customer: CustomerId) -> Result<OrderStats, RepoError>;
+    /// What the orders `query` counts add up to: equals `SalesFigures::of` the stored
+    /// orders. An adapter may sum in storage. A query that isn't `SalesQuery::is_valid`
+    /// is a `Backend` error.
+    async fn sales(&self, query: &SalesQuery) -> Result<SalesFigures, RepoError>;
     /// Stores a new order (version 1). Enforces every key in `keys`. Checkout inserts
     /// through `StageOrders` instead, together with its other writes.
     async fn insert(&self, order: &mut Order) -> Result<(), RepoError>;

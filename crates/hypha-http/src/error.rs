@@ -976,6 +976,24 @@ impl From<hypha_fulfillment::CommandError> for ApiError {
     }
 }
 
+impl From<hypha_order_actions::ReportError> for ApiError {
+    fn from(e: hypha_order_actions::ReportError) -> Self {
+        use hypha_order_actions::ReportError as E;
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // The query's period, interval or top list.
+            E::InvalidPeriod | E::TooManyBuckets { .. } | E::TopOutOfRange { .. } => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
 impl From<hypha_order_actions::CommandError> for ApiError {
     fn from(e: hypha_order_actions::CommandError) -> Self {
         use hypha_inventory::InventoryError as I;

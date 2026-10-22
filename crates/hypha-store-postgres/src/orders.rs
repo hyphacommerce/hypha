@@ -8,7 +8,8 @@ use hypha_core::{
 };
 use hypha_orders::{
     Cancellation, Order, OrderFilter, OrderLine, OrderNumber, OrderRepo, OrderShippingLine,
-    OrderSnapshot, OrderSort, OrderStats, OrderSummary, OrderTax, OrderTaxSource,
+    OrderSnapshot, OrderSort, OrderStats, OrderSummary, OrderTax, OrderTaxSource, SalesFigures,
+    SalesQuery,
 };
 use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
@@ -203,6 +204,11 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
             stats.last_order_at = Some(stats.last_order_at.map_or(last, |t| t.max(last)));
         }
         Ok(stats)
+    }
+
+    async fn sales(&self, query: &SalesQuery) -> Result<SalesFigures, RepoError> {
+        let mut conn = self.conn().await;
+        consistent_read!(conn, |tx| crate::sales::sales(tx, query).await)
     }
 
     async fn get_by_number(&self, number: OrderNumber) -> Result<Option<Order>, RepoError> {

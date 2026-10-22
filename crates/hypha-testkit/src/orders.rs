@@ -8,7 +8,8 @@ use hypha_core::{
     stamp_update,
 };
 use hypha_orders::{
-    Order, OrderFilter, OrderNumber, OrderRepo, OrderSort, OrderStats, OrderSummary, repo::keys,
+    Order, OrderFilter, OrderNumber, OrderRepo, OrderSort, OrderStats, OrderSummary, SalesFigures,
+    SalesQuery, repo::keys,
 };
 
 use crate::{
@@ -129,6 +130,15 @@ impl OrderRepo for InMemoryOrderRepo {
         Ok(OrderStats::of(
             orders.iter().filter(|o| o.customer() == customer),
         ))
+    }
+
+    async fn sales(&self, query: &SalesQuery) -> Result<SalesFigures, RepoError> {
+        if !query.is_valid() {
+            return Err(RepoError::Backend(format!(
+                "an invalid sales query: {query:?}"
+            )));
+        }
+        Ok(SalesFigures::of(&self.orders.all(), query))
     }
 
     async fn insert(&self, order: &mut Order) -> Result<(), RepoError> {

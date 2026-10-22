@@ -30,6 +30,7 @@ pub mod page;
 pub mod payments;
 pub mod products;
 pub mod reference;
+pub mod reports;
 pub mod search;
 pub mod setup;
 pub mod shipping;
@@ -167,6 +168,8 @@ macro_rules! route_table {
             [admin, GET, "/admin/orders/{id}", orders::fetch],
             [admin, POST, "/admin/orders/{id}/paid", orders::mark_paid],
             [admin, POST, "/admin/orders/{id}/cancel", orders::cancel],
+            // reports
+            [admin, GET, "/admin/reports/sales", reports::sales],
             // payment methods
             [admin, GET, "/admin/payment-providers", payments::list_providers],
             [admin, GET, "/admin/payment-methods", payments::list],

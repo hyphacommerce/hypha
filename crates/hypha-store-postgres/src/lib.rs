@@ -42,6 +42,7 @@ mod orders;
 mod outbox;
 mod payments;
 mod products;
+mod sales;
 mod search;
 mod shipping;
 pub mod spore_check;

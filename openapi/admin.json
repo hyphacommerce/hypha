@@ -2904,6 +2904,25 @@
         ],
         "type": "object"
       },
+      "CurrencyTopResponse": {
+        "description": "The products that brought the most in one currency.",
+        "properties": {
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "products": {
+            "items": {
+              "$ref": "#/components/schemas/ProductRevenueResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "currency",
+          "products"
+        ],
+        "type": "object"
+      },
       "CustomFieldAccess": {
         "additionalProperties": false,
         "description": "Who sees and writes a field's values.",
@@ -4524,6 +4543,16 @@
           "document"
         ],
         "type": "object"
+      },
+      "IntervalDto": {
+        "description": "How long each bucket is, in the store's time zone. Weeks start on Monday.\n\nKnown values: `day`, `week`, `month`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "day",
+          "week",
+          "month"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "InventoryItemId": {
         "description": "A InventoryItemId: `invi_` and 32 hex digits.",
@@ -7619,6 +7648,32 @@
         ],
         "type": "object"
       },
+      "ProductRevenueResponse": {
+        "properties": {
+          "product": {
+            "$ref": "#/components/schemas/ProductId"
+          },
+          "revenue": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Its line totals."
+          },
+          "title": {
+            "type": "string"
+          },
+          "units": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "product",
+          "title",
+          "units",
+          "revenue"
+        ],
+        "type": "object"
+      },
       "ProductStatus": {
         "description": "`ProductStatus` on the wire: snake_case strings. A DTO of its own, so the domain\nenum carries no serde and renaming a variant can't silently change the API.\n\nKnown values: `draft`, `active`, `archived`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
@@ -7751,6 +7806,28 @@
           "categories",
           "created_at",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "ProductUnitsResponse": {
+        "description": "A product in a top list, named as its line in the newest order counted.",
+        "properties": {
+          "product": {
+            "$ref": "#/components/schemas/ProductId"
+          },
+          "title": {
+            "type": "string"
+          },
+          "units": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "product",
+          "title",
+          "units"
         ],
         "type": "object"
       },
@@ -8055,6 +8132,134 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "SalesBucketResponse": {
+        "description": "A stretch of the period.",
+        "properties": {
+          "cancelled_count": {
+            "description": "Orders placed in it and cancelled since: in no sum.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "end": {
+            "description": "Where the next bucket starts; the last one's is `to`.",
+            "type": "string"
+          },
+          "sales": {
+            "description": "Per currency, by currency code; empty when nothing sold.",
+            "items": {
+              "$ref": "#/components/schemas/SalesRowResponse"
+            },
+            "type": "array"
+          },
+          "start": {
+            "description": "RFC 3339 in UTC; a bucket starts at a start of day, week or month in the store's\ntime zone, except the first, which starts at `from`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "sales",
+          "cancelled_count"
+        ],
+        "type": "object"
+      },
+      "SalesReportResponse": {
+        "properties": {
+          "buckets": {
+            "description": "Every bucket in order, empty ones too.",
+            "items": {
+              "$ref": "#/components/schemas/SalesBucketResponse"
+            },
+            "type": "array"
+          },
+          "from": {
+            "description": "RFC 3339 in UTC.",
+            "type": "string"
+          },
+          "interval": {
+            "$ref": "#/components/schemas/IntervalDto"
+          },
+          "time_zone": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timezone",
+                "description": "The store's time zone the buckets follow; `null`: UTC."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to": {
+            "type": "string"
+          },
+          "top_products": {
+            "$ref": "#/components/schemas/TopProductsResponse"
+          },
+          "total": {
+            "$ref": "#/components/schemas/SalesBucketResponse",
+            "description": "The whole period."
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "interval",
+          "buckets",
+          "total",
+          "top_products"
+        ],
+        "type": "object"
+      },
+      "SalesRowResponse": {
+        "description": "One currency's sales. Amounts never mix currencies: a period sold in two has a row\nfor each.",
+        "properties": {
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "gross_sales": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The line totals before shipping (tax included where the market's prices include\nit). Orders have no discounts yet, so there's no discount column."
+          },
+          "net": {
+            "$ref": "#/components/schemas/Money",
+            "description": "`total` less `refunded`."
+          },
+          "orders_count": {
+            "description": "Orders placed, cancelled ones left out.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "refunded": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What the orders' payments gave back so far, counted with the orders (when they\nwere placed), not when the money went back."
+          },
+          "shipping": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "taxes": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What the orders came to."
+          }
+        },
+        "required": [
+          "currency",
+          "orders_count",
+          "gross_sales",
+          "shipping",
+          "taxes",
+          "total",
+          "refunded",
+          "net"
+        ],
         "type": "object"
       },
       "SaveNotificationTemplateRequest": {
@@ -9370,6 +9575,29 @@
           "Europe/Belgrade"
         ],
         "type": "string"
+      },
+      "TopProductsResponse": {
+        "properties": {
+          "by_revenue": {
+            "description": "Per currency, by currency code: most revenue first, then by product ID.",
+            "items": {
+              "$ref": "#/components/schemas/CurrencyTopResponse"
+            },
+            "type": "array"
+          },
+          "by_units": {
+            "description": "Most units first, then by product ID; units count in every currency.",
+            "items": {
+              "$ref": "#/components/schemas/ProductUnitsResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "by_units",
+          "by_revenue"
+        ],
+        "type": "object"
       },
       "TotpSetupResponse": {
         "properties": {
@@ -33306,6 +33534,140 @@
         },
         "x-hypha-scopes": [
           "products:write"
+        ]
+      }
+    },
+    "/admin/reports/sales": {
+      "get": {
+        "operationId": "admin.reports.sales",
+        "parameters": [
+          {
+            "description": "The period's start (RFC 3339); 7 days before `to` when absent.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The period's end (RFC 3339), left out; the start of tomorrow in the store's time\nzone when absent, so the default period is the last 7 days, today included.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "`day` (the default), `week` or `month`. At most 366 buckets\n(`422 period_too_long`).",
+            "in": "query",
+            "name": "interval",
+            "required": false,
+            "schema": {
+              "description": "How long each bucket is, in the store's time zone. Weeks start on Monday.\n\nKnown values: `day`, `week`, `month`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          },
+          {
+            "description": "Only orders placed through this sales channel.",
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          },
+          {
+            "description": "Only orders placed in this market.",
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MarketId"
+            }
+          },
+          {
+            "description": "How many products each top list holds: 1 to 20, default 5 (`422 invalid_top`).",
+            "in": "query",
+            "name": "top",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SalesReportResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "What the period's orders add up to, per day, week or month in the store's time zone\nand per currency, with what their payments gave back and the products that sold most.\nCancelled orders are counted apart and add nothing.",
+        "tags": [
+          "reports"
+        ],
+        "x-hypha-scopes": [
+          "orders:read"
         ]
       }
     },

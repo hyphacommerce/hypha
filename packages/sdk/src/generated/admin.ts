@@ -2655,6 +2655,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/reports/sales": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the period's orders add up to, per day, week or month in the store's time zone
+         *     and per currency, with what their payments gave back and the products that sold most.
+         *     Cancelled orders are counted apart and add nothing.
+         */
+        get: operations["admin.reports.sales"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/roles": {
         parameters: {
             query?: never;
@@ -4073,6 +4094,11 @@ export interface components {
              */
             name: string;
         };
+        /** @description The products that brought the most in one currency. */
+        CurrencyTopResponse: {
+            currency: components["schemas"]["Currency"];
+            products: components["schemas"]["ProductRevenueResponse"][];
+        };
         /** @description Who sees and writes a field's values. */
         CustomFieldAccess: {
             admin: components["schemas"]["CustomFieldAdminAccess"];
@@ -4692,6 +4718,13 @@ export interface components {
             /** @description Its URL: the app's OAuth client ID. */
             url: string;
         };
+        /**
+         * @description How long each bucket is, in the store's time zone. Weeks start on Monday.
+         *
+         *     Known values: `day`, `week`, `month`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        IntervalDto: string;
         /**
          * @description A InventoryItemId: `invi_` and 32 hex digits.
          * @example invi_0190f1a2b3c47d8e9f00112233445566
@@ -5821,6 +5854,14 @@ export interface components {
             variants: components["schemas"]["VariantResponse"][];
             vendor?: string | null;
         };
+        ProductRevenueResponse: {
+            product: components["schemas"]["ProductId"];
+            /** @description Its line totals. */
+            revenue: components["schemas"]["Money"];
+            title: string;
+            /** Format: int64 */
+            units: number;
+        };
         /**
          * @description `ProductStatus` on the wire: snake_case strings. A DTO of its own, so the domain
          *     enum carries no serde and renaming a variant can't silently change the API.
@@ -5868,6 +5909,13 @@ export interface components {
             /** Format: int64 */
             variant_count: number;
             vendor?: string | null;
+        };
+        /** @description A product in a top list, named as its line in the newest order counted. */
+        ProductUnitsResponse: {
+            product: components["schemas"]["ProductId"];
+            title: string;
+            /** Format: int64 */
+            units: number;
         };
         /** @description How an option's price is found: one of a provider's services, or a built-in rate. */
         RateDto: {
@@ -5961,6 +6009,63 @@ export interface components {
             input?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /** @description A stretch of the period. */
+        SalesBucketResponse: {
+            /**
+             * Format: int64
+             * @description Orders placed in it and cancelled since: in no sum.
+             */
+            cancelled_count: number;
+            /** @description Where the next bucket starts; the last one's is `to`. */
+            end: string;
+            /** @description Per currency, by currency code; empty when nothing sold. */
+            sales: components["schemas"]["SalesRowResponse"][];
+            /**
+             * @description RFC 3339 in UTC; a bucket starts at a start of day, week or month in the store's
+             *     time zone, except the first, which starts at `from`.
+             */
+            start: string;
+        };
+        SalesReportResponse: {
+            /** @description Every bucket in order, empty ones too. */
+            buckets: components["schemas"]["SalesBucketResponse"][];
+            /** @description RFC 3339 in UTC. */
+            from: string;
+            interval: components["schemas"]["IntervalDto"];
+            time_zone?: components["schemas"]["Timezone"] | null;
+            to: string;
+            top_products: components["schemas"]["TopProductsResponse"];
+            /** @description The whole period. */
+            total: components["schemas"]["SalesBucketResponse"];
+        };
+        /**
+         * @description One currency's sales. Amounts never mix currencies: a period sold in two has a row
+         *     for each.
+         */
+        SalesRowResponse: {
+            currency: components["schemas"]["Currency"];
+            /**
+             * @description The line totals before shipping (tax included where the market's prices include
+             *     it). Orders have no discounts yet, so there's no discount column.
+             */
+            gross_sales: components["schemas"]["Money"];
+            /** @description `total` less `refunded`. */
+            net: components["schemas"]["Money"];
+            /**
+             * Format: int64
+             * @description Orders placed, cancelled ones left out.
+             */
+            orders_count: number;
+            /**
+             * @description What the orders' payments gave back so far, counted with the orders (when they
+             *     were placed), not when the money went back.
+             */
+            refunded: components["schemas"]["Money"];
+            shipping: components["schemas"]["Money"];
+            taxes: components["schemas"]["Money"];
+            /** @description What the orders came to. */
+            total: components["schemas"]["Money"];
         };
         /** @description A template's sources (all of them: this replaces the stored ones). */
         SaveNotificationTemplateRequest: {
@@ -6450,6 +6555,12 @@ export interface components {
          * @example Europe/Belgrade
          */
         Timezone: string;
+        TopProductsResponse: {
+            /** @description Per currency, by currency code: most revenue first, then by product ID. */
+            by_revenue: components["schemas"]["CurrencyTopResponse"][];
+            /** @description Most units first, then by product ID; units count in every currency. */
+            by_units: components["schemas"]["ProductUnitsResponse"][];
+        };
         TotpSetupResponse: {
             /** @description Base32, for typing into the app. */
             secret: string;
@@ -23986,6 +24097,81 @@ export interface operations {
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.reports.sales": {
+        parameters: {
+            query?: {
+                /** @description The period's start (RFC 3339); 7 days before `to` when absent. */
+                from?: string;
+                /**
+                 * @description The period's end (RFC 3339), left out; the start of tomorrow in the store's time
+                 *     zone when absent, so the default period is the last 7 days, today included.
+                 */
+                to?: string;
+                /**
+                 * @description `day` (the default), `week` or `month`. At most 366 buckets
+                 *     (`422 period_too_long`).
+                 */
+                interval?: "day" | "week" | "month";
+                /** @description Only orders placed through this sales channel. */
+                channel?: components["schemas"]["ChannelId"];
+                /** @description Only orders placed in this market. */
+                market?: components["schemas"]["MarketId"];
+                /** @description How many products each top list holds: 1 to 20, default 5 (`422 invalid_top`). */
+                top?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesReportResponse"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
