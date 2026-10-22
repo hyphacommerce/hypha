@@ -88,6 +88,11 @@ per-session reads (0024, §6), all live in that process. On Workers (H2) they ne
 Cloudflare's adapters (KV, the Workers Cache), and the admin's cross-request cache
 should go: an isolate that didn't see a write would keep serving the old read.
 
+*Update, 2026-10-22:* the admin's per-session cache went on every host, not only
+Workers. Every admin page is dynamic, a page's reads are deduplicated within the request
+anyway (`perRequest`), and a cache that writes had to expire was a source of stale
+reads for a few saved calls. The admin now relies on vinext's own caching alone.
+
 ## 6. Measured on the test server, and what changed
 
 A CX22 (2 shared vCPUs, 4 GB) with the seeded store, measured with `pg_stat_statements`

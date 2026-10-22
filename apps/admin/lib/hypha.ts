@@ -7,7 +7,6 @@ import { type AdminSchemas, type ApiError, createAdminClient } from "@hypha/sdk/
 import { cookies, headers } from "next/headers";
 import { forbidden, notFound, redirect } from "next/navigation";
 
-import { referenceLifetime, sessionFetch } from "./api-cache";
 import type { Currencies } from "./format";
 import { describeProblem, problemOf } from "./notifications";
 import type { Country } from "./regions";
@@ -78,20 +77,15 @@ export async function publicClient() {
  * A session the API no longer accepts (expired, revoked, user disabled) answers 401 to
  * any call: then the user goes to `/session-expired`, which clears the cookie, and
  * after signing in again comes back to the page they were on.
+ *
+ * Nothing is cached across requests: every admin page is dynamic and reads the API
+ * fresh, so what staff see is what the store holds now, on every host alike. Within a
+ * request, the `perRequest` loaders below make the layout and the page share a read.
  */
 export async function sessionClient() {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) redirect("/login");
-  // On Workers (through the API's binding) only reference data that no write changes is
-  // cached across requests: an isolate that didn't see a write would keep serving the
-  // old read. Elsewhere one server sees every write, so its cache stays right.
-  const bound = apiFetch();
-  const client = createAdminClient(
-    apiUrl(),
-    token,
-    {},
-    bound ? sessionFetch(token, bound, referenceLifetime) : sessionFetch(token),
-  );
+  const client = createAdminClient(apiUrl(), token, {}, apiFetch());
   client.use({
     async onResponse({ request, response }) {
       if (response.status === 401) await sessionExpired();
