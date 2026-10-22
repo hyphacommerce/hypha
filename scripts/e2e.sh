@@ -2188,8 +2188,8 @@ fi
 
 echo
 echo "## agents"
-# Agents call through /mcp (not yet built): here, the staff routes that manage them, as
-# the owner (logged out above; `apply` is granted only from a session).
+# The staff routes that manage agents, as the owner (logged out above; `apply` is granted
+# only from a session); then an agent working through /mcp.
 AUTH=()
 step "owner logs in again" 200 - -X POST "$BASE/admin/auth/login" -H "$JSON" \
     -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASSWORD\"}"
@@ -2219,6 +2219,62 @@ step "an agent's key works at /mcp only" 401 agent_credentials_mcp_only "$BASE/a
 AUTH=("${SAVED_AUTH[@]}")
 step "revoke the agent" 200 - -X POST "$BASE/admin/agents/$AGENT/revoke"
 step "revoking twice" 409 agent_revoked -X POST "$BASE/admin/agents/$AGENT/revoke"
+
+echo
+echo "## mcp"
+MCP_META='{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{"name":"e2e","version":"1"}}'
+# mcp_list NAME: tools/list as the agent (AUTH).
+mcp_list() {
+    step "$1" 200 - -X POST "$BASE/mcp" -H "$JSON" -H "mcp-protocol-version: 2026-07-28" \
+        -H "mcp-method: tools/list" \
+        -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{\"_meta\":$MCP_META}}"
+}
+# mcp_tool NAME TOOL ARGUMENTS_JSON: one tool call as the agent (AUTH); a tool's own
+# failure is still HTTP 200 (`"isError":true` in the body).
+mcp_tool() {
+    step "$1" 200 - -X POST "$BASE/mcp" -H "$JSON" -H "mcp-protocol-version: 2026-07-28" \
+        -H "mcp-method: tools/call" -H "mcp-name: $2" \
+        -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$2\",\"arguments\":$3,\"_meta\":$MCP_META}}"
+}
+step "an agent that reads and proposes catalog changes" 201 - -X POST "$BASE/admin/agents" -H "$JSON" \
+    -d '{"name":"Night shift","grant":{"read":["orders:read","products:read"],"write":{"products:write":"propose"}}}'
+MCP_AGENT=$(id)
+MCP_KEY=$(sed -E 's/.*"key":"(hypha_ak_[0-9a-f]+)".*/\1/' <<<"$BODY")
+SAVED_AUTH=("${AUTH[@]}")
+AUTH=()
+step "/mcp without credentials says where to start" 401 unauthenticated -X POST "$BASE/mcp" -H "$JSON" \
+    -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+step "the protected resource's metadata" 200 - "$BASE/.well-known/oauth-protected-resource/mcp"
+contains "names /mcp as the resource" '"resource":"'
+AUTH=(-H "authorization: Bearer $MCP_KEY")
+mcp_list "the agent's tools"
+contains "a direct tool for a write it proposes" '"name":"admin__products__update"'
+contains "and the fixed ones" '"name":"find_operations"'
+mcp_tool "whoami" whoami '{}'
+contains "it's the autonomous agent" '"kind":"autonomous"'
+contains "with the store" '"name":"E2E Shop"'
+mcp_tool "a read" call '{"operation":"admin.products.list","query":{"limit":2}}'
+contains "answers the page" '"isError":false'
+mcp_tool "a preview" call '{"operation":"admin.products.create","mode":"preview","body":{"handle":"agent-lamp","title":"Lamp","price":{"amount":3900,"currency":"EUR"}}}'
+contains "shows the whole write" '\"complete\":true'
+mcp_tool "the write, as a proposal" call '{"operation":"admin.products.create","idempotency_key":"e2e-lamp","body":{"handle":"agent-lamp","title":"Lamp","price":{"amount":3900,"currency":"EUR"}}}'
+contains "is proposed" '\"proposed\":\"prop_'
+PROPOSAL=$(grep -o 'prop_[0-9a-f]\{32\}' <<<"$BODY" | head -n 1)
+mcp_tool "the agent follows its proposal" get_proposal "{\"proposal\":\"$PROPOSAL\"}"
+contains "waiting for a person" '\"status\":\"pending\"'
+AUTH=("${SAVED_AUTH[@]}")
+step "nothing was written yet" 200 - "$BASE/admin/products?q=agent-lamp"
+contains "no lamp" '"items":[]'
+step "the owner approves it" 200 - -X POST "$BASE/admin/agent-proposals/$PROPOSAL/approve"
+contains "applied" '"status":"applied"'
+step "the product exists" 200 - "$BASE/admin/products?q=agent-lamp"
+contains "the lamp" '"handle":"agent-lamp"'
+step "the call log" 200 - "$BASE/admin/agents/$MCP_AGENT/calls"
+contains "has the proposal" '"mode":"propose"'
+AUTH=(-H "authorization: Bearer $MCP_KEY")
+mcp_tool "the agent learns it was applied" get_proposal "{\"proposal\":\"$PROPOSAL\"}"
+contains "applied" '\"status\":\"applied\"'
+AUTH=("${SAVED_AUTH[@]}")
 
 echo
 echo "## rate limits"
