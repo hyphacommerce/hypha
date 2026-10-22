@@ -11,6 +11,21 @@ use hypha_testkit::{
 use pollster::block_on;
 
 #[test]
+fn agent_repo() {
+    block_on(contract::agent_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn proposal_repo() {
+    block_on(contract::proposal_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn agent_call_repo() {
+    block_on(contract::agent_call_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
 fn product_repo() {
     block_on(contract::product_repo(async || {
         InMemoryProductRepo::default()
