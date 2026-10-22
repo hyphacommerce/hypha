@@ -21,17 +21,17 @@ pub mod totp;
 pub use api_key::{ApiKey, ApiKeyKind, ApiKeyParts, ApiKeySnapshot};
 pub use commands::{
     AuthEnv, ChannelDirectory, CommandError, CreateApiKey, LoginStep, MfaMethod, TotpSetup,
-    authenticate_api_key, authenticate_session, change_password, check_password, confirm_totp,
-    create_api_key, disable_mfa, finish_login, get_api_key, hash_new_password, list_api_keys,
-    list_sessions, logout, new_active_session, open_session, prepare_login, record_session_use,
-    regenerate_recovery_codes, require_grantable, reset_password, revoke_api_key,
-    revoke_other_sessions, revoke_session, session_token_hash, start_password_reset, start_totp,
-    withdraw_password_resets,
+    authenticate_agent_key, authenticate_api_key, authenticate_session, change_password,
+    check_password, confirm_totp, create_api_key, disable_mfa, finish_login, get_api_key,
+    hash_new_password, list_api_keys, list_sessions, logout, new_active_session, open_session,
+    prepare_login, record_session_use, regenerate_recovery_codes, require_grantable,
+    reset_password, revoke_api_key, revoke_other_sessions, revoke_session, session_token_hash,
+    start_password_reset, start_totp, withdraw_password_resets,
 };
 pub use error::{ApiKeyError, IdentityError, RestoreError};
 pub use identity::{
     CodeCheck, Credential, CredentialKind, Identity, IdentitySnapshot, Principal, PrincipalKind,
-    StoredCredential,
+    StoredCredential, agent_key_lookup,
 };
 pub use password::{Argon2id, HashError, Password, PasswordError, PasswordHash, PasswordHasher};
 pub use password_reset::{PasswordReset, PasswordResetSnapshot};

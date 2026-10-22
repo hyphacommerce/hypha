@@ -100,6 +100,29 @@ pub async fn identity_repo<R: IdentityRepo>(make: impl AsyncFn() -> R) {
     identity_stale(&make().await).await;
     scenario("identity: a customer signing in with an email code round trips");
     customer_identity(&make().await).await;
+    scenario("identity: an agent's key round trips and is found by its hash");
+    agent_identity(&make().await).await;
+}
+
+async fn agent_identity<R: IdentityRepo>(repo: &R) {
+    use hypha_auth::{NewToken, TokenKind, agent_key_lookup};
+    let agent = hypha_core::AgentId::from_uuid(Uuid::from_u128(41));
+    let key = NewToken::generate(TokenKind::AgentKey, &crate::TestEnv::default());
+    let mut i = Identity::with_agent_key(identity_id(5), agent, &key);
+    repo.insert(&mut i).await.unwrap();
+    assert_eq!(
+        repo.get_by_principal(Principal::Agent(agent)).await,
+        Ok(Some(i.clone()))
+    );
+    assert_eq!(
+        repo.find_login(
+            PrincipalKind::Agent,
+            CredentialKind::AgentKey,
+            &agent_key_lookup(key.hash())
+        )
+        .await,
+        Ok(Some(i))
+    );
 }
 
 async fn customer_identity<R: IdentityRepo>(repo: &R) {

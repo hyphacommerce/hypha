@@ -14,7 +14,7 @@ use thiserror::Error;
 use crate::{
     ApiKey, ApiKeyError, Identity, IdentityError, PasswordReset, Session,
     api_key::{ApiKeyKind, ApiKeyParts},
-    identity::{CredentialKind, PrincipalKind},
+    identity::{CredentialKind, Principal, PrincipalKind},
     password::{HashError, Password, PasswordError, PasswordHasher},
     recovery,
     repo::{
@@ -885,6 +885,26 @@ pub async fn revoke_api_key<R: ApiKeyRepo>(
     }
     keys.update(&mut key).await?;
     Ok(key)
+}
+
+/// The agent an autonomous agent's key (`hypha_ak_…`) belongs to. Says nothing about
+/// whether the agent may act now (enabled, not revoked): that's the agent's to say.
+pub async fn authenticate_agent_key<R: IdentityRepo>(
+    identities: &R,
+    token: &str,
+) -> Result<hypha_core::AgentId, CommandError> {
+    if TokenKind::of(token) != Some(TokenKind::AgentKey) {
+        return Err(CommandError::InvalidToken);
+    }
+    let lookup = crate::identity::agent_key_lookup(TokenHash::of(token));
+    let identity = identities
+        .find_login(PrincipalKind::Agent, CredentialKind::AgentKey, &lookup)
+        .await?
+        .ok_or(CommandError::InvalidToken)?;
+    match identity.principal() {
+        Principal::Agent(agent) => Ok(agent),
+        _ => Err(CommandError::InvalidToken),
+    }
 }
 
 /// The `Ctx` for a request carrying an API key: the key as the actor, with its scopes, and

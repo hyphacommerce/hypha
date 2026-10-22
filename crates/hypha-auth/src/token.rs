@@ -26,10 +26,14 @@ pub enum TokenKind {
     RefreshToken,
     /// A customer's session on the storefront.
     CustomerSession,
+    /// An autonomous admin agent's secret key: for `/mcp` only.
+    AgentKey,
+    /// A preview of a write: sent back with the write to apply exactly what was previewed.
+    PreviewToken,
 }
 
 impl TokenKind {
-    const ALL: [TokenKind; 9] = [
+    const ALL: [TokenKind; 11] = [
         TokenKind::Session,
         TokenKind::SecretKey,
         TokenKind::PublishableKey,
@@ -39,6 +43,8 @@ impl TokenKind {
         TokenKind::AccessToken,
         TokenKind::RefreshToken,
         TokenKind::CustomerSession,
+        TokenKind::AgentKey,
+        TokenKind::PreviewToken,
     ];
 
     pub const fn prefix(self) -> &'static str {
@@ -52,6 +58,8 @@ impl TokenKind {
             TokenKind::AccessToken => "hypha_at_",
             TokenKind::RefreshToken => "hypha_rt_",
             TokenKind::CustomerSession => "hypha_cs_",
+            TokenKind::AgentKey => "hypha_ak_",
+            TokenKind::PreviewToken => "hypha_pv_",
         }
     }
 

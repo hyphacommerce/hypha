@@ -1235,3 +1235,32 @@ fn a_sessions_use_is_recorded_once_per_resolution() {
     assert_eq!(stored(session.id()), env.now());
     assert_eq!(session.last_used_at(), env.now());
 }
+
+#[test]
+fn an_agent_key_names_its_agent_and_nothing_else_does() {
+    use hypha_auth::{NewToken, TokenKind, authenticate_agent_key};
+    use hypha_core::AgentId;
+    let (ports, env) = world();
+    let agent = AgentId::from_uuid(Uuid::from_u128(900));
+    let key = NewToken::generate(TokenKind::AgentKey, &env);
+    let mut identity =
+        Identity::with_agent_key(IdentityId::from_uuid(Uuid::from_u128(901)), agent, &key);
+    block_on(ports.identities.insert(&mut identity)).unwrap();
+    assert_eq!(
+        block_on(authenticate_agent_key(&ports.identities, key.expose())),
+        Ok(agent)
+    );
+    let other = NewToken::generate(TokenKind::AgentKey, &env);
+    let secret = NewToken::generate(TokenKind::SecretKey, &env);
+    for token in [other.expose(), secret.expose(), "hypha_ak_nope"] {
+        assert_eq!(
+            block_on(authenticate_agent_key(&ports.identities, token)),
+            Err(CommandError::InvalidToken),
+            "{token}"
+        );
+    }
+    let stored = block_on(ports.identities.get_by_principal(Principal::Agent(agent)))
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored, identity, "the key survives storage");
+}

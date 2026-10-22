@@ -3,14 +3,14 @@
 
 use core::time::Duration;
 
-use hypha_core::{CustomerId, Email, IdentityId, Timestamp, UserId, Version, Versioned};
+use hypha_core::{AgentId, CustomerId, Email, IdentityId, Timestamp, UserId, Version, Versioned};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     error::{IdentityError, RestoreError},
     password::PasswordHash,
     secret_box::Sealed,
-    token::{TokenHash, hex},
+    token::{NewToken, TokenHash, hex},
 };
 
 /// Who an identity belongs to. Typed, so a login can't be linked to the wrong kind of
@@ -20,6 +20,8 @@ pub enum Principal {
     Staff(UserId),
     /// A shopper with an account.
     Customer(CustomerId),
+    /// An autonomous admin agent, by its secret key.
+    Agent(AgentId),
 }
 
 impl Principal {
@@ -27,6 +29,7 @@ impl Principal {
         match self {
             Principal::Staff(_) => PrincipalKind::Staff,
             Principal::Customer(_) => PrincipalKind::Customer,
+            Principal::Agent(_) => PrincipalKind::Agent,
         }
     }
 }
@@ -36,6 +39,7 @@ impl Principal {
 pub enum PrincipalKind {
     Staff,
     Customer,
+    Agent,
 }
 
 impl PrincipalKind {
@@ -43,6 +47,7 @@ impl PrincipalKind {
         match self {
             PrincipalKind::Staff => "staff",
             PrincipalKind::Customer => "customer",
+            PrincipalKind::Agent => "agent",
         }
     }
 
@@ -50,6 +55,7 @@ impl PrincipalKind {
         match s {
             "staff" => Some(PrincipalKind::Staff),
             "customer" => Some(PrincipalKind::Customer),
+            "agent" => Some(PrincipalKind::Agent),
             _ => None,
         }
     }
@@ -85,6 +91,9 @@ pub enum Credential {
         expires_at: Option<Timestamp>,
         attempts: u32,
     },
+    /// An autonomous agent's secret key (`hypha_ak_…`): looked up by the hex of its
+    /// SHA-256, as every token is stored. One per agent; a new one replaces it.
+    AgentKey { lookup: String, last_four: String },
 }
 
 /// What checking an email code found (`Identity::use_email_code`).
@@ -103,6 +112,7 @@ pub enum CredentialKind {
     EmailCode,
     Totp,
     RecoveryCodes,
+    AgentKey,
 }
 
 impl CredentialKind {
@@ -112,6 +122,7 @@ impl CredentialKind {
             CredentialKind::EmailCode => "email_code",
             CredentialKind::Totp => "totp",
             CredentialKind::RecoveryCodes => "recovery_codes",
+            CredentialKind::AgentKey => "agent_key",
         }
     }
 }
@@ -123,6 +134,7 @@ impl Credential {
             Credential::EmailCode { .. } => CredentialKind::EmailCode,
             Credential::Totp { .. } => CredentialKind::Totp,
             Credential::RecoveryCodes { .. } => CredentialKind::RecoveryCodes,
+            Credential::AgentKey { .. } => CredentialKind::AgentKey,
         }
     }
 
@@ -133,9 +145,23 @@ impl Credential {
             Credential::Password { email, .. } | Credential::EmailCode { email, .. } => {
                 Some(email.as_str())
             }
+            Credential::AgentKey { lookup, .. } => Some(lookup),
             Credential::Totp { .. } | Credential::RecoveryCodes { .. } => None,
         }
     }
+
+    /// An agent's key credential for a freshly made `token`: its hash, its last four.
+    pub fn agent_key(token: &NewToken) -> Self {
+        Credential::AgentKey {
+            lookup: agent_key_lookup(token.hash()),
+            last_four: token.last_four().to_string(),
+        }
+    }
+}
+
+/// What an agent's key is looked up by: the hex of its hash.
+pub fn agent_key_lookup(hash: TokenHash) -> String {
+    hex(hash.as_bytes())
 }
 
 /// A principal's credentials. The aggregate root: credentials change only through it, so
@@ -186,6 +212,16 @@ impl Identity {
                 expires_at: None,
                 attempts: 0,
             }],
+        }
+    }
+
+    /// An autonomous agent's identity, which signs in with its key alone.
+    pub fn with_agent_key(id: IdentityId, agent: AgentId, token: &NewToken) -> Self {
+        Self {
+            id,
+            version: Version::NEW,
+            principal: Principal::Agent(agent),
+            credentials: vec![Credential::agent_key(token)],
         }
     }
 
@@ -567,6 +603,12 @@ struct TotpData {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct AgentKeyData {
+    last_four: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RecoveryCodesData {
     /// Hex of each SHA-256.
     hashes: Vec<String>,
@@ -604,6 +646,9 @@ impl Credential {
                 hash: hash.map(|h| hex(h.as_bytes())),
                 expires_at: expires_at.map(Timestamp::unix_micros),
                 attempts: *attempts,
+            }),
+            Credential::AgentKey { last_four, .. } => serde_json::json!(AgentKeyData {
+                last_four: last_four.clone(),
             }),
         };
         StoredCredential {
@@ -686,6 +731,22 @@ impl Credential {
                     .collect::<Option<Vec<_>>>()
                     .ok_or_else(|| bad("hash"))?;
                 Ok(Credential::RecoveryCodes { hashes })
+            }
+            "agent_key" => {
+                let data: AgentKeyData =
+                    serde_json::from_value(stored.data.clone()).map_err(|e| bad(&e.to_string()))?;
+                let lookup = stored.lookup.clone().ok_or_else(|| bad("no lookup"))?;
+                let hex_hash = lookup.len() == 64
+                    && lookup
+                        .bytes()
+                        .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+                if !hex_hash {
+                    return Err(bad("lookup"));
+                }
+                Ok(Credential::AgentKey {
+                    lookup,
+                    last_four: data.last_four,
+                })
             }
             _ => Err(RestoreError::UnknownCredentialKind(stored.kind)),
         }
