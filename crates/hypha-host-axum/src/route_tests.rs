@@ -196,14 +196,29 @@ async fn app_for<D: crate::Deployment>(
     media: bool,
     sender: Option<HostMail>,
 ) -> TestApp<D> {
+    // The tests' rate apps and webhook receivers listen on localhost.
+    config.allow_private_callbacks = true;
+    app_exactly::<D>(config, media, sender).await
+}
+
+/// The app under `config` as given: calls to private addresses are refused unless it
+/// allows them, as in production.
+async fn app_refusing_private_calls(toml: &str) -> TestApp {
+    let config = Config::load(Some(toml), |_| None).unwrap();
+    app_exactly::<crate::Stock>(config, false, None).await
+}
+
+async fn app_exactly<D: crate::Deployment>(
+    config: Config,
+    media: bool,
+    sender: Option<HostMail>,
+) -> TestApp<D> {
     // Warnings and errors (a 500's cause is only logged) go to the test's output, which
     // a failing test prints: in CI, that's the only place to see them.
     let _ = tracing_subscriber::fmt()
         .with_test_writer()
         .with_env_filter(tracing_subscriber::EnvFilter::new("warn"))
         .try_init();
-    // The tests' rate apps and webhook receivers listen on localhost.
-    config.allow_private_callbacks = true;
     let media = match media {
         true => Some(Arc::new(test_media(&config).await)),
         false => None,
@@ -1423,6 +1438,44 @@ async fn a_storefront_reads_its_order_with_the_access_token_only() {
         (status, code(&body)),
         (StatusCode::BAD_REQUEST, "invalid_query")
     );
+}
+
+/// Runs `statement` on the test's schema, for state no route can set (time passing).
+async fn sql<D: crate::Deployment>(app: &TestApp<D>, statement: &str) {
+    use hypha_store_postgres::PgConnection;
+    let ports = app.state.public_ports().await.unwrap();
+    let mut conn = ports.conn().await;
+    conn.client().batch_execute(statement).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_cart_checked_out_over_an_hour_ago_no_longer_answers_with_its_order() {
+    let app = app().await;
+    let (pk, cart_path, _) = cart_for_three_mugs(&app).await;
+    pay_on_delivery(&app, &pk, &cart_path).await;
+    let checkout = format!("{cart_path}/checkout");
+    let (status, placed) = send_as(&app, &pk, "POST", &checkout, Some("{}")).await;
+    assert_eq!(status, StatusCode::CREATED, "{placed}");
+    let (status, again) = send_as(&app, &pk, "POST", &checkout, Some("{}")).await;
+    assert_eq!(status, StatusCode::CREATED, "{again}");
+    assert_eq!(again["access_token"], placed["access_token"]);
+
+    // The clock is the system's: the order is made older instead.
+    sql(
+        &app,
+        "UPDATE orders SET placed_at = placed_at - interval '61 minutes'",
+    )
+    .await;
+    let (status, late) = send_as(&app, &pk, "POST", &checkout, Some("{}")).await;
+    assert_eq!(
+        (status, code(&late)),
+        (StatusCode::CONFLICT, "cart_completed"),
+        "{late}"
+    );
+    let text = late.to_string();
+    let token = placed["access_token"].as_str().unwrap();
+    assert!(!text.contains(token), "{late}");
+    assert!(!text.contains("ana@example.hr"), "{late}");
 }
 
 #[tokio::test]

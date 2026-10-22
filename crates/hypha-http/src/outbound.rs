@@ -517,6 +517,45 @@ mod tests {
     }
 
     #[test]
+    fn forwarded_calls_manifest_gets_and_spore_calls_refuse_private_literals() {
+        let refused = Err(CallError::Failed(
+            "the URL is not a public address".to_string(),
+        ));
+        let policy = OutboundPolicy::default();
+        let timeout = std::time::Duration::from_secs(5);
+        for url in [
+            "http://127.0.0.1:9000/x",
+            "http://169.254.169.254/latest/meta-data",
+            "http://[::1]:3000/x",
+        ] {
+            let forward = ForwardCall {
+                method: Method::Get,
+                url,
+                timeout,
+                secret: "s3cret",
+                at: 1_700_000_000,
+                content_type: None,
+                headers: Vec::new(),
+                body: Vec::new(),
+                max_answer: 1024,
+            };
+            assert_eq!(prepare_forward(policy, forward), refused, "{url}");
+            assert_eq!(prepare_get(policy, url, timeout), refused, "{url}");
+            assert_eq!(
+                check_literal(policy, url),
+                refused.clone().map(|_| ()),
+                "{url}"
+            );
+        }
+        let allowed = OutboundPolicy {
+            allow_private: true,
+        };
+        assert!(prepare_get(allowed, "http://127.0.0.1:9000/x", timeout).is_ok());
+        assert_eq!(check_literal(allowed, "http://[::1]:3000/x"), Ok(()));
+        assert_eq!(check_literal(policy, "https://app.example/x"), Ok(()));
+    }
+
+    #[test]
     fn only_a_2xx_answer_is_a_success() {
         let answer = |status| OutboundAnswer {
             status,

@@ -484,6 +484,92 @@ async fn without_an_admin_url_there_is_no_consent_page() {
     );
 }
 
+#[tokio::test]
+async fn an_app_reading_a_custom_fields_event_sees_only_the_fields_it_may_read() {
+    let app = oauth_app().await;
+    let (base, _) = local_app(&["apps:read", "customers:read"]).await;
+    let token = install(&app, &base, None).await["access_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for body in [
+        json!({"owner_type": "customer", "key": "birthday", "type": "date", "name": "Birthday",
+               "personal": true}),
+        json!({"owner_type": "customer", "key": "tier", "type": "text", "name": "Tier"}),
+    ] {
+        let (status, json) = send(
+            &app,
+            "POST",
+            "/admin/custom-field-definitions",
+            Some(&body.to_string()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{json}");
+    }
+    let (_, customer) = send(
+        &app,
+        "POST",
+        "/admin/customers",
+        Some(r#"{"email":"ana@example.com"}"#),
+    )
+    .await;
+    let path = format!(
+        "/admin/customers/{}/custom-fields",
+        customer["id"].as_str().unwrap()
+    );
+    let body = json!({"custom_fields": {"custom.birthday": "1990-05-04", "custom.tier": "gold"}});
+    let (status, json) = send(&app, "PATCH", &path, Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let event = outbox_events(&app)
+        .await
+        .into_iter()
+        .find(|e| e.event_type == "customer.custom_fields_updated")
+        .unwrap();
+    let uri = format!("/admin/events/{}", hypha_core::EventId::from_uuid(event.id));
+
+    let (status, seen) = send_as(&app, &token, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{seen}");
+    assert_eq!(
+        seen["data"]["changes"],
+        json!([{"key": "custom.tier", "value": "gold"}]),
+        "{seen}"
+    );
+    let owner = owner_session(&app).await;
+    let (status, seen) = send_as(&app, &owner, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{seen}");
+    let changes = seen["data"]["changes"].to_string();
+    assert!(
+        changes.contains("custom.birthday") && changes.contains("custom.tier"),
+        "{seen}"
+    );
+}
+
+#[tokio::test]
+async fn a_client_id_at_a_private_address_is_never_fetched() {
+    let app =
+        super::app_refusing_private_calls("[server]\nadmin_url = \"http://admin.test\"").await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let hits = Arc::new(Mutex::new(0));
+    let counted = Arc::clone(&hits);
+    let router = Router::new().fallback(move || {
+        let counted = Arc::clone(&counted);
+        async move {
+            *counted.lock().unwrap() += 1;
+            StatusCode::NOT_FOUND
+        }
+    });
+    tokio::spawn(async move { axum::serve(listener, router).await });
+
+    let (status, location, body) = raw(&app, "GET", &authorize_uri(&base, None), None).await;
+    assert_eq!(
+        (status, location, code(&body)),
+        (StatusCode::BAD_REQUEST, None, "manifest_unreachable"),
+        "{body}"
+    );
+    assert_eq!(*hits.lock().unwrap(), 0, "the private address was called");
+}
+
 // ---------- personal data ----------
 
 /// Values that must never reach a caller without the `customer_data:*` scopes.

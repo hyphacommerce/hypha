@@ -24,6 +24,9 @@ const WHSEC: &str = "whsec_test_secret";
 struct FakeStripe {
     intents: BTreeMap<String, Value>,
     refunds: Vec<Value>,
+    /// While set, every request is answered with this status, as Stripe down or rate
+    /// limiting.
+    failing: Option<u16>,
     /// `(method, path, idempotency key, form body)`.
     seen: Vec<(String, String, String, String)>,
 }
@@ -56,6 +59,10 @@ async fn fake_stripe() -> (String, Shared) {
                 };
                 let parts: Vec<&str> = path.trim_start_matches("/v1/").split('/').collect();
                 let (status, answer) = match (method.as_str(), parts.as_slice()) {
+                    _ if fake.failing.is_some() => (
+                        fake.failing.unwrap_or_default(),
+                        json!({"error": {"type": "api_error", "message": "unavailable"}}),
+                    ),
                     ("POST", ["payment_intents"]) => {
                         // One intent per idempotency key, as Stripe does.
                         let existing = fake
@@ -172,6 +179,11 @@ async fn fake_stripe() -> (String, Shared) {
 /// A host with the Stripe spore pointed at a fake Stripe, its keys saved.
 async fn stripe_host() -> (TestApp<WithStripe>, Shared) {
     let (base, fake) = fake_stripe().await;
+    (stripe_host_at(&base).await, fake)
+}
+
+/// A host with the Stripe spore calling Stripe at `base`, its keys saved.
+async fn stripe_host_at(base: &str) -> TestApp<WithStripe> {
     let toml = format!("[spores.stripe]\napi_base = \"{base}\"");
     let app = app_with_spores::<WithStripe>(Config::load(Some(&toml), |_| None).unwrap()).await;
     let body = json!({ "settings": {
@@ -189,7 +201,7 @@ async fn stripe_host() -> (TestApp<WithStripe>, Shared) {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{json}");
-    (app, fake)
+    app
 }
 
 /// A cart paying by the Stripe method: the publishable key and the cart's path.
@@ -743,4 +755,204 @@ async fn a_stripe_without_keys_starts_nothing_and_a_disabled_one_is_not_offered(
     );
     let (status, _) = send_with(&app, &[], "GET", "/spores/stripe/elements/payment.js", None).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+/// Stripe calls with `method` and `path` so far.
+fn calls(fake: &Shared, method: &str, path: &str) -> usize {
+    fake.lock()
+        .unwrap()
+        .seen
+        .iter()
+        .filter(|(m, p, _, _)| m == method && p == path)
+        .count()
+}
+
+#[tokio::test]
+async fn cancelling_an_order_cancels_its_intent_stripe_still_holds() {
+    let (app, fake) = stripe_host().await;
+    let (pk, cart_path) = cart_paying_by_stripe(&app).await;
+    let payment = start_paying(&app, &pk, &cart_path).await["payment"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    hold(&fake, "pi_1");
+    let (status, placed) = check_out(&app, &pk, &cart_path).await;
+    assert_eq!(status, StatusCode::CREATED, "{placed}");
+    let order = placed["id"].as_str().unwrap().to_string();
+    // Voided in Hypha only, so the order may be cancelled while Stripe still holds it.
+    let auth = format!("Bearer {}", app.admin_key);
+    let (status, json) = send_with(
+        &app,
+        &[
+            (AUTHORIZATION.as_str(), &auth),
+            ("idempotency-key", "void-1"),
+        ],
+        "POST",
+        &format!("/admin/payments/{payment}/events"),
+        Some(r#"{"type":"voided"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let (status, json) = send(
+        &app,
+        "POST",
+        &format!("/admin/orders/{order}/cancel"),
+        Some(r#"{"reason":"customer"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(calls(&fake, "POST", "/v1/payment_intents/pi_1/cancel"), 0);
+
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    assert_eq!(calls(&fake, "POST", "/v1/payment_intents/pi_1/cancel"), 1);
+    assert_eq!(fake.lock().unwrap().intents["pi_1"]["status"], "canceled");
+}
+
+#[tokio::test]
+async fn a_paid_checkout_that_cannot_complete_gives_the_money_back_at_stripe() {
+    let (app, fake) = stripe_host().await;
+    let (pk, cart_path) = cart_paying_by_stripe(&app).await;
+    let payment = start_paying(&app, &pk, &cart_path).await["payment"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // The mugs sell out before Stripe reports the card authorized.
+    let (_, products) = send(&app, "GET", "/admin/products?limit=1", None).await;
+    let product = products["items"][0]["id"].as_str().unwrap();
+    let stock = format!("/admin/products/{product}/inventory");
+    let (_, items) = send(&app, "GET", &stock, None).await;
+    let item = items["items"][0]["id"].as_str().unwrap().to_string();
+    let (_, locations) = send(&app, "GET", "/admin/locations", None).await;
+    let warehouse = locations["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["name"] == "Warehouse")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let level = format!("/admin/inventory-items/{item}/levels/{warehouse}");
+    let (status, json) = send(&app, "PUT", &level, Some(r#"{"on_hand":0}"#)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+
+    hold(&fake, "pi_1");
+    let metadata = fake.lock().unwrap().intents["pi_1"]["metadata"].clone();
+    let capturable = json!({ "id": "pi_1", "amount_capturable": 3000, "metadata": metadata });
+    let (status, outcome) = deliver(
+        &app,
+        "evt_auth",
+        "payment_intent.amount_capturable_updated",
+        capturable,
+    )
+    .await;
+    assert_eq!(
+        (status, outcome["status"].as_str()),
+        (StatusCode::OK, Some("reported")),
+        "{outcome}"
+    );
+    assert_eq!(calls(&fake, "POST", "/v1/payment_intents/pi_1/cancel"), 1);
+    let (_, json) = send(&app, "GET", &format!("/admin/payments/{payment}"), None).await;
+    assert_eq!(json["status"], "voided", "{json}");
+    assert_eq!(json["order"], Value::Null, "{json}");
+}
+
+#[tokio::test]
+async fn a_refund_stripe_cannot_be_asked_about_now_is_recorded_when_redelivered() {
+    let (app, fake) = stripe_host().await;
+    let (pk, cart_path) = cart_paying_by_stripe(&app).await;
+    let payment = start_paying(&app, &pk, &cart_path).await["payment"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (metadata, amount) = {
+        let fake = fake.lock().unwrap();
+        let intent = &fake.intents["pi_1"];
+        (intent["metadata"].clone(), intent["amount"].clone())
+    };
+    let succeeded = json!({ "id": "pi_1", "metadata": metadata });
+    let (status, outcome) = deliver(&app, "evt_paid", "payment_intent.succeeded", succeeded).await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    assert_eq!(payment_status(&app, &payment).await, "paid");
+
+    // Refunded in Stripe's dashboard; its event arrives while Stripe is down, then
+    // rate limiting.
+    fake.lock().unwrap().refunds.push(json!({
+        "id": "re_1", "amount": amount, "status": "succeeded", "created": 1_700_000_000,
+        "payment_intent": "pi_1",
+    }));
+    let charge = json!({ "id": "ch_1", "payment_intent": "pi_1", "amount": amount,
+                         "currency": "eur", "refunded": true });
+    for failing in [503, 429] {
+        fake.lock().unwrap().failing = Some(failing);
+        let (status, outcome) =
+            deliver(&app, "evt_refunded", "charge.refunded", charge.clone()).await;
+        assert_eq!(
+            status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{failing}: {outcome}"
+        );
+        assert_eq!(payment_status(&app, &payment).await, "paid");
+    }
+    fake.lock().unwrap().failing = None;
+    let (status, outcome) = deliver(&app, "evt_refunded", "charge.refunded", charge).await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    assert_eq!(payment_status(&app, &payment).await, "refunded");
+}
+
+#[tokio::test]
+async fn a_refund_event_while_stripe_cannot_be_reached_is_redelivered() {
+    let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", closed.local_addr().unwrap());
+    drop(closed);
+    let app = stripe_host_at(&base).await;
+    let charge = json!({ "id": "ch_1", "payment_intent": "pi_1", "amount": 3000,
+                         "currency": "eur", "refunded": true });
+    let (status, outcome) = deliver(&app, "evt_refunded", "charge.refunded", charge).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{outcome}");
+}
+
+#[tokio::test]
+async fn a_paid_checkout_that_fails_for_now_is_completed_when_stripe_redelivers() {
+    let (app, fake) = stripe_host().await;
+    let (pk, cart_path) = cart_paying_by_stripe(&app).await;
+    let payment = start_paying(&app, &pk, &cart_path).await["payment"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    hold(&fake, "pi_1");
+    let metadata = fake.lock().unwrap().intents["pi_1"]["metadata"].clone();
+    let capturable = json!({ "id": "pi_1", "amount_capturable": 3000, "metadata": metadata });
+    // Storage refuses orders for a while: a failure that passes.
+    super::sql(
+        &app,
+        "CREATE FUNCTION refuse_orders() RETURNS trigger LANGUAGE plpgsql AS
+             $$ BEGIN RAISE EXCEPTION 'storage unavailable'; END $$;
+         CREATE TRIGGER refuse_orders BEFORE INSERT ON orders
+             FOR EACH ROW EXECUTE FUNCTION refuse_orders();",
+    )
+    .await;
+    let (status, outcome) = deliver(
+        &app,
+        "evt_auth",
+        "payment_intent.amount_capturable_updated",
+        capturable.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{outcome}");
+    assert_eq!(calls(&fake, "POST", "/v1/payment_intents/pi_1/cancel"), 0);
+    assert_eq!(payment_status(&app, &payment).await, "authorized");
+
+    super::sql(&app, "DROP TRIGGER refuse_orders ON orders").await;
+    let (status, outcome) = deliver(
+        &app,
+        "evt_auth",
+        "payment_intent.amount_capturable_updated",
+        capturable,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    let (_, json) = send(&app, "GET", &format!("/admin/payments/{payment}"), None).await;
+    assert!(json["order"].is_string(), "{json}");
 }
