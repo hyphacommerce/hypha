@@ -69,16 +69,30 @@ export const CUSTOMER_DATA = [
 
 export { areaLabel, personalDataLabel };
 
-/** What the deployment's cap means, for a banner; `null` when grants decide. */
-export function capNotice(cap: string): { title: string; description: string } | null {
-  if (cap === "propose") {
+export type AgentSettings = AdminSchemas["AgentSettingsResponse"];
+
+/**
+ * What the operator's `[agents]` settings mean, for a banner: agents turned off, or the
+ * cap on what they write; `null` when grants decide.
+ */
+export function capNotice(
+  settings: Pick<AgentSettings, "enabled" | "writes">,
+): { title: string; description: string } | null {
+  if (!settings.enabled) {
+    return {
+      title: "Agents are turned off on this deployment",
+      description:
+        "The operator set agents.enabled to false: no agent can connect or act, whatever its grant. Grants and proposals are kept for when they're turned on.",
+    };
+  }
+  if (settings.writes === "propose") {
     return {
       title: "Agents only propose in this deployment",
       description:
         'The operator set agents.writes to "propose": every write an agent makes waits for a person to approve it, whatever its grant says.',
     };
   }
-  if (cap === "off") {
+  if (settings.writes === "off") {
     return {
       title: "Agents only read in this deployment",
       description:
@@ -134,52 +148,17 @@ export function modeLabel(mode: string): string {
   return MODES[mode] ?? mode;
 }
 
-/** The common operations agents propose, as people say them. */
-const OPERATIONS: Record<string, string> = {
-  "admin.products.create": "Create a product",
-  "admin.products.update": "Change a product",
-  "admin.products.remove": "Delete a product",
-  "admin.products.set_status": "Change a product's status",
-  "admin.products.set_options": "Change a product's options",
-  "admin.products.set_media": "Change a product's media",
-  "admin.products.add_variant": "Add a variant",
-  "admin.products.set_variants": "Replace a product's variants",
-  "admin.products.update_variant": "Change a variant",
-  "admin.products.remove_variant": "Remove a variant",
-  "admin.inventory.set_level": "Set stock at a location",
-  "admin.inventory.adjust_level": "Adjust stock at a location",
-  "admin.inventory.update_item": "Change how stock is tracked",
-  "admin.markets.set_fixed_prices": "Set fixed prices",
-  "admin.markets.remove_fixed_prices": "Remove fixed prices",
-  "admin.markets.update_price_list": "Change a price list",
-  "admin.markets.add_products": "Add products to a catalog",
-  "admin.markets.remove_products": "Remove products from a catalog",
-  "admin.orders.cancel": "Cancel an order",
-  "admin.orders.mark_paid": "Mark an order paid",
-  "admin.fulfillments.create": "Fulfil order lines",
-  "admin.fulfillments.update": "Change a shipment's tracking",
-  "admin.fulfillments.cancel": "Take back a shipment",
-  "admin.payments.capture": "Capture a payment",
-  "admin.payments.refund": "Refund a payment",
-  "admin.payments.void": "Void a payment",
-  "admin.categories.create": "Create a category",
-  "admin.categories.update": "Change a category",
-  "admin.categories.delete": "Delete a category",
-  "admin.categories.add_products": "Add products to a category",
-  "admin.categories.remove_products": "Remove products from a category",
-  "admin.categories.set_for_product": "Set a product's categories",
-  "admin.customers.create": "Create a customer",
-  "admin.customers.update": "Change a customer",
-  "admin.customers.request_erasure": "Erase a customer's personal data",
-};
-
 /**
- * An operation ID (`admin.products.update`) in words: the common ones by name, the rest
- * from the ID itself ("Custom fields: update product").
+ * An operation in words: the first sentence of its summary from the API ("Changes a
+ * product's title, handle…" stops at the first colon or full stop), else words from its
+ * ID ("Products: update variant") for an operation this build no longer has.
  */
-export function operationLabel(operation: string): string {
-  const known = OPERATIONS[operation];
-  if (known) return known;
+export function operationLabel(operation: string, summary?: string | null): string {
+  const first = summary
+    ?.split(/[.:](?:\s|$)/)[0]
+    ?.replace(/\s+/g, " ")
+    .trim();
+  if (first) return first;
   const [, area = operation, action = ""] = operation.split(".");
   const words = action.replaceAll("_", " ");
   return action ? `${areaLabel(area)}: ${words}` : areaLabel(area);
@@ -226,13 +205,6 @@ function text(value: unknown): string | undefined {
 
 function texts(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
-}
-
-/** A record's field, when it's a record itself. */
-export function recordOf(value: unknown, key: string): Record<string, unknown> | undefined {
-  if (!isRecord(value)) return undefined;
-  const field = value[key];
-  return isRecord(field) ? field : undefined;
 }
 
 function blockedBy(value: unknown): Preview["blocked_by"] {

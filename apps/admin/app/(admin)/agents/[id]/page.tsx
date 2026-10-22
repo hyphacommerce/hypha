@@ -9,7 +9,14 @@ import { type SearchParams, one } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { FormSkeleton } from "@/components/skeletons";
 import { type Agent, agentState, capNotice, kindLabel } from "@/lib/agents";
-import { loaded, perRequest, requireStaff, sessionClient, staffNames } from "@/lib/hypha";
+import {
+  loadAgentSettings,
+  loaded,
+  perRequest,
+  requireStaff,
+  sessionClient,
+  staffNames,
+} from "@/lib/hypha";
 import { hasScope } from "@/lib/navigation";
 
 import { ActivityTable } from "./activity-table";
@@ -71,14 +78,15 @@ export default async function AgentPage({
 
 async function AgentHeader({ id }: { id: string }) {
   const client = await sessionClient();
-  const [agent, me, people] = await Promise.all([
+  const [agent, me, people, settings] = await Promise.all([
     loadAgent(id),
     requireStaff(),
     staffNames(client),
+    loadAgentSettings(),
   ]);
   const state = agentState(agent);
   const person = agent.user ? (people.get(agent.user) ?? agent.user) : undefined;
-  const notice = capNotice(agent.writes_cap);
+  const notice = settings ? capNotice(settings) : null;
   const facts = [
     kindLabel(agent.kind),
     person && `acts for ${person}`,
@@ -118,12 +126,17 @@ async function AgentHeader({ id }: { id: string }) {
 }
 
 async function Access({ id }: { id: string }) {
-  const [agent, me] = await Promise.all([loadAgent(id), requireStaff()]);
+  const [agent, me, settings] = await Promise.all([
+    loadAgent(id),
+    requireStaff(),
+    loadAgentSettings(),
+  ]);
   return (
     <AgentEditor
       // A save starts a fresh draft from what was saved.
       key={agent.updated_at}
       agent={agent}
+      cap={settings?.writes ?? agent.writes_cap}
       myScopes={me.scopes}
       canWrite={hasScope(me.scopes, "agents:write") && !agent.revoked_at}
     />

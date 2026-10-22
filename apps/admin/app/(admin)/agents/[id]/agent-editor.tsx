@@ -14,14 +14,14 @@ import type { Agent } from "@/lib/agents";
 import { saveAgent } from "../actions";
 import {
   type GrantDraft,
-  GrantFields,
   type GrantProblem,
   draftOf,
   grantOf,
   operationsOf,
   sameOperations,
   sameScopes,
-} from "../grant-fields";
+} from "../grant";
+import { GrantFields } from "../grant-fields";
 
 /**
  * An agent's name and grant, one draft saved by the bar at the top. The page keys it by
@@ -29,10 +29,13 @@ import {
  */
 export function AgentEditor({
   agent,
+  cap,
   myScopes,
   canWrite,
 }: {
   agent: Agent;
+  /** The deployment's cap on what agents write (`agents.writes`). */
+  cap: string;
   myScopes: readonly string[];
   canWrite: boolean;
 }) {
@@ -89,7 +92,7 @@ export function AgentEditor({
             value={grant}
             onChange={setGrant}
             myScopes={myScopes}
-            cap={agent.writes_cap}
+            cap={cap}
             problem={problem}
             isReadOnly={!canWrite}
           />

@@ -18,29 +18,31 @@ export type CreateResult = SaveResult & { id?: string; key?: string };
 
 export type Grant = AdminSchemas["AgentGrantRequest"];
 
+const GRANT_FIELDS: GrantField[] = ["read", "write", "customer_data", "operations"];
+
+/** A string among an error's `details`, if the API sent one under `key`. */
+function detail(error: ApiError, key: string): string | undefined {
+  const { details } = error;
+  if (typeof details !== "object" || details === null) return undefined;
+  const value: unknown = Reflect.get(details, key);
+  return typeof value === "string" ? value : undefined;
+}
+
 /**
- * Where a grant error belongs: the API's message names the scope it's about ("orders:write
- * is granted to an agent to propose only"), and the scope's kind says the list.
+ * Where a save's error belongs: grant errors name their list (`details.field`) and the
+ * scope they're about; a missing or long name is the name's.
  */
 function placed(error: ApiError): SaveResult {
   const message = describe(error);
-  if (error.code === "invalid_operation_id" || error.code === "too_many_operations") {
-    return { error: message, field: "operations" };
-  }
+  const field = GRANT_FIELDS.find((f) => f === detail(error, "field"));
+  if (field) return { error: message, field, scope: detail(error, "scope") };
   if (
     (error.code === "field_required" || error.code === "field_too_long") &&
     error.error.includes("name")
   ) {
     return { error: message, field: "name" };
   }
-  const scope = /\b[a-z_]+:[a-z_]+\b/.exec(error.error)?.[0];
-  if (!scope) return { error: message };
-  const field: GrantField = scope.startsWith("customer_data:")
-    ? "customer_data"
-    : scope.endsWith(":read")
-      ? "read"
-      : "write";
-  return { error: message, field, scope };
+  return { error: message };
 }
 
 /** An autonomous agent with `grant`; its key comes back once. */
@@ -96,9 +98,10 @@ export async function revokeAgent(id: string): Promise<Result> {
 
 /**
  * Approves a proposal: its write runs as previewed, or not at all. The page shows how it
- * went from the proposal itself, `applied` or `failed` with the write's answer (a
- * `preview_stale` answer carries what the write would do now), so only an approval that
- * didn't get that far is an error here.
+ * went from the proposal itself: `applied` or `failed` with the write's answer, or, when
+ * the store changed since (`409 preview_stale`), still pending with what the write would
+ * do now and `refreshes` counted, to approve again. So only an approval that didn't get
+ * that far is an error here.
  */
 export async function approveProposal(id: string): Promise<Result> {
   const client = await sessionClient();

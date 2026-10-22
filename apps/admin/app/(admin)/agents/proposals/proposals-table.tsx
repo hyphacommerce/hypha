@@ -58,7 +58,7 @@ export function ProposalsTable({
       renderCell: (p) => (
         <VStack gap={0.5} hAlign="start">
           <Link href={`/agents/proposals/${p.id}`} weight="semibold" color="primary">
-            {operationLabel(p.operation)}
+            {operationLabel(p.operation, p.summary)}
           </Link>
           <Text type="supporting" color="secondary">
             {p.operation}

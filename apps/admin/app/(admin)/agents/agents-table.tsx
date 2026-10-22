@@ -19,16 +19,11 @@ import { useState, useTransition } from "react";
 
 import { DateTime } from "@/components/date-time";
 import { ResourceTable, type View } from "@/components/resource-table/resource-table";
-import { type Agent, agentState, capNotice, kindLabel } from "@/lib/agents";
+import { type Agent, type AgentSettings, agentState, capNotice, kindLabel } from "@/lib/agents";
 
 import { createAgent } from "./actions";
-import {
-  EMPTY_GRANT,
-  type GrantDraft,
-  GrantFields,
-  type GrantProblem,
-  grantOf,
-} from "./grant-fields";
+import { EMPTY_GRANT, type GrantDraft, type GrantProblem, grantOf } from "./grant";
+import { GrantFields } from "./grant-fields";
 
 const NO_NAMES: Record<string, string> = {};
 const NO_SCOPES: string[] = [];
@@ -40,22 +35,22 @@ const VIEWS: View[] = [
 
 export function AgentsTable({
   page,
-  cap,
+  settings,
   people = NO_NAMES,
   myScopes = NO_SCOPES,
   canWrite = false,
 }: {
   /** The page of agents; absent while it loads (the table shows its toolbar meanwhile). */
   page?: { items: Agent[]; next_cursor: string | null; error?: string };
-  /** The deployment's `writes_cap`, as the agents carry it; unknown with none listed. */
-  cap?: string;
+  /** The operator's settings for agents; absent while the page loads. */
+  settings?: AgentSettings;
   /** Staff members' names by user ID. */
   people?: Record<string, string>;
   myScopes?: readonly string[];
   canWrite?: boolean;
 }) {
   const [isCreating, setIsCreating] = useState(false);
-  const notice = cap ? capNotice(cap) : null;
+  const notice = settings ? capNotice(settings) : null;
 
   const columns: TableColumn<Agent>[] = [
     {
@@ -138,7 +133,7 @@ export function AgentsTable({
       />
       {isCreating && (
         <CreateAgentDialog
-          cap={cap ?? "apply"}
+          cap={settings?.writes ?? "apply"}
           myScopes={myScopes}
           onClose={() => setIsCreating(false)}
         />

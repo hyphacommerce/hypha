@@ -32,7 +32,7 @@ export function ActivityTable({
       header: "Operation",
       renderCell: (c) => (
         <VStack gap={0.5}>
-          <Text weight="medium">{operationLabel(c.operation)}</Text>
+          <Text weight="medium">{operationLabel(c.operation, c.summary)}</Text>
           <Text type="code">{c.operation}</Text>
         </VStack>
       ),
