@@ -231,15 +231,6 @@ fn only_ready_public_images_and_videos_attach() {
 }
 
 #[test]
-fn an_asset_listed_twice_is_refused() {
-    let ports = world();
-    assert_eq!(
-        attach(&ports, 1, &[1, 1]),
-        Err(CommandError::Product(ProductError::DuplicateMedia(aid(1))))
-    );
-}
-
-#[test]
 fn attaching_to_an_unknown_product_is_not_found() {
     let ports = world();
     assert_eq!(

@@ -714,3 +714,58 @@ fn country_taken_by_a_concurrent_insert_names_the_owner() {
         })
     );
 }
+
+#[test]
+fn market_and_catalog_writes_need_markets_write() {
+    let ports = InMemoryPorts::default();
+    let ids = SequentialIds::default();
+    let market = block_on(create_market(
+        &Ctx::system(),
+        &ports.markets,
+        &ids,
+        balkans(&["RS"]),
+    ))
+    .unwrap()
+    .id();
+    let catalog = block_on(create_catalog(
+        &Ctx::system(),
+        &ports.markets,
+        &ports.catalogs,
+        &ids,
+        catalog_for(market),
+    ))
+    .unwrap()
+    .id();
+    let reader = user(vec![Scope::MarketsRead]);
+    let rename = UpdateMarket {
+        name: Some("Serbia".to_string()),
+        ..UpdateMarket::default()
+    };
+    let results = [
+        block_on(update_market(&reader, &ports.markets, market, rename)).map(|_| ()),
+        block_on(add_market_country(&reader, &ports.markets, market, "BA")).map(|_| ()),
+        block_on(remove_market_country(&reader, &ports.markets, market, "RS")).map(|_| ()),
+        block_on(create_catalog(
+            &reader,
+            &ports.markets,
+            &ports.catalogs,
+            &ids,
+            catalog_for(market),
+        ))
+        .map(|_| ()),
+        block_on(remove_catalog_products(
+            &reader,
+            &ports,
+            catalog,
+            vec![pid(1)],
+        )),
+    ];
+    for result in results {
+        assert_eq!(
+            result,
+            Err(CommandError::Auth(AuthError::MissingScope(
+                Scope::MarketsWrite
+            )))
+        );
+    }
+}

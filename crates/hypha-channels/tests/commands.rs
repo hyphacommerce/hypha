@@ -155,8 +155,23 @@ fn channels_need_channel_scopes_and_publishing_products_write() {
         block_on(create_channel(&reader, &w.ports, &w.ids, input)).map(|_| ()),
         missing(Scope::ChannelsWrite)
     );
+    let rename = UpdateChannel {
+        name: Some("Online".to_string()),
+    };
+    assert_eq!(
+        block_on(update_channel(&reader, &w.ports, web, rename)).map(|_| ()),
+        missing(Scope::ChannelsWrite)
+    );
     assert_eq!(
         block_on(publish_products(&reader, &w.ports, web, vec![pid(1)])),
+        missing(Scope::ProductsWrite)
+    );
+    assert_eq!(
+        block_on(unpublish_products(&reader, &w.ports, web, vec![pid(1)])),
+        missing(Scope::ProductsWrite)
+    );
+    assert_eq!(
+        block_on(set_product_channels(&reader, &w.ports, pid(1), vec![web])).map(|_| ()),
         missing(Scope::ProductsWrite)
     );
     // Channel management doesn't publish.

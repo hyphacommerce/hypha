@@ -799,8 +799,7 @@ impl From<hypha_inventory::CommandError> for ApiError {
                 | I::DuplicateMarket(_)
                 | I::StockOutOfRange(_)
                 | I::Quantity(_)
-                | I::InvalidReference
-                | I::DuplicateLine { .. },
+                | I::InvalidReference,
             ) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
@@ -1009,7 +1008,6 @@ impl From<hypha_order_actions::CommandError> for ApiError {
                 | I::InvalidReference
                 | I::ReferenceInUse(_)
                 | I::OutOfStock { .. }
-                | I::DuplicateLine { .. }
                 | I::StillReserved,
             ) => return Self::internal(e),
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),

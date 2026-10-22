@@ -140,6 +140,51 @@ fn creating_a_definition_needs_custom_fields_write() {
 }
 
 #[test]
+fn changing_a_definition_needs_custom_fields_write() {
+    let w = World::new();
+    let id = w.define(spec(OwnerType::Product, "material", "text", json!({})));
+    let reader = Ctx::new(Actor::System, vec![Scope::CustomFieldsRead]);
+    let missing = Err(CommandError::Auth(AuthError::MissingScope(
+        Scope::CustomFieldsWrite,
+    )));
+    let rename = DefinitionChange {
+        name: Some("Fabric".to_string()),
+        ..Default::default()
+    };
+    assert_eq!(
+        block_on(update_definition(&reader, &w.ports, id, rename)).map(|_| ()),
+        missing
+    );
+    assert_eq!(
+        block_on(move_definition(&reader, &w.ports, id, 0)).map(|_| ()),
+        missing
+    );
+    assert_eq!(block_on(delete_definition(&reader, &w.ports, id)), missing);
+}
+
+#[test]
+fn staging_managed_definitions_needs_apps_write() {
+    let w = World::new();
+    let namespace = Namespace::of_app(AppKey::new("app_erp").unwrap());
+    let fields_writer = Ctx::new(Actor::System, vec![Scope::CustomFieldsWrite]);
+    let mut batch = w.ports.batch();
+    assert_eq!(
+        block_on(stage_managed_definitions(
+            &fields_writer,
+            &w.ports,
+            &w.ids,
+            &namespace,
+            vec![spec(OwnerType::Customer, "member_id", "text", json!({}))],
+            &mut batch,
+        ))
+        .map(|_| ()),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::AppsWrite
+        )))
+    );
+}
+
+#[test]
 fn definitions_are_appended_to_their_owner_types_form() {
     let w = World::new();
     w.define(spec(OwnerType::Product, "material", "text", json!({})));

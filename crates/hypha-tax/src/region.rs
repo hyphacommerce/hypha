@@ -255,4 +255,29 @@ mod tests {
             Err(RestoreError::DuplicateClassRate(class(2)))
         );
     }
+
+    fn event_types(r: &mut TaxRegion) -> Vec<&'static str> {
+        r.take_events().into_iter().map(|e| e.event_type).collect()
+    }
+
+    #[test]
+    fn restore_records_nothing() {
+        let mut restored = TaxRegion::restore(region().snapshot()).unwrap();
+        assert_eq!(event_types(&mut restored), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn changing_rates_records_one_change() {
+        let mut r = TaxRegion::restore(region().snapshot()).unwrap();
+        r.set_default_rate(rate(130_000));
+        r.set_class_rate(class(2), rate(50_000));
+        assert_eq!(event_types(&mut r), vec!["tax_region.changed"]);
+    }
+
+    #[test]
+    fn setting_the_same_rate_records_nothing() {
+        let mut r = TaxRegion::restore(region().snapshot()).unwrap();
+        r.set_default_rate(rate(250_000));
+        assert_eq!(event_types(&mut r), Vec::<&str>::new());
+    }
 }

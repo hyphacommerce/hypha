@@ -35,8 +35,8 @@ pub use group::{
 };
 pub use groups::{
     CreateCustomerGroup, GroupPorts, UpdateCustomerGroup, add_group_members, create_group,
-    delete_group, get_group, groups_of_customers, list_group_members, list_groups,
-    remove_group_members, set_customer_groups, update_group,
+    delete_group, get_group, groups_of_customers, list_groups, remove_group_members,
+    set_customer_groups, update_group,
 };
 pub use list::{CustomerFilter, CustomerSort, CustomerSummary};
 pub use repo::{

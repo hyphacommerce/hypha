@@ -844,3 +844,28 @@ fn reordering_variants_records_the_order() {
     assert_eq!(last.event_type, "product.updated");
     assert_eq!(last.data["fields"], serde_json::json!(["variant_order"]));
 }
+
+#[test]
+fn status_and_variant_list_need_products_write() {
+    let w = World::new();
+    let p = w.create("shirt");
+    assert_eq!(
+        block_on(hypha_products::set_product_status(
+            &reader(),
+            &w.repo,
+            p.id(),
+            hypha_products::ProductStatus::Active,
+        )),
+        missing_write()
+    );
+    assert_eq!(
+        block_on(hypha_products::set_product_variants(
+            &reader(),
+            &w.repo,
+            &w.ids,
+            p.id(),
+            vec![],
+        )),
+        missing_write()
+    );
+}

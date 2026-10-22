@@ -403,6 +403,23 @@ fn reading_needs_media_read_and_changing_needs_media_write() {
             Scope::MediaWrite
         )))
     );
+    let input = UpdateAsset {
+        alt: Some(Some("A blue shirt".to_string())),
+        title: None,
+    };
+    assert_eq!(
+        block_on(update_asset(
+            &reader,
+            &world.assets,
+            &world.clock,
+            id,
+            input
+        ))
+        .map(|_| ()),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::MediaWrite
+        )))
+    );
 }
 
 /// An asset repo whose first `get` returns `stale`: the asset as one `complete_upload`

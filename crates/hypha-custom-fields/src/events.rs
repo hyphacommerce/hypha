@@ -324,4 +324,40 @@ mod tests {
         let owner = Owner::customer(CustomerId::from_uuid(Uuid::from_u128(1)));
         assert_eq!(fields_updated(&owner, vec![]), None);
     }
+
+    #[test]
+    fn a_category_gets_its_own_event() {
+        let category = CategoryId::from_uuid(Uuid::from_u128(1));
+        let event = fields_updated(
+            &Owner::category(category),
+            vec![FieldChange::value("custom.banner", Some(json!("x")), false)],
+        )
+        .unwrap();
+        assert_eq!(
+            (event.event_type, event.subject),
+            (
+                "category.custom_fields_updated",
+                Subject::new("category", category.as_uuid())
+            )
+        );
+        assert_eq!(event.data["category"], json!(category.to_string()));
+    }
+
+    #[test]
+    fn an_order_gets_its_own_event() {
+        let order = OrderId::from_uuid(Uuid::from_u128(1));
+        let event = fields_updated(
+            &Owner::order(order),
+            vec![FieldChange::value("custom.gift", Some(json!(true)), false)],
+        )
+        .unwrap();
+        assert_eq!(
+            (event.event_type, event.subject),
+            (
+                "order.custom_fields_updated",
+                Subject::new("order", order.as_uuid())
+            )
+        );
+        assert_eq!(event.data["order"], json!(order.to_string()));
+    }
 }

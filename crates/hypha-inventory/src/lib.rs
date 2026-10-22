@@ -13,10 +13,9 @@ pub mod stock;
 
 pub use commands::{
     AdjustOnHand, CommandError, CreateInventoryItem, CreateLocation, DEFAULT_LOCATION_NAME,
-    ReleaseLine, ReleaseStock, ReserveLine, ReserveStock, SetOnHand, Shortage, UpdateInventoryItem,
-    UpdateLocation, adjust_on_hand, create_inventory_item, create_location,
-    ensure_default_location, get_inventory_item, get_location, get_variant_inventory,
-    get_variants_inventory, list_locations, release_stock, reserve_lines, reserve_stock,
+    SetOnHand, Shortage, UpdateInventoryItem, UpdateLocation, adjust_on_hand,
+    create_inventory_item, create_location, ensure_default_location, get_inventory_item,
+    get_location, get_variant_inventory, get_variants_inventory, list_locations, reserve_lines,
     set_on_hand, update_inventory_item, update_location,
 };
 pub use error::{InventoryError, RestoreError};

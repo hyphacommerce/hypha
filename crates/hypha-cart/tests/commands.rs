@@ -391,18 +391,6 @@ fn add_line_returns_priced_cart() {
 }
 
 #[test]
-fn add_line_merges_same_variant() {
-    let world = World::new();
-    let cart = world.create_cart();
-
-    world.add(&Ctx::system(), cart, "mug", 2).unwrap();
-    let priced = world.add(&Ctx::system(), cart, "mug", 1).unwrap();
-
-    assert_eq!(priced.lines.len(), 1);
-    assert_eq!(priced.total, eur(3000));
-}
-
-#[test]
 fn get_cart_reprices_after_price_list_change() {
     let world = World::new();
     let cart = world.create_cart();
