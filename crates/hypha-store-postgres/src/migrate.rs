@@ -374,6 +374,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "preview_tokens",
             sql: include_str!("../migrations/0070_preview_tokens.sql"),
         },
+        Migration {
+            version: 71,
+            name: "oauth_agent_clients",
+            sql: include_str!("../migrations/0071_oauth_agent_clients.sql"),
+        },
     ],
 };
 

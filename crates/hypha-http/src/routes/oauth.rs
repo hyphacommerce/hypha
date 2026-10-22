@@ -120,6 +120,13 @@ pub async fn authorize_handler<S: Storage>(
     }
 }
 
+/// The app an app's request is for.
+fn app_key(request: &AuthorizationRequest) -> Result<&hypha_core::AppKey, ApiError> {
+    request
+        .app()
+        .ok_or_else(|| ApiError::internal("an MCP client's request where an app's was expected"))
+}
+
 fn redirect(location: &str) -> Response {
     let mut response = StatusCode::FOUND.into_response();
     if let Ok(value) = HeaderValue::from_str(location) {
@@ -685,7 +692,10 @@ impl ConsentRequestResponse {
         stored: &[hypha_custom_fields::CustomFieldDefinition],
         now: hypha_core::Timestamp,
     ) -> Result<Self, ApiError> {
-        let manifest = request.manifest();
+        // Only an app's request reaches here (`get_request`, `request_private_app`).
+        let manifest = request.manifest().ok_or_else(|| {
+            ApiError::internal("an MCP client's request on the apps' consent page")
+        })?;
         let installed = app.is_some_and(|a| a.is_installed());
         let current: Vec<Scope> = app
             .filter(|a| a.is_installed())
@@ -815,7 +825,7 @@ pub async fn fetch_request<S: Storage>(
     use hypha_core::Clock;
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (request, app) = get_request(&ctx, &ports, id).await?;
-    let fields = crate::app_fields::stored_fields(&ports, request.app().as_str()).await?;
+    let fields = crate::app_fields::stored_fields(&ports, app_key(&request)?.as_str()).await?;
     Ok(Json(ConsentRequestResponse::new(
         &request,
         app.as_ref(),
@@ -898,9 +908,9 @@ pub async fn create_private<S: Storage>(
     let request = request_private_app(&staff.ctx, &ports, &state.env, &bytes).await?;
     let app = {
         use hypha_apps::{AppRepo, HasApps};
-        ports.apps().get(request.app()).await?
+        ports.apps().get(app_key(&request)?).await?
     };
-    let fields = crate::app_fields::stored_fields(&ports, request.app().as_str()).await?;
+    let fields = crate::app_fields::stored_fields(&ports, app_key(&request)?.as_str()).await?;
     let consent_url = state
         .config
         .server

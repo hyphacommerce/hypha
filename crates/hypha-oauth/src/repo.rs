@@ -1,6 +1,6 @@
 use hypha_apps::{HasApps, StageApps};
 use hypha_auth::TokenHash;
-use hypha_core::{AppKey, HasBatch, OAuthRequestId, RepoError, Timestamp};
+use hypha_core::{AgentId, AppKey, HasBatch, OAuthRequestId, RepoError, Timestamp};
 use uuid::Uuid;
 
 use crate::{AuthorizationCode, AuthorizationRequest, OAuthToken};
@@ -17,7 +17,8 @@ pub mod keys {
 #[allow(async_fn_in_trait)]
 pub trait OAuthRequestRepo {
     async fn get(&self, id: OAuthRequestId) -> Result<Option<AuthorizationRequest>, RepoError>;
-    /// An app's requests, newest first, at most `limit`: its history.
+    /// An app's requests, newest first, at most `limit`: its history. MCP clients'
+    /// requests belong to no app.
     async fn list_for_app(
         &self,
         app: &AppKey,
@@ -44,7 +45,8 @@ pub trait OAuthTokenRepo {
     async fn get_by_access(&self, hash: TokenHash) -> Result<Option<OAuthToken>, RepoError>;
     async fn get_by_refresh(&self, hash: TokenHash) -> Result<Option<OAuthToken>, RepoError>;
     /// Enforces `OAUTH_TOKEN_ID`, `OAUTH_ACCESS_TOKEN` and `OAUTH_REFRESH_TOKEN`. The
-    /// token's app must exist (a `Reference` otherwise); deleting the app deletes them.
+    /// token's app or agent must exist (a `Reference` otherwise); deleting the app deletes
+    /// them.
     async fn insert(&self, token: &mut OAuthToken) -> Result<(), RepoError>;
     async fn update(&self, token: &mut OAuthToken) -> Result<(), RepoError>;
     /// Revokes every token of `family` not revoked yet at `at`, bumping their versions;
@@ -52,6 +54,8 @@ pub trait OAuthTokenRepo {
     async fn revoke_family(&self, family: Uuid, at: Timestamp) -> Result<u32, RepoError>;
     /// Revokes every token of `app` not revoked yet at `at`; returns how many.
     async fn revoke_app(&self, app: &AppKey, at: Timestamp) -> Result<u32, RepoError>;
+    /// Revokes every token of `agent` not revoked yet at `at`; returns how many.
+    async fn revoke_agent(&self, agent: AgentId, at: Timestamp) -> Result<u32, RepoError>;
 }
 
 /// Stages OAuth writes in a `hypha_core::HasBatch` batch, beside the app's

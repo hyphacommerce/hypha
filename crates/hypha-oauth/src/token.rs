@@ -1,12 +1,15 @@
-//! An app's tokens: an access token (`hypha_at_…`, an hour) and the refresh token issued
-//! with it (`hypha_rt_…`, 30 days), stored together as SHA-256 hashes. Refreshing replaces
-//! the pair: the old refresh token is marked rotated, and the new pair joins its *family*
-//! (every pair since one code exchange). A rotated refresh token used again means it was
-//! copied: the app's tokens are all revoked (theft detection, OAuth 2.1 §4.3.1).
+//! An app's or a connected agent's tokens: an access token (`hypha_at_…`, an hour) and the
+//! refresh token issued with it (`hypha_rt_…`, 30 days), stored together as SHA-256 hashes.
+//! Refreshing replaces the pair: the old refresh token is marked rotated, and the new pair
+//! joins its *family* (every pair since one code exchange). A rotated refresh token used
+//! again means it was copied: every token of its app or agent is revoked (theft detection,
+//! OAuth 2.1 §4.3.1).
 
 use hypha_apps::normalize;
 use hypha_auth::TokenHash;
-use hypha_core::{AppKey, Scope, Timestamp, Version, Versioned};
+use hypha_core::{AgentId, Scope, Timestamp, Version, Versioned};
+
+use crate::client::OAuthClient;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,7 +17,10 @@ pub struct OAuthToken {
     id: Uuid,
     version: Version,
     family: Uuid,
-    app: AppKey,
+    client: OAuthClient,
+    /// An app's: what its grant gave (read against the grant again at each request). An
+    /// agent's: what the staff member granted when connecting it, for the token answer;
+    /// what it may do is its grant's, read at each request.
     scopes: Vec<Scope>,
     access_hash: TokenHash,
     access_expires_at: Timestamp,
@@ -39,7 +45,7 @@ impl Versioned for OAuthToken {
 pub struct NewTokenPair {
     pub id: Uuid,
     pub family: Uuid,
-    pub app: AppKey,
+    pub client: OAuthClient,
     pub scopes: Vec<Scope>,
     pub access_hash: TokenHash,
     pub access_expires_at: Timestamp,
@@ -54,7 +60,7 @@ impl OAuthToken {
             id: new.id,
             version: Version::NEW,
             family: new.family,
-            app: new.app,
+            client: new.client,
             scopes: normalize(&new.scopes),
             access_hash: new.access_hash,
             access_expires_at: new.access_expires_at,
@@ -87,8 +93,8 @@ impl OAuthToken {
     pub fn family(&self) -> Uuid {
         self.family
     }
-    pub fn app(&self) -> &AppKey {
-        &self.app
+    pub fn client(&self) -> &OAuthClient {
+        &self.client
     }
     pub fn scopes(&self) -> &[Scope] {
         &self.scopes
@@ -122,7 +128,9 @@ pub struct TokenSnapshot {
     pub id: Uuid,
     pub version: Version,
     pub family: Uuid,
-    pub app: String,
+    /// The app's key or the agent: exactly one.
+    pub app: Option<String>,
+    pub agent: Option<AgentId>,
     pub scopes: Vec<Scope>,
     pub access_hash: TokenHash,
     pub access_expires_at: Timestamp,
@@ -139,7 +147,8 @@ impl OAuthToken {
             id: self.id,
             version: self.version,
             family: self.family,
-            app: self.app.as_str().to_string(),
+            app: self.client.app().map(|k| k.as_str().to_string()),
+            agent: self.client.agent(),
             scopes: self.scopes.clone(),
             access_hash: self.access_hash,
             access_expires_at: self.access_expires_at,
@@ -152,11 +161,11 @@ impl OAuthToken {
     }
 
     pub fn restore(s: TokenSnapshot) -> Result<Self, String> {
-        let app = AppKey::new(&s.app).map_err(|e| e.to_string())?;
+        let client = OAuthClient::from_parts(s.app, s.agent)?;
         let mut token = Self::new(NewTokenPair {
             id: s.id,
             family: s.family,
-            app,
+            client,
             scopes: s.scopes,
             access_hash: s.access_hash,
             access_expires_at: s.access_expires_at,

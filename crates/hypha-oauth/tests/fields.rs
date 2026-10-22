@@ -113,7 +113,7 @@ fn an_approval_is_staged_with_the_manifest_it_applies_and_nothing_stored_until_c
         panic!("expected a consent page");
     };
     let prepared = block_on(prepare_approval(&owner(), &ports, &env, request.id())).unwrap();
-    assert_eq!(prepared.applies.as_ref(), Some(request.manifest()));
+    assert_eq!(prepared.applies.as_ref(), request.manifest());
     assert_eq!(block_on(ports.apps().get(&key())), Ok(None));
     block_on(ports.commit(prepared.batch)).unwrap();
     assert!(block_on(ports.apps().get(&key())).unwrap().is_some());

@@ -1,4 +1,6 @@
 use hypha_apps::{AppError, FetchError};
+
+use crate::client::ClientMetadataError;
 use hypha_core::{AppKey, AuthError, ErrorCode, OAuthRequestId, RepoError, Scope, SealError};
 use thiserror::Error;
 
@@ -46,6 +48,12 @@ pub enum CommandError {
     /// the app under that key is installed from: another manifest claiming the key.
     #[error("app {0} is installed from another manifest URL")]
     InstalledFromOtherUrl(AppKey),
+    /// Connecting an MCP client is a person's act: a staff member's session.
+    #[error("this takes a staff member's session")]
+    SessionRequired,
+    /// A connected agent's access token sent anywhere but `/mcp`, where it was issued for.
+    #[error("an agent's credentials work at /mcp only")]
+    AgentToken,
 }
 
 impl ErrorCode for CommandError {
@@ -65,6 +73,8 @@ impl ErrorCode for CommandError {
             CommandError::PrivateApp(_) => "app_is_private",
             CommandError::InstalledFromUrl(_) => "app_installed_from_url",
             CommandError::InstalledFromOtherUrl(_) => "app_installed_from_other_url",
+            CommandError::SessionRequired => "session_required",
+            CommandError::AgentToken => "agent_credentials_mcp_only",
         }
     }
 }
@@ -74,13 +84,16 @@ impl ErrorCode for CommandError {
 /// a redirect.
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum UnredirectableError {
-    #[error("client_id is required: the URL of the app's manifest")]
+    #[error("client_id is required: the URL of the app's manifest or the client's metadata")]
     MissingClientId,
     #[error(transparent)]
     Manifest(#[from] FetchError),
+    /// An MCP client's metadata document that can't be read or isn't valid.
+    #[error(transparent)]
+    ClientMetadata(#[from] ClientMetadataError),
     #[error("redirect_uri is required")]
     MissingRedirectUri,
-    #[error("redirect_uri {0:?} is not one the app's manifest lists")]
+    #[error("redirect_uri {0:?} is not one the client's manifest or metadata lists")]
     RedirectUriNotListed(String),
     /// The key is taken by an app installed from another manifest URL.
     #[error("app {0} is installed from another manifest URL")]
@@ -92,6 +105,7 @@ impl ErrorCode for UnredirectableError {
         match self {
             UnredirectableError::MissingClientId => "invalid_client",
             UnredirectableError::Manifest(e) => e.code(),
+            UnredirectableError::ClientMetadata(e) => e.code(),
             UnredirectableError::MissingRedirectUri => "invalid_redirect_uri",
             UnredirectableError::RedirectUriNotListed(_) => "invalid_redirect_uri",
             UnredirectableError::OtherManifest(_) => "invalid_client",

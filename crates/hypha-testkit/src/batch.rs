@@ -968,8 +968,17 @@ impl HasBatch for InMemoryPorts {
                         update_row(&mut oauth.codes, code.hash(), &mut code, &no_unique_keys)?
                     }
                     Staged::NewOAuthToken(mut token) => {
-                        if !apps.contains_key(token.app().as_str()) {
-                            return Err(missing("app", token.app()));
+                        match token.client() {
+                            hypha_oauth::OAuthClient::App(app) => {
+                                if !apps.contains_key(app.as_str()) {
+                                    return Err(missing("app", app));
+                                }
+                            }
+                            hypha_oauth::OAuthClient::Agent(agent) => {
+                                if !agents.contains_key(agent) {
+                                    return Err(missing("agent", agent));
+                                }
+                            }
                         }
                         insert_row(
                             &mut oauth.tokens,
@@ -1053,7 +1062,7 @@ impl HasBatch for InMemoryPorts {
                 }
             }
             for (app, at) in revocations {
-                crate::oauth::revoke_where(&mut oauth, at, |t| t.app() == &app);
+                crate::oauth::revoke_where(&mut oauth, at, |t| t.client().app() == Some(&app));
             }
             crate::custom_fields::check_unique_values(&field_values)?;
             Ok(())

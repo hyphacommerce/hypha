@@ -1,10 +1,12 @@
-//! Authorization codes (`hypha_ac_…`): what staff's approval sends back to the app's
+//! Authorization codes (`hypha_ac_…`): what staff's approval sends back to the client's
 //! redirect URI. Valid 60 seconds, once, and only with the client ID, redirect URI and PKCE
 //! verifier it was issued for. Stored as SHA-256 only.
 
 use hypha_apps::normalize;
 use hypha_auth::TokenHash;
-use hypha_core::{AppKey, OAuthRequestId, Scope, Timestamp, Version, Versioned};
+use hypha_core::{AgentId, OAuthRequestId, Scope, Timestamp, Version, Versioned};
+
+use crate::client::OAuthClient;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,7 +14,7 @@ pub struct AuthorizationCode {
     hash: TokenHash,
     version: Version,
     request: OAuthRequestId,
-    app: AppKey,
+    client: OAuthClient,
     client_id: String,
     redirect_uri: String,
     code_challenge: String,
@@ -39,7 +41,7 @@ impl Versioned for AuthorizationCode {
 pub struct NewCode {
     pub hash: TokenHash,
     pub request: OAuthRequestId,
-    pub app: AppKey,
+    pub client: OAuthClient,
     pub client_id: String,
     pub redirect_uri: String,
     pub code_challenge: String,
@@ -55,7 +57,7 @@ impl AuthorizationCode {
             hash: new.hash,
             version: Version::NEW,
             request: new.request,
-            app: new.app,
+            client: new.client,
             client_id: new.client_id,
             redirect_uri: new.redirect_uri,
             code_challenge: new.code_challenge,
@@ -86,8 +88,8 @@ impl AuthorizationCode {
     pub fn request(&self) -> OAuthRequestId {
         self.request
     }
-    pub fn app(&self) -> &AppKey {
-        &self.app
+    pub fn client(&self) -> &OAuthClient {
+        &self.client
     }
     pub fn client_id(&self) -> &str {
         &self.client_id
@@ -121,7 +123,9 @@ pub struct CodeSnapshot {
     pub hash: TokenHash,
     pub version: Version,
     pub request: OAuthRequestId,
-    pub app: String,
+    /// The app's key or the agent: exactly one.
+    pub app: Option<String>,
+    pub agent: Option<AgentId>,
     pub client_id: String,
     pub redirect_uri: String,
     pub code_challenge: String,
@@ -138,7 +142,8 @@ impl AuthorizationCode {
             hash: self.hash,
             version: self.version,
             request: self.request,
-            app: self.app.as_str().to_string(),
+            app: self.client.app().map(|k| k.as_str().to_string()),
+            agent: self.client.agent(),
             client_id: self.client_id.clone(),
             redirect_uri: self.redirect_uri.clone(),
             code_challenge: self.code_challenge.clone(),
@@ -151,11 +156,11 @@ impl AuthorizationCode {
     }
 
     pub fn restore(s: CodeSnapshot) -> Result<Self, String> {
-        let app = AppKey::new(&s.app).map_err(|e| e.to_string())?;
+        let client = OAuthClient::from_parts(s.app, s.agent)?;
         let mut code = Self::new(NewCode {
             hash: s.hash,
             request: s.request,
-            app,
+            client,
             client_id: s.client_id,
             redirect_uri: s.redirect_uri,
             code_challenge: s.code_challenge,

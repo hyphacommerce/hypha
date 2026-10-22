@@ -1,10 +1,11 @@
-//! A pending authorization: what an app asked for at `/oauth/authorize`, waiting ten
-//! minutes for a staff member's answer on the consent page. Kept after the answer, as the
-//! app's request history.
+//! A pending authorization: what an app or an MCP client asked for at `/oauth/authorize`,
+//! waiting ten minutes for a staff member's answer on the consent page. Kept after the
+//! answer, as the app's request history.
 
 use hypha_apps::{AppManifest, ManifestSource, is_private_client, normalize};
 use hypha_core::{Actor, AppKey, OAuthRequestId, Scope, Timestamp, Version, Versioned};
 
+use crate::client::{ClientMetadata, RequestClient};
 use crate::error::CommandError;
 
 /// Where a request stands.
@@ -38,17 +39,18 @@ impl RequestStatus {
 pub struct AuthorizationRequest {
     id: OAuthRequestId,
     version: Version,
-    app: AppKey,
-    /// The manifest's URL: the app's client ID.
+    /// The manifest's URL (an app's) or the metadata document's (an MCP client's).
     client_id: String,
-    /// The manifest as fetched for this request: approving installs from it.
-    manifest: AppManifest,
+    /// The manifest as fetched for this request (approving installs from it), or the MCP
+    /// client's metadata document.
+    client: RequestClient,
     redirect_uri: String,
     state: Option<String>,
     /// The app's PKCE challenge; `None` for a request Hypha started itself (a manifest
     /// refresh asking for new scopes), which approving answers with no code.
     code_challenge: Option<String>,
-    /// What the app asked for, in `Scope::ALL` order.
+    /// What the client asked for, in `Scope::ALL` order. An MCP client's are only what it
+    /// asked: the staff member chooses its grant.
     scopes: Vec<Scope>,
     /// The app's grant when it asked (`None`: not installed), for the history.
     previous_scopes: Option<Vec<Scope>>,
@@ -72,7 +74,7 @@ impl Versioned for AuthorizationRequest {
 pub struct NewRequest {
     pub id: OAuthRequestId,
     pub client_id: String,
-    pub manifest: AppManifest,
+    pub client: RequestClient,
     pub redirect_uri: String,
     pub state: Option<String>,
     pub code_challenge: Option<String>,
@@ -87,9 +89,8 @@ impl AuthorizationRequest {
         Self {
             id: new.id,
             version: Version::NEW,
-            app: new.manifest.key().clone(),
             client_id: new.client_id,
-            manifest: new.manifest,
+            client: new.client,
             redirect_uri: new.redirect_uri,
             state: new.state,
             code_challenge: new.code_challenge,
@@ -129,8 +130,9 @@ impl AuthorizationRequest {
     pub fn id(&self) -> OAuthRequestId {
         self.id
     }
-    pub fn app(&self) -> &AppKey {
-        &self.app
+    /// The app it would install; `None` for an MCP client's.
+    pub fn app(&self) -> Option<&AppKey> {
+        self.manifest().map(AppManifest::key)
     }
     pub fn client_id(&self) -> &str {
         &self.client_id
@@ -140,8 +142,22 @@ impl AuthorizationRequest {
     pub fn is_private(&self) -> bool {
         is_private_client(&self.client_id)
     }
-    pub fn manifest(&self) -> &AppManifest {
-        &self.manifest
+    pub fn client(&self) -> &RequestClient {
+        &self.client
+    }
+    /// An app's manifest; `None` for an MCP client's request.
+    pub fn manifest(&self) -> Option<&AppManifest> {
+        match &self.client {
+            RequestClient::App(manifest) => Some(manifest),
+            RequestClient::Agent(_) => None,
+        }
+    }
+    /// An MCP client's metadata document; `None` for an app's request.
+    pub fn agent_client(&self) -> Option<&ClientMetadata> {
+        match &self.client {
+            RequestClient::Agent(metadata) => Some(metadata),
+            RequestClient::App(_) => None,
+        }
     }
     pub fn redirect_uri(&self) -> &str {
         &self.redirect_uri
@@ -180,9 +196,11 @@ impl AuthorizationRequest {
 pub struct RequestSnapshot {
     pub id: OAuthRequestId,
     pub version: Version,
-    pub app: String,
+    /// An app's key and manifest, or an MCP client's metadata: one or the other.
+    pub app: Option<String>,
     pub client_id: String,
-    pub manifest: serde_json::Value,
+    pub manifest: Option<serde_json::Value>,
+    pub client_metadata: Option<serde_json::Value>,
     pub redirect_uri: String,
     pub state: Option<String>,
     pub code_challenge: Option<String>,
@@ -200,9 +218,10 @@ impl AuthorizationRequest {
         RequestSnapshot {
             id: self.id,
             version: self.version,
-            app: self.app.as_str().to_string(),
+            app: self.app().map(|k| k.as_str().to_string()),
             client_id: self.client_id.clone(),
-            manifest: self.manifest.to_value(),
+            manifest: self.manifest().map(AppManifest::to_value),
+            client_metadata: self.agent_client().map(ClientMetadata::to_value),
             redirect_uri: self.redirect_uri.clone(),
             state: self.state.clone(),
             code_challenge: self.code_challenge.clone(),
@@ -218,19 +237,33 @@ impl AuthorizationRequest {
 
     /// From storage, with the manifest's rules checked again.
     pub fn restore(s: RequestSnapshot) -> Result<Self, String> {
-        let manifest =
-            AppManifest::from_value_of(s.manifest, ManifestSource::of_client(&s.client_id))
-                .map_err(|e| e.to_string())?;
-        if manifest.key().as_str() != s.app {
-            return Err(format!(
-                "request {} names another app than its manifest",
-                s.id
-            ));
-        }
+        let client = match (s.app, s.manifest, s.client_metadata) {
+            (Some(app), Some(manifest), None) => {
+                let manifest =
+                    AppManifest::from_value_of(manifest, ManifestSource::of_client(&s.client_id))
+                        .map_err(|e| e.to_string())?;
+                if manifest.key().as_str() != app {
+                    return Err(format!(
+                        "request {} names another app than its manifest",
+                        s.id
+                    ));
+                }
+                RequestClient::App(Box::new(manifest))
+            }
+            (None, None, Some(metadata)) => {
+                RequestClient::Agent(ClientMetadata::from_value(&s.client_id, &metadata)?)
+            }
+            _ => {
+                return Err(format!(
+                    "request {} is for exactly one app or MCP client",
+                    s.id
+                ));
+            }
+        };
         let mut request = Self::new(NewRequest {
             id: s.id,
             client_id: s.client_id,
-            manifest,
+            client,
             redirect_uri: s.redirect_uri,
             state: s.state,
             code_challenge: s.code_challenge,

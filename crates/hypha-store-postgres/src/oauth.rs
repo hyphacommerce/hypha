@@ -1,7 +1,7 @@
 //! OAuth's requests, codes and token pairs.
 
 use hypha_auth::TokenHash;
-use hypha_core::{AppKey, OAuthRequestId, RepoError, Timestamp, Version, Versioned};
+use hypha_core::{AgentId, AppKey, OAuthRequestId, RepoError, Timestamp, Version, Versioned};
 use hypha_oauth::{
     AuthorizationCode, AuthorizationRequest, CodeSnapshot, OAuthCodeRepo, OAuthRequestRepo,
     OAuthToken, OAuthTokenRepo, RequestSnapshot, RequestStatus, TokenSnapshot,
@@ -22,7 +22,8 @@ use crate::{
 
 fn request_columns() -> String {
     format!(
-        "id, version, app_key, client_id, manifest::text AS manifest, redirect_uri, state,
+        "id, version, app_key, client_id, manifest::text AS manifest,
+         client_metadata::text AS client_metadata, redirect_uri, state,
          code_challenge, scopes, previous_scopes, status, decided_by_kind, decided_by_id, {}, {}, {}",
         micros("decided_at"),
         micros("created_at"),
@@ -32,7 +33,14 @@ fn request_columns() -> String {
 
 fn request_from_row(row: &Row) -> Result<AuthorizationRequest, RepoError> {
     let id = OAuthRequestId::from_uuid(col(row, "id")?);
-    let manifest: String = col(row, "manifest")?;
+    let json = |name: &str| -> Result<Option<serde_json::Value>, RepoError> {
+        col::<Option<String>>(row, name)?
+            .map(|text| {
+                serde_json::from_str(&text)
+                    .map_err(|e| corrupt(format!("request {id} {name}: {e}")))
+            })
+            .transpose()
+    };
     let status: String = col(row, "status")?;
     let decided_by = match col::<Option<String>>(row, "decided_by_kind")? {
         Some(kind) => Some(actor_from_db(&kind, col(row, "decided_by_id")?)?),
@@ -44,8 +52,8 @@ fn request_from_row(row: &Row) -> Result<AuthorizationRequest, RepoError> {
         version: version_from_db(col(row, "version")?)?,
         app: col(row, "app_key")?,
         client_id: col(row, "client_id")?,
-        manifest: serde_json::from_str(&manifest)
-            .map_err(|e| corrupt(format!("request {id} manifest: {e}")))?,
+        manifest: json("manifest")?,
+        client_metadata: json("client_metadata")?,
         redirect_uri: col(row, "redirect_uri")?,
         state: col(row, "state")?,
         code_challenge: col(row, "code_challenge")?,
@@ -70,8 +78,9 @@ pub(crate) async fn insert_request(
         &format!(
             "INSERT INTO oauth_requests (id, version, app_key, client_id, manifest, redirect_uri,
                  state, code_challenge, scopes, previous_scopes, status, decided_by_kind,
-                 decided_by_id, decided_at, created_at, expires_at)
-             VALUES ($1, 1, $2, $3, $4::text::jsonb, $5, $6, $7, $8, $9, $10, $11, $12, {}, {}, {})",
+                 decided_by_id, decided_at, created_at, expires_at, client_metadata)
+             VALUES ($1, 1, $2, $3, $4::text::jsonb, $5, $6, $7, $8, $9, $10, $11, $12, {}, {}, {},
+                 $16::text::jsonb)",
             ts(13),
             ts(14),
             ts(15)
@@ -80,7 +89,7 @@ pub(crate) async fn insert_request(
             (&s.id.as_uuid(), Type::UUID),
             (&s.app, Type::TEXT),
             (&s.client_id, Type::TEXT),
-            (&s.manifest.to_string(), Type::TEXT),
+            (&s.manifest.as_ref().map(|m| m.to_string()), Type::TEXT),
             (&s.redirect_uri, Type::TEXT),
             (&s.state, Type::TEXT),
             (&s.code_challenge, Type::TEXT),
@@ -95,6 +104,10 @@ pub(crate) async fn insert_request(
             (&opt_micros(s.decided_at), Type::INT8),
             (&s.created_at.unix_micros(), Type::INT8),
             (&s.expires_at.unix_micros(), Type::INT8),
+            (
+                &s.client_metadata.as_ref().map(|m| m.to_string()),
+                Type::TEXT,
+            ),
         ],
     )
     .await
@@ -188,7 +201,7 @@ impl<C: PgConnection> OAuthRequestRepo for PgStore<C> {
 
 fn code_columns() -> String {
     format!(
-        "hash, version, request_id, app_key, client_id, redirect_uri, code_challenge, scopes,
+        "hash, version, request_id, app_key, agent_id, client_id, redirect_uri, code_challenge, scopes,
          first_install, family, {}, {}",
         micros("expires_at"),
         micros("used_at")
@@ -201,6 +214,7 @@ fn code_from_row(row: &Row) -> Result<AuthorizationCode, RepoError> {
         version: version_from_db(col(row, "version")?)?,
         request: OAuthRequestId::from_uuid(col(row, "request_id")?),
         app: col(row, "app_key")?,
+        agent: col::<Option<Uuid>>(row, "agent_id")?.map(AgentId::from_uuid),
         client_id: col(row, "client_id")?,
         redirect_uri: col(row, "redirect_uri")?,
         code_challenge: col(row, "code_challenge")?,
@@ -217,8 +231,9 @@ pub(crate) async fn insert_code(tx: &impl Queries, s: &CodeSnapshot) -> Result<(
     tx.query_typed(
         &format!(
             "INSERT INTO oauth_codes (hash, version, request_id, app_key, client_id,
-                 redirect_uri, code_challenge, scopes, first_install, family, expires_at, used_at)
-             VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, {}, {})",
+                 redirect_uri, code_challenge, scopes, first_install, family, expires_at, used_at,
+                 agent_id)
+             VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, {}, {}, $12)",
             ts(10),
             ts(11)
         ),
@@ -234,6 +249,7 @@ pub(crate) async fn insert_code(tx: &impl Queries, s: &CodeSnapshot) -> Result<(
             (&s.family, Type::UUID),
             (&s.expires_at.unix_micros(), Type::INT8),
             (&opt_micros(s.used_at), Type::INT8),
+            (&s.agent.map(|a| a.as_uuid()), Type::UUID),
         ],
     )
     .await
@@ -294,7 +310,8 @@ impl<C: PgConnection> OAuthCodeRepo for PgStore<C> {
 
 fn token_columns() -> String {
     format!(
-        "id, version, family, app_key, scopes, access_hash, refresh_hash, {}, {}, {}, {}, {}",
+        "id, version, family, app_key, agent_id, scopes, access_hash, refresh_hash, {}, {}, {}, {},
+         {}",
         micros("access_expires_at"),
         micros("refresh_expires_at"),
         micros("created_at"),
@@ -309,6 +326,7 @@ fn token_from_row(row: &Row) -> Result<OAuthToken, RepoError> {
         version: version_from_db(col(row, "version")?)?,
         family: col(row, "family")?,
         app: col(row, "app_key")?,
+        agent: col::<Option<Uuid>>(row, "agent_id")?.map(AgentId::from_uuid),
         scopes: scopes_from_db(col(row, "scopes")?)?,
         access_hash: token_hash_from_db(col(row, "access_hash")?)?,
         access_expires_at: Timestamp::from_unix_micros(col(row, "access_expires_at")?),
@@ -326,8 +344,8 @@ pub(crate) async fn insert_token(tx: &impl Queries, s: &TokenSnapshot) -> Result
         &format!(
             "INSERT INTO oauth_refresh_tokens (id, version, family, app_key, scopes, access_hash,
                  access_expires_at, refresh_hash, refresh_expires_at, created_at, rotated_at,
-                 revoked_at)
-             VALUES ($1, 1, $2, $3, $4, $5, {}, $7, {}, {}, {}, {})",
+                 revoked_at, agent_id)
+             VALUES ($1, 1, $2, $3, $4, $5, {}, $7, {}, {}, {}, {}, $12)",
             ts(6),
             ts(8),
             ts(9),
@@ -346,6 +364,7 @@ pub(crate) async fn insert_token(tx: &impl Queries, s: &TokenSnapshot) -> Result
             (&s.created_at.unix_micros(), Type::INT8),
             (&opt_micros(s.rotated_at), Type::INT8),
             (&opt_micros(s.revoked_at), Type::INT8),
+            (&s.agent.map(|a| a.as_uuid()), Type::UUID),
         ],
     )
     .await
@@ -464,5 +483,25 @@ impl<C: PgConnection> OAuthTokenRepo for PgStore<C> {
     async fn revoke_app(&self, app: &AppKey, at: Timestamp) -> Result<u32, RepoError> {
         let app = app.as_str().to_string();
         in_transaction!(self, |tx| revoke_app_tokens(tx, &app, at).await)
+    }
+
+    async fn revoke_agent(&self, agent: AgentId, at: Timestamp) -> Result<u32, RepoError> {
+        in_transaction!(self, |tx| {
+            let rows = tx
+                .query_typed(
+                    &format!(
+                        "UPDATE oauth_refresh_tokens SET version = version + 1, revoked_at = {}
+                         WHERE agent_id = $1 AND revoked_at IS NULL RETURNING id",
+                        ts(2)
+                    ),
+                    &[
+                        (&agent.as_uuid(), Type::UUID),
+                        (&at.unix_micros(), Type::INT8),
+                    ],
+                )
+                .await
+                .map_err(repo_error)?;
+            u32::try_from(rows.len()).map_err(corrupt)
+        })
     }
 }

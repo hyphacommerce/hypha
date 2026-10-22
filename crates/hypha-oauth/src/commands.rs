@@ -10,14 +10,15 @@ use hypha_apps::{
 };
 use hypha_auth::{NewToken, TokenHash, TokenKind};
 use hypha_core::{
-    Actor, AppId, AppKey, Clock, Ctx, IdGenerator, OAuthRequestId, Random, RepoError, Scope,
-    SecretBox, Timestamp,
+    Actor, AgentId, AppId, AppKey, Clock, Ctx, IdGenerator, OAuthRequestId, Random, RepoError,
+    Scope, SecretBox, Timestamp,
 };
 use uuid::Uuid;
 
 use crate::{
     AuthorizationCode, AuthorizationRequest, CommandError, NewCode, NewRequest, NewTokenPair,
     OAuthToken, RequestStatus,
+    client::{OAuthClient, RequestClient, fetch_client_metadata},
     error::{AuthorizeError, TokenError, UnredirectableError},
     pkce,
     repo::{
@@ -78,6 +79,7 @@ pub async fn authorize<S: OAuthPorts>(
 ) -> Result<Authorized, AuthorizeError> {
     let client_id = input
         .client_id
+        .clone()
         .filter(|c| !c.trim().is_empty())
         .ok_or(UnredirectableError::MissingClientId)?;
     let manifest = fetch_manifest(fetcher, &client_id)
@@ -85,6 +87,7 @@ pub async fn authorize<S: OAuthPorts>(
         .map_err(UnredirectableError::Manifest)?;
     let redirect_uri = input
         .redirect_uri
+        .clone()
         .filter(|r| !r.is_empty())
         .ok_or(UnredirectableError::MissingRedirectUri)?;
     if !manifest.allows_redirect(&redirect_uri) {
@@ -105,50 +108,8 @@ pub async fn authorize<S: OAuthPorts>(
 
     // From here on, errors go back to the app.
     let state = input.state.clone();
-    let refuse = |error: &'static str, description: String| {
-        let mut params = vec![
-            ("error", error.to_string()),
-            ("error_description", description.clone()),
-        ];
-        if let Some(state) = &state {
-            params.push(("state", state.clone()));
-        }
-        AuthorizeError::Redirect {
-            location: with_params(&redirect_uri, &params),
-            error,
-            description,
-        }
-    };
-    if input.response_type.as_deref() != Some("code") {
-        return Err(refuse(
-            "unsupported_response_type",
-            "response_type must be code".to_string(),
-        ));
-    }
-    if state.as_ref().is_some_and(|s| s.len() > MAX_STATE_LEN) {
-        return Err(refuse(
-            "invalid_request",
-            format!("state is at most {MAX_STATE_LEN} characters"),
-        ));
-    }
-    let Some(challenge) = input.code_challenge.filter(|c| !c.is_empty()) else {
-        return Err(refuse(
-            "invalid_request",
-            "code_challenge is required (PKCE)".to_string(),
-        ));
-    };
-    if input.code_challenge_method.as_deref() != Some("S256") {
-        return Err(refuse(
-            "invalid_request",
-            "code_challenge_method must be S256".to_string(),
-        ));
-    }
-    if !pkce::is_challenge(&challenge) {
-        return Err(refuse(
-            "invalid_request",
-            "code_challenge is a base64url SHA-256 (43 characters)".to_string(),
-        ));
-    }
+    let challenge = check_code_request(&input, &redirect_uri)?;
+    let refuse = |error, description| refusal(&redirect_uri, state.as_deref(), error, description);
     let scopes = match &input.scope {
         None => manifest.scopes().to_vec(),
         Some(scope) => {
@@ -180,7 +141,7 @@ pub async fn authorize<S: OAuthPorts>(
     let mut request = AuthorizationRequest::new(NewRequest {
         id: OAuthRequestId::from_uuid(env.new_uuid()),
         client_id: client_id.clone(),
-        manifest: manifest.clone(),
+        client: RequestClient::App(Box::new(manifest.clone())),
         redirect_uri: redirect_uri.clone(),
         state: state.clone(),
         code_challenge: Some(challenge.clone()),
@@ -203,7 +164,9 @@ pub async fn authorize<S: OAuthPorts>(
         request
             .decide(true, Actor::App(app.id()), now)
             .map_err(|e| refuse("server_error", e.to_string()))?;
-        let (location, mut code) = new_code(&request, &challenge, false, env);
+        let client = OAuthClient::App(app.key().clone());
+        let (location, mut code) =
+            new_code(&request, client, request.scopes(), &challenge, false, env);
         let mut batch = ports.batch();
         batch.insert_oauth_request(&mut request);
         batch.insert_oauth_code(&mut code);
@@ -213,6 +176,73 @@ pub async fn authorize<S: OAuthPorts>(
 
     ports.oauth_requests().insert(&mut request).await?;
     Ok(Authorized::Consent(Box::new(request)))
+}
+
+/// An error sent back to the client at `redirect_uri` (RFC 6749 §4.1.2.1), with `state`.
+fn refusal(
+    redirect_uri: &str,
+    state: Option<&str>,
+    error: &'static str,
+    description: String,
+) -> AuthorizeError {
+    let mut params = vec![
+        ("error", error.to_string()),
+        ("error_description", description.clone()),
+    ];
+    if let Some(state) = state {
+        params.push(("state", state.to_string()));
+    }
+    AuthorizeError::Redirect {
+        location: with_params(redirect_uri, &params),
+        error,
+        description,
+    }
+}
+
+/// What every code request must say once its client and redirect URI are trusted
+/// (`response_type=code`, a short `state`, a PKCE S256 challenge); its challenge. Failures
+/// go back to the client.
+fn check_code_request(
+    input: &AuthorizeInput,
+    redirect_uri: &str,
+) -> Result<String, AuthorizeError> {
+    let refuse =
+        |error, description| refusal(redirect_uri, input.state.as_deref(), error, description);
+    if input.response_type.as_deref() != Some("code") {
+        return Err(refuse(
+            "unsupported_response_type",
+            "response_type must be code".to_string(),
+        ));
+    }
+    if input
+        .state
+        .as_ref()
+        .is_some_and(|s| s.len() > MAX_STATE_LEN)
+    {
+        return Err(refuse(
+            "invalid_request",
+            format!("state is at most {MAX_STATE_LEN} characters"),
+        ));
+    }
+    let Some(challenge) = input.code_challenge.clone().filter(|c| !c.is_empty()) else {
+        return Err(refuse(
+            "invalid_request",
+            "code_challenge is required (PKCE)".to_string(),
+        ));
+    };
+    if input.code_challenge_method.as_deref() != Some("S256") {
+        return Err(refuse(
+            "invalid_request",
+            "code_challenge_method must be S256".to_string(),
+        ));
+    }
+    if !pkce::is_challenge(&challenge) {
+        return Err(refuse(
+            "invalid_request",
+            "code_challenge is a base64url SHA-256 (43 characters)".to_string(),
+        ));
+    }
+    Ok(challenge)
 }
 
 /// `uri` with `params` added to its query.
@@ -232,6 +262,8 @@ fn with_params(uri: &str, params: &[(&str, String)]) -> String {
 /// with it.
 fn new_code(
     request: &AuthorizationRequest,
+    client: OAuthClient,
+    scopes: &[Scope],
     challenge: &str,
     first_install: bool,
     env: &(impl Random + IdGenerator + Clock),
@@ -240,11 +272,11 @@ fn new_code(
     let code = AuthorizationCode::new(NewCode {
         hash: token.hash(),
         request: request.id(),
-        app: request.app().clone(),
+        client,
         client_id: request.client_id().to_string(),
         redirect_uri: request.redirect_uri().to_string(),
         code_challenge: challenge.to_string(),
-        scopes: request.scopes().to_vec(),
+        scopes: scopes.to_vec(),
         first_install,
         family: env.new_uuid(),
         expires_at: env.now().plus(CODE_LIFETIME),
@@ -271,7 +303,11 @@ pub async fn get_request<S: HasOAuthRequests + hypha_apps::HasApps>(
         .get(id)
         .await?
         .ok_or(CommandError::RequestNotFound(id))?;
-    let app = ports.apps().get(request.app()).await?;
+    // An MCP client's request has its own consent page (`get_agent_request`).
+    let Some(key) = request.app() else {
+        return Err(CommandError::RequestNotFound(id));
+    };
+    let app = ports.apps().get(key).await?;
     Ok((request, app))
 }
 
@@ -370,6 +406,9 @@ pub async fn prepare_approval<S: OAuthPorts>(
         .get(id)
         .await?
         .ok_or(CommandError::RequestNotFound(id))?;
+    let (Some(key), Some(manifest)) = (request.app().cloned(), request.manifest().cloned()) else {
+        return Err(CommandError::RequestNotFound(id));
+    };
     if let Some(missing) = request.scopes().iter().find(|s| !ctx.has_scope(**s)) {
         return Err(CommandError::CannotGrant(*missing));
     }
@@ -377,12 +416,12 @@ pub async fn prepare_approval<S: OAuthPorts>(
     request.decide(true, ctx.actor(), now)?;
     let installed = InstalledManifest {
         url: request.client_id().to_string(),
-        manifest: request.manifest().clone(),
+        manifest: manifest.clone(),
         fetched_at: request.created_at(),
     };
-    let applies = Some(request.manifest().clone());
+    let applies = Some(manifest.clone());
     let grant = Grant::new(request.scopes(), ctx.actor(), now);
-    let app = ports.apps().get(request.app()).await?;
+    let app = ports.apps().get(&key).await?;
     // The key is an app installed (or uninstalled, keeping its manifest) from another
     // client ID since this was asked: two pending requests for one key from different
     // manifests must not swap the installed one (`authorize` refuses such a request
@@ -390,7 +429,6 @@ pub async fn prepare_approval<S: OAuthPorts>(
     if let Some(existing) = app.as_ref().and_then(|a| a.manifest())
         && existing.url != request.client_id()
     {
-        let key = request.app().clone();
         return Err(if request.is_private() {
             CommandError::InstalledFromUrl(key)
         } else {
@@ -399,8 +437,7 @@ pub async fn prepare_approval<S: OAuthPorts>(
     }
     let mut batch = ports.batch();
     if request.is_private() {
-        let key = request.app().clone();
-        let tokens = approve_private(&mut batch, env, request, app, installed, grant)?;
+        let tokens = approve_private(&mut batch, env, &key, request, app, installed, grant)?;
         return Ok(Prepared {
             batch,
             answer: Approval::Credentials {
@@ -424,19 +461,19 @@ pub async fn prepare_approval<S: OAuthPorts>(
         batch.update_oauth_request(&mut request);
         return Ok(Prepared {
             batch,
-            answer: Approval::Redirect(request.manifest().app_url().as_str().to_string()),
+            answer: Approval::Redirect(manifest.app_url().as_str().to_string()),
             applies,
         });
     };
     let first_install = match app {
         None => {
-            let (_, sealed) = new_secret(request.app(), env, env);
+            let (_, sealed) = new_secret(&key, env, env);
             let mut app = App::install(AppId::from_uuid(env.new_uuid()), sealed, installed, grant)?;
             batch.insert_app(&mut app);
             true
         }
         Some(mut app) if app.uninstalled_at().is_some() => {
-            let (_, sealed) = new_secret(request.app(), env, env);
+            let (_, sealed) = new_secret(&key, env, env);
             app.reinstall(sealed, installed, grant)?;
             batch.update_app(&mut app);
             true
@@ -448,7 +485,14 @@ pub async fn prepare_approval<S: OAuthPorts>(
             false
         }
     };
-    let (location, mut code) = new_code(&request, &challenge, first_install, env);
+    let (location, mut code) = new_code(
+        &request,
+        OAuthClient::App(key),
+        request.scopes(),
+        &challenge,
+        first_install,
+        env,
+    );
     batch.update_oauth_request(&mut request);
     batch.insert_oauth_code(&mut code);
     Ok(Prepared {
@@ -466,6 +510,7 @@ pub async fn prepare_approval<S: OAuthPorts>(
 fn approve_private<B: StageApps + StageOAuth>(
     batch: &mut B,
     env: &impl OAuthEnv,
+    key: &AppKey,
     mut request: AuthorizationRequest,
     app: Option<App>,
     installed: InstalledManifest,
@@ -473,13 +518,13 @@ fn approve_private<B: StageApps + StageOAuth>(
 ) -> Result<IssuedTokens, CommandError> {
     let (app, app_secret) = match app {
         None => {
-            let (secret, sealed) = new_secret(request.app(), env, env);
+            let (secret, sealed) = new_secret(key, env, env);
             let mut app = App::install(AppId::from_uuid(env.new_uuid()), sealed, installed, grant)?;
             batch.insert_app(&mut app);
             (app, Some(secret))
         }
         Some(mut app) if app.uninstalled_at().is_some() => {
-            let (secret, sealed) = new_secret(request.app(), env, env);
+            let (secret, sealed) = new_secret(key, env, env);
             app.reinstall(sealed, installed, grant)?;
             batch.update_app(&mut app);
             (app, Some(secret))
@@ -491,7 +536,8 @@ fn approve_private<B: StageApps + StageOAuth>(
             (app, None)
         }
     };
-    let (access, refresh, mut token) = new_pair(env.new_uuid(), &app, request.scopes(), env);
+    let client = OAuthClient::App(app.key().clone());
+    let (access, refresh, mut token) = new_pair(env.new_uuid(), client, request.scopes(), env);
     batch.update_oauth_request(&mut request);
     batch.insert_oauth_token(&mut token);
     Ok(IssuedTokens {
@@ -538,7 +584,7 @@ pub async fn request_private_app<S: OAuthPorts>(
         id: OAuthRequestId::from_uuid(env.new_uuid()),
         client_id,
         scopes: manifest.scopes().to_vec(),
-        manifest,
+        client: RequestClient::App(Box::new(manifest)),
         redirect_uri: String::new(),
         state: None,
         code_challenge: None,
@@ -565,6 +611,9 @@ pub async fn deny<S: HasOAuthRequests>(
         .get(id)
         .await?
         .ok_or(CommandError::RequestNotFound(id))?;
+    let Some(manifest) = request.manifest().cloned() else {
+        return Err(CommandError::RequestNotFound(id));
+    };
     request.decide(false, ctx.actor(), clock.now())?;
     ports.oauth_requests().update(&mut request).await?;
     // A private app's: nobody waits anywhere; the admin stays where it is.
@@ -573,8 +622,13 @@ pub async fn deny<S: HasOAuthRequests>(
     }
     // A refresh's request: no app is waiting at its redirect URI.
     if request.code_challenge().is_none() {
-        return Ok(Some(request.manifest().app_url().as_str().to_string()));
+        return Ok(Some(manifest.app_url().as_str().to_string()));
     }
+    Ok(Some(denied(&request)))
+}
+
+/// The client's redirect URI telling it the store declined.
+fn denied(request: &AuthorizationRequest) -> String {
     let mut params = vec![
         ("error", "access_denied".to_string()),
         (
@@ -585,7 +639,7 @@ pub async fn deny<S: HasOAuthRequests>(
     if let Some(state) = request.state() {
         params.push(("state", state.to_string()));
     }
-    Ok(Some(with_params(request.redirect_uri(), &params)))
+    with_params(request.redirect_uri(), &params)
 }
 
 /// An app's requests, newest first: its grant's history.
@@ -596,6 +650,134 @@ pub async fn request_history<S: HasOAuthRequests>(
 ) -> Result<Vec<AuthorizationRequest>, CommandError> {
     ctx.require(Scope::AppsRead)?;
     Ok(ports.oauth_requests().list_for_app(app, 50).await?)
+}
+
+// ---------- MCP clients ----------
+
+/// Checks an MCP client's authorization request against its metadata document (fetched
+/// from `client_id`) and stores it for a staff member's consent: connecting a client
+/// always asks a person, since approving makes a new agent. Scopes it asks for are kept to
+/// show the person (names that aren't Hypha's, like `offline_access`, are left out); the
+/// person chooses the grant. The caller has checked `resource` names `/mcp`.
+pub async fn authorize_agent<S: HasOAuthRequests>(
+    ports: &S,
+    fetcher: &impl ManifestFetcher,
+    env: &(impl IdGenerator + Clock),
+    input: AuthorizeInput,
+) -> Result<AuthorizationRequest, AuthorizeError> {
+    let client_id = input
+        .client_id
+        .clone()
+        .filter(|c| !c.trim().is_empty())
+        .ok_or(UnredirectableError::MissingClientId)?;
+    let metadata = fetch_client_metadata(fetcher, &client_id)
+        .await
+        .map_err(UnredirectableError::ClientMetadata)?;
+    let redirect_uri = input
+        .redirect_uri
+        .clone()
+        .filter(|r| !r.is_empty())
+        .ok_or(UnredirectableError::MissingRedirectUri)?;
+    if !metadata.allows_redirect(&redirect_uri) {
+        return Err(UnredirectableError::RedirectUriNotListed(redirect_uri).into());
+    }
+    // From here on, errors go back to the client.
+    let challenge = check_code_request(&input, &redirect_uri)?;
+    let scopes: Vec<Scope> = input
+        .scope
+        .as_deref()
+        .unwrap_or_default()
+        .split_whitespace()
+        .filter_map(Scope::parse)
+        .collect();
+    let now = env.now();
+    let mut request = AuthorizationRequest::new(NewRequest {
+        id: OAuthRequestId::from_uuid(env.new_uuid()),
+        client_id,
+        client: RequestClient::Agent(metadata),
+        redirect_uri,
+        state: input.state,
+        code_challenge: Some(challenge),
+        scopes,
+        previous_scopes: None,
+        created_at: now,
+        expires_at: now.plus(REQUEST_LIFETIME),
+    });
+    ports.oauth_requests().insert(&mut request).await?;
+    Ok(request)
+}
+
+/// An MCP client's request, for the consent page that connects it. A staff member's
+/// session reads it (the route makes sure); an app's request isn't one.
+pub async fn get_agent_request<S: HasOAuthRequests>(
+    ports: &S,
+    id: OAuthRequestId,
+) -> Result<AuthorizationRequest, CommandError> {
+    ports
+        .oauth_requests()
+        .get(id)
+        .await?
+        .filter(|r| r.agent_client().is_some())
+        .ok_or(CommandError::RequestNotFound(id))
+}
+
+/// Approves an MCP client's `request` for the calling staff member, for `agent` (made by
+/// the caller with `hypha_agents::prepare_connected_agent`, to be staged in the same
+/// batch): a code bound to the agent, sent to the client's redirect URI (the answer).
+/// `scopes` are what the agent was granted, for the token answer. Staged, not committed.
+pub fn prepare_agent_approval<S: OAuthPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    env: &(impl Random + IdGenerator + Clock),
+    mut request: AuthorizationRequest,
+    agent: AgentId,
+    scopes: &[Scope],
+) -> Result<Prepared<S::Batch, String>, CommandError> {
+    if !matches!(ctx.actor(), Actor::User(_)) {
+        return Err(CommandError::SessionRequired);
+    }
+    let id = request.id();
+    let (Some(_), Some(challenge)) = (
+        request.agent_client(),
+        request.code_challenge().map(str::to_string),
+    ) else {
+        return Err(CommandError::RequestNotFound(id));
+    };
+    request.decide(true, ctx.actor(), env.now())?;
+    // The code carries the grant's scopes, not what the client asked for.
+    let (location, mut code) = new_code(
+        &request,
+        OAuthClient::Agent(agent),
+        scopes,
+        &challenge,
+        false,
+        env,
+    );
+    let mut batch = ports.batch();
+    batch.update_oauth_request(&mut request);
+    batch.insert_oauth_code(&mut code);
+    Ok(Prepared {
+        batch,
+        answer: location,
+        applies: None,
+    })
+}
+
+/// Declines an MCP client's request; where to send the browser: its redirect URI with
+/// `error=access_denied`. A staff member's session (the route makes sure).
+pub async fn deny_agent<S: HasOAuthRequests>(
+    ctx: &Ctx,
+    ports: &S,
+    clock: &impl Clock,
+    id: OAuthRequestId,
+) -> Result<String, CommandError> {
+    if !matches!(ctx.actor(), Actor::User(_)) {
+        return Err(CommandError::SessionRequired);
+    }
+    let mut request = get_agent_request(ports, id).await?;
+    request.decide(false, ctx.actor(), clock.now())?;
+    ports.oauth_requests().update(&mut request).await?;
+    Ok(denied(&request))
 }
 
 // ---------- tokens ----------
@@ -655,12 +837,38 @@ pub async fn exchange_code<S: OAuthPorts>(
     if !pkce::verify(&input.code_verifier, code.code_challenge()) {
         return Err(invalid("code_verifier doesn't match the code_challenge"));
     }
-    let mut app = installed_app(ports, code.app())
+    let key = match code.client() {
+        OAuthClient::App(key) => key.clone(),
+        // A connected agent: nothing to install, no secret. Whether it may act is
+        // checked at every request to `/mcp`.
+        OAuthClient::Agent(agent) => {
+            let scopes = code.scopes().to_vec();
+            let client = OAuthClient::Agent(*agent);
+            code.use_up(now);
+            let (access, refresh, mut token) = new_pair(code.family(), client, &scopes, env);
+            let mut batch = ports.batch();
+            batch.update_oauth_code(&mut code);
+            batch.insert_oauth_token(&mut token);
+            match ports.commit(batch).await {
+                Err(RepoError::StaleVersion) => return Err(invalid("the code was used already")),
+                written => written?,
+            }
+            return Ok(IssuedTokens {
+                access_token: access,
+                refresh_token: refresh,
+                expires_in: ACCESS_TOKEN_LIFETIME.as_secs(),
+                scopes,
+                app_secret: None,
+            });
+        }
+    };
+    let mut app = installed_app(ports, &key)
         .await?
         .ok_or_else(|| invalid("the app is not installed"))?;
     let scopes = within_grant(code.scopes(), &app);
     code.use_up(now);
-    let (access, refresh, mut token) = new_pair(code.family(), &app, &scopes, env);
+    let client = OAuthClient::App(key);
+    let (access, refresh, mut token) = new_pair(code.family(), client, &scopes, env);
     let mut batch = ports.batch();
     batch.update_oauth_code(&mut code);
     batch.insert_oauth_token(&mut token);
@@ -719,24 +927,40 @@ pub async fn refresh<S: OAuthPorts>(
         return Err(invalid("the refresh token was revoked"));
     }
     if old.rotated_at().is_some() {
-        // Theft detection: the app's every token goes; it must be authorized again.
-        ports.oauth_tokens().revoke_app(old.app(), now).await?;
-        return Err(invalid(
-            "the refresh token was used already: every token of the app is revoked",
-        ));
+        // Theft detection: the client's every token goes; it must be authorized again.
+        let whose = match old.client() {
+            OAuthClient::App(key) => {
+                ports.oauth_tokens().revoke_app(key, now).await?;
+                "app"
+            }
+            OAuthClient::Agent(agent) => {
+                ports.oauth_tokens().revoke_agent(*agent, now).await?;
+                "agent"
+            }
+        };
+        return Err(invalid(&format!(
+            "the refresh token was used already: every token of the {whose} is revoked"
+        )));
     }
     if now >= old.refresh_expires_at() {
         return Err(invalid("the refresh token has expired"));
     }
-    let app = installed_app(ports, old.app())
-        .await?
-        .ok_or_else(|| invalid("the app is not installed"))?;
-    if let Some(client) = &input.client_id
-        && app.manifest().is_some_and(|m| &m.url != client)
-    {
-        return Err(invalid("the refresh token was issued to another client"));
-    }
-    let mut scopes = within_grant(old.scopes(), &app);
+    let mut scopes = match old.client() {
+        OAuthClient::App(key) => {
+            let app = installed_app(ports, key)
+                .await?
+                .ok_or_else(|| invalid("the app is not installed"))?;
+            if let Some(client) = &input.client_id
+                && app.manifest().is_some_and(|m| &m.url != client)
+            {
+                return Err(invalid("the refresh token was issued to another client"));
+            }
+            within_grant(old.scopes(), &app)
+        }
+        // A connected agent's: its grant is read at every request to `/mcp`; a revoked
+        // agent's tokens were revoked with it.
+        OAuthClient::Agent(_) => old.scopes().to_vec(),
+    };
     if let Some(scope) = &input.scope {
         let mut asked = Vec::new();
         for name in scope.split_whitespace() {
@@ -752,7 +976,8 @@ pub async fn refresh<S: OAuthPorts>(
         scopes = normalize(&asked);
     }
     old.rotate(now);
-    let (access, refresh, mut token) = new_pair(old.family(), &app, &scopes, env);
+    let client = old.client().clone();
+    let (access, refresh, mut token) = new_pair(old.family(), client, &scopes, env);
     let mut batch = ports.batch();
     batch.update_oauth_token(&mut old);
     batch.insert_oauth_token(&mut token);
@@ -808,13 +1033,46 @@ pub async fn authenticate_access_token<S: HasOAuthTokens + hypha_apps::HasApps>(
         .await?
         .filter(|t| t.access_valid(clock.now()))
         .ok_or(CommandError::InvalidToken)?;
-    let app = installed_app(ports, found.app())
+    let key = match found.client() {
+        OAuthClient::App(key) => key,
+        OAuthClient::Agent(_) => return Err(CommandError::AgentToken),
+    };
+    let app = installed_app(ports, key)
         .await?
         .ok_or(CommandError::InvalidToken)?;
     Ok(Ctx::new(
         Actor::App(app.id()),
         within_grant(found.scopes(), &app),
     ))
+}
+
+/// The connected agent a valid access token (`hypha_at_…`) was issued to, for `/mcp`. An
+/// app's token isn't one (`invalid_token`: it wasn't issued for `/mcp`). Says nothing about
+/// whether the agent may act now: that's the agent's to say.
+pub async fn authenticate_agent_token<S: HasOAuthTokens>(
+    ports: &S,
+    clock: &impl Clock,
+    token: &str,
+) -> Result<AgentId, CommandError> {
+    if TokenKind::of(token) != Some(TokenKind::AccessToken) {
+        return Err(CommandError::InvalidToken);
+    }
+    ports
+        .oauth_tokens()
+        .get_by_access(TokenHash::of(token))
+        .await?
+        .filter(|t| t.access_valid(clock.now()))
+        .and_then(|t| t.client().agent())
+        .ok_or(CommandError::InvalidToken)
+}
+
+/// Revokes every token of `agent` (it was revoked); how many.
+pub async fn revoke_agent_tokens<S: HasOAuthTokens>(
+    ports: &S,
+    clock: &impl Clock,
+    agent: AgentId,
+) -> Result<u32, RepoError> {
+    ports.oauth_tokens().revoke_agent(agent, clock.now()).await
 }
 
 /// The app under `key` if its tokens may work: installed and enabled.
@@ -839,7 +1097,7 @@ fn within_grant(scopes: &[Scope], app: &App) -> Vec<Scope> {
 
 fn new_pair(
     family: Uuid,
-    app: &App,
+    client: OAuthClient,
     scopes: &[Scope],
     env: &(impl Random + IdGenerator + Clock),
 ) -> (NewToken, NewToken, OAuthToken) {
@@ -849,7 +1107,7 @@ fn new_pair(
     let token = OAuthToken::new(NewTokenPair {
         id: env.new_uuid(),
         family,
-        app: app.key().clone(),
+        client,
         scopes: scopes.to_vec(),
         access_hash: access.hash(),
         access_expires_at: now.plus(ACCESS_TOKEN_LIFETIME),
@@ -1031,7 +1289,7 @@ pub async fn prepare_refresh<S: OAuthPorts>(
     let mut request = AuthorizationRequest::new(NewRequest {
         id: OAuthRequestId::from_uuid(env.new_uuid()),
         client_id: installed.url,
-        manifest,
+        client: RequestClient::App(Box::new(manifest)),
         redirect_uri,
         state: None,
         code_challenge: None,

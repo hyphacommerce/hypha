@@ -1,14 +1,20 @@
 //! OAuth's requests, codes and tokens: round trips, unique hashes, versions, the references
-//! (a code's request, a token's app) and revocation; and the batch that installs an app.
+//! (a code's request, a token's app or agent) and revocation; the batch that installs an
+//! app; and an MCP client's records, which belong to a connected agent.
 
+use hypha_agents::{
+    Agent, AgentClient, AgentKind, AgentRepo, Grant, HasAgents, NewAgent, StageAgents,
+};
 use hypha_apps::{AppRepo, StageApps};
 use hypha_auth::TokenHash;
 use hypha_core::{
-    Actor, AppKey, OAuthRequestId, RepoError, Scope, Timestamp, UserId, Version, Versioned,
+    Actor, AgentId, AppKey, HasBatch, OAuthRequestId, RepoError, Scope, Timestamp, UserId, Version,
+    Versioned,
 };
 use hypha_oauth::{
-    AuthorizationCode, AuthorizationRequest, NewCode, NewRequest, NewTokenPair, OAuthCodeRepo,
-    OAuthPorts, OAuthRequestRepo, OAuthToken, OAuthTokenRepo, RequestStatus, StageOAuth, keys,
+    AuthorizationCode, AuthorizationRequest, ClientMetadata, NewCode, NewRequest, NewTokenPair,
+    OAuthClient, OAuthCodeRepo, OAuthPorts, OAuthRequestRepo, OAuthToken, OAuthTokenRepo,
+    RequestClient, RequestStatus, StageOAuth, keys,
 };
 use uuid::Uuid;
 
@@ -26,7 +32,7 @@ fn request(n: u128, app: &str, created: i64) -> AuthorizationRequest {
     AuthorizationRequest::new(NewRequest {
         id: OAuthRequestId::from_uuid(Uuid::from_u128(n)),
         client_id: "https://app.example/hypha-app.json".to_string(),
-        manifest: crate::app_manifest(app, "https://app.example"),
+        client: RequestClient::App(Box::new(crate::app_manifest(app, "https://app.example"))),
         redirect_uri: "https://app.example/callback".to_string(),
         state: Some("xyz".to_string()),
         code_challenge: Some("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".to_string()),
@@ -41,7 +47,7 @@ fn code(n: u8, request: OAuthRequestId, app: &str) -> AuthorizationCode {
     AuthorizationCode::new(NewCode {
         hash: TokenHash::from_bytes([n; 32]),
         request,
-        app: key(app),
+        client: OAuthClient::App(key(app)),
         client_id: "https://app.example/hypha-app.json".to_string(),
         redirect_uri: "https://app.example/callback".to_string(),
         code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".to_string(),
@@ -56,7 +62,7 @@ fn token(n: u8, family: u128, app: &str) -> OAuthToken {
     OAuthToken::new(NewTokenPair {
         id: Uuid::from_u128(u128::from(n)),
         family: Uuid::from_u128(family),
-        app: key(app),
+        client: OAuthClient::App(key(app)),
         scopes: vec![Scope::OrdersRead, Scope::CustomerDataEmail],
         access_hash: TokenHash::from_bytes([n; 32]),
         access_expires_at: at(3600),
@@ -66,8 +72,50 @@ fn token(n: u8, family: u128, app: &str) -> OAuthToken {
     })
 }
 
+const MCP_CLIENT: &str = "https://client.example/oauth/metadata.json";
+
+/// An MCP client's request: no app, its metadata document instead.
+fn agent_request(n: u128) -> AuthorizationRequest {
+    let document = serde_json::json!({
+        "client_id": MCP_CLIENT,
+        "client_name": "Example client",
+        "redirect_uris": ["http://127.0.0.1/callback"],
+        "logo_uri": "https://client.example/logo.png",
+    });
+    let metadata = ClientMetadata::parse(MCP_CLIENT, document.to_string().as_bytes()).unwrap();
+    AuthorizationRequest::new(NewRequest {
+        id: OAuthRequestId::from_uuid(Uuid::from_u128(n)),
+        client_id: MCP_CLIENT.to_string(),
+        client: RequestClient::Agent(metadata),
+        redirect_uri: "http://127.0.0.1:5000/callback".to_string(),
+        state: None,
+        code_challenge: Some("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".to_string()),
+        scopes: vec![Scope::OrdersRead],
+        previous_scopes: None,
+        created_at: at(0),
+        expires_at: at(600),
+    })
+}
+
+fn connected_agent(n: u128) -> Agent {
+    Agent::new(
+        AgentId::from_uuid(Uuid::from_u128(n)),
+        NewAgent {
+            name: "Claude".to_string(),
+            kind: AgentKind::Connected {
+                user: UserId::from_uuid(Uuid::from_u128(3)),
+            },
+            client: Some(AgentClient::new(MCP_CLIENT, "Example client").unwrap()),
+            grant: Grant::default(),
+        },
+    )
+    .unwrap()
+}
+
 /// Runs every OAuth repo scenario, each on a fresh store from `make`.
-pub async fn oauth_repos<S: OAuthPorts>(make: impl AsyncFn() -> S) {
+pub async fn oauth_repos<S: OAuthPorts + HasAgents + HasBatch<Batch: StageAgents>>(
+    make: impl AsyncFn() -> S,
+) {
     scenario("oauth: a request round trips; versions; an app's history newest first");
     requests(&make().await).await;
     scenario("oauth: a code needs its request, is unique, and is spent once");
@@ -76,6 +124,99 @@ pub async fn oauth_repos<S: OAuthPorts>(make: impl AsyncFn() -> S) {
     tokens(&make().await).await;
     scenario("oauth: installing writes the app, the request and the code at once, or none");
     install_batch(&make().await).await;
+    scenario("oauth: an MCP client's request, code and tokens belong to its agent");
+    agent_client(&make().await).await;
+}
+
+async fn agent_client<S: OAuthPorts + HasAgents + HasBatch<Batch: StageAgents>>(store: &S) {
+    let mut req = agent_request(1);
+    store.oauth_requests().insert(&mut req).await.unwrap();
+    assert_eq!(
+        store.oauth_requests().get(req.id()).await,
+        Ok(Some(req.clone()))
+    );
+    assert_eq!(req.app(), None);
+
+    // Connecting writes the agent, the decided request and the code at once.
+    let staff = Actor::User(UserId::from_uuid(Uuid::from_u128(3)));
+    req.decide(true, staff, at(5)).unwrap();
+    let mut agent = connected_agent(40);
+    let agent_id = agent.id();
+    let mut code = AuthorizationCode::new(NewCode {
+        hash: TokenHash::from_bytes([9; 32]),
+        request: req.id(),
+        client: OAuthClient::Agent(agent_id),
+        client_id: MCP_CLIENT.to_string(),
+        redirect_uri: "http://127.0.0.1:5000/callback".to_string(),
+        code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".to_string(),
+        scopes: vec![Scope::OrdersRead],
+        first_install: false,
+        family: Uuid::from_u128(600),
+        expires_at: at(60),
+    });
+    let mut batch = store.batch();
+    batch.insert_agent(&mut agent);
+    batch.update_oauth_request(&mut req);
+    batch.insert_oauth_code(&mut code);
+    store.commit(batch).await.unwrap();
+    assert_eq!(
+        store.oauth_codes().get(code.hash()).await,
+        Ok(Some(code.clone()))
+    );
+    assert!(store.agents().get(agent_id).await.unwrap().is_some());
+
+    let agent_token = |n: u8, family: u128, agent: AgentId| {
+        OAuthToken::new(NewTokenPair {
+            id: Uuid::from_u128(u128::from(n)),
+            family: Uuid::from_u128(family),
+            client: OAuthClient::Agent(agent),
+            scopes: vec![Scope::OrdersRead],
+            access_hash: TokenHash::from_bytes([n; 32]),
+            access_expires_at: at(3600),
+            refresh_hash: TokenHash::from_bytes([n.wrapping_add(100); 32]),
+            refresh_expires_at: at(86_400),
+            created_at: at(0),
+        })
+    };
+    // A token needs its agent.
+    let mut batch = store.batch();
+    batch.insert_oauth_token(&mut agent_token(
+        1,
+        1,
+        AgentId::from_uuid(Uuid::from_u128(99)),
+    ));
+    assert!(matches!(
+        store.commit(batch).await,
+        Err(RepoError::Backend(_) | RepoError::Reference(_))
+    ));
+
+    let repo = store.oauth_tokens();
+    let mut first = agent_token(2, 1, agent_id);
+    repo.insert(&mut first).await.unwrap();
+    assert_eq!(
+        repo.get_by_access(first.access_hash()).await,
+        Ok(Some(first.clone()))
+    );
+    let mut other_family = agent_token(3, 2, agent_id);
+    repo.insert(&mut other_family).await.unwrap();
+    // An app's tokens are another client's: revoking the agent's leaves them.
+    store
+        .apps()
+        .insert(&mut installed_app("app_shop", &[Scope::OrdersRead]))
+        .await
+        .unwrap();
+    let mut app_pair = token(4, 3, "app_shop");
+    repo.insert(&mut app_pair).await.unwrap();
+    assert_eq!(repo.revoke_app(&key("app_shop"), at(10)).await, Ok(1));
+    assert_eq!(repo.revoke_agent(agent_id, at(20)).await, Ok(2));
+    assert_eq!(repo.revoke_agent(agent_id, at(21)).await, Ok(0));
+    let revoked = repo
+        .get_by_refresh(other_family.refresh_hash())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(revoked.revoked_at(), Some(at(20)));
+    assert_eq!(revoked.client(), &OAuthClient::Agent(agent_id));
 }
 
 async fn requests<S: OAuthPorts>(store: &S) {

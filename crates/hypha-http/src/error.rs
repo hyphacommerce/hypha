@@ -1501,6 +1501,8 @@ impl From<hypha_oauth::CommandError> for ApiError {
                 return Self::manifest(StatusCode::UNPROCESSABLE_ENTITY, inner.clone());
             }
             E::InvalidToken => return hypha_auth::CommandError::InvalidToken.into(),
+            E::SessionRequired => return Self::session_required(),
+            E::AgentToken => return Self::agent_credentials_mcp_only(),
             // Requests and apps only arrive in URLs.
             E::AppNotFound(_) | E::RequestNotFound(_) => StatusCode::NOT_FOUND,
             E::RequestExpired(_)

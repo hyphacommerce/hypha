@@ -7,7 +7,7 @@ use std::{
 };
 
 use hypha_auth::TokenHash;
-use hypha_core::{AppKey, OAuthRequestId, RepoError, Timestamp, Versioned};
+use hypha_core::{AgentId, AppKey, OAuthRequestId, RepoError, Timestamp, Versioned};
 use hypha_oauth::{
     AuthorizationCode, AuthorizationRequest, OAuthCodeRepo, OAuthRequestRepo, OAuthToken,
     OAuthTokenRepo, keys,
@@ -69,7 +69,9 @@ impl InMemoryOAuth {
     }
 
     pub(crate) fn drop_app_tokens(&self, app: &AppKey) {
-        self.lock().tokens.retain(|_, t| t.app() != app);
+        self.lock()
+            .tokens
+            .retain(|_, t| t.client().app() != Some(app));
     }
 }
 
@@ -142,7 +144,7 @@ impl OAuthRequestRepo for InMemoryOAuth {
             .lock()
             .requests
             .values()
-            .filter(|r| r.app() == app)
+            .filter(|r| r.app() == Some(app))
             .cloned()
             .collect();
         found.sort_by(|a, b| {
@@ -208,8 +210,11 @@ impl OAuthTokenRepo for InMemoryOAuth {
     }
 
     async fn insert(&self, token: &mut OAuthToken) -> Result<(), RepoError> {
-        if !self.app_exists(token.app()) {
-            return Err(missing("app", token.app()));
+        // An agent's must exist too; the repo alone can't see agents (a batch checks).
+        if let Some(app) = token.client().app()
+            && !self.app_exists(app)
+        {
+            return Err(missing("app", app));
         }
         insert_row(
             &mut self.lock().tokens,
@@ -229,6 +234,14 @@ impl OAuthTokenRepo for InMemoryOAuth {
     }
 
     async fn revoke_app(&self, app: &AppKey, at: Timestamp) -> Result<u32, RepoError> {
-        Ok(revoke_where(&mut self.lock(), at, |t| t.app() == app))
+        Ok(revoke_where(&mut self.lock(), at, |t| {
+            t.client().app() == Some(app)
+        }))
+    }
+
+    async fn revoke_agent(&self, agent: AgentId, at: Timestamp) -> Result<u32, RepoError> {
+        Ok(revoke_where(&mut self.lock(), at, |t| {
+            t.client().agent() == Some(agent)
+        }))
     }
 }
