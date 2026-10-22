@@ -17,8 +17,8 @@ use worker::Env;
 use worker::send::SendFuture;
 
 use crate::Deployment;
-use crate::handlers::CoreHandlers;
-use crate::payments::CoreProviders;
+use hypha_http::handlers::CoreHandlers;
+use hypha_http::payments::CoreProviders;
 
 /// The Hyperdrive binding's name in `wrangler.toml`.
 pub const HYPERDRIVE: &str = "HYPERDRIVE";
@@ -66,8 +66,11 @@ impl<D: Deployment> WorkersStorage<D> {
         Ok(Self {
             env,
             clock,
-            handlers: Union((crate::handlers::core_handlers(mail), built.handlers)),
-            payments: Union((crate::payments::CORE_PROVIDERS, built.payment_providers)),
+            handlers: Union((hypha_http::handlers::core_handlers(mail), built.handlers)),
+            payments: Union((
+                hypha_http::payments::CORE_PROVIDERS,
+                built.payment_providers,
+            )),
             spores: built.spores,
         })
     }

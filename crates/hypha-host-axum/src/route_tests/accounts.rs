@@ -230,6 +230,61 @@ async fn asking_for_a_code_answers_the_same_for_any_address_and_is_rate_limited(
     );
 }
 
+// Six digits are few: guesses must stay slow from any one address, and at any one email.
+#[tokio::test]
+async fn guessing_login_codes_from_one_address_is_limited() {
+    let app = app().await;
+    let pk = publishable(&app).await;
+    let (burst, _) = hypha_http::rate_limit::Rule::CustomerLoginIp.quota(&Default::default());
+    for n in 0..burst {
+        // Different emails, so only the per-address limit can trip.
+        let (status, json) =
+            login(&app, &pk, &format!("guess{n}@example.com"), "000000", None).await;
+        assert_eq!(
+            (status, code(&json)),
+            (StatusCode::UNAUTHORIZED, "invalid_code")
+        );
+    }
+    let (status, json) = login(&app, &pk, "again@example.com", "000000", None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
+    );
+}
+
+#[tokio::test]
+async fn guessing_one_emails_code_is_limited_per_address() {
+    let app = app_behind_proxy().await;
+    let pk = publishable(&app).await;
+    let (burst, _) =
+        hypha_http::rate_limit::Rule::CustomerLoginEmailFromIp.quota(&Default::default());
+    let body = json!({ "email": "nina@example.com", "code": "000000" }).to_string();
+    let path = "/storefront/auth/login";
+    let attacker = [
+        ("x-publishable-key", pk.as_str()),
+        ("x-forwarded-for", "203.0.113.66"),
+    ];
+    for _ in 0..burst {
+        let (status, _) = send_with(&app, &attacker, "POST", path, Some(&body)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    let (status, json) = send_with(&app, &attacker, "POST", path, Some(&body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
+    );
+    // From elsewhere, the same email is only a wrong code.
+    let shopper = [
+        ("x-publishable-key", pk.as_str()),
+        ("x-forwarded-for", "198.51.100.7"),
+    ];
+    let (status, json) = send_with(&app, &shopper, "POST", path, Some(&body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNAUTHORIZED, "invalid_code")
+    );
+}
+
 // ---------- the account ----------
 
 /// Signs `email` in and answers (the publishable key, the session token).

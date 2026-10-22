@@ -20,11 +20,9 @@ use hypha_store_postgres::{CORE, MigrationSet};
 
 mod calls;
 mod email;
-mod handlers;
 #[cfg(test)]
 mod handlers_test;
 mod limiter;
-mod payments;
 mod platform;
 // A spore for the route tests, and its routes, declared at the crate root as
 // `spore_routes!` asks (and before `route_tests`, which names the macro it defines).
@@ -42,8 +40,8 @@ mod runner;
 mod start;
 mod storage;
 
-pub use handlers::CoreHandlers;
-pub use payments::CoreProviders;
+pub use hypha_http::handlers::CoreHandlers;
+pub use hypha_http::payments::CoreProviders;
 pub use start::run;
 pub use storage::{HandlersOf, PgDatabase, PgPorts, PgStorage, PooledClient, ProvidersOf};
 

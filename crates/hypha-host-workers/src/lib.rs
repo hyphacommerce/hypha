@@ -34,20 +34,16 @@ pub mod schedule;
 #[cfg(target_arch = "wasm32")]
 mod email;
 #[cfg(target_arch = "wasm32")]
-mod handlers;
-#[cfg(target_arch = "wasm32")]
 mod log;
-#[cfg(target_arch = "wasm32")]
-mod payments;
 #[cfg(target_arch = "wasm32")]
 mod platform;
 #[cfg(target_arch = "wasm32")]
 mod storage;
 
 #[cfg(target_arch = "wasm32")]
-pub use handlers::CoreHandlers;
+pub use hypha_http::handlers::CoreHandlers;
 #[cfg(target_arch = "wasm32")]
-pub use payments::CoreProviders;
+pub use hypha_http::payments::CoreProviders;
 #[cfg(target_arch = "wasm32")]
 pub use storage::{HandlersOf, ProvidersOf, WorkersPorts, WorkersStorage};
 #[cfg(target_arch = "wasm32")]

@@ -565,13 +565,13 @@ pub trait Storage: Send + Sync + 'static {
     type Search<'p>: hypha_search_index::SearchIndex
     where
         Self: 'p;
-    /// The in-process event handlers this host runs: a tuple the host lists in its
-    /// `handlers.rs`, its composition root. The dispatcher runs whatever is here
+    /// The in-process event handlers this host runs: a tuple, core's (`handlers.rs`)
+    /// joined with its spores'. The dispatcher runs whatever is here
     /// (`jobs::dispatch`).
     type Handlers: for<'a> hypha_core::EventHandlers<Self::Ports<'a>> + Send + Sync + 'static;
-    /// The payment providers this host was built with: a tuple the host lists in its
-    /// `payments.rs`, next to `handlers.rs`. Checkout and the method commands find one by
-    /// key.
+    /// The payment providers this host was built with: a tuple, core's
+    /// (`payments::CoreProviders`) joined with its spores'. Checkout and the method commands
+    /// find one by key.
     type Payments: hypha_payments::PaymentProviders + Send + Sync + 'static;
     /// The spores this host was built with, built: what the routes ask in-process (settings
     /// forms, UI). `()` for none.

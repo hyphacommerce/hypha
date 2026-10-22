@@ -15,8 +15,8 @@ use hypha_store_postgres::{
 };
 
 use crate::Deployment;
-use crate::handlers::CoreHandlers;
-use crate::payments::CoreProviders;
+use hypha_http::handlers::CoreHandlers;
+use hypha_http::payments::CoreProviders;
 
 /// A pooled connection: deadpool-postgres's client, with the statements prepared on it,
 /// kept as long as the connection.
@@ -197,8 +197,11 @@ impl<D: Deployment> PgStorage<D> {
         let built = <D::Spores as SporeSet>::build(spores, config)?;
         Ok(Self {
             db,
-            handlers: Union((crate::handlers::core_handlers(mail), built.handlers)),
-            payments: Union((crate::payments::CORE_PROVIDERS, built.payment_providers)),
+            handlers: Union((hypha_http::handlers::core_handlers(mail), built.handlers)),
+            payments: Union((
+                hypha_http::payments::CORE_PROVIDERS,
+                built.payment_providers,
+            )),
             spores: built.spores,
         })
     }

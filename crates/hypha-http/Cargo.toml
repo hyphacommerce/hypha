@@ -63,7 +63,6 @@ url = "2.5"
 
 [dev-dependencies]
 pollster = "0.4"
-tower = { version = "0.5.3", features = ["util"] }
 
 [lints]
 workspace = true

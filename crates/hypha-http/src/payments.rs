@@ -12,9 +12,9 @@ use hypha_extensions::{
     PaymentsStart, PaymentsStatus, PaymentsVoid, call,
 };
 use hypha_payments::{
-    ActionAnswer, ActionRequest, NextAction, PaymentAction, PaymentError, PaymentProviders,
-    PaymentRequest, ProviderKey, ProviderState, ProviderStatus, Started, StatusRequest,
-    no_settings,
+    ActionAnswer, ActionRequest, ManualProvider, NextAction, PaymentAction, PaymentError,
+    PaymentProviders, PaymentRequest, ProviderKey, ProviderState, ProviderStatus, Started,
+    StatusRequest, no_settings,
 };
 
 use crate::{
@@ -22,6 +22,12 @@ use crate::{
     extensions::HostExtensions,
     state::HostEnv,
 };
+
+/// The providers core builds in, in no particular order (keys must be unique, spores'
+/// included). Every host joins them with its spores' as its `Storage::Payments`.
+pub type CoreProviders = (ManualProvider,);
+
+pub const CORE_PROVIDERS: CoreProviders = (ManualProvider,);
 
 /// One request's payment providers: the built-in ones, and the store's payment apps.
 pub struct HostPayments<'a, P, B> {

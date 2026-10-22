@@ -14,6 +14,7 @@ pub mod email;
 pub mod error;
 pub mod extensions;
 pub mod extract;
+pub mod handlers;
 pub mod host;
 pub mod jobs;
 pub mod key_cache;

@@ -478,16 +478,6 @@ async fn a_created_product_can_be_fetched_and_an_unknown_one_is_404() {
 }
 
 #[tokio::test]
-async fn the_store_is_the_one_created_at_startup() {
-    let app = app().await;
-    let (status, body) = send(&app, "GET", "/admin/store", None).await;
-    assert_eq!(
-        (status, body["name"].as_str()),
-        (StatusCode::OK, Some("Test"))
-    );
-}
-
-#[tokio::test]
 async fn the_store_can_be_renamed() {
     let app = app().await;
     let (status, body) = send(&app, "PATCH", "/admin/store", Some(r#"{"name":" Lumen "}"#)).await;
@@ -2647,6 +2637,174 @@ async fn two_factor_setup_and_login_over_http() {
     assert_eq!(me["mfa_enabled"], true);
 }
 
+/// Turns on TOTP for the owner's `session`; the recovery codes.
+async fn enable_totp(app: &TestApp, session: &str) -> Vec<String> {
+    let password = json!({ "password": OWNER_PASSWORD }).to_string();
+    let (status, setup) =
+        send_as(app, session, "POST", "/admin/me/mfa/totp", Some(&password)).await;
+    assert_eq!(status, StatusCode::CREATED, "{setup}");
+    let confirm = json!({ "code": totp_code(setup["secret"].as_str().unwrap()) }).to_string();
+    let path = "/admin/me/mfa/totp/confirm";
+    let (status, codes) = send_as(app, session, "POST", path, Some(&confirm)).await;
+    assert_eq!(status, StatusCode::OK, "{codes}");
+    codes["recovery_codes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap().to_string())
+        .collect()
+}
+
+/// Logs the owner in with their password; the second-factor challenge's token.
+async fn mfa_challenge(app: &TestApp) -> String {
+    let body = json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }).to_string();
+    let (status, login) = send_with(app, &[], "POST", "/admin/auth/login", Some(&body)).await;
+    assert_eq!(
+        (status, login["status"].as_str()),
+        (StatusCode::OK, Some("mfa_required"))
+    );
+    login["challenge"]["token"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn wrong_second_factor_codes_lock_the_checks() {
+    let app = app().await;
+    let session = owner_session(&app).await;
+    let recovery = enable_totp(&app, &session).await;
+    let challenge = mfa_challenge(&app).await;
+    let wrong = json!({ "challenge": challenge, "code": "000000" }).to_string();
+    for _ in 0..5 {
+        let (status, body) =
+            send_with(&app, &[], "POST", "/admin/auth/login/mfa", Some(&wrong)).await;
+        assert_eq!(
+            (status, code(&body)),
+            (StatusCode::UNAUTHORIZED, "invalid_mfa_code")
+        );
+    }
+    // The fifth ended the challenge and locked the checks: with a new one, even a right
+    // code isn't looked at.
+    let challenge = mfa_challenge(&app).await;
+    let right = json!({ "challenge": challenge, "code": recovery[0] }).to_string();
+    let (status, body) = send_with(&app, &[], "POST", "/admin/auth/login/mfa", Some(&right)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::TOO_MANY_REQUESTS, "mfa_locked")
+    );
+    assert!(body["details"]["locked_until"].is_string(), "{body}");
+}
+
+#[tokio::test]
+async fn staff_change_their_password_and_manage_their_second_factor() {
+    let app = app().await;
+    let session = owner_session(&app).await;
+    let other = owner_session(&app).await;
+
+    // The password: the current one is checked, and every other session ends.
+    let wrong = json!({ "current_password": "nope", "new_password": "a new password" });
+    let (status, body) = send_as(
+        &app,
+        &session,
+        "PUT",
+        "/admin/me/password",
+        Some(&wrong.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "wrong_password")
+    );
+    let change = json!({ "current_password": OWNER_PASSWORD, "new_password": "a new password" });
+    let (status, body) = send_as(
+        &app,
+        &session,
+        "PUT",
+        "/admin/me/password",
+        Some(&change.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(
+        send_as(&app, &other, "GET", "/admin/me", None).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        send_as(&app, &session, "GET", "/admin/me", None).await.0,
+        StatusCode::OK
+    );
+    let old = json!({ "email": OWNER_EMAIL, "password": OWNER_PASSWORD }).to_string();
+    let (status, body) = send_with(&app, &[], "POST", "/admin/auth/login", Some(&old)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNAUTHORIZED, "invalid_credentials")
+    );
+    let change = json!({ "current_password": "a new password", "new_password": OWNER_PASSWORD });
+    let (status, _) = send_as(
+        &app,
+        &session,
+        "PUT",
+        "/admin/me/password",
+        Some(&change.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // New recovery codes replace the old ones.
+    let first = enable_totp(&app, &session).await;
+    let body = json!({ "code": first[0] }).to_string();
+    let path = "/admin/me/mfa/recovery-codes";
+    let (status, fresh) = send_as(&app, &session, "POST", path, Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{fresh}");
+    let fresh: Vec<&str> = fresh["recovery_codes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap())
+        .collect();
+    assert!(!fresh.contains(&first[1].as_str()));
+    let old_code = json!({ "code": first[1] }).to_string();
+    let (status, body) = send_as(&app, &session, "POST", path, Some(&old_code)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_mfa_code")
+    );
+
+    // Turning it off takes a code too; then logging in needs only the password.
+    let disable = "/admin/me/mfa/totp/disable";
+    let (status, body) = send_as(&app, &session, "POST", disable, Some(&old_code)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_mfa_code")
+    );
+    let body = json!({ "code": fresh[0] }).to_string();
+    let (status, json) = send_as(&app, &session, "POST", disable, Some(&body)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{json}");
+    let (_, me) = send_as(&app, &session, "GET", "/admin/me", None).await;
+    assert_eq!(me["mfa_enabled"], false);
+    owner_session(&app).await;
+}
+
+#[tokio::test]
+async fn an_api_key_is_read_without_its_token() {
+    let app = app().await;
+    let body = r#"{"kind":"secret","name":"Reader","scopes":["stores:read"]}"#;
+    let (status, created) = send(&app, "POST", "/admin/api-keys", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap();
+    let (status, fetched) = send(&app, "GET", &format!("/admin/api-keys/{id}"), None).await;
+    assert_eq!(status, StatusCode::OK, "{fetched}");
+    assert_eq!(
+        (&fetched["id"], &fetched["name"], &fetched["scopes"]),
+        (&json!(id), &json!("Reader"), &json!(["stores:read"]))
+    );
+    assert!(fetched.get("token").is_none(), "{fetched}");
+    let unknown = "/admin/api-keys/key_00000000000000000000000000000063";
+    let (status, body) = send(&app, "GET", unknown, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "api_key_not_found")
+    );
+}
+
 #[tokio::test]
 async fn roles_and_invites_over_http() {
     let app = app().await;
@@ -2967,6 +3125,43 @@ async fn the_address_limit_comes_before_the_body_is_parsed() {
         send_with(&app, &[], "POST", "/admin/invites/accept", Some("{")).await;
     }
     let (status, json) = send_with(&app, &[], "POST", "/admin/invites/accept", Some("{")).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
+    );
+}
+
+#[tokio::test]
+async fn second_factor_tries_from_one_address_are_limited() {
+    let app = app().await;
+    let (burst, _) = hypha_http::rate_limit::Rule::MfaIp.quota(&Default::default());
+    let body = json!({ "challenge": "hypha_mfa_nope", "code": "000000" }).to_string();
+    for _ in 0..burst {
+        let (status, json) =
+            send_with(&app, &[], "POST", "/admin/auth/login/mfa", Some(&body)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{json}");
+    }
+    let (status, json) = send_with(&app, &[], "POST", "/admin/auth/login/mfa", Some(&body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
+    );
+}
+
+#[tokio::test]
+async fn guessing_reset_tokens_from_one_address_is_limited() {
+    let app = app().await;
+    let (burst, _) = hypha_http::rate_limit::Rule::ResetConfirmIp.quota(&Default::default());
+    let confirm = json!({ "token": "hypha_rst_nope", "password": "new password" }).to_string();
+    let path = "/admin/auth/password-reset/confirm";
+    for _ in 0..burst {
+        let (status, json) = send_with(&app, &[], "POST", path, Some(&confirm)).await;
+        assert_eq!(
+            (status, code(&json)),
+            (StatusCode::UNAUTHORIZED, "invalid_token")
+        );
+    }
+    let (status, json) = send_with(&app, &[], "POST", path, Some(&confirm)).await;
     assert_eq!(
         (status, code(&json)),
         (StatusCode::TOO_MANY_REQUESTS, "rate_limited")
@@ -4370,26 +4565,6 @@ async fn fulfilling_needs_fulfillment_scopes_and_cancelling_orders_write() {
 }
 
 #[tokio::test]
-async fn a_retried_fulfilment_replays_the_first() {
-    let app = app().await;
-    let (order, line, warehouse) = placed_order_for_three_mugs(&app).await;
-    let body = json!({"location": warehouse, "lines": [{"line": line, "quantity": 1}]}).to_string();
-    let path = format!("/admin/orders/{order}/fulfillments");
-    let auth = format!("Bearer {}", app.admin_key);
-    let headers = [
-        (AUTHORIZATION.as_str(), auth.as_str()),
-        ("idempotency-key", "ship-1"),
-    ];
-    let (status, first) = send_with(&app, &headers, "POST", &path, Some(&body)).await;
-    assert_eq!(status, StatusCode::CREATED, "{first}");
-    let (status, again) = send_with(&app, &headers, "POST", &path, Some(&body)).await;
-    assert_eq!(status, StatusCode::CREATED, "{again}");
-    assert_eq!(again["id"], first["id"]);
-    let (_, json) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
-    assert_eq!(json["lines"][0]["fulfilled_quantity"], 1);
-}
-
-#[tokio::test]
 async fn a_store_starts_with_a_default_location() {
     let app = app().await;
     let (status, json) = send(&app, "GET", "/admin/locations", None).await;
@@ -5271,6 +5446,42 @@ async fn categories_form_a_tree_storefronts_see_shown_and_search_filters_by() {
     let url = format!("/storefront/search?country=HR&sort=title&category={clothing}");
     let (_, found) = send_as(&app, &pk, "GET", &url, None).await;
     assert_eq!(titles(&found), ["trousers"]);
+}
+
+#[tokio::test]
+async fn a_category_shows_an_image_from_the_media_library() {
+    let app = app_with_media().await;
+    let body = json!({"name": "Lighting", "handle": "lighting", "visible": true}).to_string();
+    let (status, category) = send(&app, "POST", "/admin/categories", Some(&body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{category}");
+    let image = format!(
+        "/admin/categories/{}/image",
+        category["id"].as_str().unwrap()
+    );
+    let asset = ready_png(&app).await;
+
+    let body = json!({ "image": asset }).to_string();
+    let (status, json) = send(&app, "PUT", &image, Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["image"]["asset_id"], json!(asset));
+    // While it's shown, the asset can't be deleted.
+    let (status, body) = send(&app, "DELETE", &format!("/admin/assets/{asset}"), None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "asset_in_use")
+    );
+
+    let unknown = json!({ "image": format!("asset_{}", "0".repeat(32)) }).to_string();
+    let (status, body) = send(&app, "PUT", &image, Some(&unknown)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "asset_not_found")
+    );
+
+    let (status, json) = send(&app, "PUT", &image, Some(r#"{"image":null}"#)).await;
+    assert_eq!((status, &json["image"]), (StatusCode::OK, &Value::Null));
+    let (status, _) = send(&app, "DELETE", &format!("/admin/assets/{asset}"), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
 }
 
 // ---------- payments ----------

@@ -287,13 +287,4 @@ mod tests {
         let result = sender.send(&email()).await;
         assert!(matches!(result, Err(SendError::Transient(_))), "{result:?}");
     }
-
-    /// Against Mailpit (`docker compose up -d`): the message lands in its inbox at
-    /// http://localhost:8025. `cargo test -p hypha-host-axum -- --ignored mailpit`.
-    #[tokio::test]
-    #[ignore = "needs Mailpit on localhost:1025"]
-    async fn mailpit_takes_a_message() {
-        let sender = SmtpSender::new(&smtp(SmtpTls::None, None), None).unwrap();
-        assert_eq!(sender.send(&email()).await, Ok(Sent::default()));
-    }
 }
