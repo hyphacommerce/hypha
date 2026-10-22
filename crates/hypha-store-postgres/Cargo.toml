@@ -28,6 +28,7 @@ hypha-payments = { path = "../hypha-payments" }
 hypha-notifications = { path = "../hypha-notifications" }
 hypha-extensions = { path = "../hypha-extensions" }
 hypha-custom-fields = { path = "../hypha-custom-fields" }
+hypha-agents = { path = "../hypha-agents" }
 serde_json.workspace = true
 uuid.workspace = true
 # No runtime feature: the adapter never opens connections, hosts hand it a Client.

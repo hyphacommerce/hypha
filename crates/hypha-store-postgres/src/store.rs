@@ -397,6 +397,9 @@ accessors! {
     hypha_apps::HasSporeSettings => SporeSettings, spore_settings;
     hypha_custom_fields::HasCustomFieldDefinitions => CustomFieldDefinitions, custom_field_definitions;
     hypha_custom_fields::HasCustomFieldValues => CustomFieldValues, custom_field_values;
+    hypha_agents::HasAgents => Agents, agents;
+    hypha_agents::HasProposals => Proposals, proposals;
+    hypha_agents::HasAgentCalls => AgentCalls, agent_calls;
 }
 
 /// Runs a load that takes several queries (a root row, then its children) in one

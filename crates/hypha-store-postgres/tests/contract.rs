@@ -129,6 +129,24 @@ async fn idempotency_repo() {
 }
 
 #[tokio::test]
+async fn agent_repo() {
+    let Some(url) = database_url() else { return };
+    contract::agent_repo(async || fresh_store(&url, "contract_agents").await).await;
+}
+
+#[tokio::test]
+async fn proposal_repo() {
+    let Some(url) = database_url() else { return };
+    contract::proposal_repo(async || fresh_store(&url, "contract_agent_proposals").await).await;
+}
+
+#[tokio::test]
+async fn agent_call_repo() {
+    let Some(url) = database_url() else { return };
+    contract::agent_call_repo(async || fresh_store(&url, "contract_agent_calls").await).await;
+}
+
+#[tokio::test]
 async fn extension_call_repo() {
     let Some(url) = database_url() else { return };
     contract::extension_call_repo(async || fresh_store(&url, "contract_extension_calls").await)

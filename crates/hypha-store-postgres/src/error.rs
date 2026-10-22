@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use hypha_agents::keys as agent_keys;
 use hypha_apps::keys as app_keys;
 use hypha_auth::keys as auth_keys;
 use hypha_cart::repo::keys as cart_keys;
@@ -128,6 +129,10 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
         "custom_field_unique_value",
         custom_field_keys::CUSTOM_FIELD_UNIQUE_VALUE,
     ),
+    ("agents_pkey", agent_keys::AGENT_ID),
+    ("agent_proposals_pkey", agent_keys::PROPOSAL_ID),
+    ("agent_proposal_key", agent_keys::PROPOSAL_KEY),
+    ("agent_calls_pkey", agent_keys::AGENT_CALL_ID),
 ];
 
 /// Maps a driver error to the repo error the ports promise. A spore's query error as a
