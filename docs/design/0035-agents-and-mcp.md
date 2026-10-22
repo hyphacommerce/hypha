@@ -822,3 +822,25 @@ tools' names have no dots and are unchanged.
 - **Follow-ups.** `x-hypha-errors`; an `Mcp-Session`-free SSE answer for long calls
   (MCP Tasks, §12); app actions as `app.<key>.<action>` operations (M6); the Workers
   check of `/mcp` (M8); caching metadata documents if connecting ever becomes frequent.
+
+### After M5: what the admin's pages asked for
+
+- **A stale approval is a second look, not a failure.** Approving a proposal whose write
+  would no longer record what was previewed writes nothing and answers `409
+  preview_stale` as before, but the proposal stays `pending`: `Proposal::refresh` gives it
+  the fresh run's preview (with the IDs that run was handed) and digest, counts
+  `refreshes` (migration 0072) and records `proposal.updated` (`{proposal, agent,
+  refreshes, by}`); `details.proposal` is the updated proposal. Approving again applies
+  the new version exactly. A fresh run that fails (the write would error) still marks it
+  `failed`. The stale apply's response carries its run's IDs and digest
+  (`PreviewIds`/`PreviewDigest`, as a preview's does) for this. Its `emails` and `calls`
+  are empty (in the apply they ran), as for any stale answer.
+- **Summaries.** `ProposalResponse` and the call log's items carry `summary`, the
+  operation's from the operations index (`null` once this build has no such operation).
+- **Grant errors say where.** `agent_scope_not_grantable`, `not_allowed_to_grant`,
+  `not_allowed_to_grant_apply`, `invalid_grant`, `unknown_scope`, `invalid_write_mode`
+  and `invalid_operation_id` answer `details: {field, scope?, operation?}` (`field`:
+  `read`, `write`, `customer_data`, `operations`; `GrantError::field`, `GrantField::of`).
+- **`GET /admin/agent-settings`** (`agents:read`): `{enabled, writes,
+  proposal_lifetime_seconds, preview_token_lifetime_seconds}`, the operator's `[agents]`,
+  read-only through the API.
