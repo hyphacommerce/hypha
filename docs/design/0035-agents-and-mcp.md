@@ -59,12 +59,14 @@ seeing precisely what will change before it does.
   review of writes.
 - **Saleor:** an official read-only remote server. **Brink:** role-scoped actions in its
   merchant portal. **Stripe:** its own MCP for payment data.
-- **The protocol** (2026-07-28 revision; checked against secondary sources only: verify
-  against the spec before M5): a stateless core (no initialize handshake; version and
-  client info per request), OAuth with **Client ID Metadata Documents** preferred over
-  dynamic registration, Protected Resource Metadata (RFC 9728) and resource indicators
-  (RFC 8707) required, Tasks and MCP Apps (`io.modelcontextprotocol/ui`) as extensions,
-  elicitation in flux.
+- **The protocol** (2026-07-28 revision, the current one; checked against the
+  specification on 2026-10-22, see "As built: hypha-mcp"): a stateless core (no
+  initialize handshake and no sessions; version and client capabilities in every
+  request's `_meta`, client info recommended, a mandatory `server/discover`), OAuth with
+  **Client ID Metadata Documents** preferred over dynamic registration (now deprecated),
+  Protected Resource Metadata (RFC 9728) and resource indicators (RFC 8707) required,
+  Tasks and MCP Apps (`io.modelcontextprotocol/ui`) as extensions, elicitation through
+  multi round-trip results (`input_required`) instead of server-sent requests.
 
 What we take: commercetools' per-agent tool choice and its two modes (one agent per
 person, one per job); Shopify's "stage changes for confirmation", made generic; Medusa's
@@ -82,7 +84,7 @@ only, read-only, one tool per endpoint in the model's context.
 | MC5 | **Write scopes are granted with a mode: `propose` or `apply`.** Read scopes are plain. Every write scope is `propose` unless staff choose `apply`. Some scopes are never granted to an agent (§5.3). *Hard to reverse (the grant's shape)* |
 | MC6 | **A proposal is a preview waiting for a person.** A write in `propose` mode is previewed and kept (`prop_…`) in the admin's inbox; a staff member holding its scopes approves it (applied under MC3) or rejects it; it expires after `agents.proposal_lifetime` (7 days). A stale one is previewed again on request |
 | MC7 | **The MCP server is `/mcp` on the API**, both hosts, stateless Streamable HTTP. The protocol is its own crate, `hypha-mcp` (wasm-clean, knows nothing of routes or storage), behind an `Operations` port that `hypha-http` implements over the route table (§6). Auth is OAuth 2.1 through `hypha-oauth` with CIMD client IDs, as apps install (AP5); an agent's tokens are bound to `/mcp` (resource indicator) and refused elsewhere. *Hard to reverse (URL, auth flow)* |
-| MC8 | **Tools are operations, found on demand.** A small fixed set (`find_operations`, `describe_operation`, `call`) reaches every admin operation the agent may use, by its OpenAPI `operationId` (`admin.products.update`), with schemas from the committed documents; a curated set of direct tools for the common jobs sits beside it. Staff may narrow an agent to a list of operations. *Hard to reverse (tool names are a contract with agents' prompts)* |
+| MC8 | **Tools are operations, found on demand.** A small fixed set (`find_operations`, `describe_operation`, `call`) reaches every admin operation the agent may use, by its OpenAPI `operationId` (`admin.products.update`), with schemas from the committed documents; a curated set of direct tools for the common jobs sits beside it, each named after its operation with `.` as `__` (`admin__products__update`), since model APIs refuse dots in tool names. Staff may narrow an agent to a list of operations. *Hard to reverse (tool names are a contract with agents' prompts)* |
 | MC9 | **Personal data is off by default.** Tool results are redacted per the agent's grant through `redact.rs`, as for apps: names, emails, phones, addresses need `customer_data:*`, granted explicitly, connected agents included (a staff session sees everything; its agent doesn't). Every tool call is logged, reads too |
 | MC10 | **Spores and apps extend the surface for free.** A spore's routes are operations; an app's admin actions (0029 §6.1) are operations, proposable, never previewed past their call |
 | MC11 | **Hypha runs no model here.** Agents bring their own; the merchant chooses the provider and pays it. An in-admin assistant comes later on this same surface (§12) |
@@ -286,7 +288,9 @@ hour") are a natural next step on the grant; §12.
 ## 6. The MCP server (MC7)
 
 - **Endpoint:** `POST /mcp` (Streamable HTTP; JSON responses, no SSE needed for v1),
-  stateless: every request carries its credential and protocol version.
+  stateless: every request carries its credential and protocol version. Clients still on
+  the handshake revisions (2025-11-25 and before) are served too: their `initialize` is
+  answered and forgotten, with no session (see "As built: hypha-mcp").
 - **`hypha-mcp`** is the protocol, and only that: JSON-RPC envelopes, the MCP messages
   (`tools/list`, `tools/call`, the versions it speaks), the fixed tools of §7 (ranking
   for `find_operations`, `describe_operation`'s shape, `call`'s modes) and the mapping
@@ -345,8 +349,9 @@ makes it worse at picking one (Shopify's reason for skills over Dev MCP). So:
 
 **Direct tools**, curated in a list in `hypha-http` and passed to `hypha-mcp`: the
 daily work of running a store (what's come in, what to ship, what's running out, what
-to change in the catalog), same names as their operations, so an agent that found one
-via `find_operations` and one listed directly call the same thing. Writes among them
+to change in the catalog), named after their operations (dots as `__`, below), and
+`find_operations` names a curated operation's tool beside its ID, so an agent that
+found one and one listed directly call the same thing. Writes among them
 take the same `mode`. Twenty-two, 13 reads and 9 writes:
 
 | Job | Reads | Writes |
@@ -367,8 +372,10 @@ products are running low", "how did last week sell"): there's no list of invento
 items across products with a `below` filter, and no sales summary. Both are ordinary
 routes (§14, M6), useful to the admin's home page too.
 
-- Names are the OpenAPI `operationId`s, which the route table already makes stable.
-  Renaming one is a breaking change, like an error code.
+- A direct tool's name is its OpenAPI `operationId`, which the route table already
+  makes stable, with each `.` as `__` (`admin__orders__list`): model APIs refuse dots in
+  tool names (see "As built: hypha-mcp"). `call` and the other fixed tools keep the
+  dotted ID. Renaming an operation is a breaking change, like an error code.
 - Descriptions come from the operation's documentation; the error codes an operation
   can return (0010 S9, still in prose today) become data here: each route lists its
   command's `ErrorCode`s in an `x-hypha-errors` extension, which `describe_operation`
@@ -427,8 +434,8 @@ New scopes: `agents:read`, `agents:write` (owner by default).
   later would weaken a promise; comparing more would refuse writes that pass today.
 - `Actor::Agent` and the two kinds; a connected agent capped by its person (MC4).
 - The grant's shape with modes, and the scopes never granted (MC5, §5.2).
-- `/mcp`, its auth (CIMD, resource-bound tokens), and tool names = operation IDs (MC7,
-  MC8).
+- `/mcp`, its auth (CIMD, resource-bound tokens), and direct tool names = operation IDs
+  with `.` as `__` (MC7, MC8).
 - `agents.writes` and its three values (MC12).
 
 ## 12. Later
@@ -559,3 +566,73 @@ Sources for §1: [Medusa MCP](https://medusajs.com/blog/announcing-medusa-mcp),
   the tests cover a product create, a variant change, a stock adjustment, a keyed
   fulfilment followed by the real one, a cancellation, an invite (and its redaction), an
   app-backed capture (blocked) and failures.
+
+## As built: hypha-mcp
+
+`crates/hypha-mcp` (M5's protocol half), serde and `hypha-core` only, builds for wasm.
+
+**What the specification says** (read 2026-10-22). 2026-07-28 is the current revision
+([versioning](https://modelcontextprotocol.io/specification/versioning)); 2025-11-25 the
+previous, last of the handshake era.
+
+- *Stateless* ([changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog),
+  [basic](https://modelcontextprotocol.io/specification/2026-07-28/basic/index)): no
+  `initialize`, no sessions, no `ping`. Every request's `params._meta` carries
+  `io.modelcontextprotocol/protocolVersion` and `…/clientCapabilities` (required: missing
+  is `-32602`, HTTP 400) and should carry `…/clientInfo`; results carry `resultType:
+  "complete"` and should carry `_meta["io.modelcontextprotocol/serverInfo"]`. Servers
+  **must** answer `server/discover`
+  ([discover](https://modelcontextprotocol.io/specification/2026-07-28/server/discover)).
+- *Versions* ([versioning](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)):
+  an unsupported one is `-32022` with `data: {supported, requested}`. A dual-era server
+  serves a request with modern `_meta` statelessly and an `initialize` under the legacy
+  revision. Legacy negotiation ([2025-11-25 lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)):
+  answer the client's version when supported, else our latest.
+- *Streamable HTTP* ([2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http),
+  [2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)):
+  POST only (GET and DELETE `405`; ignore `Mcp-Session-Id` and `Last-Event-ID`), one
+  message per POST (no batches), a notification answered `202` with no body, a request
+  with `application/json` or SSE. Modern requests mirror the body in headers:
+  `MCP-Protocol-Version` (must equal `_meta`'s), `Mcp-Method` on every request, `Mcp-Name`
+  on `tools/call` (`=?base64?…?=` for unsafe values); missing or different is `400` with
+  `-32020 HeaderMismatch`. An unknown method is `404` with `-32601`. Without the version
+  header a server may assume 2025-03-26. `Origin` must be checked (`403`).
+- *Tools* ([tools](https://modelcontextprotocol.io/specification/2026-07-28/server/tools)):
+  names should be 1–128 of `A-Z a-z 0-9 _ - .` (`admin.tools.list` is the spec's own
+  example), but model APIs are stricter, so direct tools' names are mapped (below). The list may vary
+  by authorization, in a deterministic order; `tools/list` results must carry `ttlMs` and
+  `cacheScope` ([caching](https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/caching):
+  `private` when it varies per caller). Pagination is optional; an invalid cursor is
+  `-32602` ([pagination](https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/pagination)).
+  An unknown tool or a malformed call is a protocol error (`-32602`); input validation
+  and business errors are results with `isError: true`. `structuredContent` should be
+  mirrored as text; 2026-07-28 allows any JSON value there, 2025-11-25 only an object.
+
+**What was built.** `Server::handle(&impl Operations, McpRequest {body, headers}) ->
+McpResponse {status, body}`; transport concerns (auth, `Origin`, `405`) stay in
+`hypha-http`. Modern: `server/discover`, `tools/list`, `tools/call`. Legacy (2025-11-25,
+2025-06-18, 2025-03-26, by the header or its absence): `initialize`, `ping`, `tools/list`,
+`tools/call`, no session minted. The `Operations` port grew from §6's three methods to
+six: `visible`, `describe`, `call` (with `CallMode` `preview`/`apply`/`propose`, default
+`apply`, answering `OperationResult::Response {status, body}` or `Proposed {proposal,
+url}`), `whoami`, `proposal`, `proposals`; the last three answer HTTP-shaped like `call`,
+so `hypha-http` implements them over its own routes. Tool results keep Hypha's body as
+is (the error body too, `isError: true`), the status in `_meta["hypha/status"]`, and
+`structuredContent` only for objects. `tools/list` is never paged (6 + at most the
+curated tools), so any cursor is invalid; its `ttlMs` is `ServerConfig::list_ttl_ms`
+(60 s), `private`. A curated tool appears, and can be called, only while `visible`
+reports its operation; otherwise it's `Unknown tool`.
+
+**Direct tools' names: each `.` as `__`** (`admin.products.update` →
+`admin__products__update`), always. MCP allows dots, but the clients that matter hand
+tool names to model APIs, and the Anthropic and OpenAI APIs take only
+`^[a-zA-Z0-9_-]{1,64}$`; some clients also prefix them (Claude Code's
+`mcp__<server>__<tool>`). The mapping reads back because `OperationId` refuses `__` and
+an `_` beside a `.` (otherwise `a._b` and `a_.b` would share `a___b`); no current
+operation ID has either. A curated tool whose name passes 64 characters stops
+`Server::new` (`direct_tool_name_too_long`), never truncated. The longest current
+operation ID mapped is `admin__notifications__set_template_enabled`, 42 characters, 54
+with Claude Code's `mcp__hypha__`. Only tool names are mapped: `find_operations`
+answers, `describe_operation` and `call` take and show the dotted ID, and
+`find_operations` gives a curated operation's tool name beside it (`tool`). The fixed
+tools' names have no dots and are unchanged.

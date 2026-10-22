@@ -17,6 +17,7 @@ pub mod language;
 pub mod money;
 #[cfg(feature = "openapi")]
 mod openapi;
+pub mod operation_id;
 pub mod page;
 pub mod ports;
 pub mod quantity;
@@ -52,15 +53,17 @@ pub use idempotency::{
     IdempotencyRequest, Idempotent, StageIdempotency, earlier_id, earlier_result,
 };
 pub use ids::{
-    AddressId, AgentId, ApiKeyId, AppId, AssetId, CartId, CatalogId, CategoryId, ChannelId,
-    CustomFieldDefinitionId, CustomerGroupId, CustomerId, DeliveryId, EventId, ExtensionCallId,
-    FulfillmentId, IdError, IdentityId, InventoryItemId, InviteId, LocationId, MarketId,
-    NotificationId, OAuthRequestId, OptionId, OptionValueId, OrderId, OrderLineId, PasswordResetId,
-    PaymentId, PaymentMethodId, PriceListId, ProductId, RoleId, SessionId, ShippingGroupId,
-    ShippingOptionId, ShippingZoneId, StoreId, TaxClassId, TaxRegionId, UserId, VariantId,
+    AddressId, AgentCallId, AgentId, ApiKeyId, AppId, AssetId, CartId, CatalogId, CategoryId,
+    ChannelId, CustomFieldDefinitionId, CustomerGroupId, CustomerId, DeliveryId, EventId,
+    ExtensionCallId, FulfillmentId, IdError, IdentityId, InventoryItemId, InviteId, LocationId,
+    MarketId, NotificationId, OAuthRequestId, OptionId, OptionValueId, OrderId, OrderLineId,
+    PasswordResetId, PaymentId, PaymentMethodId, PriceListId, ProductId, ProposalId, RoleId,
+    SessionId, ShippingGroupId, ShippingOptionId, ShippingZoneId, StoreId, TaxClassId, TaxRegionId,
+    UserId, VariantId,
 };
 pub use language::{Language, LanguageError};
 pub use money::{BasisPoints, Currency, CurrencyError, Money, MoneyError, Price, TaxRate};
+pub use operation_id::{OperationId, OperationIdError};
 pub use page::{Direction, Keyset, Page, PageError, PageLimit, PageRequest, SortKey};
 pub use ports::{
     Clock, HasBatch, IdGenerator, Notifier, NotifyError, Progress, Random, RepoError,

@@ -19,6 +19,7 @@
 //! `StaleVersion`), every unique key in the crate's `repo::keys`, and the batched
 //! collection methods. `batch` checks `HasBatch` across aggregates.
 
+mod agents;
 mod apps;
 mod auth;
 mod batch;
@@ -51,6 +52,7 @@ mod tax;
 mod usages;
 mod users;
 
+pub use agents::{agent_call_repo, agent_repo, proposal_repo};
 pub use apps::{app_deliveries, app_repo};
 pub use auth::{api_key_repo, identity_repo, password_reset_repo, session_repo};
 pub use batch::batch;

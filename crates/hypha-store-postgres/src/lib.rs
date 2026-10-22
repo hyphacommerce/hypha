@@ -14,6 +14,7 @@
 //!   check, so it holds a pooled connection only briefly;
 //! - errors are mapped by SQLSTATE and constraint name (`error.rs`), never by message text.
 
+mod agents;
 mod apps;
 mod auth;
 mod batch;

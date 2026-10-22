@@ -1,3 +1,4 @@
+use hypha_agents::{Agent, Proposal, StageAgents, StageProposals};
 use hypha_apps::{App, StageApps};
 use hypha_auth::{
     Identity, PasswordReset, Session, StageIdentities, StagePasswordResets, StageSessions,
@@ -133,6 +134,10 @@ enum Staged {
         Option<Version>,
     ),
     Events(Vec<PendingEvent>, Option<Version>),
+    NewAgent(Agent),
+    Agent(Agent),
+    NewProposal(Proposal),
+    Proposal(Proposal),
 }
 
 impl StageApps for InMemoryBatch {
@@ -155,6 +160,44 @@ impl StageApps for InMemoryBatch {
             self.stage(Staged::Events(events, Some(version)));
         }
         app.set_version(version);
+    }
+}
+
+impl StageAgents for InMemoryBatch {
+    fn insert_agent(&mut self, agent: &mut Agent) {
+        stamp_insert(agent, self.now);
+        let events = agent.take_events();
+        self.stage(Staged::NewAgent(agent.clone()));
+        self.stage(Staged::Events(events, Some(Version::NEW.next())));
+        agent.set_version(Version::NEW.next());
+    }
+
+    fn update_agent(&mut self, agent: &mut Agent) {
+        stamp_update(agent, self.now);
+        let version = agent.version().next();
+        let events = agent.take_events();
+        self.stage(Staged::Agent(agent.clone()));
+        self.stage(Staged::Events(events, Some(version)));
+        agent.set_version(version);
+    }
+}
+
+impl StageProposals for InMemoryBatch {
+    fn insert_proposal(&mut self, proposal: &mut Proposal) {
+        stamp_insert(proposal, self.now);
+        let events = proposal.take_events();
+        self.stage(Staged::NewProposal(proposal.clone()));
+        self.stage(Staged::Events(events, Some(Version::NEW.next())));
+        proposal.set_version(Version::NEW.next());
+    }
+
+    fn update_proposal(&mut self, proposal: &mut Proposal) {
+        stamp_update(proposal, self.now);
+        let version = proposal.version().next();
+        let events = proposal.take_events();
+        self.stage(Staged::Proposal(proposal.clone()));
+        self.stage(Staged::Events(events, Some(version)));
+        proposal.set_version(version);
     }
 }
 
@@ -550,6 +593,10 @@ impl HasBatch for InMemoryPorts {
         let field_definitions_before = field_definitions.clone();
         let mut field_values = self.custom_fields.lock_values();
         let field_values_before = field_values.clone();
+        let mut agents = self.agents.agents.lock();
+        let agents_before = agents.clone();
+        let mut proposals = self.agents.proposals.lock();
+        let proposals_before = proposals.clone();
         let now = self.outbox.now();
         // Single writes first, the set-based revocation after them (as Postgres sorts).
         let mut revocations = Vec::new();
@@ -984,6 +1031,25 @@ impl HasBatch for InMemoryPorts {
                         )?
                     }
                     Staged::Events(staged, version) => events.push((staged, version)),
+                    Staged::NewAgent(mut agent) => insert_row(
+                        &mut agents,
+                        agent.id(),
+                        &mut agent,
+                        hypha_agents::keys::AGENT_ID,
+                        &no_unique_keys,
+                    )?,
+                    Staged::Agent(mut agent) => {
+                        crate::agents::update_agent(&mut agents, &mut agent)?
+                    }
+                    Staged::NewProposal(mut proposal) => {
+                        crate::agents::insert_proposal(&agents, &mut proposals, &mut proposal)?
+                    }
+                    Staged::Proposal(mut proposal) => update_row(
+                        &mut proposals,
+                        proposal.id(),
+                        &mut proposal,
+                        &crate::agents::unique_proposal,
+                    )?,
                 }
             }
             for (app, at) in revocations {
@@ -1015,6 +1081,8 @@ impl HasBatch for InMemoryPorts {
             *oauth = oauth_before;
             *field_definitions = field_definitions_before;
             *field_values = field_values_before;
+            *agents = agents_before;
+            *proposals = proposals_before;
             (*identities, *sessions, *resets, *roles, *users, *invites) = before_staff;
         }
         written

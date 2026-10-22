@@ -927,6 +927,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-agents"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "hypha-testkit",
+ "pollster",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-apps"
 version = "0.1.0"
 dependencies = [
@@ -1355,6 +1368,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-mcp"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "pollster",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "hypha-media"
 version = "0.1.0"
 dependencies = [
@@ -1596,6 +1620,7 @@ name = "hypha-store-postgres"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "hypha-agents",
  "hypha-apps",
  "hypha-auth",
  "hypha-cart",
@@ -1672,6 +1697,7 @@ dependencies = [
 name = "hypha-testkit"
 version = "0.1.0"
 dependencies = [
+ "hypha-agents",
  "hypha-apps",
  "hypha-auth",
  "hypha-cart",

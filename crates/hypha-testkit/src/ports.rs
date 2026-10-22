@@ -87,6 +87,8 @@ pub struct InMemoryPorts {
     pub spore_settings: crate::InMemorySporeSettingsRepo,
     /// Custom field definitions and values.
     pub custom_fields: crate::InMemoryCustomFields,
+    /// Admin agents, their proposals and their call log.
+    pub agents: crate::InMemoryAgents,
 }
 
 impl Default for InMemoryPorts {
@@ -143,8 +145,30 @@ impl Default for InMemoryPorts {
             stores: crate::InMemoryStoreRepo::sharing(&outbox),
             spore_settings: crate::InMemorySporeSettingsRepo::sharing(&outbox),
             custom_fields,
+            agents: crate::InMemoryAgents::sharing(&outbox),
             outbox,
         }
+    }
+}
+
+impl hypha_agents::HasAgents for InMemoryPorts {
+    type Agents = crate::InMemoryAgents;
+    fn agents(&self) -> &crate::InMemoryAgents {
+        &self.agents
+    }
+}
+
+impl hypha_agents::HasProposals for InMemoryPorts {
+    type Proposals = crate::InMemoryAgents;
+    fn proposals(&self) -> &crate::InMemoryAgents {
+        &self.agents
+    }
+}
+
+impl hypha_agents::HasAgentCalls for InMemoryPorts {
+    type AgentCalls = crate::InMemoryAgents;
+    fn agent_calls(&self) -> &crate::InMemoryAgents {
+        &self.agents
     }
 }
 
