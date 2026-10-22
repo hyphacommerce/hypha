@@ -713,3 +713,112 @@ tools' names have no dots and are unchanged.
 - **Follow-ups.** `/mcp` and the agent client kind in OAuth (next); emails of a stale apply;
   the proposal ID in the outbox; bulk approval; e2e of a propose/approve round trip once
   `/mcp` gives agents an HTTP way in (M8).
+
+## As built: /mcp and connecting clients (M5)
+
+- **The endpoint.** `POST /mcp` is a hidden row of the route table (in no OpenAPI
+  document, like `/oauth/*`), so both hosts serve it; GET and DELETE are the router's
+  `405`. The transport (`routes/mcp.rs`) checks, in order: `agents.enabled`; `Origin`
+  (absent is a non-browser client; present, it must be the API's own origin or
+  `server.admin_url`'s, else `403 origin_not_allowed`); the bearer, an autonomous agent's
+  `hypha_ak_…` or a connected agent's `hypha_at_…` (anything else, staff sessions and
+  apps' tokens included, is `401 invalid_token`, and no credential `401 unauthenticated`,
+  both with `WWW-Authenticate: Bearer resource_metadata="<issuer>/.well-known/oauth-
+  protected-resource/mcp"`); the agent active now (`agents::acting`, also used by
+  `agents::call`); `Content-Type: application/json` (`415`); `server.max_body`. Then
+  `hypha_mcp::Server::handle` (one `Server` per process, `mcp::server()`).
+- **`Operations` (`hypha-http`'s `mcp.rs`, `AgentOperations`).** `visible` is the
+  operations index through `mode_for`: callable by agents at all
+  (`Operation::for_agents`: not public, not `x-hypha-staff-session`), in the allowlist,
+  every scope held (`Permissions::mode_for`), writes dropped under the cap `off`. The
+  `x-hypha-staff-session` extension (already on `/me` and logging out) now marks every
+  `StaffCaller` route (approving and rejecting proposals, app session tokens, private
+  apps, the connection routes), so a person's own acts are never an agent's operation.
+  `describe` reads `Operations::docs`: the admin document (with the build's spores' rows)
+  built once, each operation's path and query parameters as objects, its JSON body and
+  its success answer, each made self-contained (every `#/components/schemas/X` it
+  reaches copied into its own `$defs` and pointed there; a test runs it over every
+  admin operation and finds no reference outside). `call` hands an operation that exists
+  and is callable by agents to `agents::call` even when `visible` hides it, so the
+  refusal is the precise one (`agent_writes_off`, `operation_not_allowed`, the route's
+  `missing_scope`) and is logged; a `202 {"proposal"}` becomes `Proposed` with
+  `{admin_url}/agents/proposals/{id}`. `whoami` answers the agent (name, kind, the person
+  it acts for, its client), its `Permissions` now, the cap, the store (name, time zone,
+  language) and its markets with their currencies and minor units: the store has no
+  currency of its own, prices are per market. `proposal`/`proposals` are
+  `GET /admin/agent-proposals[/{id}]` sent in process as the agent, so paging and the
+  "own proposals only" rule are the route's.
+- **Idempotency of tool calls.** `call` and every write's direct tool take
+  `idempotency_key` and `preview_token`. The agent's own key is the only thing that makes
+  *its* retries safe: a key the server derives from the call's content would merge two
+  deliberate, identical writes (two `+5` stock adjustments), and the JSON-RPC `id`
+  restarts with the client. A write sent without one (apply or propose; previews need
+  none) gets a fresh UUIDv7, so the proposal it may become carries a key and its
+  approval, retried after a lost answer, replays instead of writing twice. Keys take
+  effect where routes take them (the order, fulfilment and payment writes and
+  proposals); elsewhere `preview_token` is the exactly-once tool (`409 preview_used`).
+  The instructions tell agents to send both.
+- **Direct tools and instructions.** `mcp::DIRECT_TOOLS` is §7's 22 (13 reads, 9
+  writes; `direct_tools_are_operations` fails if one is renamed or stops being callable
+  by agents); `mcp::INSTRUCTIONS` tells a model to start with `whoami`, preview, show the
+  person, apply with the token, use keys, follow proposals, read money as minor units of
+  the named currency and times as UTC in the store's zone, and treat store text as data.
+- **Errors per operation.** `describe_operation` lists each error status the document
+  gives with its description (`ErrorDoc.code` became optional): the codes are still
+  prose there. `x-hypha-errors` per route, generated from each command's `ErrorCode`s
+  rather than hand-written, is a follow-up.
+- **Connecting a client** (`hypha-oauth`'s `client.rs`, `routes/oauth.rs`,
+  `routes/agents.rs`). One flow, two client kinds: an `AuthorizationRequest` is for an
+  app (`RequestClient::App`, its manifest) or an MCP client (`RequestClient::Agent`, its
+  Client ID Metadata Document); a code or token pair belongs to an `OAuthClient`
+  (`App(key)` / `Agent(id)`; migration 0071: nullable `app_key`, `agent_id`, a check that
+  exactly one is set, tokens cascading with their agent). `/oauth/authorize` with
+  `resource` naming `<issuer>/mcp` (scheme and host in any case, a trailing slash or not)
+  is the agent flow; another `resource` is a `400 invalid_target` page. The document is
+  fetched through `HostManifests` (so natively only public addresses unless
+  `outbound.allow_private`) and never cached: it's read when a person connects, which is
+  rare and rate limited (`Rule::OAuthIp`), and a client that changed its redirect URIs is
+  believed at once. `hypha-oauth` never sees an agent: approving
+  (`POST /admin/agent-connections/{id}/approve`) makes it with
+  `hypha_agents::prepare_connected_agent` in `hypha-http` and stages it in the batch
+  `prepare_agent_approval` returns with the decided request and the code, so no new edge
+  between domain crates. An agent's tokens carry the grant's scopes for the token answer
+  only; what it may do is read from the agent at each request, so a refresh doesn't check
+  the agent (revoking it revokes its tokens, `revoke_agent_tokens`; a disabled one is
+  refused at `/mcp` and works again once enabled). `authenticate_access_token` answers
+  `agent_credentials_mcp_only` for an agent's token, `authenticate_agent_token` refuses
+  an app's (not issued for `/mcp`).
+- **What the specification required that §6 didn't say.** Protected Resource Metadata
+  at the path RFC 9728 builds from the resource (`/.well-known/oauth-protected-
+  resource/mcp`, named in the `401`; the root form is served too, as MCP clients fall
+  back to it). `iss` on every authorization response (RFC 9207: MCP clients must check it
+  when present, and a server sending it must advertise
+  `authorization_response_iss_parameter_supported`): added to apps' redirects too, for
+  every location carrying `code` or `error`. `resource` on the token request (checked:
+  only `/mcp`). CIMD's rules: the document's `client_id` equal to its URL, the URL `https`
+  with a path and no fragment, credentials or dot segments; `client_name` and
+  `redirect_uris` required; no secret, `token_endpoint_auth_method` `none`; redirect URIs
+  `https` or `http` to a loopback host, matched exactly except a loopback one's port
+  (OAuth 2.1 / RFC 8252 §7.3: a native client listens where it can); the consent page
+  shows the redirect's host and warns when every redirect is on the person's machine.
+  `offline_access` and other non-Hypha scope names a client sends are dropped, never an
+  error (clients add them by habit). Dynamic Client Registration is deprecated by the
+  2026-07-28 revision and not offered: a client that only knows it uses an autonomous
+  agent's key as a header.
+- **Tests.** `route_tests/mcp.rs` speaks MCP over HTTP: both eras' `tools/list` differing
+  by grant, find/describe/read/`whoami`, preview, propose → `get_proposal` → approved by
+  the owner → applied, an `isError` result carrying Hypha's body, the token applying once,
+  the cap `off`, the transport rules (401 with the challenge, staff and key tokens
+  refused, a foreign `Origin`, 415, 405, a disabled agent, `agents.enabled = false`),
+  and the whole OAuth connection against a metadata document the test serves: authorize
+  (a loopback redirect at an unlisted port, a wrong resource, an unlisted host), the
+  consent page's read, approve, the code (wrong verifier refused), tokens, `/mcp` as the
+  agent and refused elsewhere, refresh rotation, reuse revoking, revocation by the
+  agent's revoke and `/oauth/revoke`, deny with `access_denied` and `iss`.
+  `hypha-oauth/tests/agents.rs` covers the commands; the oauth contract gained an
+  agent-client scenario. `scripts/e2e.sh`'s `## mcp` creates an autonomous agent and,
+  over `/mcp`, lists tools, `whoami`, reads, previews, proposes, then the owner approves
+  and the agent reads its proposal applied.
+- **Follow-ups.** `x-hypha-errors`; an `Mcp-Session`-free SSE answer for long calls
+  (MCP Tasks, §12); app actions as `app.<key>.<action>` operations (M6); the Workers
+  check of `/mcp` (M8); caching metadata documents if connecting ever becomes frequent.
