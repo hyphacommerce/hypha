@@ -55,6 +55,7 @@ mod tests {
         assert_eq!(mail.name(), "log");
         let email = OutgoingEmail {
             id: NotificationId::from_uuid(Uuid::from_u128(1)),
+            template: hypha_notifications::TemplateKey::StaffInvite,
             from: Mailbox {
                 name: None,
                 address: Email::new("shop@example.com").unwrap(),
@@ -76,6 +77,7 @@ mod tests {
         assert_eq!(refusing.name(), "test");
         let email = OutgoingEmail {
             id: NotificationId::from_uuid(Uuid::from_u128(2)),
+            template: hypha_notifications::TemplateKey::StaffInvite,
             from: Mailbox {
                 name: Some("Shop".to_string()),
                 address: Email::new("shop@example.com").unwrap(),

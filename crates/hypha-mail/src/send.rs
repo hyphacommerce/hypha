@@ -279,6 +279,7 @@ where
     records.insert(&mut record).await?;
     let email = OutgoingEmail {
         id: record.id(),
+        template: message.template,
         from: mailbox(env, Some(branding.sender_name())),
         reply_to: branding.settings.reply_to().cloned(),
         to: message.to,
@@ -340,6 +341,7 @@ pub async fn send_leased<E: MailEnv>(env: &E, leased: &Notification) -> Attempt 
     };
     let email = OutgoingEmail {
         id: leased.id(),
+        template: leased.template(),
         from: mailbox(env, queued.sender_name.as_deref()),
         reply_to: queued.reply_to.clone(),
         to: leased.to().clone(),

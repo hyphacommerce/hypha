@@ -265,6 +265,7 @@ mod tests {
     fn email(reply_to: Option<&str>) -> OutgoingEmail {
         OutgoingEmail {
             id: NotificationId::from_uuid(Uuid::from_u128(7)),
+            template: hypha_notifications::TemplateKey::StaffInvite,
             from: Mailbox {
                 name: Some("Ana's \"Shop\"".to_string()),
                 address: Email::new("shop@mail.example.com").unwrap(),

@@ -8,6 +8,8 @@ use std::fmt;
 use hypha_core::{Email, ErrorCode, NotificationId};
 use thiserror::Error;
 
+use crate::TemplateKey;
+
 /// An address with an optional display name: `"Shop" <shop@mail.example.com>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mailbox {
@@ -46,6 +48,8 @@ pub struct OutgoingEmail {
     /// The message's record; the provider's idempotency key where it has one, so a
     /// retried send doesn't deliver twice.
     pub id: NotificationId,
+    /// The template it was rendered from.
+    pub template: TemplateKey,
     /// The operator's address (a domain the provider verified) with the merchant's
     /// sender name.
     pub from: Mailbox,

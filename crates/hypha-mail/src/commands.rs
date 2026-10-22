@@ -405,6 +405,7 @@ where
     let to = user.email().clone();
     let email = OutgoingEmail {
         id: NotificationId::from_uuid(env.ids().new_uuid()),
+        template: key,
         from: from(env, &branding),
         reply_to: branding.settings.reply_to().cloned(),
         to: to.clone(),
