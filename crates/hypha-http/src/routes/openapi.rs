@@ -99,6 +99,7 @@ impl Doc {
 }
 
 /// One route of a document, as the route table and the handler's annotation give it.
+#[derive(Debug, Clone)]
 pub struct Row {
     pub doc: Doc,
     pub method: &'static str,
@@ -303,7 +304,7 @@ fn is_list(op: &Operation) -> bool {
 }
 
 /// Whether the operation needs credentials: annotated `security(())` means none.
-fn secured(op: &Operation) -> bool {
+pub(crate) fn secured(op: &Operation) -> bool {
     match &op.security {
         None => true,
         Some(requirements) => requirements
@@ -459,6 +460,14 @@ fn add_preview_components(components: &mut utoipa::openapi::Components) {
     )];
     PreviewResponse::schemas(&mut schemas);
     components.schemas.extend(schemas);
+}
+
+/// `document_with` as JSON, as the committed file holds it (open enums marked).
+pub(crate) fn document_value_with(doc: Doc, extra: Vec<Row>) -> Value {
+    let mut value = serde_json::to_value(document_with(doc, extra))
+        .unwrap_or_else(|e| panic!("cannot serialize the OpenAPI document: {e}"));
+    mark_open_enums(&mut value);
+    value
 }
 
 /// The document as the committed file holds it: pretty JSON and a final newline.

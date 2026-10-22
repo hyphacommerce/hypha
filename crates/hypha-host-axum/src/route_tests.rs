@@ -52,6 +52,8 @@ mod customers;
 // Customer accounts: signing in with an email code.
 mod accounts;
 mod oauth;
+// /mcp, and connecting MCP clients with OAuth.
+mod mcp;
 // Previews of admin writes (`Hypha-Preview`).
 mod previews;
 // A host built with a spore.

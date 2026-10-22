@@ -1,9 +1,14 @@
-//! OAuth 2.1 for apps: Hypha's API is the authorization server.
+//! OAuth 2.1 for apps and MCP clients: Hypha's API is the authorization server.
 //!
 //! - `GET /oauth/authorize` (public): checks the request against the app's manifest
 //!   (its `client_id` is the manifest's URL) and sends the browser to the admin's
 //!   consent page, `{server.admin_url}/apps/consent?request=<id>`; an app asking for no
-//!   more than its grant goes straight back with a code. A bad `client_id` or
+//!   more than its grant goes straight back with a code. With `resource=<api>/mcp` it's
+//!   an MCP client connecting an agent: its `client_id` is the URL of its Client ID
+//!   Metadata Document, and the browser goes to `{server.admin_url}/agents/connect?
+//!   request=<id>` (answered through `/admin/agent-connections/{id}`, `agents.rs`).
+//!   Every answer that carries a `code` or an `error` back to a client names the issuer
+//!   (`iss`, RFC 9207). A bad `client_id` or
 //!   `redirect_uri` is a 400 page (RFC 6749 §4.1.2.1: never redirect to an untrusted
 //!   URI); every other problem goes back to the app as `error=…`.
 //! - The consent page reads `GET /admin/oauth/requests/{id}` and answers with
@@ -28,6 +33,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use hypha_core::{OAuthRequestId, Scope};
+use hypha_oauth::authorize_agent;
 use hypha_oauth::{
     AuthorizationRequest, AuthorizeError, AuthorizeInput, Authorized, CodeExchange, IssuedTokens,
     Refresh, TokenError, authorize, deny, exchange_code, get_request, group_scopes,
@@ -70,6 +76,8 @@ pub struct AuthorizeQuery {
     code_challenge: Option<String>,
     /// `S256`.
     code_challenge_method: Option<String>,
+    /// `<api>/mcp` for an MCP client connecting an agent (RFC 8707); absent for apps.
+    resource: Option<String>,
 }
 
 /// Starts an app's authorization: 302 to the admin's consent page (or straight back to
@@ -88,6 +96,7 @@ pub struct AuthorizeQuery {
 pub async fn authorize_handler<S: Storage>(
     State(state): State<SharedState<S>>,
     ClientIp(ip): ClientIp,
+    Issuer(issuer): Issuer,
     query: Query<AuthorizeQuery>,
 ) -> Result<Response, ApiError> {
     enforce(&state.limiter, Rule::OAuthIp, &ip).await?;
@@ -108,16 +117,49 @@ pub async fn authorize_handler<S: Storage>(
         code_challenge: q.code_challenge,
         code_challenge_method: q.code_challenge_method,
     };
-    match authorize(&ports, &state.manifests(), &state.env, input).await {
+    let answered = match q.resource {
+        // Tokens are issued for one resource only: the MCP server.
+        Some(resource) if !super::mcp::names_mcp(&resource, &issuer) => {
+            return Err(ApiError::invalid_target(&resource));
+        }
+        Some(_) => match authorize_agent(&ports, &state.manifests(), &state.env, input).await {
+            Ok(request) => {
+                return Ok(redirect(&format!(
+                    "{consent_base}/agents/connect?request={}",
+                    request.id()
+                )));
+            }
+            Err(e) => Err(e),
+        },
+        None => authorize(&ports, &state.manifests(), &state.env, input).await,
+    };
+    match answered {
         Ok(Authorized::Consent(request)) => Ok(redirect(&format!(
             "{consent_base}/apps/consent?request={}",
             request.id()
         ))),
-        Ok(Authorized::Redirect(location)) => Ok(redirect(&location)),
-        Err(AuthorizeError::Redirect { location, .. }) => Ok(redirect(&location)),
+        Ok(Authorized::Redirect(location)) => Ok(redirect(&with_iss(&location, &issuer))),
+        Err(AuthorizeError::Redirect { location, .. }) => {
+            Ok(redirect(&with_iss(&location, &issuer)))
+        }
         Err(AuthorizeError::Unredirectable(e)) => Err(ApiError::unredirectable(e)),
         Err(AuthorizeError::Repo(e)) => Err(e.into()),
     }
+}
+
+/// `location` naming the issuer (`iss`, RFC 9207) when it answers a client: when it
+/// carries a `code` or an `error`. Clients that know the parameter (MCP's must) check it
+/// against the issuer they started with, so a mixed-up code is never sent elsewhere.
+pub(crate) fn with_iss(location: &str, issuer: &str) -> String {
+    let Ok(mut url) = url::Url::parse(location) else {
+        return location.to_string();
+    };
+    let answers = url.query_pairs().any(|(k, _)| k == "code" || k == "error");
+    if !answers || url.query_pairs().any(|(k, _)| k == "iss") {
+        return location.to_string();
+    }
+    url.query_pairs_mut().append_pair("iss", issuer);
+    url.to_string()
 }
 
 /// The app an app's request is for.
@@ -202,6 +244,8 @@ pub struct TokenRequest {
     refresh_token: Option<String>,
     /// `refresh_token`: space-separated scopes within the token's.
     scope: Option<String>,
+    /// `<api>/mcp` (RFC 8707), which MCP clients send; tokens are good for nothing else.
+    resource: Option<String>,
 }
 
 /// RFC 6749 §5.1's answer. `app_secret` comes with the first installation's code
@@ -326,6 +370,13 @@ pub async fn token_handler<S: Storage>(
         Ok(req) => req,
         Err(e) => return Ok(oauth_error(e)),
     };
+    if let Some(resource) = &req.resource
+        && !super::mcp::names_mcp(resource, &issuer)
+    {
+        return Ok(oauth_error(TokenError::InvalidTarget(format!(
+            "resource {resource:?} is not this API's MCP server (<api>/mcp)"
+        ))));
+    }
     let ports = state.public_ports().await?;
     let issued = async {
         match req.grant_type.as_str() {
@@ -413,8 +464,11 @@ pub struct ServerMetadata {
     token_endpoint_auth_methods_supported: Vec<&'static str>,
     revocation_endpoint_auth_methods_supported: Vec<&'static str>,
     scopes_supported: Vec<Scope>,
-    /// Client IDs are URLs of client metadata documents (the app's manifest).
+    /// Client IDs are URLs of client metadata documents: an app's manifest, or an MCP
+    /// client's Client ID Metadata Document.
     client_id_metadata_document_supported: bool,
+    /// Every answer to a client names the issuer (`iss`, RFC 9207).
+    authorization_response_iss_parameter_supported: bool,
 }
 
 /// The API's public base URL (`Issuer::of`), for a handler: the OAuth issuer and the
@@ -501,6 +555,7 @@ pub async fn metadata<S: Storage>(Issuer(base): Issuer) -> Json<ServerMetadata> 
         revocation_endpoint_auth_methods_supported: vec!["none"],
         scopes_supported: Scope::ALL.to_vec(),
         client_id_metadata_document_supported: true,
+        authorization_response_iss_parameter_supported: true,
     })
 }
 
@@ -858,7 +913,8 @@ pub async fn approve_request<S: Storage>(
     // The manifest applied and the app's custom fields synced to it, in one commit.
     let prepared = prepare_approval(&ctx, &ports, &state.env, id).await?;
     let approval = crate::app_fields::commit_applying(&ports, &state.env, prepared).await?;
-    let answer = ConsentAnswer::from_approval(approval, &issuer);
+    let mut answer = ConsentAnswer::from_approval(approval, &issuer);
+    answer.redirect_to = answer.redirect_to.map(|to| with_iss(&to, &issuer));
     // Credentials are in it: never cached (RFC 6749 §5.1's rule for token answers).
     Ok(no_store(StatusCode::OK, Json(answer)))
 }
@@ -893,7 +949,7 @@ pub struct PrivateAppResponse {
     path = "/admin/apps/private",
     request_body = PrivateAppRequest,
     responses((status = 201, description = "Created", body = PrivateAppResponse)),
-    extensions(("x-hypha-scopes" = json!(["apps:write"]))),
+    extensions(("x-hypha-scopes" = json!(["apps:write"])), ("x-hypha-staff-session" = json!(true))),
 )]
 pub async fn create_private<S: Storage>(
     State(state): State<SharedState<S>>,
@@ -942,11 +998,14 @@ pub async fn create_private<S: Storage>(
 )]
 pub async fn deny_request<S: Storage>(
     State(state): State<SharedState<S>>,
+    Issuer(issuer): Issuer,
     caller: Caller,
     PathId(id): PathId<OAuthRequestId>,
 ) -> Result<Json<ConsentAnswer>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let redirect_to = deny(&ctx, &ports, &state.clock, id).await?;
+    let redirect_to = deny(&ctx, &ports, &state.clock, id)
+        .await?
+        .map(|to| with_iss(&to, &issuer));
     Ok(Json(ConsentAnswer {
         redirect_to,
         credentials: None,

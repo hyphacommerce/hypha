@@ -157,6 +157,10 @@ pub enum TokenError {
     UnsupportedGrantType(String),
     #[error("{0}")]
     InvalidScope(String),
+    /// A `resource` (RFC 8707) that isn't this API's MCP server, the only one tokens are
+    /// issued for by resource.
+    #[error("{0}")]
+    InvalidTarget(String),
     #[error(transparent)]
     Repo(#[from] RepoError),
     #[error(transparent)]
@@ -171,6 +175,7 @@ impl ErrorCode for TokenError {
             TokenError::InvalidGrant(_) => "invalid_grant",
             TokenError::UnsupportedGrantType(_) => "unsupported_grant_type",
             TokenError::InvalidScope(_) => "invalid_scope",
+            TokenError::InvalidTarget(_) => "invalid_target",
             TokenError::Repo(_) | TokenError::Seal(_) => "server_error",
         }
     }

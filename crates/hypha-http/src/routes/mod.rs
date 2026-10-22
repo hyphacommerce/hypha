@@ -23,6 +23,7 @@ pub mod fulfillments;
 pub mod health;
 pub mod inventory;
 pub mod markets;
+pub mod mcp;
 pub mod me;
 pub mod notifications;
 pub mod oauth;
@@ -79,6 +80,10 @@ macro_rules! route_table {
             [hidden, POST, "/oauth/token", oauth::token_handler],
             [hidden, POST, "/oauth/revoke", oauth::revoke_handler],
             [hidden, GET, "/.well-known/oauth-authorization-server", oauth::metadata],
+            // MCP for admin agents: public (it checks agents' credentials itself)
+            [hidden, POST, "/mcp", mcp::handle],
+            [hidden, GET, "/.well-known/oauth-protected-resource", mcp::root_resource_metadata],
+            [hidden, GET, "/.well-known/oauth-protected-resource/mcp", mcp::resource_metadata],
 
             // ---------- admin ----------
             [admin, GET, "/admin/store", stores::fetch],
@@ -356,6 +361,10 @@ macro_rules! route_table {
             [admin, GET, "/admin/agent-proposals/{id}", agents::fetch_proposal],
             [admin, POST, "/admin/agent-proposals/{id}/approve", agents::approve],
             [admin, POST, "/admin/agent-proposals/{id}/reject", agents::reject],
+            // connecting an MCP client (the consent page)
+            [admin, GET, "/admin/agent-connections/{id}", agents::fetch_connection],
+            [admin, POST, "/admin/agent-connections/{id}/approve", agents::approve_connection],
+            [admin, POST, "/admin/agent-connections/{id}/deny", agents::deny_connection],
 
             // ---------- storefront ----------
             [storefront, GET, "/storefront/store", stores::fetch_storefront],

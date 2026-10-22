@@ -745,7 +745,7 @@ pub struct SessionTokenResponse {
     path = "/admin/app-extensions/{app}/session",
     params(("app" = String, Path, pattern = "^(app|spore)_[a-z][a-z0-9_]*$", example = "app_stripe")),
     responses((status = 200, description = "OK", body = SessionTokenResponse)),
-    extensions(("x-hypha-scopes" = json!(["apps:read"]))),
+    extensions(("x-hypha-scopes" = json!(["apps:read"])), ("x-hypha-staff-session" = json!(true))),
 )]
 pub async fn session<S: Storage>(
     State(state): State<SharedState<S>>,

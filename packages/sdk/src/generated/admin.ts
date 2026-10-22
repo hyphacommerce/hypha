@@ -2,6 +2,67 @@
 // run `pnpm sdk:generate` after `cargo run -p hypha-host-axum -- openapi`.
 
 export interface paths {
+    "/admin/agent-connections/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An MCP client's request to connect, for the signed-in staff member's consent page: the
+         *     client, where the code would go, and the grant to preset. A staff session only.
+         */
+        get: operations["admin.agents.fetch_connection"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/agent-connections/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Connects the client: makes a connected agent acting for the signed-in staff member with
+         *     the grant given (capped by their role at every request), and sends the client a code
+         *     for its tokens, good at `/mcp` only. A staff session only; no `agents:write` (connecting
+         *     one's own client is one's own act). 409 `oauth_request_expired` after ten minutes,
+         *     `oauth_request_decided` once answered; 403 `not_allowed_to_grant` /
+         *     `not_allowed_to_grant_apply`; 422 for a grant that breaks a rule.
+         */
+        post: operations["admin.agents.approve_connection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/agent-connections/{id}/deny": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Declines the client: it's told `access_denied`. A staff session only. */
+        post: operations["admin.agents.deny_connection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/agent-proposals": {
         parameters: {
             query?: never;
@@ -3480,6 +3541,33 @@ export interface components {
             client_id: string;
             name: string;
         };
+        /**
+         * @description An MCP client's request to connect an agent, for the consent page
+         *     (`{server.admin_url}/agents/connect?request=<id>`).
+         */
+        AgentConnectionResponse: {
+            client: components["schemas"]["ConnectingClient"];
+            created_at: string;
+            expires_at: string;
+            id: components["schemas"]["OAuthRequestId"];
+            /**
+             * @description The Hypha scopes the client asked for, if any: only a hint, the person chooses the
+             *     grant.
+             */
+            requested_scopes: components["schemas"]["Scope"][];
+            /**
+             * @description `pending`, `approved`, `denied`, or `expired` (pending past its ten minutes: the
+             *     client starts again).
+             */
+            status: string;
+            /**
+             * @description The grant to preset in the form: what the person holds, reads as reads, writes as
+             *     `propose`, no personal data (only what the client asked for, when it asked).
+             */
+            suggested_grant: components["schemas"]["AgentGrantResponse"];
+            /** @description The most any agent may write in this deployment (`apply`, `propose`, `off`). */
+            writes_cap: string;
+        };
         /** @description A grant as staff send it: scope names, each write scope with its mode. */
         AgentGrantRequest: {
             /** @description Personal data the agent may see (`customer_data:email`); none by default. */
@@ -3647,6 +3735,13 @@ export interface components {
             app: components["schemas"]["AppResponse"];
             /** @description Verify `Hypha-Signature` on webhooks and rate requests with it. Shown only now. */
             secret: string;
+        };
+        /** @description The staff member's answer: a name for the agent and its grant. */
+        ApproveConnectionRequest: {
+            /** @description No more than the staff member holds; `apply` only for scopes they could approve. */
+            grant: components["schemas"]["AgentGrantRequest"];
+            /** @description What the agent is called in the admin (`Claude on Ana's laptop`). */
+            name: string;
         };
         /**
          * @description A AssetId: `asset_` and 32 hex digits.
@@ -4014,6 +4109,35 @@ export interface components {
         ConfirmResetRequest: {
             password: string;
             token: string;
+        };
+        /** @description The MCP client asking to connect, as its metadata document says. */
+        ConnectingClient: {
+            /** @description Its client ID: the URL of its metadata document. */
+            client_id: string;
+            /** @description Its site, `https` only. */
+            client_uri?: string | null;
+            /** @description A square image, `https` only. */
+            logo_uri?: string | null;
+            /**
+             * @description Every redirect URI it lists is on the person's own machine (a desktop or command
+             *     line client): any program there can claim the name, so warn.
+             */
+            loopback_only: boolean;
+            /** @description What it calls itself. Show it with `redirect_host`: anyone can pick a name. */
+            name: string;
+            /** @description `redirect_uri`'s host: show it plainly, so the person sees where access goes. */
+            redirect_host: string;
+            /** @description Where the browser goes with the code. */
+            redirect_uri: string;
+        };
+        /** @description Where to send the browser, and the agent made. */
+        ConnectionAnswer: {
+            agent?: components["schemas"]["AgentResponse"] | null;
+            /**
+             * @description The client's redirect URI with `code`, `state` and `iss` (approved), or
+             *     `error=access_denied` (denied): navigate the browser there.
+             */
+            redirect_to: string;
         };
         /** @description Where to send the browser after an answer, or a private app's credentials. */
         ConsentAnswer: {
@@ -7315,6 +7439,275 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "admin.agents.fetch_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["OAuthRequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConnectionResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.agents.approve_connection": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["OAuthRequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionAnswer"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.agents.deny_connection": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["OAuthRequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionAnswer"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.agents.list_proposals": {
         parameters: {
             query?: {

@@ -1275,6 +1275,7 @@ dependencies = [
  "hypha-inventory",
  "hypha-mail",
  "hypha-markets",
+ "hypha-mcp",
  "hypha-media",
  "hypha-merchandising",
  "hypha-notifications",

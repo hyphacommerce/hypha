@@ -18,12 +18,14 @@ use hypha_agents::{
 };
 use hypha_auth::{Identity, NewToken, StageIdentities, TokenKind};
 use hypha_core::{
-    AgentCallId, AgentId, HasBatch, IdGenerator, IdentityId, ProposalId, Scope, Stamped, UserId,
+    AgentCallId, AgentId, HasBatch, IdGenerator, IdentityId, OAuthRequestId, ProposalId, Scope,
+    Stamped, UserId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{
+    oauth::{Issuer, with_iss},
     page::{ListQuery, PageParams, PageResponse},
     rfc3339, stamp_times,
 };
@@ -327,6 +329,9 @@ pub async fn revoke<S: Storage>(
 ) -> Result<Json<AgentResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let agent = hypha_agents::revoke_agent(&ctx, &ports, &state.clock, id).await?;
+    // Its OAuth tokens die with it (`/mcp` refuses a revoked agent anyway; this keeps a
+    // refresh from issuing new ones).
+    hypha_oauth::revoke_agent_tokens(&ports, &state.clock, id).await?;
     Ok(Json(AgentResponse::new(
         &agent,
         state.config.agents.writes,
@@ -570,7 +575,7 @@ pub async fn fetch_proposal<S: Storage>(
     path = "/admin/agent-proposals/{id}/approve",
     params(("id" = ProposalId, Path)),
     responses((status = 200, description = "OK", body = ProposalResponse)),
-    extensions(("x-hypha-scopes" = json!([]))),
+    extensions(("x-hypha-scopes" = json!([])), ("x-hypha-staff-session" = json!(true))),
 )]
 pub async fn approve<S: Storage>(
     State(state): State<SharedState<S>>,
@@ -620,7 +625,7 @@ pub struct RejectProposalRequest {
     params(("id" = ProposalId, Path)),
     request_body = RejectProposalRequest,
     responses((status = 200, description = "OK", body = ProposalResponse)),
-    extensions(("x-hypha-scopes" = json!([]))),
+    extensions(("x-hypha-scopes" = json!([])), ("x-hypha-staff-session" = json!(true))),
 )]
 pub async fn reject<S: Storage>(
     State(state): State<SharedState<S>>,
@@ -633,4 +638,208 @@ pub async fn reject<S: Storage>(
     let proposal =
         hypha_agents::reject_proposal(&staff.ctx, &ports, &state.clock, id, note).await?;
     Ok(Json(ProposalResponse::new(&proposal)?))
+}
+
+// ---------- connecting an MCP client ----------
+
+/// The MCP client asking to connect, as its metadata document says.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct ConnectingClient {
+    /// Its client ID: the URL of its metadata document.
+    client_id: String,
+    /// What it calls itself. Show it with `redirect_host`: anyone can pick a name.
+    name: String,
+    /// A square image, `https` only.
+    logo_uri: Option<String>,
+    /// Its site, `https` only.
+    client_uri: Option<String>,
+    /// Where the browser goes with the code.
+    redirect_uri: String,
+    /// `redirect_uri`'s host: show it plainly, so the person sees where access goes.
+    redirect_host: String,
+    /// Every redirect URI it lists is on the person's own machine (a desktop or command
+    /// line client): any program there can claim the name, so warn.
+    loopback_only: bool,
+}
+
+/// An MCP client's request to connect an agent, for the consent page
+/// (`{server.admin_url}/agents/connect?request=<id>`).
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct AgentConnectionResponse {
+    id: OAuthRequestId,
+    /// `pending`, `approved`, `denied`, or `expired` (pending past its ten minutes: the
+    /// client starts again).
+    status: &'static str,
+    client: ConnectingClient,
+    /// The Hypha scopes the client asked for, if any: only a hint, the person chooses the
+    /// grant.
+    requested_scopes: Vec<Scope>,
+    /// The grant to preset in the form: what the person holds, reads as reads, writes as
+    /// `propose`, no personal data (only what the client asked for, when it asked).
+    suggested_grant: AgentGrantResponse,
+    /// The most any agent may write in this deployment (`apply`, `propose`, `off`).
+    writes_cap: &'static str,
+    created_at: String,
+    expires_at: String,
+}
+
+impl AgentConnectionResponse {
+    fn new(
+        request: &hypha_oauth::AuthorizationRequest,
+        ctx: &hypha_core::Ctx,
+        cap: hypha_agents::WritesCap,
+        now: hypha_core::Timestamp,
+    ) -> Result<Self, ApiError> {
+        let client = request
+            .agent_client()
+            .ok_or_else(|| ApiError::internal("an app's request as an agent connection"))?;
+        let status = match request.status() {
+            hypha_oauth::RequestStatus::Pending if request.is_expired(now) => "expired",
+            other => other.as_str(),
+        };
+        let redirect_host = url::Url::parse(request.redirect_uri())
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string))
+            .unwrap_or_default();
+        let suggested = hypha_agents::suggested_grant(|s| ctx.has_scope(s), request.scopes());
+        Ok(Self {
+            id: request.id(),
+            status,
+            client: ConnectingClient {
+                client_id: client.client_id().to_string(),
+                name: client.client_name().to_string(),
+                logo_uri: client.logo_uri().map(str::to_string),
+                client_uri: client.client_uri().map(str::to_string),
+                redirect_uri: request.redirect_uri().to_string(),
+                redirect_host,
+                loopback_only: client.loopback_only(),
+            },
+            requested_scopes: request.scopes().to_vec(),
+            suggested_grant: AgentGrantResponse::new(&suggested),
+            writes_cap: cap.as_str(),
+            created_at: rfc3339(request.created_at())?,
+            expires_at: rfc3339(request.expires_at())?,
+        })
+    }
+}
+
+/// An MCP client's request to connect, for the signed-in staff member's consent page: the
+/// client, where the code would go, and the grant to preset. A staff session only.
+#[utoipa::path(
+    get,
+    path = "/admin/agent-connections/{id}",
+    params(("id" = OAuthRequestId, Path)),
+    responses((status = 200, description = "OK", body = AgentConnectionResponse)),
+    extensions(("x-hypha-scopes" = json!([])), ("x-hypha-staff-session" = json!(true))),
+)]
+pub async fn fetch_connection<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: StaffCaller,
+    PathId(id): PathId<OAuthRequestId>,
+) -> Result<Json<AgentConnectionResponse>, ApiError> {
+    use hypha_core::Clock;
+    let (ports, staff) = caller.authenticate(&state).await?;
+    let request = hypha_oauth::get_agent_request(&ports, id).await?;
+    Ok(Json(AgentConnectionResponse::new(
+        &request,
+        &staff.ctx,
+        state.config.agents.writes,
+        state.clock.now(),
+    )?))
+}
+
+/// The staff member's answer: a name for the agent and its grant.
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ApproveConnectionRequest {
+    /// What the agent is called in the admin (`Claude on Ana's laptop`).
+    name: String,
+    /// No more than the staff member holds; `apply` only for scopes they could approve.
+    grant: AgentGrantRequest,
+}
+
+/// Where to send the browser, and the agent made.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct ConnectionAnswer {
+    /// The client's redirect URI with `code`, `state` and `iss` (approved), or
+    /// `error=access_denied` (denied): navigate the browser there.
+    redirect_to: String,
+    /// The connected agent, acting for the staff member (approved only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    agent: Option<AgentResponse>,
+}
+
+/// Connects the client: makes a connected agent acting for the signed-in staff member with
+/// the grant given (capped by their role at every request), and sends the client a code
+/// for its tokens, good at `/mcp` only. A staff session only; no `agents:write` (connecting
+/// one's own client is one's own act). 409 `oauth_request_expired` after ten minutes,
+/// `oauth_request_decided` once answered; 403 `not_allowed_to_grant` /
+/// `not_allowed_to_grant_apply`; 422 for a grant that breaks a rule.
+#[utoipa::path(
+    post,
+    path = "/admin/agent-connections/{id}/approve",
+    params(("id" = OAuthRequestId, Path)),
+    request_body = ApproveConnectionRequest,
+    responses((status = 200, description = "OK", body = ConnectionAnswer)),
+    extensions(("x-hypha-scopes" = json!([])), ("x-hypha-staff-session" = json!(true))),
+)]
+pub async fn approve_connection<S: Storage>(
+    State(state): State<SharedState<S>>,
+    Issuer(issuer): Issuer,
+    caller: StaffCaller,
+    PathId(id): PathId<OAuthRequestId>,
+    body: JsonBody<ApproveConnectionRequest>,
+) -> Result<Json<ConnectionAnswer>, ApiError> {
+    let (ports, staff) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let request = hypha_oauth::get_agent_request(&ports, id).await?;
+    let client = request.agent_client().map(|c| hypha_agents::ClientInput {
+        client_id: c.client_id().to_string(),
+        name: c.client_name().to_string(),
+    });
+    let input = hypha_agents::ConnectAgent {
+        name: req.name,
+        client,
+        grant: req.grant.input(),
+    };
+    let mut agent = hypha_agents::prepare_connected_agent(&staff.ctx, &state.ids, input)?;
+    let scopes = agent.grant().scopes();
+    let mut prepared = hypha_oauth::prepare_agent_approval(
+        &staff.ctx,
+        &ports,
+        &state.env,
+        request,
+        agent.id(),
+        &scopes,
+    )?;
+    // The agent, the decided request and its code: together or not at all.
+    hypha_agents::StageAgents::insert_agent(&mut prepared.batch, &mut agent);
+    ports.commit(prepared.batch).await?;
+    Ok(Json(ConnectionAnswer {
+        redirect_to: with_iss(&prepared.answer, &issuer),
+        agent: Some(AgentResponse::new(&agent, state.config.agents.writes)?),
+    }))
+}
+
+/// Declines the client: it's told `access_denied`. A staff session only.
+#[utoipa::path(
+    post,
+    path = "/admin/agent-connections/{id}/deny",
+    params(("id" = OAuthRequestId, Path)),
+    responses((status = 200, description = "OK", body = ConnectionAnswer)),
+    extensions(("x-hypha-scopes" = json!([])), ("x-hypha-staff-session" = json!(true))),
+)]
+pub async fn deny_connection<S: Storage>(
+    State(state): State<SharedState<S>>,
+    Issuer(issuer): Issuer,
+    caller: StaffCaller,
+    PathId(id): PathId<OAuthRequestId>,
+) -> Result<Json<ConnectionAnswer>, ApiError> {
+    let (ports, staff) = caller.authenticate(&state).await?;
+    let location = hypha_oauth::deny_agent(&staff.ctx, &ports, &state.clock, id).await?;
+    Ok(Json(ConnectionAnswer {
+        redirect_to: with_iss(&location, &issuer),
+        agent: None,
+    }))
 }

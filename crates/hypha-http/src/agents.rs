@@ -27,7 +27,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use hypha_agents::{
-    AgentKind, CallMode, NewAgentCall, ProposalRequest, Propose, WriteMode, WritesCap, effective,
+    Agent, AgentKind, CallMode, NewAgentCall, Permissions, ProposalRequest, Propose, WriteMode,
+    WritesCap, effective,
 };
 use hypha_core::{
     Actor, AgentId, Clock, Ctx, OperationId, PreviewToken, PreviewTokenRepo, Scope, Timestamp,
@@ -79,6 +80,13 @@ pub struct Answer {
 }
 
 impl Answer {
+    /// The proposal a write became (`202 {"proposal": …}`), if it did.
+    pub fn proposal(&self) -> Option<&str> {
+        (self.status == StatusCode::ACCEPTED.as_u16())
+            .then(|| self.body.pointer("/proposal/id").and_then(Value::as_str))
+            .flatten()
+    }
+
     /// The error's code, for a failure.
     pub fn code(&self) -> Option<&str> {
         (self.status >= 400)
@@ -198,23 +206,11 @@ async fn judge<S: Storage>(
     approved: bool,
 ) -> Result<Judged, ApiError> {
     let agents = &state.config.agents;
-    if !agents.enabled {
-        return Err(ApiError::agents_disabled());
-    }
+    let Acting {
+        agent: found,
+        permissions,
+    } = acting(state, agent).await?;
     let ports = state.public_ports().await?;
-    let found = match hypha_agents::active_agent(&ports, agent).await {
-        Ok(found) => found,
-        Err(
-            hypha_agents::CommandError::AgentDisabled(_)
-            | hypha_agents::CommandError::Agent(hypha_agents::AgentError::Revoked(_)),
-        ) => return Err(ApiError::agent_disabled()),
-        Err(e) => return Err(e.into()),
-    };
-    let role = match found.kind() {
-        AgentKind::Connected { user } => Some(role_of(&ports, user).await?),
-        AgentKind::Autonomous => None,
-    };
-    let permissions = effective(found.grant(), agents.writes, role.as_deref());
     if !permissions.allows_operation(&operation.id) {
         return Err(ApiError::operation_not_allowed(operation.id.as_str()));
     }
@@ -239,6 +235,45 @@ async fn judge<S: Storage>(
     Ok(Judged {
         ctx: Ctx::new(Actor::Agent(agent), permissions.scopes()),
         mode,
+    })
+}
+
+/// An agent as it may act now, and what it may do.
+pub struct Acting {
+    pub agent: Agent,
+    /// Its grant under the operator's cap, within its staff member's role for a connected
+    /// agent: read fresh.
+    pub permissions: Permissions,
+}
+
+/// `agent` if it may act now: agents are on in this deployment (`agents_disabled`), it's
+/// enabled and not revoked, and a connected one's staff member is active
+/// (`agent_disabled`); with what it may do.
+pub async fn acting<S: Storage>(
+    state: &SharedState<S>,
+    agent: AgentId,
+) -> Result<Acting, ApiError> {
+    let agents = &state.config.agents;
+    if !agents.enabled {
+        return Err(ApiError::agents_disabled());
+    }
+    let ports = state.public_ports().await?;
+    let found = match hypha_agents::active_agent(&ports, agent).await {
+        Ok(found) => found,
+        Err(
+            hypha_agents::CommandError::AgentDisabled(_)
+            | hypha_agents::CommandError::Agent(hypha_agents::AgentError::Revoked(_)),
+        ) => return Err(ApiError::agent_disabled()),
+        Err(e) => return Err(e.into()),
+    };
+    let role = match found.kind() {
+        AgentKind::Connected { user } => Some(role_of(&ports, user).await?),
+        AgentKind::Autonomous => None,
+    };
+    let permissions = effective(found.grant(), agents.writes, role.as_deref());
+    Ok(Acting {
+        agent: found,
+        permissions,
     })
 }
 

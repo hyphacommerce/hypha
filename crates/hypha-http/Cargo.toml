@@ -23,6 +23,7 @@ hypha-order-actions = { path = "../hypha-order-actions" }
 hypha-privacy = { path = "../hypha-privacy" }
 hypha-payments = { path = "../hypha-payments" }
 hypha-agents = { path = "../hypha-agents" }
+hypha-mcp = { path = "../hypha-mcp" }
 hypha-auth = { path = "../hypha-auth" }
 hypha-users = { path = "../hypha-users" }
 hypha-customer-accounts = { path = "../hypha-customer-accounts" }

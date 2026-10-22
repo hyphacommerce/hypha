@@ -633,6 +633,53 @@
         ],
         "type": "object"
       },
+      "AgentConnectionResponse": {
+        "description": "An MCP client's request to connect an agent, for the consent page\n(`{server.admin_url}/agents/connect?request=<id>`).",
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/ConnectingClient"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/OAuthRequestId"
+          },
+          "requested_scopes": {
+            "description": "The Hypha scopes the client asked for, if any: only a hint, the person chooses the\ngrant.",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "`pending`, `approved`, `denied`, or `expired` (pending past its ten minutes: the\nclient starts again).",
+            "type": "string"
+          },
+          "suggested_grant": {
+            "$ref": "#/components/schemas/AgentGrantResponse",
+            "description": "The grant to preset in the form: what the person holds, reads as reads, writes as\n`propose`, no personal data (only what the client asked for, when it asked)."
+          },
+          "writes_cap": {
+            "description": "The most any agent may write in this deployment (`apply`, `propose`, `off`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "client",
+          "requested_scopes",
+          "suggested_grant",
+          "writes_cap",
+          "created_at",
+          "expires_at"
+        ],
+        "type": "object"
+      },
       "AgentGrantRequest": {
         "additionalProperties": false,
         "description": "A grant as staff send it: scope names, each write scope with its mode.",
@@ -1135,6 +1182,25 @@
         "required": [
           "app",
           "secret"
+        ],
+        "type": "object"
+      },
+      "ApproveConnectionRequest": {
+        "additionalProperties": false,
+        "description": "The staff member's answer: a name for the agent and its grant.",
+        "properties": {
+          "grant": {
+            "$ref": "#/components/schemas/AgentGrantRequest",
+            "description": "No more than the staff member holds; `apply` only for scopes they could approve."
+          },
+          "name": {
+            "description": "What the agent is called in the admin (`Claude on Ana's laptop`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "grant"
         ],
         "type": "object"
       },
@@ -2253,6 +2319,77 @@
         "required": [
           "token",
           "password"
+        ],
+        "type": "object"
+      },
+      "ConnectingClient": {
+        "description": "The MCP client asking to connect, as its metadata document says.",
+        "properties": {
+          "client_id": {
+            "description": "Its client ID: the URL of its metadata document.",
+            "type": "string"
+          },
+          "client_uri": {
+            "description": "Its site, `https` only.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "logo_uri": {
+            "description": "A square image, `https` only.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "loopback_only": {
+            "description": "Every redirect URI it lists is on the person's own machine (a desktop or command\nline client): any program there can claim the name, so warn.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "What it calls itself. Show it with `redirect_host`: anyone can pick a name.",
+            "type": "string"
+          },
+          "redirect_host": {
+            "description": "`redirect_uri`'s host: show it plainly, so the person sees where access goes.",
+            "type": "string"
+          },
+          "redirect_uri": {
+            "description": "Where the browser goes with the code.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "name",
+          "redirect_uri",
+          "redirect_host",
+          "loopback_only"
+        ],
+        "type": "object"
+      },
+      "ConnectionAnswer": {
+        "description": "Where to send the browser, and the agent made.",
+        "properties": {
+          "agent": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AgentResponse",
+                "description": "The connected agent, acting for the staff member (approved only)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "redirect_to": {
+            "description": "The client's redirect URI with `code`, `state` and `iss` (approved), or\n`error=access_denied` (denied): navigate the browser there.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "redirect_to"
         ],
         "type": "object"
       },
@@ -11193,6 +11330,358 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/agent-connections/{id}": {
+      "get": {
+        "operationId": "admin.agents.fetch_connection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/OAuthRequestId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentConnectionResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "An MCP client's request to connect, for the signed-in staff member's consent page: the\nclient, where the code would go, and the grant to preset. A staff session only.",
+        "tags": [
+          "agents"
+        ],
+        "x-hypha-scopes": [],
+        "x-hypha-staff-session": true
+      }
+    },
+    "/admin/agent-connections/{id}/approve": {
+      "post": {
+        "operationId": "admin.agents.approve_connection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/OAuthRequestId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveConnectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionAnswer"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Connects the client: makes a connected agent acting for the signed-in staff member with\nthe grant given (capped by their role at every request), and sends the client a code\nfor its tokens, good at `/mcp` only. A staff session only; no `agents:write` (connecting\none's own client is one's own act). 409 `oauth_request_expired` after ten minutes,\n`oauth_request_decided` once answered; 403 `not_allowed_to_grant` /\n`not_allowed_to_grant_apply`; 422 for a grant that breaks a rule.",
+        "tags": [
+          "agents"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [],
+        "x-hypha-staff-session": true
+      }
+    },
+    "/admin/agent-connections/{id}/deny": {
+      "post": {
+        "operationId": "admin.agents.deny_connection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/OAuthRequestId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionAnswer"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Declines the client: it's told `access_denied`. A staff session only.",
+        "tags": [
+          "agents"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [],
+        "x-hypha-staff-session": true
+      }
+    },
     "/admin/agent-proposals": {
       "get": {
         "operationId": "admin.agents.list_proposals",
@@ -11532,7 +12021,8 @@
         "x-hypha-preview": {
           "$ref": "#/components/responses/Preview"
         },
-        "x-hypha-scopes": []
+        "x-hypha-scopes": [],
+        "x-hypha-staff-session": true
       }
     },
     "/admin/agent-proposals/{id}/reject": {
@@ -11678,7 +12168,8 @@
         "x-hypha-preview": {
           "$ref": "#/components/responses/Preview"
         },
-        "x-hypha-scopes": []
+        "x-hypha-scopes": [],
+        "x-hypha-staff-session": true
       }
     },
     "/admin/agents": {
@@ -13400,7 +13891,8 @@
         },
         "x-hypha-scopes": [
           "apps:read"
-        ]
+        ],
+        "x-hypha-staff-session": true
       }
     },
     "/admin/apps": {
@@ -13717,7 +14209,8 @@
         },
         "x-hypha-scopes": [
           "apps:write"
-        ]
+        ],
+        "x-hypha-staff-session": true
       }
     },
     "/admin/apps/{key}": {

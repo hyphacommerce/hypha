@@ -22,6 +22,7 @@ pub mod jobs;
 pub mod key_cache;
 pub mod mail;
 pub mod manifests;
+pub mod mcp;
 pub mod media;
 pub mod operations;
 pub mod outbound;

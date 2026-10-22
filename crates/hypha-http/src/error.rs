@@ -122,6 +122,11 @@ impl ApiError {
         e
     }
 
+    /// The HTTP status it answers with.
+    pub fn status(&self) -> StatusCode {
+        self.status
+    }
+
     fn with_details(mut self, details: Option<serde_json::Value>) -> Self {
         self.details = details;
         self
@@ -359,6 +364,26 @@ impl ApiError {
             StatusCode::UNAUTHORIZED,
             "agent_credentials_mcp_only",
             "an agent's credentials work at /mcp only",
+        )
+    }
+
+    /// `/oauth/authorize` with a `resource` that isn't this API's MCP server (RFC 8707):
+    /// a page, since the client can't be trusted yet.
+    pub fn invalid_target(resource: &str) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_target",
+            format!("resource {resource:?} is not this API's MCP server (<api>/mcp)"),
+        )
+    }
+
+    /// A browser page from another site posting to `/mcp` (DNS rebinding, a page driving
+    /// a local client): only the API's own origin and the admin's may.
+    pub fn origin_not_allowed() -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "origin_not_allowed",
+            "requests to /mcp from this Origin are refused",
         )
     }
 
