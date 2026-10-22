@@ -32,7 +32,7 @@ async fn connect(url: &str) -> Client {
 
 #[tokio::test]
 async fn concurrent_items_added_to_a_new_list_all_land() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping the custom field race test");
         return;
     };

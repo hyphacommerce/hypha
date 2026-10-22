@@ -1,0 +1,18 @@
+# cargo-nextest: `cargo nextest run --workspace` (doc tests: `cargo test --workspace --doc`).
+# Every test runs in a process of its own, across all test binaries at once.
+
+[test-groups]
+# Tests on the compose Postgres and S3 server: capped so they don't swamp Docker's VM,
+# which crashed under the whole suite at once.
+services = { max-threads = 6 }
+
+[profile.default]
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+[[profile.default.overrides]]
+filter = "package(hypha-host-axum) | package(hypha-store-postgres) | package(hypha-store-s3)"
+test-group = "services"
+
+[profile.ci]
+# Report every failure, not just the first.
+fail-fast = false

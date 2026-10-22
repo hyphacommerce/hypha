@@ -2,10 +2,10 @@
 //! what only the HTTP layer decides (status codes, error codes, extractors); domain
 //! rules are tested in their crates and end to end in `scripts/e2e.sh`.
 //!
-//! They need Postgres at `DATABASE_URL` (`.cargo/config.toml` points it at the database
-//! `docker compose up -d` starts).
-//! Each test gets a schema of its own, named after it, so they run in parallel and a
-//! rerun starts clean.
+//! They need the tests' Postgres at `HYPHA_TEST_DATABASE_URL` (`.cargo/config.toml` points
+//! it at compose's `postgres-test`). Each test gets a database of its own, named after it
+//! and copied from a template migrated once, so they run in parallel and a rerun starts
+//! clean.
 
 use std::sync::{Arc, Mutex};
 
@@ -20,6 +20,7 @@ use axum::{
 use hypha_auth::{ApiKeyKind, Argon2id, CreateApiKey, create_api_key, totp};
 use hypha_config::Config;
 use hypha_core::{Ctx, Scope, Timestamp};
+use hypha_store_postgres::testing::TestDatabase;
 use hypha_stores::ensure_single_store;
 use hypha_users::{NewOwner, bootstrap_owner};
 use serde_json::{Value, json};
@@ -56,7 +57,7 @@ mod stripe;
 const OWNER_EMAIL: &str = "owner@example.com";
 const OWNER_PASSWORD: &str = "owner password";
 
-/// The app on a fresh schema, with its owner (`OWNER_EMAIL`), and a secret key with every scope
+/// The app on a fresh database, with its owner (`OWNER_EMAIL`), and a secret key with every scope
 /// that `send` uses unless a test picks other credentials.
 struct TestApp<D: crate::Deployment = crate::Stock> {
     router: Router,
@@ -66,6 +67,8 @@ struct TestApp<D: crate::Deployment = crate::Stock> {
     /// What the app's email sender was given (a recording sender, never SMTP, whatever
     /// `.cargo/config.toml` says), oldest first.
     emails: Arc<Mutex<Vec<OutgoingEmail>>>,
+    /// Last, so it's dropped after the state's connections.
+    _database: TestDatabase,
 }
 
 /// A sender that keeps what it's given, named `test` (so test sends aren't refused as
@@ -108,11 +111,10 @@ async fn app_behind_proxy() -> TestApp {
 /// Requests in these tests come from this peer (`MockConnectInfo`), as if over a socket.
 const PEER: ([u8; 4], u16) = ([127, 0, 0, 1], 4000);
 
-/// A schema of its own for the running test, emptied, and the URL that connects to it.
-/// libtest runs each test on a thread named after it, so the name is stable across runs
-/// and unique within one.
-async fn fresh_schema() -> String {
-    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL (see .cargo/config.toml)");
+/// A database of its own for the running test, copied from a template migrated with
+/// `D`'s migrations, and dropped with the `TestDatabase`. libtest names each test's thread
+/// after the test, so the name is stable across runs and unique within one.
+async fn fresh_database<D: crate::Deployment>() -> TestDatabase {
     let test = std::thread::current()
         .name()
         .unwrap_or("unnamed")
@@ -130,24 +132,10 @@ async fn fresh_schema() -> String {
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .take(40)
         .collect();
-    let schema = format!("rt_{hash:016x}_{tail}").to_lowercase();
-
-    let config = hypha_store_postgres::database_config(&url).expect("DATABASE_URL");
-    let (client, connection) = config
-        .connect(tokio_postgres::NoTls)
+    let name = format!("rt_{hash:016x}_{tail}").to_lowercase();
+    TestDatabase::new(&name, &crate::migrations::<D>())
         .await
-        .unwrap_or_else(|e| {
-            panic!("route tests need Postgres at {url} (`docker compose up -d`): {e}")
-        });
-    tokio::spawn(connection);
-    client
-        .batch_execute(&format!(
-            "DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema};"
-        ))
-        .await
-        .expect("reset the test's schema");
-    let separator = if url.contains('?') { '&' } else { '?' };
-    format!("{url}{separator}options=-csearch_path%3D{schema}")
+        .expect("HYPHA_TEST_DATABASE_URL or DATABASE_URL (see .cargo/config.toml)")
 }
 
 /// File storage under `config` (the compose server), bucket created.
@@ -224,8 +212,9 @@ async fn app_exactly<D: crate::Deployment>(
         false => None,
     };
     let runtime = crate::platform::runtime();
+    let database = fresh_database::<D>().await;
     let db = PgDatabase::connect(
-        &fresh_schema().await,
+        database.url(),
         &config.database,
         runtime.clock.clone(),
         &crate::migrations::<D>(),
@@ -319,6 +308,7 @@ async fn app_exactly<D: crate::Deployment>(
         admin_key: token.expose().to_string(),
         state,
         emails,
+        _database: database,
     }
 }
 

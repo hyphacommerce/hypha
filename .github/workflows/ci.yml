@@ -30,8 +30,13 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo clippy -p hypha-host-axum --features spore-stripe -- -D warnings
-      # Includes the OpenAPI freshness test and the Postgres and S3 contracts.
-      - run: cargo test --workspace
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      # Includes the OpenAPI freshness test and the Postgres and S3 contracts. nextest runs
+      # no doc tests, so they run apart.
+      - run: cargo nextest run --workspace --profile ci
+      - run: cargo test --workspace --doc
       - name: Core, domain crates, adapters and the HTTP layer build for wasm32
         run: >
           cargo build --target wasm32-unknown-unknown

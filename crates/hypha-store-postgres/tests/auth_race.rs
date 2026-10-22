@@ -33,7 +33,7 @@ async fn connect(url: &str, schema: &str) -> Client {
 
 #[tokio::test]
 async fn parallel_wrong_codes_all_count() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping");
         return;
     };
@@ -132,7 +132,7 @@ async fn parallel_wrong_codes_all_count() {
 
 #[tokio::test]
 async fn two_owners_disabling_each_other_leave_one_active() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping");
         return;
     };
@@ -208,7 +208,7 @@ async fn two_owners_disabling_each_other_leave_one_active() {
 
 #[tokio::test]
 async fn parallel_reset_requests_make_one_link() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping");
         return;
     };

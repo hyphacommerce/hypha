@@ -1,47 +1,48 @@
 //! Runs the shared repository contract (`hypha_testkit::contract`) against a real
-//! Postgres. Needs `DATABASE_URL`, e.g. the database from the repo's `compose.yaml`:
+//! Postgres: the tests' server (`HYPHA_TEST_DATABASE_URL`, compose's `postgres-test`,
+//! else `DATABASE_URL`), each scenario on a copy of a migrated template.
 //!
-//!   docker compose up -d
-//!   DATABASE_URL=postgres://hypha:hypha@localhost:5432/hypha cargo test -p hypha-store-postgres
-//!
-//! Without `DATABASE_URL` the tests print a notice and pass, so `cargo test --workspace`
+//! Without either URL the tests print a notice and pass, so `cargo test --workspace`
 //! still works on machines without Docker.
 
-use hypha_store_postgres::{CORE, PgStore, migrate};
+use hypha_store_postgres::testing::{TestDatabase, test_database_url};
+use hypha_store_postgres::{CORE, PgStore};
 use hypha_testkit::contract;
 use tokio_postgres::{Client, NoTls};
 
 fn database_url() -> Option<String> {
-    let url = std::env::var("DATABASE_URL").ok();
+    let url = test_database_url();
     if url.is_none() {
-        eprintln!("DATABASE_URL not set: skipping the Postgres contract tests");
+        eprintln!(
+            "no HYPHA_TEST_DATABASE_URL or DATABASE_URL: skipping the Postgres contract tests"
+        );
     }
     url
 }
 
-/// A store on a fresh, fully migrated schema. Each test uses its own schema name, so
-/// tests running in parallel never see each other's rows.
-async fn fresh_store(url: &str, schema: &str) -> PgStore<Client> {
-    fresh_store_then(url, schema, "").await
+/// A store on a fresh, fully migrated database of its own: a copy of the migrated
+/// template, so tests running in parallel never see each other's rows. `url` is the test
+/// server; `name` names the database.
+async fn fresh_store(url: &str, name: &str) -> PgStore<Client> {
+    fresh_store_then(url, name, "").await
 }
 
 /// `fresh_store`, then `sql` (to undo what migrations seed, such as the Online Store
 /// channel).
-async fn fresh_store_then(url: &str, schema: &str, sql: &str) -> PgStore<Client> {
-    let (mut client, connection) = hypha_store_postgres::database_config(url)
-        .expect("DATABASE_URL")
+async fn fresh_store_then(url: &str, name: &str, sql: &str) -> PgStore<Client> {
+    debug_assert_eq!(Some(url), test_database_url().as_deref());
+    // The store owns the connection for the rest of the scenario; the next scenario with
+    // this name drops the database first.
+    let database = TestDatabase::new(name, &[CORE])
+        .await
+        .expect("the test server's URL")
+        .keep();
+    let (client, connection) = hypha_store_postgres::database_config(&database)
+        .expect("test database URL")
         .connect(NoTls)
         .await
-        .expect("connect to DATABASE_URL");
+        .expect("connect to the test database");
     tokio::spawn(connection);
-    client
-        .batch_execute(&format!(
-            "DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema}; \
-             SET search_path TO {schema};"
-        ))
-        .await
-        .expect("reset schema");
-    migrate(&mut client, &[CORE]).await.expect("migrate");
     if !sql.is_empty() {
         client.batch_execute(sql).await.expect("after migrating");
     }

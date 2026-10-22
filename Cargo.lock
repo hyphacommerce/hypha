@@ -1618,6 +1618,7 @@ dependencies = [
  "hypha-products",
  "hypha-search-index",
  "hypha-shipping",
+ "hypha-store-postgres",
  "hypha-stores",
  "hypha-tax",
  "hypha-testkit",

@@ -35,11 +35,19 @@ tokio-postgres = { version = "0.7.18", default-features = false, features = ["wi
 # Runtime-agnostic async mutex (works on native and on Workers).
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
+# Test databases copied from a migrated template (`testing`); native only, opens its own
+# connections.
+tokio = { version = "1", features = ["rt", "time"], optional = true }
+
+[features]
+testing = ["dep:tokio", "tokio-postgres/runtime"]
+
 # On Cloudflare Workers (through Hyperdrive) tokio-postgres needs its `js` feature.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio-postgres = { version = "0.7.18", default-features = false, features = ["js"] }
 
 [dev-dependencies]
+hypha-store-postgres = { path = ".", features = ["testing"] }
 # Workflows sit above this adapter; only the race tests drive one.
 hypha-checkout = { path = "../hypha-checkout" }
 hypha-order-actions = { path = "../hypha-order-actions" }

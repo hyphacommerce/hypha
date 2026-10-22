@@ -162,7 +162,7 @@ async fn state(store: &PgStore<Client>) -> (u32, usize, i64, i64) {
 
 #[tokio::test]
 async fn fulfilments_racing_for_one_line_never_ship_more_than_was_ordered() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping the fulfilment race test");
         return;
     };
@@ -204,7 +204,7 @@ async fn fulfilments_racing_for_one_line_never_ship_more_than_was_ordered() {
 
 #[tokio::test]
 async fn a_fulfilment_racing_a_cancellation_leaves_one_or_the_other() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping the fulfilment race test");
         return;
     };

@@ -60,7 +60,7 @@ fn at(seconds: i64) -> Timestamp {
 
 #[tokio::test]
 async fn only_committed_work_for_the_dispatcher_is_signalled() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping the dispatch signal test");
         return;
     };

@@ -4,7 +4,7 @@ use hypha_store_postgres::{CORE, MigrateError, Migration, MigrationSet, migrate}
 use tokio_postgres::{Client, NoTls};
 
 async fn fresh_schema(schema: &str) -> Option<Client> {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping the migration tests");
         return None;
     };
@@ -132,7 +132,7 @@ async fn two_runners_starting_at_once_both_succeed() {
     let Some(mut first) = fresh_schema("migrate_concurrent").await else {
         return;
     };
-    let url = std::env::var("DATABASE_URL").unwrap();
+    let url = hypha_store_postgres::testing::test_database_url().unwrap();
     let (mut second, connection) = hypha_store_postgres::database_config(&url)
         .expect("DATABASE_URL")
         .connect(NoTls)

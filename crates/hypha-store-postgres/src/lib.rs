@@ -48,6 +48,8 @@ mod spore_settings;
 mod store;
 mod stores;
 mod tax;
+#[cfg(feature = "testing")]
+pub mod testing;
 mod users;
 
 pub use batch::PgBatch;

@@ -71,7 +71,8 @@ url = "2.5"
 # A test host for building spores (`hypha_spore_core::env::testing`).
 hypha-spore-core = { path = "../hypha-spore-core", features = ["testing"] }
 serde.workspace = true
-# The route tests (`route_tests.rs`).
+# The route tests (`route_tests.rs`), each on a copy of a migrated template.
+hypha-store-postgres = { path = "../hypha-store-postgres", features = ["testing"] }
 hypha-auth = { path = "../hypha-auth" }
 hypha-markets = { path = "../hypha-markets" }
 hypha-products = { path = "../hypha-products" }

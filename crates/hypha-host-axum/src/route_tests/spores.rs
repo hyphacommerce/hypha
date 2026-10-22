@@ -15,12 +15,13 @@ crate::deployment! { enum WithTestSpore {
     routes: [test_spore_routes],
 } }
 
-/// The test spore built from `toml` (its `hypha.config.toml`), on a fresh schema.
+/// The test spore built from `toml` (its `hypha.config.toml`), on a fresh database.
 async fn storage_from(toml: &str) -> Result<crate::PgStorage<WithTestSpore>, String> {
     let config = Config::load(Some(toml), |_| None).map_err(|e| e.to_string())?;
     let runtime = crate::platform::runtime();
+    let url = fresh_database::<WithTestSpore>().await.keep();
     let db = PgDatabase::connect(
-        &fresh_schema().await,
+        &url,
         &config.database,
         runtime.clock.clone(),
         &crate::migrations::<WithTestSpore>(),
@@ -65,7 +66,7 @@ async fn a_spore_reads_its_section_and_one_it_refuses_stops_the_host() {
 async fn a_host_built_with_a_spore_migrates_registers_and_runs_it() {
     let config = Config::defaults();
     let runtime = crate::platform::runtime();
-    let url = fresh_schema().await;
+    let url = fresh_database::<WithTestSpore>().await.keep();
     let db = PgDatabase::connect(
         &url,
         &config.database,

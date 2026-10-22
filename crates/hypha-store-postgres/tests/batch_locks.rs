@@ -40,7 +40,7 @@ fn item(n: u128) -> InventoryItem {
 
 #[tokio::test]
 async fn updating_and_deleting_items_never_deadlocks() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
+    let Some(url) = hypha_store_postgres::testing::test_database_url() else {
         eprintln!("DATABASE_URL not set: skipping the batch lock test");
         return;
     };

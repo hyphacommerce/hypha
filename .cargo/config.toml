@@ -4,6 +4,8 @@
 # environment win (`force = false`), so the same tests can run against R2.
 [env]
 DATABASE_URL = { value = "postgres://hypha:hypha@localhost:5432/hypha", force = false }
+# The tests' server (compose's `postgres-test`): throwaway databases, tuned for speed.
+HYPHA_TEST_DATABASE_URL = { value = "postgres://hypha:hypha@localhost:5433/hypha", force = false }
 HYPHA_S3_ENDPOINT = { value = "http://localhost:8333", force = false }
 HYPHA_S3_REGION = { value = "us-east-1", force = false }
 HYPHA_S3_BUCKET = { value = "hypha-media", force = false }
