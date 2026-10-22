@@ -130,3 +130,24 @@ test("a retried delivery is handled once with a dedupe store", async () => {
   }
   assert.equal(calls, 2);
 });
+
+test("a delivery whose handler failed isn't remembered, so the retry is handled", async () => {
+  const handled = new Set<string>();
+  let calls = 0;
+  const handle = webhookHandler({
+    secret: SECRET,
+    onEvent: () => {
+      calls += 1;
+      if (calls === 1) throw new Error("db down");
+    },
+    dedupe: {
+      seen: (id) => handled.has(id),
+      remember: (id) => {
+        handled.add(id);
+      },
+    },
+  });
+  assert.equal((await deliver(handle, envelope, { delivery: "dlv_1" })).status, 500);
+  assert.equal((await deliver(handle, envelope, { delivery: "dlv_1" })).status, 204);
+  assert.equal(calls, 2);
+});
