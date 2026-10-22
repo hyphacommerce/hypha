@@ -27,6 +27,7 @@ import {
   requireStaff,
   sessionClient,
 } from "@/lib/hypha";
+import { LOW_STOCK } from "@/lib/inventory";
 import { hasScope } from "@/lib/navigation";
 
 import { type SetupStep, setupSteps } from "./setup-checklist";
@@ -42,8 +43,8 @@ const RECENT = 5;
 
 /**
  * The signed-in home: a greeting, what needs doing (the setup checklist until it's
- * finished, today's orders and sales, orders to fulfil and payments to collect) and the
- * latest orders. The greeting and the banners render at once; each card streams in.
+ * finished, agents' proposals to review and stock running low, today's orders and sales,
+ * orders to fulfil and payments to collect) and the latest orders. The greeting and the banners render at once; each card streams in.
  */
 export default async function HomePage() {
   const [me, store, setup, timeZone] = await Promise.all([
@@ -54,6 +55,8 @@ export default async function HomePage() {
   ]);
   const showChecklist = setup !== null && !setup.isFinished;
   const canSeeOrders = hasScope(me.scopes, "orders:read");
+  const canApprove = hasScope(me.scopes, "agents:read");
+  const canSeeStock = hasScope(me.scopes, "inventory:read");
   // A server component renders once per request, so reading the clock here is fine.
   // oxlint-disable-next-line react/purity
   const now = new Date();
@@ -87,6 +90,12 @@ export default async function HomePage() {
         {(showChecklist || hasPaymentsRead(me)) && (
           <Suspense fallback={showChecklist ? <CardSkeleton lines={4} /> : null}>
             <SetupState me={me} showChecklist={showChecklist} />
+          </Suspense>
+        )}
+
+        {(canApprove || canSeeStock) && (
+          <Suspense fallback={null}>
+            <Attention canApprove={canApprove} canSeeStock={canSeeStock} />
           </Suspense>
         )}
 
@@ -235,8 +244,11 @@ async function Tiles({ now, timeZone }: { now: Date; timeZone: string }) {
     cancelled: false,
   };
   const toCollect: OrderQuery = { financial_status: ["pending"], cancelled: false };
-  const [todays, unfulfilled, unpaid] = await Promise.all([
+  const [todays, report, unfulfilled, unpaid] = await Promise.all([
     list(client, placed),
+    client.GET("/admin/reports/sales", {
+      params: { query: { from: placed.placed_from, to: placed.placed_before, top: 1 } },
+    }),
     list(client, toFulfil),
     list(client, toCollect),
   ]);
@@ -250,7 +262,7 @@ async function Tiles({ now, timeZone }: { now: Date; timeZone: string }) {
     },
     {
       label: "Sales today",
-      value: sales(todays, currencies),
+      value: sales(report.data?.total.sales, currencies),
       hint: "Order totals, before refunds",
       href: `/orders?placed=${day}..${day}`,
     },
@@ -267,6 +279,10 @@ async function Tiles({ now, timeZone }: { now: Date; timeZone: string }) {
       href: "/orders?financial_status=pending&cancelled=false",
     },
   ];
+  return <TileGrid tiles={tiles} />;
+}
+
+function TileGrid({ tiles }: { tiles: Tile[] }) {
   return (
     <Grid columns={{ minWidth: 200, repeat: "fill" }} gap={3}>
       {tiles.map((tile) => (
@@ -288,6 +304,53 @@ async function Tiles({ now, timeZone }: { now: Date; timeZone: string }) {
   );
 }
 
+/**
+ * What waits on staff beyond orders: agents' proposals they can approve (only when there
+ * are some) and variants running low on stock, each a link to the list that shows them.
+ */
+async function Attention({
+  canApprove,
+  canSeeStock,
+}: {
+  canApprove: boolean;
+  canSeeStock: boolean;
+}) {
+  const client = await sessionClient();
+  const [proposals, low] = await Promise.all([
+    canApprove
+      ? client.GET("/admin/agent-proposals", {
+          params: { query: { status: "pending", approvable: true, limit: COUNT_LIMIT } },
+        })
+      : undefined,
+    canSeeStock
+      ? client.GET("/admin/inventory-items", {
+          params: { query: { below: LOW_STOCK, limit: COUNT_LIMIT } },
+        })
+      : undefined,
+  ]);
+  const tiles: Tile[] = [];
+  const waiting = proposals?.data;
+  if (waiting && waiting.items.length > 0) {
+    tiles.push({
+      label: "Proposals to review",
+      value: waiting.next_cursor ? `${waiting.items.length}+` : String(waiting.items.length),
+      hint: "Agents' changes waiting for your approval",
+      href: "/agents/proposals",
+    });
+  }
+  const running = low?.data;
+  if (running) {
+    tiles.push({
+      label: "Running low",
+      value: running.next_cursor ? `${running.items.length}+` : String(running.items.length),
+      hint: `Variants with fewer than ${LOW_STOCK} available`,
+      href: `/inventory?below=${LOW_STOCK}`,
+    });
+  }
+  if (tiles.length === 0) return null;
+  return <TileGrid tiles={tiles} />;
+}
+
 type Listed = { items: AdminSchemas["OrderSummaryResponse"][]; more: boolean } | null;
 
 /** Up to a page of orders matching `query`; `null` when the API refused the read. */
@@ -303,19 +366,13 @@ function count(listed: Listed): string {
   return listed.more ? `${listed.items.length}+` : String(listed.items.length);
 }
 
-/** The orders' totals summed per currency ("€1,240.00 · $80.00"); "—" with none. */
-function sales(listed: Listed, currencies: Currencies): string {
-  if (!listed || listed.items.length === 0) return "—";
-  const byCurrency = new Map<string, number>();
-  for (const order of listed.items) {
-    if (order.cancelled_at) continue;
-    const { amount, currency } = order.total;
-    byCurrency.set(currency, (byCurrency.get(currency) ?? 0) + amount);
-  }
-  if (byCurrency.size === 0) return "—";
-  return [...byCurrency]
-    .map(([currency, amount]) => formatMoney({ amount, currency }, currencies))
-    .join(" · ");
+/** Today's order totals per currency ("€1,240.00 · $80.00"), from the sales report; "—" with none. */
+function sales(
+  rows: AdminSchemas["SalesRowResponse"][] | undefined,
+  currencies: Currencies,
+): string {
+  if (!rows || rows.length === 0) return "—";
+  return rows.map((row) => formatMoney(row.total, currencies)).join(" · ");
 }
 
 function TilesSkeleton() {
