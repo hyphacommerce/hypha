@@ -1,13 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    Address, AddressParts, AuthError, Ctx, ErrorCode, IdGenerator, InventoryItemId, LocationId,
-    MarketId, Quantity, RepoError, Scope, VariantId, report_duplicate, retry_on_conflict,
+    Address, AddressParts, AuthError, Ctx, ErrorCode, IdGenerator, InventoryItemId, Keyset,
+    LocationId, MarketId, Page, PageRequest, Quantity, RepoError, Scope, VariantId,
+    report_duplicate, retry_on_conflict,
 };
 use thiserror::Error;
 
 use crate::{
-    InventoryError, InventoryItem, Location, ReservationRef,
+    InventoryError, InventoryFilter, InventoryItem, InventoryItemSummary, Location, ReservationRef,
     repo::{InventoryItemRepo, LocationRepo, keys},
 };
 
@@ -254,6 +255,18 @@ pub async fn get_variants_inventory<R: InventoryItemRepo>(
 ) -> Result<Vec<InventoryItem>, CommandError> {
     ctx.require(Scope::InventoryRead)?;
     Ok(items.for_variants(variants).await?)
+}
+
+/// A page of inventory items across products, lowest available first (`InventoryFilter`).
+/// A position from another kind of list is refused by the route before it gets here.
+pub async fn list_inventory_items<R: InventoryItemRepo>(
+    ctx: &Ctx,
+    items: &R,
+    filter: &InventoryFilter,
+    page: PageRequest<Keyset<InventoryItemId>>,
+) -> Result<Page<InventoryItemSummary>, CommandError> {
+    ctx.require(Scope::InventoryRead)?;
+    Ok(items.list(filter, page).await?)
 }
 
 /// Changes only the fields that are `Some`.

@@ -1,8 +1,10 @@
 use hypha_core::{
-    InventoryItemId, LocationId, MarketId, Quantity, RepoError, VariantId, Version, Versioned,
+    InventoryItemId, Keyset, LocationId, MarketId, PageLimit, PageRequest, Quantity, RepoError,
+    SortKey, VariantId, Version, Versioned,
 };
 use hypha_inventory::{
-    InventoryItem, InventoryItemRepo, Location, LocationRepo, MAX_STOCK, ReservationRef, repo::keys,
+    InventoryFilter, InventoryItem, InventoryItemRepo, Location, LocationRepo, MAX_STOCK,
+    ReservationRef, repo::keys,
 };
 use uuid::Uuid;
 
@@ -174,6 +176,195 @@ pub async fn inventory_item_repo<R: InventoryItemRepo>(make: impl AsyncFn() -> R
     item_variant_on_update(&make().await).await;
     scenario("inventory item: delete removes it with its levels, and is repeatable");
     item_delete(&make().await).await;
+    scenario("inventory item: list is lowest available first, filtered, in pages");
+    item_list(&make().await).await;
+    scenario("inventory item: list follows writes and counts one location alone");
+    item_list_follows_writes(&make().await).await;
+}
+
+/// The IDs (as numbers) of a list's page.
+async fn listed<R: InventoryItemRepo>(
+    repo: &R,
+    filter: &InventoryFilter,
+    after: Option<(i64, u128)>,
+    limit: u32,
+) -> (Vec<u128>, bool) {
+    let page = PageRequest {
+        after: after.map(|(key, id)| Keyset {
+            key: SortKey::Int(key),
+            id: item_id(id),
+        }),
+        limit: PageLimit::new(limit).unwrap(),
+    };
+    let page = repo.list(filter, page).await.unwrap();
+    let ids = page
+        .items
+        .iter()
+        .map(|s| s.id.as_uuid().as_u128())
+        .collect();
+    (ids, page.has_more)
+}
+
+async fn item_list<R: InventoryItemRepo>(repo: &R) {
+    let all = InventoryFilter::default();
+    assert_eq!(listed(repo, &all, None, 10).await, (vec![], false));
+
+    // 1: 5 at location 1.
+    let mut a = item(1, 10);
+    a.set_on_hand(location_id(1), 5, None).unwrap();
+    // 2: 1 at location 1, 10 at location 2 with 3 of them reserved: 8 in all.
+    let mut b = item(2, 20);
+    b.set_on_hand(location_id(1), 1, None).unwrap();
+    b.set_on_hand(location_id(2), 10, None).unwrap();
+    b.reserve(&reference("order-1"), qty(3), &[location(2, &[1], 0)])
+        .unwrap();
+    // 3: untracked, nothing counted, but a level at location 1.
+    let mut c = item(3, 30);
+    c.set_tracked(false);
+    c.set_on_hand(location_id(1), 0, None).unwrap();
+    // 4: sold past zero at location 3, with nothing on hand there: -2.
+    let mut d = item(4, 40);
+    d.set_continue_selling(true);
+    d.reserve(&reference("order-2"), qty(2), &[location(3, &[1], 0)])
+        .unwrap();
+    // 5: ties with 1 on 5 available.
+    let mut e = item(5, 50);
+    e.set_on_hand(location_id(2), 5, None).unwrap();
+    // 6: retired: never listed.
+    let mut f = item(6, 60);
+    f.set_on_hand(location_id(1), 0, None).unwrap();
+    f.retire();
+    // Inserted out of order.
+    for i in [&mut e, &mut c, &mut a, &mut f, &mut d, &mut b] {
+        repo.insert(i).await.unwrap();
+    }
+
+    // Every summary is the stored item's.
+    let page = repo.list(&all, PageRequest::default()).await.unwrap();
+    let mut expected = Vec::new();
+    for id in [4, 3, 1, 5, 2] {
+        expected.push(repo.get(item_id(id)).await.unwrap().unwrap().summary());
+    }
+    assert_eq!(page.items, expected);
+    assert!(!page.has_more);
+
+    // Pages continue after the last item's key and ID; a tie goes by ID.
+    assert_eq!(listed(repo, &all, None, 2).await, (vec![4, 3], true));
+    assert_eq!(
+        listed(repo, &all, Some((0, 3)), 2).await,
+        (vec![1, 5], true)
+    );
+    assert_eq!(
+        listed(repo, &all, Some((5, 1)), 2).await,
+        (vec![5, 2], false)
+    );
+    assert_eq!(listed(repo, &all, Some((8, 2)), 2).await, (vec![], false));
+
+    // Strictly below, tracked only.
+    let below = |n| InventoryFilter {
+        below: Some(n),
+        ..InventoryFilter::default()
+    };
+    assert_eq!(listed(repo, &below(5), None, 10).await, (vec![4], false));
+    assert_eq!(
+        listed(repo, &below(6), None, 10).await,
+        (vec![4, 1, 5], false)
+    );
+    assert_eq!(listed(repo, &below(-2), None, 10).await, (vec![], false));
+
+    // One location: only what it stocks, counted there alone.
+    let at = |n, below| InventoryFilter {
+        location: Some(location_id(n)),
+        below,
+        variants: None,
+    };
+    assert_eq!(
+        listed(repo, &at(1, None), None, 10).await,
+        (vec![3, 2, 1], false)
+    );
+    assert_eq!(
+        listed(repo, &at(1, Some(2)), None, 10).await,
+        (vec![2], false)
+    );
+    assert_eq!(
+        listed(repo, &at(2, None), None, 10).await,
+        (vec![5, 2], false)
+    );
+    assert_eq!(
+        listed(repo, &at(1, None), Some((1, 2)), 10).await,
+        (vec![1], false)
+    );
+    assert_eq!(listed(repo, &at(9, None), None, 10).await, (vec![], false));
+
+    // Some variants only; one without an item matches nothing.
+    let of = InventoryFilter {
+        variants: Some(vec![vid(20), vid(40), vid(99)]),
+        ..InventoryFilter::default()
+    };
+    assert_eq!(listed(repo, &of, None, 10).await, (vec![4, 2], false));
+    let none = InventoryFilter {
+        variants: Some(vec![]),
+        ..InventoryFilter::default()
+    };
+    assert_eq!(listed(repo, &none, None, 10).await, (vec![], false));
+
+    // A position from another kind of list.
+    let wrong = PageRequest {
+        after: Some(Keyset {
+            key: SortKey::Id,
+            id: item_id(1),
+        }),
+        limit: PageLimit::DEFAULT,
+    };
+    assert!(matches!(
+        repo.list(&all, wrong).await,
+        Err(RepoError::Backend(_))
+    ));
+}
+
+async fn item_list_follows_writes<R: InventoryItemRepo>(repo: &R) {
+    let mut a = item(1, 10);
+    a.set_on_hand(location_id(1), 5, None).unwrap();
+    let mut b = item(2, 20);
+    b.set_on_hand(location_id(1), 3, None).unwrap();
+    repo.insert(&mut a).await.unwrap();
+    repo.insert(&mut b).await.unwrap();
+    let all = InventoryFilter::default();
+    assert_eq!(listed(repo, &all, None, 10).await, (vec![2, 1], false));
+
+    // A reservation and a new location move 1 below 2; a release and a move put it back.
+    a.reserve(&reference("order-1"), qty(4), &[location(1, &[1], 0)])
+        .unwrap();
+    a.set_on_hand(location_id(2), -MAX_STOCK, None).unwrap();
+    repo.update(&mut a).await.unwrap();
+    assert_eq!(listed(repo, &all, None, 10).await, (vec![1, 2], false));
+    let at_one = InventoryFilter {
+        location: Some(location_id(1)),
+        ..InventoryFilter::default()
+    };
+    assert_eq!(listed(repo, &at_one, None, 10).await, (vec![1, 2], false));
+    let page = repo.list(&all, PageRequest::default()).await.unwrap();
+    assert_eq!(
+        page.items[0],
+        repo.get(a.id()).await.unwrap().unwrap().summary()
+    );
+
+    a.release(&reference("order-1"));
+    a.set_on_hand(location_id(2), 0, None).unwrap();
+    let mut both = [a.clone(), b.clone()];
+    both[1].adjust_on_hand(location_id(1), 10).unwrap();
+    repo.update_many(&mut both).await.unwrap();
+    assert_eq!(listed(repo, &all, None, 10).await, (vec![1, 2], false));
+    assert_eq!(
+        listed(repo, &at_one, Some((5, 1)), 10).await,
+        (vec![2], false)
+    );
+
+    // A deleted item leaves the list.
+    let [mut a, _] = both;
+    a.delete().unwrap();
+    repo.delete(&mut a).await.unwrap();
+    assert_eq!(listed(repo, &all, None, 10).await, (vec![2], false));
 }
 
 async fn item_delete<R: InventoryItemRepo>(repo: &R) {

@@ -1019,6 +1019,12 @@ contains "and is left out of the total" '"total":{"amount":0,"currency":"EUR"},"
 step "delivery of 4" 200 - -X POST "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" \
     -H "$JSON" -d '{"delta":4}'
 contains "5 on hand" '"on_hand":5'
+step "what runs low at the warehouse" 200 - "$BASE/admin/inventory-items?below=6&location=$WAREHOUSE"
+contains "the lamp runs low" "\"id\":\"$LAMP_ITEM\",\"variant\":\"$LAMP_VAR\",\"product\":\"$LAMP\""
+step "no lamp below zero" 200 - "$BASE/admin/inventory-items?below=0&product=$LAMP"
+contains "an empty page" '"items":[],"has_more":false'
+step "low stock at an unknown location" 422 location_not_found \
+    "$BASE/admin/inventory-items?location=loc_00000000000000000000000000000063"
 step "get stock cart" 200 - "$BASE/storefront/carts/$STOCK_CART"
 contains "lamps are back" '"fully_available":true'
 step "raise lamps beyond stock" 409 out_of_stock -X PUT "$BASE/storefront/carts/$STOCK_CART/lines/$LAMP_VAR" \

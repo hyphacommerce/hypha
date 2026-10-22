@@ -10,13 +10,14 @@ pub mod location;
 pub mod reference;
 pub mod repo;
 pub mod stock;
+pub mod summary;
 
 pub use commands::{
     AdjustOnHand, CommandError, CreateInventoryItem, CreateLocation, DEFAULT_LOCATION_NAME,
     SetOnHand, Shortage, UpdateInventoryItem, UpdateLocation, adjust_on_hand,
     create_inventory_item, create_location, ensure_default_location, get_inventory_item,
-    get_location, get_variant_inventory, get_variants_inventory, list_locations, reserve_lines,
-    set_on_hand, update_inventory_item, update_location,
+    get_location, get_variant_inventory, get_variants_inventory, list_inventory_items,
+    list_locations, reserve_lines, set_on_hand, update_inventory_item, update_location,
 };
 pub use error::{InventoryError, RestoreError};
 pub use events::{Available, InventoryItemChanged, InventoryItemDeleted, LocationChanged};
@@ -27,3 +28,4 @@ pub use repo::{
     HasInventoryItems, HasLocations, InventoryItemRepo, LocationRepo, StageInventoryItems,
 };
 pub use stock::{Availability, StockContext};
+pub use summary::{InventoryFilter, InventoryItemSummary, LevelSummary, stock_by_location};

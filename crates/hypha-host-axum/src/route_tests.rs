@@ -876,6 +876,137 @@ async fn a_products_inventory_is_one_call_in_variant_order() {
 }
 
 #[tokio::test]
+async fn inventory_items_are_listed_across_products_lowest_first() {
+    let app = app().await;
+    let shirt = create_product(&app, "shirt").await;
+    let product = format!("/admin/products/{shirt}");
+    let body = r#"{"options":[{"name":"Size","values":[{"label":"S"},{"label":"M"}]}]}"#;
+    let (_, sized) = send(&app, "PUT", &format!("{product}/options"), Some(body)).await;
+    let small = sized["variants"][0]["id"].as_str().unwrap().to_string();
+    let m = &sized["options"][0]["values"][1]["id"];
+    let body = json!({ "price": { "amount": 1200, "currency": "EUR" }, "selections": [m], "sku": "SHIRT-M" });
+    let (status, added) = send(
+        &app,
+        "POST",
+        &format!("{product}/variants"),
+        Some(&body.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{added}");
+    let medium = added["variants"][1]["id"].as_str().unwrap().to_string();
+    let mug = create_product(&app, "mug").await;
+    let (_, read) = send(&app, "GET", &format!("/admin/products/{mug}"), None).await;
+    let cup = read["variants"][0]["id"].as_str().unwrap().to_string();
+    let body = json!({ "name": "Warehouse" }).to_string();
+    let (_, location) = send(&app, "POST", "/admin/locations", Some(&body)).await;
+    let location = location["id"].as_str().unwrap().to_string();
+    let mut items = std::collections::HashMap::new();
+    for (variant, on_hand) in [(&small, 7), (&medium, 2), (&cup, 4)] {
+        let body = json!({ "variant": variant }).to_string();
+        let (_, item) = send(&app, "POST", "/admin/inventory-items", Some(&body)).await;
+        let id = item["id"].as_str().unwrap().to_string();
+        let level = format!("/admin/inventory-items/{id}/levels/{location}");
+        let body = json!({ "on_hand": on_hand }).to_string();
+        let (status, json) = send(&app, "PUT", &level, Some(&body)).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+        items.insert(variant.clone(), id);
+    }
+    let (small, medium, cup) = (&items[&small], &items[&medium], &items[&cup]);
+    let listed = async |query: &str| {
+        let uri = format!("/admin/inventory-items?{query}");
+        let (status, page) = send(&app, "GET", &uri, None).await;
+        assert_eq!(status, StatusCode::OK, "{query}: {page}");
+        page
+    };
+
+    let page = listed("").await;
+    assert_eq!(ids(&page), [medium, cup, small]);
+    let first = &page["items"][0];
+    assert_eq!(
+        (
+            &first["product"],
+            &first["product_title"],
+            &first["variant_title"],
+            &first["sku"]
+        ),
+        (
+            &json!(shirt),
+            &json!("shirt"),
+            &json!("M"),
+            &json!("SHIRT-M")
+        )
+    );
+    assert_eq!(
+        (&first["on_hand"], &first["reserved"], &first["available"]),
+        (&json!(2), &json!(0), &json!(2))
+    );
+    assert_eq!(
+        first["levels"],
+        json!([{ "location": location, "on_hand": 2, "reserved": 0, "available": 2 }])
+    );
+    assert_eq!(page["items"][1]["variant_title"], Value::Null);
+
+    // Pages continue after the last item's count and ID.
+    let page = listed("below=5&limit=1").await;
+    assert_eq!(
+        (ids(&page), &page["has_more"]),
+        (vec![medium.as_str()], &json!(true))
+    );
+    let cursor = page["next_cursor"].as_str().unwrap();
+    let page = listed(&format!("below=5&limit=1&cursor={cursor}")).await;
+    assert_eq!(
+        (ids(&page), &page["has_more"]),
+        (vec![cup.as_str()], &json!(false))
+    );
+
+    assert_eq!(
+        ids(&listed(&format!("product={shirt}")).await),
+        [medium, small]
+    );
+    assert_eq!(ids(&listed("sku=SHIRT-M").await), [medium]);
+    assert!(ids(&listed("sku=shirt-m").await).is_empty(), "exact");
+    assert!(ids(&listed(&format!("product={mug}&sku=SHIRT-M")).await).is_empty());
+    assert_eq!(
+        ids(&listed(&format!("location={location}&below=3")).await),
+        [medium]
+    );
+    let (_, locations) = send(&app, "GET", "/admin/locations", None).await;
+    let default = locations["items"][0]["id"].as_str().unwrap();
+    assert!(ids(&listed(&format!("location={default}")).await).is_empty());
+
+    for (query, expected) in [
+        (
+            "location=loc_00000000000000000000000000000063".to_string(),
+            (StatusCode::UNPROCESSABLE_ENTITY, "location_not_found"),
+        ),
+        (
+            "product=prod_00000000000000000000000000000063".to_string(),
+            (StatusCode::UNPROCESSABLE_ENTITY, "product_not_found"),
+        ),
+        (
+            "below=few".to_string(),
+            (StatusCode::BAD_REQUEST, "invalid_query"),
+        ),
+        (
+            "status=low".to_string(),
+            (StatusCode::BAD_REQUEST, "invalid_query"),
+        ),
+        (
+            // A cursor of another list.
+            {
+                let (_, orders) = send(&app, "GET", "/admin/products?limit=1", None).await;
+                format!("cursor={}", orders["next_cursor"].as_str().unwrap())
+            },
+            (StatusCode::BAD_REQUEST, "invalid_cursor"),
+        ),
+    ] {
+        let uri = format!("/admin/inventory-items?{query}");
+        let (status, body) = send(&app, "GET", &uri, None).await;
+        assert_eq!((status, code(&body)), expected, "{query}");
+    }
+}
+
+#[tokio::test]
 async fn the_setup_checklist_says_which_steps_are_done() {
     let app = app().await;
     let (status, fresh) = send(&app, "GET", "/admin/setup/checklist", None).await;
@@ -1608,7 +1739,7 @@ async fn lists_need_read_scopes() {
         json!({ "kind": "secret", "name": "Customers", "scopes": ["customers:read"] }),
     )
     .await;
-    for uri in ["/admin/products", "/admin/orders"] {
+    for uri in ["/admin/products", "/admin/orders", "/admin/inventory-items"] {
         let (status, body) = send_as(&app, &customers, "GET", uri, None).await;
         assert_eq!(
             (status, code(&body)),

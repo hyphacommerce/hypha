@@ -4,18 +4,21 @@ use hypha_core::Stamped;
 
 use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{InventoryItemId, LocationId, MarketId, ProductId, VariantId};
+use hypha_core::{InventoryItemId, Keyset, LocationId, MarketId, ProductId, SortKey, VariantId};
 use hypha_inventory::{
     AdjustOnHand, CreateInventoryItem, CreateLocation, HasInventoryItems, HasLocations,
-    InventoryItem, Location, SetOnHand, UpdateInventoryItem, UpdateLocation, adjust_on_hand,
-    create_inventory_item, create_location, get_inventory_item, get_location,
-    get_variant_inventory, get_variants_inventory, list_locations, set_on_hand,
-    update_inventory_item, update_location,
+    InventoryFilter, InventoryItem, Location, SetOnHand, UpdateInventoryItem, UpdateLocation,
+    adjust_on_hand, create_inventory_item, create_location, get_inventory_item, get_location,
+    get_variant_inventory, get_variants_inventory, list_inventory_items, list_locations,
+    set_on_hand, update_inventory_item, update_location,
 };
-use hypha_products::{HasProducts, get_product};
+use hypha_products::{CommandError as ProductsError, HasProducts, ProductRepo, get_product};
 use serde::{Deserialize, Serialize};
 
-use super::address::{PostalAddressRequest, PostalAddressResponse};
+use super::{
+    address::{PostalAddressRequest, PostalAddressResponse},
+    page::{ListQuery, PageParams, PageResponse, SortedFilters},
+};
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId},
@@ -478,4 +481,185 @@ pub async fn fetch_product_inventory<S: Storage>(
         })
         .collect::<Result<_, ApiError>>()?;
     Ok(Json(ProductInventoryResponse { items }))
+}
+
+// ---------- across products ----------
+
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct InventoryItemFilters {
+    /// Only tracked items with less than this many available (strictly below): across
+    /// locations, or at `location` when given. Untracked stock never runs low.
+    below: Option<i64>,
+    /// Only items with stock or a reservation at this location; `below` and the order then
+    /// count this location alone. An unknown one is `422 location_not_found`.
+    #[param(value_type = Option<LocationId>)]
+    location: Option<LocationId>,
+    /// Only this product's variants. An unknown one is `422 product_not_found`.
+    #[param(value_type = Option<ProductId>)]
+    product: Option<ProductId>,
+    /// Only the variant with exactly this SKU (case-sensitive, no prefix match); when no
+    /// variant has it, the list is empty.
+    sku: Option<String>,
+}
+
+impl SortedFilters for InventoryItemFilters {
+    fn fits(&self, key: &SortKey) -> bool {
+        InventoryFilter::fits(key)
+    }
+}
+
+/// An inventory item in a list across products: what it stocks, and the product and
+/// variant it belongs to.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct InventoryItemSummaryResponse {
+    id: InventoryItemId,
+    variant: VariantId,
+    /// The product the variant belongs to; `null` if it was removed a moment ago.
+    product: Option<ProductId>,
+    product_title: Option<String>,
+    /// The variant's option values ("M / Blue"); `null` for a simple product.
+    variant_title: Option<String>,
+    sku: Option<String>,
+    tracked: bool,
+    continue_selling: bool,
+    /// Every location with a count or a reservation, by location ID.
+    levels: Vec<LevelResponse>,
+    /// On hand across locations.
+    on_hand: i64,
+    /// Reserved across locations.
+    reserved: i64,
+    /// Available across locations.
+    available: i64,
+}
+
+/// A page of inventory items (named for the documents: utoipa's `body =` takes a plain
+/// name).
+pub(super) type InventoryItemSummaryPage = PageResponse<InventoryItemSummaryResponse>;
+
+/// Inventory items across products, lowest available first (at `location` when given),
+/// then by ID: what's running low. Items whose variant was removed are left out.
+#[utoipa::path(
+    get,
+    path = "/admin/inventory-items",
+    params(PageParams, InventoryItemFilters),
+    responses((status = 200, description = "OK", body = InventoryItemSummaryPage)),
+    extensions(("x-hypha-scopes" = json!(["inventory:read"]))),
+)]
+pub async fn list_items<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    query: ListQuery<InventoryItemFilters>,
+) -> Result<Json<InventoryItemSummaryPage>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let (page, filters, scope) = query.parse_sorted()?;
+    if let Some(location) = filters.location {
+        get_location(&ctx, ports.locations(), location).await?;
+    }
+    let filter = InventoryFilter {
+        below: filters.below,
+        location: filters.location,
+        variants: variants_of(&ports, filters.product, filters.sku.as_deref()).await?,
+    };
+    let page = list_inventory_items(&ctx, ports.inventory_items(), &filter, page).await?;
+
+    // The page's products, in two reads however many items.
+    let page_variants: Vec<VariantId> = page.items.iter().map(|i| i.variant).collect();
+    let catalog = ports.products();
+    let owners = catalog
+        .ids_of_variants(&page_variants)
+        .await
+        .map_err(ProductsError::from)?;
+    let products = catalog
+        .get_many(&owners)
+        .await
+        .map_err(ProductsError::from)?;
+    let items = page
+        .items
+        .iter()
+        .map(|item| {
+            let product = products
+                .iter()
+                .find(|p| p.variants().iter().any(|v| v.id() == item.variant));
+            let variant =
+                product.and_then(|p| p.variants().iter().find(|v| v.id() == item.variant));
+            InventoryItemSummaryResponse {
+                id: item.id,
+                variant: item.variant,
+                product: product.map(|p| p.id()),
+                product_title: product.map(|p| p.title().to_string()),
+                variant_title: product.and_then(|p| p.variant_title(item.variant)),
+                sku: variant.and_then(|v| v.sku()).map(str::to_string),
+                tracked: item.tracked,
+                continue_selling: item.continue_selling,
+                levels: item
+                    .levels
+                    .iter()
+                    .map(|l| LevelResponse {
+                        location: l.location,
+                        on_hand: l.on_hand,
+                        reserved: l.reserved,
+                        available: l.available,
+                    })
+                    .collect(),
+                on_hand: item.on_hand(),
+                reserved: item.reserved(),
+                available: item.available,
+            }
+        })
+        .collect();
+    let response = PageResponse::sorted(
+        &page,
+        &scope,
+        |i| Keyset {
+            key: filter.key(i),
+            id: i.id,
+        },
+        items,
+    )?;
+    Ok(Json(response))
+}
+
+/// The variants the `product` and `sku` filters leave (both: the product's variant with
+/// that SKU), or `None` without either. Products only name the items here, so the list
+/// takes `inventory:read` alone: the catalog is read through its repository, not its
+/// commands.
+async fn variants_of<P: HasProducts>(
+    ports: &P,
+    product: Option<ProductId>,
+    sku: Option<&str>,
+) -> Result<Option<Vec<VariantId>>, ApiError> {
+    let mut variants: Option<Vec<VariantId>> = None;
+    if let Some(id) = product {
+        let found = ports
+            .products()
+            .get(id)
+            .await
+            .map_err(ProductsError::from)?;
+        let product = found.ok_or_else(|| {
+            ApiError::from(ProductsError::ProductNotFound(id)).unprocessable_if("product_not_found")
+        })?;
+        variants = Some(product.variants().iter().map(|v| v.id()).collect());
+    }
+    if let Some(sku) = sku {
+        let found = ports
+            .products()
+            .get_by_sku(sku)
+            .await
+            .map_err(ProductsError::from)?;
+        let of_sku = found.and_then(|p| {
+            p.variants()
+                .iter()
+                .find(|v| v.sku() == Some(sku))
+                .map(|v| v.id())
+        });
+        variants = Some(
+            of_sku
+                .into_iter()
+                .filter(|v| variants.as_ref().is_none_or(|of| of.contains(v)))
+                .collect(),
+        );
+    }
+    Ok(variants)
 }

@@ -1,7 +1,10 @@
 use hypha_core::{
-    InventoryItemId, Recorded, RepoError, VariantId, Versioned, stamp_insert, stamp_update,
+    Direction, InventoryItemId, Keyset, Page, PageRequest, Recorded, RepoError, VariantId,
+    Versioned, stamp_insert, stamp_update,
 };
-use hypha_inventory::{InventoryItem, InventoryItemRepo, repo::keys};
+use hypha_inventory::{
+    InventoryFilter, InventoryItem, InventoryItemRepo, InventoryItemSummary, repo::keys,
+};
 
 use crate::{InMemoryOutbox, table::Table};
 
@@ -56,6 +59,28 @@ impl InventoryItemRepo for InMemoryInventoryItemRepo {
             .into_iter()
             .filter(|i| variants.contains(&i.variant()))
             .collect())
+    }
+
+    async fn list(
+        &self,
+        filter: &InventoryFilter,
+        page: PageRequest<Keyset<InventoryItemId>>,
+    ) -> Result<Page<InventoryItemSummary>, RepoError> {
+        if let Some(after) = &page.after
+            && !InventoryFilter::fits(&after.key)
+        {
+            return Err(RepoError::Backend(format!(
+                "a {:?} position for an inventory list",
+                after.key
+            )));
+        }
+        Ok(self.items.page_sorted(
+            |i| filter.matches(i),
+            &page,
+            Direction::Ascending,
+            InventoryItem::summary,
+            |s: &InventoryItemSummary| filter.key(s),
+        ))
     }
 
     async fn insert(&self, item: &mut InventoryItem) -> Result<(), RepoError> {

@@ -1395,7 +1395,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Inventory items across products, lowest available first (at `location` when given),
+         *     then by ID: what's running low. Items whose variant was removed are left out.
+         */
+        get: operations["admin.inventory.list_items"];
         put?: never;
         /** Creates the inventory item that tracks a variant's stock. */
         post: operations["admin.inventory.create_item"];
@@ -4693,6 +4697,46 @@ export interface components {
          * @example invi_0190f1a2b3c47d8e9f00112233445566
          */
         InventoryItemId: string;
+        /** @description A page of a list, newest first. */
+        InventoryItemSummaryPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["InventoryItemSummaryResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        /**
+         * @description An inventory item in a list across products: what it stocks, and the product and
+         *     variant it belongs to.
+         */
+        InventoryItemSummaryResponse: {
+            /**
+             * Format: int64
+             * @description Available across locations.
+             */
+            available: number;
+            continue_selling: boolean;
+            id: components["schemas"]["InventoryItemId"];
+            /** @description Every location with a count or a reservation, by location ID. */
+            levels: components["schemas"]["LevelResponse"][];
+            /**
+             * Format: int64
+             * @description On hand across locations.
+             */
+            on_hand: number;
+            product?: components["schemas"]["ProductId"] | null;
+            product_title?: string | null;
+            /**
+             * Format: int64
+             * @description Reserved across locations.
+             */
+            reserved: number;
+            sku?: string | null;
+            tracked: boolean;
+            variant: components["schemas"]["VariantId"];
+            /** @description The variant's option values ("M / Blue"); `null` for a simple product. */
+            variant_title?: string | null;
+        };
         /**
          * @description A variant's stock. `id` is `null` when stock was never set up for the variant,
          *     which means untracked (always sellable).
@@ -5935,7 +5979,7 @@ export interface components {
             };
         };
         /**
-         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `customers:erase`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `customers:erase`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `agents:read`, `agents:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         Scope: string;
@@ -15926,6 +15970,93 @@ export interface operations {
             };
             /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.inventory.list_items": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+                /**
+                 * @description Only tracked items with less than this many available (strictly below): across
+                 *     locations, or at `location` when given. Untracked stock never runs low.
+                 */
+                below?: number;
+                /**
+                 * @description Only items with stock or a reservation at this location; `below` and the order then
+                 *     count this location alone. An unknown one is `422 location_not_found`.
+                 */
+                location?: components["schemas"]["LocationId"];
+                /** @description Only this product's variants. An unknown one is `422 product_not_found`. */
+                product?: components["schemas"]["ProductId"];
+                /**
+                 * @description Only the variant with exactly this SKU (case-sensitive, no prefix match); when no
+                 *     variant has it, the list is empty.
+                 */
+                sku?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryItemSummaryPage"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -4533,6 +4533,113 @@
         "pattern": "^invi_[0-9a-f]{32}$",
         "type": "string"
       },
+      "InventoryItemSummaryPage": {
+        "description": "A page of a list, newest first.",
+        "properties": {
+          "has_more": {
+            "description": "Whether there are more after these.",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InventoryItemSummaryResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "InventoryItemSummaryResponse": {
+        "description": "An inventory item in a list across products: what it stocks, and the product and\nvariant it belongs to.",
+        "properties": {
+          "available": {
+            "description": "Available across locations.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "continue_selling": {
+            "type": "boolean"
+          },
+          "id": {
+            "$ref": "#/components/schemas/InventoryItemId"
+          },
+          "levels": {
+            "description": "Every location with a count or a reservation, by location ID.",
+            "items": {
+              "$ref": "#/components/schemas/LevelResponse"
+            },
+            "type": "array"
+          },
+          "on_hand": {
+            "description": "On hand across locations.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "product": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProductId",
+                "description": "The product the variant belongs to; `null` if it was removed a moment ago."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "product_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reserved": {
+            "description": "Reserved across locations.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "sku": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tracked": {
+            "type": "boolean"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/VariantId"
+          },
+          "variant_title": {
+            "description": "The variant's option values (\"M / Blue\"); `null` for a simple product.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "variant",
+          "tracked",
+          "continue_selling",
+          "levels",
+          "on_hand",
+          "reserved",
+          "available"
+        ],
+        "type": "object"
+      },
       "InventoryResponse": {
         "description": "A variant's stock. `id` is `null` when stock was never set up for the variant,\nwhich means untracked (always sellable).",
         "properties": {
@@ -7996,7 +8103,7 @@
         "type": "object"
       },
       "Scope": {
-        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `customers:erase`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `customers:erase`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `agents:read`, `agents:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "products:read",
           "products:write",
@@ -8038,6 +8145,8 @@
           "notifications:write",
           "custom_fields:read",
           "custom_fields:write",
+          "agents:read",
+          "agents:write",
           "customer_data:name",
           "customer_data:email",
           "customer_data:phone",
@@ -22410,6 +22519,143 @@
       }
     },
     "/admin/inventory-items": {
+      "get": {
+        "operationId": "admin.inventory.list_items",
+        "parameters": [
+          {
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 100 (default 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only tracked items with less than this many available (strictly below): across\nlocations, or at `location` when given. Untracked stock never runs low.",
+            "in": "query",
+            "name": "below",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only items with stock or a reservation at this location; `below` and the order then\ncount this location alone. An unknown one is `422 location_not_found`.",
+            "in": "query",
+            "name": "location",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/LocationId"
+            }
+          },
+          {
+            "description": "Only this product's variants. An unknown one is `422 product_not_found`.",
+            "in": "query",
+            "name": "product",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          },
+          {
+            "description": "Only the variant with exactly this SKU (case-sensitive, no prefix match); when no\nvariant has it, the list is empty.",
+            "in": "query",
+            "name": "sku",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryItemSummaryPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Inventory items across products, lowest available first (at `location` when given),\nthen by ID: what's running low. Items whose variant was removed are left out.",
+        "tags": [
+          "inventory"
+        ],
+        "x-hypha-scopes": [
+          "inventory:read"
+        ]
+      },
       "post": {
         "operationId": "admin.inventory.create_item",
         "parameters": [

@@ -273,6 +273,7 @@ macro_rules! route_table {
             [admin, POST, "/admin/locations", inventory::create_location_handler],
             [admin, GET, "/admin/locations/{id}", inventory::fetch_location],
             [admin, PATCH, "/admin/locations/{id}", inventory::update_location_handler],
+            [admin, GET, "/admin/inventory-items", inventory::list_items],
             [admin, POST, "/admin/inventory-items", inventory::create_item],
             [admin, GET, "/admin/inventory-items/{id}", inventory::fetch_item],
             [admin, PATCH, "/admin/inventory-items/{id}", inventory::update_item],
