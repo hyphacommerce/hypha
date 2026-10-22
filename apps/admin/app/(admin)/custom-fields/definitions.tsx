@@ -11,7 +11,6 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { MultiSelector } from "@astryxdesign/core/MultiSelector";
 import { Selector } from "@astryxdesign/core/Selector";
-import { Tab, TabList } from "@astryxdesign/core/TabList";
 import {
   Table,
   TableBody,
@@ -30,7 +29,6 @@ import {
   PlusIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
-import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 
 import { useCurrencies } from "@/components/currencies";
@@ -81,7 +79,6 @@ export function DefinitionsCard({
   /** `custom_fields:write`: the merchant's fields can change. */
   canWrite: boolean;
 }) {
-  const router = useRouter();
   const [editing, setEditing] = useState<Definition | "new">();
   const [deleting, setDeleting] = useState<Definition>();
   const [error, setError] = useState<string>();
@@ -100,14 +97,6 @@ export function DefinitionsCard({
 
   return (
     <VStack gap={4}>
-      <TabList
-        value={owner}
-        onChange={(value) => router.push(`/settings/custom-fields?owner=${value}`)}
-      >
-        {OWNER_TYPES.map((o) => (
-          <Tab key={o.value} value={o.value} label={o.label} />
-        ))}
-      </TabList>
       <Card>
         <VStack gap={3}>
           <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">

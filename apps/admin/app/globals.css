@@ -194,7 +194,8 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   overflow: hidden;
 }
 
-.rt[data-pending] .rt-body {
+.rt[data-pending] .rt-body,
+.pending-content[data-pending] {
   opacity: 0.55;
   transition: opacity 120ms;
 }
@@ -246,6 +247,9 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   border-top: 1px solid var(--color-border);
 }
 
+.rt-rows-skeleton {
+  padding: 16px;
+}
 .rt-grid,
 .rt-empty {
   padding: 16px 12px;

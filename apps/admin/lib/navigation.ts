@@ -31,9 +31,12 @@ export type NavItem = {
   icon?: NavIcon;
   /** The scope the page reads with; staff without it don't see the item. */
   scope?: string;
-  /** Pages of the section, shown under it while you're in it. */
+  /** Pages of the section, nested under it with a toggle. */
   children?: NavItem[];
 };
+
+/** A titled group of the side nav. */
+export type NavSection = { title: string; items: NavItem[] };
 
 /**
  * Whether `scopes` (the signed-in staff member's, from `GET /admin/me`) include `scope`.
@@ -46,13 +49,13 @@ export function hasScope(scopes: readonly string[], scope: string): boolean {
   );
 }
 
-/** Whether a page's item shows: always while the scopes aren't known yet (`null`). */
-export function canOpen(item: { scope?: string }, scopes: readonly string[] | null): boolean {
-  return scopes === null || item.scope === undefined || hasScope(scopes, item.scope);
+/** Whether a page's item shows for a staff member with `scopes`. */
+export function canOpen(item: { scope?: string }, scopes: readonly string[]): boolean {
+  return item.scope === undefined || hasScope(scopes, item.scope);
 }
 
 /** `items` and their children, without the pages `scopes` can't open. */
-export function visibleNav(items: NavItem[], scopes: readonly string[] | null): NavItem[] {
+export function visibleNav(items: NavItem[], scopes: readonly string[]): NavItem[] {
   return items
     .filter((item) => canOpen(item, scopes))
     .map((item) =>
@@ -62,36 +65,71 @@ export function visibleNav(items: NavItem[], scopes: readonly string[] | null): 
     );
 }
 
-/** The side nav's main items, in order. Settings comes last, on its own. */
-export const MAIN_NAV: NavItem[] = [
-  { label: "Home", href: "/", icon: HomeIcon },
-  { label: "Orders", href: "/orders", icon: ShoppingBagIcon, scope: "orders:read" },
-  {
-    label: "Products",
-    href: "/products",
-    icon: CubeIcon,
-    scope: "products:read",
-    children: [{ label: "Categories", href: "/products/categories", scope: "products:read" }],
-  },
-  {
-    label: "Customers",
-    href: "/customers",
-    icon: UsersIcon,
-    scope: "customers:read",
-    children: [{ label: "Groups", href: "/customers/groups", scope: "customers:read" }],
-  },
-  { label: "Media", href: "/media", icon: PhotoIcon, scope: "media:read" },
-  {
-    label: "Markets",
-    href: "/markets",
-    icon: GlobeEuropeAfricaIcon,
-    scope: "markets:read",
-    children: [{ label: "Price lists", href: "/markets/price-lists", scope: "pricing:read" }],
-  },
-  { label: "Apps", href: "/apps", icon: PuzzlePieceIcon, scope: "apps:read" },
-];
+/** The side nav's sections, without the pages `scopes` can't open and no empty section. */
+export function visibleSections(scopes: readonly string[]): NavSection[] {
+  return NAV_SECTIONS.map((section) => ({
+    ...section,
+    items: visibleNav(section.items, scopes),
+  })).filter((section) => section.items.length > 0);
+}
 
 export const SETTINGS_NAV: NavItem = { label: "Settings", href: "/settings", icon: Cog6ToothIcon };
+
+/**
+ * The side nav, in order. "Store" is what you sell and to whom; "Content" what
+ * describes it beyond the catalog (files, your own fields; later menus and pages);
+ * "Manage" how the admin itself is set up. The setup guide's item sits in "Manage",
+ * above Settings, while the guide isn't finished.
+ */
+export const NAV_SECTIONS: NavSection[] = [
+  {
+    title: "Store",
+    items: [
+      { label: "Home", href: "/", icon: HomeIcon },
+      { label: "Orders", href: "/orders", icon: ShoppingBagIcon, scope: "orders:read" },
+      {
+        label: "Products",
+        href: "/products",
+        icon: CubeIcon,
+        scope: "products:read",
+        children: [{ label: "Categories", href: "/products/categories", scope: "products:read" }],
+      },
+      {
+        label: "Customers",
+        href: "/customers",
+        icon: UsersIcon,
+        scope: "customers:read",
+        children: [{ label: "Groups", href: "/customers/groups", scope: "customers:read" }],
+      },
+      {
+        label: "Markets",
+        href: "/markets",
+        icon: GlobeEuropeAfricaIcon,
+        scope: "markets:read",
+        children: [{ label: "Price lists", href: "/markets/price-lists", scope: "pricing:read" }],
+      },
+    ],
+  },
+  {
+    title: "Content",
+    items: [
+      { label: "Media", href: "/media", icon: PhotoIcon, scope: "media:read" },
+      {
+        label: "Custom fields",
+        href: "/custom-fields",
+        icon: TableCellsIcon,
+        scope: "custom_fields:read",
+      },
+    ],
+  },
+  {
+    title: "Manage",
+    items: [
+      { label: "Apps", href: "/apps", icon: PuzzlePieceIcon, scope: "apps:read" },
+      SETTINGS_NAV,
+    ],
+  },
+];
 
 export type SettingsPage = NavItem & { icon: NavIcon; description: string };
 
@@ -114,13 +152,6 @@ export const SETTINGS_GROUPS: { title: string; description: string; pages: Setti
         icon: Squares2X2Icon,
         scope: "channels:read",
         description: "Your storefronts and other sales channels, and their keys.",
-      },
-      {
-        label: "Custom fields",
-        href: "/settings/custom-fields",
-        icon: TableCellsIcon,
-        scope: "custom_fields:read",
-        description: "Your own data on products, customers, orders and more.",
       },
     ],
   },
@@ -207,7 +238,7 @@ export const ACCOUNT_NAV: NavItem = {
 };
 
 /** The settings groups with only the pages `scopes` can open, and no empty group. */
-export function visibleSettings(scopes: readonly string[] | null): typeof SETTINGS_GROUPS {
+export function visibleSettings(scopes: readonly string[]): typeof SETTINGS_GROUPS {
   return SETTINGS_GROUPS.map((group) => ({
     ...group,
     pages: group.pages.filter((page) => canOpen(page, scopes)),

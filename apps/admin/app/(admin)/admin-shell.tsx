@@ -1,10 +1,10 @@
 "use client";
 
 // The application frame, from Astryx's `shell-nav` template: a top bar with the brand,
-// the command palette and the user's menu, and a side nav with the admin's sections. A
-// section's pages nest under it and show while you're in it, as in Shopify. Settings is
-// one entry, leading to its own index page, so the nav stays short however many
-// settings there are.
+// the command palette and the user's menu, and a side nav in sections. A section's
+// pages nest under it behind a toggle, open while you're in the section, so where
+// there's more to find is visible from anywhere. Settings is one entry, leading to its
+// own index page, so the nav stays short however many settings there are.
 
 import { AppShell } from "@astryxdesign/core/AppShell";
 import { DropdownMenu, DropdownMenuItem } from "@astryxdesign/core/DropdownMenu";
@@ -13,24 +13,24 @@ import { SideNav, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav
 import { TopNav } from "@astryxdesign/core/TopNav";
 import { ArrowRightStartOnRectangleIcon, RocketLaunchIcon } from "@heroicons/react/24/outline";
 import { usePathname } from "next/navigation";
-import { startTransition, type ReactNode } from "react";
+import { Fragment, type ReactNode, startTransition, useState } from "react";
 
 import { Wordmark } from "@/components/wordmark";
 import {
   ACCOUNT_NAV,
-  MAIN_NAV,
+  NAV_SECTIONS,
   type NavItem,
   SETTINGS_NAV,
   covers,
-  visibleNav,
+  visibleSections,
 } from "@/lib/navigation";
 
 import { logout } from "../login/actions";
 
 /** Every item's href, flattened, to find the one that covers a page most closely. */
-const ALL_HREFS = [...MAIN_NAV, SETTINGS_NAV].flatMap((i) => [
-  i.href,
-  ...(i.children ?? []).map((c) => c.href),
+const ALL_HREFS = NAV_SECTIONS.flatMap((section) => section.items).flatMap((item) => [
+  item.href,
+  ...(item.children ?? []).map((child) => child.href),
 ]);
 
 /** The nav item a page belongs to: the longest href that covers it. */
@@ -39,7 +39,7 @@ function currentHref(pathname: string): string | undefined {
   return covering.toSorted((a, b) => b.length - a.length)[0];
 }
 
-/** The setup guide's nav item; the layout streams it in while the guide isn't finished. */
+/** The setup guide's nav item, while the guide isn't finished. */
 export function SetupNavItem() {
   const pathname = usePathname();
   return (
@@ -52,7 +52,7 @@ export function SetupNavItem() {
   );
 }
 
-/** The signed-in staff member's menu, streamed in by the layout. */
+/** The signed-in staff member's menu. */
 export function UserMenu({ name, email }: { name: string; email: string }) {
   return (
     <DropdownMenu button={{ label: name, variant: "ghost", size: "sm" }} menuWidth={240}>
@@ -72,57 +72,81 @@ export function UserMenu({ name, email }: { name: string; email: string }) {
 }
 
 function NavEntry({ item, current }: { item: NavItem; current: string | undefined }) {
-  // A section's pages show only while you're in it, so the nav stays short.
   const inSection = [item, ...(item.children ?? [])].some((i) => i.href === current);
+  // The pages under a section show while you're in it; the toggle overrides that until
+  // you enter or leave a section, which opens or closes it again.
+  const [toggled, setToggled] = useState<{ inSection: boolean; isOpen: boolean }>();
+  const isOpen = toggled?.inSection === inSection ? toggled.isOpen : inSection;
+  if (!item.children?.length) {
+    return (
+      <SideNavItem
+        label={item.label}
+        href={item.href}
+        icon={item.icon}
+        isSelected={current === item.href}
+      />
+    );
+  }
   return (
     <SideNavItem
       label={item.label}
       href={item.href}
       icon={item.icon}
       isSelected={current === item.href}
+      collapsible={{
+        isCollapsed: !isOpen,
+        onCollapsedChange: (isCollapsed) => setToggled({ inSection, isOpen: !isCollapsed }),
+      }}
     >
-      {inSection &&
-        item.children?.map((child) => (
-          <SideNavItem
-            key={child.href}
-            label={child.label}
-            href={child.href}
-            isSelected={current === child.href}
-          />
-        ))}
+      {item.children.map((child) => (
+        <SideNavItem
+          key={child.href}
+          label={child.label}
+          href={child.href}
+          isSelected={current === child.href}
+        />
+      ))}
     </SideNavItem>
   );
 }
 
 /**
- * The store's sections the staff member can open: all of them until their scopes are
- * known (`null`, while the layout streams them in), so the frame never waits.
+ * The nav's sections with the pages the staff member's `scopes` can open. `setupItem`
+ * (the setup guide's, while it shows) goes above Settings.
  */
-export function StoreNav({ scopes }: { scopes: readonly string[] | null }) {
+export function MainNav({
+  scopes,
+  setupItem,
+}: {
+  scopes: readonly string[];
+  setupItem?: ReactNode;
+}) {
   const current = currentHref(usePathname());
-  return visibleNav(MAIN_NAV, scopes).map((item) => (
-    <NavEntry key={item.href} item={item} current={current} />
+  return visibleSections(scopes).map((section) => (
+    <SideNavSection key={section.title} title={section.title}>
+      {section.items.map((item) => (
+        <Fragment key={item.href}>
+          {item.href === SETTINGS_NAV.href && setupItem}
+          <NavEntry item={item} current={current} />
+        </Fragment>
+      ))}
+    </SideNavSection>
   ));
 }
 
 export function AdminShell({
-  storeNav,
+  nav,
   commandMenu,
   userMenu,
-  setupItem,
   children,
 }: {
-  /** The store's sections (`StoreNav`), trimmed to the user's scopes once known. */
-  storeNav: ReactNode;
+  /** The side nav's sections (`MainNav`), trimmed to the user's scopes. */
+  nav: ReactNode;
   /** The ⌘K palette (`CommandMenu`), likewise. */
   commandMenu: ReactNode;
   userMenu: ReactNode;
-  /** The setup guide's item, above Settings while the guide shows. */
-  setupItem?: ReactNode;
   children: ReactNode;
 }) {
-  const current = currentHref(usePathname());
-
   return (
     <AppShell
       contentPadding={0}
@@ -139,13 +163,7 @@ export function AdminShell({
         />
       }
       sideNav={
-        <SideNav resizable={{ defaultWidth: 240, minWidth: 180, maxWidth: 360 }}>
-          <SideNavSection title="Store">{storeNav}</SideNavSection>
-          <SideNavSection title="Manage">
-            {setupItem}
-            <NavEntry item={SETTINGS_NAV} current={current} />
-          </SideNavSection>
-        </SideNav>
+        <SideNav resizable={{ defaultWidth: 240, minWidth: 180, maxWidth: 360 }}>{nav}</SideNav>
       }
     >
       {children}

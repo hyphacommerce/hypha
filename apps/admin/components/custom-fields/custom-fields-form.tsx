@@ -85,7 +85,7 @@ export function CustomFieldsFrame({
           </Text>
           <Text type="supporting" color="secondary">
             Your own data on this {ownerType}, and what apps keep here.{" "}
-            <Link href={`/settings/custom-fields?owner=${ownerType}`}>Manage fields</Link>
+            <Link href={`/custom-fields?owner=${ownerType}`}>Manage fields</Link>
           </Text>
         </VStack>
         {error && <Banner status="error" title={error} />}

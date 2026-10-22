@@ -14,11 +14,9 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   ACCOUNT_NAV,
-  MAIN_NAV,
   type NavIcon,
-  SETTINGS_NAV,
   canOpen,
-  visibleNav,
+  visibleSections,
   visibleSettings,
 } from "@/lib/navigation";
 
@@ -35,16 +33,17 @@ function command(
   return { id: href, label, auxiliaryData: { group, icon, hint, keywords } };
 }
 
-/** Every page `scopes` can open (all while they're unknown, `null`). */
-function commands(scopes: readonly string[] | null): Command[] {
+/** Every page `scopes` can open. */
+function commands(scopes: readonly string[]): Command[] {
   return [
-    ...visibleNav(MAIN_NAV, scopes).flatMap((item) => [
-      command("Go to", item.label, item.href, item.icon),
-      ...(item.children ?? []).map((child) =>
-        command("Go to", child.label, child.href, item.icon, item.label),
-      ),
-    ]),
-    command("Go to", SETTINGS_NAV.label, SETTINGS_NAV.href, SETTINGS_NAV.icon),
+    ...visibleSections(scopes)
+      .flatMap((section) => section.items)
+      .flatMap((item) => [
+        command("Go to", item.label, item.href, item.icon),
+        ...(item.children ?? []).map((child) =>
+          command("Go to", child.label, child.href, item.icon, item.label),
+        ),
+      ]),
     command("Go to", ACCOUNT_NAV.label, ACCOUNT_NAV.href, ACCOUNT_NAV.icon, undefined, [
       "password",
       "two-factor",
@@ -85,7 +84,7 @@ function CommandRow({ item }: { item: Command }) {
   );
 }
 
-export function CommandMenu({ scopes = null }: { scopes?: readonly string[] | null }) {
+export function CommandMenu({ scopes }: { scopes: readonly string[] }) {
   const [isOpen, setIsOpen] = useState(false);
   const router = useRouter();
   const source = useMemo(
