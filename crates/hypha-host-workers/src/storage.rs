@@ -3,12 +3,15 @@
 //! Migrations aren't run here (`setup` from the CLI).
 
 use std::collections::BTreeMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use hypha_core::{StoreId, Union};
 use hypha_http::error::ApiError;
 use hypha_http::host::HostClock;
 use hypha_http::mail::MailHost;
+use hypha_http::preview::OpenPreview;
 use hypha_http::state::{SharedState, Storage};
 use hypha_spore_core::{SporeHost, SporeSet, SporeStartError};
 use hypha_store_postgres::PgStore;
@@ -155,6 +158,19 @@ impl<D: Deployment> Storage for WorkersStorage<D> {
 
     fn spores(&self) -> &hypha_spore_core::BuiltSpores<D::Spores> {
         &self.spores
+    }
+
+    /// Each request's connection is its own and closes when dropped, so a preview whose
+    /// request was dropped half-way ends with it.
+    fn begin_preview<'a>(
+        &'a self,
+        ports: &'a Self::Ports<'_>,
+        timeout: std::time::Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<OpenPreview, ApiError>> + Send + 'a>> {
+        Box::pin(async move {
+            let open = ports.begin_preview(timeout).await?;
+            Ok(OpenPreview::new(move || Box::pin(open.end())))
+        })
     }
 
     fn spawn_password_reset(state: SharedState<Self>, email: String) {

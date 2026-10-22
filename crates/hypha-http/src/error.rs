@@ -293,6 +293,15 @@ impl ApiError {
         )
     }
 
+    /// `Hypha-Preview` with a value other than `1` (preview) or `0` (run the write).
+    pub fn invalid_preview_header() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_preview_header",
+            "Hypha-Preview is 1 (preview the write) or 0",
+        )
+    }
+
     pub fn method_not_allowed() -> Self {
         Self::new(
             StatusCode::METHOD_NOT_ALLOWED,

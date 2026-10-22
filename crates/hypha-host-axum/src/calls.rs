@@ -158,6 +158,7 @@ mod tests {
             body: Vec::new(),
             discard_answer: false,
             max_answer: 1024,
+            purpose: hypha_http::outbound::CallPurpose::Other,
         }
     }
 

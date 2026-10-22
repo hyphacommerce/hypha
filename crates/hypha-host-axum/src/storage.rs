@@ -2,12 +2,15 @@
 //! keeping its prepared statements, migrated on startup. One `PgStore` per request.
 
 use std::collections::BTreeMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use hypha_core::{StoreId, Union};
 use hypha_http::error::ApiError;
 use hypha_http::host::HostClock;
 use hypha_http::mail::MailHost;
+use hypha_http::preview::OpenPreview;
 use hypha_http::state::{SharedState, Storage};
 use hypha_spore_core::{SporeHost, SporeSet, SporeStartError};
 use hypha_store_postgres::{
@@ -24,6 +27,9 @@ pub struct PgConn {
     client: deadpool_postgres::ClientWrapper,
     /// `None` with `database.statement_cache = false`.
     statements: Option<StatementCache>,
+    /// Whether a preview's transaction is open on it (`PgConnection::preview_open`): one
+    /// whose request was dropped half-way, rolled back before the connection is used again.
+    preview_open: bool,
 }
 
 /// deadpool-postgres's manager (connecting, TLS, recycling), keeping a statement cache
@@ -41,6 +47,7 @@ impl deadpool::managed::Manager for PgManager {
         Ok(PgConn {
             client: self.inner.create().await?,
             statements: self.statement_cache.then(StatementCache::default),
+            preview_open: false,
         })
     }
 
@@ -49,7 +56,12 @@ impl deadpool::managed::Manager for PgManager {
         conn: &mut PgConn,
         metrics: &deadpool::managed::Metrics,
     ) -> deadpool::managed::RecycleResult<tokio_postgres::Error> {
-        self.inner.recycle(&mut conn.client, metrics).await
+        self.inner.recycle(&mut conn.client, metrics).await?;
+        if conn.preview_open {
+            conn.client.batch_execute("ROLLBACK").await?;
+            conn.preview_open = false;
+        }
+        Ok(())
     }
 
     fn detach(&self, conn: &mut PgConn) {
@@ -74,6 +86,12 @@ impl PgConnection for PooledClient {
     /// Straight to Postgres: a read's ROLLBACK can be queued (no Hyperdrive here).
     fn ends_reads_unawaited(&self) -> bool {
         true
+    }
+
+    /// Kept with the connection, so the pool rolls back a preview whose request was
+    /// dropped before handing it out again (`PgManager::recycle`).
+    fn preview_open(&mut self, open: bool) {
+        self.0.preview_open = open;
     }
 }
 
@@ -246,6 +264,17 @@ impl<D: Deployment> Storage for PgStorage<D> {
 
     fn spores(&self) -> &hypha_spore_core::BuiltSpores<D::Spores> {
         &self.spores
+    }
+
+    fn begin_preview<'a>(
+        &'a self,
+        ports: &'a Self::Ports<'_>,
+        timeout: std::time::Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<OpenPreview, ApiError>> + Send + 'a>> {
+        Box::pin(async move {
+            let open = ports.begin_preview(timeout).await?;
+            Ok(OpenPreview::new(move || Box::pin(open.end())))
+        })
     }
 
     fn spawn_password_reset(state: SharedState<Self>, email: String) {

@@ -3,7 +3,10 @@
 //! (`media.public_url`, `media.transforms`).
 
 use hypha_core::{Clock, Timestamp};
-use hypha_media::{Asset, AssetKind, AssetStatus, BlobStore, MediaSettings, Visibility};
+use hypha_media::{
+    Asset, AssetKind, AssetStatus, BlobError, BlobHead, BlobKey, BlobStore, MediaSettings,
+    PresignedUpload, UploadTerms, Visibility,
+};
 use hypha_store_s3::{S3BlobStore, S3Config};
 
 use crate::{
@@ -11,7 +14,58 @@ use crate::{
     host::{HostClock, HostHttp},
 };
 
-pub type HostBlobs = S3BlobStore<HostHttp, HostClock>;
+/// The media storage over the host's HTTP. Its requests go through `HostHttp`, which a
+/// preview blocks; an upload URL is signed here without one, so a preview refuses it here
+/// (a working URL would let a file in for an asset that was never kept).
+pub struct HostBlobs(S3BlobStore<HostHttp, HostClock>);
+
+impl std::ops::Deref for HostBlobs {
+    type Target = S3BlobStore<HostHttp, HostClock>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl BlobStore for HostBlobs {
+    async fn presign_upload(
+        &self,
+        key: &BlobKey,
+        terms: &UploadTerms,
+        now: Timestamp,
+    ) -> Result<PresignedUpload, BlobError> {
+        if let Some(preview) = crate::preview::current() {
+            preview.block(crate::preview::BlockedBy::MediaUpload);
+            return Err(BlobError::Backend(crate::preview::NOT_SENT.to_string()));
+        }
+        self.0.presign_upload(key, terms, now).await
+    }
+
+    async fn head(&self, key: &BlobKey) -> Result<Option<BlobHead>, BlobError> {
+        self.0.head(key).await
+    }
+
+    async fn read_range(&self, key: &BlobKey, start: u64, len: u64) -> Result<Vec<u8>, BlobError> {
+        self.0.read_range(key, start, len).await
+    }
+
+    async fn copy(&self, from: &BlobKey, to: &BlobKey) -> Result<(), BlobError> {
+        self.0.copy(from, to).await
+    }
+
+    async fn delete(&self, key: &BlobKey) -> Result<(), BlobError> {
+        self.0.delete(key).await
+    }
+
+    async fn presign_download(
+        &self,
+        key: &BlobKey,
+        now: Timestamp,
+        expires_in_secs: u32,
+    ) -> Result<String, BlobError> {
+        self.0.presign_download(key, now, expires_in_secs).await
+    }
+}
 
 /// The file store and the URL rules; `None` in `AppState` without `media.s3.endpoint`,
 /// and then the asset routes answer `503 media_not_configured`.
@@ -89,7 +143,7 @@ impl Media {
             secret_access_key: key("HYPHA_S3_SECRET_ACCESS_KEY")?,
         };
         Ok(Some(Media {
-            blobs: S3BlobStore::new(s3, http()?, clock.clone()),
+            blobs: HostBlobs(S3BlobStore::new(s3, http()?, clock.clone())),
             clock,
             urls: MediaUrls {
                 public_base: config.public_url.clone(),

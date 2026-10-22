@@ -62,6 +62,7 @@ async fn send(
         body: request.body,
         discard_answer: false,
         max_answer: request.max_answer,
+        purpose: crate::outbound::CallPurpose::Other,
     };
     let answer = calls.send(call).await.map_err(http_error)?;
     Ok(HttpResponse {

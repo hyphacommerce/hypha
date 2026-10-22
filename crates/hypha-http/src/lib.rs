@@ -24,6 +24,7 @@ pub mod media;
 pub mod outbound;
 pub mod patch;
 pub mod payments;
+pub mod preview;
 pub mod rate_limit;
 pub mod redact;
 pub mod routes;

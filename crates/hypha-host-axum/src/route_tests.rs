@@ -50,6 +50,8 @@ mod customers;
 // Customer accounts: signing in with an email code.
 mod accounts;
 mod oauth;
+// Previews of admin writes (`Hypha-Preview`).
+mod previews;
 // A host built with a spore.
 mod spores;
 mod stripe;

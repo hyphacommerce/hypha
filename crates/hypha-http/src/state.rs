@@ -345,9 +345,19 @@ impl<S: Storage> AppState<S> {
     ///
     /// The ports tell `after_writes` when a write gives the dispatcher work (events
     /// committed, a delivery retried), so writes without events don't wake the jobs.
+    ///
+    /// In a request previewing a write (`crate::preview`), the ports run in a preview
+    /// (`Storage::begin_preview`), which the request ends once its handler is done, and
+    /// wake nothing.
     pub async fn public_ports(&self) -> Result<S::Ports<'_>, ApiError> {
         let ports = self.storage.ports(self.store).await?;
-        hypha_core::SignalsDispatch::on_dispatch_work(&ports, self.after_writes.hook());
+        match crate::preview::current() {
+            Some(preview) => {
+                let timeout = self.config.agents.preview_timeout;
+                preview.hold(self.storage.begin_preview(&ports, timeout).await?);
+            }
+            None => hypha_core::SignalsDispatch::on_dispatch_work(&ports, self.after_writes.hook()),
+        }
         Ok(ports)
     }
 }
@@ -618,6 +628,25 @@ pub trait Storage: Send + Sync + 'static {
 
     /// The spores (`Self::Spores`), built at startup.
     fn spores(&self) -> &Self::Spores;
+
+    /// Runs everything `ports` do from now on in a transaction that's never committed,
+    /// each statement cut off after `timeout`: a preview (`crate::preview`). The
+    /// `OpenPreview` ends it, giving back the events its writes recorded; built here, for
+    /// the concrete ports, so its future is provably `Send`. Boxed too: every request's
+    /// `public_ports` holds it, and an `async fn` here would make the jobs' futures, generic
+    /// over the storage, too much for the compiler to prove `Send` through the ports'
+    /// lifetime.
+    fn begin_preview<'a>(
+        &'a self,
+        ports: &'a Self::Ports<'_>,
+        timeout: std::time::Duration,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<crate::preview::OpenPreview, ApiError>>
+                + Send
+                + 'a,
+        >,
+    >;
 
     /// Runs a password reset request as background work (`AppState::background`), so the
     /// response doesn't wait for it; dropped and logged when the host takes no more. Here

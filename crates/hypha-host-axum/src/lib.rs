@@ -131,13 +131,16 @@ macro_rules! deployment {
             fn router() -> $crate::__private::Router<
                 $crate::__private::SharedState<$crate::PgStorage<Self>>,
             > {
-                $crate::__private::hypha_http::router!($crate::PgStorage<$name>)
-                    $($(.merge($($routes)::+!(router $crate::PgStorage<$name>)))*)?
-                    // Again after the spores' routes: axum gives the fallback only to routes
-                    // already there, and every error is `{code, error, details}`.
-                    .method_not_allowed_fallback(|| async {
-                        $crate::__private::hypha_http::error::ApiError::method_not_allowed()
-                    })
+                // Every admin write previewable (`Hypha-Preview`), the spores' too.
+                $crate::__private::hypha_http::preview::with_previews(
+                    $crate::__private::hypha_http::router!($crate::PgStorage<$name>)
+                        $($(.merge($($routes)::+!(router $crate::PgStorage<$name>)))*)?
+                        // Again after the spores' routes: axum gives the fallback only to routes
+                        // already there, and every error is `{code, error, details}`.
+                        .method_not_allowed_fallback(|| async {
+                            $crate::__private::hypha_http::error::ApiError::method_not_allowed()
+                        })
+                )
             }
 
             fn spore_rows() -> ::std::vec::Vec<$crate::__private::hypha_http::routes::openapi::Row> {

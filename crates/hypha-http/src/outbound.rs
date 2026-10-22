@@ -133,6 +133,25 @@ pub struct OutboundCall {
     /// The most of the answer's body read (`MAX_ANSWER_BYTES` unless the app proxy's
     /// larger cap).
     pub max_answer: usize,
+    /// What it's for, as far as a preview needs to know (`crate::preview`).
+    pub purpose: CallPurpose,
+}
+
+/// What a call is for, as far as a preview needs to know: one only sends read-only
+/// extension calls.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum CallPurpose {
+    /// A webhook, a manifest, a rate service list, a spore's provider, the app proxy.
+    #[default]
+    Other,
+    /// An app's extension point (`hypha_extensions::call`).
+    Extension {
+        point: &'static str,
+        /// The app's key.
+        app: String,
+        /// `ExtensionPoint::READ_ONLY`.
+        read_only: bool,
+    },
 }
 
 /// Signs `call` and checks its URL: an IP literal that isn't public under `policy` is
@@ -164,6 +183,7 @@ pub fn prepare(policy: OutboundPolicy, call: SignedCall<'_>) -> Result<OutboundC
         body: call.body,
         discard_answer: call.discard_answer,
         max_answer: MAX_ANSWER_BYTES,
+        purpose: CallPurpose::Other,
     })
 }
 
@@ -252,6 +272,7 @@ pub fn prepare_forward(
         body: call.body,
         discard_answer: false,
         max_answer: call.max_answer,
+        purpose: CallPurpose::Other,
     })
 }
 
@@ -276,6 +297,7 @@ pub fn prepare_get(
         body: Vec::new(),
         discard_answer: false,
         max_answer: MAX_ANSWER_BYTES,
+        purpose: CallPurpose::Other,
     })
 }
 

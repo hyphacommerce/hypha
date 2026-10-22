@@ -4,6 +4,9 @@
 //! gives Tokio's and the operating system's; a Workers host gives the runtime's
 //! (`Date.now()`, `crypto.getRandomValues`, `fetch`, `waitUntil`).
 //!
+//! A request previewing a write (`crate::preview`) finds its `Preview` here, so each
+//! capability records or blocks its effect for it instead of having it.
+//!
 //! Each is a small wrapper around a shared function whose futures are boxed and `Send`.
 //! That keeps one concrete `AppState` per storage and one `Media` type, and the compiler
 //! still proves every handler's future `Send` (a boxed `Send` future is). The repositories
@@ -59,8 +62,13 @@ impl HostIds {
 }
 
 impl IdGenerator for HostIds {
+    /// In a preview, each ID handed out is noted, in order.
     fn new_uuid(&self) -> Uuid {
-        self.0.new_uuid()
+        let id = self.0.new_uuid();
+        if let Some(preview) = crate::preview::current() {
+            preview.id(id);
+        }
+        id
     }
 }
 
@@ -164,7 +172,12 @@ impl HostBackground {
         Self(Arc::new(spawn))
     }
 
+    /// In a preview, the work is dropped (and said to be taken): what it would act on was
+    /// never committed.
     pub fn spawn(&self, work: impl Future<Output = ()> + Send + 'static) -> bool {
+        if crate::preview::current().is_some() {
+            return true;
+        }
         (self.0)(Box::pin(work))
     }
 }
@@ -210,7 +223,14 @@ impl HostCalls {
         Self(Arc::new(send))
     }
 
+    /// In a preview, only a read-only extension point's call goes out; anything else fails
+    /// unsent, and the preview notes it as what blocked it.
     pub async fn send(&self, call: OutboundCall) -> Result<OutboundAnswer, CallError> {
+        if let Some(preview) = crate::preview::current()
+            && !preview.allows_call(&call.purpose)
+        {
+            return Err(CallError::Failed(crate::preview::NOT_SENT.to_string()));
+        }
         (self.0)(call).await
     }
 
@@ -252,7 +272,12 @@ impl HostHttp {
 }
 
 impl HttpClient for HostHttp {
+    /// In a preview, nothing is sent: the media storage isn't part of its transaction.
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, String> {
+        if let Some(preview) = crate::preview::current() {
+            preview.block(crate::preview::BlockedBy::MediaStorage);
+            return Err(crate::preview::NOT_SENT.to_string());
+        }
         (self.0)(request).await
     }
 }
@@ -293,7 +318,12 @@ impl EmailSender for HostMail {
         self.name
     }
 
+    /// In a preview, the email is recorded, not sent, and taken as sent.
     async fn send(&self, email: &OutgoingEmail) -> Result<Sent, SendError> {
+        if let Some(preview) = crate::preview::current() {
+            preview.email(crate::preview::PreviewEmail::new(email));
+            return Ok(Sent::default());
+        }
         (self.send)(email.clone()).await
     }
 }
@@ -316,8 +346,11 @@ impl AfterWrites {
         Self::new(|| {})
     }
 
+    /// Nothing in a preview: nothing was committed.
     pub fn notify(&self) {
-        (self.0)();
+        if crate::preview::current().is_none() {
+            (self.0)();
+        }
     }
 
     /// The hook, for the ports (`hypha_core::SignalsDispatch`).
@@ -342,8 +375,11 @@ impl MailQueued {
         Self::new(|| {})
     }
 
+    /// Nothing in a preview: nothing was queued.
     pub fn notify(&self) {
-        (self.0)();
+        if crate::preview::current().is_none() {
+            (self.0)();
+        }
     }
 }
 

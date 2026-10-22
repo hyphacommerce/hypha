@@ -7,7 +7,7 @@ use hypha_extensions::{Answer, ExtensionCaller, OutgoingCall, STORE_HEADER, Tran
 
 use crate::{
     host::{HostCalls, HostClock},
-    outbound::{CallError, Method, OutboundPolicy, SignedCall},
+    outbound::{CallError, CallPurpose, Method, OutboundPolicy, SignedCall, prepare},
 };
 
 /// Sends extension calls for one store.
@@ -33,7 +33,18 @@ impl ExtensionCaller for HostExtensions<'_> {
             body: call.body,
             discard_answer: false,
         };
-        match self.calls.exchange_signed(self.outbound, signed).await {
+        let sent = match prepare(self.outbound, signed) {
+            Ok(mut prepared) => {
+                prepared.purpose = CallPurpose::Extension {
+                    point: call.point,
+                    app: call.app.to_string(),
+                    read_only: call.read_only,
+                };
+                self.calls.send(prepared).await
+            }
+            Err(e) => Err(e),
+        };
+        match sent {
             Ok(answer) => Ok(Answer {
                 status: answer.status,
                 body: answer.body,
@@ -85,6 +96,9 @@ mod tests {
             store: StoreId::from_uuid(Uuid::from_u128(7)),
         };
         pollster::block_on(caller.send(OutgoingCall {
+            point: "shipping.rates",
+            read_only: true,
+            app: &hypha_core::AppKey::new("app_rates").unwrap(),
             url,
             secret: "s3cret",
             headers: vec![(EXTENSION_HEADER, "shipping.rates".to_string())],

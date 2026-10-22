@@ -6,7 +6,8 @@
 //! its path parameters and its scopes (`x-hypha-scopes`). The rest is filled in here
 //! from the table, the same way for every operation: the operation ID
 //! (`admin.products.create`), a tag per module, the surface's security scheme, and the
-//! error responses every route of that shape can give.
+//! error responses every route of that shape can give, and, on admin writes, the
+//! `Hypha-Preview` header and the preview it answers (`crate::preview`).
 
 use std::{collections::BTreeMap, sync::OnceLock};
 
@@ -257,6 +258,12 @@ fn add_standard_errors(op: &mut Operation, row: &Row, secured: bool) {
              other API (`admin_credentials_required`, `publishable_key_required`).",
         );
     }
+    if writes && row.doc == Doc::Admin {
+        errors
+            .entry("400")
+            .or_default()
+            .push("A `Hypha-Preview` other than `1` or `0` (`invalid_preview_header`).");
+    }
     if writes {
         errors.entry("409").or_default().push(
             "Conflicts with existing data or the resource's state, or a concurrent change \
@@ -323,6 +330,9 @@ pub fn document_with(doc: Doc, extra: Vec<Row>) -> OpenApi {
             )]);
         }
         add_standard_errors(&mut op, &row, secured);
+        if doc == Doc::Admin && row.method != "GET" {
+            add_preview(&mut op);
+        }
         (row.schemas)(&mut schemas);
         // A catch-all (`{*path}`, the app proxy) is a plain parameter in OpenAPI.
         let path = row.path.replace("{*", "{");
@@ -340,7 +350,86 @@ pub fn document_with(doc: Doc, extra: Vec<Row>) -> OpenApi {
     let components = api.components.get_or_insert_with(Default::default);
     components.schemas.extend(schemas);
     components.add_security_scheme(scheme_name, scheme);
+    if doc == Doc::Admin {
+        add_preview_components(components);
+    }
     api
+}
+
+/// The reusable `Hypha-Preview` header (`#/components/parameters/HyphaPreview`).
+const PREVIEW_PARAMETER: &str = "HyphaPreview";
+/// The reusable answer to a preview (`#/components/responses/Preview`).
+const PREVIEW_RESPONSE: &str = "Preview";
+
+/// An admin write takes `Hypha-Preview`, and says where its preview's answer is described
+/// (`x-hypha-preview`): its own `200`, where it has one, is what the write answers.
+fn add_preview(op: &mut Operation) {
+    use utoipa::openapi::extensions::ExtensionsBuilder;
+    op.parameters
+        .get_or_insert_with(Vec::new)
+        .push(RefOr::Ref(Ref::new(format!(
+            "#/components/parameters/{PREVIEW_PARAMETER}"
+        ))));
+    let preview = ExtensionsBuilder::new()
+        .add(
+            "x-hypha-preview",
+            serde_json::json!({"$ref": format!("#/components/responses/{PREVIEW_RESPONSE}")}),
+        )
+        .build();
+    match &mut op.extensions {
+        Some(extensions) => extensions.merge(preview),
+        None => op.extensions = Some(preview),
+    }
+}
+
+/// The header, the response and their schemas, once in the admin document.
+fn add_preview_components(components: &mut utoipa::openapi::Components) {
+    use crate::preview::PreviewResponse;
+    use utoipa::openapi::{
+        Required,
+        path::ParameterBuilder,
+        schema::{ObjectBuilder, SchemaType, Type},
+    };
+    let header = ParameterBuilder::new()
+        .name("Hypha-Preview")
+        .parameter_in(ParameterIn::Header)
+        .required(Required::False)
+        .description(Some(
+            "`1` previews the write: it runs for real and is rolled back, and the answer is \
+             `200` with what it would have done (`#/components/responses/Preview`) instead of \
+             its own. A write that fails answers its failure as without the header. `0`, or \
+             no header, runs the write.",
+        ))
+        .schema(Some(
+            ObjectBuilder::new()
+                .schema_type(SchemaType::Type(Type::String))
+                .enum_values(Some(["1", "0"])),
+        ))
+        .build();
+    components
+        .parameters
+        .insert(PREVIEW_PARAMETER.to_string(), RefOr::T(header));
+    let response = ResponseBuilder::new()
+        .description(
+            "The write previewed (`Hypha-Preview: 1`): what it would have answered and \
+             recorded. Nothing of it was kept.",
+        )
+        .content(
+            "application/json",
+            ContentBuilder::new()
+                .schema(Some(Ref::from_schema_name(PreviewResponse::name())))
+                .build(),
+        )
+        .build();
+    components
+        .responses
+        .insert(PREVIEW_RESPONSE.to_string(), RefOr::T(response));
+    let mut schemas = vec![(
+        PreviewResponse::name().to_string(),
+        PreviewResponse::schema(),
+    )];
+    PreviewResponse::schemas(&mut schemas);
+    components.schemas.extend(schemas);
 }
 
 /// The document as the committed file holds it: pretty JSON and a final newline.
@@ -790,13 +879,35 @@ mod tests {
             refs(&json, &mut found);
             assert!(!found.is_empty());
             for r in found {
-                let name = r.strip_prefix("#/components/schemas/").unwrap_or(&r);
+                let pointer = r.strip_prefix('#').unwrap_or(&r);
                 assert!(
-                    json["components"]["schemas"].get(name).is_some(),
+                    json.pointer(pointer).is_some(),
                     "{doc:?}: {r} points nowhere"
                 );
             }
         }
+    }
+
+    #[test]
+    fn admin_writes_take_the_preview_header_and_say_what_it_answers() {
+        let json = serde_json::to_value(document(Doc::Admin)).unwrap();
+        for (path, item) in json["paths"].as_object().unwrap() {
+            for (method, op) in item.as_object().unwrap() {
+                let header = serde_json::json!({"$ref": "#/components/parameters/HyphaPreview"});
+                let takes = op["parameters"]
+                    .as_array()
+                    .is_some_and(|p| p.contains(&header));
+                let writes = method != "get";
+                assert_eq!(takes, writes, "{method} {path}");
+                assert_eq!(
+                    op.get("x-hypha-preview").is_some(),
+                    writes,
+                    "{method} {path}"
+                );
+            }
+        }
+        let storefront = serde_json::to_value(document(Doc::Storefront)).unwrap();
+        assert!(storefront["components"]["parameters"].is_null());
     }
 
     #[test]

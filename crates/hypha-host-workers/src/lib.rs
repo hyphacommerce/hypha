@@ -91,13 +91,16 @@ macro_rules! deployment {
             fn router() -> $crate::__private::Router<
                 $crate::__private::SharedState<$crate::WorkersStorage<Self>>,
             > {
-                $crate::__private::hypha_http::router!($crate::WorkersStorage<$name>)
-                    $($(.merge($($routes)::+!(router $crate::WorkersStorage<$name>)))*)?
-                    // Again after the spores' routes: axum gives the fallback only to routes
-                    // already there, and every error is `{code, error, details}`.
-                    .method_not_allowed_fallback(|| async {
-                        $crate::__private::hypha_http::error::ApiError::method_not_allowed()
-                    })
+                // Every admin write previewable (`Hypha-Preview`), the spores' too.
+                $crate::__private::hypha_http::preview::with_previews(
+                    $crate::__private::hypha_http::router!($crate::WorkersStorage<$name>)
+                        $($(.merge($($routes)::+!(router $crate::WorkersStorage<$name>)))*)?
+                        // Again after the spores' routes: axum gives the fallback only to routes
+                        // already there, and every error is `{code, error, details}`.
+                        .method_not_allowed_fallback(|| async {
+                            $crate::__private::hypha_http::error::ApiError::method_not_allowed()
+                        })
+                )
             }
         }
     };

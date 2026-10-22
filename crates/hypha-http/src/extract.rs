@@ -305,8 +305,36 @@ impl<A: Surface> Caller<A> {
         };
         // Every event these ports write from here on is the caller's.
         ports.act_as(ctx.actor());
+        note_viewer(&ports, &ctx).await?;
         Ok((ports, ctx))
     }
+}
+
+/// In a preview, who the caller is, so its events are shown as the caller may see them
+/// (`crate::preview::Viewer`): for anyone but a staff session, with the custom field
+/// definitions as they are before the write.
+async fn note_viewer<P>(ports: &P, ctx: &Ctx) -> Result<(), ApiError>
+where
+    P: HasApps + hypha_custom_fields::HasCustomFieldDefinitions,
+{
+    let Some(preview) = crate::preview::current() else {
+        return Ok(());
+    };
+    let fields = match ctx.is_staff() {
+        true => None,
+        false => {
+            let kind = crate::routes::custom_fields::caller_kind(ctx, ports).await?;
+            let definitions =
+                hypha_custom_fields::DefinitionRepo::list(ports.custom_field_definitions(), None)
+                    .await?;
+            Some((kind, definitions))
+        }
+    };
+    preview.set_viewer(crate::preview::Viewer {
+        ctx: ctx.clone(),
+        fields,
+    });
+    Ok(())
 }
 
 impl StaffCaller {
@@ -325,6 +353,7 @@ impl StaffCaller {
         {
             Authenticated::Staff(staff) => {
                 ports.act_as(staff.ctx.actor());
+                note_viewer(&ports, &staff.ctx).await?;
                 Ok((ports, *staff))
             }
             Authenticated::Key(_) | Authenticated::Customer(_) => Err(ApiError::session_required()),
