@@ -262,6 +262,19 @@ fn a_connected_agent_acts_for_the_staff_member_who_connected_it() {
         .err(),
         Some(CommandError::SessionRequired)
     );
+    // A staff member without `agents:write` connects their own client too, granting
+    // only what their role holds.
+    let clerk = Ctx::new(Actor::User(user(2)), vec![Scope::ProductsRead]);
+    let own = block_on(create_connected_agent(&clerk, &w.ports, &w.ids, input())).unwrap();
+    assert_eq!(own.kind(), AgentKind::Connected { user: user(2) });
+    let wider = ConnectAgent {
+        grant: grant(&["orders:read"], &[]),
+        ..input()
+    };
+    assert_eq!(
+        block_on(create_connected_agent(&clerk, &w.ports, &w.ids, wider)).err(),
+        Some(CommandError::CannotGrant(Scope::OrdersRead))
+    );
     let mine = AgentFilter {
         user: Some(user(1)),
         include_revoked: false,

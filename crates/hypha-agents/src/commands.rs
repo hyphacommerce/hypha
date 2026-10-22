@@ -195,14 +195,14 @@ pub struct ConnectAgent {
 
 /// Checks and builds a connected agent without writing it, for the OAuth workflow that
 /// stages it with the code it issues. The staff member is the caller (a session), never
-/// input; needs `agents:write` and a grantable grant, which their role caps at every
-/// request anyway.
+/// input. No `agents:write`: connecting one's own client is a person's own act, and the
+/// agent can never do more than their role allows (it's capped by it at every request);
+/// the grant must still be one they could give.
 pub fn prepare_connected_agent(
     ctx: &Ctx,
     ids: &impl IdGenerator,
     input: ConnectAgent,
 ) -> Result<Agent, CommandError> {
-    ctx.require(Scope::AgentsWrite)?;
     let Actor::User(user) = ctx.actor() else {
         return Err(CommandError::SessionRequired);
     };
