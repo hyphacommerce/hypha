@@ -506,6 +506,22 @@ pub async fn record_failed<S: HasProposals>(
     Ok(proposal)
 }
 
+/// Records that approving found the proposal stale: it now holds what the write would do
+/// today (`preview`, `digest`), still pending, for a person to approve again.
+pub async fn record_refreshed<S: HasProposals>(
+    ctx: &Ctx,
+    ports: &S,
+    id: ProposalId,
+    preview: Value,
+    digest: String,
+) -> Result<Proposal, CommandError> {
+    let mut proposal = load_proposal(ports.proposals(), id).await?;
+    let user = decider(ctx, &proposal)?;
+    proposal.refresh(user, preview, digest)?;
+    ports.proposals().update(&mut proposal).await?;
+    Ok(proposal)
+}
+
 /// Rejects a pending proposal, with a note the agent can read.
 pub async fn reject_proposal<S: HasProposals>(
     ctx: &Ctx,

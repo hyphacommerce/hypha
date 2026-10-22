@@ -357,6 +357,21 @@ async fn proposal_round_trip<S: HasAgents + HasProposals>(ports: &S) {
     repo.insert(&mut bodiless).await.unwrap();
     assert_eq!(repo.get(pid(2)).await, Ok(Some(bodiless)));
 
+    // Previewed again on a stale approval: a new preview and digest, still pending.
+    let mut refreshed = proposal(7, 1, None, 100);
+    repo.insert(&mut refreshed).await.unwrap();
+    refreshed
+        .refresh(
+            user(1),
+            serde_json::json!({"complete": true, "ids": ["x"]}),
+            "sha256:fresh".to_string(),
+        )
+        .unwrap();
+    repo.update(&mut refreshed).await.unwrap();
+    let stored = repo.get(pid(7)).await.unwrap().unwrap();
+    assert_eq!((stored.refreshes(), stored.digest()), (1, "sha256:fresh"));
+    assert_eq!(stored, refreshed);
+
     type Decide = fn(&mut Proposal);
     let decisions: [(u128, Decide); 4] = [
         (3, |p| p.applied(user(1), at(5), response()).unwrap()),

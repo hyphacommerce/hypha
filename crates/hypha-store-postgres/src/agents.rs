@@ -300,7 +300,7 @@ fn proposal_columns() -> String {
     format!(
         "id, version, agent_id, operation, request::text AS request, idempotency_key, \
          preview::text AS preview, digest, scopes, status, decided_by, {}, note, \
-         response_status, response::text AS response, {}, {}",
+         response_status, response::text AS response, refreshes, {}, {}",
         micros("decided_at"),
         micros("expires_at"),
         stamp_columns("")
@@ -351,6 +351,7 @@ fn proposal_from_row(row: &Row) -> Result<Proposal, RepoError> {
         note: col(row, "note")?,
         response,
         expires_at: Timestamp::from_unix_micros(col(row, "expires_at")?),
+        refreshes: u32::try_from(col::<i32>(row, "refreshes")?).map_err(|e| bad(&e))?,
     })
     .map_err(|e| bad(&e))
 }
@@ -413,7 +414,7 @@ pub(crate) async fn insert_proposal(
 }
 
 /// `ProposalRepo::update` inside the caller's transaction; the new version. Writes what a
-/// decision changes: the request, preview and scopes never do.
+/// decision or a refresh changes: the request and scopes never do.
 pub(crate) async fn update_proposal(
     tx: &impl Queries,
     s: &ProposalSnapshot,
@@ -425,7 +426,8 @@ pub(crate) async fn update_proposal(
             &format!(
                 "UPDATE agent_proposals SET version = version + 1, status = $3,
                      decided_by = $4, decided_at = {}, note = $6, response_status = $7,
-                     response = $8::text::jsonb
+                     response = $8::text::jsonb, preview = $9::text::jsonb, digest = $10,
+                     refreshes = $11
                  WHERE id = $1 AND version = $2 RETURNING version",
                 ts(5)
             ),
@@ -438,6 +440,9 @@ pub(crate) async fn update_proposal(
                 (&s.note, Type::TEXT),
                 (&response_status, Type::INT4),
                 (&response, Type::TEXT),
+                (&s.preview.to_string(), Type::TEXT),
+                (&s.digest, Type::TEXT),
+                (&i32::try_from(s.refreshes).unwrap_or(i32::MAX), Type::INT4),
             ],
         )
         .await

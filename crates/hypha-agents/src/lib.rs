@@ -26,14 +26,16 @@ pub use commands::{
     create_connected_agent, create_proposal, expire_proposals, get_agent, get_proposal,
     list_agent_calls, list_agents, list_proposals, prepare_autonomous_agent,
     prepare_connected_agent, prune_agent_calls, record_agent_use, record_applied, record_call,
-    record_failed, reject_proposal, require_grantable, revoke_agent, update_agent,
+    record_failed, record_refreshed, reject_proposal, require_grantable, revoke_agent,
+    update_agent,
 };
 pub use error::{AgentError, CallError, ProposalError};
 pub use events::{
     AGENT, AgentCreated, AgentRevoked, AgentUpdated, PROPOSAL, ProposalCreated, ProposalDecided,
+    ProposalUpdated,
 };
 pub use grant::{
-    Access, Grant, GrantError, GrantInput, MAX_OPERATIONS, NEVER_GRANTED, PROPOSE_ONLY,
+    Access, Grant, GrantError, GrantField, GrantInput, MAX_OPERATIONS, NEVER_GRANTED, PROPOSE_ONLY,
     Permissions, WriteMode, WritesCap, effective, suggested_grant,
 };
 pub use hypha_core::{OperationId, OperationIdError};

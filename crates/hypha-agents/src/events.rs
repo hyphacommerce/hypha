@@ -65,6 +65,23 @@ impl Event for ProposalCreated {
     const VERSION: u16 = 1;
 }
 
+/// `proposal.updated`: approving found the store changed since the preview, so the
+/// proposal now holds what the write would do today, for a person to review again.
+#[derive(Debug, Serialize)]
+pub struct ProposalUpdated {
+    pub proposal: ProposalId,
+    pub agent: AgentId,
+    /// How many times it was previewed again.
+    pub refreshes: u32,
+    /// Who tried to approve it.
+    pub by: UserId,
+}
+
+impl Event for ProposalUpdated {
+    const TYPE: &'static str = "proposal.updated";
+    const VERSION: u16 = 1;
+}
+
 /// `proposal.decided`: `applied`, `failed` or `rejected` by a staff member, or `expired`
 /// (no one).
 #[derive(Debug, Serialize)]

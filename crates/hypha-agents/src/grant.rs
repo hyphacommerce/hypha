@@ -58,14 +58,45 @@ pub const PROPOSE_ONLY: [Scope; 1] = [Scope::CustomersErase];
 /// The most operations an allowlist names: more than the admin surface has.
 pub const MAX_OPERATIONS: usize = 1000;
 
+/// Which list of a grant a problem is in: where a form shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrantField {
+    Read,
+    Write,
+    CustomerData,
+    Operations,
+}
+
+impl GrantField {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GrantField::Read => "read",
+            GrantField::Write => "write",
+            GrantField::CustomerData => "customer_data",
+            GrantField::Operations => "operations",
+        }
+    }
+
+    /// The list a scope of this kind belongs in.
+    pub fn of(scope: Scope) -> Self {
+        match kind(scope) {
+            Kind::Read => GrantField::Read,
+            Kind::Write => GrantField::Write,
+            Kind::CustomerData => GrantField::CustomerData,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum GrantError {
-    #[error("{0:?} is not a scope")]
-    UnknownScope(String),
-    #[error("{0:?} is not a write mode (\"propose\" or \"apply\")")]
-    UnknownWriteMode(String),
-    #[error("{0} is never granted to an agent")]
-    NotGrantable(Scope),
+    /// A name in `field` that isn't a scope.
+    #[error("{1:?} is not a scope")]
+    UnknownScope(GrantField, String),
+    #[error("{mode:?} is not a write mode (\"propose\" or \"apply\")")]
+    UnknownWriteMode { scope: String, mode: String },
+    /// Listed in `field`.
+    #[error("{1} is never granted to an agent")]
+    NotGrantable(GrantField, Scope),
     #[error("{0} is granted to an agent to propose only")]
     ProposeOnly(Scope),
     #[error("{0} is not a read scope")]
@@ -85,9 +116,11 @@ pub enum GrantError {
 impl ErrorCode for GrantError {
     fn code(&self) -> &'static str {
         match self {
-            GrantError::UnknownScope(_) => "unknown_scope",
-            GrantError::UnknownWriteMode(_) => "invalid_write_mode",
-            GrantError::NotGrantable(_) | GrantError::ProposeOnly(_) => "agent_scope_not_grantable",
+            GrantError::UnknownScope(..) => "unknown_scope",
+            GrantError::UnknownWriteMode { .. } => "invalid_write_mode",
+            GrantError::NotGrantable(..) | GrantError::ProposeOnly(_) => {
+                "agent_scope_not_grantable"
+            }
             GrantError::NotARead(_)
             | GrantError::NotAWrite(_)
             | GrantError::NotCustomerData(_)
@@ -144,8 +177,49 @@ pub struct Grant {
     operations: Option<Vec<OperationId>>,
 }
 
-fn parse_scope(name: &str) -> Result<Scope, GrantError> {
-    Scope::parse(name).ok_or_else(|| GrantError::UnknownScope(name.to_string()))
+fn parse_scope(field: GrantField, name: &str) -> Result<Scope, GrantError> {
+    Scope::parse(name).ok_or_else(|| GrantError::UnknownScope(field, name.to_string()))
+}
+
+impl GrantError {
+    /// Where the problem is, for a form: the list, and the scope or operation it names.
+    pub fn field(&self) -> GrantField {
+        match self {
+            GrantError::UnknownScope(field, _) | GrantError::NotGrantable(field, _) => *field,
+            GrantError::UnknownWriteMode { .. }
+            | GrantError::ProposeOnly(_)
+            | GrantError::NotAWrite(_)
+            | GrantError::DuplicateWrite(_) => GrantField::Write,
+            GrantError::NotARead(_) => GrantField::Read,
+            GrantError::NotCustomerData(_) => GrantField::CustomerData,
+            GrantError::Operation(_) | GrantError::TooManyOperations { .. } => {
+                GrantField::Operations
+            }
+        }
+    }
+
+    /// The scope it's about, as named (known or not).
+    pub fn scope(&self) -> Option<String> {
+        match self {
+            GrantError::UnknownScope(_, name) => Some(name.clone()),
+            GrantError::UnknownWriteMode { scope, .. } => Some(scope.clone()),
+            GrantError::NotGrantable(_, s)
+            | GrantError::ProposeOnly(s)
+            | GrantError::NotARead(s)
+            | GrantError::NotAWrite(s)
+            | GrantError::NotCustomerData(s)
+            | GrantError::DuplicateWrite(s) => Some(s.as_str().to_string()),
+            GrantError::Operation(_) | GrantError::TooManyOperations { .. } => None,
+        }
+    }
+
+    /// The operation it's about, as sent.
+    pub fn operation(&self) -> Option<&str> {
+        match self {
+            GrantError::Operation(e) => Some(&e.0),
+            _ => None,
+        }
+    }
 }
 
 fn sorted_once(mut scopes: Vec<Scope>) -> Vec<Scope> {
@@ -163,21 +237,24 @@ impl Grant {
         let read = input
             .read
             .iter()
-            .map(|s| parse_scope(s))
+            .map(|s| parse_scope(GrantField::Read, s))
             .collect::<Result<Vec<_>, _>>()?;
         let write = input
             .write
             .iter()
             .map(|(s, m)| {
-                let scope = parse_scope(s)?;
-                let mode = WriteMode::parse(m).map_err(GrantError::UnknownWriteMode)?;
+                let scope = parse_scope(GrantField::Write, s)?;
+                let mode = WriteMode::parse(m).map_err(|mode| GrantError::UnknownWriteMode {
+                    scope: s.clone(),
+                    mode,
+                })?;
                 Ok((scope, mode))
             })
             .collect::<Result<Vec<_>, GrantError>>()?;
         let customer_data = input
             .customer_data
             .iter()
-            .map(|s| parse_scope(s))
+            .map(|s| parse_scope(GrantField::CustomerData, s))
             .collect::<Result<Vec<_>, _>>()?;
         let operations = input
             .operations
@@ -199,10 +276,11 @@ impl Grant {
     ) -> Result<Self, GrantError> {
         let all = read
             .iter()
-            .chain(write.iter().map(|(s, _)| s))
-            .chain(customer_data.iter());
-        if let Some(never) = all.into_iter().find(|s| NEVER_GRANTED.contains(s)) {
-            return Err(GrantError::NotGrantable(*never));
+            .map(|s| (GrantField::Read, s))
+            .chain(write.iter().map(|(s, _)| (GrantField::Write, s)))
+            .chain(customer_data.iter().map(|s| (GrantField::CustomerData, s)));
+        if let Some((field, never)) = all.into_iter().find(|(_, s)| NEVER_GRANTED.contains(s)) {
+            return Err(GrantError::NotGrantable(field, *never));
         }
         if let Some(s) = read.iter().find(|s| kind(**s) != Kind::Read) {
             return Err(GrantError::NotARead(*s));
@@ -573,11 +651,23 @@ mod tests {
     fn unknown_names_are_refused_by_name() {
         assert_eq!(
             Grant::new(input(&["products:reed"], &[], &[])),
-            Err(GrantError::UnknownScope("products:reed".to_string()))
+            Err(GrantError::UnknownScope(
+                GrantField::Read,
+                "products:reed".to_string()
+            ))
         );
+        let mode = Grant::new(input(&[], &[("products:write", "always")], &[]));
         assert_eq!(
-            Grant::new(input(&[], &[("products:write", "always")], &[])),
-            Err(GrantError::UnknownWriteMode("always".to_string()))
+            mode,
+            Err(GrantError::UnknownWriteMode {
+                scope: "products:write".to_string(),
+                mode: "always".to_string()
+            })
+        );
+        let mode = mode.unwrap_err();
+        assert_eq!(
+            (mode.field(), mode.scope().as_deref()),
+            (GrantField::Write, Some("products:write"))
         );
     }
 
@@ -585,16 +675,24 @@ mod tests {
     fn never_granted_scopes_are_refused_in_every_list_and_mode() {
         for scope in NEVER_GRANTED {
             let name = scope.as_str();
-            let expected = Err(GrantError::NotGrantable(scope));
-            assert_eq!(Grant::new(input(&[name], &[], &[])), expected, "{name}");
+            let refused = |field| Err(GrantError::NotGrantable(field, scope));
+            assert_eq!(
+                Grant::new(input(&[name], &[], &[])),
+                refused(GrantField::Read),
+                "{name}"
+            );
             for mode in ["propose", "apply"] {
                 assert_eq!(
                     Grant::new(input(&[], &[(name, mode)], &[])),
-                    expected,
+                    refused(GrantField::Write),
                     "{name} {mode}"
                 );
             }
-            assert_eq!(Grant::new(input(&[], &[], &[name])), expected, "{name}");
+            assert_eq!(
+                Grant::new(input(&[], &[], &[name])),
+                refused(GrantField::CustomerData),
+                "{name}"
+            );
         }
     }
 

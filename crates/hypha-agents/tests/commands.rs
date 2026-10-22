@@ -191,6 +191,7 @@ fn never_granted_scopes_are_refused_by_name() {
         w.create(&staff(), grant(&[], &[("users:write", "propose")]))
             .err(),
         Some(CommandError::Grant(GrantError::NotGrantable(
+            hypha_agents::GrantField::Write,
             Scope::UsersWrite
         )))
     );

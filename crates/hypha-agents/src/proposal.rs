@@ -6,7 +6,9 @@ use hypha_core::{
 };
 use serde_json::{Map, Value};
 
-use crate::{OperationId, ProposalCreated, ProposalDecided, ProposalError, events::PROPOSAL};
+use crate::{
+    OperationId, ProposalCreated, ProposalDecided, ProposalError, ProposalUpdated, events::PROPOSAL,
+};
 
 /// The largest request a proposal keeps, serialized: an admin write's body is far smaller.
 pub const MAX_REQUEST_BYTES: usize = 1024 * 1024;
@@ -177,6 +179,8 @@ pub struct Proposal {
     note: Option<String>,
     response: Option<ProposalResponse>,
     expires_at: Timestamp,
+    /// How many times approving found it stale and previewed it again.
+    refreshes: u32,
     events: Recorder,
 }
 
@@ -221,6 +225,7 @@ impl Proposal {
             note: None,
             response: None,
             expires_at: new.expires_at,
+            refreshes: 0,
             events: Recorder::default(),
         };
         let created = ProposalCreated {
@@ -295,6 +300,31 @@ impl Proposal {
         self.pending()?;
         self.response = Some(response);
         self.decide(ProposalStatus::Failed, Some(by), at);
+        Ok(())
+    }
+
+    /// Approving found the store changed since its preview: it now holds `preview` (with
+    /// the IDs the new run was handed) and `digest`, what the write would do today, and
+    /// stays pending for a person to review and approve again.
+    pub fn refresh(
+        &mut self,
+        by: UserId,
+        preview: Value,
+        digest: String,
+    ) -> Result<(), ProposalError> {
+        self.pending()?;
+        check_size("preview", &preview, MAX_PREVIEW_BYTES)?;
+        check_digest(&digest)?;
+        self.preview = preview;
+        self.digest = digest;
+        self.refreshes = self.refreshes.saturating_add(1);
+        let updated = ProposalUpdated {
+            proposal: self.id,
+            agent: self.agent,
+            refreshes: self.refreshes,
+            by,
+        };
+        self.events.record(self.subject(), &updated);
         Ok(())
     }
 
@@ -385,6 +415,10 @@ impl Proposal {
         self.expires_at
     }
 
+    pub fn refreshes(&self) -> u32 {
+        self.refreshes
+    }
+
     pub fn snapshot(&self) -> ProposalSnapshot {
         ProposalSnapshot {
             id: self.id,
@@ -403,6 +437,7 @@ impl Proposal {
             note: self.note.clone(),
             response: self.response.clone(),
             expires_at: self.expires_at,
+            refreshes: self.refreshes,
         }
     }
 
@@ -457,6 +492,7 @@ impl Proposal {
         proposal.decided_at = s.decided_at;
         proposal.note = s.note;
         proposal.response = s.response;
+        proposal.refreshes = s.refreshes;
         proposal.events = Recorder::default();
         Ok(proposal)
     }
@@ -481,6 +517,7 @@ pub struct ProposalSnapshot {
     pub note: Option<String>,
     pub response: Option<ProposalResponse>,
     pub expires_at: Timestamp,
+    pub refreshes: u32,
 }
 
 impl Recorded for Proposal {
@@ -824,6 +861,38 @@ mod tests {
             Proposal::restore(s),
             Err(ProposalError::Inconsistent),
             "expired by someone"
+        );
+    }
+
+    #[test]
+    fn a_stale_proposal_is_previewed_again_and_stays_pending() {
+        let mut p = pending();
+        p.refresh(
+            user(),
+            json!({"complete": true, "n": 2}),
+            "sha256:def".to_string(),
+        )
+        .unwrap();
+        assert_eq!(p.status(), ProposalStatus::Pending);
+        assert_eq!(p.preview(), &json!({"complete": true, "n": 2}));
+        assert_eq!(p.digest(), "sha256:def");
+        assert_eq!(p.refreshes(), 1);
+        let events = data(&mut p);
+        assert_eq!(events[0].0, "proposal.updated");
+        assert_eq!(events[0].1["refreshes"], json!(1));
+        p.refresh(user(), json!({}), "sha256:ghi".to_string())
+            .unwrap();
+        assert_eq!(p.refreshes(), 2);
+        assert_eq!(
+            p.clone().refresh(user(), json!({}), String::new()),
+            Err(ProposalError::InvalidDigest(String::new()))
+        );
+        p.take_events();
+        assert_eq!(Proposal::restore(p.snapshot()), Ok(p.clone()));
+        p.applied(user(), at(1), response()).unwrap();
+        assert_eq!(
+            p.refresh(user(), json!({}), "sha256:x".to_string()),
+            Err(ProposalError::Decided(ProposalStatus::Applied))
         );
     }
 }
