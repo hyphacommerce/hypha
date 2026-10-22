@@ -1430,6 +1430,7 @@ dependencies = [
 name = "hypha-oauth"
 version = "0.1.0"
 dependencies = [
+ "hypha-agents",
  "hypha-apps",
  "hypha-auth",
  "hypha-core",

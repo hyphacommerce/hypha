@@ -16,6 +16,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 hypha-testkit = { path = "../hypha-testkit" }
+hypha-agents = { path = "../hypha-agents" }
 pollster = "0.4"
 
 [lints]
