@@ -491,3 +491,71 @@ Sources for §1: [Medusa MCP](https://medusajs.com/blog/announcing-medusa-mcp),
 [commercetools managed MCP servers](https://docs.commercetools.com/api/managed-mcp-servers-overview),
 [Saleor MCP](https://glama.ai/mcp/servers/@saleor/saleor-mcp),
 [MCP 2026-07-28 (WorkOS)](https://workos.com/blog/mcp-2026-spec-agent-authentication).
+
+## As built: preview (M1)
+
+- **Where a preview starts.** `crate::preview::middleware` (layered by both hosts over every
+  route, spores' included) takes any non-GET under `/admin/` with `Hypha-Preview: 1`; `0`
+  or no header runs the write, anything else is `400 invalid_preview_header`. Every set of
+  ports such a request opens goes through `AppState::public_ports`, which begins the
+  preview on them (`Storage::begin_preview`), so `Caller::authenticate`, `StaffCaller` and
+  the credential-free routes are all covered. `Storage::directory()` (a model C control
+  plane) isn't; both hosts serve the directory from the request's ports.
+- **The adapter.** `PgStore::begin_preview` runs `BEGIN` with `SET LOCAL statement_timeout`
+  (`agents.preview_timeout`, 100 ms to 30 s, 5 s) and `idle_in_transaction_session_timeout`
+  (`PREVIEW_LEFT_OPEN`, 60 s). The three places that began a transaction now begin a `Tx`,
+  which in a preview is a savepoint, released or rolled back to; `consistent_read!` reads
+  the preview's own view in a savepoint. Different from §3.2: a statement *outside* a write
+  (`conn.db()`) takes a savepoint of its own too, or one failed statement (a reference on a
+  delete) would abort the whole transaction and the next read would answer 500 instead of
+  the write's own error. A store whose preview ended refuses further statements.
+- **Events: read back, by the rows written.** `insert_events` returns each row's `seq`;
+  in a preview they're noted, and `PgPreview::end` reads `outbox_events WHERE seq = ANY(…)`
+  before the `ROLLBACK`. A write rolled back to its savepoint (a lost race retried, a
+  duplicate) takes its rows with it, so what's read back is exactly what would have
+  committed, in order, as stored (the contract form M2 digests). Capturing payloads at the
+  write would have to undo captures on every savepoint rollback; reading the table without
+  the `seq`s can't tell our rows from other transactions' (rows from subtransactions don't
+  carry the top transaction's xid).
+- **Leaks.** The open preview shares the store's connection (`Arc<Mutex<C>>`), so the
+  middleware ends it after the handler dropped its ports. A request dropped or panicking
+  before that leaves the connection marked (`PgConnection::preview_open`): the native pool
+  rolls it back in `recycle` before handing it out (deadpool's `Fast` recycling only checks
+  the socket), and Postgres ends a transaction idle for 60 s, which bounds the locks it
+  holds meanwhile; a Workers connection closes when dropped.
+- **Capabilities.** Not a swapped `AppState` (it's shared, and copying it per request means
+  copying the storage): the request's `Preview` is current while its future is polled
+  (`InPreview`, a thread-local set around each poll, as Workers' `Scoped`), and each door in
+  `host.rs` asks for it. `HostMail` records (template, recipient, subject; `OutgoingEmail`
+  gained `template`) and answers sent; `HostCalls` sends only calls marked
+  `CallPurpose::Extension { read_only: true }` (`ExtensionPoint::READ_ONLY`, now required on
+  every point; `OutgoingCall` carries the point, `READ_ONLY` and the app) and lists them in
+  `calls`; `HostHttp` is blocked (`media_storage`); presigning an upload needs no HTTP, so
+  `HostBlobs` (now a newtype) blocks it (`media_upload`), or the preview would hand out a
+  working upload URL; `HostBackground::spawn` drops the work (and says it was taken),
+  `AfterWrites` and `MailQueued` stay quiet, and the store never calls its dispatch hook.
+  `blocked_by.kind` is `extension_call` (with `point`, `app`), `outbound_call` (webhooks,
+  manifests, spores' HTTP), `media_storage` or `media_upload`; the first blocked effect is
+  the one reported, and `response` is `null` when the write failed there.
+- **Emails** are the ones sent while answering (invites, test sends). Emails queued later by
+  the `Mailer` from the write's events (an order's) aren't listed yet: listing them means
+  running the `Mailer` over the preview's events inside its transaction, before the
+  rollback. A password reset runs in the background and so previews as nothing. Recipients
+  show for staff sessions and `customer_data:email`, else `to` is absent and listed in
+  `redacted`.
+- **Redaction.** `response.body` is the handler's own, already redacted. Events go through
+  `redact::event_data` for anyone but a staff session, and `*.custom_fields_updated`
+  entries through `changes_visible_to` with the definitions read when the caller
+  authenticated (before the write), as `GET /admin/events/{id}` shows them.
+- **IDs** handed out by `HostIds` are noted in order and put on the preview's response as
+  the `PreviewIds` extension, not in its body: M2 puts them in the token.
+- **OpenAPI.** Every admin write has `#/components/parameters/HyphaPreview` and
+  `x-hypha-preview: {"$ref": "#/components/responses/Preview"}` (schema `PreviewResponse`),
+  plus `invalid_preview_header` among its 400s. Not a second `200`: a write that answers
+  `200` itself can't have two, and its own responses keep the SDK's types exact.
+- **Settings.** `agents.preview_timeout` is `hypha_config::AgentsConfig`: no crate below
+  `hypha-config` owns it (the adapter and `hypha-http` use it); M3 can grow `[agents]`.
+- **Not yet:** the route test that previews *every* admin write from the fixtures (§14 M1);
+  the tests cover a product create, a variant change, a stock adjustment, a keyed
+  fulfilment followed by the real one, a cancellation, an invite (and its redaction), an
+  app-backed capture (blocked) and failures.
