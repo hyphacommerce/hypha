@@ -612,6 +612,14 @@ export async function channelNames(
   return new Map((data?.items ?? []).map((c) => [c.id, c.name]));
 }
 
+/** Locations' names by ID. Empty without `inventory:read`. */
+export async function locationNames(
+  client: Awaited<ReturnType<typeof sessionClient>>,
+): Promise<Map<string, string>> {
+  const { data } = await client.GET("/admin/locations");
+  return new Map((data?.items ?? []).map((l) => [l.id, l.name]));
+}
+
 /**
  * Minor units by currency (`GET /admin/currencies`), fetched once per request: the
  * layout, which provides it to client components (`useCurrencies`), and the page's own

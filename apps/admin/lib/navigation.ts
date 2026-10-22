@@ -2,6 +2,7 @@
 // palette all read these lists, so a page is added in one place.
 
 import {
+  ArchiveBoxIcon,
   BanknotesIcon,
   BuildingStorefrontIcon,
   CodeBracketIcon,
@@ -94,6 +95,7 @@ export const NAV_SECTIONS: NavSection[] = [
         scope: "products:read",
         children: [{ label: "Categories", href: "/products/categories", scope: "products:read" }],
       },
+      { label: "Inventory", href: "/inventory", icon: ArchiveBoxIcon, scope: "inventory:read" },
       {
         label: "Customers",
         href: "/customers",
