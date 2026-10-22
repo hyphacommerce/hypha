@@ -15,7 +15,6 @@ pub mod commands;
 pub mod error;
 pub mod events;
 pub mod grant;
-pub mod operation;
 pub mod proposal;
 pub mod repo;
 
@@ -37,7 +36,7 @@ pub use grant::{
     Access, Grant, GrantError, GrantInput, MAX_OPERATIONS, NEVER_GRANTED, PROPOSE_ONLY,
     Permissions, WriteMode, WritesCap, effective,
 };
-pub use operation::{OperationError, OperationId};
+pub use hypha_core::{OperationId, OperationIdError};
 pub use proposal::{
     MAX_DIGEST_LEN, MAX_NOTE_LEN, MAX_PREVIEW_BYTES, MAX_REQUEST_BYTES, NewProposal, Proposal,
     ProposalRequest, ProposalResponse, ProposalSnapshot, ProposalStatus,

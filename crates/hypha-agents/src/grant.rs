@@ -8,7 +8,7 @@ use std::fmt;
 use hypha_core::{ErrorCode, Scope};
 use thiserror::Error;
 
-use crate::{OperationError, OperationId};
+use crate::{OperationId, OperationIdError};
 
 /// How an agent may use a write scope: `Propose` previews the write and keeps it for a
 /// person to approve; `Apply` writes at once.
@@ -77,7 +77,7 @@ pub enum GrantError {
     #[error("{0} is listed twice in the write scopes")]
     DuplicateWrite(Scope),
     #[error(transparent)]
-    Operation(#[from] OperationError),
+    Operation(#[from] OperationIdError),
     #[error("an allowlist names at most {max} operations")]
     TooManyOperations { max: usize },
 }
@@ -183,7 +183,7 @@ impl Grant {
             .operations
             .map(|ops| {
                 ops.iter()
-                    .map(|o| OperationId::new(o))
+                    .map(OperationId::new)
                     .collect::<Result<Vec<_>, _>>()
             })
             .transpose()?;
@@ -654,7 +654,7 @@ mod tests {
         i.operations = Some(vec!["products".to_string()]);
         assert_eq!(
             Grant::new(i.clone()),
-            Err(GrantError::Operation(OperationError(
+            Err(GrantError::Operation(OperationIdError(
                 "products".to_string()
             )))
         );

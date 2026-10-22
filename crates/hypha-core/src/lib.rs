@@ -17,6 +17,7 @@ pub mod language;
 pub mod money;
 #[cfg(feature = "openapi")]
 mod openapi;
+pub mod operation_id;
 pub mod page;
 pub mod ports;
 pub mod quantity;
@@ -62,6 +63,7 @@ pub use ids::{
 };
 pub use language::{Language, LanguageError};
 pub use money::{BasisPoints, Currency, CurrencyError, Money, MoneyError, Price, TaxRate};
+pub use operation_id::{OperationId, OperationIdError};
 pub use page::{Direction, Keyset, Page, PageError, PageLimit, PageRequest, SortKey};
 pub use ports::{
     Clock, HasBatch, IdGenerator, Notifier, NotifyError, Progress, Random, RepoError,

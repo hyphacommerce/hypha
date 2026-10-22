@@ -20,7 +20,7 @@ use thiserror::Error;
 use crate::{
     Agent, AgentCall, AgentCallRepo, AgentClient, AgentError, AgentFilter, AgentKind, AgentRepo,
     CallError, Grant, GrantError, GrantInput, HasAgentCalls, HasAgents, HasProposals, NewAgent,
-    NewAgentCall, NewProposal, OperationError, OperationId, Proposal, ProposalError,
+    NewAgentCall, NewProposal, OperationId, OperationIdError, Proposal, ProposalError,
     ProposalFilter, ProposalRepo, ProposalRequest, ProposalResponse, ProposalStatus, WriteMode,
     repo::keys,
 };
@@ -58,7 +58,7 @@ pub enum CommandError {
     #[error(transparent)]
     Grant(#[from] GrantError),
     #[error(transparent)]
-    Operation(#[from] OperationError),
+    Operation(#[from] OperationIdError),
     #[error(transparent)]
     Proposal(#[from] ProposalError),
     #[error(transparent)]
@@ -268,7 +268,7 @@ pub async fn update_agent<S: HasAgents>(
         let operations = operations
             .map(|ops| {
                 ops.iter()
-                    .map(|o| OperationId::new(o))
+                    .map(OperationId::new)
                     .collect::<Result<Vec<_>, _>>()
             })
             .transpose()?;

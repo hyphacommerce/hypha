@@ -341,7 +341,7 @@ fn narrowing_the_allowlist_needs_no_scopes_but_changing_scopes_does() {
     };
     assert_eq!(
         block_on(update_agent(&staff(), &w.ports, agent.id(), bad)).err(),
-        Some(CommandError::Operation(hypha_agents::OperationError(
+        Some(CommandError::Operation(hypha_agents::OperationIdError(
             "products".to_string()
         )))
     );

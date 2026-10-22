@@ -478,12 +478,11 @@ mod tests {
 
     #[test]
     fn a_direct_tool_may_not_take_a_fixed_name() {
-        let mut config = ServerConfig::new("hypha", "0.1.0");
-        config.direct_tools = vec![id("call")];
-        assert_eq!(
-            Server::new(config).err(),
-            Some(ConfigError::DirectToolShadowsFixed(id("call")))
-        );
+        // Every operation ID has a dot, so its tool name has a "__" no fixed tool has:
+        // the check in `Server::new` holds by construction.
+        for fixed in FIXED_TOOLS {
+            assert!(OperationId::from_tool_name(fixed).is_err(), "{fixed}");
+        }
     }
 
     #[test]

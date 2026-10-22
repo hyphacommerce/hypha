@@ -1,7 +1,7 @@
 use hypha_core::{AgentId, CallbackUrlError, ErrorCode, IdempotencyError, TextError};
 use thiserror::Error;
 
-use crate::{GrantError, OperationError, ProposalStatus};
+use crate::{GrantError, OperationIdError, ProposalStatus};
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum AgentError {
@@ -31,7 +31,7 @@ impl ErrorCode for AgentError {
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum ProposalError {
     #[error(transparent)]
-    Operation(#[from] OperationError),
+    Operation(#[from] OperationIdError),
     #[error(transparent)]
     Idempotency(#[from] IdempotencyError),
     /// Pending is the only state a proposal leaves.
@@ -79,7 +79,7 @@ impl ErrorCode for ProposalError {
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CallError {
     #[error(transparent)]
-    Operation(#[from] OperationError),
+    Operation(#[from] OperationIdError),
     #[error("{0} is not an HTTP status")]
     InvalidStatus(u16),
     /// Error codes are snake_case, like every code Hypha answers with.

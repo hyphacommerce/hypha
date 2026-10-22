@@ -47,9 +47,9 @@ pub mod server;
 pub mod tools;
 
 pub use ops::{
-    Access, BodySchema, CallMode, ErrorDoc, InvalidOperationId, McpError, Mode, OperationCall,
-    OperationId, OperationResponse, OperationResult, OperationSchema, OperationSummary, Operations,
-    ProposalQuery, ProposalStatus, Proposed,
+    Access, BodySchema, CallMode, ErrorDoc, McpError, Mode, OperationCall, OperationId,
+    OperationIdError, OperationResponse, OperationResult, OperationSchema, OperationSummary,
+    Operations, ProposalQuery, ProposalStatus, Proposed,
 };
 pub use protocol::{
     Headers, LEGACY_VERSIONS, METHOD_HEADER, MODERN_VERSIONS, NAME_HEADER, PROTOCOL_VERSION_HEADER,

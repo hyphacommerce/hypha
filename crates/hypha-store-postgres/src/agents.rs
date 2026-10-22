@@ -47,7 +47,7 @@ fn agent_from_row(row: &Row) -> Result<Agent, RepoError> {
     let operations = col::<Option<Vec<String>>>(row, "operations")?
         .map(|ops| {
             ops.iter()
-                .map(|o| OperationId::new(o))
+                .map(OperationId::new)
                 .collect::<Result<Vec<_>, _>>()
         })
         .transpose()
