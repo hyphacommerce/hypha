@@ -1,59 +1,86 @@
 ---
+import wordmarkDark from "../../../admin/public/brand/hypha-wordmark-on-dark.svg?url";
+import wordmark from "../../../admin/public/brand/hypha-wordmark.svg?url";
 import { GITHUB, SPONSOR } from "../consts";
+
+const links = [
+  { href: "/docs", label: "Docs" },
+  { href: "/docs/api/admin", label: "API" },
+  { href: "/blog", label: "Blog" },
+  { href: "/releases", label: "Releases" },
+  { href: "/changelog", label: "Changelog" },
+  { href: "/rss.xml", label: "RSS" },
+  { href: GITHUB, label: "GitHub" },
+  { href: SPONSOR, label: "Sponsor" },
+];
 ---
 
 <footer class="footer">
-  <div class="wrap cols">
-    <p class="note">
-      Hypha is open source under the MIT or Apache-2.0 license. It's a public preview: it works end
-      to end, it isn't production-proven yet, and its APIs may change between 0.x releases.
-    </p>
-    <ul>
-      <li><a href="/docs">Docs</a></li>
-      <li><a href="/docs/api/admin">Admin API</a></li>
-      <li><a href="/docs/api/storefront">Storefront API</a></li>
-    </ul>
-    <ul>
-      <li><a href="/blog">Blog</a></li>
-      <li><a href="/releases">Releases</a></li>
-      <li><a href="/changelog">Changelog</a></li>
-      <li><a href="/rss.xml">RSS</a></li>
-    </ul>
-    <ul>
-      <li><a href={GITHUB}>GitHub</a></li>
-      <li><a href={SPONSOR}>Sponsor</a></li>
-    </ul>
+  <div class="bar">
+    <div class="brand">
+      <img class="on-light" src={wordmark} alt="Hypha" width="63" height="20" />
+      <img class="on-dark" src={wordmarkDark} alt="Hypha" width="63" height="20" />
+      <span>Open source under MIT or Apache-2.0 · © 2026</span>
+    </div>
+    <nav aria-label="Footer">
+      {links.map((l) => <a href={l.href}>{l.label}</a>)}
+    </nav>
   </div>
 </footer>
 
 <style>
   .footer {
-    margin-top: 120px;
-    padding-block: 48px 64px;
+    position: relative;
+    z-index: 1;
+    margin-top: 96px;
     border-top: 1px solid var(--rule);
-    background: var(--bg-sunk);
-    font-size: 0.93rem;
+    background: var(--bg);
   }
 
-  .cols {
-    display: grid;
-    grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
-    gap: 32px;
+  /* The landing page ends on its own closing section. */
+  :global(main:has(.page)) + .footer {
+    margin-top: 0;
   }
 
-  .note {
-    max-width: 44ch;
-    color: var(--text-muted);
+  .bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px 32px;
+    align-items: center;
+    justify-content: space-between;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 28px 20px 36px;
   }
 
-  ul {
-    margin: 0;
-    padding: 0;
-    list-style: none;
+  .brand {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+    font-size: 13px;
+    color: var(--text-faint);
   }
 
-  li + li {
-    margin-top: 8px;
+  .brand img {
+    width: auto;
+    height: 20px;
+  }
+
+  .on-dark,
+  :global([data-theme="dark"]) .on-light {
+    display: none;
+  }
+
+  :global([data-theme="dark"]) .on-dark {
+    display: block;
+  }
+
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 18px;
+    font-size: 14px;
   }
 
   a {
@@ -63,16 +90,5 @@ import { GITHUB, SPONSOR } from "../consts";
 
   a:hover {
     color: var(--text);
-    text-decoration: underline;
-  }
-
-  @media (max-width: 760px) {
-    .cols {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-
-    .note {
-      grid-column: 1 / -1;
-    }
   }
 </style>
