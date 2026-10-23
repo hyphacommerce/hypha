@@ -80,7 +80,7 @@ hypha-products = { path = "../hypha-products" }
 jiff = "0.2"
 tower = { version = "0.5.3", features = ["util"] }
 # Reading apps' session tokens (JWTs) in the route tests.
-base64 = "0.22"
+base64 = "0.23"
 
 [lints]
 workspace = true

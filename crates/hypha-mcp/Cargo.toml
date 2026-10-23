@@ -6,7 +6,7 @@ license.workspace = true
 description = "The Model Context Protocol server: JSON-RPC, versions and tools, behind an Operations port."
 
 [dependencies]
-base64 = "0.22"
+base64 = "0.23"
 hypha-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true

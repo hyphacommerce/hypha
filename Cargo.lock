@@ -1167,7 +1167,7 @@ name = "hypha-host-axum"
 version = "0.1.0"
 dependencies = [
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "deadpool",
  "deadpool-postgres",
  "getrandom 0.4.3",
@@ -1255,7 +1255,7 @@ name = "hypha-http"
 version = "0.1.0"
 dependencies = [
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "hmac",
  "hypha-agents",
  "hypha-apps",
@@ -1376,7 +1376,7 @@ dependencies = [
 name = "hypha-mcp"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "hypha-core",
  "pollster",
  "serde",
@@ -1666,7 +1666,7 @@ dependencies = [
 name = "hypha-store-s3"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "hmac",
  "hypha-core",
  "hypha-media",
