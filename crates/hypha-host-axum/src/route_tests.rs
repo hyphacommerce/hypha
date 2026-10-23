@@ -1009,6 +1009,19 @@ async fn inventory_items_are_listed_across_products_lowest_first() {
         let (status, body) = send(&app, "GET", &uri, None).await;
         assert_eq!((status, code(&body)), expected, "{query}");
     }
+
+    // The list names products: stock alone doesn't read it.
+    let stock_only = key(
+        &app,
+        json!({"kind": "secret", "name": "stock", "scopes": ["inventory:read"]}),
+    )
+    .await;
+    let (status, body) = send_as(&app, &stock_only, "GET", "/admin/inventory-items", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "missing_scope"),
+        "{body}"
+    );
 }
 
 #[tokio::test]

@@ -539,13 +539,14 @@ pub struct InventoryItemSummaryResponse {
 pub(super) type InventoryItemSummaryPage = PageResponse<InventoryItemSummaryResponse>;
 
 /// Inventory items across products, lowest available first (at `location` when given),
-/// then by ID: what's running low. Items whose variant was removed are left out.
+/// then by ID: what's running low. Items whose variant was removed are left out. Each
+/// names its product, title and SKU, so it takes `products:read` too.
 #[utoipa::path(
     get,
     path = "/admin/inventory-items",
     params(PageParams, InventoryItemFilters),
     responses((status = 200, description = "OK", body = InventoryItemSummaryPage)),
-    extensions(("x-hypha-scopes" = json!(["inventory:read"]))),
+    extensions(("x-hypha-scopes" = json!(["inventory:read", "products:read"]))),
 )]
 pub async fn list_items<S: Storage>(
     State(state): State<SharedState<S>>,
@@ -553,6 +554,8 @@ pub async fn list_items<S: Storage>(
     query: ListQuery<InventoryItemFilters>,
 ) -> Result<Json<InventoryItemSummaryPage>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
+    ctx.require(hypha_core::Scope::ProductsRead)
+        .map_err(ProductsError::from)?;
     let (page, filters, scope) = query.parse_sorted()?;
     if let Some(location) = filters.location {
         get_location(&ctx, ports.locations(), location).await?;

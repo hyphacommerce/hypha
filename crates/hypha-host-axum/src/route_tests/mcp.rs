@@ -126,7 +126,7 @@ async fn tools_list_follows_the_grant_in_both_protocol_eras() {
     )
     .await;
     let (_, support) = agent_key(&app, json!({"read": ["customers:read"]})).await;
-    let (_, stock) = agent_key(&app, json!({"read": ["inventory:read"]})).await;
+    let (_, stock) = agent_key(&app, json!({"read": ["inventory:read", "products:read"]})).await;
 
     let tools = tool_names(&app, &catalog).await;
     for fixed in [
@@ -217,7 +217,9 @@ async fn every_tools_refs_resolve_from_its_input_schema() {
         let mut found = Vec::new();
         refs(input, &mut found);
         for target in found {
-            let pointer = target.strip_prefix('#').unwrap_or_else(|| panic!("{target}"));
+            let pointer = target
+                .strip_prefix('#')
+                .unwrap_or_else(|| panic!("{target}"));
             assert!(
                 input.pointer(pointer).is_some(),
                 "{}: {target} doesn't resolve",
