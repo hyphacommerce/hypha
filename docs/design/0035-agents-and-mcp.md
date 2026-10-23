@@ -352,7 +352,7 @@ daily work of running a store (what's come in, what to ship, what's running out,
 to change in the catalog), named after their operations (dots as `__`, below), and
 `find_operations` names a curated operation's tool beside its ID, so an agent that
 found one and one listed directly call the same thing. Writes among them
-take the same `mode`. Twenty-two, 13 reads and 9 writes:
+take the same `mode`. Twenty-three, 14 reads and 9 writes:
 
 | Job | Reads | Writes |
 | --- | --- | --- |
@@ -360,7 +360,7 @@ take the same `mode`. Twenty-two, 13 reads and 9 writes:
 | Orders | `admin.orders.list`, `admin.orders.fetch`, `admin.fulfillments.list` | `admin.fulfillments.create`, `admin.orders.mark_paid`, `admin.orders.cancel` |
 | Customers | `admin.customers.list`, `admin.customers.fetch` | |
 | Catalog | `admin.products.list`, `admin.products.fetch`, `admin.categories.list` | `admin.products.update`, `admin.products.update_variant`, `admin.products.set_status`, `admin.categories.add_products` |
-| Stock | `admin.inventory.fetch_product_inventory`, `admin.inventory.list_locations` | `admin.inventory.adjust_level` |
+| Stock | `admin.inventory.list_items` (`below`: what's running low), `admin.inventory.fetch_product_inventory`, `admin.inventory.list_locations` | `admin.inventory.adjust_level` |
 | Prices | `admin.markets.list_markets`, `admin.markets.list_fixed_prices` | `admin.markets.set_fixed_prices` |
 
 Left to `find_operations` on purpose: refunds, captures and voids (money leaving;
@@ -758,7 +758,7 @@ tools' names have no dots and are unchanged.
   effect where routes take them (the order, fulfilment and payment writes and
   proposals); elsewhere `preview_token` is the exactly-once tool (`409 preview_used`).
   The instructions tell agents to send both.
-- **Direct tools and instructions.** `mcp::DIRECT_TOOLS` is §7's 22 (13 reads, 9
+- **Direct tools and instructions.** `mcp::DIRECT_TOOLS` is §7's 23 (14 reads, 9
   writes; `direct_tools_are_operations` fails if one is renamed or stops being callable
   by agents); `mcp::INSTRUCTIONS` tells a model to start with `whoami`, preview, show the
   person, apply with the token, use keys, follow proposals, read money as minor units of

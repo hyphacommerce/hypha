@@ -126,6 +126,7 @@ async fn tools_list_follows_the_grant_in_both_protocol_eras() {
     )
     .await;
     let (_, support) = agent_key(&app, json!({"read": ["customers:read"]})).await;
+    let (_, stock) = agent_key(&app, json!({"read": ["inventory:read"]})).await;
 
     let tools = tool_names(&app, &catalog).await;
     for fixed in [
@@ -141,6 +142,10 @@ async fn tools_list_follows_the_grant_in_both_protocol_eras() {
     assert!(tools.contains(&"admin__orders__list".to_string()));
     assert!(tools.contains(&"admin__products__update".to_string()));
     assert!(!tools.contains(&"admin__customers__list".to_string()));
+
+    // What's running low, across products.
+    let tools = tool_names(&app, &stock).await;
+    assert!(tools.contains(&"admin__inventory__list_items".to_string()));
 
     let tools = tool_names(&app, &support).await;
     assert!(tools.contains(&"admin__customers__list".to_string()));

@@ -86,10 +86,10 @@ choosing, so `/mcp` offers a few tools that reach every operation on demand:
 | `call` | runs any operation: `{operation, params, query, body, mode, idempotency_key, preview_token}` |
 | `get_proposal`, `list_proposals` | its own proposals and their outcomes |
 
-Beside them, 22 **direct tools** for the daily work, named after their operation with
+Beside them, 23 **direct tools** for the daily work, named after their operation with
 each `.` as `__` (`admin__orders__list`, `admin__inventory__adjust_level`, …): orders and
-fulfilments, customers, the catalog, stock and prices. An agent sees only what its grant
-allows.
+fulfilments, customers, the catalog, stock (what's running low too) and prices. An agent
+sees only what its grant allows.
 
 Operations are the admin API's own (`admin.products.update` is `PATCH
 /admin/products/{id}`), so everything in the [OpenAPI document](../../openapi/admin.json)
