@@ -39,6 +39,9 @@ mod route_tests;
 mod runner;
 mod start;
 mod storage;
+/// A test host for route tests, a spore's included (feature `testing`).
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 pub use hypha_http::handlers::CoreHandlers;
 pub use hypha_http::payments::CoreProviders;
@@ -185,6 +188,7 @@ macro_rules! host {
     };
 }
 
-// The stock deployment, for this crate's own tests (the binary declares its own).
-#[cfg(test)]
-deployment! { pub(crate) enum Stock { spores: [] } }
+// The stock deployment, no spores: for the route tests and `testing`'s default (the binary
+// declares its own).
+#[cfg(any(test, feature = "testing"))]
+deployment! { pub enum Stock { spores: [] } }
