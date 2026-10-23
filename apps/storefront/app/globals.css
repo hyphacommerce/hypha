@@ -126,6 +126,16 @@ body {
   justify-self: center;
 }
 
+/* The footer's "Built with Hypha" credit. */
+.shop-built-with {
+  color: inherit;
+  text-underline-offset: 3px;
+}
+
+.shop-built-with:hover {
+  color: var(--color-text-primary);
+}
+
 .shop-rounded {
   border-radius: var(--radius-container);
   overflow: hidden;

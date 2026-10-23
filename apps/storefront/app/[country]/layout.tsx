@@ -126,7 +126,11 @@ export default async function CountryLayout({
               </Grid>
               <HStack hAlign="between" wrap="wrap" gap={2}>
                 <Text type="supporting" color="secondary">
-                  © {store.name}
+                  © {store.name} · Built with{" "}
+                  {/* Hypha's credit, like a theme's: a merchant may remove it. */}
+                  <a className="shop-built-with" href="https://hyphacommerce.com">
+                    Hypha
+                  </a>
                 </Text>
                 <Text type="supporting" color="secondary">
                   Shipping to {country.name} · Prices in {country.currency}
