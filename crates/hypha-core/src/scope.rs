@@ -102,8 +102,9 @@ pub enum Scope {
     CustomFieldsRead,
     #[serde(rename = "custom_fields:write")]
     CustomFieldsWrite,
-    /// Admin agents: their grants, their call log and the proposals they make. Never
-    /// granted to an agent itself, so no agent widens its own reach.
+    /// Admin agents: their grants, their call log and the proposals they make. An agent
+    /// may be granted `agents:read`, never `agents:write`, so no agent widens its own
+    /// reach.
     #[serde(rename = "agents:read")]
     AgentsRead,
     #[serde(rename = "agents:write")]
