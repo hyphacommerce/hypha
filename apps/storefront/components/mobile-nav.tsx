@@ -87,10 +87,10 @@ export default function MobileNav({
             </SiteLink>
           </nav>
           <Divider />
-          <HStack gap={3} vAlign="center" hAlign="between">
+          <VStack gap={2}>
             <Text color="secondary">Currency</Text>
-            <CurrencySwitcher current={country} countries={countries} />
-          </HStack>
+            <CurrencySwitcher current={country} countries={countries} layout="segments" />
+          </VStack>
         </VStack>
       </Dialog>
     </>

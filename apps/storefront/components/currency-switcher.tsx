@@ -5,6 +5,7 @@
 // the store sells in, as Shopify themes do. Picking one moves the shopper to a country
 // that pays in it (theirs, if it does) and remembers it.
 
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
 import { usePathname } from "next/navigation";
 import { useTransition } from "react";
@@ -18,9 +19,13 @@ export type CountryOption = { code: string; name: string; currency: string };
 export function CurrencySwitcher({
   current,
   countries,
+  layout = "menu",
 }: {
   current: string;
   countries: CountryOption[];
+  /** `menu`, a dropdown (the header); `segments`, every currency at once (the phones'
+   * menu drawer, where a dropdown at the bottom opens below the screen). */
+  layout?: "menu" | "segments";
 }) {
   const path = usePathname();
   const [pending, start] = useTransition();
@@ -28,6 +33,30 @@ export function CurrencySwitcher({
   const currency = countries.find((c) => c.code === current)?.currency;
   const currencies = [...new Set(countries.map((c) => c.currency))].toSorted();
   if (currencies.length < 2) return null;
+  const pick = (picked: string | null) => {
+    if (!picked || picked === currency) return;
+    const target = countries.find((c) => c.currency === picked);
+    if (target) {
+      // The action redirects: the navigation bar is started by hand.
+      progress.start();
+      start(() => setCountry({ country: target.code, path }));
+    }
+  };
+  if (layout === "segments") {
+    return (
+      <SegmentedControl
+        label="Currency"
+        size="sm"
+        value={currency ?? ""}
+        onChange={pick}
+        isDisabled={pending}
+      >
+        {currencies.map((code) => (
+          <SegmentedControlItem key={code} value={code} label={code} />
+        ))}
+      </SegmentedControl>
+    );
+  }
   return (
     <Selector
       label="Currency"
@@ -37,15 +66,7 @@ export function CurrencySwitcher({
       isLoading={pending}
       value={currency}
       options={currencies.map((code) => ({ value: code, label: code }))}
-      onChange={(picked) => {
-        if (!picked || picked === currency) return;
-        const target = countries.find((c) => c.currency === picked);
-        if (target) {
-          // The action redirects: the navigation bar is started by hand.
-          progress.start();
-          start(() => setCountry({ country: target.code, path }));
-        }
-      }}
+      onChange={pick}
     />
   );
 }
