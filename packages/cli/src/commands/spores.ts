@@ -1,5 +1,5 @@
 // `hypha spores`: the spores compiled into the deployment's API. `add` lists one in
-// `hypha.json` (this repository's by name, or a crate), `remove` takes it out, `list`
+// `hypha.json` (a first-party one by name, or a crate), `remove` takes it out, `list`
 // shows them. `hypha deploy` builds the API with them; a spore removed keeps its tables
 // and its app (shown as missing) until dropped by hand.
 
@@ -7,20 +7,13 @@ import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 
 import { loadDeployment, saveDeployment } from "../deployment.ts";
-import {
-  FIRST_PARTY_SPORES,
-  type SporeEntry,
-  isFirstParty,
-  normalizeSpores,
-  sporeName,
-} from "../spores.ts";
+import { FIRST_PARTY_SPORES, type SporeEntry, normalizeSpores, sporeName } from "../spores.ts";
 import { dirArg, guarded } from "./shared.ts";
 
 /** What `list` shows for a spore. */
 export function describeSpore(entry: SporeEntry): string {
-  if (isFirstParty(entry)) return `${entry.padEnd(12)} this repository's (spores/${entry})`;
   const source = entry.git
-    ? `${entry.git} @ ${entry.rev?.slice(0, 12)}`
+    ? `${entry.git} @ ${entry.rev?.slice(0, 12) ?? "unpinned"}`
     : entry.version
       ? `crates.io ${entry.version}`
       : `path ${entry.path}`;
@@ -42,7 +35,7 @@ export const spores = defineCommand({
           const listed = d.spores ?? [];
           if (listed.length === 0) {
             p.log.info(
-              `No spores: \`hypha spores add ${FIRST_PARTY_SPORES[0]}\` adds this repository's.`,
+              `No spores: \`hypha spores add ${Object.keys(FIRST_PARTY_SPORES)[0]}\` adds the first-party one.`,
             );
             return;
           }
@@ -59,7 +52,7 @@ export const spores = defineCommand({
         spore: {
           type: "positional",
           required: true,
-          description: `This repository's (${FIRST_PARTY_SPORES.join(", ")}), or a name with --crate`,
+          description: `A first-party spore (${Object.keys(FIRST_PARTY_SPORES).join(", ")}), or a name with --crate`,
         },
         crate: { type: "string", description: "Its crate (a spore from outside)" },
         type: { type: "string", description: "Its Spore type (crate_name::Type)" },
@@ -68,7 +61,10 @@ export const spores = defineCommand({
           description: "Its route macro (crate_name::name_routes), if it has routes",
         },
         git: { type: "string", description: "Its repository (with --rev)" },
-        rev: { type: "string", description: "The commit (40 hex digits)" },
+        rev: {
+          type: "string",
+          description: "The commit (40 hex digits); without it, the next deploy pins the head",
+        },
         version: { type: "string", description: "Its crates.io version" },
         path: { type: "string", description: "A local path (relative to the deployment)" },
       },

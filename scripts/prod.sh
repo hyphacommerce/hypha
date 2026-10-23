@@ -14,13 +14,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# First-party spores to build the API with: HYPHA_SPORES=stripe (comma-separated)
-# turns on each one's `spore-<name>` feature.
-SPORE_FEATURES=""
+# First-party spores to build the API with: HYPHA_SPORES=stripe (comma-separated), each
+# from its checkout beside this one (`../spore-stripe`) or else cloned at its head, in a
+# host crate of their own (`.hypha-build/dev/host`).
+API_CRATE=(-p hypha-host-axum)
 # `:-`: set -u refuses an unset variable (bash 4+).
-spores="${HYPHA_SPORES:-}"
-for spore in ${spores//,/ }; do SPORE_FEATURES+="spore-$spore,"; done
-SPORE_FEATURES="${SPORE_FEATURES%,}"
+if [ -n "${HYPHA_SPORES:-}" ]; then
+  API_CRATE=(--manifest-path "$(node packages/cli/src/dev-host.ts "$HYPHA_SPORES")")
+  # The workspace's target, so Hypha's crates aren't compiled a second time.
+  export CARGO_TARGET_DIR="$PWD/target"
+fi
 
 API_PORT=3917
 
@@ -59,7 +62,7 @@ done
 # Built before anything starts, so a failing build stops here.
 if [ -z "${HYPHA_PROD_SKIP_BUILD:-}" ]; then
   echo "Building the API (release), the admin and the storefront…"
-  cargo build --release -q -p hypha-host-axum ${SPORE_FEATURES:+--features "$SPORE_FEATURES"}
+  cargo build --release -q "${API_CRATE[@]}"
   pnpm --filter admin build
   pnpm --filter storefront build
 fi
@@ -87,7 +90,7 @@ echo "Starting the API on :${API_PORT}…"
 HYPHA_BIND="127.0.0.1:$API_PORT" \
   HYPHA_SECRET_KEY="$(cat .dev-secret-key)" \
   HYPHA_ALLOW_PRIVATE_CALLBACKS=true \
-  cargo run --release -q -p hypha-host-axum ${SPORE_FEATURES:+--features "$SPORE_FEATURES"} > >(label api) 2>&1 &
+  cargo run --release -q "${API_CRATE[@]}" > >(label api) 2>&1 &
 pids+=($!)
 
 until curl -sf "http://127.0.0.1:$API_PORT/health" >/dev/null; do

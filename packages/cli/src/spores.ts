@@ -1,40 +1,50 @@
-// Spores: Rust crates compiled into the deployment's API. A first-party spore (this
-// repository's `spores/<name>`, `"stripe"` in `hypha.json`) is a Cargo feature of the
-// hosts (`spore-<name>`); any other is a crate from git, crates.io or a path, which
-// needs host crates of the deployment's own, written next to this checkout (so Docker's
-// build context holds both) and built instead of the stock ones: the native host
-// (`writeHostCrate`: a server's API, and Cloudflare's `setup` tool) and the Worker
-// (`writeWorkerCrate`).
+// Spores: Rust crates compiled into the deployment's API, each from git (the first-party
+// ones from their own repositories: `"stripe"` in `hypha.json` stands for
+// hyphacommerce/spore-stripe), crates.io or a path. A deployment with spores gets host
+// crates of its own, written into this checkout (so Docker's build context holds them):
+// the native host (`writeHostCrate`: a server's API, and Cloudflare's `setup` tool) and
+// the Worker (`writeWorkerCrate`). A git spore is cloned here at its commit with this
+// machine's git credentials (`fetchSpores`) and built from that clone, so the build
+// needs none.
 
 import { createHash } from "node:crypto";
+import { readdirSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
 
+import { type Runner, cloneAt } from "./apps.ts";
 import { REPO } from "./templates.ts";
 
-/** The spores this repository ships, each a feature of `hypha-host-axum` and
- * `hypha-host-workers` (`spore-<name>`). */
-export const FIRST_PARTY_SPORES = ["stripe"] as const;
+/** Hypha's repository, as spores outside it name it in their git dependencies. */
+export const HYPHA_GIT = "https://github.com/hyphacommerce/hypha";
 
-/** A spore in `hypha.json`: a first-party name alone (`"stripe"`), or a crate. */
-export type SporeEntry =
-  | string
-  | {
-      /** Its name (`NAME`): `spore_<name>` is its app's key. */
-      name: string;
-      /** The crate (`acme-hypha-reviews`), from one of `git` (with `rev`), `version`
-       * (crates.io) or `path`. */
-      crate: string;
-      git?: string;
-      rev?: string;
-      version?: string;
-      path?: string;
-      /** Its `Spore` type (`acme_hypha_reviews::Reviews`). */
-      spore: string;
-      /** The route macro its `spore_routes!` defines (`acme_hypha_reviews::reviews_routes`);
-       * absent for a spore without routes. */
-      routes?: string;
-    };
+/** A spore in `hypha.json`, after a first-party name alone (`"stripe"`) is filled in. */
+export type SporeEntry = {
+  /** Its name (`NAME`): `spore_<name>` is its app's key. */
+  name: string;
+  /** The crate (`acme-hypha-reviews`), from one of `git` (with `rev`, set by the next
+   * deploy when absent), `version` (crates.io) or `path`. */
+  crate: string;
+  git?: string;
+  rev?: string;
+  version?: string;
+  path?: string;
+  /** Its `Spore` type (`acme_hypha_reviews::Reviews`). */
+  spore: string;
+  /** The route macro its `spore_routes!` defines (`acme_hypha_reviews::reviews_routes`);
+   * absent for a spore without routes. */
+  routes?: string;
+};
+
+/** The first-party spores, by name: each in its own repository. */
+export const FIRST_PARTY_SPORES: Record<string, Omit<SporeEntry, "name">> = {
+  stripe: {
+    crate: "hypha-spore-stripe",
+    git: "git@github.com:hyphacommerce/spore-stripe.git",
+    spore: "hypha_spore_stripe::Stripe",
+    routes: "hypha_spore_stripe::stripe_routes",
+  },
+};
 
 const NAME = /^[a-z][a-z0-9_]*$/;
 const REV = /^[0-9a-f]{40}$/;
@@ -42,59 +52,60 @@ const RUST_PATH = /^[a-z_][a-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)+$/;
 
 /** The spore's name. */
 export function sporeName(entry: SporeEntry): string {
-  return typeof entry === "string" ? entry : entry.name;
+  return entry.name;
 }
 
-/** Whether it's one of this repository's (a feature, no host crate). */
-export function isFirstParty(entry: SporeEntry): entry is string {
-  return typeof entry === "string";
-}
-
-/** `hypha.json`'s `spores`, checked: every problem a message naming `where`. The names
- * may not extend one another (`stripe`, `stripe_link`), as the hosts check. */
+/** `hypha.json`'s `spores`, checked: every problem a message naming `where`. A
+ * first-party name alone is filled in from its repository. The names may not extend one
+ * another (`stripe`, `stripe_link`), as the hosts check. */
 export function normalizeSpores(raw: unknown, where: string): SporeEntry[] {
   if (!Array.isArray(raw)) throw new Error(`${where}: \`spores\` is a list`);
   const out: SporeEntry[] = [];
+  const known = Object.keys(FIRST_PARTY_SPORES).join(", ");
   for (const item of raw) {
-    let entry: SporeEntry;
+    let o: Partial<SporeEntry>;
     if (typeof item === "string") {
-      if (!(FIRST_PARTY_SPORES as readonly string[]).includes(item))
+      const first = FIRST_PARTY_SPORES[item];
+      if (!first)
         throw new Error(
-          `${where}: ${JSON.stringify(item)} isn't a first-party spore (${FIRST_PARTY_SPORES.join(", ")}): give {name, crate, spore, and git+rev, version or path}`,
+          `${where}: ${JSON.stringify(item)} isn't a first-party spore (${known}): give {name, crate, spore, and git, version or path}`,
         );
-      entry = item;
+      o = { name: item, ...first };
     } else if (item && typeof item === "object") {
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- each field is checked next
-      const o = item as Partial<Exclude<SporeEntry, string>>;
-      const name = o.name;
-      if (typeof name !== "string" || typeof o.crate !== "string" || typeof o.spore !== "string")
-        throw new Error(`${where}: a spore needs \`name\`, \`crate\` and \`spore\``);
-      const sources = [o.git, o.version, o.path].filter((s) => s !== undefined);
-      if (sources.length !== 1)
-        throw new Error(
-          `${where}: spore ${name}: give one of \`git\` (with \`rev\`), \`version\` or \`path\``,
-        );
-      if (o.git !== undefined && (typeof o.rev !== "string" || !REV.test(o.rev)))
-        throw new Error(`${where}: spore ${name}: \`rev\` is a full commit ID (40 hex digits)`);
-      if (!RUST_PATH.test(o.spore))
-        throw new Error(`${where}: spore ${name}: \`spore\` is a Rust path (crate_name::Type)`);
-      if (o.routes !== undefined && !RUST_PATH.test(o.routes))
-        throw new Error(
-          `${where}: spore ${name}: \`routes\` is a Rust path (crate_name::name_routes)`,
-        );
-      entry = {
-        name,
-        crate: o.crate,
-        spore: o.spore,
-        ...(o.git !== undefined ? { git: o.git, rev: o.rev } : {}),
-        ...(o.version !== undefined ? { version: o.version } : {}),
-        ...(o.path !== undefined ? { path: o.path } : {}),
-        ...(o.routes !== undefined ? { routes: o.routes } : {}),
-      };
+      const given = item as Partial<SporeEntry>;
+      const first = given.name ? FIRST_PARTY_SPORES[given.name] : undefined;
+      // A first-party spore's entry carries its pin; the rest comes from here.
+      o = first && given.crate === undefined ? { ...first, ...given } : given;
     } else {
       throw new Error(`${where}: a spore is a first-party name or {name, crate, spore, …}`);
     }
-    const name = sporeName(entry);
+    const name = o.name;
+    if (typeof name !== "string" || typeof o.crate !== "string" || typeof o.spore !== "string")
+      throw new Error(`${where}: a spore needs \`name\`, \`crate\` and \`spore\``);
+    const sources = [o.git, o.version, o.path].filter((s) => s !== undefined);
+    if (sources.length !== 1)
+      throw new Error(`${where}: spore ${name}: give one of \`git\`, \`version\` or \`path\``);
+    if (o.rev !== undefined && (o.git === undefined || !REV.test(o.rev)))
+      throw new Error(
+        `${where}: spore ${name}: \`rev\` is a full commit ID (40 hex digits), with \`git\``,
+      );
+    if (!RUST_PATH.test(o.spore))
+      throw new Error(`${where}: spore ${name}: \`spore\` is a Rust path (crate_name::Type)`);
+    if (o.routes !== undefined && !RUST_PATH.test(o.routes))
+      throw new Error(
+        `${where}: spore ${name}: \`routes\` is a Rust path (crate_name::name_routes)`,
+      );
+    const entry: SporeEntry = {
+      name,
+      crate: o.crate,
+      spore: o.spore,
+      ...(o.git !== undefined ? { git: o.git } : {}),
+      ...(o.rev !== undefined ? { rev: o.rev } : {}),
+      ...(o.version !== undefined ? { version: o.version } : {}),
+      ...(o.path !== undefined ? { path: o.path } : {}),
+      ...(o.routes !== undefined ? { routes: o.routes } : {}),
+    };
     if (!NAME.test(name))
       throw new Error(
         `${where}: spore ${JSON.stringify(name)}: lowercase letters, digits and _, starting with a letter`,
@@ -112,27 +123,48 @@ export function normalizeSpores(raw: unknown, where: string): SporeEntry[] {
   return out;
 }
 
-/** The hosts' features for a deployment's first-party spores (`spore-stripe`), when it
- * has no others; `undefined` when it has none at all. */
-export function sporeFeatures(spores: SporeEntry[]): string | undefined {
-  const first = spores.filter(isFirstParty);
-  return first.length ? first.map((s) => `spore-${s}`).join(",") : undefined;
+/** The deployment's generated crates, in this checkout: git-ignored, named after the
+ * deployment's folder. */
+export function buildDir(deploymentDir: string): string {
+  return join(REPO, ".hypha-build", basename(resolve(deploymentDir)));
 }
 
-/** Whether the deployment needs a host crate of its own (a spore from outside this
- * repository). */
-export function needsHostCrate(spores: SporeEntry[]): boolean {
-  return spores.some((s) => !isFirstParty(s));
-}
-
-/** Where a deployment's host crate goes: in this checkout (Docker's build context),
- * git-ignored, named after the deployment's folder. */
+/** Where a deployment's host crate goes. */
 export function hostCrateDir(deploymentDir: string): string {
-  return join(REPO, ".hypha-build", basename(resolve(deploymentDir)), "host");
+  return join(buildDir(deploymentDir), "host");
 }
 
-/** The host crate's `Cargo.toml`: the native host and every spore, its own workspace. */
-export function hostCargoToml(dir: string, spores: SporeEntry[], deploymentDir = "."): string {
+/** Where a git spore is cloned, beside the host crate (in Docker's build context). */
+export function sporeCloneDir(deploymentDir: string, name: string): string {
+  return join(buildDir(deploymentDir), "spores", name);
+}
+
+/** Each git spore cloned at its commit: its name → the clone. A spore not pinned yet is
+ * refused (`hypha deploy` pins them first). */
+export async function fetchSpores(
+  deploymentDir: string,
+  spores: SporeEntry[],
+  runner?: Runner,
+): Promise<Record<string, string>> {
+  const local: Record<string, string> = {};
+  for (const s of spores) {
+    if (!s.git) continue;
+    if (!s.rev) throw new Error(`spore ${s.name} isn't pinned to a commit (\`rev\`)`);
+    const clone = sporeCloneDir(deploymentDir, s.name);
+    await cloneAt(s.git, s.rev, clone, runner);
+    local[s.name] = clone;
+  }
+  return local;
+}
+
+/** The host crate's `Cargo.toml`: the native host and every spore, its own workspace.
+ * `local` is where each git spore's crate is on this machine (`fetchSpores`). */
+export function hostCargoToml(
+  dir: string,
+  spores: SporeEntry[],
+  deploymentDir = ".",
+  local: Record<string, string> = {},
+): string {
   const repo = (path: string) => JSON.stringify(relative(dir, join(REPO, path)));
   const lines = [
     "# Written by `hypha deploy` from hypha.json's `spores`: change",
@@ -149,14 +181,32 @@ export function hostCargoToml(dir: string, spores: SporeEntry[], deploymentDir =
     "[dependencies]",
     `hypha-host-axum = { path = ${repo("crates/hypha-host-axum")} }`,
   ];
-  lines.push(...sporeDependencies(dir, spores, deploymentDir));
+  lines.push(...sporeDependencies(dir, spores, deploymentDir, local));
+  lines.push(...hyphaPatch(dir));
   lines.push("", "[profile.release]", 'debug = "line-tables-only"', "");
   return lines.join("\n");
 }
 
+/** Spores depend on Hypha through git: this points that source at this checkout, so the
+ * spores and the host share one copy of each crate (two would be two `Spore` traits), and
+ * the build fetches nothing. Cargo warns about the crates no spore uses. */
+function hyphaPatch(dir: string): string[] {
+  const crates = readdirSync(join(REPO, "crates"), { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .toSorted();
+  return [
+    "",
+    `[patch.${JSON.stringify(HYPHA_GIT)}]`,
+    ...crates.map(
+      (c) => `${c} = { path = ${JSON.stringify(relative(dir, join(REPO, "crates", c)))} }`,
+    ),
+  ];
+}
+
 /** A path spore's folder: resolved against the deployment's folder, and inside this
- * checkout's `spores/`, the one folder of it besides the crates that goes into Docker's
- * build context (`docker/api.Dockerfile.dockerignore`). */
+ * checkout's `spores/`, the one folder of it besides the crates and `.hypha-build/` that
+ * goes into Docker's build context (`docker/api.Dockerfile.dockerignore`). */
 export function sporePath(name: string, deploymentDir: string, path: string): string {
   const full = resolve(deploymentDir, path);
   const spores = join(REPO, "spores");
@@ -174,10 +224,8 @@ export function hostMain(spores: SporeEntry[]): string {
 
 /** A generated crate's entry: `<macro> { spores: [...], routes: [...] }`. */
 function crateEntry(macro: string, writer: string, spores: SporeEntry[]): string {
-  const types = spores.map((s) => (isFirstParty(s) ? `hypha_spore_${s}::${pascal(s)}` : s.spore));
-  const routes = spores.flatMap((s) =>
-    isFirstParty(s) ? [`hypha_spore_${s}::${s}_routes`] : s.routes ? [s.routes] : [],
-  );
+  const types = spores.map((s) => s.spore);
+  const routes = spores.flatMap((s) => (s.routes ? [s.routes] : []));
   return [
     `//! Written by ${writer} from hypha.json's \`spores\`.`,
     "",
@@ -189,28 +237,29 @@ function crateEntry(macro: string, writer: string, spores: SporeEntry[]): string
   ].join("\n");
 }
 
-function pascal(name: string): string {
-  return name
-    .split("_")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join("");
-}
-
 /** Where a deployment's Worker crate goes, beside its host crate. */
 export function workerCrateDir(deploymentDir: string): string {
-  return join(REPO, ".hypha-build", basename(resolve(deploymentDir)), "worker");
+  return join(buildDir(deploymentDir), "worker");
 }
 
 /** The spores' dependency lines for a crate in `dir`. */
-function sporeDependencies(dir: string, spores: SporeEntry[], deploymentDir: string): string[] {
+function sporeDependencies(
+  dir: string,
+  spores: SporeEntry[],
+  deploymentDir: string,
+  local: Record<string, string>,
+): string[] {
   return spores.map((s) => {
-    if (isFirstParty(s))
-      return `hypha-spore-${s} = { path = ${JSON.stringify(relative(dir, join(REPO, "spores", s)))} }`;
-    const source = s.git
-      ? `git = ${JSON.stringify(s.git)}, rev = ${JSON.stringify(s.rev)}`
-      : s.version
-        ? `version = ${JSON.stringify(s.version)}`
-        : `path = ${JSON.stringify(relative(dir, sporePath(s.name, deploymentDir, s.path ?? ".")))}`;
+    let source: string;
+    if (s.git) {
+      const clone = local[s.name];
+      if (!clone) throw new Error(`spore ${s.name} hasn't been fetched (\`fetchSpores\`)`);
+      source = `path = ${JSON.stringify(relative(dir, clone))}`;
+    } else if (s.version) {
+      source = `version = ${JSON.stringify(s.version)}`;
+    } else {
+      source = `path = ${JSON.stringify(relative(dir, sporePath(s.name, deploymentDir, s.path ?? ".")))}`;
+    }
     return `${s.crate} = { ${source} }`;
   });
 }
@@ -222,6 +271,7 @@ export function workerCargoToml(
   spores: SporeEntry[],
   worker: string,
   deploymentDir = ".",
+  local: Record<string, string> = {},
 ): string {
   return [
     "# Written by `hypha deploy` from hypha.json's `spores`: change",
@@ -241,7 +291,8 @@ export function workerCargoToml(
     "[dependencies]",
     `hypha-host-workers = { path = ${JSON.stringify(relative(dir, join(REPO, "crates", "hypha-host-workers")))}, default-features = false }`,
     worker,
-    ...sporeDependencies(dir, spores, deploymentDir),
+    ...sporeDependencies(dir, spores, deploymentDir, local),
+    ...hyphaPatch(dir),
     "",
   ].join("\n");
 }
@@ -265,18 +316,23 @@ export async function workerDependency(): Promise<string> {
 export async function writeWorkerCrate(
   deploymentDir: string,
   spores: SporeEntry[],
+  local: Record<string, string> = {},
 ): Promise<string> {
   const dir = workerCrateDir(deploymentDir);
-  const toml = workerCargoToml(dir, spores, await workerDependency(), deploymentDir);
+  const toml = workerCargoToml(dir, spores, await workerDependency(), deploymentDir, local);
   await writeCrate(dir, { "Cargo.toml": toml, "src/lib.rs": workerLib(spores) });
   return dir;
 }
 
 /** Writes the deployment's host crate and returns its folder relative to the checkout
  * (what the API's Dockerfile builds: `HOST_CRATE`). */
-export async function writeHostCrate(deploymentDir: string, spores: SporeEntry[]): Promise<string> {
+export async function writeHostCrate(
+  deploymentDir: string,
+  spores: SporeEntry[],
+  local: Record<string, string> = {},
+): Promise<string> {
   const dir = hostCrateDir(deploymentDir);
-  const toml = hostCargoToml(dir, spores, deploymentDir);
+  const toml = hostCargoToml(dir, spores, deploymentDir, local);
   await writeCrate(dir, { "Cargo.toml": toml, "src/main.rs": hostMain(spores) });
   return relative(REPO, dir);
 }

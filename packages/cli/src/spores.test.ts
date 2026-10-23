@@ -4,17 +4,16 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
-import { workerFeatures } from "./cloudflare.ts";
 import { chooseSpores } from "./commands/init.ts";
 import { describeSpore } from "./commands/spores.ts";
-import type { Deployment } from "./deployment.ts";
 import { buildArgs, images } from "./images.ts";
 import {
+  FIRST_PARTY_SPORES,
+  fetchSpores,
   hostCargoToml,
   hostMain,
-  needsHostCrate,
   normalizeSpores,
-  sporeFeatures,
+  sporeCloneDir,
   workerCargoToml,
   workerDependency,
   writeHostCrate,
@@ -33,12 +32,18 @@ const reviews = {
   rev: REV,
 };
 
-test("a first-party spore is its name; another is a crate from one source", () => {
-  assert.deepEqual(normalizeSpores(["stripe", reviews], "hypha.json"), ["stripe", reviews]);
+const stripe = { name: "stripe", ...FIRST_PARTY_SPORES.stripe };
+
+test("a first-party spore's name stands for its repository; another is a crate from one source", () => {
+  assert.deepEqual(normalizeSpores(["stripe", reviews], "hypha.json"), [stripe, reviews]);
+  // Pinned, as `hypha deploy` saves it: the rest still comes from the repository's entry.
+  assert.deepEqual(normalizeSpores([{ name: "stripe", rev: REV }], "hypha.json"), [
+    { ...stripe, rev: REV },
+  ]);
   assert.throws(() => normalizeSpores(["paypal"], "hypha.json"), /isn't a first-party spore/);
   assert.throws(
     () => normalizeSpores([{ ...reviews, version: "1.0" }], "hypha.json"),
-    /one of `git` \(with `rev`\), `version` or `path`/,
+    /one of `git`, `version` or `path`/,
   );
   assert.throws(
     () => normalizeSpores([{ ...reviews, rev: "main" }], "hypha.json"),
@@ -60,42 +65,35 @@ test("spore names are listed once and may not extend one another", () => {
   assert.throws(() => normalizeSpores([{ ...reviews, name: "Reviews" }], "x"), /lowercase/);
 });
 
-test("first-party spores are the hosts' features; others need a host crate", () => {
-  assert.equal(sporeFeatures([]), undefined);
-  assert.equal(sporeFeatures(["stripe"]), "spore-stripe");
-  assert.equal(needsHostCrate(["stripe"]), false);
-  assert.equal(needsHostCrate(["stripe", reviews]), true);
+test("the API image is the stock host, or the deployment's host crate", () => {
+  const [plain] = images([]);
+  assert.ok(!buildArgs(plain).some((a) => a.startsWith("HOST_CRATE")));
+  const [crate] = images([], ".hypha-build/x/host");
+  assert.ok(buildArgs(crate).join(" ").includes("--build-arg HOST_CRATE=.hypha-build/x/host"));
 });
 
-test("the API image is built with the spores, as features or the host crate", () => {
-  const [plain] = images([], []);
-  assert.ok(
-    !buildArgs(plain).some((a) => a.startsWith("SPORE_FEATURES") || a.startsWith("HOST_CRATE")),
-  );
-  const [features] = images([], ["stripe"]);
-  assert.ok(buildArgs(features).join(" ").includes("--build-arg SPORE_FEATURES=spore-stripe"));
-  const [crate] = images([], ["stripe", reviews], ".hypha-build/x/host");
-  const args = buildArgs(crate).join(" ");
-  assert.ok(args.includes("--build-arg HOST_CRATE=.hypha-build/x/host"), args);
-  assert.ok(!args.includes("SPORE_FEATURES"), args);
-});
-
-test("the host crate names the native host and each spore, its own workspace", () => {
+test("the host crate builds git spores from their clones, with Hypha patched to the checkout", () => {
   const dir = join(REPO, ".hypha-build", "x", "host");
-  const toml = hostCargoToml(dir, ["stripe", reviews]);
+  const local = { stripe: join(REPO, ".hypha-build", "x", "spores", "stripe") };
+  const pinned = { ...stripe, rev: REV };
+  const toml = hostCargoToml(
+    dir,
+    [pinned, { ...reviews, git: undefined, version: "1.2" }],
+    ".",
+    local,
+  );
   assert.match(toml, /^\[workspace\]$/m);
   assert.match(
     toml,
     /^hypha-host-axum = \{ path = "\.\.\/\.\.\/\.\.\/crates\/hypha-host-axum" \}$/m,
   );
-  assert.match(toml, /^hypha-spore-stripe = \{ path = "\.\.\/\.\.\/\.\.\/spores\/stripe" \}$/m);
-  assert.ok(
-    toml.includes(
-      `acme-hypha-reviews = { git = "https://github.com/acme/hypha-reviews", rev = "${REV}" }`,
-    ),
-    toml,
-  );
-  const main = hostMain(["stripe", reviews]);
+  assert.match(toml, /^hypha-spore-stripe = \{ path = "\.\.\/spores\/stripe" \}$/m);
+  assert.match(toml, /^acme-hypha-reviews = \{ version = "1\.2" \}$/m);
+  // Every crate of the checkout, so a spore's git dependency on Hypha is this checkout.
+  assert.match(toml, /^\[patch\."https:\/\/github\.com\/hyphacommerce\/hypha"\]$/m);
+  assert.match(toml, /^hypha-spore = \{ path = "\.\.\/\.\.\/\.\.\/crates\/hypha-spore" \}$/m);
+  assert.throws(() => hostCargoToml(dir, [pinned]), /hasn't been fetched/);
+  const main = hostMain([pinned, reviews]);
   assert.ok(
     main.includes("spores: [hypha_spore_stripe::Stripe, acme_hypha_reviews::Reviews],"),
     main,
@@ -108,22 +106,49 @@ test("the host crate names the native host and each spore, its own workspace", (
   );
 });
 
+test("git spores are cloned at their commit beside the host crate; an unpinned one is refused", async () => {
+  const deployment = await mkdtemp(join(tmpdir(), "hypha-spores-"));
+  const calls: string[][] = [];
+  const runner = async (program: string, args: string[]) => {
+    calls.push([program, ...args]);
+    return "";
+  };
+  const local = await fetchSpores(
+    deployment,
+    [
+      { ...stripe, rev: REV },
+      { ...reviews, git: undefined, version: "1.2" },
+    ],
+    runner,
+  );
+  const clone = sporeCloneDir(deployment, "stripe");
+  assert.deepEqual(local, { stripe: clone });
+  assert.deepEqual(calls[0], ["git", "clone", "--quiet", FIRST_PARTY_SPORES.stripe.git, clone]);
+  assert.ok(
+    calls.some((c) => c.includes("checkout") && c.includes(REV)),
+    JSON.stringify(calls),
+  );
+  await assert.rejects(fetchSpores(deployment, [stripe], runner), /isn't pinned/);
+});
+
+const versioned = { ...reviews, git: undefined, rev: undefined, version: "1.2" };
+
 test("a generated crate's lock follows the checkout's only when that changed", async () => {
   const deployment = await mkdtemp(join(tmpdir(), "hypha-spores-"));
-  const relative = await writeHostCrate(deployment, ["stripe"]);
+  const relative = await writeHostCrate(deployment, [versioned]);
   assert.ok(relative.startsWith(".hypha-build/"), relative);
   const lockPath = join(REPO, relative, "Cargo.lock");
   const checkout = await readFile(join(REPO, "Cargo.lock"), "utf8");
   assert.equal(await readFile(lockPath, "utf8"), checkout);
   const main = await readFile(join(REPO, relative, "src", "main.rs"), "utf8");
-  assert.ok(main.includes("hypha_spore_stripe::Stripe"));
+  assert.ok(main.includes("acme_hypha_reviews::Reviews"));
   // What Cargo resolved for the spores stays while the checkout's lock is the same…
   await writeFile(lockPath, `${checkout}# resolved\n`);
-  await writeHostCrate(deployment, ["stripe"]);
+  await writeHostCrate(deployment, [versioned]);
   assert.ok((await readFile(lockPath, "utf8")).endsWith("# resolved\n"));
   // …and a lock seeded from another checkout lock is replaced.
   await writeFile(join(REPO, relative, "Cargo.lock.seed"), "stale");
-  await writeHostCrate(deployment, ["stripe"]);
+  await writeHostCrate(deployment, [versioned]);
   assert.equal(await readFile(lockPath, "utf8"), checkout);
   await rm(dirname(join(REPO, relative)), { recursive: true });
 });
@@ -133,36 +158,28 @@ test("the Worker crate depends on the very `worker` the host does", async () => 
   const host = await readFile(join(REPO, "crates", "hypha-host-workers", "Cargo.toml"), "utf8");
   assert.ok(host.split("\n").includes(line), line);
   const dir = join(REPO, ".hypha-build", "x", "worker");
-  const toml = workerCargoToml(dir, ["stripe", reviews], line);
+  const toml = workerCargoToml(dir, [versioned], line);
   assert.ok(toml.split("\n").includes(line), toml);
   assert.match(
     toml,
     /^hypha-host-workers = \{ path = "\.\.\/\.\.\/\.\.\/crates\/hypha-host-workers", default-features = false \}$/m,
   );
   const deployment = await mkdtemp(join(tmpdir(), "hypha-spores-"));
-  const written = await writeWorkerCrate(deployment, ["stripe", reviews]);
+  const written = await writeWorkerCrate(deployment, [versioned]);
   const lib = await readFile(join(written, "src", "lib.rs"), "utf8");
   assert.ok(lib.includes("hypha_host_workers::worker!"), lib);
   await rm(dirname(written), { recursive: true });
 });
 
-test("the Worker builds with the first-party spores' features", () => {
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- only `spores` is read
-  const d = { spores: ["stripe"] } as Deployment;
-  assert.equal(workerFeatures(d), " --features spore-stripe");
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- only `spores` is read
-  assert.equal(workerFeatures({} as Deployment), "");
-});
-
 test("init's --spores sets the list, none clears it, absent keeps the earlier", () => {
-  assert.deepEqual(chooseSpores({ spores: "stripe" }, undefined), ["stripe"]);
-  assert.equal(chooseSpores({ spores: "none" }, ["stripe"]), undefined);
-  assert.deepEqual(chooseSpores({}, ["stripe"]), ["stripe"]);
+  assert.deepEqual(chooseSpores({ spores: "stripe" }, undefined), [stripe]);
+  assert.equal(chooseSpores({ spores: "none" }, [stripe]), undefined);
+  assert.deepEqual(chooseSpores({}, [stripe]), [stripe]);
   assert.throws(() => chooseSpores({ spores: "paypal" }, undefined), /first-party/);
 });
 
 test("list says where each spore comes from", () => {
-  assert.match(describeSpore("stripe"), /this repository's \(spores\/stripe\)/);
+  assert.match(describeSpore(stripe), /hypha-spore-stripe \(.*spore-stripe\.git @ unpinned\)/);
   assert.match(
     describeSpore(reviews),
     /acme-hypha-reviews \(https:\/\/github\.com\/acme\/hypha-reviews @ aaaaaaaaaaaa\)/,

@@ -39,14 +39,20 @@ export async function resolveRev(git: string, rev: string | undefined): Promise<
   return remoteHead(git, rev ? rev : "HEAD");
 }
 
-/** Pins every app listed without a commit (a first-party name alone in `hypha.json`) to
- * its repository's head, and saves it. */
+/** Pins every app and git spore listed without a commit (a first-party name alone in
+ * `hypha.json`) to its repository's head, and saves it. */
 export async function pinUnpinned(dir: string, d: Deployment): Promise<void> {
   let changed = false;
   for (const entry of d.apps ?? []) {
     if (entry.rev) continue;
     entry.rev = await remoteHead(entry.git);
     p.log.step(`Pinned the ${entry.name} app to ${entry.rev.slice(0, 12)} (its head)`);
+    changed = true;
+  }
+  for (const entry of d.spores ?? []) {
+    if (!entry.git || entry.rev) continue;
+    entry.rev = await remoteHead(entry.git);
+    p.log.step(`Pinned the ${entry.name} spore to ${entry.rev.slice(0, 12)} (its head)`);
     changed = true;
   }
   if (changed) await saveDeployment(dir, d);

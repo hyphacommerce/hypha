@@ -102,7 +102,7 @@ export function normalizeApps(raw: unknown, where: string): AppEntry[] {
 }
 
 /** What `hypha apps add` takes: a first-party name, or a repository (its name from the
- * repository's, without a `hypha-app-` prefix, unless `name` is given). */
+ * repository's, without an `app-` or `hypha-app-` prefix, unless `name` is given). */
 export function entryFor(spec: string, name?: string): AppEntry {
   const git = FIRST_PARTY[spec] ?? spec;
   if (git === spec && !/^(git@|https:\/\/|ssh:\/\/|file:\/\/|\/)/.test(spec)) {
@@ -119,7 +119,7 @@ export function entryFor(spec: string, name?: string): AppEntry {
           .split(/[/:]/)
           .pop()
           ?.replace(/\.git$/, "")
-          .replace(/^hypha-app-/, "")
+          .replace(/^(hypha-)?app-/, "")
           .toLowerCase() ?? ""));
   const wrong = checkAppName(derived);
   if (wrong) throw new Error(`the app's name, ${JSON.stringify(derived)}: ${wrong} (pass --name)`);
@@ -384,6 +384,31 @@ export async function remoteHead(git: string, ref = "HEAD", runner: Runner = run
   return rev;
 }
 
+/** `git` at commit `rev` in `clone`: cloned the first time, fetched when the commit is new
+ * to it, and left as it is when it's there already. With this machine's git credentials. */
+export async function cloneAt(
+  git: string,
+  rev: string,
+  clone: string,
+  runner: Runner = runHere,
+): Promise<void> {
+  if (!(await exists(join(clone, ".git")))) {
+    await runner("git", ["clone", "--quiet", git, clone], { capture: true });
+  }
+  const has = await runner("git", ["cat-file", "-e", `${rev}^{commit}`], {
+    cwd: clone,
+    capture: true,
+  }).then(
+    () => true,
+    () => false,
+  );
+  if (!has) await runner("git", ["fetch", "--quiet", "origin", rev], { cwd: clone, capture: true });
+  await runner("git", ["-c", "advice.detachedHead=false", "checkout", "--quiet", "--force", rev], {
+    cwd: clone,
+    capture: true,
+  });
+}
+
 async function exists(path: string): Promise<boolean> {
   return stat(path).then(
     () => true,
@@ -416,26 +441,7 @@ export async function checkout(
   if (!a.rev) throw new Error(`app ${a.name} isn't pinned: \`hypha apps update ${a.name}\``);
   await linkHypha(dir);
   const clone = cloneDir(dir, a);
-  if (!(await exists(join(clone, ".git")))) {
-    await runner("git", ["clone", "--quiet", a.git, clone], { capture: true });
-  }
-  const has = await runner("git", ["cat-file", "-e", `${a.rev}^{commit}`], {
-    cwd: clone,
-    capture: true,
-  }).then(
-    () => true,
-    () => false,
-  );
-  if (!has)
-    await runner("git", ["fetch", "--quiet", "origin", a.rev], { cwd: clone, capture: true });
-  await runner(
-    "git",
-    ["-c", "advice.detachedHead=false", "checkout", "--quiet", "--force", a.rev],
-    {
-      cwd: clone,
-      capture: true,
-    },
-  );
+  await cloneAt(a.git, a.rev, clone, runner);
   // The SDK it links needs this checkout's own dependencies.
   if (!(await exists(join(REPO, "node_modules")))) {
     await runner("pnpm", ["install", "--frozen-lockfile"], { cwd: REPO, capture: true });

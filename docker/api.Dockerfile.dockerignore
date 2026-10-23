@@ -1,6 +1,5 @@
-# Only the Rust workspace goes into the API's build: its crates, this repository's spores
-# (the hosts name them as optional dependencies, so even a stock build reads them), and a
-# deployment's own host crate when it has spores from outside.
+# Only the Rust workspace goes into the API's build: its crates, path spores under
+# `spores/`, and a deployment's own host crate with its git spores' clones.
 *
 !Cargo.toml
 !Cargo.lock

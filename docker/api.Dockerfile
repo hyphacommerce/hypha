@@ -4,10 +4,8 @@
 # machine, so a rebuild compiles only what changed.
 
 FROM rust:1.99-trixie AS build
-# Spores, as `hypha deploy` passes them: this repository's own as the host's features
-# (`SPORE_FEATURES=spore-stripe`), or a deployment's host crate
-# (`HOST_CRATE=.hypha-build/<deployment>/host`, written by the CLI) when it has others.
-ARG SPORE_FEATURES=""
+# A deployment with spores: its own host crate (`HOST_CRATE=.hypha-build/<deployment>/host`,
+# written by `hypha deploy`, its git spores cloned beside it).
 ARG HOST_CRATE=""
 WORKDIR /src
 COPY . .
@@ -21,7 +19,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
         && cp target/release/hypha-deployment /hypha-api; \
     else \
         cargo build --release --locked -p hypha-host-axum \
-            ${SPORE_FEATURES:+--features "$SPORE_FEATURES"} \
         && cp target/release/hypha-host-axum /hypha-api; \
     fi
 

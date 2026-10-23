@@ -48,7 +48,7 @@ import {
 } from "./apps.ts";
 import { connectStorefront, type StorefrontKeys, syncWebhook } from "./storefront.ts";
 import { run } from "./shell.ts";
-import { needsHostCrate, sporeFeatures, writeHostCrate, writeWorkerCrate } from "./spores.ts";
+import { fetchSpores, writeHostCrate, writeWorkerCrate } from "./spores.ts";
 import { REPO } from "./templates.ts";
 
 /** The generated configuration, next to `hypha.json`. */
@@ -182,9 +182,8 @@ export function wranglerToml(d: Deployment, input: WorkerInput): string {
     `routes = [{ pattern = ${str(d.domains.api)}, custom_domain = true }]`,
     "",
     "[build]",
-    // This repository's spores are the stock Worker's features; the deployment's own
-    // crate lists every spore itself.
-    `command = ${str(`worker-build --release${input.workerCrate ? "" : workerFeatures(d)}`)}`,
+    // The stock Worker, or the deployment's own crate listing its spores.
+    `command = ${str("worker-build --release")}`,
     // Absolute: wrangler runs the build from its own working directory, reading `cwd`
     // as given (unlike `main`, which is relative to this file).
     `cwd = ${str(workerCrate)}`,
@@ -335,12 +334,12 @@ export async function deployCloudflare(
   if (!databaseUrl || problem) throw new Error(`.env: DATABASE_URL should be ${problem}`);
   const secretKey = env.get("HYPHA_SECRET_KEY");
   if (!secretKey) throw new Error(".env: HYPHA_SECRET_KEY is missing");
-  // Spores from outside this repository: the deployment's own crates, the native one for
-  // `setup` (it migrates and registers them) and the Worker.
+  // Spores: the deployment's own crates, the native one for `setup` (it migrates and
+  // registers them) and the Worker, git spores cloned here first.
   const spores = d.spores ?? [];
-  const outside = needsHostCrate(spores);
-  const hostCrate = outside ? await writeHostCrate(dir, spores) : undefined;
-  const workerCrate = outside ? await writeWorkerCrate(dir, spores) : undefined;
+  const local = spores.length ? await fetchSpores(dir, spores) : {};
+  const hostCrate = spores.length ? await writeHostCrate(dir, spores, local) : undefined;
+  const workerCrate = spores.length ? await writeWorkerCrate(dir, spores, local) : undefined;
   const keyId = env.get("R2_ACCESS_KEY_ID");
   const keySecret = env.get("R2_SECRET_ACCESS_KEY");
   const media = Boolean(keyId && keySecret);
@@ -781,12 +780,6 @@ function pick(env: EnvFile, keys: string[]): Record<string, string> {
   return out;
 }
 
-/** ` --features spore-stripe,…` for `worker-build`: the Worker's first-party spores. */
-export function workerFeatures(d: Deployment): string {
-  const features = sporeFeatures(d.spores ?? []);
-  return features ? ` --features ${features}` : "";
-}
-
 /** The tools on this machine: wrangler (logged in, or `CLOUDFLARE_API_TOKEN`), cargo,
  * and `worker-build` with the wasm target. */
 export function hereTools(dir: string, d: Deployment, env: EnvFile): Tools {
@@ -814,9 +807,7 @@ export function hereTools(dir: string, d: Deployment, env: EnvFile): Tools {
         );
         return join(target, "release", "hypha-deployment");
       }
-      const features = sporeFeatures(d.spores ?? []);
-      const featureArgs = features ? ["--features", features] : [];
-      await run("cargo", ["build", "--release", "-p", "hypha-host-axum", ...featureArgs], {
+      await run("cargo", ["build", "--release", "-p", "hypha-host-axum"], {
         cwd: REPO,
         capture: true,
       });
