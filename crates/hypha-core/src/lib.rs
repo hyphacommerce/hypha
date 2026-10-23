@@ -70,7 +70,9 @@ pub use ports::{
     Clock, HasBatch, IdGenerator, Notifier, NotifyError, Progress, Random, RepoError,
     report_duplicate,
 };
-pub use preview_token::{HasPreviewTokens, PreviewToken, PreviewTokenRepo};
+pub use preview_token::{
+    HasPreviewTokens, PreviewToken, PreviewTokenRepo, RowChange, WriteRecord, WrittenRow,
+};
 pub use quantity::{Quantity, QuantityError};
 pub use retry::{Attempts, MAX_ATTEMPTS, retry_on_conflict};
 pub use scope::Scope;

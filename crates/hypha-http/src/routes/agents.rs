@@ -582,7 +582,8 @@ pub async fn fetch_proposal<S: Storage>(
 }
 
 /// Approves a pending proposal: its write is sent again as its agent, exactly as
-/// previewed (the preview's IDs; committed only if it records the same events). Takes a
+/// previewed (the preview's IDs; committed only if it records the same events over records
+/// as they were when previewed). Takes a
 /// staff session holding every scope the proposal names. Answers the proposal, `applied`
 /// or `failed` with the write's answer in `response`. A write that would no longer do
 /// what was previewed (the store changed meanwhile) writes nothing and answers `409

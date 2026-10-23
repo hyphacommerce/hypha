@@ -195,7 +195,7 @@ where
     OpenPreview::new(
         move || {
             let reader = reader.clone();
-            Box::pin(async move { reader.events().await })
+            Box::pin(async move { reader.recorded().await })
         },
         move |commit, token| Box::pin(open.finish(commit, token)),
     )

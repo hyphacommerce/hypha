@@ -15,14 +15,15 @@
 //! A preview that ran to its end answers a token (`hypha_pv_…`, stored as its SHA-256 for
 //! `agents.preview_token_lifetime`), bound to the caller and the request (its
 //! fingerprint: method, path, query and body), holding the IDs it was handed and the
-//! digest of its events. Sending the same write with `Hypha-Preview-Token` applies it:
+//! digest of what it did (its events, and the rows of aggregates it wrote with the
+//! versions it found). Sending the same write with `Hypha-Preview-Token` applies it:
 //!
 //! - its ports run in one transaction too (`Storage::begin_apply`); `Caller::authenticate`
 //!   checks the token against the caller and marks it used, in that transaction;
 //! - the command is handed the preview's IDs first (`HostIds`), so what it creates is what
 //!   the preview showed;
-//! - once the handler is done, the events its writes recorded are digested like the
-//!   preview's: equal, everything commits; different (something changed meanwhile), it's
+//! - once the handler is done, what its writes did is digested like the preview's: equal,
+//!   everything commits; different (something it writes changed meanwhile), it's
 //!   rolled back and answers `409 preview_stale` with what it would do now, and a token
 //!   for that.
 //!
@@ -52,8 +53,8 @@ use axum::{
 };
 use hypha_auth::{NewToken, TokenHash, TokenKind};
 use hypha_core::{
-    Actor, Clock, Ctx, HasPreviewTokens, PreviewToken, PreviewTokenRepo, RepoError, StoredEvent,
-    Timestamp,
+    Actor, Clock, Ctx, HasPreviewTokens, PreviewToken, PreviewTokenRepo, RepoError, RowChange,
+    StoredEvent, Timestamp, WriteRecord,
 };
 use hypha_custom_fields::{CallerKind, CustomFieldDefinition, FieldCaller};
 use serde::Serialize;
@@ -97,44 +98,46 @@ pub(crate) fn applying() -> Option<Arc<Apply>> {
     APPLYING.with_borrow(|current| current.clone())
 }
 
-type EventsOf = dyn Fn() -> BoxFuture<Result<Vec<StoredEvent>, RepoError>> + Send;
+type RecordOf = dyn Fn() -> BoxFuture<Result<WriteRecord, RepoError>> + Send;
 type FinishWith = dyn FnOnce(bool, Option<PreviewToken>) -> BoxFuture<Result<(), RepoError>> + Send;
 
 /// A store's open preview or apply (`Storage::begin_preview`, `begin_apply`): what reads
-/// back the events its writes recorded, and what ends it (committing or not, then storing a
+/// back what its writes did (the events recorded, the rows written), and what ends it (committing or not, then storing a
 /// token if one is given). Boxed, so this module knows no storage; built by each host for
 /// its concrete storage, where the futures are provably `Send`.
 pub struct OpenPreview {
-    events: Box<EventsOf>,
+    recorded: Box<RecordOf>,
     finish: Box<FinishWith>,
 }
 
 impl OpenPreview {
     pub fn new(
-        events: impl Fn() -> BoxFuture<Result<Vec<StoredEvent>, RepoError>> + Send + 'static,
+        recorded: impl Fn() -> BoxFuture<Result<WriteRecord, RepoError>> + Send + 'static,
         finish: impl FnOnce(bool, Option<PreviewToken>) -> BoxFuture<Result<(), RepoError>>
         + Send
         + 'static,
     ) -> Self {
         Self {
-            events: Box::new(events),
+            recorded: Box::new(recorded),
             finish: Box::new(finish),
         }
     }
 }
 
-/// What `stores` recorded, in the order of the stores. The reads start here, so no
-/// borrow of `stores` is held across an await (`OpenPreview` is `Send`, not `Sync`).
-fn events_of(
+/// What `stores` did, in the order of the stores. The reads start here, so no borrow of
+/// `stores` is held across an await (`OpenPreview` is `Send`, not `Sync`).
+fn recorded_by(
     stores: &[OpenPreview],
-) -> impl Future<Output = Result<Vec<StoredEvent>, RepoError>> + Send + use<> {
-    let reads: Vec<_> = stores.iter().map(|store| (store.events)()).collect();
+) -> impl Future<Output = Result<WriteRecord, RepoError>> + Send + use<> {
+    let reads: Vec<_> = stores.iter().map(|store| (store.recorded)()).collect();
     async move {
-        let mut events = Vec::new();
+        let mut all = WriteRecord::default();
         for read in reads {
-            events.append(&mut read.await?);
+            let mut one = read.await?;
+            all.events.append(&mut one.events);
+            all.rows.append(&mut one.rows);
         }
-        Ok(events)
+        Ok(all)
     }
 }
 
@@ -170,8 +173,8 @@ struct Issued {
     expires_at: String,
 }
 
-/// A token applying `request` as `actor` previewed it: its `ids`, events digested to
-/// `digest`.
+/// A token applying `request` as `actor` previewed it: its `ids`, what it did digested
+/// to `digest`.
 fn issue(
     host: &TokenHost,
     actor: Actor,
@@ -196,13 +199,17 @@ fn issue(
     })
 }
 
-/// The digest of what a write recorded, which applying it must match: SHA-256 over its
-/// events in order, each as its type, version, subject and data, with every value that is
-/// an RFC 3339 timestamp blanked (times move between a preview and its apply; nothing
-/// else should). As `sha256:<hex>`.
-pub(crate) fn digest(events: &[StoredEvent]) -> Result<String, ApiError> {
-    let mut list = Vec::with_capacity(events.len());
-    for event in events {
+/// The digest of what a write did, which applying it must match: SHA-256 over its events
+/// in order, each as its type, version, subject and data, with every value that is an RFC
+/// 3339 timestamp blanked (times move between a preview and its apply; nothing else
+/// should), and over the rows of aggregates it wrote, in order, each with the version it
+/// found (`Inserted` for a new one). The rows are what catch a record changed since the
+/// preview whose change no event payload would show (`product.updated` names the fields
+/// changed, not their old values): whatever the write read and wrote again must be as it
+/// was. As `sha256:<hex>`.
+pub(crate) fn digest(record: &WriteRecord) -> Result<String, ApiError> {
+    let mut list = Vec::with_capacity(record.events.len());
+    for event in &record.events {
         let envelope = crate::webhooks::EventEnvelope::new(event)?;
         let mut data = event.data.clone();
         blank_times(&mut data);
@@ -213,8 +220,21 @@ pub(crate) fn digest(events: &[StoredEvent]) -> Result<String, ApiError> {
             "data": data,
         }));
     }
+    let rows = record
+        .rows
+        .iter()
+        .map(|row| {
+            let (change, found) = match row.change {
+                RowChange::Inserted => ("insert", None),
+                RowChange::Updated(v) => ("update", Some(v)),
+                RowChange::Deleted(v) => ("delete", Some(v)),
+            };
+            serde_json::json!([row.kind, row.key, change, found])
+        })
+        .collect();
+    let all = serde_json::json!({"events": list, "rows": Value::Array(rows)});
     let mut canonical = Vec::new();
-    crate::extract::write_canonical(&Value::Array(list), &mut canonical);
+    crate::extract::write_canonical(&all, &mut canonical);
     let hash: [u8; 32] = Sha256::digest(&canonical).into();
     let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
     Ok(format!("sha256:{hex}"))
@@ -328,7 +348,7 @@ impl Preview {
     /// Ends the stores' previews, then answers for the handler's `response`.
     async fn finish(&self, response: Response) -> Response {
         let stores = std::mem::take(&mut *lock(&self.stores));
-        let events = events_of(&stores).await;
+        let recorded = recorded_by(&stores).await;
         let (parts, body) = response.into_parts();
         let bytes = match axum::body::to_bytes(body, MAX_RESPONSE_BYTES).await {
             Ok(bytes) => bytes,
@@ -343,9 +363,9 @@ impl Preview {
             let _ = finish_all(stores, false, None).await;
             return Response::from_parts(parts, Body::from(bytes));
         }
-        let answered = events
+        let answered = recorded
             .map_err(|e| ApiError::internal(format!("ending a preview: {e}")))
-            .and_then(|events| self.answer(parts.status, &bytes, &events, blocked));
+            .and_then(|recorded| self.answer(parts.status, &bytes, &recorded, blocked));
         let (preview, ids, digest, token) = match answered {
             Ok(answered) => answered,
             Err(e) => {
@@ -362,14 +382,14 @@ impl Preview {
         answer
     }
 
-    /// The preview of a write that answered `status` with `bytes` and recorded `events`;
-    /// the IDs it was handed; its events' digest; and, when it ran to its end for a known
-    /// caller, the token that applies it.
+    /// The preview of a write that answered `status` with `bytes` and did `recorded`; the
+    /// IDs it was handed; its digest; and, when it ran to its end for a known caller, the
+    /// token that applies it.
     fn answer(
         &self,
         status: StatusCode,
         bytes: &[u8],
-        events: &[StoredEvent],
+        recorded: &WriteRecord,
         blocked: Option<BlockedBy>,
     ) -> Result<(PreviewBody, Vec<Uuid>, String, Option<PreviewToken>), ApiError> {
         let viewer = lock(&self.viewer).take();
@@ -379,7 +399,7 @@ impl Preview {
         let mut preview = PreviewBody::build(
             status,
             bytes,
-            events,
+            &recorded.events,
             viewer.as_ref(),
             emails,
             calls,
@@ -387,7 +407,7 @@ impl Preview {
         )?;
         let ids = std::mem::take(&mut *lock(&self.ids));
         let host = lock(&self.host).clone();
-        let digest = digest(events)?;
+        let digest = digest(recorded)?;
         let token = match (complete, host, &viewer) {
             (true, Some(host), Some(viewer)) => {
                 let issued = issue(
@@ -518,14 +538,14 @@ impl Apply {
             return ApiError::preview_token_invalid("this route takes no credentials")
                 .into_response();
         };
-        let events = match events_of(&stores).await {
-            Ok(events) => events,
+        let recorded = match recorded_by(&stores).await {
+            Ok(recorded) => recorded,
             Err(e) => {
                 let _ = finish_all(stores, false, None).await;
                 return ApiError::internal(format!("applying a preview: {e}")).into_response();
             }
         };
-        let now = match digest(&events) {
+        let now = match digest(&recorded) {
             Ok(now) => now,
             Err(e) => {
                 let _ = finish_all(stores, false, None).await;
@@ -540,7 +560,7 @@ impl Apply {
         }
         let (parts, body) = response.into_parts();
         let stale = match axum::body::to_bytes(body, MAX_RESPONSE_BYTES).await {
-            Ok(bytes) => self.stale(parts.status, &bytes, &events, now),
+            Ok(bytes) => self.stale(parts.status, &bytes, &recorded.events, now),
             Err(e) => Err(ApiError::internal(format!("an applied response: {e}"))),
         };
         match stale {
@@ -565,7 +585,7 @@ impl Apply {
     }
 
     /// What a stale apply did instead, as a preview, with a token for it: the write as it
-    /// would be now, with the IDs it was handed and its events' digest. Its effects outside
+    /// would be now, with the IDs it was handed and its digest. Its effects outside
     /// the database weren't recorded (they ran), so its `emails` and `calls` are empty.
     fn stale(
         &self,
@@ -619,7 +639,7 @@ fn is_replay(response: &Response) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreviewIds(pub Vec<Uuid>);
 
-/// The digest of a preview's events (`digest`), on its response's extensions: what a
+/// The digest of what a preview did (`digest`), on its response's extensions: what a
 /// proposal keeps to apply it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreviewDigest(pub String);
@@ -787,8 +807,8 @@ pub struct PreviewBody {
     pub blocked_by: Option<BlockedBy>,
     /// Sent back as `Hypha-Preview-Token` with the same request (method, path, query and
     /// body) by the same caller, it applies exactly this: the same IDs, and only if the
-    /// write records the same events (else `409 preview_stale`). Once. Absent when the
-    /// preview isn't `complete`.
+    /// write records the same events over records as they were when previewed (else `409
+    /// preview_stale`). Once. Absent when the preview isn't `complete`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
     /// When `token` stops working (RFC 3339).

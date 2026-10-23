@@ -348,3 +348,75 @@ async fn an_apply_commits_or_rolls_back_as_a_whole_once_its_events_are_read() {
     assert_eq!(count(&other, "products").await, 2);
     assert_eq!(signals.load(Ordering::Relaxed), 1);
 }
+
+#[tokio::test]
+async fn a_preview_notes_each_aggregate_it_wrote_with_the_version_it_found() {
+    use hypha_core::{RowChange, WrittenRow};
+    let Some((_db, store, _open, _other)) = setup("store_preview_rows").await else {
+        return;
+    };
+    let mut mug = product(1, "mug");
+    ProductRepo::insert(&store, &mut mug).await.unwrap();
+    let mut mug = ProductRepo::get(&store, mug.id()).await.unwrap().unwrap();
+    mug.set_status(ProductStatus::Active).unwrap();
+    ProductRepo::update(&store, &mut mug).await.unwrap();
+
+    let preview = store.begin_preview(TIMEOUT).await.unwrap();
+    let mut changed = ProductRepo::get(&store, mug.id()).await.unwrap().unwrap();
+    changed.set_status(ProductStatus::Draft).unwrap();
+    ProductRepo::update(&store, &mut changed).await.unwrap();
+    let mut cup = product(2, "cup");
+    ProductRepo::insert(&store, &mut cup).await.unwrap();
+    // A write that fails takes its line with it, as its rows.
+    let mut duplicate = product(3, "cup");
+    assert_eq!(
+        ProductRepo::insert(&store, &mut duplicate).await,
+        Err(RepoError::Duplicate(keys::HANDLE))
+    );
+    let recorded = preview.recorded().await.unwrap();
+    let row = |key: Uuid, change| WrittenRow {
+        kind: "products".to_string(),
+        key: key.to_string(),
+        change,
+    };
+    assert_eq!(
+        recorded.rows,
+        [
+            row(mug.id().as_uuid(), RowChange::Updated(2)),
+            row(cup.id().as_uuid(), RowChange::Inserted),
+        ]
+    );
+    assert_eq!(recorded.events.len(), 2, "{:?}", recorded.events);
+    preview.finish(false, None).await.unwrap();
+}
+
+#[tokio::test]
+async fn every_aggregates_table_notes_its_writes() {
+    let Some((_db, _store, _open, other)) = setup("store_write_log_tables").await else {
+        return;
+    };
+    // An aggregate's table has a bigint `version`; `version` columns of other types are
+    // something else's (an event's, an extension point's, a migration's).
+    let missing: Vec<String> = other
+        .query(
+            "SELECT c.table_name::text FROM information_schema.columns c
+             WHERE c.table_schema = 'public' AND c.column_name = 'version'
+               AND c.data_type = 'bigint'
+               AND NOT EXISTS (
+                   SELECT 1 FROM information_schema.triggers t
+                   WHERE t.event_object_table = c.table_name
+                     AND t.trigger_name = 'hypha_note_write')
+             ORDER BY 1",
+            &[],
+        )
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.get(0))
+        .collect();
+    assert_eq!(
+        missing,
+        Vec::<String>::new(),
+        "tables without the write log"
+    );
+}

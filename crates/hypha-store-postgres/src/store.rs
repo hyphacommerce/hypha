@@ -5,7 +5,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use hypha_core::{Actor, Clock, DispatchHook, PreviewToken, RepoError, StoredEvent, Timestamp};
+use hypha_core::{
+    Actor, Clock, DispatchHook, PreviewToken, RepoError, RowChange, StoredEvent, Timestamp,
+    WriteRecord, WrittenRow,
+};
 use tokio_postgres::{
     Client, Error, GenericClient, IsolationLevel, Row, Statement, Transaction,
     types::{ToSql, Type},
@@ -384,7 +387,8 @@ impl<C: PgConnection> PgStore<C> {
         let left_open = PREVIEW_LEFT_OPEN.as_millis();
         conn.client()
             .batch_execute(&format!(
-                "BEGIN; {settings}SET LOCAL idle_in_transaction_session_timeout = {left_open}"
+                "BEGIN; {settings}SET LOCAL idle_in_transaction_session_timeout = {left_open}; \
+                 SET LOCAL hypha.log_writes = 'on'"
             ))
             .await
             .map_err(repo_error)?;
@@ -505,6 +509,35 @@ impl<C: PgConnection> PgPreview<C> {
         crate::outbox::events_by_seq(&Db::new(&*client, statements), &seqs).await
     }
 
+    /// The rows of aggregates its writes wrote and kept, in the order written, each with the
+    /// version it found (`hypha_note_write`, migration 0074): read from the transaction's
+    /// own log, so a write rolled back to its savepoint isn't there.
+    pub async fn rows(&self) -> Result<Vec<WrittenRow>, RepoError> {
+        let mut conn = self.conn.lock().await;
+        let (client, statements) = conn.parts();
+        let row = Db::new(&*client, statements)
+            .query_typed_one(
+                "SELECT current_setting('hypha.writes', true) AS writes",
+                &[],
+            )
+            .await
+            .map_err(repo_error)?;
+        let log: Option<String> = crate::columns::col(&row, "writes")?;
+        log.unwrap_or_default()
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(written_row)
+            .collect()
+    }
+
+    /// What its writes did: `events`, then `rows`.
+    pub async fn recorded(&self) -> Result<WriteRecord, RepoError> {
+        Ok(WriteRecord {
+            events: self.events().await?,
+            rows: self.rows().await?,
+        })
+    }
+
     /// Ends it: everything committed (`commit`) or rolled back, then `token` stored, on
     /// its own, outside the transaction. A preview passes `false`, an apply `true` when its
     /// events matched.
@@ -535,6 +568,21 @@ impl<C: PgConnection> PgPreview<C> {
         self.finish(false, None).await?;
         events
     }
+}
+
+/// One line of the write log: `["<table>", "<key>", "insert"|"update"|"delete", <version
+/// found or null>]`.
+fn written_row(line: &str) -> Result<WrittenRow, RepoError> {
+    let corrupt = |why: &str| RepoError::Backend(format!("the write log {line:?}: {why}"));
+    let (kind, key, op, found): (String, String, String, Option<i64>) =
+        serde_json::from_str(line).map_err(|e| corrupt(&e.to_string()))?;
+    let change = match (op.as_str(), found) {
+        ("insert", None) => RowChange::Inserted,
+        ("update", Some(v)) => RowChange::Updated(v),
+        ("delete", Some(v)) => RowChange::Deleted(v),
+        _ => return Err(corrupt("not a write")),
+    };
+    Ok(WrittenRow { kind, key, change })
 }
 
 /// The store's connection while it's locked (`PgStore::conn`): the host's connection

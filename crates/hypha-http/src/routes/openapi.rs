@@ -429,7 +429,8 @@ fn add_preview_components(components: &mut utoipa::openapi::Components) {
         .description(Some(
             "A preview's `token` (`hypha_pv_…`): sent with the same request by the same \
              caller, the write runs with the preview's IDs and commits only if it records \
-             the same events (else `409 preview_stale`, nothing written). Once \
+             the same events, over records as they were when previewed (else `409 \
+             preview_stale`, nothing written). Once \
              (`409 preview_used`); a retry sends the `Idempotency-Key` alone.",
         ))
         .schema(Some(

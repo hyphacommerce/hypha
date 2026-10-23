@@ -1023,3 +1023,82 @@ async fn an_approval_whose_write_was_applied_already_is_recorded_applied() {
     assert_eq!(decided["refreshes"], 0);
     assert_eq!(rows(&app, "fulfillments").await, 1, "shipped once");
 }
+
+#[tokio::test]
+async fn a_proposal_the_store_moved_past_is_stale_not_applied() {
+    let app = app().await;
+    let product = create_product(&app, "mug").await;
+    let agent = proposer(&app).await;
+    let restock = op(
+        "admin.products.update",
+        json!({"id": product}),
+        Some(json!({"title": "Mug (restocked)"})),
+        Mode::Apply,
+    );
+    let proposed = call(&app, &agent, restock).await;
+    assert_eq!(proposed.status, 202, "{:?}", proposed.body);
+    let id = proposed.body["proposal"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // The owner changes the same product by hand meanwhile.
+    let path = format!("/admin/products/{product}");
+    let (status, _) = send(&app, "PATCH", &path, Some(r#"{"title": "Mug, blue"}"#)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let session = owner_session(&app).await;
+    let approve = format!("/admin/agent-proposals/{id}/approve");
+    let (status, json) = send_as(&app, &session, "POST", &approve, None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "preview_stale"),
+        "{json}"
+    );
+    assert_eq!(json["details"]["proposal"]["status"], "pending");
+    assert_eq!(json["details"]["proposal"]["refreshes"], 1);
+    let (_, now) = send(&app, "GET", &path, None).await;
+    assert_eq!(now["title"], "Mug, blue", "the owner's change stands");
+
+    // Looked at again, the new version is approved.
+    let (status, json) = send_as(&app, &session, "POST", &approve, None).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["status"], "applied");
+    let (_, now) = send(&app, "GET", &path, None).await;
+    assert_eq!(now["title"], "Mug (restocked)");
+}
+
+#[tokio::test]
+async fn an_agents_token_applies_nothing_after_a_hand_edit() {
+    let app = app().await;
+    let product = create_product(&app, "mug").await;
+    let agent = agent_with(&app, json!({"write": {"products:write": "apply"}})).await;
+    let restock = |mode| {
+        op(
+            "admin.products.update",
+            json!({"id": product}),
+            Some(json!({"title": "Mug (restocked)"})),
+            mode,
+        )
+    };
+    let previewed = call(&app, &agent, restock(Mode::Preview)).await;
+    assert_eq!(previewed.status, 200, "{:?}", previewed.body);
+    let token = previewed.body["preview"]["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let path = format!("/admin/products/{product}");
+    let (status, _) = send(&app, "PATCH", &path, Some(r#"{"title": "Mug, blue"}"#)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let mut apply = restock(Mode::Apply);
+    apply.preview_token = Some(token);
+    let answer = call(&app, &agent, apply).await;
+    assert_eq!(
+        answer_code(&answer),
+        (409, "preview_stale"),
+        "{:?}",
+        answer.body
+    );
+    let (_, now) = send(&app, "GET", &path, None).await;
+    assert_eq!(now["title"], "Mug, blue");
+}

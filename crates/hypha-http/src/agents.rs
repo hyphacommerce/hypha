@@ -78,7 +78,7 @@ pub struct Answer {
     pub status: u16,
     pub body: Value,
     /// For a preview, or a stale apply's fresh one: the IDs its run was handed and its
-    /// events' digest, which a proposal keeps.
+    /// digest, which a proposal keeps.
     pub(crate) previewed: Option<(Vec<uuid::Uuid>, String)>,
 }
 
