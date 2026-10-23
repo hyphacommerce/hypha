@@ -1,20 +1,36 @@
 ---
 import { render } from "astro:content";
 
+import QuietWeb from "../../components/QuietWeb.astro";
+import { EMAIL } from "../../consts";
 import Base from "../../layouts/Base.astro";
-import { formatDate, type Post, posts } from "../../lib/posts";
+import { formatDate, initials, type Post, posts, readingMinutes } from "../../lib/posts";
 import { ORG_ID, WEBSITE_ID } from "../../lib/seo";
 
 export async function getStaticPaths() {
-  return (await posts()).map((post) => ({ params: { slug: post.id }, props: { post } }));
+  const all = await posts();
+  return all.map((post, i) => ({
+    params: { slug: post.id },
+    // Newest first: the next post is the one before in the list.
+    props: { post, newer: all[i - 1], older: all[i + 1] },
+  }));
 }
 
 interface Props {
   post: Post;
+  newer?: Post;
+  older?: Post;
 }
 
-const { post } = Astro.props;
-const { Content } = await render(post);
+const { post, newer, older } = Astro.props;
+const { Content, headings } = await render(post);
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+const minutes = readingMinutes(post);
+
+// A change line's `code` becomes <code>; everything else is escaped.
+const escape = (s: string) =>
+  s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`).replace(/`([^`]+)`/g, "<code>$1</code>");
+
 const url = new URL(Astro.url.pathname, Astro.site).href;
 const article = {
   "@type": "BlogPosting",
@@ -28,6 +44,7 @@ const article = {
   mainEntityOfPage: url,
   image: new URL("/og.png", Astro.site).href,
   keywords: post.data.tags,
+  timeRequired: `PT${minutes}M`,
 };
 ---
 
@@ -39,58 +56,786 @@ const article = {
   schema={[article]}
   noindex={post.data.draft}
 >
-  <article class="wrap">
-    <header class="post-head">
-      <p class="meta">
-        <time datetime={post.data.date.toISOString()}>{formatDate(post.data.date)}</time>, by {
-          post.data.author
+  <div class="head">
+    <QuietWeb seed={13} signals={1} />
+    <div class="grid">
+      <div class="head-in">
+        <a class="back" href={post.data.release ? "/releases" : "/blog"}>
+          <span aria-hidden="true">←</span>
+          {post.data.release ? "All releases" : "All posts"}
+        </a>
+        {
+          (post.data.version || post.data.tags.length > 0 || post.data.draft) && (
+            <div class="tags">
+              {post.data.version && <span class="version">{post.data.version}</span>}
+              {post.data.tags.map((t) => (
+                <a class="tag" href={`/blog?tag=${encodeURIComponent(t)}`}>
+                  {t}
+                </a>
+              ))}
+              {post.data.draft && <span class="tag draft">Draft: not published</span>}
+            </div>
+          )
         }
-        {post.data.draft && <span class="draft">Draft: not published</span>}
-      </p>
-      <h1>{post.data.title}</h1>
-      <p class="lede">{post.data.description}</p>
-    </header>
-    <div class="prose">
-      <Content />
+        <h1>{post.data.title}</h1>
+        <p class="lede">{post.data.description}</p>
+        <div class="byline">
+          <span class="who">
+            <span class="avatar" aria-hidden="true">{initials(post.data.author)}</span>
+            <span class="name">{post.data.author}</span>
+          </span>
+          <span aria-hidden="true" class="sep">·</span>
+          <time datetime={post.data.date.toISOString()}>{formatDate(post.data.date)}</time>
+          <span aria-hidden="true" class="sep">·</span>
+          <span>{minutes} min read</span>
+        </div>
+      </div>
     </div>
-    <p class="back"><a href={post.data.release ? "/releases" : "/blog"}>All posts</a></p>
-  </article>
+  </div>
+
+  <div class="grid">
+    <div class="main-col">
+      {
+        toc.length > 2 && (
+          <details class="toc-narrow">
+            <summary>On this page</summary>
+            <nav aria-label="On this page">
+              {toc.map((h) => (
+                <a href={`#${h.slug}`} class={`d${h.depth}`}>
+                  {h.text}
+                </a>
+              ))}
+            </nav>
+          </details>
+        )
+      }
+
+      <article class="post">
+        {
+          post.data.changes.length > 0 && (
+            <section class="changes" aria-labelledby="what-changed">
+              <div class="changes-head">
+                <h2 id="what-changed">What changed{post.data.version && ` in ${post.data.version}`}</h2>
+                <a href="/changelog">
+                  Full changelog <span aria-hidden="true">→</span>
+                </a>
+              </div>
+              <ul>
+                {post.data.changes.map((c) => (
+                  <li>
+                    <span class={`kind ${c.kind.toLowerCase()}`}>{c.kind}</span>
+                    <span set:html={escape(c.text)} />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )
+        }
+        <Content />
+        <script is:inline>
+          // Code in posts is dark in both themes, as designed.
+          for (const ec of document.querySelectorAll(".post .expressive-code")) {
+            ec.dataset.theme = "dark";
+          }
+        </script>
+      </article>
+
+      <nav class="more" aria-label="More posts">
+        <div class="more-links">
+          <a href="/blog"><span aria-hidden="true">←</span> All posts</a>
+          <a class="rss" href="/rss.xml">Subscribe via RSS</a>
+        </div>
+        {
+          (older || newer) && (
+            <div class="adjacent">
+              {older && (
+                <a href={`/blog/${older.id}`}>
+                  <span>Previous</span>
+                  <strong>{older.data.title}</strong>
+                </a>
+              )}
+              {newer && (
+                <a class="next" href={`/blog/${newer.id}`}>
+                  <span>Next</span>
+                  <strong>{newer.data.title}</strong>
+                </a>
+              )}
+            </div>
+          )
+        }
+        <div class="sponsor">
+          <strong>Hypha is open source. Sponsors keep it that way.</strong>
+          <span>
+            Hosting or database company, or a merchant who'd like to give back? Write to{" "}
+            <a href={`mailto:${EMAIL}`}>{EMAIL}</a>.
+          </span>
+        </div>
+      </nav>
+    </div>
+
+    {
+      toc.length > 2 && (
+        <div class="toc-wide">
+          <nav aria-label="On this page">
+            <span>On this page</span>
+            {toc.map((h) => (
+              <a href={`#${h.slug}`} class={`d${h.depth}`} data-toc={h.slug}>
+                {h.text}
+              </a>
+            ))}
+          </nav>
+        </div>
+      )
+    }
+  </div>
 </Base>
 
+<script>
+  // The table of contents follows the reading position.
+  const links = [...document.querySelectorAll<HTMLAnchorElement>("[data-toc]")];
+  const heads = links
+    .map((a) => document.getElementById(a.dataset.toc ?? ""))
+    .filter((h): h is HTMLElement => h !== null);
+  let frame = 0;
+  const spy = () => {
+    let current = heads[0]?.id;
+    for (const h of heads) if (h.getBoundingClientRect().top < 140) current = h.id;
+    for (const a of links) {
+      if (a.dataset.toc === current) a.setAttribute("aria-current", "location");
+      else a.removeAttribute("aria-current");
+    }
+  };
+  if (links.length) {
+    addEventListener(
+      "scroll",
+      () => {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(spy);
+      },
+      { passive: true },
+    );
+    spy();
+  }
+
+  // A copy button on every code block.
+  // Expressive Code's blocks have their own; this covers a bare <pre> it didn't take.
+  for (const pre of document.querySelectorAll<HTMLPreElement>(".post pre")) {
+    if (pre.closest(".expressive-code")) continue;
+    const wrap = document.createElement("div");
+    wrap.className = "code-wrap";
+    pre.replaceWith(wrap);
+    wrap.append(pre);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy";
+    button.textContent = "Copy";
+    button.setAttribute("aria-label", "Copy code");
+    const live = document.createElement("span");
+    live.className = "sr-only";
+    live.setAttribute("aria-live", "polite");
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(pre.innerText);
+        button.textContent = "Copied";
+        live.textContent = "Code copied to clipboard";
+      } catch {
+        button.textContent = "Copy failed";
+      }
+      setTimeout(() => {
+        button.textContent = "Copy";
+        live.textContent = "";
+      }, 1800);
+    });
+    wrap.append(button, live);
+  }
+</script>
+
 <style>
-  .post-head {
-    max-width: var(--measure);
-    padding-block: clamp(48px, 7vw, 88px) 36px;
+  .head {
+    position: relative;
+    border-bottom: 1px solid var(--rule);
   }
 
-  .meta {
-    color: var(--text-faint);
-    font-size: 0.93rem;
+  .grid {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-content: center;
+    column-gap: 80px;
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
   }
 
-  h1 {
-    margin-top: 14px;
-    font-size: clamp(2rem, 4.2vw, 3rem);
-    letter-spacing: -0.035em;
+  @media (min-width: 1060px) {
+    .grid {
+      grid-template-columns: minmax(0, 38em) 220px;
+    }
   }
 
-  .lede {
-    margin-top: 16px;
-    color: var(--text-muted);
-    font-size: 1.15rem;
-  }
-
-  .draft {
-    margin-left: 10px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: var(--lime-soft);
-    color: var(--text-accent);
-    font-size: 0.78rem;
-    font-weight: 560;
+  .head-in {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 20px;
+    min-width: 0;
+    padding: clamp(36px, 6vw, 72px) 0 clamp(32px, 5vw, 52px);
   }
 
   .back {
+    display: inline-flex;
+    gap: 6px;
+    font-size: 15px;
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+
+  .back:hover {
+    color: var(--text);
+  }
+
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .version {
+    padding: 3px 10px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: var(--ink-on-lime);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .tag {
+    padding: 3px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--rule-strong);
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 14px;
+    text-decoration: none;
+  }
+
+  a.tag:hover {
+    border-color: var(--text-faint);
+  }
+
+  .tag.draft {
+    border-style: dashed;
+  }
+
+  h1 {
+    font-size: clamp(36px, 5.6vw, 62px);
+    line-height: 1.04;
+    letter-spacing: -0.04em;
+    font-weight: 600;
+  }
+
+  .lede {
+    font-size: clamp(19px, 2.1vw, 22px);
+    line-height: 1.5;
+    color: var(--text-muted);
+  }
+
+  .byline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 16px;
+    padding-top: 4px;
+    font-size: 15px;
+    color: var(--text-muted);
+  }
+
+  .who {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid var(--rule-strong);
+    background: var(--muted);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .name {
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .sep {
+    color: var(--rule-strong);
+  }
+
+  .main-col {
+    min-width: 0;
+    padding-top: clamp(28px, 4vw, 48px);
+    padding-bottom: 112px;
+  }
+
+  /* On this page: a sticky list beside the text on wide screens, a disclosure above it
+     on narrow ones. */
+  .toc-narrow {
+    margin-bottom: 32px;
+    border: 1px solid var(--rule);
+    border-radius: 14px;
+    background: var(--surface);
+  }
+
+  .toc-narrow summary {
+    min-height: 44px;
+    padding: 12px 18px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .toc-narrow nav {
+    display: flex;
+    flex-direction: column;
+    padding: 0 18px 14px;
+  }
+
+  .toc-narrow a {
+    padding: 9px 0;
+    border-top: 1px solid var(--rule);
+    color: var(--text-muted);
+    font-size: 14px;
+    text-decoration: none;
+  }
+
+  .toc-narrow a.d3 {
+    padding-left: 16px;
+  }
+
+  .toc-wide {
+    display: none;
+  }
+
+  @media (min-width: 1060px) {
+    .toc-narrow {
+      display: none;
+    }
+
+    .toc-wide {
+      display: block;
+      position: sticky;
+      top: 96px;
+      align-self: start;
+      padding-top: clamp(28px, 4vw, 48px);
+    }
+  }
+
+  .toc-wide nav {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .toc-wide span {
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+
+  .toc-wide a {
+    padding: 5px 0 5px 14px;
+    border-left: 2px solid var(--rule);
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.4;
+    text-decoration: none;
+  }
+
+  .toc-wide a.d3 {
+    padding-left: 26px;
+  }
+
+  .toc-wide a:hover {
+    color: var(--text);
+  }
+
+  .toc-wide a[aria-current] {
+    border-left-color: var(--text);
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  /* The post's text. */
+  .post {
+    max-width: 38em;
+    font-size: 18px;
+    line-height: 1.72;
+    color: var(--text);
+  }
+
+  .post :global(p) {
+    margin: 0 0 22px;
+  }
+
+  .post :global(h2) {
+    margin: 56px 0 16px;
+    font-size: clamp(26px, 3vw, 32px);
+    line-height: 1.2;
+    letter-spacing: -0.025em;
+    font-weight: 600;
+    scroll-margin-top: 96px;
+  }
+
+  .post :global(h3) {
+    margin: 36px 0 10px;
+    font-size: 22px;
+    line-height: 1.3;
+    letter-spacing: -0.015em;
+    font-weight: 600;
+    scroll-margin-top: 96px;
+  }
+
+  .post :global(a) {
+    color: var(--text-accent);
+    text-underline-offset: 3px;
+  }
+
+  .post :global(ul),
+  .post :global(ol) {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0 0 24px;
+    padding-left: 24px;
+  }
+
+  .post :global(blockquote) {
+    margin: 36px 0;
+    padding: 2px 0 2px 24px;
+    border-left: 2px solid var(--text);
+  }
+
+  .post :global(blockquote p) {
+    margin: 0 0 10px;
+    font-size: clamp(20px, 2.4vw, 24px);
+    line-height: 1.45;
+    letter-spacing: -0.01em;
+  }
+
+  .post :global(blockquote p:last-child) {
+    margin: 0;
+  }
+
+  .post :global(:not(pre) > code) {
+    padding: 1px 6px;
+    border-radius: 6px;
+    border: 1px solid var(--rule);
+    background: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+  }
+
+  /* Code blocks are Expressive Code's (from the docs' setup: frames, copy buttons); these
+     only style a bare <pre> it didn't take. */
+  .post :global(.expressive-code) {
+    --ec-brdRad: 14px;
+    margin: 28px 0 32px;
+  }
+
+  .post :global(.code-wrap) {
+    position: relative;
+    margin: 28px 0 32px;
+  }
+
+  .post :global(.code-wrap pre) {
+    margin: 0;
+    padding: 18px 20px;
+    overflow-x: auto;
+    border: 1px solid #30322f;
+    border-radius: 14px;
+    background: #262825 !important;
+    color: #e6e8e5;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.65;
+    tab-size: 4;
+  }
+
+  .post :global(.copy) {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    min-height: 32px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid #444642;
+    background: #262825;
+    color: #e6e8e5;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .post :global(.copy:hover) {
+    background: #30322f;
+  }
+
+  .post :global(table) {
+    width: 100%;
+    margin: 20px 0 28px;
+    border: 1px solid var(--rule);
+    border-radius: 14px;
+    background: var(--surface);
+    border-collapse: separate;
+    border-spacing: 0;
+    overflow: hidden;
+    font-size: 15px;
+    line-height: 1.45;
+  }
+
+  .post :global(th),
+  .post :global(td) {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule);
+    text-align: left;
+  }
+
+  .post :global(thead th) {
+    border-bottom-color: var(--rule-strong);
+    font-weight: 600;
+  }
+
+  .post :global(tbody tr:last-child > *) {
+    border-bottom: 0;
+  }
+
+  .post :global(figure) {
+    margin: 36px 0;
+  }
+
+  .post :global(img) {
+    border-radius: 14px;
+    border: 1px solid var(--rule);
+  }
+
+  .post :global(figcaption) {
+    margin-top: 12px;
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--text-faint);
+  }
+
+  /* A note: `<div class="note">` in a post, its first `<strong>` the title. (Not an
+     <aside>: that would be a landmark inside the page's main one.) */
+  .post :global(.note) {
+    margin: 24px 0 28px;
+    padding: 18px 20px;
+    border-radius: 14px;
+    border: 1px solid var(--rule);
+    background: var(--muted);
+    font-size: 16px;
+    line-height: 1.6;
+  }
+
+  .post :global(.note > strong:first-child) {
+    display: block;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+
+  .post :global(.note p:last-child) {
+    margin: 0;
+  }
+
+  .post :global(hr) {
+    margin: 48px 0;
+    border: 0;
+    border-top: 1px solid var(--rule);
+  }
+
+  /* A release's summary. */
+  .changes {
+    margin: 0 0 40px;
+    padding: 22px 24px;
+    border-radius: 18px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    font-size: 16px;
+    line-height: 1.6;
+  }
+
+  .changes-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px 16px;
+    margin-bottom: 12px;
+  }
+
+  .changes h2 {
+    margin: 0;
+    font-size: 18px;
+    letter-spacing: -0.01em;
+  }
+
+  .changes-head a {
+    font-size: 15px;
+    color: var(--text-accent);
+    text-underline-offset: 4px;
+  }
+
+  .changes ul {
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .changes li {
+    display: flex;
+    gap: 12px;
+    padding: 9px 0;
+    border-top: 1px solid var(--rule);
+  }
+
+  .kind {
+    flex: 0 0 76px;
+    padding-top: 2px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-accent);
+  }
+
+  .kind.changed,
+  .kind.removed {
+    color: var(--text-faint);
+  }
+
+  .kind.breaking {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .changes :global(code) {
+    padding: 1px 6px;
+    border-radius: 6px;
+    border: 1px solid var(--rule);
+    background: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+  }
+
+  /* After the post. */
+  .more {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 38em;
     margin-top: 56px;
+    padding-top: 28px;
+    border-top: 1px solid var(--rule);
+  }
+
+  .more-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 10px 20px;
+    font-size: 15px;
+  }
+
+  .more-links a {
+    color: var(--text);
+    font-weight: 500;
+    text-decoration: none;
+  }
+
+  .more-links a:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  .more-links .rss {
+    color: var(--text-accent);
+    font-weight: 400;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  .adjacent {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+    gap: 12px;
+  }
+
+  .adjacent a {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 16px 18px;
+    border-radius: 14px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    color: var(--text);
+    text-decoration: none;
+  }
+
+  .adjacent a:hover {
+    border-color: var(--text-faint);
+  }
+
+  .adjacent a.next {
+    align-items: flex-end;
+    text-align: right;
+  }
+
+  .adjacent span {
+    font-size: 13px;
+    color: var(--text-faint);
+  }
+
+  .adjacent strong {
+    font-size: 17px;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    font-weight: 600;
+  }
+
+  .sponsor {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 20px 22px;
+    border: 1px dashed var(--rule-strong);
+    border-radius: 18px;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+
+  .sponsor strong {
+    font-weight: 600;
+  }
+
+  .sponsor span {
+    color: var(--text-muted);
+  }
+
+  .sponsor a {
+    color: var(--text-accent);
+    text-underline-offset: 3px;
   }
 </style>

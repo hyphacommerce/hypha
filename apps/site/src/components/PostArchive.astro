@@ -1,0 +1,536 @@
+---
+// A list of posts: a header over a quiet web, tag filters, the newest post featured and
+// the rest listed. Filtering happens in the browser (each post is rendered once as a
+// feature and once as a row; the script shows the right ones); without JavaScript the
+// newest post is featured and the rest are listed. `?tag=` preselects a filter.
+import { formatDate, type Post, readingMinutes, shortDate } from "../lib/posts";
+import QuietWeb from "./QuietWeb.astro";
+
+interface Props {
+  title: string;
+  lede: string;
+  posts: Post[];
+  /** Offer tag filters (the blog does; the releases page lists one kind of post). */
+  filters?: boolean;
+  links: { href: string; label: string }[];
+  empty: string;
+}
+
+const { title, lede, posts, filters = true, links, empty } = Astro.props;
+const tags = ["all", ...new Set(posts.flatMap((p) => p.data.tags))];
+const items = posts.map((p) => ({
+  href: `/blog/${p.id}`,
+  title: p.data.title,
+  description: p.data.description,
+  date: p.data.date,
+  author: p.data.author,
+  minutes: readingMinutes(p),
+  tags: p.data.tags,
+  version: p.data.version,
+  draft: p.data.draft,
+}));
+---
+
+<section class="head">
+  <QuietWeb seed={7} />
+  <div class="head-in">
+    <h1>{title}</h1>
+    <p class="lede">{lede}</p>
+    <div class="head-links">
+      {links.map((l) => <a href={l.href}>{l.label}</a>)}
+    </div>
+  </div>
+</section>
+
+<div class="body" data-archive>
+  {
+    filters && tags.length > 2 && (
+      <div class="pills" role="group" aria-label="Filter posts by tag">
+        {tags.map((t) => (
+          <button type="button" data-tag={t} aria-pressed={t === "all" ? "true" : "false"}>
+            {t}
+          </button>
+        ))}
+      </div>
+    )
+  }
+
+  {
+    items.map((p, i) => (
+      <article class="feature" data-feature data-tags={p.tags.join(" ")} hidden={i !== 0}>
+        <div class="feature-main">
+          <span class="latest" data-latest>
+            Latest
+          </span>
+          <h2>
+            <a href={p.href}>{p.title}</a>
+          </h2>
+          <p>{p.description}</p>
+          <a class="read" href={p.href}>
+            Read post <span aria-hidden="true">→</span>
+          </a>
+        </div>
+        <dl class="meta">
+          <div>
+            <dt>Published</dt>
+            <dd>
+              <time datetime={p.date.toISOString()}>{formatDate(p.date)}</time>
+            </dd>
+          </div>
+          <div>
+            <dt>Author</dt>
+            <dd>{p.author}</dd>
+          </div>
+          <div>
+            <dt>Reading time</dt>
+            <dd>{p.minutes} min</dd>
+          </div>
+          {(p.version || p.tags.length > 0) && (
+            <div>
+              <dt>Tags</dt>
+              <dd class="tags">
+                {p.version && <span class="version">{p.version}</span>}
+                {p.tags.map((t) => (
+                  <span class="tag">{t}</span>
+                ))}
+                {p.draft && <span class="tag draft">draft</span>}
+              </dd>
+            </div>
+          )}
+        </dl>
+      </article>
+    ))
+  }
+
+  {
+    items.length > 1 && (
+      <section class="earlier" aria-labelledby="earlier" data-earlier>
+        <h2 id="earlier">Earlier posts</h2>
+        {items.map((p, i) => (
+          <article class="row" data-row data-tags={p.tags.join(" ")} hidden={i === 0}>
+            <time datetime={p.date.toISOString()}>{shortDate(p.date)}</time>
+            <div>
+              <h3>
+                <a href={p.href}>{p.title}</a>
+              </h3>
+              <p>{p.description}</p>
+              <div class="row-meta">
+                {p.version && <span class="version">{p.version}</span>}
+                {p.tags.map((t) => (
+                  <span class="tag">{t}</span>
+                ))}
+                {p.draft && <span class="tag draft">draft</span>}
+                <span class="mins">{p.minutes} min read</span>
+              </div>
+            </div>
+          </article>
+        ))}
+      </section>
+    )
+  }
+
+  <section class="empty" data-empty hidden={items.length > 0}>
+    <span class="dot" aria-hidden="true"></span>
+    <h2>{empty}</h2>
+    <p>Follow the RSS feed to read them as soon as they're published.</p>
+    <div class="empty-actions">
+      <a class="btn" href="/rss.xml">Subscribe via RSS</a>
+      <button type="button" class="show-all" data-show-all hidden>Show all posts</button>
+    </div>
+  </section>
+</div>
+
+<script>
+  // Tag filters: the first matching post is featured, the others listed.
+  const root = document.querySelector<HTMLElement>("[data-archive]");
+  const buttons = [...(root?.querySelectorAll<HTMLButtonElement>("[data-tag]") ?? [])];
+  const features = [...(root?.querySelectorAll<HTMLElement>("[data-feature]") ?? [])];
+  const rows = [...(root?.querySelectorAll<HTMLElement>("[data-row]") ?? [])];
+  const earlier = root?.querySelector<HTMLElement>("[data-earlier]");
+  const empty = root?.querySelector<HTMLElement>("[data-empty]");
+  const showAll = root?.querySelector<HTMLButtonElement>("[data-show-all]");
+
+  function apply(tag: string) {
+    const matches = (el: HTMLElement) => tag === "all" || (el.dataset.tags ?? "").split(" ").includes(tag);
+    const shown = features.map(matches);
+    const first = shown.indexOf(true);
+    features.forEach((el, i) => {
+      el.hidden = i !== first;
+      const latest = el.querySelector("[data-latest]");
+      if (latest) latest.textContent = tag === "all" ? "Latest" : `Latest in ${tag}`;
+    });
+    rows.forEach((el, i) => (el.hidden = !shown[i] || i === first));
+    if (earlier) earlier.hidden = !rows.some((el) => !el.hidden);
+    if (empty) empty.hidden = first !== -1;
+    if (showAll) showAll.hidden = tag === "all";
+    for (const b of buttons) b.setAttribute("aria-pressed", String(b.dataset.tag === tag));
+  }
+
+  for (const b of buttons) {
+    b.addEventListener("click", () => {
+      const tag = b.dataset.tag ?? "all";
+      apply(tag);
+      const url = new URL(location.href);
+      if (tag === "all") url.searchParams.delete("tag");
+      else url.searchParams.set("tag", tag);
+      history.replaceState(null, "", url);
+    });
+  }
+  showAll?.addEventListener("click", () => buttons.find((b) => b.dataset.tag === "all")?.click());
+
+  const wanted = new URLSearchParams(location.search).get("tag");
+  if (wanted && buttons.some((b) => b.dataset.tag === wanted)) apply(wanted);
+</script>
+
+<style>
+  .head {
+    position: relative;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .head-in {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: clamp(56px, 8vw, 104px) 20px clamp(36px, 5vw, 56px);
+  }
+
+  h1 {
+    font-size: clamp(44px, 7vw, 80px);
+    line-height: 1;
+    letter-spacing: -0.045em;
+    font-weight: 600;
+  }
+
+  .lede {
+    max-width: 600px;
+    font-size: clamp(18px, 2vw, 21px);
+    color: var(--text-muted);
+  }
+
+  .head-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    padding-top: 4px;
+    font-size: 15px;
+  }
+
+  .head-links a {
+    color: var(--text-accent);
+    text-underline-offset: 4px;
+  }
+
+  .body {
+    display: flex;
+    flex-direction: column;
+    gap: 36px;
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 28px 20px 112px;
+  }
+
+  [hidden] {
+    display: none !important;
+  }
+
+  .pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .pills button {
+    min-height: 36px;
+    padding: 7px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--rule-strong);
+    background: var(--surface);
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .pills button:hover {
+    border-color: var(--text-faint);
+  }
+
+  .pills button[aria-pressed="true"] {
+    border-color: var(--text);
+    background: var(--text);
+    color: var(--bg);
+  }
+
+  .feature {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px 56px;
+    padding: clamp(24px, 4vw, 44px);
+    border-radius: 18px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+  }
+
+  .feature-main {
+    flex: 1 1 440px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .latest {
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--text);
+    color: var(--bg);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .feature h2 {
+    font-size: clamp(28px, 3.8vw, 46px);
+    line-height: 1.08;
+    letter-spacing: -0.035em;
+    font-weight: 600;
+  }
+
+  .feature h2 a,
+  .row h3 a {
+    color: var(--text);
+    text-decoration: none;
+  }
+
+  .feature h2 a:hover {
+    text-decoration: underline;
+    text-underline-offset: 6px;
+    text-decoration-thickness: 2px;
+  }
+
+  .feature-main > p {
+    max-width: 62ch;
+    font-size: clamp(17px, 1.7vw, 19px);
+    color: var(--text-muted);
+  }
+
+  .read {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 6px;
+    padding: 10px 16px;
+    border-radius: 10px;
+    background: var(--accent);
+    color: var(--ink-on-lime);
+    font-size: 15px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .read:hover {
+    background: var(--accent-hover);
+  }
+
+  .meta {
+    flex: 0 1 280px;
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    font-size: 15px;
+  }
+
+  .meta div {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 11px 0;
+    border-top: 1px solid var(--rule);
+  }
+
+  .meta div:last-child {
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .meta dt {
+    color: var(--text-faint);
+  }
+
+  .meta dd {
+    margin: 0;
+  }
+
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .tag {
+    padding: 1px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--rule-strong);
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .tag.draft {
+    border-style: dashed;
+  }
+
+  .version {
+    padding: 1px 8px;
+    border-radius: 6px;
+    background: var(--accent);
+    color: var(--ink-on-lime);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .earlier {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .earlier > h2 {
+    margin-bottom: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0;
+    color: var(--text-muted);
+  }
+
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 32px;
+    padding: 24px 0;
+    border-top: 1px solid var(--rule);
+  }
+
+  .row time {
+    flex: 0 0 132px;
+    padding-top: 3px;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    color: var(--text-faint);
+  }
+
+  .row > div {
+    flex: 1 1 420px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .row h3 {
+    font-size: 21px;
+    line-height: 1.3;
+    letter-spacing: -0.015em;
+    font-weight: 600;
+  }
+
+  .row h3 a:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  .row p {
+    max-width: 70ch;
+    font-size: 16px;
+    color: var(--text-muted);
+  }
+
+  .row-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding-top: 4px;
+  }
+
+  .mins {
+    padding-left: 4px;
+    font-size: 13px;
+    color: var(--text-faint);
+  }
+
+  .empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: clamp(40px, 7vw, 80px) 24px;
+    border: 1px dashed var(--rule-strong);
+    border-radius: 18px;
+    background: var(--bg);
+    text-align: center;
+  }
+
+  .dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow:
+      0 0 0 6px var(--muted),
+      0 0 0 7px var(--rule-strong);
+  }
+
+  .empty h2 {
+    margin-top: 8px;
+    font-size: clamp(24px, 3vw, 32px);
+    letter-spacing: -0.025em;
+    font-weight: 600;
+  }
+
+  .empty p {
+    max-width: 46ch;
+    color: var(--text-muted);
+  }
+
+  .empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    padding-top: 4px;
+  }
+
+  .btn {
+    padding: 10px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--rule-strong);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 500;
+    text-decoration: none;
+  }
+
+  .btn:hover {
+    border-color: var(--text-faint);
+  }
+
+  .show-all {
+    padding: 10px 16px;
+    border: 0;
+    background: none;
+    color: var(--text-accent);
+    font: inherit;
+    font-size: 15px;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    cursor: pointer;
+  }
+</style>

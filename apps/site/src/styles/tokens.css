@@ -31,6 +31,7 @@
   --surface: #ffffff;
   --muted: #f2f3f0;
   --net-thread: rgb(38 40 37 / 0.27);
+  --thread-quiet: rgb(38 40 37 / 0.2);
   --sig-stroke: #455c01;
   --core-bg: #262825;
   --core-ink: #fafaf9;
@@ -68,6 +69,7 @@
   --surface: #232522;
   --muted: #2b2d2a;
   --net-thread: rgb(236 238 233 / 0.2);
+  --thread-quiet: rgb(236 238 233 / 0.15);
   --sig-stroke: transparent;
   --core-bg: #f3f4f2;
   --core-ink: #1a1b19;

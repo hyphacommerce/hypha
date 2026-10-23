@@ -1,26 +1,20 @@
 ---
-import PageHead from "../../components/PageHead.astro";
-import PostList from "../../components/PostList.astro";
+import PostArchive from "../../components/PostArchive.astro";
 import Base from "../../layouts/Base.astro";
 import { posts } from "../../lib/posts";
 
 const all = await posts();
 ---
 
-<Base title="Blog" description="Posts about building Hypha, its releases and how it works.">
-  <div class="wrap">
-    <PageHead title="Blog" lede="Building Hypha in the open: releases, design decisions and guides.">
-      <p class="subscribe">
-        <a href="/releases">Release posts only</a> or subscribe with <a href="/rss.xml">RSS</a>.
-      </p>
-    </PageHead>
-    <PostList posts={all} empty="The first posts are on their way." />
-  </div>
+<Base title="Blog" description="Building Hypha in the open: releases, design decisions and guides.">
+  <PostArchive
+    title="Blog"
+    lede="Building Hypha in the open: releases, design decisions and guides."
+    posts={all}
+    links={[
+      { href: "/releases", label: "Release posts only" },
+      { href: "/rss.xml", label: "RSS feed" },
+    ]}
+    empty="The first posts are on their way."
+  />
 </Base>
-
-<style>
-  .subscribe {
-    margin-top: 12px;
-    color: var(--text-muted);
-  }
-</style>

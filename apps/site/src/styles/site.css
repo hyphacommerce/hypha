@@ -10,6 +10,26 @@
   box-sizing: border-box;
 }
 
+/* Code blocks in posts are Expressive Code's, from the docs' setup; its styles read these
+   Starlight colours, which only the docs define (in starlight.css). The dark palette. */
+:root {
+  --sl-color-white: #fafaf9;
+  --sl-color-gray-1: #e6e8e5;
+  --sl-color-gray-2: #d4d5d2;
+  --sl-color-gray-3: #a3a5a1;
+  --sl-color-gray-4: #6a6c68;
+  --sl-color-gray-5: #444642;
+  --sl-color-gray-6: #30322f;
+  --sl-color-gray-7: #262825;
+  --sl-color-black: #1a1b19;
+  --sl-color-text: #e6e8e5;
+  --sl-color-accent: #b8e948;
+  --sl-color-accent-high: #d9f7a5;
+  --sl-text-code: 0.875rem;
+  --sl-line-height: 1.65;
+  --__sl-font-mono: var(--font-mono);
+}
+
 html {
   -webkit-text-size-adjust: 100%;
 }

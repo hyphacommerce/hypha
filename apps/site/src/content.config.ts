@@ -19,6 +19,16 @@ export const collections = {
       draft: z.boolean().default(false),
       release: z.boolean().default(false),
       version: z.string().optional(),
+      // A release post's summary, shown above its text: what was added, changed, fixed,
+      // removed or broken, one line each (inline `code` allowed).
+      changes: z
+        .array(
+          z.object({
+            kind: z.enum(["Added", "Changed", "Fixed", "Removed", "Breaking"]),
+            text: z.string(),
+          }),
+        )
+        .default([]),
     }),
   }),
   // The repository's CHANGELOG.md, written by release-please; empty until the first
