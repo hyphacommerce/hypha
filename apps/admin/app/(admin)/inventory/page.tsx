@@ -37,13 +37,14 @@ export default async function InventoryPage({
 async function InventoryRows({ params }: { params: SearchParams }) {
   const client = await sessionClient();
   const below = Number(one(params, "below"));
+  const location = one(params, "location");
   const [result, locations] = await Promise.all([
     client.GET("/admin/inventory-items", {
       params: {
         query: {
           ...pageQuery(params),
           below: Number.isSafeInteger(below) ? below : undefined,
-          location: one(params, "location"),
+          location,
           // Only from a link (`?product=`): no chip offers it.
           product: one(params, "product"),
           sku: one(params, "sku"),
@@ -56,6 +57,7 @@ async function InventoryRows({ params }: { params: SearchParams }) {
     <InventoryTable
       page={listPage(result, "/inventory", params)}
       locations={Object.fromEntries(locations)}
+      location={location}
     />
   );
 }

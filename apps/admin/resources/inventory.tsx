@@ -1,6 +1,8 @@
 "use client";
 
-// The inventory list's table: an item per variant, its stock summed over locations.
+// The inventory list's table: an item per variant, its stock summed over locations, or
+// at one location when the list is filtered by it (the API filters and sorts by that
+// location's count, so the columns show the same one).
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { VStack } from "@astryxdesign/core/Layout";
@@ -29,14 +31,25 @@ const VIEWS: View[] = [
 
 const BELOW = [1, LOW_STOCK, 10, 25, 100];
 
+/** The item's counts at `location` (zero where it has no level there), or its totals. */
+function countsAt(item: Item, location: string | undefined) {
+  if (!location) return item;
+  return (
+    item.levels.find((l) => l.location === location) ?? { on_hand: 0, reserved: 0, available: 0 }
+  );
+}
+
 export function InventoryTable({
   page,
   locations = NO_NAMES,
+  location,
 }: {
   /** The page of rows; absent while it loads (the table shows its toolbar meanwhile). */
   page?: { items: Item[]; next_cursor: string | null; error?: string };
   /** Locations' names by ID. */
   locations?: Record<string, string>;
+  /** The location the list is filtered by: the counts shown are that location's. */
+  location?: string;
 }) {
   const filters: FilterDef[] = [
     { kind: "search", param: "sku", label: "SKU", placeholder: "Find a variant by its exact SKU" },
@@ -89,33 +102,35 @@ export function InventoryTable({
       header: "On hand",
       width: pixel(100),
       align: "end",
-      renderCell: (item) => <Text hasTabularNumbers>{item.on_hand}</Text>,
+      renderCell: (item) => <Text hasTabularNumbers>{countsAt(item, location).on_hand}</Text>,
     },
     {
       key: "reserved",
       header: "Reserved",
       width: pixel(100),
       align: "end",
-      renderCell: (item) => <Text hasTabularNumbers>{item.reserved}</Text>,
+      renderCell: (item) => <Text hasTabularNumbers>{countsAt(item, location).reserved}</Text>,
     },
     {
       key: "available",
       header: "Available",
       width: pixel(150),
       align: "end",
-      renderCell: (item) =>
-        !item.tracked ? (
+      renderCell: (item) => {
+        const { available } = countsAt(item, location);
+        return !item.tracked ? (
           <Badge label="Not tracked" variant="neutral" />
-        ) : item.available <= 0 ? (
+        ) : available <= 0 ? (
           <Badge
-            label={item.continue_selling ? `${item.available}, still selling` : `${item.available}`}
+            label={item.continue_selling ? `${available}, still selling` : `${available}`}
             variant="error"
           />
-        ) : item.available < LOW_STOCK ? (
-          <Badge label={String(item.available)} variant="warning" />
+        ) : available < LOW_STOCK ? (
+          <Badge label={String(available)} variant="warning" />
         ) : (
-          <Text hasTabularNumbers>{item.available}</Text>
-        ),
+          <Text hasTabularNumbers>{available}</Text>
+        );
+      },
     },
   ];
   return (
