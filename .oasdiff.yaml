@@ -1,0 +1,8 @@
+# oasdiff (CI's "API compatibility" job, or `oasdiff breaking <base> <revision>` locally).
+# Merging allOf branches avoids false alarms from the documents' composed schemas.
+flatten-allof: true
+fail-on: ERR
+# `<check id> <level>` per line, no comments allowed there. A new value in a response enum
+# (a scope, a status, an event type) is how the API grows: clients must tolerate values they
+# don't know, so it's reported, not failed.
+severity-levels: .github/oasdiff-severity.txt

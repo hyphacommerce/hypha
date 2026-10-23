@@ -1,0 +1,59 @@
+# Breaking changes to the OpenAPI documents, against the pull request's base. A field, route or
+# enum value clients rely on is a contract: removing or narrowing one fails here. To ship one on
+# purpose, label the pull request `breaking-api`. Checks and levels: `.oasdiff.yaml`.
+name: API compatibility
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths: ["openapi/**", ".oasdiff.yaml", ".github/oasdiff-severity.txt"]
+
+concurrency:
+  group: api-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  OASDIFF_VERSION: 1.34.1
+  OASDIFF_SHA256: 75775f65b0adebd26a8e013af51a799342dfdc6262d89efa9e3b7bdf89657d90
+
+jobs:
+  breaking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          sparse-checkout: openapi
+          persist-credentials: false
+      - name: Install oasdiff
+        run: |
+          archive="oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
+          curl -sSfLO "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/${archive}"
+          echo "${OASDIFF_SHA256}  ${archive}" | sha256sum -c -
+          tar -xzf "${archive}" oasdiff
+          sudo mv oasdiff /usr/local/bin/
+      - name: Compare with the base
+        env:
+          ALLOWED: ${{ contains(github.event.pull_request.labels.*.name, 'breaking-api') }}
+        run: |
+          status=0
+          for doc in admin storefront extensions; do
+            if [ ! -f "base/openapi/$doc.json" ]; then
+              echo "openapi/$doc.json is new: nothing to compare"
+              continue
+            fi
+            oasdiff breaking "base/openapi/$doc.json" "openapi/$doc.json" --format githubactions || status=1
+          done
+          if [ "$status" -ne 0 ] && [ "$ALLOWED" = "true" ]; then
+            echo "::notice::Breaking changes accepted by the breaking-api label"
+            exit 0
+          fi
+          exit "$status"

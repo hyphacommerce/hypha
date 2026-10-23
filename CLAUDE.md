@@ -28,6 +28,7 @@ cargo build -p hypha-core -p hypha-products -p hypha-markets -p hypha-pricing -p
 
 Extend the wasm build list when a domain crate or storage adapter is added. `hypha-http` is on it: anything a runtime provides goes through `host.rs`, never a Tokio or OS call (design note 0026).
 
+- Dependencies and API compatibility (beside `ci.yml`): `deny.yml` runs `cargo deny check` (`deny.toml`: RustSec advisories, permissive licenses only, crates.io only; on Cargo changes, pushes to main and weekly) and `api-compat.yml` runs `oasdiff breaking` on each `openapi/*.json` against the pull request's base (`.oasdiff.yaml`; a new response enum value is only reported; label the PR `breaking-api` to ship a break on purpose). Run `cargo deny check` after adding a crate. Dependabot (`.github/dependabot.yml`) proposes weekly grouped updates, a week after release. Actions are pinned to commit SHAs with the version in a comment, and workflows read with `permissions: contents: read`.
 - Single crate's tests: `cargo nextest run -p hypha-products` (`cargo test -p …` works too)
 - Single test by name: `cargo nextest run -p hypha-products rejects_same_handle_products`
 - Only an integration test file: `cargo nextest run -p hypha-products --test commands`

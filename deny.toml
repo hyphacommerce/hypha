@@ -1,0 +1,40 @@
+# cargo-deny: what the dependency tree may contain. CI runs `cargo deny check`; run it
+# locally after adding a dependency (`cargo install cargo-deny --locked`).
+
+[graph]
+# The spores' features and the hosts' optional parts ship too.
+all-features = true
+
+[advisories]
+# A RustSec advisory fails the check. To accept one, list its ID here with the reason.
+ignore = []
+
+[licenses]
+# Hypha is MIT OR Apache-2.0, so everything it ships must be usable under both: permissive
+# licenses only. MPL-2.0 is file-level copyleft (cssparser and dtoa-short, through ammonia):
+# it binds changes to those files, not Hypha. Anything else needs a decision before it's added.
+allow = [
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "0BSD",
+  "Zlib",
+  "Unicode-3.0",
+  "CDLA-Permissive-2.0",
+  "MPL-2.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "allow"
+# The workspace's own crates depend on each other by path alone, which counts as a wildcard;
+# crates.io refuses wildcard dependencies, so no other kind can reach us.
+wildcards = "allow"
+
+[sources]
+# Only crates.io: a git dependency is code nobody reviewed at a version.
+unknown-registry = "deny"
+unknown-git = "deny"

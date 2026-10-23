@@ -1,0 +1,38 @@
+# Weekly dependency PRs, grouped so a week's updates arrive as a few PRs. A release must be a
+# week old before it's proposed (`cooldown`): most compromised packages are caught sooner.
+# Security updates aren't held back by either.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      cargo:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directories: ["/", "/apps/*", "/packages/*"]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      # Astryx is 0.x and pinned exactly: its updates come on their own, to be read first.
+      astryx:
+        patterns: ["@astryxdesign/*"]
+      npm:
+        update-types: [minor, patch]
+        exclude-patterns: ["@astryxdesign/*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
