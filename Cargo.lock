@@ -1054,6 +1054,7 @@ dependencies = [
  "hypha-notifications",
  "hypha-privacy",
  "hypha-search",
+ "hypha-users",
  "ipnet",
  "schemars",
  "serde",

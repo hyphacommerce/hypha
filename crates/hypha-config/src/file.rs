@@ -218,6 +218,12 @@ pub struct Auth {
     pub password_reset_resend_after: Dur,
     /// How long an invite works. At least 1 minute.
     pub invite_lifetime: Dur,
+    /// Staff accounts locked against changing themselves, by login email: a public
+    /// demo's shared login. They keep what their role allows, but can't change their
+    /// name, password, two-factor setup or other sessions (`403 account_locked`), see only
+    /// their own session, and get no password reset emails.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub locked_accounts: Vec<String>,
 }
 
 impl Default for Auth {
@@ -230,6 +236,7 @@ impl Default for Auth {
             password_reset_lifetime: Dur(d.password_reset_lifetime),
             password_reset_resend_after: Dur(d.password_reset_resend_after),
             invite_lifetime: Dur(d.invite_lifetime),
+            locked_accounts: Vec::new(),
         }
     }
 }

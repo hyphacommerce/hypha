@@ -2686,6 +2686,74 @@ async fn wrong_second_factor_codes_lock_the_checks() {
 }
 
 #[tokio::test]
+async fn a_locked_account_keeps_its_role_but_cannot_change_itself() {
+    let app = app_configured(&format!("[auth]\nlocked_accounts = [{OWNER_EMAIL:?}]\n")).await;
+    let session = owner_session(&app).await;
+    let other = owner_session(&app).await;
+
+    // What the role allows still works.
+    assert_eq!(
+        send_as(&app, &session, "GET", "/admin/products", None)
+            .await
+            .0,
+        StatusCode::OK
+    );
+
+    // Its own name, password, second factor and the others' sessions don't.
+    let password = json!({ "current_password": OWNER_PASSWORD, "new_password": "a new password" });
+    let totp = json!({ "password": OWNER_PASSWORD });
+    let name = json!({ "name": "Someone else" });
+    for (method, path, body) in [
+        ("PATCH", "/admin/me", Some(name.to_string())),
+        ("PUT", "/admin/me/password", Some(password.to_string())),
+        ("POST", "/admin/me/mfa/totp", Some(totp.to_string())),
+        ("POST", "/admin/me/sessions/revoke-others", None),
+    ] {
+        let (status, body) = send_as(&app, &session, method, path, body.as_deref()).await;
+        assert_eq!(
+            (status, code(&body)),
+            (StatusCode::FORBIDDEN, "account_locked"),
+            "{method} {path}"
+        );
+    }
+
+    // Each session sees only itself, and may end only itself.
+    let (status, body) = send_as(&app, &session, "GET", "/admin/me/sessions", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["current"], json!(true));
+    let (_, theirs) = send_as(&app, &other, "GET", "/admin/me/sessions", None).await;
+    let other_id = theirs["items"][0]["id"].as_str().unwrap().to_string();
+    let (status, body) = send_as(
+        &app,
+        &session,
+        "DELETE",
+        &format!("/admin/me/sessions/{other_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "account_locked")
+    );
+    let mine = items[0]["id"].as_str().unwrap();
+    let (status, _) = send_as(
+        &app,
+        &session,
+        "DELETE",
+        &format!("/admin/me/sessions/{mine}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        send_as(&app, &other, "GET", "/admin/me", None).await.0,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
 async fn staff_change_their_password_and_manage_their_second_factor() {
     let app = app().await;
     let session = owner_session(&app).await;

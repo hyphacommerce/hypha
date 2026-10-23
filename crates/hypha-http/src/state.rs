@@ -117,6 +117,8 @@ pub struct HostEnv {
     auth: AuthSettings,
     /// Customers' session and code lifetimes (`[customers]`).
     accounts: hypha_customer_accounts::AccountSettings,
+    /// Staff accounts locked against changing themselves (`[auth]`'s `locked_accounts`).
+    staff: hypha_users::StaffSettings,
 }
 
 impl HostEnv {
@@ -130,7 +132,18 @@ impl HostEnv {
             hasher: Argon2id::OWASP,
             auth,
             accounts: hypha_customer_accounts::AccountSettings::default(),
+            staff: hypha_users::StaffSettings::default(),
         }
+    }
+
+    /// The locked staff accounts (`config.staff`); none otherwise.
+    pub fn with_staff(mut self, staff: hypha_users::StaffSettings) -> Self {
+        self.staff = staff;
+        self
+    }
+
+    pub fn staff_settings(&self) -> &hypha_users::StaffSettings {
+        &self.staff
     }
 
     /// The customer accounts' lifetimes (`config.accounts`); the defaults otherwise.

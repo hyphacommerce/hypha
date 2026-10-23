@@ -7,7 +7,7 @@ use hypha_auth::{
     list_sessions, regenerate_recovery_codes, revoke_other_sessions, revoke_session, start_totp,
 };
 use hypha_core::{RoleId, Scope, SessionId};
-use hypha_users::{HasUsers, StaffSession, rename_me};
+use hypha_users::{HasUsers, StaffSession, rename_me, require_unlocked};
 use serde::{Deserialize, Serialize};
 
 use super::{rfc3339, staff::UserResponse};
@@ -94,6 +94,7 @@ pub async fn update<S: Storage>(
     body: JsonBody<UpdateMeRequest>,
 ) -> Result<Json<MeResponse>, ApiError> {
     let (ports, mut staff) = staff.authenticate(&state).await?;
+    require_unlocked(&staff, state.env.staff_settings())?;
     let req = body.parse()?;
     if let Some(name) = &req.name {
         staff.user = rename_me(ports.users(), staff.user.id(), name).await?;
@@ -151,7 +152,12 @@ pub async fn list_sessions_handler<S: Storage>(
     staff: StaffCaller,
 ) -> Result<Json<MySessionListResponse>, ApiError> {
     let (ports, staff) = staff.authenticate(&state).await?;
-    let sessions = list_sessions(ports.sessions(), &state.clock, &staff.session).await?;
+    let mut sessions = list_sessions(ports.sessions(), &state.clock, &staff.session).await?;
+    // A locked account is shared: everyone using it sees only their own session, not
+    // where the others sign in from.
+    if state.env.staff_settings().is_locked(staff.user.email()) {
+        sessions.retain(|s| s.id() == staff.session.id());
+    }
     Ok(Json(MySessionListResponse {
         items: sessions
             .iter()
@@ -175,6 +181,10 @@ pub async fn revoke_session_handler<S: Storage>(
     PathId(id): PathId<SessionId>,
 ) -> Result<StatusCode, ApiError> {
     let (ports, staff) = staff.authenticate(&state).await?;
+    // A locked (shared) account may sign itself out, not the others using it.
+    if id != staff.session.id() {
+        require_unlocked(&staff, state.env.staff_settings())?;
+    }
     revoke_session(ports.sessions(), &state.clock, &staff.session, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -191,6 +201,7 @@ pub async fn revoke_other_sessions_handler<S: Storage>(
     staff: StaffCaller,
 ) -> Result<StatusCode, ApiError> {
     let (ports, staff) = staff.authenticate(&state).await?;
+    require_unlocked(&staff, state.env.staff_settings())?;
     revoke_other_sessions(&ports, &state.clock, &staff.session).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -216,6 +227,7 @@ pub async fn change_password_handler<S: Storage>(
     body: JsonBody<ChangePasswordRequest>,
 ) -> Result<StatusCode, ApiError> {
     let (ports, staff) = staff.authenticate(&state).await?;
+    require_unlocked(&staff, state.env.staff_settings())?;
     let req = body.parse()?;
     change_password(
         &ports,
@@ -258,6 +270,7 @@ pub async fn start_totp_handler<S: Storage>(
     body: JsonBody<StartTotpRequest>,
 ) -> Result<(StatusCode, Json<TotpSetupResponse>), ApiError> {
     let (ports, staff) = staff.authenticate(&state).await?;
+    require_unlocked(&staff, state.env.staff_settings())?;
     let req = body.parse()?;
     let setup = start_totp(
         ports.identities(),
@@ -311,6 +324,7 @@ pub async fn confirm_totp_handler<S: Storage>(
     body: JsonBody<CodeRequest>,
 ) -> Result<Json<RecoveryCodesResponse>, ApiError> {
     let (ports, staff) = staff.authenticate(&state).await?;
+    require_unlocked(&staff, state.env.staff_settings())?;
     let req = body.parse()?;
     let codes = confirm_totp(
         ports.identities(),
@@ -339,6 +353,7 @@ pub async fn disable_totp_handler<S: Storage>(
     body: JsonBody<CodeRequest>,
 ) -> Result<StatusCode, ApiError> {
     let (ports, staff) = staff.authenticate(&state).await?;
+    require_unlocked(&staff, state.env.staff_settings())?;
     let req = body.parse()?;
     disable_mfa(
         ports.identities(),
@@ -365,6 +380,7 @@ pub async fn recovery_codes_handler<S: Storage>(
     body: JsonBody<CodeRequest>,
 ) -> Result<Json<RecoveryCodesResponse>, ApiError> {
     let (ports, staff) = staff.authenticate(&state).await?;
+    require_unlocked(&staff, state.env.staff_settings())?;
     let req = body.parse()?;
     let codes = regenerate_recovery_codes(
         ports.identities(),

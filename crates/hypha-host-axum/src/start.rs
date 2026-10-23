@@ -235,7 +235,9 @@ async fn main<D: Deployment>() {
         }
     };
     tracing::info!("storage: Postgres (migrations applied)");
-    let env = HostEnv::new(secret_key, config.auth, runtime.clone()).with_accounts(config.accounts);
+    let env = HostEnv::new(secret_key, config.auth, runtime.clone())
+        .with_accounts(config.accounts)
+        .with_staff(config.staff.clone());
     let prepared = prepare::<D>(db, env, mail_sender, runtime, config).await;
     if setup_only {
         tracing::info!("setup done: migrations, the store, the owner, the location, search");

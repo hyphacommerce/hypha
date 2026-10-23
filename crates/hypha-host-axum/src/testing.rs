@@ -196,8 +196,9 @@ pub(crate) async fn app_exactly<D: crate::Deployment>(
     )
     .await
     .unwrap();
-    let env =
-        HostEnv::new([7; 32], config.auth, runtime.clone()).with_hasher(Argon2id::new(8, 1, 1));
+    let env = HostEnv::new([7; 32], config.auth, runtime.clone())
+        .with_hasher(Argon2id::new(8, 1, 1))
+        .with_staff(config.staff.clone());
     let (recording, emails) = recording_sender();
     let mail = Arc::new(MailHost::new(
         MailParts {

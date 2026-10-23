@@ -1788,7 +1788,7 @@ impl From<hypha_users::CommandError> for ApiError {
         use hypha_users::{CommandError as E, RoleError as R, UserError as U};
         let status = match &e {
             E::Login(inner) => return Self::from(inner.clone()),
-            E::Auth(_) => StatusCode::FORBIDDEN,
+            E::Auth(_) | E::AccountLocked => StatusCode::FORBIDDEN,
             E::NotStaff => StatusCode::UNAUTHORIZED,
             // User IDs only ever arrive in URLs; role IDs arrive in either, so routes
             // naming a role in the URL turn its 422 into a 404 (`not_found_if`). Invite

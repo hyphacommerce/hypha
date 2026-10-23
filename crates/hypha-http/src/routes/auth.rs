@@ -219,9 +219,14 @@ pub async fn request_reset_handler<S: Storage>(
 /// The work behind `request_reset_handler`; failures can only be logged.
 pub async fn password_reset_in_background<S: Storage>(state: SharedState<S>, email: String) {
     let result = match state.public_ports().await {
-        Ok(ports) => request_password_reset(&ports, &state.staff_env(&ports), &email)
-            .await
-            .map_err(|e| e.to_string()),
+        Ok(ports) => request_password_reset(
+            &ports,
+            &state.staff_env(&ports),
+            state.env.staff_settings(),
+            &email,
+        )
+        .await
+        .map_err(|e| e.to_string()),
         Err(_) => Err("cannot reach storage".to_string()),
     };
     if let Err(error) = result {

@@ -41,6 +41,8 @@ pub struct Config {
     pub allow_private_callbacks: bool,
     pub media: MediaConfig,
     pub auth: AuthSettings,
+    /// Staff accounts locked against changing themselves (`auth.locked_accounts`).
+    pub staff: hypha_users::StaffSettings,
     pub email: EmailConfig,
     pub categories: CategorySettings,
     /// The erasure window.
@@ -687,6 +689,15 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
     ] {
         p.between(key, value, min, LONGEST);
     }
+    let locked_accounts = auth
+        .locked_accounts
+        .iter()
+        .filter_map(|a| {
+            hypha_core::Email::new(a)
+                .inspect_err(|_| p.add("auth.locked_accounts", Broken::NotEmail(a.clone())))
+                .ok()
+        })
+        .collect();
 
     // Email.
     let email = &file.email;
@@ -955,6 +966,7 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             password_reset_resend_after: auth.password_reset_resend_after.0,
             invite_lifetime: auth.invite_lifetime.0,
         },
+        staff: hypha_users::StaffSettings { locked_accounts },
         email,
         categories: CategorySettings { max_depth },
         privacy: hypha_privacy::PrivacySettings {
@@ -1190,6 +1202,30 @@ mod tests {
             found,
             ["jobs.prune.events_after: is 10d, at least 11d is needed \
               (webhooks.give_up_after plus a day)"]
+        );
+    }
+
+    #[test]
+    fn locked_accounts_are_login_emails() {
+        let config = load(
+            r#"
+            [auth]
+            locked_accounts = ["demo@example.com"]
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.staff.locked_accounts,
+            [hypha_core::Email::new("demo@example.com").unwrap()]
+        );
+        assert_eq!(
+            problems(load(
+                r#"
+                [auth]
+                locked_accounts = ["demo"]
+                "#,
+            )),
+            ["auth.locked_accounts: \"demo\" isn't an email address"]
         );
     }
 

@@ -14,7 +14,7 @@ use hypha_core::{
 use thiserror::Error;
 
 use crate::{
-    Invite, Role, RoleError, User, UserError, UserStatus,
+    Invite, Role, RoleError, StaffSettings, User, UserError, UserStatus,
     repo::{
         HasInvites, HasRoles, HasStaffSessions, HasUsers, InviteRepo, RoleRepo, StaffSessionRecord,
         StaffSessionRepo, StageInvites, StageRoles, StageUsers, UserRepo, keys,
@@ -109,6 +109,9 @@ pub enum CommandError {
     NotStaff,
     #[error("invite {0} not found")]
     InviteNotFound(InviteId),
+    /// The account is locked against changing itself (`StaffSettings::locked_accounts`).
+    #[error("this account can't change its own settings")]
+    AccountLocked,
 }
 
 impl ErrorCode for CommandError {
@@ -129,6 +132,7 @@ impl ErrorCode for CommandError {
             CommandError::LastOwner => "last_owner",
             CommandError::NotStaff => "invalid_token",
             CommandError::InviteNotFound(_) => "invite_not_found",
+            CommandError::AccountLocked => "account_locked",
         }
     }
 }
@@ -675,6 +679,20 @@ pub struct StaffSession {
     pub role: Role,
 }
 
+/// Refuses a change a staff member makes to their own account (name, password, two
+/// factor, other sessions) when the account is locked (`StaffSettings`): a shared demo
+/// login. What their role allows is unaffected.
+pub fn require_unlocked(
+    staff: &StaffSession,
+    settings: &StaffSettings,
+) -> Result<(), CommandError> {
+    if settings.is_locked(staff.user.email()) {
+        Err(CommandError::AccountLocked)
+    } else {
+        Ok(())
+    }
+}
+
 /// Who `token` belongs to. Unknown, expired, revoked or pending sessions and disabled
 /// users are all `invalid_token`.
 ///
@@ -721,11 +739,16 @@ pub async fn authenticate_staff<S: HasStaffSessions + HasSessions>(
 pub async fn request_password_reset<S: StaffPorts>(
     ports: &S,
     env: &(impl AuthEnv + Notifier<StaffEmail>),
+    settings: &StaffSettings,
     email: &str,
 ) -> Result<(), CommandError> {
     let Ok(address) = Email::new(email) else {
         return Ok(());
     };
+    // A locked account's password stays as the operator set it: no reset link.
+    if settings.is_locked(&address) {
+        return Ok(());
+    }
     // A staff member's login email is their user email.
     if !ports
         .users()

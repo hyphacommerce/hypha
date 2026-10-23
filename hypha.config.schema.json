@@ -294,6 +294,13 @@
           "$ref": "#/$defs/Duration",
           "default": "7d"
         },
+        "locked_accounts": {
+          "description": "Staff accounts locked against changing themselves, by login email: a public\ndemo's shared login. They keep what their role allows, but can't change their\nname, password, two-factor setup or other sessions (`403 account_locked`), see only\ntheir own session, and get no password reset emails.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "password_reset_lifetime": {
           "description": "How long an emailed password reset link works.",
           "$ref": "#/$defs/Duration",

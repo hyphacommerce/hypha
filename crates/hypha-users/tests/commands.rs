@@ -6,9 +6,9 @@ use hypha_core::{
 use hypha_testkit::{InMemoryPorts, TestEnv};
 use hypha_users::{
     AcceptInvite, CommandError, Invite, InviteUser, NewOwner, Role, RoleRepo, StaffEmail,
-    UpdateRole, UpdateUser, User, UserRepo, UserStatus, accept_invite, authenticate_staff,
-    bootstrap_owner, create_role, get_user, invite_user, login, lookup_invite, rename_me,
-    request_password_reset, revoke_invite, update_role, update_user,
+    StaffSettings, UpdateRole, UpdateUser, User, UserRepo, UserStatus, accept_invite,
+    authenticate_staff, bootstrap_owner, create_role, get_user, invite_user, login, lookup_invite,
+    rename_me, request_password_reset, require_unlocked, revoke_invite, update_role, update_user,
 };
 use pollster::block_on;
 use uuid::Uuid;
@@ -236,7 +236,13 @@ fn disabling_a_user_uses_up_their_reset_links() {
     let (ports, env, owner) = world();
     let support = support_role(&ports, &env, &owner);
     let (bob, _) = join(&ports, &env, &owner, support.id());
-    block_on(request_password_reset(&ports, &env, "bob@example.com")).unwrap();
+    block_on(request_password_reset(
+        &ports,
+        &env,
+        &StaffSettings::default(),
+        "bob@example.com",
+    ))
+    .unwrap();
     let link = env.last_token().unwrap();
     let disable = UpdateUser {
         status: Some(UserStatus::Disabled),
@@ -738,14 +744,69 @@ fn reading_a_user_needs_users_read() {
     );
 }
 
+// ---------- locked accounts ----------
+
+fn locked(email: &str) -> StaffSettings {
+    StaffSettings {
+        locked_accounts: vec![Email::new(email).unwrap()],
+    }
+}
+
+#[test]
+fn a_locked_account_may_not_change_itself() {
+    let (ports, env, _) = world();
+    let token = session_token(
+        block_on(login(
+            &ports,
+            &env,
+            "ana@example.com",
+            OWNER_PASSWORD,
+            &SessionClient::default(),
+        ))
+        .unwrap(),
+    );
+    let staff = block_on(authenticate_staff(&ports, &env, &token)).unwrap();
+    assert_eq!(
+        require_unlocked(&staff, &locked("ana@example.com")),
+        Err(CommandError::AccountLocked)
+    );
+    assert_eq!(require_unlocked(&staff, &locked("bob@example.com")), Ok(()));
+    assert_eq!(require_unlocked(&staff, &StaffSettings::default()), Ok(()));
+}
+
+#[test]
+fn a_locked_account_gets_no_reset_link() {
+    let (ports, env, _) = world();
+    block_on(request_password_reset(
+        &ports,
+        &env,
+        &locked("ana@example.com"),
+        "ana@example.com",
+    ))
+    .unwrap();
+    assert!(env.sent().is_empty());
+}
+
 // ---------- password reset ----------
 
 #[test]
 fn a_reset_is_emailed_to_staff_only() {
     let (ports, env, _) = world();
-    block_on(request_password_reset(&ports, &env, "nobody@example.com")).unwrap();
+    block_on(request_password_reset(
+        &ports,
+        &env,
+        &StaffSettings::default(),
+        "nobody@example.com",
+    ))
+    .unwrap();
     assert!(env.sent().is_empty());
-    block_on(request_password_reset(&ports, &env, "ana@example.com")).unwrap();
+    block_on(request_password_reset(
+        &ports,
+        &env,
+        &StaffSettings::default(),
+        "ana@example.com",
+    ))
+    .unwrap();
     let sent = env.sent();
     let [StaffEmail::PasswordReset { to, token, .. }] = sent.as_slice() else {
         panic!("expected one reset email, got {:?}", env.sent());
@@ -775,11 +836,22 @@ fn a_reset_email_that_failed_does_not_hold_back_the_next() {
     let (ports, env, _) = world();
     env.fail_sending(true);
     assert!(matches!(
-        block_on(request_password_reset(&ports, &env, "ana@example.com")),
+        block_on(request_password_reset(
+            &ports,
+            &env,
+            &StaffSettings::default(),
+            "ana@example.com"
+        )),
         Err(CommandError::Notify(_))
     ));
     env.fail_sending(false);
-    block_on(request_password_reset(&ports, &env, "ana@example.com")).unwrap();
+    block_on(request_password_reset(
+        &ports,
+        &env,
+        &StaffSettings::default(),
+        "ana@example.com",
+    ))
+    .unwrap();
     assert_eq!(env.sent().len(), 1);
 }
 
@@ -801,7 +873,13 @@ fn a_reset_asked_while_disabled_does_not_hold_back_the_next() {
     ))
     .unwrap();
     let before = env.sent().len();
-    block_on(request_password_reset(&ports, &env, "bob@example.com")).unwrap();
+    block_on(request_password_reset(
+        &ports,
+        &env,
+        &StaffSettings::default(),
+        "bob@example.com",
+    ))
+    .unwrap();
     block_on(update_user(
         &owner_ctx(&owner),
         &ports,
@@ -810,7 +888,13 @@ fn a_reset_asked_while_disabled_does_not_hold_back_the_next() {
         status(UserStatus::Active),
     ))
     .unwrap();
-    block_on(request_password_reset(&ports, &env, "bob@example.com")).unwrap();
+    block_on(request_password_reset(
+        &ports,
+        &env,
+        &StaffSettings::default(),
+        "bob@example.com",
+    ))
+    .unwrap();
     assert_eq!(env.sent().len(), before + 1);
 }
 
@@ -832,7 +916,13 @@ fn a_disabled_user_gets_no_reset_email() {
     ))
     .unwrap();
     let before = env.sent().len();
-    block_on(request_password_reset(&ports, &env, "bob@example.com")).unwrap();
+    block_on(request_password_reset(
+        &ports,
+        &env,
+        &StaffSettings::default(),
+        "bob@example.com",
+    ))
+    .unwrap();
     assert_eq!(env.sent().len(), before);
 }
 
