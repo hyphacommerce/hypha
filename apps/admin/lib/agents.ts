@@ -121,10 +121,18 @@ export function kindLabel(kind: string): string {
 type Variant = "success" | "neutral" | "warning" | "info" | "error";
 
 /** Every status a proposal has, as the list filters them. */
-export const PROPOSAL_STATUSES = ["pending", "applied", "rejected", "expired", "failed"] as const;
+export const PROPOSAL_STATUSES = [
+  "pending",
+  "applying",
+  "applied",
+  "rejected",
+  "expired",
+  "failed",
+] as const;
 
 const PROPOSAL_STATUS: Record<string, { label: string; variant: Variant }> = {
   pending: { label: "Waiting", variant: "warning" },
+  applying: { label: "Applying", variant: "info" },
   applied: { label: "Applied", variant: "success" },
   rejected: { label: "Rejected", variant: "neutral" },
   expired: { label: "Expired", variant: "neutral" },

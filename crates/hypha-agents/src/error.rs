@@ -37,6 +37,15 @@ pub enum ProposalError {
     /// Pending is the only state a proposal leaves.
     #[error("the proposal is already {0}")]
     Decided(ProposalStatus),
+    /// Another approval is applying it.
+    #[error("the proposal is being applied")]
+    Applying,
+    /// It isn't what the approver saw: it was previewed again since.
+    #[error("the proposal changed since it was shown: look at it again")]
+    Changed,
+    /// Only an approval applying it records its write's answer.
+    #[error("the proposal is {0}, not applying")]
+    NotApplying(ProposalStatus),
     #[error("the proposal expired")]
     Expired,
     /// Expiring one before its time (a job's bug).
@@ -64,6 +73,9 @@ impl ErrorCode for ProposalError {
             ProposalError::Operation(e) => e.code(),
             ProposalError::Idempotency(e) => e.code(),
             ProposalError::Decided(_) => "proposal_decided",
+            ProposalError::Applying => "proposal_applying",
+            ProposalError::Changed => "proposal_changed",
+            ProposalError::NotApplying(_) => "proposal_decided",
             ProposalError::Expired => "proposal_expired",
             ProposalError::NotDue => "internal_error",
             ProposalError::TooLarge { .. } => "proposal_too_large",

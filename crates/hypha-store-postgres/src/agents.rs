@@ -550,7 +550,7 @@ impl<C: PgConnection> ProposalRepo for PgStore<C> {
             .query_typed(
                 &format!(
                     "SELECT {} FROM agent_proposals
-                     WHERE status = 'pending' AND expires_at <= {}
+                     WHERE status IN ('pending', 'applying') AND expires_at <= {}
                      ORDER BY expires_at, id LIMIT $2",
                     proposal_columns(),
                     ts(1)

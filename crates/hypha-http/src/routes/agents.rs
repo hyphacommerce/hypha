@@ -446,8 +446,9 @@ pub struct ProposalResponse {
     preview: Option<Value>,
     /// Every scope approving it takes.
     scopes: Vec<Scope>,
-    /// `pending`, `applied`, `rejected`, `expired` or `failed` (approved, but its write
-    /// failed: stale, a conflict, an app's refusal; `response` says why).
+    /// `pending`, `applying` (approved, its write running: `decided_by` and `decided_at`
+    /// say who and since when), `applied`, `rejected`, `expired` or `failed` (approved, but
+    /// its write failed: a conflict, an app's refusal; `response` says why).
     status: &'static str,
     decided_by: Option<UserId>,
     decided_at: Option<String>,
@@ -542,6 +543,7 @@ impl ProposalResponse {
 #[serde(rename_all = "snake_case")]
 pub enum ProposalStatusRequest {
     Pending,
+    Applying,
     Applied,
     Rejected,
     Expired,
@@ -552,6 +554,7 @@ impl From<ProposalStatusRequest> for ProposalStatus {
     fn from(s: ProposalStatusRequest) -> Self {
         match s {
             ProposalStatusRequest::Pending => ProposalStatus::Pending,
+            ProposalStatusRequest::Applying => ProposalStatus::Applying,
             ProposalStatusRequest::Applied => ProposalStatus::Applied,
             ProposalStatusRequest::Rejected => ProposalStatus::Rejected,
             ProposalStatusRequest::Expired => ProposalStatus::Expired,
@@ -626,25 +629,37 @@ pub async fn fetch_proposal<S: Storage>(
     )?))
 }
 
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ApproveProposalRequest {
+    /// The proposal's `refreshes` as the approver saw it: when it was previewed again
+    /// since, approving answers `409 proposal_changed` and applies nothing.
+    refreshes: Option<u32>,
+}
+
 /// Approves a pending proposal: its write is sent again as its agent, exactly as
 /// previewed (the preview's IDs; committed only if it records the same events over records
-/// as they were when previewed). Takes a
-/// staff session holding every scope the proposal names. Answers the proposal, `applied`
-/// or `failed` with the write's answer in `response`. A write that would no longer do
-/// what was previewed (the store changed meanwhile) writes nothing and answers `409
-/// preview_stale`: the proposal stays `pending`, now holding what the write would do today
-/// (its preview, IDs and digest replaced, `refreshes` counted, `proposal.updated`
-/// recorded), in `details.proposal`, with that preview in `details.preview`; review it and
-/// approve again. A proposal
-/// whose preview stopped at an effect it couldn't run (`complete: false`) is sent as a
-/// plain write. A write refused for good (a 4xx) marks it `failed`; one that may go
-/// through later (`408`, `429`, a 5xx) answers that and leaves it pending. A write already
-/// made under the proposal's idempotency key (an approval whose answer was lost) is
-/// recorded `applied` with that write's answer.
+/// as they were when previewed). Takes a staff session holding every scope the proposal
+/// names. The body is optional: `refreshes` binds the approval to the preview the approver
+/// saw (another count is `409 proposal_changed`, with the proposal as it is in
+/// `details.proposal`). While its write runs the proposal is `applying`, and nobody else
+/// decides it (`409 proposal_applying`). Answers the proposal, `applied` or `failed` with
+/// the write's answer in `response`. A write that would no longer do what was previewed
+/// (the store changed meanwhile) writes nothing and answers `409 preview_stale`: the
+/// proposal is `pending` again, now holding what the write would do today (its preview,
+/// IDs and digest replaced, `refreshes` counted, `proposal.updated` recorded), in
+/// `details.proposal`, with that preview in `details.preview`; review it and approve
+/// again. A proposal whose preview stopped at an effect it couldn't run (`complete:
+/// false`) is sent as a plain write. A write refused for good (a 4xx) marks it `failed`;
+/// one that may go through later (`408`, `429`, a 5xx, or agents turned off or capped to
+/// reading meanwhile) answers that and leaves it pending. A write already made under the
+/// proposal's idempotency key (an approval whose answer was lost) is recorded `applied`
+/// with that write's answer.
 #[utoipa::path(
     post,
     path = "/admin/agent-proposals/{id}/approve",
     params(("id" = ProposalId, Path)),
+    request_body = ApproveProposalRequest,
     responses((status = 200, description = "OK", body = ProposalResponse)),
     extensions(("x-hypha-scopes" = json!([])), ("x-hypha-staff-session" = json!(true))),
 )]
@@ -652,9 +667,21 @@ pub async fn approve<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: StaffCaller,
     PathId(id): PathId<ProposalId>,
+    body: JsonBody<ApproveProposalRequest>,
 ) -> Result<Response, ApiError> {
     let (ports, staff) = caller.authenticate(&state).await?;
-    let proposal = hypha_agents::approve_proposal(&staff.ctx, &ports, &state.clock, id).await?;
+    let seen = body.parse_optional()?.and_then(|r| r.refreshes);
+    let approved = hypha_agents::approve_proposal(&staff.ctx, &ports, &state.clock, id, seen).await;
+    let proposal = match approved {
+        Ok(proposal) => proposal,
+        Err(e @ hypha_agents::CommandError::Proposal(hypha_agents::ProposalError::Changed)) => {
+            let now = hypha_agents::get_proposal(&staff.ctx, &ports, id).await?;
+            let now = ProposalResponse::new(&staff.ctx, &now, state.operations())?;
+            let now = serde_json::to_value(&now).map_err(ApiError::internal)?;
+            return Err(ApiError::from(e).with_details(Some(serde_json::json!({ "proposal": now }))));
+        }
+        Err(e) => return Err(e.into()),
+    };
     if let Some(preview) = crate::preview::current() {
         // Its write is its own request: previewed when it was proposed.
         preview.block(crate::preview::BlockedBy::Proposal);
@@ -686,16 +713,17 @@ pub async fn approve<S: Storage>(
         let proposal = serde_json::to_value(&response).map_err(ApiError::internal)?;
         return Ok(ApiError::proposal_stale(fresh, proposal).into_response());
     }
-    let decided = match approved_write(answer.status) {
+    let decided = match approved_write(answer.status, answer.code()) {
         ApprovedWrite::Applied => {
             hypha_agents::record_applied(&staff.ctx, &ports, &state.clock, id, outcome).await?
         }
         ApprovedWrite::Refused => {
             hypha_agents::record_failed(&staff.ctx, &ports, &state.clock, id, outcome).await?
         }
-        // Nothing was written and the write may go through later: the proposal stays
-        // pending, and the approver gets the write's own answer.
+        // Nothing was written and the write may go through later: the proposal is
+        // pending again, and the approver gets the write's own answer.
         ApprovedWrite::NotNow => {
+            hypha_agents::release_proposal(&staff.ctx, &ports, id).await?;
             let status =
                 StatusCode::from_u16(answer.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
             return Ok((status, Json(answer.body)).into_response());
@@ -716,15 +744,20 @@ enum ApprovedWrite {
     Applied,
     /// A definitive refusal (any other 4xx): the proposal failed.
     Refused,
-    /// Too many requests, a timeout or a server error: try again later.
+    /// Too many requests, a timeout, a server error, or the operator's switches (agents
+    /// off, capped to reading) or the agent's staff member's turned off since: try again
+    /// later.
     NotNow,
 }
 
-fn approved_write(status: u16) -> ApprovedWrite {
-    match status {
-        200..=299 => ApprovedWrite::Applied,
-        408 | 429 => ApprovedWrite::NotNow,
-        400..=499 => ApprovedWrite::Refused,
+fn approved_write(status: u16, code: Option<&str>) -> ApprovedWrite {
+    match (status, code) {
+        (200..=299, _) => ApprovedWrite::Applied,
+        (_, Some("agents_disabled" | "agent_writes_off" | "agent_disabled")) => {
+            ApprovedWrite::NotNow
+        }
+        (408 | 429, _) => ApprovedWrite::NotNow,
+        (400..=499, _) => ApprovedWrite::Refused,
         _ => ApprovedWrite::NotNow,
     }
 }
@@ -1014,13 +1047,29 @@ mod tests {
 
     #[test]
     fn only_a_definitive_refusal_fails_an_approved_proposal() {
-        assert_eq!(approved_write(200), ApprovedWrite::Applied);
-        assert_eq!(approved_write(201), ApprovedWrite::Applied);
+        assert_eq!(approved_write(200, None), ApprovedWrite::Applied);
+        assert_eq!(approved_write(201, None), ApprovedWrite::Applied);
         for refused in [400, 403, 404, 409, 422] {
-            assert_eq!(approved_write(refused), ApprovedWrite::Refused, "{refused}");
+            let code = Some("anything");
+            assert_eq!(
+                approved_write(refused, code),
+                ApprovedWrite::Refused,
+                "{refused}"
+            );
         }
         for later in [408, 429, 500, 502, 503] {
-            assert_eq!(approved_write(later), ApprovedWrite::NotNow, "{later}");
+            assert_eq!(
+                approved_write(later, None),
+                ApprovedWrite::NotNow,
+                "{later}"
+            );
+        }
+        for switch in ["agents_disabled", "agent_writes_off", "agent_disabled"] {
+            assert_eq!(
+                approved_write(403, Some(switch)),
+                ApprovedWrite::NotNow,
+                "{switch}"
+            );
         }
     }
 }

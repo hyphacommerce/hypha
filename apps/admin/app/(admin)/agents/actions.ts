@@ -97,19 +97,28 @@ export async function revokeAgent(id: string): Promise<Result> {
 }
 
 /**
- * Approves a proposal: its write runs as previewed, or not at all. The page shows how it
- * went from the proposal itself: `applied` or `failed` with the write's answer, or, when
- * the store changed since (`409 preview_stale`), still pending with what the write would
- * do now and `refreshes` counted, to approve again. So only an approval that didn't get
- * that far is an error here.
+ * Approves a proposal as the page showed it (`refreshes`: the preview seen): its write runs
+ * as previewed, or not at all. The page shows how it went from the proposal itself:
+ * `applied` or `failed` with the write's answer, or, when the store changed since (`409
+ * preview_stale`), still pending with what the write would do now and `refreshes`
+ * counted, to approve again. So only an approval that didn't get that far is an error
+ * here; one whose proposal was previewed again since it was shown (`proposal_changed`)
+ * says so, and the page shows the new preview.
  */
-export async function approveProposal(id: string): Promise<Result> {
+export async function approveProposal(id: string, refreshes: number): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.POST("/admin/agent-proposals/{id}/approve", {
     params: { path: { id } },
+    body: { refreshes },
   });
   revalidatePath(`/agents/proposals/${id}`);
   revalidatePath("/agents/proposals");
+  if (error?.code === "proposal_changed") {
+    return {
+      error:
+        "This proposal changed since you opened it. Below is what it would do now: review it and approve again.",
+    };
+  }
   if (error && error.code !== "preview_stale") return { error: describe(error) };
   return {};
 }

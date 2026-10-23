@@ -26,8 +26,8 @@ pub use commands::{
     create_connected_agent, create_proposal, expire_proposals, get_agent, get_proposal,
     list_agent_calls, list_agents, list_proposals, prepare_autonomous_agent,
     prepare_connected_agent, prune_agent_calls, record_agent_use, record_applied, record_call,
-    record_failed, record_refreshed, reject_proposal, require_grantable, revoke_agent,
-    update_agent,
+    record_failed, record_refreshed, reject_proposal, release_proposal, require_grantable,
+    revoke_agent, update_agent,
 };
 pub use error::{AgentError, CallError, ProposalError};
 pub use events::{
@@ -40,8 +40,8 @@ pub use grant::{
 };
 pub use hypha_core::{OperationId, OperationIdError};
 pub use proposal::{
-    MAX_DIGEST_LEN, MAX_NOTE_LEN, MAX_PREVIEW_BYTES, MAX_REQUEST_BYTES, NewProposal, Proposal,
-    ProposalRequest, ProposalResponse, ProposalSnapshot, ProposalStatus,
+    APPLYING_LEASE, MAX_DIGEST_LEN, MAX_NOTE_LEN, MAX_PREVIEW_BYTES, MAX_REQUEST_BYTES,
+    NewProposal, Proposal, ProposalRequest, ProposalResponse, ProposalSnapshot, ProposalStatus,
 };
 pub use repo::{
     AgentCallRepo, AgentFilter, AgentRepo, HasAgentCalls, HasAgents, HasProposals, ProposalFilter,

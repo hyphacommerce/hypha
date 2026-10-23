@@ -1,4 +1,5 @@
 use std::fmt;
+use std::time::Duration;
 
 use hypha_core::{
     AgentId, IdempotencyKey, PendingEvent, ProposalId, Recorded, Recorder, Scope, Stamped, Stamps,
@@ -18,11 +19,20 @@ pub const MAX_PREVIEW_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_DIGEST_LEN: usize = 128;
 /// The longest rejection note, in characters.
 pub const MAX_NOTE_LEN: usize = 2000;
+/// How long an approval holds a proposal `applying`: past it, the approval is taken to
+/// have died before recording its write's answer, and the proposal counts as pending
+/// again. Far longer than a write takes.
+pub const APPLYING_LEASE: Duration = Duration::from_secs(5 * 60);
 
-/// Where a proposal stands. `Pending` is the only state it leaves, to one of the others.
+/// Where a proposal stands. `Pending` leaves to one of the others; `Applying` to a
+/// decision or back to `Pending`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProposalStatus {
     Pending,
+    /// Approved (`decided_by`, at `decided_at`), its write being sent: nobody else
+    /// decides it meanwhile. Pending again when the write may go through later or the
+    /// store moved, or once `APPLYING_LEASE` has passed.
+    Applying,
     /// Approved, and its write committed.
     Applied,
     Rejected,
@@ -33,8 +43,9 @@ pub enum ProposalStatus {
 }
 
 impl ProposalStatus {
-    pub const ALL: [ProposalStatus; 5] = [
+    pub const ALL: [ProposalStatus; 6] = [
         ProposalStatus::Pending,
+        ProposalStatus::Applying,
         ProposalStatus::Applied,
         ProposalStatus::Rejected,
         ProposalStatus::Expired,
@@ -44,6 +55,7 @@ impl ProposalStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             ProposalStatus::Pending => "pending",
+            ProposalStatus::Applying => "applying",
             ProposalStatus::Applied => "applied",
             ProposalStatus::Rejected => "rejected",
             ProposalStatus::Expired => "expired",
@@ -242,10 +254,27 @@ impl Proposal {
         Subject::new(PROPOSAL, self.id.as_uuid())
     }
 
-    fn pending(&self) -> Result<(), ProposalError> {
+    /// Fails unless it's open at `now`: pending, or applying past `APPLYING_LEASE`.
+    fn open(&self, now: Timestamp) -> Result<(), ProposalError> {
         match self.status {
             ProposalStatus::Pending => Ok(()),
+            ProposalStatus::Applying
+                if self
+                    .decided_at
+                    .is_some_and(|since| since.plus(APPLYING_LEASE) <= now) =>
+            {
+                Ok(())
+            }
+            ProposalStatus::Applying => Err(ProposalError::Applying),
             done => Err(ProposalError::Decided(done)),
+        }
+    }
+
+    /// Fails unless an approval is applying it.
+    fn applying(&self) -> Result<(), ProposalError> {
+        match self.status {
+            ProposalStatus::Applying => Ok(()),
+            other => Err(ProposalError::NotApplying(other)),
         }
     }
 
@@ -254,12 +283,31 @@ impl Proposal {
         now >= self.expires_at
     }
 
-    /// Fails unless a person may decide it at `now`: pending and within its lifetime.
+    /// Fails unless a person may decide it at `now`: open and within its lifetime.
     pub fn check_decidable(&self, now: Timestamp) -> Result<(), ProposalError> {
-        self.pending()?;
+        self.open(now)?;
         if self.is_expired(now) {
             return Err(ProposalError::Expired);
         }
+        Ok(())
+    }
+
+    /// Approved by `by` at `now`: applying until its write's answer is recorded
+    /// (`applied`, `failed`, `refresh`, `release`). Nobody else decides it meanwhile.
+    pub fn start_applying(&mut self, by: UserId, now: Timestamp) -> Result<(), ProposalError> {
+        self.check_decidable(now)?;
+        self.status = ProposalStatus::Applying;
+        self.decided_by = Some(by);
+        self.decided_at = Some(now);
+        Ok(())
+    }
+
+    /// Pending again: its approved write wasn't made and may go through later.
+    pub fn release(&mut self) -> Result<(), ProposalError> {
+        self.applying()?;
+        self.status = ProposalStatus::Pending;
+        self.decided_by = None;
+        self.decided_at = None;
         Ok(())
     }
 
@@ -284,7 +332,7 @@ impl Proposal {
         at: Timestamp,
         response: ProposalResponse,
     ) -> Result<(), ProposalError> {
-        self.pending()?;
+        self.applying()?;
         self.response = Some(response);
         self.decide(ProposalStatus::Applied, Some(by), at);
         Ok(())
@@ -297,7 +345,7 @@ impl Proposal {
         at: Timestamp,
         response: ProposalResponse,
     ) -> Result<(), ProposalError> {
-        self.pending()?;
+        self.applying()?;
         self.response = Some(response);
         self.decide(ProposalStatus::Failed, Some(by), at);
         Ok(())
@@ -305,16 +353,17 @@ impl Proposal {
 
     /// Approving found the store changed since its preview: it now holds `preview` (with
     /// the IDs the new run was handed) and `digest`, what the write would do today, and
-    /// stays pending for a person to review and approve again.
+    /// is pending again for a person to review and approve again.
     pub fn refresh(
         &mut self,
         by: UserId,
         preview: Value,
         digest: String,
     ) -> Result<(), ProposalError> {
-        self.pending()?;
+        self.applying()?;
         check_size("preview", &preview, MAX_PREVIEW_BYTES)?;
         check_digest(&digest)?;
+        self.release()?;
         self.preview = preview;
         self.digest = digest;
         self.refreshes = self.refreshes.saturating_add(1);
@@ -350,7 +399,7 @@ impl Proposal {
 
     /// Expired at `at`, which must be at or past its lifetime.
     pub fn expire(&mut self, at: Timestamp) -> Result<(), ProposalError> {
-        self.pending()?;
+        self.open(at)?;
         if !self.is_expired(at) {
             return Err(ProposalError::NotDue);
         }
@@ -460,7 +509,10 @@ impl Proposal {
         )?;
         let by_person = matches!(
             s.status,
-            ProposalStatus::Applied | ProposalStatus::Rejected | ProposalStatus::Failed
+            ProposalStatus::Applying
+                | ProposalStatus::Applied
+                | ProposalStatus::Rejected
+                | ProposalStatus::Failed
         );
         let with_response = matches!(s.status, ProposalStatus::Applied | ProposalStatus::Failed);
         let note_fits = s
@@ -727,9 +779,39 @@ mod tests {
         );
     }
 
+    /// Pending, then approved at 10: its write running.
+    fn applying() -> Proposal {
+        let mut p = pending();
+        p.start_applying(user(), at(10)).unwrap();
+        p
+    }
+
+    #[test]
+    fn approving_holds_it_until_the_answer_or_the_lease() {
+        let mut p = applying();
+        assert_eq!(p.status(), ProposalStatus::Applying);
+        assert_eq!(p.decided_by(), Some(user()));
+        assert!(data(&mut p).is_empty(), "nothing decided yet");
+        let lapses = at(10).plus(APPLYING_LEASE);
+        let held = Err(ProposalError::Applying);
+        assert_eq!(p.open(lapses.minus(Duration::from_micros(1))), held);
+        assert_eq!(p.clone().reject(user(), at(11), None), held);
+        assert_eq!(p.clone().start_applying(user(), at(11)), held);
+        assert_eq!(p.open(lapses), Ok(()), "the lease passed");
+        p.release().unwrap();
+        assert_eq!(
+            (p.status(), p.decided_by(), p.decided_at()),
+            (ProposalStatus::Pending, None, None)
+        );
+        assert_eq!(
+            p.release(),
+            Err(ProposalError::NotApplying(ProposalStatus::Pending))
+        );
+    }
+
     #[test]
     fn applying_records_who_when_and_the_response() {
-        let mut p = pending();
+        let mut p = applying();
         p.applied(user(), at(50), response()).unwrap();
         assert_eq!(p.status(), ProposalStatus::Applied);
         assert_eq!(p.decided_by(), Some(user()));
@@ -751,9 +833,9 @@ mod tests {
 
     #[test]
     fn applying_may_finish_after_the_lifetime() {
-        let mut p = pending();
+        let mut p = applying();
         p.applied(user(), at(100), response()).unwrap();
-        let mut p = pending();
+        let mut p = applying();
         p.failed(user(), at(101), response()).unwrap();
         assert_eq!(p.status(), ProposalStatus::Failed);
     }
@@ -813,11 +895,23 @@ mod tests {
 
     #[test]
     fn only_pending_moves() {
-        let mut decided = pending();
+        let mut decided = applying();
         decided.applied(user(), at(1), response()).unwrap();
         let done = Err(ProposalError::Decided(ProposalStatus::Applied));
-        assert_eq!(decided.clone().applied(user(), at(2), response()), done);
-        assert_eq!(decided.clone().failed(user(), at(2), response()), done);
+        let not_applying = Err(ProposalError::NotApplying(ProposalStatus::Applied));
+        assert_eq!(
+            decided.clone().applied(user(), at(2), response()),
+            not_applying
+        );
+        assert_eq!(
+            decided.clone().failed(user(), at(2), response()),
+            not_applying
+        );
+        assert_eq!(
+            pending().applied(user(), at(2), response()),
+            Err(ProposalError::NotApplying(ProposalStatus::Pending)),
+            "only an approval records an answer"
+        );
         assert_eq!(decided.clone().reject(user(), at(2), None), done);
         assert_eq!(decided.clone().expire(at(200)), done);
         assert_eq!(decided.check_decidable(at(2)), done);
@@ -825,7 +919,7 @@ mod tests {
 
     #[test]
     fn restore_round_trips_every_status() {
-        let mut applied = pending();
+        let mut applied = applying();
         applied.applied(user(), at(5), response()).unwrap();
         let mut rejected = pending();
         rejected
@@ -833,9 +927,9 @@ mod tests {
             .unwrap();
         let mut expired = pending();
         expired.expire(at(100)).unwrap();
-        let mut failed = pending();
+        let mut failed = applying();
         failed.failed(user(), at(5), response()).unwrap();
-        for mut p in [pending(), applied, rejected, expired, failed] {
+        for mut p in [pending(), applying(), applied, rejected, expired, failed] {
             p.take_events();
             p.set_version(Version::new(2));
             assert_eq!(Proposal::restore(p.snapshot()), Ok(p));
@@ -865,8 +959,8 @@ mod tests {
     }
 
     #[test]
-    fn a_stale_proposal_is_previewed_again_and_stays_pending() {
-        let mut p = pending();
+    fn a_stale_proposal_is_previewed_again_and_is_pending_again() {
+        let mut p = applying();
         p.refresh(
             user(),
             json!({"complete": true, "n": 2}),
@@ -880,19 +974,23 @@ mod tests {
         let events = data(&mut p);
         assert_eq!(events[0].0, "proposal.updated");
         assert_eq!(events[0].1["refreshes"], json!(1));
+        p.start_applying(user(), at(11)).unwrap();
         p.refresh(user(), json!({}), "sha256:ghi".to_string())
             .unwrap();
         assert_eq!(p.refreshes(), 2);
+        let mut again = p.clone();
+        again.start_applying(user(), at(12)).unwrap();
         assert_eq!(
-            p.clone().refresh(user(), json!({}), String::new()),
+            again.refresh(user(), json!({}), String::new()),
             Err(ProposalError::InvalidDigest(String::new()))
         );
         p.take_events();
         assert_eq!(Proposal::restore(p.snapshot()), Ok(p.clone()));
-        p.applied(user(), at(1), response()).unwrap();
+        p.start_applying(user(), at(12)).unwrap();
+        p.applied(user(), at(13), response()).unwrap();
         assert_eq!(
             p.refresh(user(), json!({}), "sha256:x".to_string()),
-            Err(ProposalError::Decided(ProposalStatus::Applied))
+            Err(ProposalError::NotApplying(ProposalStatus::Applied))
         );
     }
 }

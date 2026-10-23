@@ -743,6 +743,107 @@ async fn a_proposal_is_approved_and_applied_as_previewed() {
     assert_eq!(modes, ["propose", "propose"]);
 }
 
+/// A proposal `agent` made directly in storage, as if previewed: creating a mug.
+async fn stored_proposal(app: &TestApp, agent: &str) -> String {
+    let ports = app.state.public_ports().await.unwrap();
+    let ctx = hypha_core::Ctx::new(
+        hypha_core::Actor::Agent(agent.parse().unwrap()),
+        vec![hypha_core::Scope::ProductsWrite],
+    );
+    let input = hypha_agents::Propose {
+        operation: "admin.products.create".to_string(),
+        request: hypha_agents::ProposalRequest {
+            body: Some(mug()),
+            ..Default::default()
+        },
+        idempotency_key: None,
+        preview: json!({"complete": false}),
+        digest: "sha256:0".to_string(),
+        scopes: vec![hypha_core::Scope::ProductsWrite],
+    };
+    let settings = &app.state.config.agents.settings;
+    let made = hypha_agents::create_proposal(
+        &ctx,
+        &ports,
+        &app.state.ids,
+        &app.state.clock,
+        settings,
+        input,
+    )
+    .await
+    .unwrap();
+    made.value.id().to_string()
+}
+
+#[tokio::test]
+async fn an_approval_holds_its_proposal_and_names_what_it_saw() {
+    let app = app().await;
+    let agent = proposer(&app).await;
+    let id = stored_proposal(&app, &agent).await;
+    let session = owner_session(&app).await;
+    let approve = format!("/admin/agent-proposals/{id}/approve");
+
+    // Shown before it was previewed again: nothing applied.
+    let body = json!({"refreshes": 1}).to_string();
+    let (status, json) = send_as(&app, &session, "POST", &approve, Some(&body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "proposal_changed"),
+        "{json}"
+    );
+    assert_eq!(json["details"]["proposal"]["status"], "pending");
+    assert_eq!(json["details"]["proposal"]["refreshes"], 0);
+    assert_eq!(rows(&app, "products").await, 0);
+
+    // Another approval is applying it: nobody else decides it meanwhile.
+    let ports = app.state.public_ports().await.unwrap();
+    let staff = hypha_core::Ctx::new(
+        hypha_core::Actor::User(hypha_core::UserId::from_uuid(uuid::Uuid::from_u128(1))),
+        hypha_core::Scope::ALL.to_vec(),
+    );
+    let claimed =
+        hypha_agents::approve_proposal(&staff, &ports, &app.state.clock, id.parse().unwrap(), None)
+            .await;
+    assert_eq!(
+        claimed.map(|p| p.status()),
+        Ok(hypha_agents::ProposalStatus::Applying)
+    );
+    drop(ports);
+    let body = json!({"refreshes": 0}).to_string();
+    let (status, json) = send_as(&app, &session, "POST", &approve, Some(&body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "proposal_applying"),
+        "{json}"
+    );
+    let reject = format!("/admin/agent-proposals/{id}/reject");
+    let (status, json) = send_as(&app, &session, "POST", &reject, None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "proposal_applying")
+    );
+    let (_, one) = send(&app, "GET", &format!("/admin/agent-proposals/{id}"), None).await;
+    assert_eq!(one["status"], "applying");
+}
+
+#[tokio::test]
+async fn approving_while_agents_only_read_keeps_the_proposal_pending() {
+    let app = app_configured("[agents]\nwrites = \"off\"").await;
+    let agent = proposer(&app).await;
+    let id = stored_proposal(&app, &agent).await;
+    let session = owner_session(&app).await;
+    let approve = format!("/admin/agent-proposals/{id}/approve");
+    let (status, json) = send_as(&app, &session, "POST", &approve, None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::FORBIDDEN, "agent_writes_off"),
+        "{json}"
+    );
+    let (_, one) = send(&app, "GET", &format!("/admin/agent-proposals/{id}"), None).await;
+    assert_eq!(one["status"], "pending", "{one}");
+    assert_eq!(rows(&app, "products").await, 0);
+}
+
 #[tokio::test]
 async fn a_stale_proposal_is_previewed_again_for_a_second_look() {
     let app = app().await;

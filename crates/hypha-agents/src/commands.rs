@@ -461,19 +461,50 @@ fn decider(ctx: &Ctx, proposal: &Proposal) -> Result<UserId, CommandError> {
     Ok(user)
 }
 
-/// Checks that the caller may approve the proposal now and returns it for the host to
-/// apply (exactly as previewed); the host then records the result with `record_applied`
-/// or `record_failed`. Writes nothing. Refused for a revoked or disabled agent's.
+/// Checks that the caller may approve the proposal now and claims it (`applying`), so
+/// nobody else decides it meanwhile; returns it for the host to apply (exactly as
+/// previewed), which then records the result with `record_applied`, `record_failed`,
+/// `record_refreshed` or `release_proposal`. `seen` is the `refreshes` the approver
+/// looked at: another count is `proposal_changed` (it was previewed again since).
+/// Refused for a revoked or disabled agent's.
 pub async fn approve_proposal<S: HasAgents + HasProposals>(
     ctx: &Ctx,
     ports: &S,
     clock: &impl Clock,
     id: ProposalId,
+    seen: Option<u32>,
 ) -> Result<Proposal, CommandError> {
-    let proposal = load_proposal(ports.proposals(), id).await?;
-    decider(ctx, &proposal)?;
-    proposal.check_decidable(clock.now())?;
+    let mut proposal = load_proposal(ports.proposals(), id).await?;
+    let user = decider(ctx, &proposal)?;
+    let now = clock.now();
+    proposal.check_decidable(now)?;
+    if seen.is_some_and(|seen| seen != proposal.refreshes()) {
+        return Err(ProposalError::Changed.into());
+    }
     active_agent(ports, proposal.agent()).await?;
+    proposal.start_applying(user, now)?;
+    match ports.proposals().update(&mut proposal).await {
+        Ok(()) => Ok(proposal),
+        // Decided, claimed or previewed again since it was read.
+        Err(RepoError::StaleVersion) => {
+            let now_is = load_proposal(ports.proposals(), id).await?;
+            now_is.check_decidable(now)?;
+            Err(ProposalError::Changed.into())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Its approved write wasn't made and may go through later: pending again.
+pub async fn release_proposal<S: HasProposals>(
+    ctx: &Ctx,
+    ports: &S,
+    id: ProposalId,
+) -> Result<Proposal, CommandError> {
+    let mut proposal = load_proposal(ports.proposals(), id).await?;
+    decider(ctx, &proposal)?;
+    proposal.release()?;
+    ports.proposals().update(&mut proposal).await?;
     Ok(proposal)
 }
 
@@ -517,7 +548,7 @@ pub async fn record_failed<S: HasProposals>(
 }
 
 /// Records that approving found the proposal stale: it now holds what the write would do
-/// today (`preview`, `digest`), still pending, for a person to approve again.
+/// today (`preview`, `digest`), pending again, for a person to approve again.
 pub async fn record_refreshed<S: HasProposals>(
     ctx: &Ctx,
     ports: &S,

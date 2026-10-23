@@ -127,7 +127,7 @@ impl ApiError {
         self.status
     }
 
-    fn with_details(mut self, details: Option<serde_json::Value>) -> Self {
+    pub(crate) fn with_details(mut self, details: Option<serde_json::Value>) -> Self {
         self.details = details;
         self
     }
@@ -1559,7 +1559,9 @@ impl From<hypha_agents::CommandError> for ApiError {
             | E::Grant(_)
             | E::Operation(_)
             | E::Idempotency(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            E::Proposal(P::Decided(_) | P::Expired) => StatusCode::CONFLICT,
+            E::Proposal(
+                P::Decided(_) | P::Expired | P::Applying | P::NotApplying(_) | P::Changed,
+            ) => StatusCode::CONFLICT,
             E::Proposal(
                 P::Operation(_)
                 | P::Idempotency(_)

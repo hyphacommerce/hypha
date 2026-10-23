@@ -95,7 +95,7 @@ async function ProposalDetail({ id }: { id: string }) {
             />
           )}
           {proposal.status === "pending" ? (
-            <Decision id={proposal.id} missing={missing} />
+            <Decision id={proposal.id} refreshes={proposal.refreshes} missing={missing} />
           ) : (
             <Outcome proposal={proposal} people={people} />
           )}
@@ -162,12 +162,14 @@ async function ProposalDetail({ id }: { id: string }) {
                   What approving sends, as the agent made it.
                 </Text>
               </VStack>
-              <JsonDisclosure
-                label="Path and query"
-                value={{ ...proposal.request.params, ...proposal.request.query }}
-                isOpen
-              />
-              {proposal.request.body != null && (
+              {proposal.request && (
+                <JsonDisclosure
+                  label="Path and query"
+                  value={{ ...proposal.request.params, ...proposal.request.query }}
+                  isOpen
+                />
+              )}
+              {proposal.request?.body != null && (
                 <JsonDisclosure label="Body" value={proposal.request.body} isOpen />
               )}
             </VStack>
@@ -252,6 +254,14 @@ function Outcome({ proposal, people }: { proposal: Proposal; people: Map<string,
             )}
           </VStack>
         </Card>
+      );
+    case "applying":
+      return (
+        <Banner
+          status="info"
+          title="Being applied"
+          description={`Approved${decider ? ` by ${decider}` : ""}; its write is running. Reload in a moment to see how it went.`}
+        />
       );
     case "expired":
       return (

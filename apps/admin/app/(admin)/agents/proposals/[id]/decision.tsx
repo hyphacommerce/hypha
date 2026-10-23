@@ -21,9 +21,12 @@ const NOTE_MAX = 2000;
  */
 export function Decision({
   id,
+  refreshes,
   missing,
 }: {
   id: string;
+  /** How many times it was previewed again: what's shown, which approving names. */
+  refreshes: number;
   /** The proposal's scopes the signed-in staff member lacks: then they can't approve it. */
   missing: string[];
 }) {
@@ -32,7 +35,8 @@ export function Decision({
   const [isPending, startTransition] = useTransition();
   const canDecide = missing.length === 0;
 
-  const approve = () => startTransition(async () => setError((await approveProposal(id)).error));
+  const approve = () =>
+    startTransition(async () => setError((await approveProposal(id, refreshes)).error));
 
   return (
     <Card>

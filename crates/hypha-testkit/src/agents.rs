@@ -192,7 +192,12 @@ impl ProposalRepo for InMemoryAgents {
             .proposals
             .all()
             .into_iter()
-            .filter(|p| p.status() == ProposalStatus::Pending && p.expires_at() <= now)
+            .filter(|p| {
+                matches!(
+                    p.status(),
+                    ProposalStatus::Pending | ProposalStatus::Applying
+                ) && p.expires_at() <= now
+            })
             .collect();
         due.sort_by_key(|p| (p.expires_at(), p.id()));
         due.truncate(limit as usize);

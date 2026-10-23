@@ -2,16 +2,17 @@
 
 use core::time::Duration;
 
-use hypha_agents::{Agent, AgentSettings, Proposal};
 use hypha_agents::{
-    AgentError, AgentFilter, AgentKind, AgentRepo, CallMode, ClientInput, CommandError,
-    ConnectAgent, CreateAgent, GrantError, GrantInput, ListProposals, NewAgentCall, OperationId,
-    Outcome, ProposalError, ProposalRequest, ProposalStatus, Propose, UpdateAgent, WriteMode,
-    WritesCap, active_agent, approve_proposal, create_autonomous_agent, create_connected_agent,
-    create_proposal, effective, expire_proposals, get_agent, get_proposal, list_agent_calls,
-    list_agents, list_proposals, prune_agent_calls, record_agent_use, record_applied, record_call,
-    record_failed, reject_proposal, revoke_agent, update_agent,
+    APPLYING_LEASE, AgentError, AgentFilter, AgentKind, AgentRepo, CallMode, ClientInput,
+    CommandError, ConnectAgent, CreateAgent, GrantError, GrantInput, ListProposals, NewAgentCall,
+    OperationId, Outcome, ProposalError, ProposalRequest, ProposalStatus, Propose, UpdateAgent,
+    WriteMode, WritesCap, active_agent, approve_proposal, create_autonomous_agent,
+    create_connected_agent, create_proposal, effective, expire_proposals, get_agent, get_proposal,
+    list_agent_calls, list_agents, list_proposals, prune_agent_calls, record_agent_use,
+    record_applied, record_call, record_failed, record_refreshed, reject_proposal,
+    release_proposal, revoke_agent, update_agent,
 };
+use hypha_agents::{Agent, AgentSettings, Proposal};
 use hypha_core::{
     Actor, AgentId, ApiKeyId, AuthError, Ctx, IdempotencyError, PageRequest, Progress, ProposalId,
     Scope, Timestamp, UserId, Versioned,
@@ -133,6 +134,17 @@ impl World {
             .into_iter()
             .map(|e| e.event_type)
             .collect()
+    }
+
+    /// The owner approves `id` as it is now.
+    fn approve(&self, id: ProposalId) -> Result<Proposal, CommandError> {
+        block_on(approve_proposal(
+            &staff(),
+            &self.ports,
+            &self.clock,
+            id,
+            None,
+        ))
     }
 
     fn later(&self, by: Duration) {
@@ -581,8 +593,10 @@ fn a_staff_member_holding_its_scopes_approves_then_records_the_result() {
         &w.ports,
         &w.clock,
         proposal.id(),
-    ));
-    assert_eq!(approved, Ok(proposal.clone()));
+        Some(0),
+    ))
+    .unwrap();
+    assert_eq!(approved.status(), ProposalStatus::Applying);
     let applied = block_on(record_applied(
         &staff(),
         &w.ports,
@@ -624,14 +638,15 @@ fn deciding_takes_a_session_with_every_scope() {
             &key(Scope::ALL.to_vec()),
             &w.ports,
             &w.clock,
-            id
+            id,
+            None
         ))
         .err(),
         Some(CommandError::SessionRequired)
     );
     let reader = Ctx::new(Actor::User(user(2)), vec![Scope::ProductsRead]);
     assert_eq!(
-        block_on(approve_proposal(&reader, &w.ports, &w.clock, id)).err(),
+        block_on(approve_proposal(&reader, &w.ports, &w.clock, id, None)).err(),
         Some(CommandError::Auth(AuthError::MissingScope(
             Scope::ProductsWrite
         )))
@@ -655,7 +670,8 @@ fn an_expired_proposal_is_not_approved() {
             &staff(),
             &w.ports,
             &w.clock,
-            proposal.id()
+            proposal.id(),
+            None
         ))
         .err(),
         Some(CommandError::Proposal(ProposalError::Expired))
@@ -673,7 +689,8 @@ fn a_revoked_agents_proposals_are_not_approved() {
             &staff(),
             &w.ports,
             &w.clock,
-            proposal.id()
+            proposal.id(),
+            None
         ))
         .err(),
         Some(CommandError::Agent(AgentError::Revoked(agent.id())))
@@ -690,6 +707,7 @@ fn a_failed_apply_and_a_rejection_are_recorded() {
         status: 409,
         body: json!({"code": "preview_stale"}),
     };
+    w.approve(one.id()).unwrap();
     let failed = block_on(record_failed(&staff(), &w.ports, &w.clock, one.id(), stale)).unwrap();
     assert_eq!(failed.status(), ProposalStatus::Failed);
     let two = w.propose(&ctx, None).unwrap();
@@ -708,6 +726,7 @@ fn a_failed_apply_and_a_rejection_are_recorded() {
         body: json!(null),
     };
     let three = w.propose(&ctx, None).unwrap();
+    w.approve(three.id()).unwrap();
     assert_eq!(
         block_on(record_applied(
             &staff(),
@@ -719,6 +738,77 @@ fn a_failed_apply_and_a_rejection_are_recorded() {
         .err(),
         Some(CommandError::Proposal(ProposalError::InvalidStatus(42)))
     );
+}
+
+#[test]
+fn an_approval_holds_the_proposal_until_its_answer_is_recorded() {
+    let w = World::new();
+    let agent = w.agent();
+    let proposal = w.propose(&w.as_agent(&agent), None).unwrap();
+    let id = proposal.id();
+    w.approve(id).unwrap();
+    let applying = Some(CommandError::Proposal(ProposalError::Applying));
+    assert_eq!(w.approve(id).err(), applying, "a second approval");
+    assert_eq!(
+        block_on(reject_proposal(&staff(), &w.ports, &w.clock, id, None)).err(),
+        applying
+    );
+    // The write may go through later: pending again, approvable again.
+    let released = block_on(release_proposal(&staff(), &w.ports, id)).unwrap();
+    assert_eq!(released.status(), ProposalStatus::Pending);
+    assert_eq!(released.decided_by(), None);
+    w.approve(id).unwrap();
+    // An approval that never recorded its answer lets go once the lease has passed.
+    w.later(APPLYING_LEASE - Duration::from_secs(1));
+    assert_eq!(w.approve(id).err(), applying);
+    w.later(Duration::from_secs(1));
+    assert_eq!(
+        w.approve(id).map(|p| p.status()),
+        Ok(ProposalStatus::Applying)
+    );
+}
+
+#[test]
+fn an_approval_names_the_preview_it_saw() {
+    let w = World::new();
+    let agent = w.agent();
+    let proposal = w.propose(&w.as_agent(&agent), None).unwrap();
+    let id = proposal.id();
+    w.approve(id).unwrap();
+    block_on(record_refreshed(
+        &staff(),
+        &w.ports,
+        id,
+        json!({"complete": true}),
+        "sha256:2".to_string(),
+    ))
+    .unwrap();
+    let approve_seen = |seen| block_on(approve_proposal(&staff(), &w.ports, &w.clock, id, seen));
+    assert_eq!(
+        approve_seen(Some(0)).err(),
+        Some(CommandError::Proposal(ProposalError::Changed))
+    );
+    assert_eq!(
+        approve_seen(Some(1)).map(|p| p.status()),
+        Ok(ProposalStatus::Applying)
+    );
+}
+
+#[test]
+fn an_applying_proposal_expires_only_once_its_approval_let_go() {
+    let w = World::new();
+    let agent = w.agent();
+    let proposal = w.propose(&w.as_agent(&agent), None).unwrap();
+    w.later(w.settings.proposal_lifetime - Duration::from_secs(1));
+    w.approve(proposal.id()).unwrap();
+    w.later(Duration::from_secs(1));
+    block_on(expire_proposals(&w.ports, &w.clock, 5)).unwrap();
+    let held = block_on(get_proposal(&staff(), &w.ports, proposal.id())).unwrap();
+    assert_eq!(held.status(), ProposalStatus::Applying);
+    w.later(APPLYING_LEASE);
+    block_on(expire_proposals(&w.ports, &w.clock, 5)).unwrap();
+    let expired = block_on(get_proposal(&staff(), &w.ports, proposal.id())).unwrap();
+    assert_eq!(expired.status(), ProposalStatus::Expired);
 }
 
 #[test]
