@@ -2,7 +2,10 @@
 // Worker code. Build first (`pnpm --filter site build`), then `wrangler deploy` here.
 {
   "name": "hypha-site",
+  "account_id": "2b2981da48f18724a34f1778268a5501",
   "compatibility_date": "2026-10-01",
+  // The apex as a custom domain (Cloudflare creates its DNS record and certificate).
+  "routes": [{ "pattern": "hyphacommerce.com", "custom_domain": true }],
   "assets": {
     "directory": "./dist",
     "not_found_handling": "404-page",
