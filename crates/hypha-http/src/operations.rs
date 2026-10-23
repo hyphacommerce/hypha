@@ -114,34 +114,6 @@ impl Operation {
         }
         Ok(path)
     }
-
-    /// The path parameters `path` gives this operation's route, if it's one of its paths.
-    fn matches(&self, path: &str) -> Option<(Vec<bool>, Map<String, Value>)> {
-        let mut parts = path.trim_start_matches('/').split('/');
-        let mut fixed = Vec::new();
-        let mut params = Map::new();
-        for segment in segments(self.path) {
-            match segment {
-                Segment::Fixed(text) => {
-                    if parts.next()? != text {
-                        return None;
-                    }
-                    fixed.push(true);
-                }
-                Segment::Param(name) => {
-                    let part = parts.next().filter(|p| !p.is_empty())?;
-                    params.insert(name.to_string(), Value::String(decode(part)?));
-                    fixed.push(false);
-                }
-                Segment::Rest(name) => {
-                    let rest: Vec<&str> = parts.by_ref().collect();
-                    params.insert(name.to_string(), Value::String(decode(&rest.join("/"))?));
-                    fixed.push(false);
-                }
-            }
-        }
-        parts.next().is_none().then_some((fixed, params))
-    }
 }
 
 /// `value` percent-encoded for a path segment: what isn't unreserved (RFC 3986) is
@@ -158,24 +130,6 @@ pub(crate) fn encode(value: &str, keep_slashes: bool) -> String {
         }
     }
     out
-}
-
-/// A path segment percent-decoded; `None` if that isn't UTF-8 or an escape is broken.
-fn decode(part: &str) -> Option<String> {
-    let bytes = part.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
-            let hex = part.get(i + 1..i + 3)?;
-            out.push(u8::from_str_radix(hex, 16).ok()?);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8(out).ok()
 }
 
 /// Every admin operation of a build: the route table's and its spores'.
@@ -267,17 +221,6 @@ impl Operations {
         self.by_id.values()
     }
 
-    /// The operation a request to `method path` reaches, with the path parameters it
-    /// gives it. Where two routes match (`…/suggestions` and `…/{id}`), the one with a
-    /// fixed segment earlier wins, as the router decides.
-    pub fn find(&self, method: &str, path: &str) -> Option<(&Operation, Map<String, Value>)> {
-        self.by_id
-            .values()
-            .filter(|op| op.method == method)
-            .filter_map(|op| op.matches(path).map(|(fixed, params)| (fixed, op, params)))
-            .max_by(|a, b| a.0.cmp(&b.0))
-            .map(|(_, op, params)| (op, params))
-    }
 }
 
 /// One operation as the admin document describes it, for agents: each schema
@@ -492,35 +435,6 @@ mod tests {
         let rows = crate::routes::openapi::rows();
         let admin = rows.iter().filter(|r| r.doc == Doc::Admin).count();
         assert_eq!(ops.iter().count(), admin, "every operation ID is valid");
-    }
-
-    #[test]
-    fn a_request_finds_its_operation_and_parameters() {
-        let ops = ops();
-        let (op, params) = ops
-            .find("PATCH", "/admin/products/prod_1/variants/var_2")
-            .unwrap();
-        assert_eq!(op.id, id("admin.products.update_variant"));
-        assert_eq!(
-            params,
-            json!({"id": "prod_1", "variant_id": "var_2"})
-                .as_object()
-                .unwrap()
-                .clone()
-        );
-        let (op, _) = ops
-            .find("GET", "/admin/custom-field-definitions/suggestions")
-            .unwrap();
-        assert_eq!(
-            op.id,
-            id("admin.custom_fields.suggestions"),
-            "the fixed segment wins"
-        );
-        let (op, params) = ops.find("POST", "/admin/apps/app_x/proxy/a/b%20c").unwrap();
-        assert_eq!(op.id, id("admin.app_extensions.admin_proxy_post"));
-        assert_eq!(params["path"], "a/b c");
-        assert!(ops.find("GET", "/admin/products/prod_1/nope").is_none());
-        assert!(ops.find("PUT", "/admin/products").is_none());
     }
 
     #[test]
