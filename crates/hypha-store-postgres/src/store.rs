@@ -456,7 +456,7 @@ impl<C: PgConnection> PgStore<C> {
 pub const PREVIEW_LEFT_OPEN: Duration = Duration::from_secs(60);
 
 /// What a preview's writes recorded: the outbox rows' `seq`s, in order. A write rolled back
-/// to its savepoint leaves its numbers here, but not its rows, so `PgPreview::end` reads
+/// to its savepoint leaves its numbers here, but not its rows, so `PgPreview::events` reads
 /// back what's still there.
 #[derive(Default)]
 pub(crate) struct PreviewLog {
@@ -561,13 +561,6 @@ impl<C: PgConnection> PgPreview<C> {
         }
         Ok(())
     }
-
-    /// Ends a preview: its events, then everything rolled back.
-    pub async fn end(self) -> Result<Vec<StoredEvent>, RepoError> {
-        let events = self.events().await;
-        self.finish(false, None).await?;
-        events
-    }
 }
 
 /// One line of the write log: `["<table>", "<key>", "insert"|"update"|"delete", <version
@@ -648,6 +641,11 @@ impl EventStamp<'_> {
     /// The open transaction gave the dispatcher work: events, or a delivery due again.
     pub(crate) fn wrote(&self) {
         self.pending.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether the store runs in a preview or an apply, which reads back what it wrote.
+    pub(crate) fn in_preview(&self) -> bool {
+        self.preview.is_some()
     }
 
     /// The outbox rows just written, by `seq`, for a preview to read back.

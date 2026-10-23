@@ -359,14 +359,10 @@ async fn note_viewer<P>(ports: &P, ctx: &Ctx, clock: &impl Clock) -> Result<(), 
 where
     P: HasApps + hypha_custom_fields::HasCustomFieldDefinitions + hypha_core::HasPreviewTokens,
 {
-    let preview = crate::preview::current();
-    let apply = crate::preview::applying();
-    if preview.is_none() && apply.is_none() {
+    let Some(run) = crate::preview::current() else {
         return Ok(());
-    }
-    if let Some(apply) = &apply {
-        apply.claim(ports, ctx, clock.now()).await?;
-    }
+    };
+    run.claim(ports, ctx, clock.now()).await?;
     let fields = match ctx.is_staff() {
         true => None,
         false => {
@@ -381,11 +377,7 @@ where
         ctx: ctx.clone(),
         fields,
     };
-    match (preview, apply) {
-        (Some(preview), _) => preview.set_viewer(viewer),
-        (None, Some(apply)) => apply.set_viewer(viewer),
-        (None, None) => {}
-    }
+    run.set_viewer(viewer);
     Ok(())
 }
 

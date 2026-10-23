@@ -81,30 +81,28 @@ const MAX_RESPONSE_BYTES: usize = 16 << 20;
 const MAX_REQUEST_BYTES: usize = 64 << 20;
 
 thread_local! {
-    /// The preview whose request is being polled (`Scoped`).
-    static CURRENT: RefCell<Option<Arc<Preview>>> = const { RefCell::new(None) };
-    /// The apply whose request is being polled (`Scoped`).
-    static APPLYING: RefCell<Option<Arc<Apply>>> = const { RefCell::new(None) };
+    /// The preview or apply whose request is being polled (`Scoped`).
+    static CURRENT: RefCell<Option<Arc<Run>>> = const { RefCell::new(None) };
 }
 
-/// The preview of the request being polled, if it is one.
-pub(crate) fn current() -> Option<Arc<Preview>> {
+/// The preview or apply of the request being polled, if it is one.
+pub(crate) fn current() -> Option<Arc<Run>> {
     CURRENT.with_borrow(|current| current.clone())
 }
 
-/// The apply of the request being polled, if it is one: a write sent with its preview's
-/// token.
-pub(crate) fn applying() -> Option<Arc<Apply>> {
-    APPLYING.with_borrow(|current| current.clone())
+/// Whether the request being polled is a preview (not an apply, not a plain write).
+pub(crate) fn previewing() -> bool {
+    current().is_some_and(|run| run.apply.is_none())
 }
 
 type RecordOf = dyn Fn() -> BoxFuture<Result<WriteRecord, RepoError>> + Send;
 type FinishWith = dyn FnOnce(bool, Option<PreviewToken>) -> BoxFuture<Result<(), RepoError>> + Send;
 
 /// A store's open preview or apply (`Storage::begin_preview`, `begin_apply`): what reads
-/// back what its writes did (the events recorded, the rows written), and what ends it (committing or not, then storing a
-/// token if one is given). Boxed, so this module knows no storage; built by each host for
-/// its concrete storage, where the futures are provably `Send`.
+/// back what its writes did (the events recorded, the rows written), and what ends it
+/// (committing or not, then storing a token if one is given). Boxed, so this module knows
+/// no storage; built by each host for its concrete storage, where the futures are
+/// provably `Send`.
 pub struct OpenPreview {
     recorded: Box<RecordOf>,
     finish: Box<FinishWith>,
@@ -250,17 +248,40 @@ fn blank_times(value: &mut Value) {
     }
 }
 
-/// One preview request's record: its stores' open previews, what its effects would have
-/// been, the first one it couldn't preview, the IDs it was handed, who it is (for
-/// redacting its events and binding its token) and the request's fingerprint.
-#[derive(Default)]
-pub struct Preview {
+/// An effect outside the database held until the write commits (an email, background
+/// work): run after an apply's COMMIT; dropped with a write that rolls back, and always
+/// in a preview.
+pub(crate) type Deferred = Box<dyn FnOnce() -> BoxFuture<()> + Send>;
+
+/// One previewed or applied request's record: its stores' open transactions, who the
+/// caller is (for redacting its events and binding its token), the request's
+/// fingerprint, every ID handed out, and its effects outside the database: what they came
+/// to and those held until a commit.
+///
+/// An apply (`Hypha-Preview-Token`) "applies what was previewed, or nothing", effects
+/// included. Its IDs are the preview's first. Emails and background work are held and
+/// happen only once the write commits. A call out is allowed only if its preview could
+/// have made it: its preview was complete, so it made no call but to read-only extension
+/// points (which are made again, as in a preview) and touched no media storage; anything
+/// else is blocked before it goes out and the apply answers stale.
+pub(crate) struct Run {
     request: [u8; 32],
+    /// `Some` for an apply.
+    apply: Option<Applying>,
     stores: Mutex<Vec<OpenPreview>>,
     host: Mutex<Option<TokenHost>>,
-    effects: Effects,
-    ids: Mutex<Vec<Uuid>>,
+    handed: Mutex<Vec<Uuid>>,
     viewer: Mutex<Option<Viewer>>,
+    effects: Effects,
+    deferred: Mutex<Vec<Deferred>>,
+}
+
+/// What an apply has beyond a preview: the token sent, the preview's IDs still to hand
+/// out, and the digest the token holds once claimed.
+struct Applying {
+    token: TokenHash,
+    queue: Mutex<VecDeque<Uuid>>,
+    claimed: Mutex<Option<String>>,
 }
 
 /// What a preview's or an apply's effects outside the database came to: the emails it
@@ -271,57 +292,6 @@ struct Effects {
     emails: Mutex<Vec<PreviewEmail>>,
     calls: Mutex<Vec<PreviewCall>>,
     blocked: Mutex<Option<BlockedBy>>,
-}
-
-impl Effects {
-    fn email(&self, email: PreviewEmail) {
-        lock(&self.emails).push(email);
-    }
-
-    fn block(&self, by: BlockedBy) {
-        lock(&self.blocked).get_or_insert(by);
-    }
-
-    /// Whether a call to an app may go out: only to a read-only extension point, which is
-    /// recorded. Anything else is blocked.
-    fn allows_call(&self, purpose: &CallPurpose) -> bool {
-        match purpose {
-            CallPurpose::Extension {
-                point,
-                app,
-                read_only: true,
-            } => {
-                lock(&self.calls).push(PreviewCall {
-                    point,
-                    app: app.clone(),
-                });
-                true
-            }
-            CallPurpose::Extension { point, app, .. } => {
-                self.block(BlockedBy::ExtensionCall {
-                    point,
-                    app: app.clone(),
-                });
-                false
-            }
-            CallPurpose::Other => {
-                self.block(BlockedBy::OutboundCall);
-                false
-            }
-        }
-    }
-
-    fn take_blocked(&self) -> Option<BlockedBy> {
-        lock(&self.blocked).take()
-    }
-
-    fn take_emails(&self) -> Vec<PreviewEmail> {
-        std::mem::take(&mut *lock(&self.emails))
-    }
-
-    fn take_calls(&self) -> Vec<PreviewCall> {
-        std::mem::take(&mut *lock(&self.calls))
-    }
 }
 
 /// Who asked for the preview, for showing its events as the caller may see them: a staff
@@ -342,208 +312,43 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// Why a call wasn't sent: the request is a preview. What the caller sees is the preview's
 /// `blocked_by`, not this.
-pub(crate) const NOT_SENT: &str = "not sent: the request is a preview";
+const NOT_SENT: &str = "not sent: the request is a preview";
 
 /// Why a call wasn't sent while applying a preview: its preview made no such call.
-pub(crate) const NOT_PREVIEWED: &str = "not sent: the preview being applied made no such call";
+const NOT_PREVIEWED: &str = "not sent: the preview being applied made no such call";
 
-impl Preview {
-    fn for_request(request: [u8; 32]) -> Self {
+/// How a request's stores end, and what it answers.
+enum Ending {
+    /// Rolled back, answering the write's own answer (a failure, a replay) or an error:
+    /// ending the stores can't change it.
+    Pass(Response),
+    /// Committed, then the held effects run.
+    Commit(Response),
+    /// Rolled back, storing the token the answer (a preview) carries.
+    Answer(Response, Option<PreviewToken>),
+}
+
+impl Run {
+    fn new(request: [u8; 32], apply: Option<TokenHash>) -> Self {
         Self {
             request,
-            ..Self::default()
-        }
-    }
-
-    /// Keeps a store's open preview, to end once the handler is done.
-    pub(crate) fn hold(&self, store: OpenPreview, host: TokenHost) {
-        lock(&self.stores).push(store);
-        lock(&self.host).get_or_insert(host);
-    }
-
-    pub(crate) fn set_viewer(&self, viewer: Viewer) {
-        *lock(&self.viewer) = Some(viewer);
-    }
-
-    pub(crate) fn email(&self, email: PreviewEmail) {
-        self.effects.email(email);
-    }
-
-    pub(crate) fn id(&self, id: Uuid) {
-        lock(&self.ids).push(id);
-    }
-
-    /// Notes the first effect the preview couldn't run; the command fails there.
-    pub(crate) fn block(&self, by: BlockedBy) {
-        self.effects.block(by);
-    }
-
-    /// Whether a call to an app may go out: only to a read-only extension point, which is
-    /// recorded. Anything else is blocked.
-    pub(crate) fn allows_call(&self, purpose: &CallPurpose) -> bool {
-        self.effects.allows_call(purpose)
-    }
-
-    /// Ends the stores' previews, then answers for the handler's `response`.
-    async fn finish(&self, response: Response) -> Response {
-        let stores = std::mem::take(&mut *lock(&self.stores));
-        let recorded = recorded_by(&stores).await;
-        let (parts, body) = response.into_parts();
-        let bytes = match axum::body::to_bytes(body, MAX_RESPONSE_BYTES).await {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                let _ = finish_all(stores, false, None).await;
-                return ApiError::internal(format!("a previewed response: {e}")).into_response();
-            }
-        };
-        let blocked = self.effects.take_blocked();
-        if blocked.is_none() && !parts.status.is_success() {
-            // The write's own failure is the answer; ending the stores can't change it.
-            let _ = finish_all(stores, false, None).await;
-            return Response::from_parts(parts, Body::from(bytes));
-        }
-        let answered = recorded
-            .map_err(|e| ApiError::internal(format!("ending a preview: {e}")))
-            .and_then(|recorded| self.answer(parts.status, &bytes, &recorded, blocked));
-        let (preview, ids, digest, token) = match answered {
-            Ok(answered) => answered,
-            Err(e) => {
-                let _ = finish_all(stores, false, None).await;
-                return e.into_response();
-            }
-        };
-        if let Err(e) = finish_all(stores, false, token).await {
-            return ApiError::internal(format!("ending a preview: {e}")).into_response();
-        }
-        let mut answer = (StatusCode::OK, axum::Json(PreviewResponse { preview })).into_response();
-        answer.extensions_mut().insert(PreviewIds(ids));
-        answer.extensions_mut().insert(PreviewDigest(digest));
-        answer
-    }
-
-    /// The preview of a write that answered `status` with `bytes` and did `recorded`; the
-    /// IDs it was handed; its digest; and, when it ran to its end for a known caller, the
-    /// token that applies it.
-    fn answer(
-        &self,
-        status: StatusCode,
-        bytes: &[u8],
-        recorded: &WriteRecord,
-        blocked: Option<BlockedBy>,
-    ) -> Result<(PreviewBody, Vec<Uuid>, String, Option<PreviewToken>), ApiError> {
-        let viewer = lock(&self.viewer).take();
-        let emails = self.effects.take_emails();
-        let calls = self.effects.take_calls();
-        let complete = blocked.is_none();
-        let mut preview = PreviewBody::build(
-            status,
-            bytes,
-            &recorded.events,
-            viewer.as_ref(),
-            emails,
-            calls,
-            blocked,
-        )?;
-        let ids = std::mem::take(&mut *lock(&self.ids));
-        let host = lock(&self.host).clone();
-        let digest = digest(recorded)?;
-        let token = match (complete, host, &viewer) {
-            (true, Some(host), Some(viewer)) => {
-                let issued = issue(
-                    &host,
-                    viewer.ctx.actor(),
-                    self.request,
-                    ids.clone(),
-                    digest.clone(),
-                )?;
-                preview.token = Some(issued.token);
-                preview.expires_at = Some(issued.expires_at);
-                Some(issued.record)
-            }
-            _ => None,
-        };
-        Ok((preview, ids, digest, token))
-    }
-}
-
-/// What a write sent with its preview's token checks: who previewed, and what its events
-/// came to.
-struct Claimed {
-    digest: String,
-}
-
-/// An effect outside the database an apply holds until it commits (an email, background
-/// work): run after the COMMIT, dropped with a write that rolls back.
-pub(crate) type Deferred = Box<dyn FnOnce() -> BoxFuture<()> + Send>;
-
-/// One apply request's record (a write sent with `Hypha-Preview-Token`): its stores' open
-/// transactions, the token and the request's fingerprint, the preview's IDs still to hand
-/// out and every ID handed, what the claimed token says, who the caller is, and its effects
-/// outside the database: those held until the commit, and what they came to.
-///
-/// "Applies what was previewed, or nothing" covers effects too. Emails and background
-/// work are held and happen only once the write commits. A call out is allowed only if its
-/// preview could have made it: its preview was complete, so it made no call but to
-/// read-only extension points (which are made again, as in a preview) and touched no
-/// media storage; anything else is blocked before it goes out and the apply answers stale.
-pub(crate) struct Apply {
-    token: TokenHash,
-    request: [u8; 32],
-    stores: Mutex<Vec<OpenPreview>>,
-    host: Mutex<Option<TokenHost>>,
-    queue: Mutex<VecDeque<Uuid>>,
-    handed: Mutex<Vec<Uuid>>,
-    claimed: Mutex<Option<Claimed>>,
-    viewer: Mutex<Option<Viewer>>,
-    effects: Effects,
-    deferred: Mutex<Vec<Deferred>>,
-}
-
-impl Apply {
-    fn new(token: TokenHash, request: [u8; 32]) -> Self {
-        Self {
-            token,
-            request,
+            apply: apply.map(|token| Applying {
+                token,
+                queue: Mutex::default(),
+                claimed: Mutex::default(),
+            }),
             stores: Mutex::default(),
             host: Mutex::default(),
-            queue: Mutex::default(),
             handed: Mutex::default(),
-            claimed: Mutex::default(),
             viewer: Mutex::default(),
             effects: Effects::default(),
             deferred: Mutex::default(),
         }
     }
 
-    /// Holds an email until the write commits: it's listed like a preview's, and sent by
-    /// `send` after the COMMIT.
-    pub(crate) fn hold_email(&self, email: PreviewEmail, send: Deferred) {
-        self.effects.email(email);
-        lock(&self.deferred).push(send);
-    }
-
-    /// Holds background work until the write commits.
-    pub(crate) fn defer(&self, work: Deferred) {
-        lock(&self.deferred).push(work);
-    }
-
-    /// Notes an effect the preview couldn't have had: the apply stops there and is stale.
-    pub(crate) fn block(&self, by: BlockedBy) {
-        self.effects.block(by);
-    }
-
-    /// Whether a call to an app may go out: only to a read-only extension point, as in a
-    /// preview (recorded). Anything else is blocked: the preview made no such call.
-    pub(crate) fn allows_call(&self, purpose: &CallPurpose) -> bool {
-        self.effects.allows_call(purpose)
-    }
-
-    /// Runs what was held until the commit, in order.
-    async fn run_deferred(&self) {
-        let deferred = std::mem::take(&mut *lock(&self.deferred));
-        for work in deferred {
-            work().await;
-        }
+    /// Whether this is an apply (a write sent with its preview's token).
+    pub(crate) fn is_apply(&self) -> bool {
+        self.apply.is_some()
     }
 
     /// Keeps a store's open transaction, to end once the handler is done.
@@ -556,24 +361,86 @@ impl Apply {
         *lock(&self.viewer) = Some(viewer);
     }
 
-    /// The next ID for the command: the preview's, in order, then `fresh` ones.
+    /// The next ID for the command, noted: applying, the preview's, in order, then
+    /// `fresh` ones.
     pub(crate) fn next_id(&self, fresh: impl FnOnce() -> Uuid) -> Uuid {
-        let id = lock(&self.queue).pop_front().unwrap_or_else(fresh);
+        let queued = self
+            .apply
+            .as_ref()
+            .and_then(|apply| lock(&apply.queue).pop_front());
+        let id = queued.unwrap_or_else(fresh);
         lock(&self.handed).push(id);
         id
     }
 
-    /// Checks the token for the caller `ctx` and marks it used, through `ports` (in the
-    /// apply's transaction: a write that rolls back leaves it unused). Unknown, expired,
-    /// another caller's or another request's: `preview_token_invalid`; used:
-    /// `preview_used`.
+    /// Lists an email as the write's and holds `send` until it commits.
+    pub(crate) fn hold_email(&self, email: PreviewEmail, send: Deferred) {
+        lock(&self.effects.emails).push(email);
+        self.defer(send);
+    }
+
+    /// Holds background work until the write commits.
+    pub(crate) fn defer(&self, work: Deferred) {
+        lock(&self.deferred).push(work);
+    }
+
+    /// Notes the first effect that couldn't run: a preview stops there; an apply too, and
+    /// is stale.
+    pub(crate) fn block(&self, by: BlockedBy) {
+        lock(&self.effects.blocked).get_or_insert(by);
+    }
+
+    /// Why a blocked call wasn't sent.
+    pub(crate) fn not_sent(&self) -> &'static str {
+        match self.apply {
+            None => NOT_SENT,
+            Some(_) => NOT_PREVIEWED,
+        }
+    }
+
+    /// Whether a call to an app may go out: only to a read-only extension point, which is
+    /// recorded. Anything else is blocked.
+    pub(crate) fn allows_call(&self, purpose: &CallPurpose) -> bool {
+        match purpose {
+            CallPurpose::Extension {
+                point,
+                app,
+                read_only: true,
+            } => {
+                lock(&self.effects.calls).push(PreviewCall {
+                    point,
+                    app: app.clone(),
+                });
+                true
+            }
+            CallPurpose::Extension { point, app, .. } => {
+                self.block(BlockedBy::ExtensionCall {
+                    point,
+                    app: app.clone(),
+                });
+                false
+            }
+            CallPurpose::Other => {
+                self.block(BlockedBy::OutboundCall);
+                false
+            }
+        }
+    }
+
+    /// Applying, checks the token for the caller `ctx` and marks it used, through `ports`
+    /// (in the apply's transaction: a write that rolls back leaves it unused). Unknown,
+    /// expired, another caller's or another request's: `preview_token_invalid`; used:
+    /// `preview_used`. A preview has nothing to claim.
     pub(crate) async fn claim<P: HasPreviewTokens>(
         &self,
         ports: &P,
         ctx: &Ctx,
         now: Timestamp,
     ) -> Result<(), ApiError> {
-        let hash = self.token.as_bytes();
+        let Some(apply) = &self.apply else {
+            return Ok(());
+        };
+        let hash = apply.token.as_bytes();
         let Some(token) = ports.preview_tokens().get(hash).await? else {
             return Err(ApiError::preview_token_invalid("it's unknown"));
         };
@@ -594,112 +461,90 @@ impl Apply {
         if !ports.preview_tokens().mark_used(hash, now).await? {
             return Err(ApiError::preview_used());
         }
-        *lock(&self.queue) = token.ids.into();
-        *lock(&self.claimed) = Some(Claimed {
-            digest: token.digest,
-        });
+        *lock(&apply.queue) = token.ids.into();
+        *lock(&apply.claimed) = Some(token.digest);
         Ok(())
     }
 
-    /// Ends the stores' transactions: committed when the write succeeded and did what its
-    /// preview did, then the effects held until then run; otherwise rolled back, the held
-    /// effects dropped, answering the write's failure or `preview_stale` with what it would
-    /// do now. A write that reached an effect its preview couldn't have had is stale too,
+    /// Ends the stores' transactions and answers for the handler's `response`. A write
+    /// that failed answers its failure. A preview answers what the write did. An apply
+    /// commits when the write did what its preview did, then runs the effects held until
+    /// then; otherwise it rolls back and answers `preview_stale` with what it would do
+    /// now. A write that reached an effect its preview couldn't have had is stale too,
     /// whatever it answered.
     async fn finish(&self, response: Response) -> Response {
         let stores = std::mem::take(&mut *lock(&self.stores));
-        let claimed = lock(&self.claimed).take();
-        let blocked = self.effects.take_blocked();
-        if blocked.is_none() && !response.status().is_success() {
-            let _ = finish_all(stores, false, None).await;
-            return response;
-        }
-        if blocked.is_none() && is_replay(&response) {
-            // The write was made earlier under the same idempotency key, and this is its
-            // answer: it was applied then, so there's nothing to compare and nothing to
-            // keep (the token stays unused).
-            let _ = finish_all(stores, false, None).await;
-            return response;
-        }
-        let Some(claimed) = claimed else {
-            let _ = finish_all(stores, false, None).await;
-            return ApiError::preview_token_invalid("this route takes no credentials")
-                .into_response();
-        };
-        let recorded = match recorded_by(&stores).await {
-            Ok(recorded) => recorded,
-            Err(e) => {
+        let recorded = recorded_by(&stores);
+        match self.end(response, recorded).await {
+            Ok(Ending::Pass(answer)) => {
                 let _ = finish_all(stores, false, None).await;
-                return ApiError::internal(format!("applying a preview: {e}")).into_response();
+                answer
             }
-        };
-        let now = match digest(&recorded) {
-            Ok(now) => now,
-            Err(e) => {
-                let _ = finish_all(stores, false, None).await;
-                return e.into_response();
-            }
-        };
-        if blocked.is_none() && now == claimed.digest {
-            return match finish_all(stores, true, None).await {
-                Ok(()) => {
-                    self.run_deferred().await;
-                    response
-                }
-                Err(e) => ApiError::internal(format!("committing an apply: {e}")).into_response(),
-            };
-        }
-        let (parts, body) = response.into_parts();
-        let stale = match axum::body::to_bytes(body, MAX_RESPONSE_BYTES).await {
-            Ok(bytes) => self.stale(parts.status, &bytes, &recorded.events, now, blocked),
-            Err(e) => Err(ApiError::internal(format!("an applied response: {e}"))),
-        };
-        match stale {
-            Ok((preview, ids, digest, token)) => match finish_all(stores, false, token).await {
-                Ok(()) => match serde_json::to_value(&preview) {
-                    Ok(preview) => {
-                        // What a stale proposal keeps to be approved again.
-                        let mut answer = ApiError::preview_stale(preview).into_response();
-                        answer.extensions_mut().insert(PreviewIds(ids));
-                        answer.extensions_mut().insert(PreviewDigest(digest));
-                        answer
-                    }
-                    Err(e) => ApiError::internal(e).into_response(),
-                },
-                Err(e) => ApiError::internal(format!("ending an apply: {e}")).into_response(),
-            },
             Err(e) => {
                 let _ = finish_all(stores, false, None).await;
                 e.into_response()
             }
+            Ok(Ending::Commit(answer)) => match finish_all(stores, true, None).await {
+                Ok(()) => {
+                    let deferred = std::mem::take(&mut *lock(&self.deferred));
+                    for work in deferred {
+                        work().await;
+                    }
+                    answer
+                }
+                Err(e) => ApiError::internal(format!("committing an apply: {e}")).into_response(),
+            },
+            Ok(Ending::Answer(answer, token)) => match finish_all(stores, false, token).await {
+                Ok(()) => answer,
+                Err(e) => ApiError::internal(format!("ending a preview: {e}")).into_response(),
+            },
         }
     }
 
-    /// What a stale apply did instead, as a preview, with a token for it when it ran to
-    /// its end: the write as it would be now, with the IDs it was handed, its digest, the
-    /// emails it held (none was sent) and the read-only points it called; or, `blocked`,
-    /// where it stopped.
-    fn stale(
+    async fn end(
         &self,
-        status: StatusCode,
-        bytes: &[u8],
-        events: &[StoredEvent],
-        digest: String,
-        blocked: Option<BlockedBy>,
-    ) -> Result<(PreviewBody, Vec<Uuid>, String, Option<PreviewToken>), ApiError> {
+        response: Response,
+        recorded: impl Future<Output = Result<WriteRecord, RepoError>>,
+    ) -> Result<Ending, ApiError> {
+        let blocked = lock(&self.effects.blocked).take();
+        if blocked.is_none()
+            && (!response.status().is_success() || (self.is_apply() && is_replay(&response)))
+        {
+            // A replay was applied when the write was made earlier under the same
+            // idempotency key: nothing to compare and nothing to keep (the token stays
+            // unused).
+            return Ok(Ending::Pass(response));
+        }
+        let claimed = match &self.apply {
+            None => None,
+            Some(apply) => Some(lock(&apply.claimed).take().ok_or_else(|| {
+                ApiError::preview_token_invalid("this route takes no credentials")
+            })?),
+        };
+        let recorded = recorded
+            .await
+            .map_err(|e| ApiError::internal(format!("reading what a write did: {e}")))?;
+        let digest = digest(&recorded)?;
+        if blocked.is_none() && claimed.as_ref() == Some(&digest) {
+            return Ok(Ending::Commit(response));
+        }
+        let (parts, body) = response.into_parts();
+        let bytes = axum::body::to_bytes(body, MAX_RESPONSE_BYTES)
+            .await
+            .map_err(|e| ApiError::internal(format!("a previewed response: {e}")))?;
         let viewer = lock(&self.viewer).take();
         let complete = blocked.is_none();
         let mut preview = PreviewBody::build(
-            status,
-            bytes,
-            events,
+            parts.status,
+            &bytes,
+            &recorded.events,
             viewer.as_ref(),
-            self.effects.take_emails(),
-            self.effects.take_calls(),
+            std::mem::take(&mut *lock(&self.effects.emails)),
+            std::mem::take(&mut *lock(&self.effects.calls)),
             blocked,
         )?;
-        let host = lock(&self.host).clone();
         let ids = std::mem::take(&mut *lock(&self.handed));
+        let host = lock(&self.host).clone();
         let token = match (complete, host, &viewer) {
             (true, Some(host), Some(viewer)) => {
                 let issued = issue(
@@ -715,7 +560,17 @@ impl Apply {
             }
             _ => None,
         };
-        Ok((preview, ids, digest, token))
+        let mut answer = match self.apply {
+            None => (StatusCode::OK, axum::Json(PreviewResponse { preview })).into_response(),
+            // What a stale proposal keeps to be approved again.
+            Some(_) => ApiError::preview_stale(
+                serde_json::to_value(&preview).map_err(ApiError::internal)?,
+            )
+            .into_response(),
+        };
+        answer.extensions_mut().insert(PreviewIds(ids));
+        answer.extensions_mut().insert(PreviewDigest(digest));
+        Ok(Ending::Answer(answer, token))
     }
 }
 
@@ -738,10 +593,9 @@ pub struct PreviewIds(pub Vec<Uuid>);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreviewDigest(pub String);
 
-/// Polls `inner` with `preview` or `apply` current (`current`, `applying`).
+/// Polls `inner` with `run` current (`current`).
 struct Scoped<F> {
-    preview: Option<Arc<Preview>>,
-    apply: Option<Arc<Apply>>,
+    run: Option<Arc<Run>>,
     inner: Pin<Box<F>>,
 }
 
@@ -750,11 +604,9 @@ impl<F: Future> Future for Scoped<F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
         let this = self.get_mut();
-        let outer_preview = CURRENT.replace(this.preview.clone());
-        let outer_apply = APPLYING.replace(this.apply.clone());
+        let outer = CURRENT.replace(this.run.clone());
         let polled = this.inner.as_mut().poll(cx);
-        CURRENT.set(outer_preview);
-        APPLYING.set(outer_apply);
+        CURRENT.set(outer);
         polled
     }
 }
@@ -763,8 +615,7 @@ impl<F: Future> Future for Scoped<F> {
 /// (`internal::dispatch`) is its own, whatever the request sending it is.
 pub(crate) fn detached<F: Future>(inner: F) -> impl Future<Output = F::Output> {
     Scoped {
-        preview: None,
-        apply: None,
+        run: None,
         inner: Box::pin(inner),
     }
 }
@@ -837,35 +688,24 @@ pub async fn middleware(request: Request, next: Next) -> Response {
         (None, _) => ApiError::invalid_preview_header().into_response(),
         (Some(true), Some(_)) => ApiError::preview_with_token().into_response(),
         (Some(false), None) => next.run(request).await,
-        (Some(true), None) => {
-            let (request, fingerprint) = match fingerprinted(request).await {
-                Ok(fingerprinted) => fingerprinted,
-                Err(e) => return e.into_response(),
-            };
-            let preview = Arc::new(Preview::for_request(fingerprint));
-            let response = Scoped {
-                preview: Some(Arc::clone(&preview)),
-                apply: None,
-                inner: Box::pin(next.run(request)),
-            }
-            .await;
-            preview.finish(response).await
-        }
-        (Some(false), Some(token)) => {
-            let (request, fingerprint) = match fingerprinted(request).await {
-                Ok(fingerprinted) => fingerprinted,
-                Err(e) => return e.into_response(),
-            };
-            let apply = Arc::new(Apply::new(token, fingerprint));
-            let response = Scoped {
-                preview: None,
-                apply: Some(Arc::clone(&apply)),
-                inner: Box::pin(next.run(request)),
-            }
-            .await;
-            apply.finish(response).await
-        }
+        (Some(true), None) => run(request, next, None).await,
+        (Some(false), Some(token)) => run(request, next, Some(token)).await,
     }
+}
+
+/// Runs `request` as a preview, or (`token`) as an apply.
+async fn run(request: Request, next: Next, token: Option<TokenHash>) -> Response {
+    let (request, fingerprint) = match fingerprinted(request).await {
+        Ok(fingerprinted) => fingerprinted,
+        Err(e) => return e.into_response(),
+    };
+    let run = Arc::new(Run::new(fingerprint, token));
+    let response = Scoped {
+        run: Some(Arc::clone(&run)),
+        inner: Box::pin(next.run(request)),
+    }
+    .await;
+    run.finish(response).await
 }
 
 /// `router` with admin writes previewable and applicable as previewed (`middleware`).
@@ -1129,11 +969,10 @@ mod tests {
 
     #[test]
     fn the_preview_is_current_only_while_its_future_is_polled() {
-        let preview = Arc::new(Preview::default());
+        let run = Arc::new(Run::new([0; 32], None));
         let seen = pollster::block_on(Scoped {
-            preview: Some(Arc::clone(&preview)),
-            apply: None,
-            inner: Box::pin(async { current().is_some() && applying().is_none() }),
+            run: Some(Arc::clone(&run)),
+            inner: Box::pin(async { previewing() }),
         });
         assert!(seen);
         assert!(current().is_none());
@@ -1188,7 +1027,7 @@ mod tests {
 
     #[test]
     fn an_apply_makes_no_call_its_preview_couldnt_have_made() {
-        let apply = Apply::new(TokenHash::of("hypha_pv_x"), [0; 32]);
+        let apply = Run::new([0; 32], Some(TokenHash::of("hypha_pv_x")));
         assert!(apply.allows_call(&CallPurpose::Extension {
             point: "shipping.rates",
             app: "app_rates".to_string(),
@@ -1201,7 +1040,7 @@ mod tests {
         }));
         assert!(!apply.allows_call(&CallPurpose::Other));
         assert_eq!(
-            apply.effects.take_blocked(),
+            *lock(&apply.effects.blocked),
             Some(BlockedBy::ExtensionCall {
                 point: "payments.capture",
                 app: "app_pay".to_string()
@@ -1210,25 +1049,8 @@ mod tests {
     }
 
     #[test]
-    fn an_apply_runs_what_it_held_only_when_told() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        let apply = Apply::new(TokenHash::of("hypha_pv_x"), [0; 32]);
-        let ran = Arc::new(AtomicUsize::new(0));
-        let counted = Arc::clone(&ran);
-        apply.defer(Box::new(move || {
-            counted.fetch_add(1, Ordering::Relaxed);
-            Box::pin(async {})
-        }));
-        assert_eq!(ran.load(Ordering::Relaxed), 0, "held");
-        pollster::block_on(apply.run_deferred());
-        assert_eq!(ran.load(Ordering::Relaxed), 1);
-        pollster::block_on(apply.run_deferred());
-        assert_eq!(ran.load(Ordering::Relaxed), 1, "once");
-    }
-
-    #[test]
     fn the_first_blocked_effect_is_the_one_reported() {
-        let preview = Preview::default();
+        let preview = Run::new([0; 32], None);
         assert!(!preview.allows_call(&CallPurpose::Extension {
             point: "payments.refund",
             app: "app_pay".to_string(),

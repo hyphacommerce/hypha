@@ -38,30 +38,33 @@ pub(crate) async fn insert_events(
     let subject_version = subject_version.map(version_to_db).transpose()?;
     // jsonb arrays don't bind as `jsonb[]` from serde values; text cast back is exact.
     let data: Vec<String> = events.iter().map(|e| e.data.to_string()).collect();
-    let rows = tx
-        .query_typed(
-            "INSERT INTO outbox_events
+    const INSERT: &str = "INSERT INTO outbox_events
             (type, version, subject_type, subject_id, subject_version, actor_kind, actor_id,
              data)
          SELECT t, v, st, si, $5, $6, $7, d::jsonb
          FROM unnest($1::text[], $2::smallint[], $3::text[], $4::uuid[], $8::text[])
               WITH ORDINALITY AS e (t, v, st, si, d, n)
-         ORDER BY n
-         RETURNING seq",
-            &[
-                (&types, Type::TEXT_ARRAY),
-                (&versions, Type::INT2_ARRAY),
-                (&subject_types, Type::TEXT_ARRAY),
-                (&subject_ids, Type::UUID_ARRAY),
-                (&subject_version, Type::INT8),
-                (&actor_kind, Type::TEXT),
-                (&actor_id, Type::UUID),
-                (&data, Type::TEXT_ARRAY),
-            ],
-        )
+         ORDER BY n";
+    let params: &[(&(dyn tokio_postgres::types::ToSql + Sync), Type)] = &[
+        (&types, Type::TEXT_ARRAY),
+        (&versions, Type::INT2_ARRAY),
+        (&subject_types, Type::TEXT_ARRAY),
+        (&subject_ids, Type::UUID_ARRAY),
+        (&subject_version, Type::INT8),
+        (&actor_kind, Type::TEXT),
+        (&actor_id, Type::UUID),
+        (&data, Type::TEXT_ARRAY),
+    ];
+    stamp.wrote();
+    if !stamp.in_preview() {
+        tx.execute_typed(INSERT, params).await.map_err(repo_error)?;
+        return Ok(());
+    }
+    // A preview or an apply reads back what it wrote by `seq`.
+    let rows = tx
+        .query_typed(&format!("{INSERT} RETURNING seq"), params)
         .await
         .map_err(repo_error)?;
-    stamp.wrote();
     stamp.wrote_events(
         rows.iter()
             .map(|row| col::<i64>(row, "seq"))
@@ -71,7 +74,7 @@ pub(crate) async fn insert_events(
 }
 
 /// The events with these `seq`s that are still there, in `seq` order: what a preview's
-/// writes recorded and kept (`PgPreview::end`).
+/// writes recorded and kept (`PgPreview::events`).
 pub(crate) async fn events_by_seq(
     db: &impl Queries,
     seqs: &[i64],

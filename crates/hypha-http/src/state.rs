@@ -357,20 +357,19 @@ impl<S: Storage> AppState<S> {
     /// transaction (`Storage::begin_apply`), committed or not once the handler is done.
     pub async fn public_ports(&self) -> Result<S::Ports<'_>, ApiError> {
         let ports = self.storage.ports(self.store).await?;
-        match (crate::preview::current(), crate::preview::applying()) {
-            (Some(preview), _) => {
-                let timeout = self.config.agents.preview_timeout;
-                let open = self.storage.begin_preview(&ports, timeout).await?;
-                preview.hold(open, self.token_host());
-            }
-            (None, Some(apply)) => {
-                hypha_core::SignalsDispatch::on_dispatch_work(&ports, self.after_writes.hook());
-                let open = self.storage.begin_apply(&ports).await?;
-                apply.hold(open, self.token_host());
-            }
-            (None, None) => {
-                hypha_core::SignalsDispatch::on_dispatch_work(&ports, self.after_writes.hook())
-            }
+        let run = crate::preview::current();
+        if !run.as_ref().is_some_and(|run| !run.is_apply()) {
+            hypha_core::SignalsDispatch::on_dispatch_work(&ports, self.after_writes.hook());
+        }
+        if let Some(run) = run {
+            let open = match run.is_apply() {
+                true => self.storage.begin_apply(&ports).await?,
+                false => {
+                    let timeout = self.config.agents.preview_timeout;
+                    self.storage.begin_preview(&ports, timeout).await?
+                }
+            };
+            run.hold(open, self.token_host());
         }
         Ok(ports)
     }

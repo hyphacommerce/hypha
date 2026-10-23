@@ -1,6 +1,6 @@
 //! A store in a preview (`PgStore::begin_preview`) runs its writes for real in one
 //! transaction that's rolled back: each write is a savepoint, so a failing one is undone
-//! alone and the preview goes on, reads see the writes before them, and `PgPreview::end`
+//! alone and the preview goes on, reads see the writes before them, and ending it
 //! gives back the events the kept writes recorded. Needs `HYPHA_TEST_DATABASE_URL` (or
 //! `DATABASE_URL`) like the contract tests; skips itself without it.
 
@@ -9,11 +9,12 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use hypha_core::{
-    Currency, HasBatch, Money, Price, ProductId, RepoError, SignalsDispatch, VariantId,
+    Currency, HasBatch, Money, Price, ProductId, RepoError, SignalsDispatch, StoredEvent,
+    VariantId,
 };
 use hypha_products::{Handle, Product, ProductRepo, ProductStatus, StageProducts, repo::keys};
 use hypha_store_postgres::testing::TestDatabase;
-use hypha_store_postgres::{CORE, PgConnection, PgStore, Queries, database_config};
+use hypha_store_postgres::{CORE, PgConnection, PgPreview, PgStore, Queries, database_config};
 use tokio_postgres::{Client, NoTls};
 use uuid::Uuid;
 
@@ -104,7 +105,7 @@ async fn a_previews_writes_are_seen_inside_it_and_gone_after() {
     assert!(ProductRepo::get(&store, mug.id()).await.unwrap().is_some());
     assert_eq!(count(&other, "products").await, 1);
 
-    let events = preview.end().await.unwrap();
+    let events = end(preview).await;
     assert!(!open.load(Ordering::Relaxed), "rolled back");
     let subjects: Vec<Uuid> = events.iter().map(|e| e.subject_id).collect();
     assert!(subjects.contains(&mug.id().as_uuid()), "{events:?}");
@@ -139,7 +140,7 @@ async fn a_duplicate_in_a_preview_fails_alone() {
     let mut cup = product(3, "cup");
     ProductRepo::insert(&store, &mut cup).await.unwrap();
 
-    let events = preview.end().await.unwrap();
+    let events = end(preview).await;
     let subjects: Vec<Uuid> = events.iter().map(|e| e.subject_id).collect();
     assert!(subjects.contains(&mug.id().as_uuid()));
     assert!(subjects.contains(&cup.id().as_uuid()));
@@ -169,7 +170,7 @@ async fn a_stale_write_in_a_preview_fails_as_it_would_and_the_next_one_works() {
     );
     mug.set_status(ProductStatus::Archived).unwrap();
     ProductRepo::update(&store, &mut mug).await.unwrap();
-    let events = preview.end().await.unwrap();
+    let events = end(preview).await;
     assert_eq!(events.len(), 2, "{events:?}");
 
     let version: i64 = other
@@ -205,7 +206,7 @@ async fn batches_in_a_preview_commit_to_it_or_roll_back_alone() {
     batch.update_product(&mut stale);
     assert_eq!(store.commit(batch).await, Err(RepoError::StaleVersion));
 
-    let events = preview.end().await.unwrap();
+    let events = end(preview).await;
     assert_eq!(events.len(), 1, "{events:?}");
     assert_eq!(
         signals.load(Ordering::Relaxed),
@@ -237,7 +238,7 @@ async fn a_failing_statement_outside_a_write_doesnt_abort_the_preview() {
     }
     // Still in the preview, its write still there.
     assert!(ProductRepo::get(&store, mug.id()).await.unwrap().is_some());
-    assert_eq!(preview.end().await.unwrap().len(), 1);
+    assert_eq!(end(preview).await.len(), 1);
 }
 
 #[tokio::test]
@@ -275,7 +276,7 @@ async fn a_preview_cuts_off_slow_statements() {
                 .is_err()
         );
     }
-    preview.end().await.unwrap();
+    end(preview).await;
 }
 
 #[tokio::test]
@@ -419,4 +420,11 @@ async fn every_aggregates_table_notes_its_writes() {
         Vec::<String>::new(),
         "tables without the write log"
     );
+}
+
+/// Ends a preview: its events, then everything rolled back.
+async fn end<C: PgConnection>(preview: PgPreview<C>) -> Vec<StoredEvent> {
+    let events = preview.events().await.unwrap();
+    preview.finish(false, None).await.unwrap();
+    events
 }

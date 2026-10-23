@@ -65,14 +65,10 @@ impl IdGenerator for HostIds {
     /// In a preview, each ID handed out is noted, in order; applying one, its IDs are
     /// handed out first.
     fn new_uuid(&self) -> Uuid {
-        if let Some(apply) = crate::preview::applying() {
-            return apply.next_id(|| self.0.new_uuid());
+        match crate::preview::current() {
+            Some(run) => run.next_id(|| self.0.new_uuid()),
+            None => self.0.new_uuid(),
         }
-        let id = self.0.new_uuid();
-        if let Some(preview) = crate::preview::current() {
-            preview.id(id);
-        }
-        id
     }
 }
 
@@ -180,13 +176,10 @@ impl HostBackground {
     /// never committed. Applying one, it's held until the write commits (and dropped if it
     /// doesn't).
     pub fn spawn(&self, work: impl Future<Output = ()> + Send + 'static) -> bool {
-        if crate::preview::current().is_some() {
-            return true;
-        }
-        if let Some(apply) = crate::preview::applying() {
+        if let Some(run) = crate::preview::current() {
             let spawn = Arc::clone(&self.0);
             let work: BoxFuture<()> = Box::pin(work);
-            apply.defer(Box::new(move || {
+            run.defer(Box::new(move || {
                 if !spawn(work) {
                     tracing::warn!("work held until its apply committed found no slot");
                 }
@@ -244,15 +237,10 @@ impl HostCalls {
     /// its preview was complete, so it made no other call, and one now means the write no
     /// longer does what was previewed (the apply answers stale before anything went out).
     pub async fn send(&self, call: OutboundCall) -> Result<OutboundAnswer, CallError> {
-        if let Some(preview) = crate::preview::current()
-            && !preview.allows_call(&call.purpose)
+        if let Some(run) = crate::preview::current()
+            && !run.allows_call(&call.purpose)
         {
-            return Err(CallError::Failed(crate::preview::NOT_SENT.to_string()));
-        }
-        if let Some(apply) = crate::preview::applying()
-            && !apply.allows_call(&call.purpose)
-        {
-            return Err(CallError::Failed(crate::preview::NOT_PREVIEWED.to_string()));
+            return Err(CallError::Failed(run.not_sent().to_string()));
         }
         (self.0)(call).await
     }
@@ -298,13 +286,9 @@ impl HttpClient for HostHttp {
     /// In a preview, nothing is sent: the media storage isn't part of its transaction.
     /// Applying one, neither: its preview was complete, so it didn't reach the storage.
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, String> {
-        if let Some(preview) = crate::preview::current() {
-            preview.block(crate::preview::BlockedBy::MediaStorage);
-            return Err(crate::preview::NOT_SENT.to_string());
-        }
-        if let Some(apply) = crate::preview::applying() {
-            apply.block(crate::preview::BlockedBy::MediaStorage);
-            return Err(crate::preview::NOT_PREVIEWED.to_string());
+        if let Some(run) = crate::preview::current() {
+            run.block(crate::preview::BlockedBy::MediaStorage);
+            return Err(run.not_sent().to_string());
         }
         (self.0)(request).await
     }
@@ -350,14 +334,10 @@ impl EmailSender for HostMail {
     /// taken as sent and held until the write commits, then sent (never, if it rolls back):
     /// a refusal then can't change the committed write's answer, so it's logged.
     async fn send(&self, email: &OutgoingEmail) -> Result<Sent, SendError> {
-        if let Some(preview) = crate::preview::current() {
-            preview.email(crate::preview::PreviewEmail::new(email));
-            return Ok(Sent::default());
-        }
-        if let Some(apply) = crate::preview::applying() {
+        if let Some(run) = crate::preview::current() {
             let send = Arc::clone(&self.send);
             let held = email.clone();
-            apply.hold_email(
+            run.hold_email(
                 crate::preview::PreviewEmail::new(email),
                 Box::new(move || {
                     Box::pin(async move {
@@ -394,7 +374,7 @@ impl AfterWrites {
 
     /// Nothing in a preview: nothing was committed.
     pub fn notify(&self) {
-        if crate::preview::current().is_none() {
+        if !crate::preview::previewing() {
             (self.0)();
         }
     }
@@ -423,7 +403,7 @@ impl MailQueued {
 
     /// Nothing in a preview: nothing was queued.
     pub fn notify(&self) {
-        if crate::preview::current().is_none() {
+        if !crate::preview::previewing() {
             (self.0)();
         }
     }
