@@ -310,7 +310,7 @@ impl<C: PgConnection> OAuthCodeRepo for PgStore<C> {
 
 fn token_columns() -> String {
     format!(
-        "id, version, family, app_key, agent_id, scopes, access_hash, refresh_hash, {}, {}, {}, {},
+        "id, version, family, app_key, agent_id, client_id, scopes, access_hash, refresh_hash, {}, {}, {}, {},
          {}",
         micros("access_expires_at"),
         micros("refresh_expires_at"),
@@ -327,6 +327,7 @@ fn token_from_row(row: &Row) -> Result<OAuthToken, RepoError> {
         family: col(row, "family")?,
         app: col(row, "app_key")?,
         agent: col::<Option<Uuid>>(row, "agent_id")?.map(AgentId::from_uuid),
+        client_id: col(row, "client_id")?,
         scopes: scopes_from_db(col(row, "scopes")?)?,
         access_hash: token_hash_from_db(col(row, "access_hash")?)?,
         access_expires_at: Timestamp::from_unix_micros(col(row, "access_expires_at")?),
@@ -344,8 +345,8 @@ pub(crate) async fn insert_token(tx: &impl Queries, s: &TokenSnapshot) -> Result
         &format!(
             "INSERT INTO oauth_refresh_tokens (id, version, family, app_key, scopes, access_hash,
                  access_expires_at, refresh_hash, refresh_expires_at, created_at, rotated_at,
-                 revoked_at, agent_id)
-             VALUES ($1, 1, $2, $3, $4, $5, {}, $7, {}, {}, {}, {}, $12)",
+                 revoked_at, agent_id, client_id)
+             VALUES ($1, 1, $2, $3, $4, $5, {}, $7, {}, {}, {}, {}, $12, $13)",
             ts(6),
             ts(8),
             ts(9),
@@ -365,6 +366,7 @@ pub(crate) async fn insert_token(tx: &impl Queries, s: &TokenSnapshot) -> Result
             (&opt_micros(s.rotated_at), Type::INT8),
             (&opt_micros(s.revoked_at), Type::INT8),
             (&s.agent.map(|a| a.as_uuid()), Type::UUID),
+            (&s.client_id, Type::TEXT),
         ],
     )
     .await

@@ -225,6 +225,32 @@ fn an_agents_token_works_at_mcp_only_and_rotates() {
 }
 
 #[test]
+fn an_agents_refresh_token_works_only_for_its_client() {
+    let ports = InMemoryPorts::default();
+    let env = TestEnv::default();
+    let (_, code) = connect(&ports, &env, 42);
+    let tokens = exchange(&ports, &env, &code);
+    let refresh_token = tokens.refresh_token.expose().to_string();
+    let from = |client: &str| Refresh {
+        refresh_token: refresh_token.clone(),
+        client_id: Some(client.to_string()),
+        scope: None,
+    };
+    assert_eq!(
+        block_on(refresh(
+            &ports,
+            &env,
+            from("https://other.example/client.json")
+        ))
+        .err(),
+        Some(TokenError::InvalidGrant(
+            "the refresh token was issued to another client".to_string()
+        ))
+    );
+    assert!(block_on(refresh(&ports, &env, from(CLIENT))).is_ok());
+}
+
+#[test]
 fn revoking_an_agents_tokens_stops_them() {
     let ports = InMemoryPorts::default();
     let env = TestEnv::default();

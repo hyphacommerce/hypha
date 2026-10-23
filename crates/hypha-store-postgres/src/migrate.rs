@@ -384,6 +384,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "proposal_refreshes",
             sql: include_str!("../migrations/0072_proposal_refreshes.sql"),
         },
+        Migration {
+            version: 73,
+            name: "oauth_token_clients",
+            sql: include_str!("../migrations/0073_oauth_token_clients.sql"),
+        },
     ],
 };
 

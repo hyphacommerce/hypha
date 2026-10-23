@@ -537,7 +537,13 @@ fn approve_private<B: StageApps + StageOAuth>(
         }
     };
     let client = OAuthClient::App(app.key().clone());
-    let (access, refresh, mut token) = new_pair(env.new_uuid(), client, request.scopes(), env);
+    let (access, refresh, mut token) = new_pair(
+        env.new_uuid(),
+        client,
+        Some(request.client_id()),
+        request.scopes(),
+        env,
+    );
     batch.update_oauth_request(&mut request);
     batch.insert_oauth_token(&mut token);
     Ok(IssuedTokens {
@@ -845,7 +851,8 @@ pub async fn exchange_code<S: OAuthPorts>(
             let scopes = code.scopes().to_vec();
             let client = OAuthClient::Agent(*agent);
             code.use_up(now);
-            let (access, refresh, mut token) = new_pair(code.family(), client, &scopes, env);
+            let (access, refresh, mut token) =
+                new_pair(code.family(), client, Some(code.client_id()), &scopes, env);
             let mut batch = ports.batch();
             batch.update_oauth_code(&mut code);
             batch.insert_oauth_token(&mut token);
@@ -868,7 +875,8 @@ pub async fn exchange_code<S: OAuthPorts>(
     let scopes = within_grant(code.scopes(), &app);
     code.use_up(now);
     let client = OAuthClient::App(key);
-    let (access, refresh, mut token) = new_pair(code.family(), client, &scopes, env);
+    let (access, refresh, mut token) =
+        new_pair(code.family(), client, Some(code.client_id()), &scopes, env);
     let mut batch = ports.batch();
     batch.update_oauth_code(&mut code);
     batch.insert_oauth_token(&mut token);
@@ -959,7 +967,14 @@ pub async fn refresh<S: OAuthPorts>(
         }
         // A connected agent's: its grant is read at every request to `/mcp`; a revoked
         // agent's tokens were revoked with it.
-        OAuthClient::Agent(_) => old.scopes().to_vec(),
+        OAuthClient::Agent(_) => {
+            if let (Some(client), Some(issued)) = (&input.client_id, old.client_id())
+                && client != issued
+            {
+                return Err(invalid("the refresh token was issued to another client"));
+            }
+            old.scopes().to_vec()
+        }
     };
     if let Some(scope) = &input.scope {
         let mut asked = Vec::new();
@@ -977,7 +992,9 @@ pub async fn refresh<S: OAuthPorts>(
     }
     old.rotate(now);
     let client = old.client().clone();
-    let (access, refresh, mut token) = new_pair(old.family(), client, &scopes, env);
+    let client_id = old.client_id().map(str::to_string);
+    let (access, refresh, mut token) =
+        new_pair(old.family(), client, client_id.as_deref(), &scopes, env);
     let mut batch = ports.batch();
     batch.update_oauth_token(&mut old);
     batch.insert_oauth_token(&mut token);
@@ -1098,6 +1115,7 @@ fn within_grant(scopes: &[Scope], app: &App) -> Vec<Scope> {
 fn new_pair(
     family: Uuid,
     client: OAuthClient,
+    client_id: Option<&str>,
     scopes: &[Scope],
     env: &(impl Random + IdGenerator + Clock),
 ) -> (NewToken, NewToken, OAuthToken) {
@@ -1108,6 +1126,7 @@ fn new_pair(
         id: env.new_uuid(),
         family,
         client,
+        client_id: client_id.map(str::to_string),
         scopes: scopes.to_vec(),
         access_hash: access.hash(),
         access_expires_at: now.plus(ACCESS_TOKEN_LIFETIME),
