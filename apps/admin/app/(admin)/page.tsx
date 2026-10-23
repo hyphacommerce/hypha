@@ -375,8 +375,7 @@ function count(listed: Listed): string {
   return listed.more ? `${listed.items.length}+` : String(listed.items.length);
 }
 
-/** Today's order totals per currency ("€1,240.00 · $80.00"), from the sales report; "—" with none. */
-/** Today's sales, one amount per currency. */
+/** Today's sales, one amount per currency; "—" with none. */
 function sales(
   rows: AdminSchemas["SalesRowResponse"][] | undefined,
   currencies: Currencies,
