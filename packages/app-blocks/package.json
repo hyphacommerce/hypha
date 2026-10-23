@@ -23,7 +23,7 @@
     "jiti": "2.7.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   },
   "peerDependencies": {
     "@astryxdesign/core": "0.7.1",
