@@ -1243,6 +1243,21 @@
         ],
         "type": "object"
       },
+      "ApproveProposalRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "refreshes": {
+            "description": "The proposal's `refreshes` as the approver saw it: when it was previewed again\nsince, approving answers `409 proposal_changed` and applies nothing.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "AssetId": {
         "description": "A AssetId: `asset_` and 32 hex digits.",
         "examples": [
@@ -8493,8 +8508,18 @@
             "type": "string"
           },
           "preview": {
-            "description": "The write's preview when it was proposed (`#/components/schemas/PreviewBody`,\nwithout a token): its response, events, emails and calls, or what blocked it.",
-            "type": "object"
+            "description": "The write's preview when it was proposed (`#/components/schemas/PreviewBody`,\nwithout a token): its response, events, emails and calls, or what blocked it.\nAbsent like `request`.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "redacted": {
+            "description": "The fields left out for this caller (`request`, `preview`, `response`).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "refreshes": {
             "description": "How many times approving found the store changed and previewed it again.",
@@ -8503,12 +8528,21 @@
             "type": "integer"
           },
           "request": {
-            "$ref": "#/components/schemas/ProposalRequestResponse"
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProposalRequestResponse",
+                "description": "Absent for a caller other than a staff session that doesn't hold every scope in\n`scopes` and every `customer_data:*` scope (listed in `redacted`): what the write\nsends and answers may hold what those scopes guard."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "response": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/ProposalOutcomeResponse"
+                "$ref": "#/components/schemas/ProposalOutcomeResponse",
+                "description": "What its write answered once approved; absent until then, and like `request`."
               },
               {
                 "type": "null"
@@ -8523,7 +8557,7 @@
             "type": "array"
           },
           "status": {
-            "description": "`pending`, `applied`, `rejected`, `expired` or `failed` (approved, but its write\nfailed: stale, a conflict, an app's refusal; `response` says why).",
+            "description": "`pending`, `applying` (approved, its write running: `decided_by` and `decided_at`\nsay who and since when), `applied`, `rejected`, `expired` or `failed` (approved, but\nits write failed: a conflict, an app's refusal; `response` says why).",
             "type": "string"
           },
           "summary": {
@@ -8541,8 +8575,6 @@
           "id",
           "agent",
           "operation",
-          "request",
-          "preview",
           "scopes",
           "status",
           "refreshes",
@@ -11774,9 +11806,10 @@
             "name": "status",
             "required": false,
             "schema": {
-              "description": "Known values: `pending`, `applied`, `rejected`, `expired`, `failed`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "description": "Known values: `pending`, `applying`, `applied`, `rejected`, `expired`, `failed`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
               "enum": [
                 "pending",
+                "applying",
                 "applied",
                 "rejected",
                 "expired",
@@ -11980,6 +12013,16 @@
             "$ref": "#/components/parameters/HyphaPreviewToken"
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveProposalRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -11999,7 +12042,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -12041,6 +12084,26 @@
             },
             "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -12049,7 +12112,7 @@
                 }
               }
             },
-            "description": "A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
           },
           "500": {
             "content": {
@@ -12067,7 +12130,7 @@
             "bearer": []
           }
         ],
-        "summary": "Approves a pending proposal: its write is sent again as its agent, exactly as\npreviewed (the preview's IDs; committed only if it records the same events over records\nas they were when previewed). Takes a\nstaff session holding every scope the proposal names. Answers the proposal, `applied`\nor `failed` with the write's answer in `response`. A write that would no longer do\nwhat was previewed (the store changed meanwhile) writes nothing and answers `409\npreview_stale`: the proposal stays `pending`, now holding what the write would do today\n(its preview, IDs and digest replaced, `refreshes` counted, `proposal.updated`\nrecorded), in `details.proposal`, with that preview in `details.preview`; review it and\napprove again. A proposal\nwhose preview stopped at an effect it couldn't run (`complete: false`) is sent as a\nplain write. A write refused for good (a 4xx) marks it `failed`; one that may go\nthrough later (`408`, `429`, a 5xx) answers that and leaves it pending. A write already\nmade under the proposal's idempotency key (an approval whose answer was lost) is\nrecorded `applied` with that write's answer.",
+        "summary": "Approves a pending proposal: its write is sent again as its agent, exactly as\npreviewed (the preview's IDs; committed only if it records the same events over records\nas they were when previewed). Takes a staff session holding every scope the proposal\nnames. The body is optional: `refreshes` binds the approval to the preview the approver\nsaw (another count is `409 proposal_changed`, with the proposal as it is in\n`details.proposal`). While its write runs the proposal is `applying`, and nobody else\ndecides it (`409 proposal_applying`). Answers the proposal, `applied` or `failed` with\nthe write's answer in `response`. A write that would no longer do what was previewed\n(the store changed meanwhile) writes nothing and answers `409 preview_stale`: the\nproposal is `pending` again, now holding what the write would do today (its preview,\nIDs and digest replaced, `refreshes` counted, `proposal.updated` recorded), in\n`details.proposal`, with that preview in `details.preview`; review it and approve\nagain. A proposal whose preview stopped at an effect it couldn't run (`complete:\nfalse`) is sent as a plain write. A write refused for good (a 4xx) marks it `failed`;\none that may go through later (`408`, `429`, a 5xx, or agents turned off or capped to\nreading meanwhile) answers that and leaves it pending. A write already made under the\nproposal's idempotency key (an approval whose answer was lost) is recorded `applied`\nwith that write's answer.",
         "tags": [
           "agents"
         ],
@@ -25699,12 +25762,13 @@
             "bearer": []
           }
         ],
-        "summary": "Inventory items across products, lowest available first (at `location` when given),\nthen by ID: what's running low. Items whose variant was removed are left out.",
+        "summary": "Inventory items across products, lowest available first (at `location` when given),\nthen by ID: what's running low. Items whose variant was removed are left out. Each\nnames its product, title and SKU, so it takes `products:read` too.",
         "tags": [
           "inventory"
         ],
         "x-hypha-scopes": [
-          "inventory:read"
+          "inventory:read",
+          "products:read"
         ]
       },
       "post": {

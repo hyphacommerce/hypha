@@ -109,19 +109,22 @@ export interface paths {
         /**
          * Approves a pending proposal: its write is sent again as its agent, exactly as
          *     previewed (the preview's IDs; committed only if it records the same events over records
-         *     as they were when previewed). Takes a
-         *     staff session holding every scope the proposal names. Answers the proposal, `applied`
-         *     or `failed` with the write's answer in `response`. A write that would no longer do
-         *     what was previewed (the store changed meanwhile) writes nothing and answers `409
-         *     preview_stale`: the proposal stays `pending`, now holding what the write would do today
-         *     (its preview, IDs and digest replaced, `refreshes` counted, `proposal.updated`
-         *     recorded), in `details.proposal`, with that preview in `details.preview`; review it and
-         *     approve again. A proposal
-         *     whose preview stopped at an effect it couldn't run (`complete: false`) is sent as a
-         *     plain write. A write refused for good (a 4xx) marks it `failed`; one that may go
-         *     through later (`408`, `429`, a 5xx) answers that and leaves it pending. A write already
-         *     made under the proposal's idempotency key (an approval whose answer was lost) is
-         *     recorded `applied` with that write's answer.
+         *     as they were when previewed). Takes a staff session holding every scope the proposal
+         *     names. The body is optional: `refreshes` binds the approval to the preview the approver
+         *     saw (another count is `409 proposal_changed`, with the proposal as it is in
+         *     `details.proposal`). While its write runs the proposal is `applying`, and nobody else
+         *     decides it (`409 proposal_applying`). Answers the proposal, `applied` or `failed` with
+         *     the write's answer in `response`. A write that would no longer do what was previewed
+         *     (the store changed meanwhile) writes nothing and answers `409 preview_stale`: the
+         *     proposal is `pending` again, now holding what the write would do today (its preview,
+         *     IDs and digest replaced, `refreshes` counted, `proposal.updated` recorded), in
+         *     `details.proposal`, with that preview in `details.preview`; review it and approve
+         *     again. A proposal whose preview stopped at an effect it couldn't run (`complete:
+         *     false`) is sent as a plain write. A write refused for good (a 4xx) marks it `failed`;
+         *     one that may go through later (`408`, `429`, a 5xx, or agents turned off or capped to
+         *     reading meanwhile) answers that and leaves it pending. A write already made under the
+         *     proposal's idempotency key (an approval whose answer was lost) is recorded `applied`
+         *     with that write's answer.
          */
         post: operations["admin.agents.approve"];
         delete?: never;
@@ -1647,7 +1650,8 @@ export interface paths {
         };
         /**
          * Inventory items across products, lowest available first (at `location` when given),
-         *     then by ID: what's running low. Items whose variant was removed are left out.
+         *     then by ID: what's running low. Items whose variant was removed are left out. Each
+         *     names its product, title and SKU, so it takes `products:read` too.
          */
         get: operations["admin.inventory.list_items"];
         put?: never;
@@ -3797,6 +3801,14 @@ export interface components {
             grant: components["schemas"]["AgentGrantRequest"];
             /** @description What the agent is called in the admin (`Claude on Ana's laptop`). */
             name: string;
+        };
+        ApproveProposalRequest: {
+            /**
+             * Format: int32
+             * @description The proposal's `refreshes` as the approver saw it: when it was previewed again
+             *     since, approving answers `409 proposal_changed` and applies nothing.
+             */
+            refreshes?: number | null;
         };
         /**
          * @description A AssetId: `asset_` and 32 hex digits.
@@ -6423,20 +6435,24 @@ export interface components {
             /**
              * @description The write's preview when it was proposed (`#/components/schemas/PreviewBody`,
              *     without a token): its response, events, emails and calls, or what blocked it.
+             *     Absent like `request`.
              */
-            preview: Record<string, never>;
+            preview?: Record<string, never> | null;
+            /** @description The fields left out for this caller (`request`, `preview`, `response`). */
+            redacted?: string[];
             /**
              * Format: int32
              * @description How many times approving found the store changed and previewed it again.
              */
             refreshes: number;
-            request: components["schemas"]["ProposalRequestResponse"];
+            request?: components["schemas"]["ProposalRequestResponse"] | null;
             response?: components["schemas"]["ProposalOutcomeResponse"] | null;
             /** @description Every scope approving it takes. */
             scopes: components["schemas"]["Scope"][];
             /**
-             * @description `pending`, `applied`, `rejected`, `expired` or `failed` (approved, but its write
-             *     failed: stale, a conflict, an app's refusal; `response` says why).
+             * @description `pending`, `applying` (approved, its write running: `decided_by` and `decided_at`
+             *     say who and since when), `applied`, `rejected`, `expired` or `failed` (approved, but
+             *     its write failed: a conflict, an app's refusal; `response` says why).
              */
             status: string;
             /**
@@ -7786,7 +7802,7 @@ export interface operations {
                 limit?: number;
                 /** @description Only this agent's. */
                 agent?: components["schemas"]["AgentId"];
-                status?: "pending" | "applied" | "rejected" | "expired" | "failed";
+                status?: "pending" | "applying" | "applied" | "rejected" | "expired" | "failed";
                 /** @description Only those the caller could approve: every scope of theirs held. */
                 approvable?: boolean;
             };
@@ -7933,7 +7949,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveProposalRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -7944,7 +7964,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProposalResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7989,7 +8009,25 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
             422: {
                 headers: {
                     [name: string]: unknown;
