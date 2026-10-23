@@ -198,9 +198,9 @@ fn issue(
 }
 
 /// The digest of what a write did, which applying it must match: SHA-256 over its events
-/// in order, each as its type, version, subject and data, with every value that is an RFC
-/// 3339 timestamp blanked (times move between a preview and its apply; nothing else
-/// should), and over the rows of aggregates it wrote, in order, each with the version it
+/// in order, each as its type, version, subject and data, with every time blanked
+/// (`blank_times`: times move between a preview and its apply; nothing else should), and
+/// over the rows of aggregates it wrote, in order, each with the version it
 /// found (`Inserted` for a new one). The rows are what catch a record changed since the
 /// preview whose change no event payload would show (`product.updated` names the fields
 /// changed, not their old values): whatever the write read and wrote again must be as it
@@ -238,12 +238,20 @@ pub(crate) fn digest(record: &WriteRecord) -> Result<String, ApiError> {
     Ok(format!("sha256:{hex}"))
 }
 
-/// Blanks every string in `value` that is an RFC 3339 timestamp.
+/// Blanks every time in `value`: a string that is an RFC 3339 timestamp, and a number
+/// under a key ending in `_at` (microseconds since the epoch, as `Timestamp` counts).
 fn blank_times(value: &mut Value) {
     match value {
         Value::String(text) if text.parse::<jiff::Timestamp>().is_ok() => text.clear(),
         Value::Array(items) => items.iter_mut().for_each(blank_times),
-        Value::Object(map) => map.values_mut().for_each(blank_times),
+        Value::Object(map) => {
+            for (key, value) in map.iter_mut() {
+                match value {
+                    Value::Number(_) if key.ends_with("_at") => *value = Value::Null,
+                    _ => blank_times(value),
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -1045,6 +1053,26 @@ mod tests {
                 point: "payments.capture",
                 app: "app_pay".to_string()
             })
+        );
+    }
+
+    fn recorded(data: Value) -> WriteRecord {
+        WriteRecord {
+            events: vec![event(data)],
+            rows: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn times_dont_change_a_digest_and_other_values_do() {
+        let digest_of = |data| digest(&recorded(data)).unwrap();
+        assert_eq!(
+            digest_of(serde_json::json!({"due_at": 1, "at": "2026-01-01T00:00:00Z"})),
+            digest_of(serde_json::json!({"due_at": 2, "at": "2026-02-01T00:00:00Z"}))
+        );
+        assert_ne!(
+            digest_of(serde_json::json!({"due": 1})),
+            digest_of(serde_json::json!({"due": 2}))
         );
     }
 

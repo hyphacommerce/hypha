@@ -184,6 +184,52 @@ async fn tools_list_follows_the_grant_in_both_protocol_eras() {
 }
 
 #[tokio::test]
+async fn every_tools_refs_resolve_from_its_input_schema() {
+    let app = app().await;
+    let (_, token) = agent_key(
+        &app,
+        json!({
+            "read": ["orders:read", "customers:read", "inventory:read", "products:read"],
+            "write": {"products:write": "apply", "orders:write": "apply",
+                "customers:write": "apply", "inventory:write": "apply"},
+        }),
+    )
+    .await;
+    let answered = modern(&app, &token, "tools/list", json!({})).await;
+    assert_eq!(answered.status, StatusCode::OK, "{}", answered.body);
+    let tools = answered.body["result"]["tools"].as_array().unwrap();
+    assert!(tools.len() > 12, "{}", tools.len());
+    fn refs<'a>(value: &'a Value, found: &mut Vec<&'a str>) {
+        match value {
+            Value::Object(map) => {
+                if let Some(Value::String(target)) = map.get("$ref") {
+                    found.push(target);
+                }
+                map.values().for_each(|v| refs(v, found));
+            }
+            Value::Array(items) => items.iter().for_each(|v| refs(v, found)),
+            _ => {}
+        }
+    }
+    let mut checked = 0;
+    for tool in tools {
+        let input = &tool["inputSchema"];
+        let mut found = Vec::new();
+        refs(input, &mut found);
+        for target in found {
+            let pointer = target.strip_prefix('#').unwrap_or_else(|| panic!("{target}"));
+            assert!(
+                input.pointer(pointer).is_some(),
+                "{}: {target} doesn't resolve",
+                tool["name"]
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "no tool uses a $ref");
+}
+
+#[tokio::test]
 async fn an_agent_finds_describes_and_reads() {
     let app = app().await;
     let (_, key) = agent_key(
@@ -365,6 +411,38 @@ async fn an_agent_previews_proposes_and_a_person_approves() {
         modes.contains(&"preview") && modes.contains(&"propose"),
         "{modes:?}"
     );
+}
+
+/// Erasing is only ever proposed; its event's due time moves between the proposal and
+/// the approval, and the approval still applies it.
+#[tokio::test]
+async fn an_erasure_an_agent_proposed_is_applied_when_approved() {
+    let app = app().await;
+    let (order, _, _) = placed_order_for_three_mugs(&app).await;
+    let (_, placed) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
+    let buyer = placed["customer"].as_str().unwrap().to_string();
+    let (_, key) = agent_key(
+        &app,
+        json!({"read": ["customers:read"], "write": {"customers:erase": "propose"}}),
+    )
+    .await;
+    let proposed = tool(
+        &app,
+        &key,
+        "call",
+        json!({"operation": "admin.customers.request_erasure", "params": {"id": buyer}}),
+    )
+    .await;
+    assert_eq!(proposed["isError"], false, "{proposed}");
+    let id = proposed["structuredContent"]["proposed"].as_str().unwrap();
+
+    let session = owner_session(&app).await;
+    let path = format!("/admin/agent-proposals/{id}/approve");
+    let (status, approved) = send_as(&app, &session, "POST", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{approved}");
+    assert_eq!(approved["status"], "applied", "{approved}");
+    let (_, customer) = send(&app, "GET", &format!("/admin/customers/{buyer}"), None).await;
+    assert!(customer["erasure_due_at"].is_string(), "{customer}");
 }
 
 #[tokio::test]
