@@ -20,9 +20,7 @@
     "lint:fix": "vp lint --fix",
     "fmt": "vp fmt",
     "fmt:check": "vp fmt --check",
-    "lint:react": "react-doctor -y --no-telemetry",
-    "spores:build": "node scripts/build-spore-elements.mjs",
-    "spores:check": "node scripts/build-spore-elements.mjs --check"
+    "lint:react": "react-doctor -y --no-telemetry"
   },
   "devDependencies": {
     "react-doctor": "0.9.18",

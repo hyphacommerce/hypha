@@ -50,7 +50,6 @@ mod mcp;
 mod previews;
 // A host built with a spore.
 mod spores;
-mod stripe;
 
 /// The app without file storage: most routes don't need it, so their tests don't need
 /// the S3 server.

@@ -35,7 +35,6 @@ jobs:
         run: docker compose up -d --wait
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo clippy -p hypha-host-axum --features spore-stripe -- -D warnings
       - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
         with:
           tool: nextest
@@ -52,9 +51,7 @@ jobs:
           -p hypha-checkout -p hypha-dispatch -p hypha-auth -p hypha-users -p hypha-media
           -p hypha-merchandising -p hypha-shipping -p hypha-apps -p hypha-oauth -p hypha-channels -p hypha-search-index -p hypha-search -p hypha-config -p hypha-store-postgres -p hypha-store-s3 -p hypha-mail-resend
           -p hypha-categories -p hypha-custom-fields -p hypha-extensions -p hypha-http -p hypha-spore-core -p hypha-host-workers
-          -p hypha-spore -p hypha-spore-stripe -p hypha-agents -p hypha-mcp --features hypha-spore/postgres,hypha-spore/http
-      # The Worker and the native host with this repository's spores.
-      - run: cargo build --target wasm32-unknown-unknown -p hypha-host-workers --features spore-stripe
+          -p hypha-spore -p hypha-agents -p hypha-mcp --features hypha-spore/postgres,hypha-spore/http
       - name: The services' logs, when something failed
         if: failure()
         run: docker compose logs --tail 200 s3 postgres mailpit
@@ -95,8 +92,6 @@ jobs:
       - run: pnpm lint
       - run: pnpm lint:react
       - run: pnpm sdk:check
-      # The spores' storefront elements as bundled.
-      - run: pnpm spores:check
       # The default email templates and their contract with the API.
       - run: pnpm emails:check
       - run: pnpm --filter @hyphacommerce/emails test

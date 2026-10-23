@@ -157,23 +157,9 @@ macro_rules! worker {
 
 /// The stock Worker: no spores. In a module of its own, so its `Deployment` type doesn't
 /// meet the trait; the events it exports are the Worker's wherever they're declared.
-#[cfg(all(
-    target_arch = "wasm32",
-    feature = "stock",
-    not(feature = "spore-stripe")
-))]
+#[cfg(all(target_arch = "wasm32", feature = "stock"))]
 mod stock {
     crate::worker! { spores: [] }
-}
-
-/// This workspace's Worker with the first-party Stripe spore: `--features spore-stripe`, as
-/// the native host.
-#[cfg(all(target_arch = "wasm32", feature = "stock", feature = "spore-stripe"))]
-mod stock_with_stripe {
-    crate::worker! {
-        spores: [hypha_spore_stripe::Stripe],
-        routes: [hypha_spore_stripe::stripe_routes],
-    }
 }
 
 #[cfg(target_arch = "wasm32")]

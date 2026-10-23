@@ -6,9 +6,6 @@ license.workspace = true
 publish = false
 
 [dependencies]
-# First-party spores, built in by a feature: `--features spore-stripe`. The
-# stock binary has none.
-hypha-spore-stripe = { path = "../../spores/stripe", optional = true }
 # The routes, the state and everything but the runtime.
 hypha-http = { path = "../hypha-http" }
 hypha-dispatch = { path = "../hypha-dispatch" }
@@ -63,16 +60,11 @@ serde_json.workspace = true
 toml = "0.9"
 
 [features]
-# The Stripe spore.
-spore-stripe = ["dep:hypha-spore-stripe"]
 # The test host (`hypha_host_axum::testing`), for a spore's route tests.
 testing = ["dep:hypha-auth", "dep:tower", "hypha-store-postgres/testing"]
 
 [dev-dependencies]
 hypha-agents = { path = "../hypha-agents" }
-# The first-party Stripe spore, for route tests of a host built with it; the stock
-# binary has no spores.
-hypha-spore-stripe = { path = "../../spores/stripe" }
 url = "2.5"
 # A test host for building spores (`hypha_spore_core::env::testing`).
 hypha-spore-core = { path = "../hypha-spore-core", features = ["testing"] }

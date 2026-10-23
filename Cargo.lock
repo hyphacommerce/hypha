@@ -1191,7 +1191,6 @@ dependencies = [
  "hypha-search",
  "hypha-search-index",
  "hypha-spore-core",
- "hypha-spore-stripe",
  "hypha-store-postgres",
  "hypha-store-s3",
  "hypha-stores",
@@ -1235,7 +1234,6 @@ dependencies = [
  "hypha-payments",
  "hypha-search",
  "hypha-spore-core",
- "hypha-spore-stripe",
  "hypha-store-postgres",
  "hypha-store-s3",
  "hypha-stores",
@@ -1608,19 +1606,6 @@ dependencies = [
  "thiserror",
  "toml",
  "uuid",
-]
-
-[[package]]
-name = "hypha-spore-stripe"
-version = "0.1.0"
-dependencies = [
- "hmac",
- "hypha-spore",
- "pollster",
- "serde",
- "serde_json",
- "sha2",
- "thiserror",
 ]
 
 [[package]]
