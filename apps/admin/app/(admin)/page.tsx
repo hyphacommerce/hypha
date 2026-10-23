@@ -225,7 +225,8 @@ function SetupChecklist({ steps }: { steps: SetupStep[] }) {
 
 // ---------- today's numbers ----------
 
-type Tile = { label: string; value: string; hint: string; href: string };
+/** A tile: its value is one figure, or one per currency (wrapping between them). */
+type Tile = { label: string; value: string | string[]; hint: string; href: string };
 
 /**
  * Today's orders and sales, the orders still to ship and the payments still to collect,
@@ -292,7 +293,15 @@ function TileGrid({ tiles }: { tiles: Tile[] }) {
               {tile.label}
             </Text>
             <Text type="display-2" hasTabularNumbers>
-              {tile.value}
+              {typeof tile.value === "string" ? (
+                tile.value
+              ) : (
+                <span className="tile-amounts">
+                  {tile.value.map((amount) => (
+                    <span key={amount}>{amount}</span>
+                  ))}
+                </span>
+              )}
             </Text>
             <Text type="supporting" color="secondary">
               {tile.hint}
@@ -367,12 +376,13 @@ function count(listed: Listed): string {
 }
 
 /** Today's order totals per currency ("€1,240.00 · $80.00"), from the sales report; "—" with none. */
+/** Today's sales, one amount per currency. */
 function sales(
   rows: AdminSchemas["SalesRowResponse"][] | undefined,
   currencies: Currencies,
-): string {
+): string | string[] {
   if (!rows || rows.length === 0) return "—";
-  return rows.map((row) => formatMoney(row.total, currencies)).join(" · ");
+  return rows.map((row) => formatMoney(row.total, currencies));
 }
 
 function TilesSkeleton() {
