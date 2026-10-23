@@ -515,20 +515,28 @@ impl Permissions {
             .map(|(_, m)| *m)
     }
 
-    /// How a write needing `scopes` may go: `Apply` when every write scope among them is
-    /// applied, `Propose` when one is only proposed, `None` when any scope (read or write)
-    /// is missing. Read scopes among them only need reading.
-    pub fn mode_for(&self, scopes: &[Scope]) -> Option<WriteMode> {
-        let mut mode = WriteMode::Apply;
-        for scope in scopes {
-            match (kind(*scope), self.access(*scope)) {
-                (_, None) => return None,
-                (Kind::Write, Some(Access::Propose)) => mode = WriteMode::Propose,
-                (Kind::Write, Some(Access::Read)) => return None,
-                _ => {}
-            }
+    /// How a write needing `scopes` may go: `Propose` when the agent holds any of its
+    /// write scopes only to propose, `Apply` otherwise. Decided by the write scopes held
+    /// alone: a scope the agent lacks makes the route refuse the write, never turns a
+    /// proposal into a direct write.
+    pub fn mode_for(&self, scopes: &[Scope]) -> WriteMode {
+        let proposes = scopes
+            .iter()
+            .any(|s| self.write_mode(*s) == Some(WriteMode::Propose));
+        match proposes {
+            true => WriteMode::Propose,
+            false => WriteMode::Apply,
         }
-        Some(mode)
+    }
+
+    /// Whether the agent holds every one of `scopes`, a write scope in either mode.
+    pub fn holds_all(&self, scopes: &[Scope]) -> bool {
+        scopes.iter().all(|s| {
+            !matches!(
+                (kind(*s), self.access(*s)),
+                (_, None) | (Kind::Write, Some(Access::Read))
+            )
+        })
     }
 
     pub fn read(&self) -> &[Scope] {
@@ -555,13 +563,31 @@ impl Permissions {
     }
 
     /// Every scope the agent holds in any mode, in `Scope::ALL` order: the scopes of the
-    /// `Ctx` its requests run with. A write in `Propose` mode is held too, since previewing
-    /// and proposing it run the command; the host refuses to commit it.
+    /// `Ctx` a request runs with when nothing it does is kept without a person (a preview,
+    /// a proposal's preview, an approved proposal's write). A write in `Propose` mode is
+    /// held here, since previewing and proposing it run the command.
     pub fn scopes(&self) -> Vec<Scope> {
+        self.held(|_| true)
+    }
+
+    /// The scopes the agent may use on its own, in `Scope::ALL` order: every one it holds
+    /// but the write scopes it only proposes. The scopes of the `Ctx` of anything it reads
+    /// or writes directly, so a write it may only propose can't commit there, whatever
+    /// else the operation names.
+    pub fn applied_scopes(&self) -> Vec<Scope> {
+        self.held(|mode| mode == WriteMode::Apply)
+    }
+
+    fn held(&self, writes: impl Fn(WriteMode) -> bool) -> Vec<Scope> {
         sorted_once(
             self.read
                 .iter()
-                .chain(self.write.iter().map(|(s, _)| s))
+                .chain(
+                    self.write
+                        .iter()
+                        .filter(|(_, m)| writes(*m))
+                        .map(|(s, _)| s),
+                )
                 .chain(self.customer_data.iter())
                 .copied()
                 .collect(),
@@ -840,7 +866,7 @@ mod tests {
             "reads stay"
         );
         assert_eq!(p.access(Scope::CustomerDataEmail), Some(Access::Read));
-        assert_eq!(p.mode_for(&[Scope::InventoryWrite]), None);
+        assert!(!p.holds_all(&[Scope::InventoryWrite]));
     }
 
     #[test]
@@ -865,23 +891,55 @@ mod tests {
     }
 
     #[test]
-    fn mode_for_a_write_is_its_weakest_scope() {
+    fn mode_for_a_write_is_its_weakest_scope_held() {
         let p = effective(&example(), WritesCap::Apply, None);
-        assert_eq!(p.mode_for(&[Scope::InventoryWrite]), Some(WriteMode::Apply));
+        assert_eq!(p.mode_for(&[Scope::InventoryWrite]), WriteMode::Apply);
         assert_eq!(
             p.mode_for(&[Scope::InventoryWrite, Scope::ProductsWrite]),
-            Some(WriteMode::Propose)
+            WriteMode::Propose
         );
         assert_eq!(
             p.mode_for(&[Scope::InventoryWrite, Scope::OrdersRead]),
-            Some(WriteMode::Apply)
+            WriteMode::Apply
         );
-        assert_eq!(
-            p.mode_for(&[Scope::InventoryWrite, Scope::OrdersWrite]),
-            None
+        assert_eq!(p.mode_for(&[]), WriteMode::Apply);
+    }
+
+    #[test]
+    fn a_missing_scope_never_turns_a_proposal_into_a_write() {
+        let p = effective(&example(), WritesCap::Apply, None);
+        // products:write is only proposed; customers:read isn't held at all.
+        let scopes = [Scope::ProductsWrite, Scope::CustomersRead];
+        assert_eq!(p.mode_for(&scopes), WriteMode::Propose);
+        assert!(!p.holds_all(&scopes));
+        let capped = effective(&example(), WritesCap::Propose, None);
+        let scopes = [Scope::InventoryWrite, Scope::CustomersRead];
+        assert_eq!(capped.mode_for(&scopes), WriteMode::Propose, "the cap");
+    }
+
+    #[test]
+    fn holding_a_write_is_holding_it_in_either_mode() {
+        let p = effective(&example(), WritesCap::Apply, None);
+        assert!(p.holds_all(&[Scope::InventoryWrite, Scope::ProductsWrite]));
+        assert!(p.holds_all(&[Scope::InventoryWrite, Scope::OrdersRead]));
+        assert!(!p.holds_all(&[Scope::InventoryWrite, Scope::OrdersWrite]));
+        assert!(!p.holds_all(&[Scope::CustomersRead]));
+        assert!(p.holds_all(&[]));
+    }
+
+    #[test]
+    fn applied_scopes_leave_out_the_writes_only_proposed() {
+        let p = effective(&example(), WritesCap::Apply, None);
+        let applied = p.applied_scopes();
+        assert!(applied.contains(&Scope::InventoryWrite));
+        assert!(
+            applied.contains(&Scope::ProductsRead),
+            "a proposed write's read"
         );
-        assert_eq!(p.mode_for(&[Scope::CustomersRead]), None);
-        assert_eq!(p.mode_for(&[]), Some(WriteMode::Apply));
+        assert!(!applied.contains(&Scope::ProductsWrite));
+        assert!(!applied.contains(&Scope::CustomersErase));
+        let capped = effective(&example(), WritesCap::Propose, None);
+        assert!(!capped.applied_scopes().contains(&Scope::InventoryWrite));
     }
 
     #[test]

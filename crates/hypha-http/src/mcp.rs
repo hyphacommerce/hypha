@@ -161,7 +161,10 @@ impl<'a, S: Storage> AgentOperations<'a, S> {
             .map_err(|e| internal("a proposals request", e))?;
         let as_agent = AgentRequest {
             agent: self.id(),
-            ctx: Ctx::new(Actor::Agent(self.id()), self.acting.permissions.scopes()),
+            ctx: Ctx::new(
+                Actor::Agent(self.id()),
+                self.acting.permissions.applied_scopes(),
+            ),
         };
         let answer = answer_of(dispatch(self.state, request, Some(as_agent)).await).await;
         Ok(response_of(answer))
@@ -174,14 +177,16 @@ fn mode_for(permissions: &Permissions, cap: WritesCap, op: &Operation) -> Option
     if !op.for_agents() || !permissions.allows_operation(&op.id) {
         return None;
     }
-    let mode = permissions.mode_for(&op.scopes)?;
+    if !permissions.holds_all(&op.scopes) {
+        return None;
+    }
     if !op.write {
         return Some(Mode::Read);
     }
     if cap == WritesCap::Off {
         return None;
     }
-    Some(match mode {
+    Some(match permissions.mode_for(&op.scopes) {
         WriteMode::Propose => Mode::Propose,
         WriteMode::Apply => Mode::Apply,
     })
@@ -271,9 +276,9 @@ impl<S: Storage> Operations for AgentOperations<'_, S> {
             }
             None => None,
         };
-        let answer = agents::call(
+        let answer = agents::call_as(
             self.state,
-            self.id(),
+            &self.acting,
             agents::OperationCall {
                 operation: call.operation,
                 params: call.params,

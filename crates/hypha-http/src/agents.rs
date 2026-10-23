@@ -98,20 +98,64 @@ impl Answer {
     }
 }
 
-/// Calls `call.operation` as `agent`, judged as the module says, and logs it.
+/// Calls `call.operation` as `agent`, judged as the module says, and logs it: `call_as`
+/// for an agent found first (`acting`), with its use noted.
 pub async fn call<S: Storage>(
     state: &SharedState<S>,
     agent: AgentId,
     call: OperationCall,
 ) -> Answer {
-    run(state, agent, call, None).await
+    match acting(state, agent, NoteUse::Yes).await {
+        Ok(acting) => call_as(state, &acting, call).await,
+        Err(e) => {
+            let started = state.clock.now();
+            let operation = state.operations().get(&call.operation);
+            let answer = answer_of(e.into_response()).await;
+            log(
+                state,
+                agent,
+                &call.operation,
+                asked(operation, call.mode),
+                &answer,
+                started,
+            )
+            .await;
+            answer
+        }
+    }
+}
+
+/// Calls `call.operation` as `acting`, an agent `acting` found may act now (what `/mcp`
+/// does once per request), judged as the module says, and logs it.
+pub async fn call_as<S: Storage>(
+    state: &SharedState<S>,
+    acting: &Acting,
+    call: OperationCall,
+) -> Answer {
+    let started = state.clock.now();
+    let (mode, answer) = match judge_and_send(state, acting, &call, None).await {
+        Ok(done) => done,
+        Err((mode, e)) => (mode, answer_of(e.into_response()).await),
+    };
+    log(
+        state,
+        acting.agent.id(),
+        &call.operation,
+        mode,
+        &answer,
+        started,
+    )
+    .await;
+    answer
 }
 
 /// Applies an approved proposal's write as its agent: with a token made from the
 /// proposal's preview (its IDs and digest) when the preview was complete, so it commits
 /// only if it does what was previewed; as a plain write otherwise (an effect a preview
 /// couldn't run, which the approver saw). The agent's grant may only propose it: the
-/// approval is the person's say.
+/// approval is the person's say. A person's act, not the agent's: it spends none of the
+/// agent's rate limits, isn't its use and isn't in its call log (the proposal records
+/// who approved it and what the write answered).
 pub(crate) async fn apply_approved<S: Storage>(
     state: &SharedState<S>,
     proposal: &hypha_agents::Proposal,
@@ -125,22 +169,24 @@ pub(crate) async fn apply_approved<S: Storage>(
         idempotency_key: proposal.idempotency_key().map(|k| k.as_str().to_string()),
         preview_token: None,
     };
-    run(state, proposal.agent(), call, Some(proposal)).await
+    let sent = match acting(state, proposal.agent(), NoteUse::No).await {
+        Ok(acting) => judge_and_send(state, &acting, &call, Some(proposal)).await,
+        Err(e) => Err((CallMode::Apply, e)),
+    };
+    match sent {
+        Ok((_, answer)) => answer,
+        Err((_, e)) => answer_of(e.into_response()).await,
+    }
 }
 
-async fn run<S: Storage>(
-    state: &SharedState<S>,
-    agent: AgentId,
-    call: OperationCall,
-    approved: Option<&hypha_agents::Proposal>,
-) -> Answer {
-    let started = state.clock.now();
-    let (mode, answer) = match judge_and_send(state, agent, &call, approved).await {
-        Ok(done) => done,
-        Err((mode, e)) => (mode, answer_of(e.into_response()).await),
-    };
-    log(state, agent, &call.operation, mode, &answer, started).await;
-    answer
+/// How a call is logged until it's judged: by what it asked for.
+fn asked(operation: Option<&Operation>, mode: Mode) -> CallMode {
+    match (operation, mode) {
+        (Some(op), _) if !op.write => CallMode::Read,
+        (_, Mode::Preview) => CallMode::Preview,
+        (_, Mode::Propose) => CallMode::Propose,
+        (_, Mode::Apply) => CallMode::Apply,
+    }
 }
 
 /// What the agent may do now: its permissions, as the scopes of the `Ctx` its request
@@ -152,25 +198,20 @@ struct Judged {
 
 async fn judge_and_send<S: Storage>(
     state: &SharedState<S>,
-    agent: AgentId,
+    acting: &Acting,
     call: &OperationCall,
     approved: Option<&hypha_agents::Proposal>,
 ) -> Result<(CallMode, Answer), (CallMode, ApiError)> {
+    let agent = acting.agent.id();
     let operation = state.operations().get(&call.operation).cloned();
-    // How the call is logged until it's judged: by what it asked for.
-    let asked = match (&operation, call.mode) {
-        (Some(op), _) if !op.write => CallMode::Read,
-        (_, Mode::Preview) => CallMode::Preview,
-        (_, Mode::Propose) => CallMode::Propose,
-        (_, Mode::Apply) => CallMode::Apply,
-    };
+    let asked = asked(operation.as_ref(), call.mode);
     let operation = operation.ok_or_else(|| {
         (
             asked,
             ApiError::operation_not_found(call.operation.as_str()),
         )
     })?;
-    let judged = judge(state, agent, &operation, call.mode, approved.is_some())
+    let judged = judge(state, acting, &operation, call.mode, approved.is_some())
         .await
         .map_err(|e| (asked, e))?;
     let mode = judged.mode;
@@ -199,44 +240,51 @@ async fn judge_and_send<S: Storage>(
     }
 }
 
-/// Judges `agent`'s call of `operation` in `asked` mode (`approved`: a person approved
-/// it), as the module says.
+/// Judges the call of `operation` by `acting` in `asked` mode (`approved`: a person
+/// approved it), as the module says. The `Ctx` it answers carries the write scopes the
+/// agent only proposes solely where nothing is kept without a person: a preview or a
+/// proposal's (sent with `Hypha-Preview`, so rolled back) and an approved proposal's write.
+/// A direct read or write runs without them, so it can't commit what the agent may only
+/// propose, whatever else its operation names.
 async fn judge<S: Storage>(
     state: &SharedState<S>,
-    agent: AgentId,
+    acting: &Acting,
     operation: &Operation,
     asked: Mode,
     approved: bool,
 ) -> Result<Judged, ApiError> {
-    let agents = &state.config.agents;
-    let Acting {
-        agent: found,
-        permissions,
-    } = acting(state, agent).await?;
-    let ports = state.public_ports().await?;
+    let permissions = &acting.permissions;
     if !permissions.allows_operation(&operation.id) {
         return Err(ApiError::operation_not_allowed(operation.id.as_str()));
     }
     let mode = match (operation.write, approved, asked) {
         (false, _, _) => CallMode::Read,
-        _ if agents.writes == WritesCap::Off => return Err(ApiError::agent_writes_off()),
+        _ if state.config.agents.writes == WritesCap::Off => {
+            return Err(ApiError::agent_writes_off());
+        }
         (true, true, _) => CallMode::Apply,
         (true, false, Mode::Preview) => CallMode::Preview,
         (true, false, Mode::Propose) => CallMode::Propose,
         (true, false, Mode::Apply) => match permissions.mode_for(&operation.scopes) {
-            Some(WriteMode::Propose) => CallMode::Propose,
-            // Missing a scope: the route refuses it as it would anyone.
-            Some(WriteMode::Apply) | None => CallMode::Apply,
+            WriteMode::Propose => CallMode::Propose,
+            WriteMode::Apply => CallMode::Apply,
         },
     };
-    let key = agent.to_string();
-    enforce(&state.limiter, Rule::AgentCall, &key).await?;
-    if matches!(mode, CallMode::Propose | CallMode::Apply) {
-        enforce(&state.limiter, Rule::AgentWrite, &key).await?;
+    if !approved {
+        let key = acting.agent.id().to_string();
+        enforce(&state.limiter, Rule::AgentCall, &key).await?;
+        if matches!(mode, CallMode::Propose | CallMode::Apply) {
+            enforce(&state.limiter, Rule::AgentWrite, &key).await?;
+        }
     }
-    hypha_agents::record_agent_use(&ports, &found, state.clock.now()).await?;
+    let scopes = match (mode, approved) {
+        (CallMode::Preview | CallMode::Propose, _) | (CallMode::Apply, true) => {
+            permissions.scopes()
+        }
+        (CallMode::Read, _) | (CallMode::Apply, false) => permissions.applied_scopes(),
+    };
     Ok(Judged {
-        ctx: Ctx::new(Actor::Agent(agent), permissions.scopes()),
+        ctx: Ctx::new(Actor::Agent(acting.agent.id()), scopes),
         mode,
     })
 }
@@ -249,12 +297,22 @@ pub struct Acting {
     pub permissions: Permissions,
 }
 
+/// Whether finding an agent that may act counts as its use (`last_used_at`): its own
+/// requests do, a person approving its proposal doesn't.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoteUse {
+    Yes,
+    No,
+}
+
 /// `agent` if it may act now: agents are on in this deployment (`agents_disabled`), it's
 /// enabled and not revoked, and a connected one's staff member is active
-/// (`agent_disabled`); with what it may do.
+/// (`agent_disabled`); with what it may do. Its use is noted when `note` says so, on the
+/// same connection.
 pub async fn acting<S: Storage>(
     state: &SharedState<S>,
     agent: AgentId,
+    note: NoteUse,
 ) -> Result<Acting, ApiError> {
     let agents = &state.config.agents;
     if !agents.enabled {
@@ -273,6 +331,9 @@ pub async fn acting<S: Storage>(
         AgentKind::Connected { user } => Some(role_of(&ports, user).await?),
         AgentKind::Autonomous => None,
     };
+    if note == NoteUse::Yes {
+        hypha_agents::record_agent_use(&ports, &found, state.clock.now()).await?;
+    }
     let permissions = effective(found.grant(), agents.writes, role.as_deref());
     Ok(Acting {
         agent: found,

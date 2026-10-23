@@ -591,7 +591,10 @@ pub async fn fetch_proposal<S: Storage>(
 /// recorded), in `details.proposal`, with that preview in `details.preview`; review it and
 /// approve again. A proposal
 /// whose preview stopped at an effect it couldn't run (`complete: false`) is sent as a
-/// plain write.
+/// plain write. A write refused for good (a 4xx) marks it `failed`; one that may go
+/// through later (`408`, `429`, a 5xx) answers that and leaves it pending. A write already
+/// made under the proposal's idempotency key (an approval whose answer was lost) is
+/// recorded `applied` with that write's answer.
 #[utoipa::path(
     post,
     path = "/admin/agent-proposals/{id}/approve",
@@ -637,11 +640,42 @@ pub async fn approve<S: Storage>(
         let proposal = serde_json::to_value(&response).map_err(ApiError::internal)?;
         return Ok(ApiError::proposal_stale(fresh, proposal).into_response());
     }
-    let decided = match (200..300).contains(&answer.status) {
-        true => hypha_agents::record_applied(&staff.ctx, &ports, &state.clock, id, outcome).await?,
-        false => hypha_agents::record_failed(&staff.ctx, &ports, &state.clock, id, outcome).await?,
+    let decided = match approved_write(answer.status) {
+        ApprovedWrite::Applied => {
+            hypha_agents::record_applied(&staff.ctx, &ports, &state.clock, id, outcome).await?
+        }
+        ApprovedWrite::Refused => {
+            hypha_agents::record_failed(&staff.ctx, &ports, &state.clock, id, outcome).await?
+        }
+        // Nothing was written and the write may go through later: the proposal stays
+        // pending, and the approver gets the write's own answer.
+        ApprovedWrite::NotNow => {
+            let status =
+                StatusCode::from_u16(answer.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            return Ok((status, Json(answer.body)).into_response());
+        }
     };
     Ok(Json(ProposalResponse::new(&decided, state.operations())?).into_response())
+}
+
+/// What an approved write's answer says about the proposal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApprovedWrite {
+    /// 2xx: written (a replay under the proposal's key included).
+    Applied,
+    /// A definitive refusal (any other 4xx): the proposal failed.
+    Refused,
+    /// Too many requests, a timeout or a server error: try again later.
+    NotNow,
+}
+
+fn approved_write(status: u16) -> ApprovedWrite {
+    match status {
+        200..=299 => ApprovedWrite::Applied,
+        408 | 429 => ApprovedWrite::NotNow,
+        400..=499 => ApprovedWrite::Refused,
+        _ => ApprovedWrite::NotNow,
+    }
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -917,4 +951,21 @@ pub async fn settings<S: Storage>(
         proposal_lifetime_seconds: agents.settings.proposal_lifetime.as_secs(),
         preview_token_lifetime_seconds: agents.preview_token_lifetime.as_secs(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_definitive_refusal_fails_an_approved_proposal() {
+        assert_eq!(approved_write(200), ApprovedWrite::Applied);
+        assert_eq!(approved_write(201), ApprovedWrite::Applied);
+        for refused in [400, 403, 404, 409, 422] {
+            assert_eq!(approved_write(refused), ApprovedWrite::Refused, "{refused}");
+        }
+        for later in [408, 429, 500, 502, 503] {
+            assert_eq!(approved_write(later), ApprovedWrite::NotNow, "{later}");
+        }
+    }
 }

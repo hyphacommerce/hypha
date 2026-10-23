@@ -27,7 +27,7 @@ use serde::Serialize;
 
 use super::oauth::Issuer;
 use crate::{
-    agents::acting,
+    agents::{NoteUse, acting},
     error::ApiError,
     mcp::{AgentOperations, challenge, server},
     state::{SharedState, Storage},
@@ -238,10 +238,8 @@ async fn serve<S: Storage>(
         }
         Err(e) => return Err(e),
     };
-    let acting = match acting(state, agent).await {
-        Ok(acting) => acting,
-        Err(e) => return Err(e),
-    };
+    // Found once per request: every tool call in it runs as this.
+    let acting = acting(state, agent, NoteUse::Yes).await?;
     if !is_json(&headers) {
         return Err(ApiError::missing_content_type());
     }

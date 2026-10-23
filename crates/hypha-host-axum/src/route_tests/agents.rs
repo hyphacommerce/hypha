@@ -112,13 +112,15 @@ async fn agents_are_created_listed_changed_and_revoked() {
     );
 
     let path = format!("/admin/agents/{id}");
-    let (status, changed) = send(
-        &app,
-        "PATCH",
-        &path,
-        Some(r#"{"name": "Night shift", "operations": null, "enabled": false}"#),
-    )
-    .await;
+    let lift = r#"{"name": "Night shift", "operations": null, "enabled": false}"#;
+    // Lifting the allowlist hands out the whole grant, which applies inventory writes: a
+    // key can't, a staff session can.
+    let (status, json) = send(&app, "PATCH", &path, Some(lift)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::FORBIDDEN, "not_allowed_to_grant_apply")
+    );
+    let (status, changed) = send_as(&app, &session, "PATCH", &path, Some(lift)).await;
     assert_eq!(status, StatusCode::OK, "{changed}");
     assert_eq!(
         (
@@ -652,7 +654,8 @@ async fn a_proposal_is_approved_and_applied_as_previewed() {
         .into_iter()
         .map(|c| c.1)
         .collect();
-    assert_eq!(modes, ["apply", "propose", "propose"]);
+    // The approval is a person's: the proposal records it, the agent's log doesn't.
+    assert_eq!(modes, ["propose", "propose"]);
 }
 
 #[tokio::test]
@@ -893,5 +896,93 @@ async fn the_deployments_agent_settings_are_read_only_here() {
     assert_eq!(
         (status, code(&json)),
         (StatusCode::FORBIDDEN, "missing_scope")
+    );
+}
+
+/// A cart linked to a customer, by staff: its ID.
+async fn cart_with_customer(app: &TestApp) -> String {
+    let (_, cart_path, _) = cart_for_three_mugs(app).await;
+    let cart = cart_path.rsplit('/').next().unwrap().to_string();
+    let (status, customer) = send(
+        app,
+        "POST",
+        "/admin/customers",
+        Some(r#"{"email":"ana@example.hr"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{customer}");
+    let body = json!({"customer": customer["id"]}).to_string();
+    let (status, json) = send(
+        app,
+        "PUT",
+        &format!("/admin/carts/{cart}/customer"),
+        Some(&body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    cart
+}
+
+fn unlink_customer(cart: &str) -> OperationCall {
+    op(
+        "admin.carts.set_customer",
+        json!({"id": cart}),
+        Some(json!({"customer": null})),
+        Mode::Apply,
+    )
+}
+
+#[tokio::test]
+async fn a_write_the_agent_only_proposes_never_commits_without_a_person() {
+    let app = app().await;
+    let cart = cart_with_customer(&app).await;
+    // `admin.carts.set_customer` names customers:read too, which this agent lacks; the
+    // command asks for it only when a customer is given.
+    let agent = agent_with(&app, json!({"write": {"carts:write": "propose"}})).await;
+    let answer = call(&app, &agent, unlink_customer(&cart)).await;
+    assert_ne!(answer.status, 200, "applied: {:?}", answer.body);
+    assert_eq!(
+        rows(&app, "carts WHERE customer_id IS NOT NULL").await,
+        1,
+        "the cart keeps its customer"
+    );
+    assert_eq!(calls_of(&app, &agent).await[0].1, "propose");
+
+    // The operator's cap, likewise: a grant to apply proposes under it.
+    let capped = app_configured("[agents]\nwrites = \"propose\"").await;
+    let cart = cart_with_customer(&capped).await;
+    let agent = agent_with(&capped, json!({"write": {"carts:write": "apply"}})).await;
+    let answer = call(&capped, &agent, unlink_customer(&cart)).await;
+    assert_ne!(answer.status, 200, "applied: {:?}", answer.body);
+    assert_eq!(
+        rows(&capped, "carts WHERE customer_id IS NOT NULL").await,
+        1,
+        "the cart keeps its customer under the cap"
+    );
+}
+
+#[tokio::test]
+async fn approving_spends_none_of_the_agents_own_limits() {
+    let app = app_configured("[rate_limits]\nagent_write = { burst = 1, per = \"1h\" }").await;
+    let agent = proposer(&app).await;
+    let proposed = call(&app, &agent, create_mug(Mode::Propose)).await;
+    assert_eq!(proposed.status, 202, "{:?}", proposed.body);
+    let id = proposed.body["proposal"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let session = owner_session(&app).await;
+    let approve = format!("/admin/agent-proposals/{id}/approve");
+    let (status, decided) = send_as(&app, &session, "POST", &approve, None).await;
+    assert_eq!(status, StatusCode::OK, "{decided}");
+    assert_eq!(decided["status"], "applied", "{decided}");
+    assert_eq!(
+        calls_of(&app, &agent)
+            .await
+            .into_iter()
+            .map(|c| c.1)
+            .collect::<Vec<_>>(),
+        ["propose"],
+        "a person's approval isn't the agent's call"
     );
 }
