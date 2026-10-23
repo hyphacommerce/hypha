@@ -27,7 +27,7 @@ hypha-payments = { path = "../hypha-payments" }
 # The spores a deployment is built with (`worker!`).
 hypha-spore-core = { path = "../hypha-spore-core" }
 # Spores' configuration sections (`[spores.<name>]`).
-toml = "0.9"
+toml = "1.1"
 hypha-merchandising = { path = "../hypha-merchandising" }
 hypha-custom-fields = { path = "../hypha-custom-fields" }
 hypha-search = { path = "../hypha-search" }
@@ -55,7 +55,7 @@ default = ["stock"]
 stock = []
 
 [dev-dependencies]
-toml = "0.9"
+toml = "1.1"
 
 [lints]
 workspace = true

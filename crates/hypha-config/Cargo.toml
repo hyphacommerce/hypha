@@ -19,7 +19,7 @@ hypha-customer-accounts = { path = "../hypha-customer-accounts" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-toml = "0.9"
+toml = "1.1"
 schemars = "1"
 ipnet = "2"
 
