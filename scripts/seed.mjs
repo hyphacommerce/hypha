@@ -1,12 +1,18 @@
 #!/usr/bin/env node
-// A demo store for the admin and the storefront: "Lumen & Loom", clothing and homeware.
+// A demo store for the admin and the storefront: "Mycelium Works", a mycology company
+// in Zagreb selling grow kits, live cultures, lab equipment, materials grown from
+// mycelium and courses. It's built to show what a catalogue can carry beyond shirts and
+// mugs: sparse variants (only the species and sizes that exist), per-variant shipping (an
+// eBook beside a paperback), digital products, perishables, and custom fields on
+// products, variants, categories, customers and orders, some shown to shoppers and used
+// as search filters, some for staff only, and references between products.
+//
 // It goes through the admin and storefront APIs like a merchant and their shoppers
 // would, so every rule applies: store details, four markets (EUR, GBP, USD, RSD) with
 // tax regions, price lists and fixed prices, two warehouses, shipping zones with rates,
-// a category tree, products with sizes and colours (sparse variants, generated colour
-// images, stock, some sold out), publishing, search filters, a publishable key, the
-// storefront's webhook, payment methods (cash on delivery in Serbia, bank transfer
-// everywhere), and a few orders in different states, some paid.
+// a category tree, products with stock (some sold out), publishing, search filters, a
+// publishable key, the storefront's webhook, payment methods (cash on delivery in
+// Serbia, bank transfer everywhere), and a few orders in different states, some paid.
 //
 // Run it against a fresh store (it stops when products already exist):
 //
@@ -16,8 +22,13 @@
 //
 // HYPHA_URL (default http://127.0.0.1:3917), HYPHA_SEED_EMAIL and HYPHA_SEED_PASSWORD
 // (default the owner above) say where and as whom. Images need the API's file storage
-// (the compose S3 server under `cargo run`); without it products get none.
+// (the compose S3 server under `cargo run`); without it products get none. Each image is
+// `scripts/seed-assets/images/<name>.{webp,jpg,png}` when that file exists (the prompts
+// that make them are in `scripts/seed-assets/PROMPTS.md`), else a plain shot in the
+// product's colour.
 
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { deflateSync } from "node:zlib";
 
 const BASE = (process.env.HYPHA_URL ?? "http://127.0.0.1:3917").replace(/\/$/, "");
@@ -145,16 +156,29 @@ function productImage(hex) {
 
 let mediaWorks = true;
 
-/** Uploads a colour's image (once per colour and product); `null` without file storage. */
-async function upload(filename, hex, alt) {
+const IMAGES = join(import.meta.dirname, "seed-assets", "images");
+const MIME = { webp: "image/webp", jpg: "image/jpeg", png: "image/png" };
+
+/** The image called `name`: its file when there is one, else a plain shot in `hex`. */
+async function imageFile(name, hex) {
+  for (const [extension, mime] of Object.entries(MIME)) {
+    const bytes = await readFile(join(IMAGES, `${name}.${extension}`)).catch(() => null);
+    if (bytes) return { bytes, mime, filename: `${name}.${extension}` };
+  }
+  return { bytes: productImage(hex), mime: "image/png", filename: `${name}.png` };
+}
+
+/** Uploads the image called `name` (`hex` its colour when there's no file); its asset's
+ * ID, or `null` without file storage. */
+async function upload(name, hex, alt) {
   if (!mediaWorks) return null;
-  const file = productImage(hex);
+  const file = await imageFile(name, hex);
   let created;
   try {
     created = await admin.post("/admin/assets", {
-      filename,
-      mime_type: "image/png",
-      byte_size: file.length,
+      filename: file.filename,
+      mime_type: file.mime,
+      byte_size: file.bytes.length,
     });
   } catch (e) {
     if (e.code === "media_not_configured") {
@@ -165,8 +189,8 @@ async function upload(filename, hex, alt) {
     throw e;
   }
   const headers = Object.fromEntries(created.upload.headers.map((h) => [h.name, h.value]));
-  const stored = await fetch(created.upload.url, { method: "PUT", headers, body: file });
-  if (!stored.ok) throw new Error(`uploading ${filename} to storage failed: ${stored.status}`);
+  const stored = await fetch(created.upload.url, { method: "PUT", headers, body: file.bytes });
+  if (!stored.ok) throw new Error(`uploading ${file.filename} to storage failed: ${stored.status}`);
   const asset = await admin.post(`/admin/assets/${created.asset.id}/complete`);
   await admin.patch(`/admin/assets/${asset.id}`, { alt });
   return asset.id;
@@ -174,311 +198,1037 @@ async function upload(filename, hex, alt) {
 
 // ---------- the catalogue ----------
 
-const COLORS = {
-  White: "#f2efe9",
-  Black: "#24221f",
-  Sage: "#9aa58a",
-  Oatmeal: "#d9cbb2",
-  Navy: "#2c3a52",
-  Charcoal: "#4a4846",
-  "Sky blue": "#a9c4dc",
-  Olive: "#626a3e",
-  Khaki: "#b9a77f",
-  Camel: "#b88a58",
-  Grey: "#9a9894",
-  Herringbone: "#7d746a",
-  Natural: "#e6dccb",
-  Cognac: "#8a4f2a",
-  Speckled: "#e3ddd1",
-  Ink: "#2f3d4f",
-  Clay: "#b5714f",
-  Stone: "#bdb5a6",
-  Mustard: "#c99a2e",
-  Terracotta: "#c1673f",
-  Rust: "#a4502a",
+/** The brand's colours, for the plain shots that stand in for a missing image. */
+const SWATCH = {
+  lime: "#B8E948",
+  moss: "#5F7E01",
+  forest: "#304204",
+  pale: "#EAFBCF",
+  stone: "#E6E8E5",
+  bark: "#6A6C68",
+  charcoal: "#30322F",
+  oyster: "#D4D5D2",
+  blue: "#A3B8C9",
+  pink: "#E8B4B8",
+  gold: "#E8C66A",
+  cream: "#F3EAD7",
+  clay: "#B8775A",
+  rust: "#953F21",
 };
 
+const choices = (pairs) => pairs.map(([key, label]) => ({ key, label }));
+
+const SPECIES = choices([
+  ["pearl_oyster", "Pearl oyster"],
+  ["blue_oyster", "Blue oyster"],
+  ["pink_oyster", "Pink oyster"],
+  ["golden_oyster", "Golden oyster"],
+  ["king_oyster", "King oyster"],
+  ["lions_mane", "Lion's mane"],
+  ["shiitake", "Shiitake"],
+  ["reishi", "Reishi"],
+  ["chestnut", "Chestnut"],
+]);
+const speciesKey = (label) => SPECIES.find((s) => s.label === label).key;
+
+/** Shown to shoppers. */
+const SHOWN = { admin: "read_write", storefront: "read" };
+/** Staff only. */
+const STAFF = { admin: "read_write", storefront: "none" };
+
 /**
- * Each product: its options (the first is the one images follow when it's Color), the
- * combinations sold (sparse: not every size in every colour), a base price per variant,
- * and stock (`null` untracked; 0 sold out).
+ * The merchant's own fields (namespace `custom`), in the order forms show them. What a
+ * shopper filters by is `filterable` and shown, and listed in the search facets below.
  */
-const PRODUCTS = [
+const FIELDS = [
+  // Products: what a grower, a lab or a designer compares.
   {
-    title: "Organic Cotton Tee",
-    handle: "organic-cotton-tee",
-    vendor: "Lumen & Loom",
-    type: "T-shirt",
-    tags: ["organic", "essentials", "summer"],
-    categories: ["tops"],
+    owner_type: "product",
+    key: "difficulty",
+    type: "choice",
+    name: "Difficulty",
+    description: "How much experience it asks for.",
+    validations: {
+      choices: choices([
+        ["beginner", "Beginner"],
+        ["intermediate", "Intermediate"],
+        ["advanced", "Advanced"],
+      ]),
+    },
+    access: SHOWN,
+    capabilities: { filterable: true },
+  },
+  {
+    owner_type: "product",
+    key: "live_culture",
+    type: "boolean",
+    name: "Live culture",
     description:
-      "<p>A heavyweight tee in GOTS-certified organic cotton, garment-dyed for a soft, lived-in hand.</p><ul><li>220 g/m² single jersey</li><li>Relaxed fit, dropped shoulder</li><li>Made in Portugal</li></ul>",
-    options: { Color: ["White", "Black", "Sage"], Size: ["XS", "S", "M", "L", "XL"] },
-    price: 29,
-    weight: 220,
+      "Alive when it ships: it leaves on Mondays to Wednesdays, never to sit in a depot over a weekend.",
+    access: SHOWN,
+    capabilities: { filterable: true },
   },
   {
-    title: "Merino Crew Sweater",
-    handle: "merino-crew-sweater",
-    vendor: "Nordvik",
-    type: "Sweater",
-    tags: ["merino", "knitwear", "winter"],
-    categories: ["knitwear"],
-    description:
-      "<p>Extra-fine 18.5 micron merino, knitted seamless on a 12-gauge machine. Warm without the bulk, and it doesn't itch.</p><p>Hand wash cold, dry flat.</p>",
-    options: { Color: ["Oatmeal", "Navy", "Charcoal"], Size: ["S", "M", "L", "XL"] },
-    price: 119,
-    weight: 380,
+    owner_type: "product",
+    key: "first_harvest_days",
+    type: "integer",
+    name: "Days to first harvest",
+    validations: { min: 1, max: 365 },
+    access: SHOWN,
   },
   {
-    title: "Linen Button-Down Shirt",
-    handle: "linen-button-down",
-    vendor: "Atelier Sade",
-    type: "Shirt",
-    tags: ["linen", "summer"],
-    categories: ["tops"],
-    description:
-      "<p>Washed European flax linen with corozo buttons and a soft-roll collar. Gets better with every wash.</p>",
-    options: { Color: ["White", "Sky blue"], Size: ["S", "M", "L", "XL"] },
-    price: 79,
-    weight: 260,
+    owner_type: "product",
+    key: "expected_yield",
+    type: "measurement",
+    name: "Expected yield per flush",
+    validations: { dimension: "weight" },
+    access: SHOWN,
   },
   {
-    title: "Waxed Field Jacket",
-    handle: "waxed-field-jacket",
-    vendor: "Kestrel Goods",
-    type: "Jacket",
-    tags: ["outerwear", "waxed cotton"],
-    categories: ["outerwear"],
-    description:
-      "<p>British waxed cotton over a cotton twill lining, with four bellows pockets and a corduroy collar. Re-proof once a season and it lasts decades.</p>",
-    options: { Color: ["Olive", "Navy"], Size: ["S", "M", "L", "XL"] },
-    // Navy only in the middle sizes: variants are sparse.
-    sold: (o) => o.Color === "Olive" || ["M", "L"].includes(o.Size),
-    price: 249,
-    weight: 1400,
+    owner_type: "product",
+    key: "substrate",
+    type: "list.choice",
+    name: "Substrate",
+    validations: {
+      choices: choices([
+        ["hardwood", "Hardwood sawdust"],
+        ["soy_hulls", "Soy hulls"],
+        ["straw", "Straw"],
+        ["coffee", "Spent coffee grounds"],
+        ["rye", "Rye grain"],
+        ["agar", "Agar"],
+        ["hemp", "Hemp hurd"],
+      ]),
+      unique_items: true,
+    },
+    access: SHOWN,
   },
   {
-    title: "Relaxed Chino",
-    handle: "relaxed-chino",
-    vendor: "Lumen & Loom",
-    type: "Trousers",
-    tags: ["essentials"],
-    categories: ["bottoms"],
-    description:
-      "<p>Brushed cotton twill with a relaxed, tapered leg and a hidden coin pocket.</p>",
-    options: { Color: ["Khaki", "Navy", "Black"], Waist: ["28", "30", "32", "34", "36"] },
-    price: 89,
-    weight: 560,
+    owner_type: "product",
+    key: "certifications",
+    type: "list.choice",
+    name: "Certifications",
+    validations: {
+      choices: choices([
+        ["eu_organic", "EU organic"],
+        ["home_compostable", "Home compostable (TÜV OK compost HOME)"],
+        ["oeko_tex", "OEKO-TEX Standard 100"],
+        ["vegan", "Vegan (no animal inputs)"],
+        ["en_1822", "Filters tested to EN 1822"],
+        ["ce", "CE marked"],
+      ]),
+      unique_items: true,
+    },
+    access: SHOWN,
+    capabilities: { filterable: true },
   },
   {
-    title: "Cashmere Beanie",
-    handle: "cashmere-beanie",
-    vendor: "Nordvik",
-    type: "Hat",
-    tags: ["cashmere", "winter", "gift"],
-    categories: ["accessories"],
-    description: "<p>Two-ply Mongolian cashmere in a ribbed knit, with a fold-up cuff.</p>",
-    options: { Color: ["Camel", "Grey", "Black"] },
-    price: 65,
-    weight: 90,
+    owner_type: "product",
+    key: "fire_rating",
+    type: "choice",
+    name: "Fire rating (EN 13501-1)",
+    validations: {
+      choices: choices([
+        ["b_s1_d0", "B-s1, d0"],
+        ["c_s2_d0", "C-s2, d0"],
+        ["e", "E"],
+      ]),
+    },
+    access: SHOWN,
   },
   {
-    title: "Herringbone Wool Scarf",
-    handle: "herringbone-wool-scarf",
-    vendor: "Kestrel Goods",
-    type: "Scarf",
-    tags: ["wool", "winter", "gift"],
-    categories: ["scarves"],
-    description:
-      "<p>Woven in a Scottish mill from lambswool, with hand-twisted fringes. 180 × 30 cm.</p>",
-    options: { Color: ["Herringbone", "Charcoal"] },
-    price: 79,
-    weight: 180,
+    owner_type: "product",
+    key: "sound_absorption",
+    type: "decimal",
+    name: "Sound absorption (NRC)",
+    description: "The noise reduction coefficient: 0 reflects everything, 1 absorbs everything.",
+    validations: { min: "0", max: "1", max_scale: 2 },
+    access: SHOWN,
   },
   {
-    title: "Canvas Tote",
-    handle: "canvas-tote",
-    vendor: "Lumen & Loom",
-    type: "Bag",
-    tags: ["everyday", "gift"],
-    categories: ["bags"],
-    description:
-      "<p>16 oz cotton canvas with leather handles and an inside zip pocket. Fits a laptop.</p>",
-    options: { Color: ["Natural", "Black"] },
-    price: 45,
-    weight: 450,
+    owner_type: "product",
+    key: "warranty_months",
+    type: "integer",
+    name: "Warranty (months)",
+    validations: { min: 0, max: 120 },
+    access: SHOWN,
   },
   {
-    title: "Leather Weekender",
-    handle: "leather-weekender",
-    vendor: "Atelier Sade",
-    type: "Bag",
-    tags: ["leather", "travel"],
-    categories: ["bags"],
-    description:
-      "<p>Vegetable-tanned full-grain leather, solid brass hardware and a detachable shoulder strap. 45 litres: cabin size on most airlines.</p>",
-    options: { Color: ["Cognac", "Black"] },
-    price: 329,
-    weight: 2100,
+    owner_type: "product",
+    key: "spec_sheet",
+    type: "url",
+    name: "Spec sheet",
+    validations: { schemes: ["https"] },
+    access: SHOWN,
   },
   {
-    title: "Stoneware Mug",
-    handle: "stoneware-mug",
-    vendor: "Clayworks Studio",
-    type: "Mug",
-    tags: ["ceramics", "gift"],
-    categories: ["kitchen"],
-    description:
-      "<p>Wheel-thrown stoneware with a reactive glaze, so no two are alike. 350 ml, dishwasher safe.</p>",
-    options: { Color: ["Speckled", "Ink", "Clay"] },
-    price: 22,
-    weight: 420,
+    owner_type: "product",
+    key: "works_with",
+    type: "list.reference",
+    name: "Works with",
+    description: "Products it's made to be used with.",
+    validations: { kind: "product", max_items: 6 },
+    access: SHOWN,
   },
   {
-    title: "Linen Tea Towel Set",
-    handle: "linen-tea-towels",
-    vendor: "Lumen & Loom",
-    type: "Tea towel",
-    tags: ["linen", "kitchen"],
-    categories: ["kitchen"],
-    description:
-      "<p>Two stonewashed linen tea towels, 50 × 70 cm. Lint-free and very absorbent.</p>",
-    color: "Natural",
-    price: 28,
-    weight: 260,
+    owner_type: "product",
+    key: "care_guide",
+    type: "rich_text",
+    name: "Care guide",
+    access: SHOWN,
   },
   {
-    title: "Cast Iron Skillet",
-    handle: "cast-iron-skillet",
-    vendor: "Kestrel Goods",
-    type: "Cookware",
-    tags: ["cookware"],
-    categories: ["kitchen"],
-    description: "<p>Pre-seasoned cast iron, ready to use. Oven, grill and induction safe.</p>",
-    color: "Black",
-    options: { Size: ["20 cm", "26 cm", "30 cm"] },
-    priceOf: (o) => ({ "20 cm": 49, "26 cm": 69, "30 cm": 89 })[o.Size],
-    weightOf: (o) => ({ "20 cm": 1800, "26 cm": 2700, "30 cm": 3600 })[o.Size],
+    owner_type: "product",
+    key: "grown_in",
+    type: "text",
+    name: "Grown in",
+    validations: { max_length: 120 },
+    access: SHOWN,
   },
   {
-    title: "Washed Linen Duvet Cover",
-    handle: "washed-linen-duvet-cover",
-    vendor: "Lumen & Loom",
-    type: "Duvet cover",
-    tags: ["linen", "bedding"],
-    categories: ["bedding"],
-    description:
-      "<p>Garment-washed linen with coconut buttons. Breathable in summer, warm in winter.</p>",
-    options: { Color: ["Natural", "Stone", "Rust"], Size: ["Single", "Double", "King"] },
-    priceOf: (o) => ({ Single: 149, Double: 179, King: 199 })[o.Size],
-    weight: 1300,
+    owner_type: "product",
+    key: "next_session",
+    type: "date_time",
+    name: "Next live session",
+    access: SHOWN,
   },
   {
-    title: "Percale Pillowcases (Pair)",
-    handle: "percale-pillowcases",
-    vendor: "Lumen & Loom",
-    type: "Pillowcase",
-    tags: ["cotton", "bedding"],
-    categories: ["bedding"],
-    description: "<p>Crisp, cool 300 thread count cotton percale with an envelope closure.</p>",
-    color: "White",
-    options: { Size: ["Standard", "King"] },
-    priceOf: (o) => ({ Standard: 39, King: 45 })[o.Size],
-    weight: 400,
+    owner_type: "product",
+    key: "duration_hours",
+    type: "decimal",
+    name: "Duration (hours)",
+    validations: { min: "0", max_scale: 1 },
+    access: SHOWN,
   },
   {
-    title: "Wool Throw Blanket",
-    handle: "wool-throw",
-    vendor: "Nordvik",
-    type: "Throw",
-    tags: ["wool", "home", "gift"],
-    categories: ["decor"],
-    description: "<p>Woven from undyed Norwegian wool. 130 × 180 cm.</p>",
-    options: { Color: ["Mustard", "Grey"] },
-    price: 129,
-    weight: 1100,
+    owner_type: "product",
+    key: "supplier_code",
+    type: "text",
+    name: "Supplier code",
+    description: "The supplier's own SKU, for reordering.",
+    validations: { max_length: 64 },
+    access: STAFF,
+    capabilities: { filterable: true, unique: true },
   },
   {
-    title: "Ceramic Vase",
-    handle: "ceramic-vase",
-    vendor: "Clayworks Studio",
-    type: "Vase",
-    tags: ["ceramics", "home"],
-    categories: ["decor"],
-    description: "<p>A matte, hand-built vase. Watertight, for fresh or dried stems.</p>",
-    options: { Color: ["White", "Terracotta"], Size: ["Small", "Large"] },
-    priceOf: (o) => ({ Small: 39, Large: 59 })[o.Size],
-    weightOf: (o) => ({ Small: 700, Large: 1500 })[o.Size],
+    owner_type: "product",
+    key: "landed_cost",
+    type: "money",
+    name: "Landed cost",
+    description: "What one unit costs us delivered to the warehouse, duties included.",
+    validations: { currencies: ["EUR"] },
+    access: STAFF,
+  },
+
+  // Variants: what differs between one size, strain or plug and the next.
+  {
+    owner_type: "variant",
+    key: "species",
+    type: "choice",
+    name: "Species",
+    validations: { choices: SPECIES },
+    access: SHOWN,
+    capabilities: { filterable: true },
   },
   {
-    title: "Beeswax Candle",
-    handle: "beeswax-candle",
-    vendor: "Clayworks Studio",
-    type: "Candle",
-    tags: ["home", "gift"],
-    categories: ["decor"],
-    description:
-      "<p>Pure beeswax in a reusable ceramic pot. About 40 hours of clean, honey-scented burn.</p>",
-    color: "Mustard",
-    price: 18,
-    weight: 300,
-    untracked: true,
+    owner_type: "variant",
+    key: "volume",
+    type: "measurement",
+    name: "Volume",
+    validations: { dimension: "volume" },
+    access: SHOWN,
   },
   {
-    title: "Field Notebooks (3-Pack)",
-    handle: "field-notebooks",
-    vendor: "Kestrel Goods",
-    type: "Notebook",
-    tags: ["stationery", "gift"],
-    categories: ["accessories"],
-    description: "<p>Pocket notebooks with recycled paper and a dot grid. 48 pages each.</p>",
-    color: "Khaki",
-    price: 14,
-    weight: 150,
+    owner_type: "variant",
+    key: "generation",
+    type: "integer",
+    name: "Culture generation",
+    description: "Transfers since the master culture: the lower, the more vigorous.",
+    validations: { min: 1, max: 10 },
+    access: SHOWN,
   },
   {
-    title: "Alpaca Cardigan",
-    handle: "alpaca-cardigan",
-    vendor: "Nordvik",
-    type: "Cardigan",
-    tags: ["alpaca", "knitwear"],
-    categories: ["knitwear"],
-    description: "<p>Coming next season: brushed baby alpaca in a relaxed shawl collar.</p>",
-    options: { Color: ["Camel", "Grey"], Size: ["S", "M", "L"] },
-    price: 189,
-    weight: 450,
-    draft: true,
+    owner_type: "variant",
+    key: "lab_tested_on",
+    type: "date",
+    name: "Contamination tested",
+    access: SHOWN,
   },
+  {
+    owner_type: "variant",
+    key: "capacity",
+    type: "measurement",
+    name: "Capacity",
+    validations: { dimension: "volume" },
+    access: SHOWN,
+  },
+  {
+    owner_type: "variant",
+    key: "voltage",
+    type: "choice",
+    name: "Voltage",
+    validations: {
+      choices: choices([
+        ["230v", "220–240 V, 50 Hz"],
+        ["120v", "110–120 V, 60 Hz"],
+      ]),
+    },
+    access: SHOWN,
+  },
+  {
+    owner_type: "variant",
+    key: "thickness",
+    type: "measurement",
+    name: "Thickness",
+    validations: { dimension: "length" },
+    access: SHOWN,
+  },
+  {
+    owner_type: "variant",
+    key: "width",
+    type: "measurement",
+    name: "Width",
+    validations: { dimension: "length" },
+    access: SHOWN,
+  },
+  {
+    owner_type: "variant",
+    key: "height",
+    type: "measurement",
+    name: "Height",
+    validations: { dimension: "length" },
+    access: SHOWN,
+  },
+  {
+    owner_type: "variant",
+    key: "lot",
+    type: "text",
+    name: "Lot",
+    description: "The production lot on shelf now, for recalls and lab records.",
+    validations: { pattern: "^MW-[0-9]{4}-[0-9]{3}$" },
+    access: STAFF,
+    capabilities: { filterable: true },
+  },
+
+  // Categories: a buying guide at the top of the category page.
+  {
+    owner_type: "category",
+    key: "buying_guide",
+    type: "rich_text",
+    name: "Buying guide",
+    access: SHOWN,
+  },
+
+  // Customers: who they are to the business (with the suggested labels and notes below).
+  {
+    owner_type: "customer",
+    key: "business_type",
+    type: "choice",
+    name: "Business type",
+    validations: {
+      choices: choices([
+        ["home", "Home grower"],
+        ["farm", "Mushroom farm"],
+        ["lab", "Research lab"],
+        ["studio", "Design studio"],
+        ["restaurant", "Restaurant"],
+      ]),
+    },
+    access: STAFF,
+    capabilities: { filterable: true },
+  },
+  {
+    owner_type: "customer",
+    key: "vat_id",
+    type: "text",
+    name: "VAT ID",
+    validations: { pattern: "^[A-Z]{2}[0-9A-Z]{2,13}$" },
+    access: STAFF,
+    capabilities: { filterable: true, unique: true },
+  },
+
+  // Orders: what the warehouse needs to pack it right.
+  {
+    owner_type: "order",
+    key: "cold_pack",
+    type: "boolean",
+    name: "Ships with a cold pack",
+    access: STAFF,
+    capabilities: { filterable: true },
+  },
+  {
+    owner_type: "order",
+    key: "gift_message",
+    type: "multiline_text",
+    name: "Gift message",
+    validations: { max_length: 500 },
+    access: STAFF,
+    personal: true,
+  },
+];
+
+/** Search filters on the storefront. */
+const FACETS = [
+  { key: "field.custom.species", label: "Species" },
+  { key: "field.custom.difficulty", label: "Difficulty" },
+  { key: "field.custom.live_culture", label: "Live culture" },
+  { key: "field.custom.certifications", label: "Certifications" },
+  { key: "product_type", label: "Type" },
+  { key: "option.colour", label: "Colour" },
+  { key: "vendor", label: "Maker" },
 ];
 
 const CATEGORIES = [
   {
-    name: "Clothing",
-    handle: "clothing",
+    name: "Grow",
+    handle: "grow",
+    image: "category-grow",
+    swatch: SWATCH.moss,
+    guide:
+      "<p>New to growing? Start with an <strong>oyster kit</strong>: it fruits in about ten days on a kitchen counter. Lion's mane and shiitake take more patience; reishi is for when you want a project.</p>",
     children: [
-      { name: "Tops", handle: "tops" },
-      { name: "Knitwear", handle: "knitwear" },
-      { name: "Outerwear", handle: "outerwear" },
-      { name: "Bottoms", handle: "bottoms" },
+      { name: "Grow kits", handle: "grow-kits" },
+      { name: "Cultures & spawn", handle: "cultures" },
+      { name: "Substrates", handle: "substrates" },
     ],
   },
   {
-    name: "Home",
-    handle: "home",
+    name: "Lab",
+    handle: "lab",
+    image: "category-lab",
+    swatch: SWATCH.charcoal,
+    guide:
+      "<p>Clean work is most of mycology. A <strong>still air box</strong> gets a beginner far; a <strong>flow hood</strong> and a <strong>pressure sterilizer</strong> turn a hobby into a lab.</p>",
     children: [
-      { name: "Kitchen", handle: "kitchen" },
-      { name: "Bedding", handle: "bedding" },
-      { name: "Decor", handle: "decor" },
+      { name: "Sterilization", handle: "sterilization" },
+      { name: "Clean air", handle: "clean-air" },
+      { name: "Tools", handle: "tools" },
     ],
   },
   {
-    name: "Accessories",
-    handle: "accessories",
+    name: "Materials",
+    handle: "materials",
+    image: "category-materials",
+    swatch: SWATCH.clay,
+    guide:
+      "<p>Mycelium grows into whatever shape it's given, then is dried to stop it. The result replaces leather, foam and plastic, and goes back to the soil at the end.</p>",
     children: [
-      { name: "Bags", handle: "bags" },
-      { name: "Scarves", handle: "scarves" },
+      { name: "Mycelium leather", handle: "leather" },
+      { name: "Packaging", handle: "packaging" },
+      { name: "Acoustic panels", handle: "acoustics" },
+      { name: "Objects", handle: "objects" },
     ],
+  },
+  {
+    name: "Learn",
+    handle: "learn",
+    image: "category-learn",
+    swatch: SWATCH.lime,
+    guide: "<p>From your first kit to your own cultures: courses and books by our lab team.</p>",
+    children: [
+      { name: "Courses", handle: "courses" },
+      { name: "Books", handle: "books" },
+    ],
+  },
+];
+
+/** A product's variants: each `of` names its option values; only those listed exist. */
+const v = (of, price, more = {}) => ({ of, price, ...more });
+const ml = (value) => ({ value: String(value), unit: "ml" });
+const l = (value) => ({ value: String(value), unit: "l" });
+const g = (value) => ({ value: String(value), unit: "g" });
+const mm = (value) => ({ value: String(value), unit: "mm" });
+const cm = (value) => ({ value: String(value), unit: "cm" });
+
+const PRODUCTS = [
+  // ----- Grow kits -----
+  {
+    title: "Oyster Mushroom Grow Kit",
+    handle: "oyster-grow-kit",
+    type: "Grow kit",
+    vendor: "Mycelium Works",
+    tags: ["bestseller", "gift"],
+    categories: ["grow-kits"],
+    description:
+      "<p>A block of hardwood and soy hulls, already colonised. Cut the window, mist twice a day, and harvest your first cluster in about ten days, then again two weeks later.</p>",
+    options: {
+      Species: ["Pearl oyster", "Blue oyster", "Pink oyster", "Golden oyster"],
+      Size: ["Starter", "Family"],
+    },
+    // Pink and golden oysters fruit fast and keep badly: the starter block only.
+    variants: [
+      v({ Species: "Pearl oyster", Size: "Starter" }, 24, { weight: 1700 }),
+      v({ Species: "Pearl oyster", Size: "Family" }, 39, { weight: 3400 }),
+      v({ Species: "Blue oyster", Size: "Starter" }, 24, { weight: 1700 }),
+      v({ Species: "Blue oyster", Size: "Family" }, 39, { weight: 3400 }),
+      v({ Species: "Pink oyster", Size: "Starter" }, 26, { weight: 1700 }),
+      v({ Species: "Golden oyster", Size: "Starter" }, 26, { weight: 1700 }),
+    ],
+    variantFields: (o) => ({ "custom.species": speciesKey(o.Species) }),
+    imageBy: "Species",
+    image: "oyster-grow-kit",
+    swatchBy: {
+      "Pearl oyster": SWATCH.oyster,
+      "Blue oyster": SWATCH.blue,
+      "Pink oyster": SWATCH.pink,
+      "Golden oyster": SWATCH.gold,
+    },
+    fields: {
+      "custom.difficulty": "beginner",
+      "custom.live_culture": true,
+      "custom.first_harvest_days": 10,
+      "custom.expected_yield": g(450),
+      "custom.substrate": ["hardwood", "soy_hulls"],
+      "custom.grown_in": "Zagreb, Croatia",
+      "custom.care_guide":
+        "<ol><li>Cut an X in the bag's window.</li><li>Mist the cut twice a day; keep it out of direct sun.</li><li>Harvest when the caps flatten, twisting the whole cluster off.</li><li>Rest the block two weeks, soak it overnight, and it fruits again.</li></ol>",
+      "custom.supplier_code": "MW-OYS-BLK",
+      "custom.landed_cost": eur(7.4),
+    },
+  },
+  {
+    title: "Lion's Mane Grow Kit",
+    handle: "lions-mane-grow-kit",
+    type: "Grow kit",
+    vendor: "Mycelium Works",
+    tags: ["gift"],
+    categories: ["grow-kits"],
+    description:
+      "<p>Lion's mane grows as a white cascade of soft spines and tastes like crab when it's fried in butter. Slower than an oyster, and worth it.</p>",
+    options: { Size: ["Starter", "Family"] },
+    variants: [
+      v({ Size: "Starter" }, 28, { weight: 1700 }),
+      v({ Size: "Family" }, 45, { weight: 3400 }),
+    ],
+    variantFields: () => ({ "custom.species": "lions_mane" }),
+    image: "lions-mane-grow-kit",
+    swatch: SWATCH.cream,
+    fields: {
+      "custom.difficulty": "intermediate",
+      "custom.live_culture": true,
+      "custom.first_harvest_days": 18,
+      "custom.expected_yield": g(350),
+      "custom.substrate": ["hardwood", "soy_hulls"],
+      "custom.grown_in": "Zagreb, Croatia",
+      "custom.supplier_code": "MW-LIO-BLK",
+      "custom.landed_cost": eur(8.9),
+    },
+  },
+  {
+    title: "Shiitake Log",
+    handle: "shiitake-log",
+    type: "Grow kit",
+    vendor: "Mycelium Works",
+    tags: ["outdoor"],
+    categories: ["grow-kits"],
+    description:
+      "<p>An oak log drilled and plugged with shiitake spawn. Keep it shaded in the garden; it fruits each spring and autumn for four to six years.</p>",
+    options: { Length: ["40 cm", "60 cm"] },
+    variants: [
+      v({ Length: "40 cm" }, 34, { weight: 6000 }),
+      v({ Length: "60 cm" }, 49, { weight: 9000 }),
+    ],
+    variantFields: () => ({ "custom.species": "shiitake" }),
+    image: "shiitake-log",
+    swatch: SWATCH.bark,
+    fields: {
+      "custom.difficulty": "intermediate",
+      "custom.live_culture": true,
+      "custom.first_harvest_days": 240,
+      "custom.expected_yield": g(300),
+      "custom.substrate": ["hardwood"],
+      "custom.grown_in": "Gorski kotar, Croatia",
+    },
+  },
+  {
+    title: "Reishi Antler Kit",
+    handle: "reishi-antler-kit",
+    type: "Grow kit",
+    vendor: "Mycelium Works",
+    tags: ["project"],
+    categories: ["grow-kits"],
+    description:
+      "<p>Starved of fresh air, reishi grows lacquered red antlers instead of caps. Grow them for tea, or dry them as sculpture.</p>",
+    price: 32,
+    weight: 1600,
+    variantFields: () => ({ "custom.species": "reishi" }),
+    image: "reishi-antler-kit",
+    swatch: SWATCH.rust,
+    fields: {
+      "custom.difficulty": "advanced",
+      "custom.live_culture": true,
+      "custom.first_harvest_days": 60,
+      "custom.substrate": ["hardwood"],
+    },
+  },
+  {
+    title: "Fruiting Chamber",
+    handle: "fruiting-chamber",
+    type: "Equipment",
+    vendor: "Mycelium Works",
+    tags: ["equipment"],
+    categories: ["grow-kits", "clean-air"],
+    description:
+      "<p>A shelved tent that holds humidity around your blocks. The ultrasonic version runs a fogger on a humidity sensor, so you can leave for a weekend.</p>",
+    options: { Shelves: ["2 shelves", "4 shelves"], Humidifier: ["None", "Ultrasonic"] },
+    // The fogger only comes with the tall chamber.
+    variants: [
+      v({ Shelves: "2 shelves", Humidifier: "None" }, 59, { weight: 4200 }),
+      v({ Shelves: "4 shelves", Humidifier: "None" }, 89, { weight: 6800 }),
+      v({ Shelves: "4 shelves", Humidifier: "Ultrasonic" }, 179, { weight: 8100 }),
+    ],
+    variantFields: (o) => ({ "custom.height": cm(o.Shelves === "2 shelves" ? 90 : 160) }),
+    image: "fruiting-chamber",
+    swatch: SWATCH.stone,
+    fields: {
+      "custom.difficulty": "beginner",
+      "custom.warranty_months": 24,
+      "custom.works_with": ["oyster-grow-kit", "lions-mane-grow-kit", "reishi-antler-kit"],
+      "custom.spec_sheet": "https://myceliumworks.example/specs/fruiting-chamber.pdf",
+      "custom.certifications": ["ce"],
+      "custom.supplier_code": "GT-FC-2024",
+      "custom.landed_cost": eur(31),
+    },
+  },
+
+  // ----- Cultures & spawn -----
+  {
+    title: "Liquid Culture Syringe",
+    handle: "liquid-culture-syringe",
+    type: "Culture",
+    vendor: "Mycelium Works Lab",
+    tags: ["lab"],
+    categories: ["cultures"],
+    description:
+      "<p>Living mycelium in a nutrient broth, drawn from our master cultures and tested clean on agar before it ships. Inject it into grain or a sterilised bag.</p>",
+    options: {
+      Species: [
+        "Pearl oyster",
+        "Blue oyster",
+        "King oyster",
+        "Lion's mane",
+        "Shiitake",
+        "Reishi",
+        "Chestnut",
+      ],
+      Volume: ["10 ml", "20 ml"],
+    },
+    // Slow growers come in the small syringe only: a large one would age before it's used.
+    variants: [
+      ...["Pearl oyster", "Blue oyster", "King oyster", "Lion's mane", "Shiitake"].flatMap(
+        (species) => [
+          v({ Species: species, Volume: "10 ml" }, 14, { weight: 40 }),
+          v({ Species: species, Volume: "20 ml" }, 22, { weight: 60 }),
+        ],
+      ),
+      v({ Species: "Reishi", Volume: "10 ml" }, 16, { weight: 40 }),
+      v({ Species: "Chestnut", Volume: "10 ml" }, 16, { weight: 40 }),
+    ],
+    variantFields: (o, i) => ({
+      "custom.species": speciesKey(o.Species),
+      "custom.volume": ml(o.Volume === "10 ml" ? 10 : 20),
+      "custom.generation": 1 + (i % 2),
+      "custom.lab_tested_on": "2026-10-12",
+      "custom.lot": `MW-2026-${String(410 + i).padStart(3, "0")}`,
+    }),
+    image: "liquid-culture-syringe",
+    swatch: SWATCH.pale,
+    fields: {
+      "custom.difficulty": "intermediate",
+      "custom.live_culture": true,
+      "custom.works_with": ["grain-spawn-bag", "still-air-box", "inoculation-kit"],
+    },
+  },
+  {
+    title: "Grain Spawn Bag",
+    handle: "grain-spawn-bag",
+    type: "Spawn",
+    vendor: "Mycelium Works Lab",
+    tags: ["lab", "bulk"],
+    categories: ["cultures"],
+    description:
+      "<p>Sterilised rye fully colonised by the species you choose, with a filter patch so it breathes. Mix it into a bulk substrate to start a grow of your own.</p>",
+    options: {
+      Species: ["Pearl oyster", "Blue oyster", "King oyster", "Lion's mane", "Shiitake"],
+      Weight: ["1 kg", "3 kg"],
+    },
+    // King oyster spawn goes to farms: the 3 kg bag only.
+    variants: [
+      ...["Pearl oyster", "Blue oyster", "Lion's mane", "Shiitake"].flatMap((species) => [
+        v({ Species: species, Weight: "1 kg" }, 12, { weight: 1100 }),
+        v({ Species: species, Weight: "3 kg" }, 29, { weight: 3200 }),
+      ]),
+      v({ Species: "King oyster", Weight: "3 kg" }, 32, { weight: 3200 }),
+    ],
+    variantFields: (o, i) => ({
+      "custom.species": speciesKey(o.Species),
+      "custom.lot": `MW-2026-${String(520 + i).padStart(3, "0")}`,
+    }),
+    image: "grain-spawn-bag",
+    swatch: SWATCH.cream,
+    fields: {
+      "custom.difficulty": "intermediate",
+      "custom.live_culture": true,
+      "custom.substrate": ["rye"],
+      "custom.works_with": ["hardwood-substrate", "coffee-substrate"],
+    },
+  },
+  {
+    title: "Agar Plates",
+    handle: "agar-plates",
+    type: "Lab supply",
+    vendor: "Mycelium Works Lab",
+    tags: ["lab"],
+    categories: ["cultures", "tools"],
+    description:
+      "<p>Poured and sealed malt extract agar in 90 mm dishes, for isolating a clean culture from a tissue sample or checking a syringe before you trust it.</p>",
+    options: { Pack: ["10 plates", "25 plates"] },
+    variants: [
+      v({ Pack: "10 plates" }, 18, { weight: 450 }),
+      v({ Pack: "25 plates" }, 39, { weight: 1100 }),
+    ],
+    image: "agar-plates",
+    swatch: SWATCH.gold,
+    fields: {
+      "custom.difficulty": "advanced",
+      "custom.live_culture": false,
+      "custom.substrate": ["agar"],
+    },
+  },
+
+  // ----- Substrates -----
+  {
+    title: "Supplemented Hardwood Substrate",
+    handle: "hardwood-substrate",
+    type: "Substrate",
+    vendor: "Mycelium Works",
+    tags: ["bulk"],
+    categories: ["substrates"],
+    description:
+      "<p>Oak sawdust with 20% soy hulls, hydrated and sterilised in a filter bag. Ready for grain spawn: the master's mix for oysters, lion's mane and shiitake.</p>",
+    options: { Weight: ["2.5 kg", "5 kg"] },
+    variants: [
+      v({ Weight: "2.5 kg" }, 9, { weight: 2600 }),
+      v({ Weight: "5 kg" }, 16, { weight: 5100 }),
+    ],
+    image: "hardwood-substrate",
+    swatch: SWATCH.clay,
+    fields: { "custom.difficulty": "intermediate", "custom.substrate": ["hardwood", "soy_hulls"] },
+  },
+  {
+    title: "Coffee Grounds Substrate",
+    handle: "coffee-substrate",
+    type: "Substrate",
+    vendor: "Mycelium Works",
+    tags: ["upcycled"],
+    categories: ["substrates"],
+    description:
+      "<p>Spent grounds collected from twelve Zagreb cafés the morning they're brewed, pasteurised with straw. Oysters love it, and it saves a skip of waste a week.</p>",
+    price: 7,
+    weight: 2100,
+    image: "coffee-substrate",
+    swatch: SWATCH.charcoal,
+    fields: {
+      "custom.difficulty": "beginner",
+      "custom.substrate": ["coffee", "straw"],
+      "custom.grown_in": "Zagreb, Croatia",
+      "custom.certifications": ["eu_organic"],
+    },
+  },
+
+  // ----- Lab -----
+  {
+    title: "Pressure Sterilizer",
+    handle: "pressure-sterilizer",
+    type: "Equipment",
+    vendor: "Sterilab",
+    tags: ["equipment", "lab"],
+    categories: ["sterilization"],
+    description:
+      "<p>A cast aluminium sterilizer that holds 121 °C at 15 psi, the temperature that kills every spore a grain jar can hide. Two gauges, a weighted valve and a gasket you'll never think about.</p>",
+    options: { Capacity: ["23 L", "41 L"], Plug: ["EU", "UK", "US"] },
+    // The 41 L model isn't certified for the UK.
+    variants: [
+      v({ Capacity: "23 L", Plug: "EU" }, 249, { weight: 7800 }),
+      v({ Capacity: "23 L", Plug: "UK" }, 249, { weight: 7800 }),
+      v({ Capacity: "23 L", Plug: "US" }, 249, { weight: 7800 }),
+      v({ Capacity: "41 L", Plug: "EU" }, 389, { weight: 11800 }),
+      v({ Capacity: "41 L", Plug: "US" }, 389, { weight: 11800 }),
+    ],
+    variantFields: (o) => ({
+      "custom.capacity": l(o.Capacity === "23 L" ? 23 : 41),
+      "custom.voltage": o.Plug === "US" ? "120v" : "230v",
+    }),
+    image: "pressure-sterilizer",
+    swatch: SWATCH.oyster,
+    fields: {
+      "custom.difficulty": "intermediate",
+      "custom.warranty_months": 36,
+      "custom.spec_sheet": "https://myceliumworks.example/specs/pressure-sterilizer.pdf",
+      "custom.works_with": ["agar-plates", "grain-spawn-bag", "hardwood-substrate"],
+      "custom.certifications": ["ce"],
+      "custom.supplier_code": "STL-PS-23-41",
+      "custom.landed_cost": eur(118),
+    },
+  },
+  {
+    title: "Laminar Flow Hood",
+    handle: "flow-hood",
+    type: "Equipment",
+    vendor: "Clean Air Lab",
+    tags: ["equipment", "lab"],
+    categories: ["clean-air"],
+    description:
+      "<p>A wall of filtered air pushed across your bench at 0.45 m/s, so nothing floating in the room reaches an open plate. The professional's answer to contamination.</p>",
+    options: { Width: ["60 cm", "120 cm"], Plug: ["EU", "UK", "US"] },
+    variants: [
+      v({ Width: "60 cm", Plug: "EU" }, 690, { weight: 21000 }),
+      v({ Width: "60 cm", Plug: "UK" }, 690, { weight: 21000 }),
+      v({ Width: "60 cm", Plug: "US" }, 690, { weight: 21000 }),
+      v({ Width: "120 cm", Plug: "EU" }, 1290, { weight: 38000 }),
+      v({ Width: "120 cm", Plug: "US" }, 1290, { weight: 38000 }),
+    ],
+    variantFields: (o) => ({
+      "custom.width": cm(o.Width === "60 cm" ? 60 : 120),
+      "custom.voltage": o.Plug === "US" ? "120v" : "230v",
+    }),
+    image: "flow-hood",
+    swatch: SWATCH.stone,
+    fields: {
+      "custom.difficulty": "advanced",
+      "custom.warranty_months": 60,
+      "custom.spec_sheet": "https://myceliumworks.example/specs/flow-hood.pdf",
+      "custom.certifications": ["en_1822", "ce"],
+      "custom.works_with": ["agar-plates", "inoculation-kit"],
+      "custom.supplier_code": "CAL-LFH",
+      "custom.landed_cost": eur(402),
+    },
+  },
+  {
+    title: "Still Air Box",
+    handle: "still-air-box",
+    type: "Equipment",
+    vendor: "Mycelium Works",
+    tags: ["equipment", "beginner"],
+    categories: ["clean-air"],
+    description:
+      "<p>A clear tub with two arm ports. Still air carries no spores, so a wiped-down box and slow hands give you clean transfers without a flow hood.</p>",
+    price: 45,
+    weight: 2400,
+    image: "still-air-box",
+    swatch: SWATCH.pale,
+    fields: {
+      "custom.difficulty": "beginner",
+      "custom.works_with": ["liquid-culture-syringe", "agar-plates", "inoculation-kit"],
+    },
+  },
+  {
+    title: "Inoculation Tool Kit",
+    handle: "inoculation-kit",
+    type: "Lab supply",
+    vendor: "Mycelium Works",
+    tags: ["lab"],
+    categories: ["tools"],
+    description:
+      "<p>A scalpel with ten blades, an inoculation loop, a spirit lamp, sterile needles and a roll of Parafilm, in a canvas roll that fits in a still air box.</p>",
+    price: 38,
+    weight: 600,
+    image: "inoculation-kit",
+    swatch: SWATCH.forest,
+    fields: { "custom.difficulty": "intermediate" },
+  },
+
+  // ----- Materials -----
+  {
+    title: "Mycelium Leather",
+    handle: "mycelium-leather",
+    type: "Material",
+    vendor: "Mycelium Works Materials",
+    tags: ["by the metre", "b2b"],
+    categories: ["leather"],
+    description:
+      "<p>A supple sheet grown from reishi mycelium on hemp, tanned with plant extracts, sold by the running metre at 140 cm wide. It cuts, stitches and ages like leather.</p>",
+    options: { Colour: ["Natural", "Charcoal", "Forest", "Clay"], Thickness: ["1.2 mm", "1.8 mm"] },
+    // Forest and clay are dyed in the thin sheet only.
+    variants: [
+      v({ Colour: "Natural", Thickness: "1.2 mm" }, 89, { weight: 560 }),
+      v({ Colour: "Natural", Thickness: "1.8 mm" }, 109, { weight: 840 }),
+      v({ Colour: "Charcoal", Thickness: "1.2 mm" }, 95, { weight: 560 }),
+      v({ Colour: "Charcoal", Thickness: "1.8 mm" }, 115, { weight: 840 }),
+      v({ Colour: "Forest", Thickness: "1.2 mm" }, 95, { weight: 560 }),
+      v({ Colour: "Clay", Thickness: "1.2 mm" }, 95, { weight: 560 }),
+    ],
+    variantFields: (o) => ({
+      "custom.thickness": mm(o.Thickness === "1.2 mm" ? "1.2" : "1.8"),
+      "custom.width": cm(140),
+    }),
+    imageBy: "Colour",
+    image: "mycelium-leather",
+    swatchBy: {
+      Natural: SWATCH.cream,
+      Charcoal: SWATCH.charcoal,
+      Forest: SWATCH.forest,
+      Clay: SWATCH.clay,
+    },
+    fields: {
+      "custom.certifications": ["vegan", "oeko_tex"],
+      "custom.substrate": ["hemp"],
+      "custom.grown_in": "Zagreb, Croatia",
+      "custom.care_guide":
+        "<p>Wipe with a damp cloth; condition twice a year with a plant wax. Keep it out of long, direct sun, which fades the natural shade first.</p>",
+      "custom.supplier_code": "MWM-LTH",
+      "custom.landed_cost": eur(31),
+    },
+  },
+  {
+    title: "Grown Packaging Inserts",
+    handle: "packaging-inserts",
+    type: "Material",
+    vendor: "Mycelium Works Materials",
+    tags: ["b2b", "bulk"],
+    categories: ["packaging"],
+    description:
+      "<p>Protective inserts grown in moulds from hemp and mycelium in five days. As light and strong as polystyrene, and they break down in a garden compost in about six weeks.</p>",
+    options: {
+      Shape: ["Wine bottle", "Box insert 20 × 15 cm", "Corner protector"],
+      Pack: ["50", "250"],
+    },
+    variants: [
+      v({ Shape: "Wine bottle", Pack: "50" }, 79, { weight: 3500 }),
+      v({ Shape: "Wine bottle", Pack: "250" }, 329, { weight: 17000 }),
+      v({ Shape: "Box insert 20 × 15 cm", Pack: "50" }, 69, { weight: 3000 }),
+      v({ Shape: "Box insert 20 × 15 cm", Pack: "250" }, 289, { weight: 15000 }),
+      v({ Shape: "Corner protector", Pack: "250" }, 149, { weight: 6000 }),
+    ],
+    image: "packaging-inserts",
+    swatch: SWATCH.cream,
+    fields: {
+      "custom.certifications": ["home_compostable", "vegan"],
+      "custom.substrate": ["hemp"],
+      "custom.grown_in": "Zagreb, Croatia",
+    },
+  },
+  {
+    title: "Acoustic Wall Panel",
+    handle: "acoustic-panel",
+    type: "Material",
+    vendor: "Mycelium Works Materials",
+    tags: ["interiors", "b2b"],
+    categories: ["acoustics"],
+    description:
+      "<p>Panels grown on hemp into a deep, irregular relief that scatters sound and soaks it up. Mount them with the hidden French cleat; charred ones are flame-finished for a darker, harder face.</p>",
+    options: { Size: ["60 × 60 cm", "120 × 60 cm"], Finish: ["Raw", "Charred"] },
+    variants: [
+      v({ Size: "60 × 60 cm", Finish: "Raw" }, 69, { weight: 2200 }),
+      v({ Size: "60 × 60 cm", Finish: "Charred" }, 85, { weight: 2200 }),
+      v({ Size: "120 × 60 cm", Finish: "Raw" }, 125, { weight: 4300 }),
+      v({ Size: "120 × 60 cm", Finish: "Charred" }, 155, { weight: 4300 }),
+    ],
+    variantFields: (o) => ({
+      "custom.width": cm(o.Size.startsWith("120") ? 120 : 60),
+      "custom.height": cm(60),
+      "custom.thickness": mm(40),
+    }),
+    imageBy: "Finish",
+    image: "acoustic-panel",
+    swatchBy: { Raw: SWATCH.cream, Charred: SWATCH.charcoal },
+    fields: {
+      "custom.fire_rating": "b_s1_d0",
+      "custom.sound_absorption": "0.75",
+      "custom.certifications": ["home_compostable", "ce"],
+      "custom.spec_sheet": "https://myceliumworks.example/specs/acoustic-panel.pdf",
+      "custom.grown_in": "Zagreb, Croatia",
+    },
+  },
+  {
+    title: "Grown Pendant Shade",
+    handle: "pendant-shade",
+    type: "Object",
+    vendor: "Mycelium Works Materials",
+    tags: ["interiors"],
+    categories: ["objects"],
+    description:
+      "<p>A lampshade grown in a mould over a week, then dried and left in the texture the mycelium chose. No two match. Fits an E27 pendant set.</p>",
+    options: { Shape: ["Dome", "Cone"] },
+    variants: [
+      v({ Shape: "Dome" }, 145, { weight: 700 }),
+      v({ Shape: "Cone" }, 135, { weight: 650 }),
+    ],
+    variantFields: (o) => ({
+      "custom.width": cm(o.Shape === "Dome" ? 42 : 36),
+      "custom.height": cm(o.Shape === "Dome" ? 24 : 30),
+    }),
+    image: "pendant-shade",
+    swatch: SWATCH.cream,
+    fields: { "custom.certifications": ["home_compostable"], "custom.grown_in": "Zagreb, Croatia" },
+  },
+
+  // ----- Learn -----
+  {
+    title: "Cultivation: From Spore to Harvest",
+    handle: "cultivation-course",
+    type: "Course",
+    vendor: "Mycelium Works Lab",
+    tags: ["online"],
+    categories: ["courses"],
+    description:
+      "<p>Twelve lessons from our lab: sterile work, agar, liquid culture, grain spawn and fruiting, with the mistakes we made so you don't. Self-paced, or with a cohort and four live sessions.</p>",
+    options: { Format: ["Self-paced", "Live cohort"] },
+    variants: [
+      v({ Format: "Self-paced" }, 129, { shipping: false }),
+      v({ Format: "Live cohort" }, 249, { shipping: false }),
+    ],
+    untracked: true,
+    image: "cultivation-course",
+    swatch: SWATCH.lime,
+    fields: {
+      "custom.difficulty": "beginner",
+      "custom.duration_hours": "14.5",
+      "custom.next_session": "2026-11-18T18:00:00Z",
+      "custom.works_with": ["still-air-box", "agar-plates", "liquid-culture-syringe"],
+    },
+  },
+  {
+    title: "The Mycelium Handbook",
+    handle: "mycelium-handbook",
+    type: "Book",
+    vendor: "Mycelium Works Press",
+    tags: ["book", "gift"],
+    categories: ["books"],
+    description:
+      "<p>Our lab manual, rewritten for everyone: 320 pages on growing, cooking and building with fungi, with photographs from the farm.</p>",
+    options: { Format: ["Paperback", "Hardcover", "eBook"] },
+    variants: [
+      v({ Format: "Paperback" }, 29, { weight: 780 }),
+      v({ Format: "Hardcover" }, 42, { weight: 1150 }),
+      // Downloaded: nothing to ship, and no stock to run out of.
+      v({ Format: "eBook" }, 18, { shipping: false, untracked: true }),
+    ],
+    image: "mycelium-handbook",
+    swatch: SWATCH.moss,
+    fields: { "custom.difficulty": "beginner" },
+  },
+
+  // A draft: being tested, not for sale yet.
+  {
+    title: "Mycelium Building Brick",
+    handle: "mycelium-brick",
+    type: "Material",
+    vendor: "Mycelium Works Materials",
+    tags: ["prototype"],
+    categories: ["objects"],
+    description:
+      "<p>A load-bearing brick grown from hemp and mycelium. In compression testing with the Faculty of Civil Engineering.</p>",
+    price: 6,
+    weight: 1300,
+    draft: true,
+    image: "mycelium-brick",
+    swatch: SWATCH.bark,
+    fields: {
+      "custom.certifications": ["home_compostable"],
+      "custom.supplier_code": "MWM-BRK-P1",
+      "custom.landed_cost": eur(2.1),
+    },
   },
 ];
 
@@ -540,14 +1290,29 @@ const VAT = {
 };
 
 /** Every combination of `options`, as `{ name: value }`. */
-function combinations(options) {
-  return Object.entries(options).reduce(
-    (all, [name, values]) => all.flatMap((c) => values.map((v) => ({ ...c, [name]: v }))),
-    [{}],
-  );
-}
-
 // ---------- the run ----------
+
+const slug = (text) =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+
+/** A SKU from the product's initials and each option value's first letters. */
+function skuOf(handle, of) {
+  const initials = handle
+    .split("-")
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
+  const values = Object.values(of).map((value) =>
+    value
+      .replace(/[^A-Za-z0-9]/g, "")
+      .slice(0, 4)
+      .toUpperCase(),
+  );
+  return [initials, ...values].join("-");
+}
 
 async function main() {
   console.log(`Seeding ${BASE} as ${EMAIL}`);
@@ -563,18 +1328,19 @@ async function main() {
 
   console.log("Store details");
   await admin.patch("/admin/store", {
-    name: "Lumen & Loom",
-    contact_email: "hello@lumenandloom.example",
-    description: "Considered essentials for your wardrobe and home, made to last.",
-    legal_name: "Lumen & Loom d.o.o.",
+    name: "Mycelium Works",
+    contact_email: "hello@myceliumworks.example",
+    description:
+      "Grow kits, lab cultures and materials grown from mycelium, from our lab and farm in Zagreb.",
+    legal_name: "Mycelium Works d.o.o.",
     legal_address: {
-      last_name: "Lumen & Loom d.o.o.",
-      company: "Lumen & Loom d.o.o.",
-      line1: "Ilica 42",
+      last_name: "Mycelium Works d.o.o.",
+      company: "Mycelium Works d.o.o.",
+      line1: "Radnička cesta 80",
       city: "Zagreb",
       postal_code: "10000",
       country: "HR",
-      phone: "+385 1 4800 100",
+      phone: "+385 1 4800 200",
     },
     timezone: "Europe/Zagreb",
     default_language: "en",
@@ -582,14 +1348,15 @@ async function main() {
   });
 
   console.log("Notification settings");
-  // Emails in the shop's colours (clay 700, the theme's accent), new orders to the owner,
-  // and order links into the storefront: `/order/<id>?token=` keeps the token in the
-  // buyer's cookie and opens the confirmation.
+  // Emails in the brand's moss green, new orders to the owner, and order links into the
+  // storefront: `/order/<id>?token=` keeps the token in the buyer's cookie and opens the
+  // confirmation.
   await admin.patch("/admin/notification-settings", {
-    accent: "#953f21",
-    sender_name: "Lumen & Loom",
-    reply_to: "hello@lumenandloom.example",
-    footer: "Lumen & Loom d.o.o. · Ilica 42, 10000 Zagreb, Croatia · hello@lumenandloom.example",
+    accent: "#455C01",
+    sender_name: "Mycelium Works",
+    reply_to: "hello@myceliumworks.example",
+    footer:
+      "Mycelium Works d.o.o. · Radnička cesta 80, 10000 Zagreb, Croatia · hello@myceliumworks.example",
     staff_recipients: [EMAIL],
     order_url: `${STOREFRONT_URL}/order/{order}?token={token}`,
   });
@@ -623,7 +1390,7 @@ async function main() {
   console.log("Warehouses");
   const byName = Object.fromEntries(MARKETS.map((m) => [m.name, m.id]));
   const zagreb = await admin.post("/admin/locations", {
-    name: "Zagreb warehouse",
+    name: "Zagreb lab and farm",
     markets: [byName.Europe, byName["United Kingdom"], byName.Serbia],
     priority: 1,
   });
@@ -656,6 +1423,18 @@ async function main() {
     }
   }
 
+  console.log("Custom fields");
+  for (const field of FIELDS) await admin.post("/admin/custom-field-definitions", field);
+  // The well-known customer fields, created from the API's suggestions as the admin's
+  // "Add" would: `custom.tags` (labels) and `custom.note`.
+  const suggested = await admin.get(
+    "/admin/custom-field-definitions/suggestions?owner_type=customer",
+  );
+  for (const { why: _why, existing: taken, field: _field, ...body } of suggested.items) {
+    if (!taken) await admin.post("/admin/custom-field-definitions", body);
+  }
+  console.log(`  ${FIELDS.length + suggested.items.length} definitions`);
+
   console.log("Categories");
   const categoryIds = {};
   let position = 0;
@@ -665,9 +1444,14 @@ async function main() {
       handle: top.handle,
       visible: true,
       position: position++,
-      description: `<p>${top.name} from Lumen &amp; Loom and the makers we work with.</p>`,
+      description: `<p>${top.name} from Mycelium Works.</p>`,
     });
     categoryIds[top.handle] = parent.id;
+    await admin.patch(`/admin/categories/${parent.id}/custom-fields`, {
+      custom_fields: { "custom.buying_guide": top.guide },
+    });
+    const image = await upload(top.image, top.swatch, top.name);
+    if (image) await admin.put(`/admin/categories/${parent.id}/image`, { image });
     for (const child of top.children) {
       const created = await admin.post("/admin/categories", {
         name: child.name,
@@ -685,18 +1469,19 @@ async function main() {
 
   console.log("Products");
   const sellable = [];
+  const productIds = {};
   for (const spec of PRODUCTS) {
     process.stdout.write(`  ${spec.title}`);
-    const options = spec.options ?? {};
-    const combos = combinations(options).filter((o) => (spec.sold ? spec.sold(o) : true));
-    const priceOf = (o) => eur(spec.priceOf ? spec.priceOf(o) : spec.price);
-    const weightOf = (o) => (spec.weightOf ? spec.weightOf(o) : spec.weight);
+    const variants = spec.variants ?? [
+      { of: {}, price: spec.price, weight: spec.weight, untracked: spec.untracked },
+    ];
 
     let product = await admin.post("/admin/products", {
       handle: spec.handle,
       title: spec.title,
-      price: priceOf(combos[0]),
+      price: eur(variants[0].price),
     });
+    productIds[spec.handle] = product.id;
     await admin.patch(`/admin/products/${product.id}`, {
       description: spec.description,
       vendor: spec.vendor,
@@ -704,101 +1489,91 @@ async function main() {
       tags: spec.tags,
     });
 
-    if (Object.keys(options).length > 0) {
+    if (spec.options) {
       product = await admin.put(`/admin/products/${product.id}/options`, {
-        options: Object.entries(options).map(([name, values]) => ({
+        options: Object.entries(spec.options).map(([name, values]) => ({
           name,
           values: values.map((label) => ({ label })),
         })),
       });
       const valueId = (name, label) =>
-        product.options.find((o) => o.name === name).values.find((v) => v.label === label).id;
-      const sku = (o) =>
-        [
-          spec.handle
-            .split("-")
-            .map((w) => w[0])
-            .join("")
-            .toUpperCase(),
-          ...Object.values(o).map((v) =>
-            v
-              .replace(/[^A-Za-z0-9]/g, "")
-              .slice(0, 4)
-              .toUpperCase(),
-          ),
-        ].join("-");
+        product.options.find((o) => o.name === name).values.find((x) => x.label === label).id;
       product = await admin.put(`/admin/products/${product.id}/variants`, {
-        variants: combos.map((o) => ({
+        variants: variants.map((variant) => ({
           id: null,
-          sku: sku(o),
-          price: priceOf(o),
-          selections: Object.entries(o).map(([name, label]) => valueId(name, label)),
-          weight_grams: weightOf(o),
-          requires_shipping: true,
+          sku: skuOf(spec.handle, variant.of),
+          price: eur(variant.price),
+          selections: Object.entries(variant.of).map(([name, label]) => valueId(name, label)),
+          weight_grams: variant.shipping === false ? null : variant.weight,
+          requires_shipping: variant.shipping !== false,
         })),
       });
     } else {
-      const variant = product.variants[0];
-      product = await admin.patch(`/admin/products/${product.id}/variants/${variant.id}`, {
-        sku: spec.handle.toUpperCase().replace(/-/g, "").slice(0, 10),
-        weight_grams: spec.weight,
-      });
+      product = await admin.patch(
+        `/admin/products/${product.id}/variants/${product.variants[0].id}`,
+        { sku: skuOf(spec.handle, {}), weight_grams: spec.weight },
+      );
+    }
+    // The stored variants line up with the spec's: both in the order given.
+    const pairs = product.variants.map((stored, i) => ({ stored, spec: variants[i] }));
+
+    for (const [i, { stored, spec: variant }] of pairs.entries()) {
+      const fields = spec.variantFields?.(variant.of, i);
+      if (fields)
+        await admin.patch(`/admin/variants/${stored.id}/custom-fields`, { custom_fields: fields });
     }
 
-    // One image per colour (or the product's one colour), the variants pointing at theirs.
-    const colourOf = (variant) => {
-      const selected = variant.selections?.map((id) =>
-        product.options
-          .flatMap((o) => o.values.map((v) => ({ name: o.name, ...v })))
-          .find((v) => v.id === id),
-      );
-      return selected?.find((v) => v?.name === "Color")?.label ?? spec.color;
-    };
-    const colours = [...new Set(product.variants.map(colourOf).filter(Boolean))];
-    const images = {};
-    for (const colour of colours) {
-      const asset = await upload(
-        `${spec.handle}-${colour.toLowerCase().replace(/ /g, "-")}.png`,
-        COLORS[colour],
-        `${spec.title} in ${colour}`,
-      );
-      if (asset) images[colour] = asset;
-    }
-    if (Object.keys(images).length > 0) {
-      await admin.put(`/admin/products/${product.id}/media`, { assets: Object.values(images) });
-      if (colours.length > 1) {
-        for (const variant of product.variants) {
-          const asset = images[colourOf(variant)];
+    // Images: one per value of the option that changes how it looks, the variants
+    // pointing at theirs; else one for the product.
+    if (spec.imageBy) {
+      const values = [...new Set(variants.map((x) => x.of[spec.imageBy]))];
+      const images = {};
+      for (const value of values) {
+        const asset = await upload(
+          `${spec.image}-${slug(value)}`,
+          spec.swatchBy[value],
+          `${spec.title}, ${value}`,
+        );
+        if (asset) images[value] = asset;
+      }
+      if (Object.keys(images).length > 0) {
+        await admin.put(`/admin/products/${product.id}/media`, { assets: Object.values(images) });
+        for (const { stored, spec: variant } of pairs) {
+          const asset = images[variant.of[spec.imageBy]];
           if (asset)
-            await admin.put(`/admin/products/${product.id}/variants/${variant.id}/media`, {
-              asset,
-            });
+            await admin.put(`/admin/products/${product.id}/variants/${stored.id}/media`, { asset });
         }
       }
+    } else {
+      const asset = await upload(spec.image, spec.swatch, spec.title);
+      if (asset) await admin.put(`/admin/products/${product.id}/media`, { assets: [asset] });
     }
 
-    // Stock: tracked at both warehouses, a few variants sold out; candles untracked.
-    for (const variant of product.variants) {
-      if (spec.untracked) continue;
+    // Stock at both warehouses, a few variants sold out; live cultures kept low, since
+    // they're grown to order; nothing for what's downloaded.
+    const live = spec.fields?.["custom.live_culture"] === true;
+    for (const { stored, spec: variant } of pairs) {
+      if (spec.untracked || variant.untracked) continue;
       const item = await admin.post("/admin/inventory-items", {
-        variant: variant.id,
+        variant: stored.id,
         tracked: true,
       });
-      const soldOut = random() < 0.12;
+      const soldOut = random() < 0.1;
+      const most = live ? 15 : 60;
       await admin.put(`/admin/inventory-items/${item.id}/levels/${zagreb.id}`, {
-        on_hand: soldOut ? 0 : 5 + Math.floor(random() * 60),
+        on_hand: soldOut ? 0 : 3 + Math.floor(random() * most),
       });
       await admin.put(`/admin/inventory-items/${item.id}/levels/${newJersey.id}`, {
-        on_hand: soldOut ? 0 : Math.floor(random() * 25),
+        on_hand: soldOut || live ? 0 : Math.floor(random() * 20),
       });
     }
 
     // Prices in the other currencies.
     for (const market of MARKETS.filter((m) => m.priceList)) {
       await admin.put(`/admin/price-lists/${market.priceList}/fixed-prices`, {
-        fixed_prices: product.variants.map((v) => ({
-          variant: v.id,
-          price: convert(v.price.amount, market.currency),
+        fixed_prices: product.variants.map((x) => ({
+          variant: x.id,
+          price: convert(x.price.amount, market.currency),
         })),
       });
     }
@@ -815,22 +1590,29 @@ async function main() {
     process.stdout.write(` · ${product.variants.length} variant(s)\n`);
   }
 
+  // Product fields last: "Works with" references products made after the one holding it.
+  console.log("Product fields");
+  for (const spec of PRODUCTS) {
+    if (!spec.fields) continue;
+    const fields = { ...spec.fields };
+    if (fields["custom.works_with"])
+      fields["custom.works_with"] = fields["custom.works_with"].map((handle) => {
+        const id = productIds[handle];
+        if (!id) throw new Error(`${spec.handle} works with an unknown product, ${handle}`);
+        return id;
+      });
+    await admin.patch(`/admin/products/${productIds[spec.handle]}/custom-fields`, {
+      custom_fields: fields,
+    });
+  }
+
   const ids = sellable.map((p) => p.id);
   for (const market of MARKETS)
     await admin.post(`/admin/catalogs/${market.catalog}/products`, { products: ids });
   await admin.post(`/admin/channels/${onlineStore.id}/products`, { products: ids });
 
   console.log("Search");
-  await admin.patch("/admin/search/settings", {
-    split_by: [],
-    facets: [
-      { key: "option.color", label: "Colour" },
-      { key: "option.size", label: "Size" },
-      { key: "product_type", label: "Type" },
-      { key: "vendor", label: "Brand" },
-      { key: "tag", label: "Tag" },
-    ],
-  });
+  await admin.patch("/admin/search/settings", { split_by: [], facets: FACETS });
 
   console.log("Publishable key and the storefront's webhook");
   const key = await admin.post("/admin/api-keys", {
@@ -873,7 +1655,7 @@ async function main() {
     name: "Bank transfer",
     instructions: [
       "Transfer the total to:",
-      "Lumen & Loom d.o.o., Demo Bank d.d.",
+      "Mycelium Works d.o.o., Demo Bank d.d.",
       "IBAN: HR00 0000 0000 0000 0000 0",
       "BIC: DEMOHR2X",
       "Use your order number as the reference. We ship once the payment arrives.",
@@ -956,11 +1738,19 @@ async function main() {
       postal: "1016 GV",
     },
   ];
+  const liveProducts = new Set(
+    sellable.filter((p) => p.fields?.["custom.live_culture"] === true).map((p) => p.id),
+  );
+  // What ships, by variant: order lines don't say.
+  const ships = new Map(
+    sellable.flatMap((p) => p.variants.map((x) => [x.id, x.requires_shipping !== false])),
+  );
   const orders = [];
   for (const shopper of SHOPPERS) {
     const sf = (method, path, body) => call(method, path, body, { key: key.token });
     const cart = await sf("POST", "/storefront/carts", { country: shopper.country });
     const lines = 1 + Math.floor(random() * 3);
+    let live = false;
     for (let i = 0; i < lines; i++) {
       const product = pick(sellable);
       const variant = pick(product.variants);
@@ -969,6 +1759,7 @@ async function main() {
           variant: variant.id,
           quantity: 1 + Math.floor(random() * 2),
         });
+        if (liveProducts.has(product.id)) live = true;
       } catch (e) {
         if (e.code !== "out_of_stock") throw e; // a sold-out pick: skip it
       }
@@ -1015,11 +1806,23 @@ async function main() {
         headers: { "idempotency-key": `seed-${cart.id}` },
       },
     );
-    orders.push({ order, shopper });
+    orders.push({ order, shopper, live });
     const paying = order.payment?.method_name ? `, ${order.payment.method_name}` : "";
     console.log(
       `  #${order.number} ${shopper.first} ${shopper.last} (${shopper.country}) ${(priced.total.amount / 100).toFixed(2)} ${priced.total.currency}${paying}`,
     );
+  }
+
+  // What the warehouse needs: a cold pack for anything alive, and one gift message.
+  for (const [i, { order, live }] of orders.entries()) {
+    const fields = {
+      ...(live ? { "custom.cold_pack": true } : {}),
+      ...(i === 1
+        ? { "custom.gift_message": "Happy birthday, Mira! Your own lion's mane farm. — Lukas" }
+        : {}),
+    };
+    if (Object.keys(fields).length > 0)
+      await admin.patch(`/admin/orders/${order.id}/custom-fields`, { custom_fields: fields });
   }
 
   // Their states: paid, paid and shipped with tracking, one cancelled (its pending
@@ -1035,11 +1838,13 @@ async function main() {
     await admin.post(`/admin/orders/${order.id}/paid`, {
       reference: cash ? `Courier receipt PE-${4100 + i}` : `HR-TRF-${order.number}-${20261000 + i}`,
     });
-    if (i % 2 === 0) {
+    // Shipped: only what ships (a course or an eBook is never fulfilled from a shelf).
+    const shippable = order.lines.filter((line) => ships.get(line.variant) !== false);
+    if (i % 2 === 0 && shippable.length > 0) {
       const location = shopper.country === "US" ? newJersey.id : zagreb.id;
       await admin.post(`/admin/orders/${order.id}/fulfillments`, {
         location,
-        lines: order.lines.map((l) => ({ line: l.id, quantity: l.quantity })),
+        lines: shippable.map((line) => ({ line: line.id, quantity: line.quantity })),
         tracking: [
           {
             carrier: shopper.country === "US" ? "UPS" : "DHL",
@@ -1052,50 +1857,50 @@ async function main() {
     }
   }
 
-  console.log("Customer labels and notes");
-  // The well-known customer fields, created from the API's suggestions as the admin's
-  // "Add" would: `custom.tags` (labels) and `custom.note`.
-  const suggested = await admin.get(
-    "/admin/custom-field-definitions/suggestions?owner_type=customer",
-  );
-  for (const { why: _why, existing: taken, field: _field, ...body } of suggested.items) {
-    if (!taken) await admin.post("/admin/custom-field-definitions", body);
-  }
-  // A group: what group prices and payment methods will point at.
+  console.log("Customer fields and groups");
   const wholesale = await admin.post("/admin/customer-groups", {
-    name: "Wholesale",
-    handle: "wholesale",
-    description: "Studios and shops buying in bulk.",
+    name: "Trade",
+    handle: "trade",
+    description: "Farms, labs and studios buying at trade prices.",
   });
-  const LABELS = {
-    "ana.horvat@example.com": { tags: ["vip", "newsletter"], note: "Prefers email over phone." },
-    "lukas.weber@example.com": {
-      tags: ["wholesale"],
-      note: "Buys for his studio; asks for invoices with the VAT ID DE123456789.",
+  const CUSTOMERS = {
+    "ana.horvat@example.com": {
+      "custom.business_type": "home",
+      "custom.tags": ["vip", "newsletter"],
+      "custom.note": "Grows on her balcony; asked for a reishi workshop.",
     },
-    "marko.petrovic@example.com": { tags: ["newsletter"] },
+    "lukas.weber@example.com": {
+      "custom.business_type": "studio",
+      "custom.vat_id": "DE123456789",
+      "custom.tags": ["trade"],
+      "custom.note": "Buys mycelium leather for his bag studio; invoices with his VAT ID.",
+    },
+    "chloe.martin@example.com": { "custom.business_type": "restaurant", "custom.tags": ["trade"] },
+    "marko.petrovic@example.com": { "custom.business_type": "farm", "custom.tags": ["newsletter"] },
     "sofia.rossi@example.com": {
-      tags: ["vip"],
-      note: "Returned a lamp in 2026-09, replaced without fuss. Keep it that way.",
+      "custom.business_type": "lab",
+      "custom.vat_id": "IT12345678901",
+      "custom.tags": ["vip", "trade"],
+      "custom.note":
+        "University lab; a syringe arrived contaminated in 2026-09, replaced the same week.",
     },
   };
-  for (const [email, { tags, note }] of Object.entries(LABELS)) {
+  for (const [email, fields] of Object.entries(CUSTOMERS)) {
     const found = await admin.get(`/admin/customers?q=${encodeURIComponent(email)}`);
     const customer = found.items.find((c) => c.email === email);
     if (!customer) continue;
-    await admin.patch(`/admin/customers/${customer.id}/custom-fields`, {
-      custom_fields: { "custom.tags": tags, ...(note ? { "custom.note": note } : {}) },
-    });
-    if (tags.includes("wholesale")) {
+    await admin.patch(`/admin/customers/${customer.id}/custom-fields`, { custom_fields: fields });
+    if (fields["custom.tags"].includes("trade")) {
       await admin.post(`/admin/customer-groups/${wholesale.id}/customers`, {
         customers: [customer.id],
       });
     }
   }
 
-  console.log("\nDone: Lumen & Loom is set up.");
+  const variantCount = sellable.reduce((n, p) => n + p.variants.length, 0);
+  console.log("\nDone: Mycelium Works is set up.");
   console.log(
-    `  ${sellable.length} products for sale, 1 draft · ${MARKETS.length} markets · 2 payment methods · ${orders.length} orders`,
+    `  ${sellable.length} products for sale (${variantCount} variants), 1 draft · ${FIELDS.length} custom fields · ${MARKETS.length} markets · ${orders.length} orders`,
   );
   console.log("\nFor the storefront (apps/storefront/.dev.vars):");
   console.log(`  STOREFRONT_KEY=${key.token}`);
