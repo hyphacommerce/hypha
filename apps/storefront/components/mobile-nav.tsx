@@ -1,8 +1,11 @@
 "use client";
 
 // The phones' menu: a drawer from the start edge, as the cart's is from the end, with
-// every category (its subcategories under it), the account and the currency. Loaded
-// when it first opens (`SiteHeader`).
+// every category (its subcategories under it), the account and the currency, scrolling
+// inside the drawer when it's taller than the screen. Mounted when it first opens
+// (`SiteHeader`), and imported with the header rather than lazily: a lazy load revealed
+// it through Suspense, which React animates with a view transition that snapshots the
+// page, so the drawer flickered as it opened.
 
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog } from "@astryxdesign/core/Dialog";
@@ -44,10 +47,10 @@ export default function MobileNav({
         width={320}
         maxHeight="100dvh"
         style={{ height: "100dvh", borderRadius: 0 }}
-        padding={5}
+        padding={0}
         aria-label="Menu"
       >
-        <VStack gap={4}>
+        <VStack gap={4} padding={5} className="shop-mobile-menu">
           <HStack hAlign="between" vAlign="center">
             <Heading level={2}>Menu</Heading>
             <Button

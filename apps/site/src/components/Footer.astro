@@ -1,7 +1,7 @@
 ---
 import wordmarkDark from "../../../admin/public/brand/hypha-wordmark-on-dark.svg?url";
 import wordmark from "../../../admin/public/brand/hypha-wordmark.svg?url";
-import { EMAIL, GITHUB, SPONSOR } from "../consts";
+import { DEMO_ADMIN, DEMO_STORE, EMAIL, GITHUB, SPONSOR } from "../consts";
 
 const links = [
   { href: "/docs", label: "Docs" },
@@ -10,6 +10,8 @@ const links = [
   { href: "/releases", label: "Releases" },
   { href: "/changelog", label: "Changelog" },
   { href: "/rss.xml", label: "RSS" },
+  { href: DEMO_STORE, label: "Demo store" },
+  { href: DEMO_ADMIN, label: "Demo admin" },
   { href: GITHUB, label: "GitHub" },
   { href: SPONSOR, label: "Sponsor" },
   { href: `mailto:${EMAIL}`, label: EMAIL },

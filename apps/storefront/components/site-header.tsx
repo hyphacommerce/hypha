@@ -17,18 +17,18 @@ import {
   ShoppingBagIcon,
   UserIcon,
 } from "@heroicons/react/24/outline";
-import { Suspense, lazy, useState } from "react";
+import { useState } from "react";
 
 import { useCart } from "./cart/cart-provider";
 import { CloseOnNavigate } from "./close-on-navigate";
 import { type CountryOption, CurrencySwitcher } from "./currency-switcher";
+import MobileNav from "./mobile-nav";
 import { type NavCategory, NavMenu } from "./nav-menu";
 import { SearchBox } from "./search-box";
 
 export type { NavCategory };
 
 /** The phones' menu, loaded the first time it opens. */
-const MobileNav = lazy(() => import("./mobile-nav"));
 
 export type HeaderProps = {
   storeName: string;
@@ -73,17 +73,15 @@ export function SiteHeader(props: HeaderProps) {
                 }}
               />
               {menuLoaded && (
-                <Suspense fallback={null}>
-                  <MobileNav
-                    isOpen={menu}
-                    onOpenChange={setMenu}
-                    categories={props.categories}
-                    searchHref={props.searchHref}
-                    accountHref={props.accountHref}
-                    country={props.country}
-                    countries={props.countries}
-                  />
-                </Suspense>
+                <MobileNav
+                  isOpen={menu}
+                  onOpenChange={setMenu}
+                  categories={props.categories}
+                  searchHref={props.searchHref}
+                  accountHref={props.accountHref}
+                  country={props.country}
+                  countries={props.countries}
+                />
               )}
             </div>
             <TopNavHeading heading={props.storeName} headingHref={props.homeHref} />

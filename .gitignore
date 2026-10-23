@@ -22,3 +22,7 @@ next-env.d.ts
 
 # macOS Finder metadata
 .DS_Store
+
+# The demo store's generated photos: used by `pnpm seed`, kept out of the repository.
+/scripts/seed-assets/images/*
+!/scripts/seed-assets/images/.gitkeep

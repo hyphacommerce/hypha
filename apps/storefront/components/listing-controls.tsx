@@ -15,8 +15,10 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
+import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { AdjustmentsHorizontalIcon } from "@heroicons/react/24/outline";
-import { Suspense, lazy, useState } from "react";
+import { CloseOnNavigate } from "./close-on-navigate";
+import { useState } from "react";
 
 import {
   SORTS,
@@ -30,7 +32,6 @@ import {
 
 /** The phones' filter sheet, loaded the first time it opens: wide screens never need
  * it, and it's the listing's heaviest piece. */
-const FilterSheet = lazy(() => import("./listing-sheet"));
 
 export type Facet = {
   key: string;
@@ -238,11 +239,7 @@ export function ListingToolbar(props: Props & { total: number; sort: Sort; isBus
               setSheet(true);
             }}
           />
-          {sheetLoaded && (
-            <Suspense fallback={null}>
-              <FilterSheet {...props} isOpen={sheet} onOpenChange={setSheet} />
-            </Suspense>
-          )}
+          {sheetLoaded && <FilterSheet {...props} isOpen={sheet} onOpenChange={setSheet} />}
         </div>
         <Selector
           label="Sort"
@@ -260,5 +257,26 @@ export function ListingToolbar(props: Props & { total: number; sort: Sort; isBus
         />
       </HStack>
     </HStack>
+  );
+}
+
+/** The filters in a bottom sheet, for phones (wide screens show the facets beside the
+ * results instead). Mounted when it first opens, and part of this module rather than
+ * loaded apart: loading it lazily revealed it through Suspense, which React animates
+ * with a view transition that snapshots the page, so the sheet flickered as it opened. */
+function FilterSheet({
+  isOpen,
+  onOpenChange,
+  ...props
+}: Props & { isOpen: boolean; onOpenChange: (open: boolean) => void }) {
+  return (
+    <>
+      {/* Leaving the listing (a product, another category) closes it; filtering here,
+        which changes only the query, doesn't. */}
+      <CloseOnNavigate pathOnly onNavigate={() => onOpenChange(false)} />
+      <BottomSheet label="Filters" isOpen={isOpen} onOpenChange={onOpenChange} height="tall">
+        <FacetPanel {...props} onDone={() => onOpenChange(false)} />
+      </BottomSheet>
+    </>
   );
 }

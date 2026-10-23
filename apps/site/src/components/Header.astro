@@ -1,7 +1,7 @@
 ---
 import wordmarkDark from "../../../admin/public/brand/hypha-wordmark-on-dark.svg?url";
 import wordmark from "../../../admin/public/brand/hypha-wordmark.svg?url";
-import { GITHUB, SPONSOR } from "../consts";
+import { DEMO_ADMIN, DEMO_STORE, GITHUB, SPONSOR } from "../consts";
 
 const links = [
   { href: "/docs", label: "Docs" },
@@ -9,6 +9,7 @@ const links = [
   { href: "/blog", label: "Blog" },
   { href: "/changelog", label: "Changelog" },
   { href: GITHUB, label: "GitHub" },
+  { href: DEMO_STORE, label: "Demo", menuLabel: "Demo store" },
 ];
 const path = Astro.url.pathname;
 const current = (href: string) => href.startsWith("/") && path.startsWith(href);
@@ -39,15 +40,19 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
     <a class="quiet" href={SPONSOR}>Sponsor</a>
     <a class="cta" href="/docs/getting-started">Get started</a>
     <details class="menu">
-      <summary>Menu</summary>
+      <summary>
+        <span class="sr-only">Menu</span>
+        <span class="bars" aria-hidden="true"></span>
+      </summary>
       <ul>
         {
           links.map((l) => (
             <li>
-              <a href={l.href}>{l.label}</a>
+              <a href={l.href}>{l.menuLabel ?? l.label}</a>
             </li>
           ))
         }
+        <li><a href={DEMO_ADMIN}>Demo admin</a></li>
         <li><a href="/docs/getting-started">Get started</a></li>
         <li><a href={SPONSOR}>Sponsor</a></li>
       </ul>
@@ -198,11 +203,9 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
     border-radius: 10px;
     list-style: none;
     cursor: pointer;
-    font-size: 0;
   }
 
-  .menu summary::before {
-    content: "";
+  .bars {
     width: 16px;
     height: 10px;
     border-block: 1.5px solid var(--text);

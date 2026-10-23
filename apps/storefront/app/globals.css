@@ -441,6 +441,14 @@ body {
 }
 
 /* The phones' menu (components/mobile-nav.tsx). */
+/* The phones' menu drawer (components/mobile-nav.tsx): its content scrolls inside it,
+   without scrolling the page under it. */
+.shop-mobile-menu {
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .shop-mobile-nav {
   display: flex;
   flex-direction: column;
