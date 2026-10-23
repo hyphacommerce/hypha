@@ -62,7 +62,7 @@ pnpm hypha init      # a deployment folder: target, domains, secrets
 pnpm hypha deploy    # builds and starts it
 ```
 
-`--target server` deploys to a machine over SSH, `--target cloudflare` to Workers with one
+`--target vps` deploys to a machine over SSH, `--target cloudflare` to Workers with one
 API token, and `--target local` to this machine under `*.hypha.localhost`. Until the
 first release, the CLI runs from a checkout of this repository.
 
