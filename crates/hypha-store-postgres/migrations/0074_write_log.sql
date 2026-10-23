@@ -4,7 +4,7 @@
 -- its events read the same (an event names what changed, not what it was changed from).
 --
 -- Only while the transaction says so (`SET LOCAL hypha.log_writes = 'on'`, which previews
--- and applies do); every other write pays one setting lookup. The log is the
+-- and applies do): the trigger's WHEN checks it, so every other write runs no function. The log is the
 -- transaction-local setting `hypha.writes`, one JSON array per line
 -- (`["products", "<key>", "update", 4]`), so a write rolled back to its savepoint takes
 -- its lines with it, as it takes its rows.
@@ -15,9 +15,6 @@ DECLARE
     row_key   text := '';
     found     bigint;
 BEGIN
-    IF current_setting('hypha.log_writes', true) IS DISTINCT FROM 'on' THEN
-        RETURN NULL;
-    END IF;
     IF TG_OP = 'UPDATE' THEN
         -- A write that keeps the version (a use recorded, stamps written after the
         -- version moved) changes no aggregate.
@@ -76,7 +73,8 @@ BEGIN
     LOOP
         EXECUTE format(
             'CREATE TRIGGER hypha_note_write AFTER INSERT OR UPDATE OR DELETE ON %I
-                 FOR EACH ROW EXECUTE FUNCTION hypha_note_write(%s)',
+                 FOR EACH ROW WHEN (current_setting(''hypha.log_writes'', true) = ''on'')
+                 EXECUTE FUNCTION hypha_note_write(%s)',
             t.name,
             (SELECT string_agg(quote_literal(trim(c)), ', ')
                  FROM unnest(string_to_array(t.key_columns, ',')) AS c)
