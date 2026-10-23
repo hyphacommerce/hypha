@@ -986,3 +986,40 @@ async fn approving_spends_none_of_the_agents_own_limits() {
         "a person's approval isn't the agent's call"
     );
 }
+
+#[tokio::test]
+async fn an_approval_whose_write_was_applied_already_is_recorded_applied() {
+    let app = app().await;
+    let (order, line, warehouse) = placed_order_for_three_mugs(&app).await;
+    let agent = agent_with(&app, json!({"write": {"fulfillments:write": "apply"}})).await;
+    let ship = |mode| {
+        let mut call = op(
+            "admin.fulfillments.create",
+            json!({"id": order}),
+            Some(json!({"location": warehouse, "lines": [{"line": line, "quantity": 1}]})),
+            mode,
+        );
+        call.idempotency_key = Some("ship-1".to_string());
+        call
+    };
+    let proposed = call(&app, &agent, ship(Mode::Propose)).await;
+    assert_eq!(proposed.status, 202, "{:?}", proposed.body);
+    let id = proposed.body["proposal"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // The write went through under the proposal's key (an approval whose answer was lost
+    // before it was recorded, or another person's at the same time).
+    let applied = call(&app, &agent, ship(Mode::Apply)).await;
+    assert_eq!(applied.status, 201, "{:?}", applied.body);
+
+    let session = owner_session(&app).await;
+    let approve = format!("/admin/agent-proposals/{id}/approve");
+    let (status, decided) = send_as(&app, &session, "POST", &approve, None).await;
+    assert_eq!(status, StatusCode::OK, "{decided}");
+    assert_eq!(decided["status"], "applied", "{decided}");
+    assert_eq!(decided["response"]["status"], 201);
+    assert_eq!(decided["response"]["body"]["id"], applied.body["id"]);
+    assert_eq!(decided["refreshes"], 0);
+    assert_eq!(rows(&app, "fulfillments").await, 1, "shipped once");
+}

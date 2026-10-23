@@ -506,6 +506,13 @@ impl Apply {
             let _ = finish_all(stores, false, None).await;
             return response;
         }
+        if is_replay(&response) {
+            // The write was made earlier under the same idempotency key, and this is its
+            // answer: it was applied then, so there's nothing to compare and nothing to
+            // keep (the token stays unused).
+            let _ = finish_all(stores, false, None).await;
+            return response;
+        }
         let Some(claimed) = claimed else {
             let _ = finish_all(stores, false, None).await;
             return ApiError::preview_token_invalid("this route takes no credentials")
@@ -596,6 +603,15 @@ impl Apply {
         };
         Ok((preview, ids, digest, token))
     }
+}
+
+/// Whether `response` replays an earlier write made with the same idempotency key
+/// (`extract::idempotent_response`).
+fn is_replay(response: &Response) -> bool {
+    response
+        .headers()
+        .get(crate::extract::REPLAYED_HEADER)
+        .is_some_and(|v| v == "true")
 }
 
 /// The IDs a preview was handed, in order: on the preview's response's extensions, not

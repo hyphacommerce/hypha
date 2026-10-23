@@ -598,10 +598,13 @@ pub fn idempotent_response(status: StatusCode, body: impl Serialize, replayed: b
     if replayed {
         response
             .headers_mut()
-            .insert("idempotent-replayed", HeaderValue::from_static("true"));
+            .insert(REPLAYED_HEADER, HeaderValue::from_static("true"));
     }
     response
 }
+
+/// The response header saying a keyed write's answer is a replay of an earlier one.
+pub const REPLAYED_HEADER: &str = "idempotent-replayed";
 
 /// A route's query string, read but not yet parsed: call `parse` after authenticating,
 /// like `JsonBody`, so strangers get a 401 first. `F` refuses unknown parameters
