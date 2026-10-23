@@ -343,6 +343,55 @@ async fn a_previewed_capture_stops_at_the_payment_app() {
     assert_eq!(traces(&app).await, before, "not even the call's record");
 }
 
+/// A preview whose request is dropped half-way never ends its transaction: its connection
+/// is closed rather than pooled, so its locks go at once.
+#[tokio::test]
+async fn a_preview_dropped_half_way_holds_no_transaction_open() {
+    use hypha_http::state::Storage;
+    use hypha_store_postgres::PgConnection;
+    let app = app().await;
+    {
+        let ports = app.state.storage.ports(app.state.store).await.unwrap();
+        let open = app
+            .state
+            .storage
+            .begin_preview(&ports, std::time::Duration::from_secs(30))
+            .await
+            .unwrap();
+        let mut conn = ports.conn().await;
+        conn.client()
+            .batch_execute("UPDATE stores SET version = version")
+            .await
+            .unwrap();
+        drop(conn);
+        drop(open);
+    }
+    let open_ones = || async {
+        let ports = app.state.public_ports().await.unwrap();
+        let mut conn = ports.conn().await;
+        let n: i64 = conn
+            .client()
+            .query_one(
+                "SELECT count(*) FROM pg_stat_activity
+                 WHERE datname = current_database() AND state LIKE 'idle in transaction%'",
+                &[],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        n
+    };
+    let mut left = open_ones().await;
+    for _ in 0..50 {
+        if left == 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        left = open_ones().await;
+    }
+    assert_eq!(left, 0, "a transaction left open");
+}
+
 #[tokio::test]
 async fn a_failing_write_previews_as_its_failure() {
     let app = app().await;

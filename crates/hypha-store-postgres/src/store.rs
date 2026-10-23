@@ -39,10 +39,10 @@ pub trait PgConnection {
     }
 
     /// Told when a preview's transaction opens on this connection (`open`) and when it's
-    /// rolled back. A preview whose request was dropped half-way (cancelled, panicked)
-    /// never rolls back, so a pooled connection must roll back before it's handed out
-    /// again; one that closes when dropped (a Workers request's, a test's) needs nothing,
-    /// the default.
+    /// ended. A preview whose request was dropped half-way (cancelled, panicked) never
+    /// ends, and holds its locks until its connection closes, so a pooled connection
+    /// dropped with one open must be closed rather than go back to the pool; one that
+    /// closes when dropped (a Workers request's, a test's) needs nothing, the default.
     fn preview_open(&mut self, open: bool) {
         let _ = open;
     }

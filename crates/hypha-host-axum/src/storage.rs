@@ -27,8 +27,7 @@ pub struct PgConn {
     client: deadpool_postgres::ClientWrapper,
     /// `None` with `database.statement_cache = false`.
     statements: Option<StatementCache>,
-    /// Whether a preview's transaction is open on it (`PgConnection::preview_open`): one
-    /// whose request was dropped half-way, rolled back before the connection is used again.
+    /// Whether a preview's transaction is open on it (`PgConnection::preview_open`).
     preview_open: bool,
 }
 
@@ -56,12 +55,7 @@ impl deadpool::managed::Manager for PgManager {
         conn: &mut PgConn,
         metrics: &deadpool::managed::Metrics,
     ) -> deadpool::managed::RecycleResult<tokio_postgres::Error> {
-        self.inner.recycle(&mut conn.client, metrics).await?;
-        if conn.preview_open {
-            conn.client.batch_execute("ROLLBACK").await?;
-            conn.preview_open = false;
-        }
-        Ok(())
+        self.inner.recycle(&mut conn.client, metrics).await
     }
 
     fn detach(&self, conn: &mut PgConn) {
@@ -69,17 +63,41 @@ impl deadpool::managed::Manager for PgManager {
     }
 }
 
-/// A connection checked out of the pool; it goes back when the request's store is dropped.
-pub struct PooledClient(deadpool::managed::Object<PgManager>);
+/// A connection checked out of the pool; it goes back when the request's store is dropped,
+/// unless a preview's transaction is still open on it.
+pub struct PooledClient(Option<deadpool::managed::Object<PgManager>>);
+
+impl PooledClient {
+    fn conn(&mut self) -> &mut PgConn {
+        // `Some` until it's dropped.
+        self.0
+            .as_mut()
+            .map(|object| &mut **object)
+            .expect("a pooled client in use")
+    }
+}
+
+impl Drop for PooledClient {
+    /// A preview or an apply whose request was dropped half-way left its transaction open,
+    /// holding its locks: the connection is closed instead of going back to the pool, so
+    /// Postgres rolls back now rather than when it's next checked out.
+    fn drop(&mut self) {
+        if let Some(object) = self.0.take()
+            && object.preview_open
+        {
+            drop(deadpool::managed::Object::take(object));
+        }
+    }
+}
 
 impl PgConnection for PooledClient {
     fn client(&mut self) -> &mut tokio_postgres::Client {
         // PgConn -> deadpool's ClientWrapper -> tokio_postgres::Client
-        &mut self.0.client
+        &mut self.conn().client
     }
 
     fn parts(&mut self) -> (&mut tokio_postgres::Client, Option<&StatementCache>) {
-        let conn = &mut *self.0;
+        let conn = self.conn();
         (&mut conn.client, conn.statements.as_ref())
     }
 
@@ -88,10 +106,9 @@ impl PgConnection for PooledClient {
         true
     }
 
-    /// Kept with the connection, so the pool rolls back a preview whose request was
-    /// dropped before handing it out again (`PgManager::recycle`).
+    /// Kept with the connection, so one dropped with a preview open is closed (`Drop`).
     fn preview_open(&mut self, open: bool) {
-        self.0.preview_open = open;
+        self.conn().preview_open = open;
     }
 }
 
@@ -172,7 +189,7 @@ impl PgDatabase {
     /// A store on a pooled connection.
     pub async fn store(&self) -> Result<PgStore<PooledClient>, ApiError> {
         let conn = self.pool.get().await.map_err(ApiError::internal)?;
-        Ok(PgStore::new(PooledClient(conn), self.clock.shared()))
+        Ok(PgStore::new(PooledClient(Some(conn)), self.clock.shared()))
     }
 }
 
