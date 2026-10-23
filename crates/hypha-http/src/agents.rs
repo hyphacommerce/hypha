@@ -98,33 +98,6 @@ impl Answer {
     }
 }
 
-/// Calls `call.operation` as `agent`, judged as the module says, and logs it: `call_as`
-/// for an agent found first (`acting`), with its use noted.
-pub async fn call<S: Storage>(
-    state: &SharedState<S>,
-    agent: AgentId,
-    call: OperationCall,
-) -> Answer {
-    match acting(state, agent, NoteUse::Yes).await {
-        Ok(acting) => call_as(state, &acting, call).await,
-        Err(e) => {
-            let started = state.clock.now();
-            let operation = state.operations().get(&call.operation);
-            let answer = answer_of(e.into_response()).await;
-            log(
-                state,
-                agent,
-                &call.operation,
-                asked(operation, call.mode),
-                &answer,
-                started,
-            )
-            .await;
-            answer
-        }
-    }
-}
-
 /// Calls `call.operation` as `acting`, an agent `acting` found may act now (what `/mcp`
 /// does once per request), judged as the module says, and logs it.
 pub async fn call_as<S: Storage>(
@@ -133,19 +106,27 @@ pub async fn call_as<S: Storage>(
     call: OperationCall,
 ) -> Answer {
     let started = state.clock.now();
-    let (mode, answer) = match judge_and_send(state, acting, &call, None).await {
-        Ok(done) => done,
-        Err((mode, e)) => (mode, answer_of(e.into_response()).await),
+    let sent = judge_and_send(state, acting, &call, None).await;
+    // One connection after the routed request (which takes its own): for the proposal
+    // the write may become, and the log.
+    let ports = state.public_ports().await;
+    let (mode, answer) = match (sent, &ports) {
+        (Ok((mode, Sent::Answered(answer))), _) => (mode, answer),
+        (Ok((mode, Sent::Proposing(proposing))), Ok(ports)) => {
+            match propose(state, ports, &call, proposing).await {
+                Ok(answer) => (mode, answer),
+                Err(e) => (mode, answer_of(e.into_response()).await),
+            }
+        }
+        (Ok((mode, Sent::Proposing(_))), Err(_)) => {
+            let e = ApiError::internal("no connection to keep a proposal on");
+            (mode, answer_of(e.into_response()).await)
+        }
+        (Err((mode, e)), _) => (mode, answer_of(e.into_response()).await),
     };
-    log(
-        state,
-        acting.agent.id(),
-        &call.operation,
-        mode,
-        &answer,
-        started,
-    )
-    .await;
+    let agent = acting.agent.id();
+    let ports = ports.as_ref().ok();
+    log(state, ports, agent, &call.operation, mode, &answer, started).await;
     answer
 }
 
@@ -174,9 +155,24 @@ pub(crate) async fn apply_approved<S: Storage>(
         Err(e) => Err((CallMode::Apply, e)),
     };
     match sent {
-        Ok((_, answer)) => answer,
+        Ok((_, Sent::Answered(answer))) => answer,
+        // An approved write is applied, never proposed again.
+        Ok((_, Sent::Proposing(proposing))) => answer_of(proposing.response).await,
         Err((_, e)) => answer_of(e.into_response()).await,
     }
+}
+
+/// What sending a judged call came to: its answer, or a preview to keep as a proposal.
+enum Sent {
+    Answered(Answer),
+    Proposing(Proposing),
+}
+
+/// A write the agent proposes: previewed as `ctx`, answered `response`.
+struct Proposing {
+    ctx: Ctx,
+    operation: Operation,
+    response: Response,
 }
 
 /// How a call is logged until it's judged: by what it asked for.
@@ -201,7 +197,7 @@ async fn judge_and_send<S: Storage>(
     acting: &Acting,
     call: &OperationCall,
     approved: Option<&hypha_agents::Proposal>,
-) -> Result<(CallMode, Answer), (CallMode, ApiError)> {
+) -> Result<(CallMode, Sent), (CallMode, ApiError)> {
     let agent = acting.agent.id();
     let operation = state.operations().get(&call.operation).cloned();
     let asked = asked(operation.as_ref(), call.mode);
@@ -232,11 +228,15 @@ async fn judge_and_send<S: Storage>(
     };
     let response = dispatch(state, http, Some(as_agent)).await;
     match mode {
-        CallMode::Propose => propose(state, &judged.ctx, &operation, call, response)
-            .await
-            .map(|answer| (mode, answer))
-            .map_err(|e| (mode, e)),
-        _ => Ok((mode, answer_of(response).await)),
+        CallMode::Propose => Ok((
+            mode,
+            Sent::Proposing(Proposing {
+                ctx: judged.ctx,
+                operation,
+                response,
+            }),
+        )),
+        _ => Ok((mode, Sent::Answered(answer_of(response).await))),
     }
 }
 
@@ -314,12 +314,24 @@ pub async fn acting<S: Storage>(
     agent: AgentId,
     note: NoteUse,
 ) -> Result<Acting, ApiError> {
+    if !state.config.agents.enabled {
+        return Err(ApiError::agents_disabled());
+    }
+    acting_on(state, &state.public_ports().await?, agent, note).await
+}
+
+/// `acting` on the request's `ports`.
+pub(crate) async fn acting_on<S: Storage>(
+    state: &SharedState<S>,
+    ports: &S::Ports<'_>,
+    agent: AgentId,
+    note: NoteUse,
+) -> Result<Acting, ApiError> {
     let agents = &state.config.agents;
     if !agents.enabled {
         return Err(ApiError::agents_disabled());
     }
-    let ports = state.public_ports().await?;
-    let found = match hypha_agents::active_agent(&ports, agent).await {
+    let found = match hypha_agents::active_agent(ports, agent).await {
         Ok(found) => found,
         Err(
             hypha_agents::CommandError::AgentDisabled(_)
@@ -328,11 +340,11 @@ pub async fn acting<S: Storage>(
         Err(e) => return Err(e.into()),
     };
     let role = match found.kind() {
-        AgentKind::Connected { user } => Some(role_of(&ports, user).await?),
+        AgentKind::Connected { user } => Some(role_of(ports, user).await?),
         AgentKind::Autonomous => None,
     };
     if note == NoteUse::Yes {
-        hypha_agents::record_agent_use(&ports, &found, state.clock.now()).await?;
+        hypha_agents::record_agent_use(ports, &found, state.clock.now()).await?;
     }
     let permissions = effective(found.grant(), agents.writes, role.as_deref());
     Ok(Acting {
@@ -530,17 +542,21 @@ async fn mint_token<S: Storage>(
 /// failure, and nothing is kept.
 async fn propose<S: Storage>(
     state: &SharedState<S>,
-    ctx: &Ctx,
-    operation: &Operation,
+    ports: &S::Ports<'_>,
     call: &OperationCall,
-    response: Response,
+    proposing: Proposing,
 ) -> Result<Answer, ApiError> {
+    let Proposing {
+        ctx,
+        operation,
+        response,
+    } = proposing;
+    let ctx = &ctx;
     let answer = answer_of(response).await;
     let (Some((ids, digest)), 200) = (answer.previewed.clone(), answer.status) else {
         return Ok(answer);
     };
     let preview = kept_preview(answer.body.get("preview"), &ids);
-    let ports = state.public_ports().await?;
     let input = Propose {
         operation: operation.id.as_str().to_string(),
         request: ProposalRequest {
@@ -555,7 +571,7 @@ async fn propose<S: Storage>(
     };
     let proposal = hypha_agents::create_proposal(
         ctx,
-        &ports,
+        ports,
         &state.ids,
         &state.clock,
         &state.config.agents.settings,
@@ -585,7 +601,7 @@ pub(crate) fn kept_preview(preview: Option<&Value>, ids: &[uuid::Uuid]) -> Value
 }
 
 /// A response as an `Answer`: its status and JSON body (`null` when empty or not JSON).
-pub(crate) async fn answer_of(response: Response) -> Answer {
+pub async fn answer_of(response: Response) -> Answer {
     let ids = response.extensions().get::<PreviewIds>().cloned();
     let digest = response.extensions().get::<PreviewDigest>().cloned();
     let previewed = match (ids, digest) {
@@ -608,6 +624,7 @@ pub(crate) async fn answer_of(response: Response) -> Answer {
 /// failure.
 async fn log<S: Storage>(
     state: &SharedState<S>,
+    ports: Option<&S::Ports<'_>>,
     agent: AgentId,
     operation: &OperationId,
     mode: CallMode,
@@ -628,12 +645,12 @@ async fn log<S: Storage>(
         duration_ms: u32::try_from(micros / 1000).unwrap_or(u32::MAX),
         at: now,
     };
-    let logged = match state.public_ports().await {
-        Ok(ports) => hypha_agents::record_call(&ports, &state.ids, call)
+    let logged = match ports {
+        Some(ports) => hypha_agents::record_call(ports, &state.ids, call)
             .await
             .map(|_| ())
             .map_err(|e| e.to_string()),
-        Err(_) => Err("no connection".to_string()),
+        None => Err("no connection".to_string()),
     };
     if let Err(error) = logged {
         tracing::warn!(%agent, %error, "an agent's call wasn't logged");

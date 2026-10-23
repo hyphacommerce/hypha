@@ -678,7 +678,9 @@ pub async fn approve<S: Storage>(
             let now = hypha_agents::get_proposal(&staff.ctx, &ports, id).await?;
             let now = ProposalResponse::new(&staff.ctx, &now, state.operations())?;
             let now = serde_json::to_value(&now).map_err(ApiError::internal)?;
-            return Err(ApiError::from(e).with_details(Some(serde_json::json!({ "proposal": now }))));
+            return Err(
+                ApiError::from(e).with_details(Some(serde_json::json!({ "proposal": now })))
+            );
         }
         Err(e) => return Err(e.into()),
     };

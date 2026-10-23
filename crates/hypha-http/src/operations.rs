@@ -220,7 +220,6 @@ impl Operations {
     pub fn iter(&self) -> impl Iterator<Item = &Operation> {
         self.by_id.values()
     }
-
 }
 
 /// One operation as the admin document describes it, for agents: each schema

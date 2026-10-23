@@ -1,5 +1,5 @@
 //! Agents: the staff routes that manage them and their proposals, and agents' calls of
-//! operations, which come only in process (`hypha_http::agents::call`, what `/mcp`
+//! operations, which come only in process (`hypha_http::agents::acting` and `call_as`, what `/mcp`
 //! sends): their credentials, kill switches, cap, allowlist, modes, the call log,
 //! proposals approved exactly as previewed, and redaction.
 
@@ -43,7 +43,12 @@ fn op(operation: &str, params: Value, body: Option<Value>, mode: Mode) -> Operat
 /// `agent` calls `call`, as `/mcp` would.
 async fn call(app: &TestApp, agent: &str, call: OperationCall) -> Answer {
     let agent: AgentId = agent.parse().unwrap();
-    hypha_http::agents::call(&app.state, agent, call).await
+    use axum::response::IntoResponse;
+    use hypha_http::agents::{NoteUse, acting, answer_of, call_as};
+    match acting(&app.state, agent, NoteUse::Yes).await {
+        Ok(acting) => call_as(&app.state, &acting, call).await,
+        Err(e) => answer_of(e.into_response()).await,
+    }
 }
 
 fn mug() -> Value {

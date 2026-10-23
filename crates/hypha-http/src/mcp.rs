@@ -2,10 +2,10 @@
 //!
 //! What an agent may see is the operations index (`operations.rs`) filtered by what it may
 //! do now (`agents::acting`: its grant under the operator's cap, within its staff
-//! member's role); what it calls goes through `agents::call`, which judges and logs every
+//! member's role); what it calls goes through `agents::call_as`, which judges and logs every
 //! call and sends it through the router in process. Nothing here decides a permission
-//! twice: `visible` only hides what `agents::call` would refuse anyway, and a call of a
-//! hidden operation that exists still reaches `agents::call`, so its refusal is the
+//! twice: `visible` only hides what `agents::call_as` would refuse anyway, and a call of a
+//! hidden operation that exists still reaches `agents::call_as`, so its refusal is the
 //! precise one (`agent_writes_off`, `operation_not_allowed`) and is logged.
 
 use std::sync::OnceLock;
@@ -125,7 +125,7 @@ impl<'a, S: Storage> AgentOperations<'a, S> {
         self.acting.agent.id()
     }
 
-    /// What the agent may do with `op` now, if anything: what `agents::call` will judge.
+    /// What the agent may do with `op` now, if anything: what `agents::call_as` will judge.
     fn mode_of(&self, op: &Operation) -> Option<Mode> {
         mode_for(
             &self.acting.permissions,
@@ -254,7 +254,7 @@ impl<S: Storage> Operations for AgentOperations<'_, S> {
 
     async fn call(&self, call: OperationCall) -> Result<OperationResult, McpError> {
         // Operations an agent can never call (a person's own, the public ones) don't
-        // exist for it; anything else goes to `agents::call`, which refuses precisely.
+        // exist for it; anything else goes to `agents::call_as`, which refuses precisely.
         let write = match self.state.operations().get(&call.operation) {
             Some(op) if op.for_agents() => op.write,
             _ => return Err(McpError::OperationNotFound(call.operation)),

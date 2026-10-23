@@ -27,7 +27,7 @@ use serde::Serialize;
 
 use super::oauth::Issuer;
 use crate::{
-    agents::{NoteUse, acting},
+    agents::{NoteUse, acting_on},
     error::ApiError,
     mcp::{AgentOperations, challenge, server},
     state::{SharedState, Storage},
@@ -157,6 +157,7 @@ fn unauthorized(e: ApiError, issuer: &str, error: Option<&str>) -> Response {
 /// agent's access token. `None` without a token; an `Err` for any other.
 async fn agent_of<S: Storage>(
     state: &SharedState<S>,
+    ports: &S::Ports<'_>,
     headers: &HeaderMap,
 ) -> Result<Option<AgentId>, ApiError> {
     let Some(value) = headers.get(AUTHORIZATION) else {
@@ -169,7 +170,6 @@ async fn agent_of<S: Storage>(
         return Err(invalid());
     }
     let token = token.trim();
-    let ports = state.public_ports().await?;
     let agent = match TokenKind::of(token) {
         Some(TokenKind::AgentKey) => {
             use hypha_auth::HasIdentities;
@@ -177,7 +177,7 @@ async fn agent_of<S: Storage>(
         }
         // An app's access token wasn't issued for `/mcp`: it's refused like any stranger.
         Some(TokenKind::AccessToken) => {
-            hypha_oauth::authenticate_agent_token(&ports, &state.clock, token).await?
+            hypha_oauth::authenticate_agent_token(ports, &state.clock, token).await?
         }
         _ => return Err(invalid()),
     };
@@ -230,7 +230,11 @@ async fn serve<S: Storage>(
     if !origin_allowed(&headers, issuer, state.config.server.admin_url.as_deref()) {
         return Err(ApiError::origin_not_allowed());
     }
-    let agent = match agent_of(state, &headers).await {
+    // One connection for the credential and the agent, let go before any tool call:
+    // the routed request takes its own, and holding this one meanwhile could leave a
+    // full pool waiting on itself.
+    let ports = state.public_ports().await?;
+    let agent = match agent_of(state, &ports, &headers).await {
         Ok(Some(agent)) => agent,
         Ok(None) => return Ok(unauthorized(ApiError::unauthenticated(), issuer, None)),
         Err(e) if e.status() == StatusCode::UNAUTHORIZED => {
@@ -239,7 +243,8 @@ async fn serve<S: Storage>(
         Err(e) => return Err(e),
     };
     // Found once per request: every tool call in it runs as this.
-    let acting = acting(state, agent, NoteUse::Yes).await?;
+    let acting = acting_on(state, &ports, agent, NoteUse::Yes).await?;
+    drop(ports);
     if !is_json(&headers) {
         return Err(ApiError::missing_content_type());
     }

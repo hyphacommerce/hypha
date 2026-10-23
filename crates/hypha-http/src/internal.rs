@@ -35,7 +35,7 @@ impl<S> Default for Internal<S> {
     }
 }
 
-/// An agent a request acts as, authenticated and checked (`agents::call`): its `Ctx`
+/// An agent a request acts as, authenticated and checked (`agents::call_as`): its `Ctx`
 /// (`Actor::Agent`, the scopes its permissions come to now). Only this crate makes one,
 /// and only in-process requests carry it.
 #[derive(Clone)]
