@@ -19,14 +19,14 @@ serde_json.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 # A spore's section of `hypha.config.toml`, as written.
-toml = "0.9"
+toml = "1.1"
 
 # `testing`: a `SporeHost` with deterministic ports, for spores' own tests.
 [features]
 testing = []
 
 [dev-dependencies]
-pollster = "0.4"
+pollster = "1.0"
 
 [lints]
 workspace = true

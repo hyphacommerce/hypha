@@ -12,7 +12,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 hypha-testkit = { path = "../hypha-testkit" }
-pollster = "0.4"
+pollster = "1.0"
 uuid.workspace = true
 
 [lints]

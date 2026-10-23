@@ -20,7 +20,7 @@ sha2 = { version = "0.11", default-features = false }
 [dev-dependencies]
 uuid.workspace = true
 hypha-testkit = { path = "../hypha-testkit" }
-pollster = "0.4"
+pollster = "1.0"
 
 [lints]
 workspace = true

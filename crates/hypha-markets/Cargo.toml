@@ -12,7 +12,7 @@ serde.workspace = true
 [dev-dependencies]
 uuid.workspace = true
 hypha-testkit = { path = "../hypha-testkit" }
-pollster = "0.4"
+pollster = "1.0"
 serde_json.workspace = true
 
 [lints]

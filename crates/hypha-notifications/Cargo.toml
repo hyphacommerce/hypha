@@ -17,7 +17,7 @@ thiserror.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 hypha-testkit = { path = "../hypha-testkit" }
-pollster = "0.4"
+pollster = "1.0"
 
 [lints]
 workspace = true

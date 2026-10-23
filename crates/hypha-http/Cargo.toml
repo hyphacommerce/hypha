@@ -59,13 +59,13 @@ sha2 = "0.11"
 tower = { version = "0.5.3", default-features = false, features = ["util"] }
 hmac = "0.13"
 jiff = "0.2"
-base64 = "0.22"
+base64 = "0.23"
 serde_html_form = "0.4.1"
 # The WHATWG URL parser (as reqwest uses): an IP literal is read as the address it connects to.
 url = "2.5"
 
 [dev-dependencies]
-pollster = "0.4"
+pollster = "1.0"
 
 [lints]
 workspace = true

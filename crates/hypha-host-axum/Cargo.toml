@@ -34,7 +34,7 @@ hypha-auth = { path = "../hypha-auth", optional = true }
 tower = { version = "0.5.3", features = ["util"], optional = true }
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
-tower-http = { version = "0.6", features = ["trace"] }
+tower-http = { version = "0.7", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { workspace = true, features = ["v7"] }
@@ -57,7 +57,7 @@ lettre = { version = "0.11.23", default-features = false, features = ["smtp-tran
 # `config rate-limits` prints JSON.
 serde_json.workspace = true
 # Spores' configuration sections (`[spores.<name>]`).
-toml = "0.9"
+toml = "1.1"
 
 [features]
 # The test host (`hypha_host_axum::testing`), for a spore's route tests.
@@ -77,7 +77,7 @@ hypha-products = { path = "../hypha-products" }
 jiff = "0.2"
 tower = { version = "0.5.3", features = ["util"] }
 # Reading apps' session tokens (JWTs) in the route tests.
-base64 = "0.22"
+base64 = "0.23"
 
 [lints]
 workspace = true
