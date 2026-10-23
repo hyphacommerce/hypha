@@ -24,7 +24,7 @@ The product is **Hypha**; its formal name, and the one identifier everywhere els
 
 | What | Name |
 | --- | --- |
-| Website | `hyphacommerce.com` (`hypha-commerce.com` redirects) |
+| Website | `hyphacommerce.com` (`hypha-commerce.com` to redirect, once there are sponsors) |
 | GitHub | `github.com/hyphacommerce` (`hypha`, `app-stripe`, `app-meilisearch`, `spore-stripe`, templates) |
 | npm | `@hyphacommerce/*` |
 | Images | `ghcr.io/hyphacommerce/*` |
@@ -134,11 +134,14 @@ When the spore API is stable, the whole set is published with release-plz, in lo
 | `hyphacommerce/spore-template`, `hyphacommerce/app-template` | minimal starting points (`cargo generate`, `cli create app`) |
 
 The admin and storefront stay in the main repository: CI tests them against the API at
-the same commit, and they change with it. The Stripe spore moves out after the first tag
-(until the spore API settles, a change to it would need matching pull requests in two
-repositories); core CI keeps covering spores through `test_spore.rs`, and the hosts'
-`spore-stripe` feature and `HYPHA_SPORES=stripe pnpm dev` give way to the CLI's host
-crate.
+the same commit, and they change with it. The Stripe spore moves out now, before the first
+tag, since showing a spore built outside was the point of it; until there's a tag it
+depends on `hypha`'s `main`, so a change to the spore API needs matching pull requests in
+both repositories. Its route tests go with it, on a public test harness
+(`hypha_host_axum::testing`, feature `testing`) that any spore author can use. Core CI
+keeps covering spores through `test_spore.rs`; the hosts' `spore-stripe` feature gives
+way to the CLI's host crate, and `HYPHA_SPORES=stripe pnpm dev` builds one from a
+`spore-stripe` checkout beside this one.
 
 ## 7. Starters: `cli create`
 
@@ -169,7 +172,7 @@ Written up for users in `docs/releases.md`:
    bought 2026-10-23.
 2. **Versions:** one version, one tag per release (§5).
 3. **crates.io:** not until the spore API is stable (§4.3).
-4. **Stripe spore:** its own repository, after the first tag (§6).
+4. **Stripe spore:** its own repository, now (§6).
 5. **Admin and storefront:** published as images and as starters through `cli create`;
    the SDKs published (§3, §4, §7).
 6. **License:** open; before the first publish.
@@ -184,4 +187,8 @@ Written up for users in `docs/releases.md`:
 4. R4: `release.yml`: the images (multi-arch), npm publish, the Workers bundle.
 5. R5: the CLI on prebuilt images (`--build-from-source` kept).
 6. R6: `cli create` for the storefront, admin and app, with the starter check in CI.
-7. R7: after the first tag, the Stripe spore to its own repository; the templates.
+7. R7: the templates (spore, app).
+
+The Stripe spore's move (§6) comes right after R1: the test harness, the repository split
+with its history, then removing it here (hosts, CI, scripts, the CLI's first-party
+spores, the docs).
