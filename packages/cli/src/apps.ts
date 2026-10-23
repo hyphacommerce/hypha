@@ -34,8 +34,8 @@ export type { AppEntry } from "./deployment.ts";
 
 /** The first-party apps, by name. */
 export const FIRST_PARTY: Record<string, string> = {
-  stripe: "git@github.com:invocation97/hypha-app-stripe.git",
-  meilisearch: "git@github.com:invocation97/hypha-app-meilisearch.git",
+  stripe: "git@github.com:hyphacommerce/app-stripe.git",
+  meilisearch: "git@github.com:hyphacommerce/app-meilisearch.git",
 };
 
 /** An app's name: a DNS label and part of resource names. `hypha` is the SDK's link. */

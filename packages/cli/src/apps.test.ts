@@ -65,22 +65,22 @@ function vps(): Deployment {
 
 const stripe = {
   name: "stripe",
-  git: "git@github.com:invocation97/hypha-app-stripe.git",
+  git: "git@github.com:hyphacommerce/app-stripe.git",
   rev: REV,
 };
 const meili = {
   name: "meilisearch",
-  git: "git@github.com:invocation97/hypha-app-meilisearch.git",
+  git: "git@github.com:hyphacommerce/app-meilisearch.git",
   rev: REV,
   domain: "search.example.com",
 };
 
 test("a first-party app's name stands for its repository, unpinned", () => {
   assert.deepEqual(normalizeApps(["stripe"], "hypha.json"), [
-    { name: "stripe", git: "git@github.com:invocation97/hypha-app-stripe.git" },
+    { name: "stripe", git: "git@github.com:hyphacommerce/app-stripe.git" },
   ]);
   assert.deepEqual(normalizeApps([{ name: "meilisearch", rev: REV }], "hypha.json"), [
-    { name: "meilisearch", git: "git@github.com:invocation97/hypha-app-meilisearch.git", rev: REV },
+    { name: "meilisearch", git: "git@github.com:hyphacommerce/app-meilisearch.git", rev: REV },
   ]);
 });
 
@@ -101,7 +101,7 @@ test("an app's domain in hypha.json is lowercased, and one that isn't a domain i
   assert.deepEqual(normalizeApps([{ name: "stripe", domain: " Pay.Example.COM " }], "hypha.json"), [
     {
       name: "stripe",
-      git: "git@github.com:invocation97/hypha-app-stripe.git",
+      git: "git@github.com:hyphacommerce/app-stripe.git",
       domain: "pay.example.com",
     },
   ]);
