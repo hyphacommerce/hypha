@@ -3,7 +3,7 @@
 // the browser never needs it. Never import this from a "use client" file.
 
 import { apiFetch } from "#api-fetch";
-import { type StorefrontSchemas, createStorefrontClient } from "@hypha/sdk/storefront";
+import { type StorefrontSchemas, createStorefrontClient } from "@hyphacommerce/sdk/storefront";
 import { unstable_cache } from "next/cache";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";

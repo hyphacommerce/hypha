@@ -14,7 +14,7 @@ import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { MagnifyingGlassIcon, PhotoIcon } from "@heroicons/react/24/outline";
 import { useEffect, useRef, useState, useTransition } from "react";
 

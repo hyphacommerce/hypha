@@ -13,7 +13,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { CheckIcon } from "@heroicons/react/24/solid";
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useRouter } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useState, useTransition } from "react";
 

@@ -17,7 +17,7 @@ import {
   isRecord,
   isResourceType,
   isToastTone,
-} from "@hypha/app-bridge/protocol";
+} from "@hyphacommerce/app-bridge/protocol";
 
 /** What the host needs of the iframe: its window. */
 export interface BridgeFrame {

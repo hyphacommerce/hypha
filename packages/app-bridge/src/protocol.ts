@@ -1,6 +1,6 @@
 // The bridge's wire protocol, version 1 (docs/apps/bridge.md): what an embedded app
-// page and the admin around it say over `postMessage`. Shared by `@hypha/app-bridge`
-// (the app's side) and `@hypha/app-bridge-host` (the admin's).
+// page and the admin around it say over `postMessage`. Shared by `@hyphacommerce/app-bridge`
+// (the app's side) and `@hyphacommerce/app-bridge-host` (the admin's).
 
 export const PROTOCOL_VERSION = 1;
 

@@ -10,7 +10,7 @@ import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { type FormEvent, type ReactNode, startTransition, useState, useTransition } from "react";
 
 import { DateTime } from "@/components/date-time";

@@ -2,7 +2,7 @@
 // can name, labels for statuses and operations, and the preview a proposal carries, read
 // from the API's untyped JSON into typed values. Shared by server and client components.
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { areaLabel, personalDataLabel } from "./apps";
 

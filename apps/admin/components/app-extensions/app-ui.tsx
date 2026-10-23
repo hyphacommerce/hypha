@@ -1,7 +1,7 @@
 "use client";
 
 // Apps' blocks and actions where staff work: a block is the app's UI tree rendered with
-// the admin's own components (`@hypha/app-blocks`), and its buttons and the app's
+// the admin's own components (`@hyphacommerce/app-blocks`), and its buttons and the app's
 // action buttons run through the admin's server. An action with an input schema asks
 // for its input first; one that names a payment point runs through the payment's route.
 
@@ -16,9 +16,9 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useToast } from "@astryxdesign/core/Toast";
-import type { BlockElement } from "@hypha/app-blocks";
-import { HyphaBlock } from "@hypha/app-blocks/react";
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { BlockElement } from "@hyphacommerce/app-blocks";
+import { HyphaBlock } from "@hyphacommerce/app-blocks/react";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 

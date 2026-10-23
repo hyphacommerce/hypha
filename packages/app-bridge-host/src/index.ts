@@ -1,4 +1,4 @@
-// @hypha/app-bridge-host: the admin's side of the app bridge.
+// @hyphacommerce/app-bridge-host: the admin's side of the app bridge.
 
 export {
   attachBridge,
@@ -12,4 +12,4 @@ export {
   type ResourceType,
   type ToastTone,
   type BridgeErrorCode,
-} from "@hypha/app-bridge/protocol";
+} from "@hyphacommerce/app-bridge/protocol";

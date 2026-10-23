@@ -12,7 +12,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { DateTime } from "@/components/date-time";
 

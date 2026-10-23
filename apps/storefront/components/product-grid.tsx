@@ -3,7 +3,7 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { Grid } from "@astryxdesign/core/Grid";
 import { VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
-import type { StorefrontSchemas } from "@hypha/sdk/storefront";
+import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 import { formatRange } from "@/lib/money";
 
 import { SiteLink as Link } from "./site-link";

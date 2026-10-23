@@ -1,4 +1,4 @@
-// @hypha/app-bridge: the app's side of the admin bridge.
+// @hyphacommerce/app-bridge: the app's side of the admin bridge.
 
 export {
   createBridge,

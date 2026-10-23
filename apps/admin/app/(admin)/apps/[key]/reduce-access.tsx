@@ -6,7 +6,7 @@ import { CheckboxList, CheckboxListItem } from "@astryxdesign/core/CheckboxList"
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useState, useTransition } from "react";
 
 import { isPersonalDataScope, personalDataLabel } from "@/lib/apps";

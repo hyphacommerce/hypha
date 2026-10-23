@@ -13,7 +13,7 @@ import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { type ElementEvent, HyphaElement } from "@hypha/storefront-elements/react";
+import { type ElementEvent, HyphaElement } from "@hyphacommerce/storefront-elements/react";
 import { createContext, useContext, useEffect, useMemo, useState, useTransition } from "react";
 
 import {

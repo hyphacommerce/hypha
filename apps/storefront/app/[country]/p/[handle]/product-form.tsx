@@ -19,7 +19,7 @@ import { SelectableCard } from "@astryxdesign/core/SelectableCard";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { MinusIcon, PlusIcon } from "@heroicons/react/24/outline";
-import type { StorefrontSchemas } from "@hypha/sdk/storefront";
+import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 import { startTransition, useState, useTransition } from "react";
 
 import { useCart } from "@/components/cart/cart-provider";

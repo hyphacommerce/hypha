@@ -3,7 +3,7 @@
 // `field[…]` list filters. Plain data and pure functions, shared by server pages and
 // client components.
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { type Currencies, moneyInput, parseMoney } from "./format";
 import { hasScope } from "./navigation";

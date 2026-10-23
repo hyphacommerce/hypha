@@ -25,7 +25,7 @@ pnpm admin:dev
 ## How it's put together
 
 - **The browser never talks to the API.** Server actions and server components call it
-  (`lib/hypha.ts`, through `@hypha/sdk`); the staff session lives in an `httpOnly`
+  (`lib/hypha.ts`, through `@hyphacommerce/sdk`); the staff session lives in an `httpOnly`
   cookie (`hypha_admin_session`) page scripts can't read.
 - **Login** (`app/login`): email and password, then a code page when 2FA is on.
 - **Signed-in pages** live in `app/(admin)`; its layout checks the session on every

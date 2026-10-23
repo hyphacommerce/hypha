@@ -3,7 +3,7 @@
 // the API. Never import this from a "use client" file.
 
 import { apiFetch } from "#api-fetch";
-import { type AdminSchemas, type ApiError, createAdminClient } from "@hypha/sdk/admin";
+import { type AdminSchemas, type ApiError, createAdminClient } from "@hyphacommerce/sdk/admin";
 import { cookies, headers } from "next/headers";
 import { forbidden, notFound, redirect } from "next/navigation";
 

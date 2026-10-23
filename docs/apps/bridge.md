@@ -2,8 +2,8 @@
 
 How an app's embedded page (design note 0029, §6.3) and the admin around it talk. The
 page runs in an iframe; the two sides exchange `postMessage` messages. Either side can be
-written without our packages: `@hypha/app-bridge` (inside the app) and
-`@hypha/app-bridge-host` (in the admin) implement exactly what this page says.
+written without our packages: `@hyphacommerce/app-bridge` (inside the app) and
+`@hyphacommerce/app-bridge-host` (in the admin) implement exactly what this page says.
 
 ## The iframe
 
@@ -139,7 +139,7 @@ webhooks with), valid for one minute:
 
 The app's page sends it to the app's backend (an `Authorization: Bearer` header), which
 verifies it with `verifySessionToken(token, appSecret, { audience: "app_stripe" })` from
-`@hypha/app`: the algorithm must be `HS256` (never `none`), the signature must match,
+`@hyphacommerce/app`: the algorithm must be `HS256` (never `none`), the signature must match,
 `exp` must be in the future and `aud` must be the app. Ask for a new token per call
 rather than keeping one.
 
@@ -148,7 +148,7 @@ rather than keeping one.
 Inside the app:
 
 ```ts
-import { createBridge } from "@hypha/app-bridge";
+import { createBridge } from "@hyphacommerce/app-bridge";
 
 const bridge = createBridge({ hostOrigin: adminOrigin, autoResize: true });
 const token = await bridge.getSessionToken();
@@ -160,7 +160,7 @@ const [productId] = await bridge.openResourcePicker({ type: "product" });
 In an admin:
 
 ```ts
-import { attachBridge } from "@hypha/app-bridge-host";
+import { attachBridge } from "@hyphacommerce/app-bridge-host";
 
 const detach = attachBridge(iframe, {
   appOrigin: new URL(iframe.src).origin,

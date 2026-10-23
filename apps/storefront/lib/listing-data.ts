@@ -2,7 +2,7 @@
 // search pages render it on the server, and the listing's server action reads it when
 // a static category page is filtered in the browser.
 
-import type { StorefrontPaths, StorefrontSchemas } from "@hypha/sdk/storefront";
+import type { StorefrontPaths, StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 import { unstable_cache } from "next/cache";
 
 import { api } from "./api";

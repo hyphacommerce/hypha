@@ -1,7 +1,7 @@
 // The category tree as the admin's screens use it: the API's nested tree flattened
 // into rows, with the paths pickers show. Shared by server and client components.
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 export type CategoryNode = AdminSchemas["CategoryNode"];
 

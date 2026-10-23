@@ -58,7 +58,7 @@ export function HyphaBlock({ tree, onAction, onNavigate }: HyphaBlockProps) {
 function warn(message: string) {
   // Development only: an older host meeting a newer element is expected in production.
   if (typeof process !== "undefined" && process.env.NODE_ENV === "production") return;
-  console.warn(`[@hypha/app-blocks] ${message}`);
+  console.warn(`[@hyphacommerce/app-blocks] ${message}`);
 }
 
 const STACK_GAP = { 0: 0, 1: 1, 2: 2, 3: 3, 4: 4 } as const;

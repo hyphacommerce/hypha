@@ -8,7 +8,7 @@
 import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 
-import type { StorefrontSchemas } from "@hypha/sdk/storefront";
+import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
 import { type ActionResult } from "@/app/[country]/actions";
 import { accountApi, forgetSession, rememberSession, sessionToken } from "@/lib/account";

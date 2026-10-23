@@ -99,17 +99,17 @@ jobs:
       - run: pnpm spores:check
       # The default email templates and their contract with the API.
       - run: pnpm emails:check
-      - run: pnpm --filter @hypha/emails test
+      - run: pnpm --filter @hyphacommerce/emails test
       # The apps platform's packages: the SDK (and its extension types against
       # openapi/extensions.json), the bridge, blocks and storefront elements.
-      - run: pnpm --filter @hypha/app check
-      - run: pnpm --filter @hypha/app test
-      - run: pnpm --filter @hypha/app-bridge test
-      - run: pnpm --filter @hypha/app-bridge-host test
-      - run: pnpm --filter @hypha/app-blocks test
-      - run: pnpm --filter @hypha/storefront-elements test
+      - run: pnpm --filter @hyphacommerce/app check
+      - run: pnpm --filter @hyphacommerce/app test
+      - run: pnpm --filter @hyphacommerce/app-bridge test
+      - run: pnpm --filter @hyphacommerce/app-bridge-host test
+      - run: pnpm --filter @hyphacommerce/app-blocks test
+      - run: pnpm --filter @hyphacommerce/storefront-elements test
       # The deploy CLI, and the apps' plain helpers.
-      - run: pnpm --filter @hypha/cli test
+      - run: pnpm --filter @hyphacommerce/cli test
       - run: pnpm --filter admin test
       - run: pnpm --filter storefront test
       - run: pnpm --filter admin theme:check

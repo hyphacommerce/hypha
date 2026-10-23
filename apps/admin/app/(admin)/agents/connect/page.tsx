@@ -7,7 +7,7 @@ import { Link } from "@astryxdesign/core/Link";
 import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 import { CpuChipIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { Suspense } from "react";
 
 import { DateTime } from "@/components/date-time";

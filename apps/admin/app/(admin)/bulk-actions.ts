@@ -5,7 +5,7 @@
 // its own call, a few at a time, and every failure is reported with the row it
 // belongs to.
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { revalidatePath } from "next/cache";
 
 import { describe, sessionClient } from "@/lib/hypha";

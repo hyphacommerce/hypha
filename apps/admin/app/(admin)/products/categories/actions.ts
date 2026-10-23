@@ -1,6 +1,6 @@
 "use server";
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 

@@ -1,5 +1,5 @@
 {
-  "name": "@hypha/cli",
+  "name": "@hyphacommerce/cli",
   "version": "0.1.0",
   "private": true,
   "description": "Hosting Hypha: `hypha init` writes a deployment, `hypha deploy` runs it on a server or on Cloudflare Workers, with the apps `hypha apps` lists beside it.",

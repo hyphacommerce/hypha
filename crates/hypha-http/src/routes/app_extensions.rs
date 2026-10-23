@@ -14,7 +14,7 @@
 //!
 //! Calls Hypha forwards to an app (blocks, the proxy) carry `Hypha-Signature` over the
 //! body, as every call, and `Hypha-Context-Signature` over the method and the `Hypha-*`
-//! context headers (`outbound::context_signature`; `@hypha/app`'s
+//! context headers (`outbound::context_signature`; `@hyphacommerce/app`'s
 //! `verifyForwardedRequest`). The context is IDs only: staff IDs, customer and cart IDs
 //! aren't personal data, and no name, email, phone or address is forwarded.
 
@@ -729,7 +729,7 @@ pub async fn origins<S: Storage>(
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct SessionTokenResponse {
     /// A JWT (HS256, the app's secret): pass it to the app through the bridge's
-    /// `session_token` answer. The app verifies it with `@hypha/app`'s
+    /// `session_token` answer. The app verifies it with `@hyphacommerce/app`'s
     /// `verifySessionToken` (`docs/apps/bridge.md`).
     token: String,
     /// A minute from now (RFC 3339): ask for a new one per call.
@@ -951,7 +951,7 @@ pub struct BlockResponse {
     app: String,
     id: String,
     target: AdminTarget,
-    /// `{version: 1, root}`: render it with your own components (`@hypha/app-blocks`
+    /// `{version: 1, root}`: render it with your own components (`@hyphacommerce/app-blocks`
     /// for React). Elements of types newer than v1 may appear: skip them.
     #[schema(value_type = Object)]
     tree: serde_json::Value,

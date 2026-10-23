@@ -4,7 +4,7 @@
 // module in the browser, with its props set as properties. A failure to load shows
 // nothing: an app's block never breaks the page.
 
-import { HyphaElement } from "@hypha/storefront-elements/react";
+import { HyphaElement } from "@hyphacommerce/storefront-elements/react";
 
 export function AppElements({
   elements,

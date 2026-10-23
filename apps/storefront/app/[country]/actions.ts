@@ -11,7 +11,7 @@ import { refresh } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-import type { StorefrontSchemas } from "@hypha/sdk/storefront";
+import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
 import { api, describe, loadCountries, shopperApi } from "@/lib/api";
 import { type ListingPage, readListingPage } from "@/lib/listing-data";

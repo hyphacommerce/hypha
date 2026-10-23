@@ -4,7 +4,7 @@ How an app puts UI into a storefront it doesn't control (design note 0029, §7).
 storefront is the merchant's own code, in any framework, so an app's storefront UI is a
 **custom element** (a web component) in an ES module the app hosts. The storefront finds
 it through the API, loads it, places it, and listens to its events.
-`@hypha/storefront-elements` does the loading and wiring; this page is the contract on
+`@hyphacommerce/storefront-elements` does the loading and wiring; this page is the contract on
 both sides, so either can be written without it.
 
 ## Discovery
@@ -150,7 +150,7 @@ Later versions may add events; storefronts ignore ones they don't know.
 Without a framework:
 
 ```ts
-import { loadElement, mountElement, on } from "@hypha/storefront-elements";
+import { loadElement, mountElement, on } from "@hyphacommerce/storefront-elements";
 
 await loadElement({ module, tag });                       // imports once, waits for the tag
 const element = mountElement(container, { tag, props });  // props set as properties
@@ -166,7 +166,7 @@ the tag within ten seconds. Its errors are `ElementLoadError` with a `code`
 In React:
 
 ```tsx
-import { HyphaElement } from "@hypha/storefront-elements/react";
+import { HyphaElement } from "@hyphacommerce/storefront-elements/react";
 
 <HyphaElement
   tag={action.element}

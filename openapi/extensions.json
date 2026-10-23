@@ -1215,7 +1215,7 @@
             "description": "The answer (any 2xx)."
           },
           "default": {
-            "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+            "description": "A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
           }
         },
         "summary": "Run one of the app's admin actions, pressed by staff.",
@@ -1304,7 +1304,7 @@
             "description": "The answer (any 2xx)."
           },
           "default": {
-            "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+            "description": "A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
           }
         },
         "summary": "Capture an authorized payment (staff).",
@@ -1393,7 +1393,7 @@
             "description": "The answer (any 2xx)."
           },
           "default": {
-            "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+            "description": "A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
           }
         },
         "summary": "Refund some or all of a captured payment (staff).",
@@ -1482,7 +1482,7 @@
             "description": "The answer (any 2xx)."
           },
           "default": {
-            "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+            "description": "A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
           }
         },
         "summary": "Start paying for a cart at checkout, before its order exists: what the buyer does next.",
@@ -1571,7 +1571,7 @@
             "description": "The answer (any 2xx)."
           },
           "default": {
-            "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+            "description": "A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
           }
         },
         "summary": "Say where a payment the app started is, when the shopper says they paid before the app reported it.",
@@ -1660,7 +1660,7 @@
             "description": "The answer (any 2xx)."
           },
           "default": {
-            "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+            "description": "A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
           }
         },
         "summary": "Void a payment that wasn't captured (staff).",
@@ -1749,7 +1749,7 @@
             "description": "The answer (any 2xx)."
           },
           "default": {
-            "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+            "description": "A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
           }
         },
         "summary": "Answer a storefront search with product and variant IDs in order.",
@@ -1838,7 +1838,7 @@
             "description": "The answer (any 2xx)."
           },
           "default": {
-            "description": "A failure. Apps built on `@hypha/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+            "description": "A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
           }
         },
         "summary": "Price a cart's shipping group.",

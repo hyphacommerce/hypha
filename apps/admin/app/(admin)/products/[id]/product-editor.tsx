@@ -1,6 +1,6 @@
 "use client";
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { type ReactNode, useEffect, useState, useTransition } from "react";
 
 import { useCurrencies } from "@/components/currencies";

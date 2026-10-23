@@ -10,7 +10,7 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 
-import type { StorefrontSchemas } from "@hypha/sdk/storefront";
+import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
 import { AppElements } from "@/components/app-element";
 import { lineImage } from "@/components/line-image";

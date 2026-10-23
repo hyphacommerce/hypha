@@ -4,7 +4,7 @@
 
 import { cookies } from "next/headers";
 
-import type { StorefrontSchemas } from "@hypha/sdk/storefront";
+import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
 import { api } from "./api";
 

@@ -6,7 +6,7 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { type FormEvent, startTransition, useActionState, useState } from "react";
 
 import { NewPasswordFields, fieldText, newPasswordProblem } from "@/components/new-password";

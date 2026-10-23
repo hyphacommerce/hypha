@@ -1,6 +1,6 @@
 // The extension points' request and response bodies by name. The contract is
 // hypha-extensions' DTOs, published as `openapi/extensions.json` and generated into
-// `generated/extensions.ts` (`pnpm --filter @hypha/app generate`); these names alias
+// `generated/extensions.ts` (`pnpm --filter @hyphacommerce/app generate`); these names alias
 // the generated types, so they can't drift from what Hypha sends.
 
 import type { components } from "./generated/extensions.ts";

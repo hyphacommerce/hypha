@@ -8,7 +8,7 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { type TableColumn, pixel } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { ClockIcon } from "@heroicons/react/24/outline";
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { DateTime } from "@/components/date-time";
 import { ResourceTable } from "@/components/resource-table/resource-table";

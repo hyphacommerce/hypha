@@ -3,7 +3,7 @@
 // preset it matches: flat, free from an amount, tiers by subtotal or by weight. Shared
 // by server and client components.
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { type Currencies, formatMoney, moneyInput, parseMoney } from "./format";
 

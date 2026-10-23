@@ -41,7 +41,7 @@ Fetch each block's tree from your server:
 `GET /admin/app-extensions/blocks/{app}/{id}?order_id=…&payment_id=…` answers
 `{app, id, target, tree}` with `tree` checked against the block format v1
 (`packages/app-blocks/schema/block.v1.json`). Render it with your own components:
-`@hypha/app-blocks/react`'s `<HyphaBlock tree onAction onNavigate>` does it on Astryx,
+`@hyphacommerce/app-blocks/react`'s `<HyphaBlock tree onAction onNavigate>` does it on Astryx,
 and any other design system needs a renderer for about fifteen elements.
 
 - Fetch blocks in parallel and never let one break the page: a `502 app_unavailable`
@@ -61,7 +61,7 @@ Load the page's `url` in
         sandbox="allow-scripts allow-forms allow-same-origin allow-popups"></iframe>
 ```
 
-and answer it with `@hypha/app-bridge-host` (protocol: [bridge.md](bridge.md)):
+and answer it with `@hyphacommerce/app-bridge-host` (protocol: [bridge.md](bridge.md)):
 
 ```ts
 const detach = attachBridge(iframe, {

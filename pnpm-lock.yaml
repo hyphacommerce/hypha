@@ -205,13 +205,13 @@ importers:
       '@heroicons/react':
         specifier: 2.2.0
         version: 2.2.0(react@19.3.1)
-      '@hypha/app-blocks':
+      '@hyphacommerce/app-blocks':
         specifier: workspace:*
         version: link:../../packages/app-blocks
-      '@hypha/app-bridge-host':
+      '@hyphacommerce/app-bridge-host':
         specifier: workspace:*
         version: link:../../packages/app-bridge-host
-      '@hypha/sdk':
+      '@hyphacommerce/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
       '@lexical/code':
@@ -323,13 +323,13 @@ importers:
       '@heroicons/react':
         specifier: 2.2.0
         version: 2.2.0(react@19.3.1)
-      '@hypha/app':
+      '@hyphacommerce/app':
         specifier: workspace:*
         version: link:../../packages/app
-      '@hypha/sdk':
+      '@hyphacommerce/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
-      '@hypha/storefront-elements':
+      '@hyphacommerce/storefront-elements':
         specifier: workspace:*
         version: link:../../packages/storefront-elements
       '@stylexjs/stylex':
@@ -387,7 +387,7 @@ importers:
 
   packages/app:
     dependencies:
-      '@hypha/sdk':
+      '@hyphacommerce/sdk':
         specifier: workspace:*
         version: link:../sdk
       openapi-fetch:
@@ -451,7 +451,7 @@ importers:
 
   packages/app-bridge-host:
     dependencies:
-      '@hypha/app-bridge':
+      '@hyphacommerce/app-bridge':
         specifier: workspace:*
         version: link:../app-bridge
     devDependencies:

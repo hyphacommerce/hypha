@@ -703,7 +703,7 @@ fn point_operation(point: &PointDoc) -> Operation {
             "default",
             ResponseBuilder::new()
                 .description(
-                    "A failure. Apps built on `@hypha/app` answer `{code, error}` \
+                    "A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` \
                      (`invalid_signature`, `unknown_extension`, `unsupported_version`, \
                      `invalid_request`, `handler_failed`); the code is kept in the call log.",
                 )

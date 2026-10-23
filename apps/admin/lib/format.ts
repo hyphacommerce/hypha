@@ -1,7 +1,7 @@
 // Display formats shared by server and client components. Fixed locale and time zone,
 // so the server's render and the browser's agree.
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 type Money = AdminSchemas["Money"];
 

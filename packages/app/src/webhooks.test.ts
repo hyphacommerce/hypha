@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { signRequest } from "./signature.ts";
 import { webhookHandler, type WebhookContext, type WebhookEnvelope } from "./webhooks.ts";

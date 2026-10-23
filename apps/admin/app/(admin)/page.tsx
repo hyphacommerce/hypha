@@ -10,7 +10,7 @@ import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Text } from "@astryxdesign/core/Text";
 import { CheckCircleIcon as CheckCircleOutline } from "@heroicons/react/24/outline";
 import { CheckCircleIcon } from "@heroicons/react/24/solid";
-import type { AdminPaths, AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminPaths, AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { Suspense } from "react";
 
 import { DateTime } from "@/components/date-time";

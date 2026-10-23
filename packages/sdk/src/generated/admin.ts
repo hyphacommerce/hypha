@@ -3916,7 +3916,7 @@ export interface components {
             id: string;
             target: components["schemas"]["AdminTarget"];
             /**
-             * @description `{version: 1, root}`: render it with your own components (`@hypha/app-blocks`
+             * @description `{version: 1, root}`: render it with your own components (`@hyphacommerce/app-blocks`
              *     for React). Elements of types newer than v1 may appear: skip them.
              */
             tree: Record<string, never>;
@@ -6717,7 +6717,7 @@ export interface components {
             expires_at: string;
             /**
              * @description A JWT (HS256, the app's secret): pass it to the app through the bridge's
-             *     `session_token` answer. The app verifies it with `@hypha/app`'s
+             *     `session_token` answer. The app verifies it with `@hyphacommerce/app`'s
              *     `verifySessionToken` (`docs/apps/bridge.md`).
              */
             token: string;

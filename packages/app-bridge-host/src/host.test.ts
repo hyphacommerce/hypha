@@ -1,11 +1,11 @@
-// Both sides together: @hypha/app-bridge in the fake iframe, this package in the admin.
+// Both sides together: @hyphacommerce/app-bridge in the fake iframe, this package in the admin.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { BridgeError, createBridge } from "@hypha/app-bridge";
-import type { Envelope, ResponseEnvelope } from "@hypha/app-bridge/protocol";
-import { fakeFrame, flush } from "@hypha/app-bridge/testing";
+import { BridgeError, createBridge } from "@hyphacommerce/app-bridge";
+import type { Envelope, ResponseEnvelope } from "@hyphacommerce/app-bridge/protocol";
+import { fakeFrame, flush } from "@hyphacommerce/app-bridge/testing";
 
 import { type AttachOptions, BridgeHostError, attachBridge } from "./host.ts";
 

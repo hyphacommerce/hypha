@@ -1,7 +1,7 @@
 //! Session tokens for apps' embedded admin pages: a JWT, HS256 under the app's secret, a
 //! minute long, its audience the app. The admin asks for one (`POST
 //! /admin/app-extensions/{app}/session`) and hands it to the app through the bridge; the
-//! app verifies it with `@hypha/app`'s `verifySessionToken` (`docs/apps/bridge.md`). The
+//! app verifies it with `@hyphacommerce/app`'s `verifySessionToken` (`docs/apps/bridge.md`). The
 //! tests below and that package's share a vector.
 
 use serde::Serialize;

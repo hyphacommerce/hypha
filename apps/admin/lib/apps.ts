@@ -1,7 +1,7 @@
 // How the admin labels apps: how each got here, whether it runs, and which of its
 // scopes reach customers' personal data.
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 type App = AdminSchemas["AppResponse"];
 

@@ -1,7 +1,7 @@
 // Test support: an admin window and an app window in its iframe, wired like a browser's
 // `postMessage` (asynchronous, structured-cloned, delivered only when the target origin
-// matches, with the sender's origin and window). Shared with @hypha/app-bridge-host's
-// tests, and exported as `@hypha/app-bridge/testing` for apps testing their own pages.
+// matches, with the sender's origin and window). Shared with @hyphacommerce/app-bridge-host's
+// tests, and exported as `@hyphacommerce/app-bridge/testing` for apps testing their own pages.
 
 type Listener = (event: MessageEvent) => void;
 

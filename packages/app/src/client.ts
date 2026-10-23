@@ -5,7 +5,7 @@
 // Object), and the refresh inside reads the tokens again first, so the process that
 // waited uses the pair the other one stored.
 
-import type { AdminPaths } from "@hypha/sdk/admin";
+import type { AdminPaths } from "@hyphacommerce/sdk/admin";
 import createClient from "openapi-fetch";
 
 import { refresh, type TokenSet } from "./oauth.ts";
@@ -75,7 +75,7 @@ export class NotInstalledError extends Error {
 export class HyphaClient {
   readonly apiUrl: string;
   readonly manifestUrl: string;
-  /** The admin API, typed from `@hypha/sdk`'s OpenAPI types, authenticated as the app. */
+  /** The admin API, typed from `@hyphacommerce/sdk`'s OpenAPI types, authenticated as the app. */
   readonly admin: ReturnType<typeof createClient<AdminPaths>>;
   readonly #tokens: TokenStore;
   readonly #fetch: typeof globalThis.fetch;

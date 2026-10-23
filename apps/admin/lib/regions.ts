@@ -1,7 +1,7 @@
 // Countries as the admin shows them: a flag and the local name (`Intl.DisplayNames`),
 // falling back to the API's English name. Shared by server and client components.
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 export type Country = AdminSchemas["CountryResponse"];
 

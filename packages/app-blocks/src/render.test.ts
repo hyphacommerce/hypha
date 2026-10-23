@@ -97,7 +97,7 @@ test("an unknown element warns in development", () => {
   } finally {
     console.warn = original;
   }
-  assert.deepEqual(warnings, ['[@hypha/app-blocks] unknown element type "chart": skipped']);
+  assert.deepEqual(warnings, ['[@hyphacommerce/app-blocks] unknown element type "chart": skipped']);
 });
 
 test("another version renders nothing", () => {

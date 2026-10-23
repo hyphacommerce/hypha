@@ -24,7 +24,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { PencilSquareIcon, PlusIcon, TrashIcon, UserGroupIcon } from "@heroicons/react/24/outline";
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 

@@ -12,7 +12,7 @@
 // deliveries in the admin instead of silently stale pages.
 
 import { revalidatePath, revalidateTag } from "next/cache";
-import { verifySignature } from "@hypha/app/signature";
+import { verifySignature } from "@hyphacommerce/app/signature";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { api, loadCategories, loadCountries } from "@/lib/api";

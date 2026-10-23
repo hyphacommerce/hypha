@@ -1,6 +1,6 @@
 import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { Suspense } from "react";
 
 import { PageHeader } from "@/components/page-header";

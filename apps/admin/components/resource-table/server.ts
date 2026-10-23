@@ -1,7 +1,7 @@
 // Server-only: reading a list page's URL into an API query, and its answer into a
 // page. Never import this from a "use client" file.
 
-import type { ApiError } from "@hypha/sdk/admin";
+import type { ApiError } from "@hyphacommerce/sdk/admin";
 import { forbidden, redirect } from "next/navigation";
 
 import { describe, isMissingScope } from "@/lib/hypha";

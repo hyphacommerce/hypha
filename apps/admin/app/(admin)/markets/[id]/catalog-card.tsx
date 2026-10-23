@@ -15,7 +15,7 @@ import {
   TableRow,
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { TrashIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 

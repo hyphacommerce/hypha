@@ -5,7 +5,7 @@
 // an app's action. Each goes through the admin's server, so the staff session never
 // reaches the browser's JavaScript or an app.
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { revalidatePath } from "next/cache";
 
 import { appPagePath, loadExtensions } from "@/lib/app-extensions";

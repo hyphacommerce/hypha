@@ -1,14 +1,14 @@
 "use client";
 
 // An app's embedded page (docs/apps/bridge.md): the app's own URL in a sandboxed
-// iframe, answered through `@hypha/app-bridge-host`. Session tokens come from the
+// iframe, answered through `@hyphacommerce/app-bridge-host`. Session tokens come from the
 // admin's server (the staff session never reaches the app), navigation stays within
 // the app's page here, toasts are the admin's, the product picker is the admin's own,
 // and the frame takes the page's height.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { useToast } from "@astryxdesign/core/Toast";
-import { BridgeHostError, attachBridge } from "@hypha/app-bridge-host";
+import { BridgeHostError, attachBridge } from "@hyphacommerce/app-bridge-host";
 import { useRouter } from "next/navigation";
 import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from "react";
 

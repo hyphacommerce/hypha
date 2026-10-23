@@ -13,7 +13,7 @@ import {
   TableRow,
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { type ReactNode, Suspense } from "react";
 
 import { Link } from "@astryxdesign/core/Link";

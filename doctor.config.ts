@@ -7,7 +7,12 @@
 import { defineConfig } from "react-doctor/api";
 
 export default defineConfig({
-  projects: ["admin", "storefront", "@hypha/app-blocks", "@hypha/storefront-elements"],
+  projects: [
+    "admin",
+    "storefront",
+    "@hyphacommerce/app-blocks",
+    "@hyphacommerce/storefront-elements",
+  ],
   noScore: true,
   share: false,
   supplyChain: { enabled: false },

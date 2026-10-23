@@ -1,6 +1,6 @@
 "use server";
 
-import type { AdminSchemas, ApiError } from "@hypha/sdk/admin";
+import type { AdminSchemas, ApiError } from "@hyphacommerce/sdk/admin";
 import { revalidatePath } from "next/cache";
 
 import { describe, sessionClient } from "@/lib/hypha";

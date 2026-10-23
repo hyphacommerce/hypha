@@ -2,7 +2,7 @@
 // target. Cached like the store's details (no cookies, so static pages may read it); an
 // API that can't answer means no elements, never a broken page.
 
-import type { StorefrontSchemas } from "@hypha/sdk/storefront";
+import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 import { unstable_cache } from "next/cache";
 import { cache } from "react";
 

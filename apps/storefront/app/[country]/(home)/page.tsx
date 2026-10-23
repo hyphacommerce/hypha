@@ -8,7 +8,7 @@ import { Section } from "@astryxdesign/core/Section";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { ArrowRightIcon } from "@heroicons/react/20/solid";
-import type { StorefrontSchemas } from "@hypha/sdk/storefront";
+import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
 import { ProductGrid } from "@/components/product-grid";
 import { countryOf, loadCategories, loadStore } from "@/lib/api";

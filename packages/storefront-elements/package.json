@@ -1,5 +1,5 @@
 {
-  "name": "@hypha/storefront-elements",
+  "name": "@hyphacommerce/storefront-elements",
   "version": "0.1.0",
   "private": true,
   "description": "Loading apps' storefront elements (web components) into any storefront (docs/apps/elements.md): a loader, the documented events, and a React wrapper.",

@@ -5,7 +5,7 @@ import { CheckboxList, CheckboxListItem } from "@astryxdesign/core/CheckboxList"
 import { VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
 import { Text } from "@astryxdesign/core/Text";
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import type { Draft } from "./draft";
 

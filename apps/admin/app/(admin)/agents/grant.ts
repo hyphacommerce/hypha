@@ -1,7 +1,7 @@
 // An agent's grant as the admin's forms edit it, and back into what the API takes. Plain
 // functions, so server pages (the consent page's preset) and client forms share them.
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import type { WriteMode } from "@/lib/agents";
 

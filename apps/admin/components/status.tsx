@@ -1,7 +1,7 @@
 // Badges for the API's statuses, one place so every page colours them alike.
 
 import { Badge } from "@astryxdesign/core/Badge";
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 const PRODUCT: Record<
   AdminSchemas["ProductStatus"],

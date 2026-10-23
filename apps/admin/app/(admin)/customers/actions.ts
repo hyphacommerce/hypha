@@ -3,7 +3,7 @@
 // What the customer pages ask the API: the customer's own fields, the address book, the
 // labels in use, and the well-known fields' creation.
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { revalidatePath } from "next/cache";
 
 import { describe, sessionClient } from "@/lib/hypha";

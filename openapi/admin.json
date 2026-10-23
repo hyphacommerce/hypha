@@ -1545,7 +1545,7 @@
             "$ref": "#/components/schemas/AdminTarget"
           },
           "tree": {
-            "description": "`{version: 1, root}`: render it with your own components (`@hypha/app-blocks`\nfor React). Elements of types newer than v1 may appear: skip them.",
+            "description": "`{version: 1, root}`: render it with your own components (`@hyphacommerce/app-blocks`\nfor React). Elements of types newer than v1 may appear: skip them.",
             "type": "object"
           }
         },
@@ -9340,7 +9340,7 @@
             "type": "string"
           },
           "token": {
-            "description": "A JWT (HS256, the app's secret): pass it to the app through the bridge's\n`session_token` answer. The app verifies it with `@hypha/app`'s\n`verifySessionToken` (`docs/apps/bridge.md`).",
+            "description": "A JWT (HS256, the app's secret): pass it to the app through the bridge's\n`session_token` answer. The app verifies it with `@hyphacommerce/app`'s\n`verifySessionToken` (`docs/apps/bridge.md`).",
             "type": "string"
           }
         },

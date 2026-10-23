@@ -4,7 +4,7 @@
 // renders them in place (chips under the name, a note card) when they exist with the
 // shape it expects. Safe for client components: types and pure functions only.
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import type { Definition } from "./custom-fields";
 

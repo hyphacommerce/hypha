@@ -2,7 +2,7 @@
 // (`GET /admin/app-extensions`, every admin target), shared by the page and its parts;
 // the targets are picked from it here.
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { unstable_rethrow } from "next/navigation";
 
 import { perRequest, sessionClient } from "./hypha";

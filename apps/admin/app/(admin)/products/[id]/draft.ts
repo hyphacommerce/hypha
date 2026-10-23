@@ -2,7 +2,7 @@
 // lands here first, and one Save sends it. Plain data and pure functions, shared by the
 // editor's cards and the save action's input.
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { type Currencies, moneyInput, parseMoney } from "@/lib/format";
 

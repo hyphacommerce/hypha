@@ -3,7 +3,7 @@
 // What the product picker (`product-picker.tsx`) reads: a page of products as the
 // products list sees them, and one product's variants for picks that need a variant.
 
-import type { AdminSchemas } from "@hypha/sdk/admin";
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { sessionClient } from "@/lib/hypha";
 

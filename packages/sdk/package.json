@@ -1,5 +1,5 @@
 {
-  "name": "@hypha/sdk",
+  "name": "@hyphacommerce/sdk",
   "version": "0.1.0",
   "private": true,
   "description": "Typed clients for the Hypha admin and storefront APIs, generated from openapi/.",

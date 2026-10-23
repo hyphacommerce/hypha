@@ -1,4 +1,4 @@
-// @hypha/app: the SDK for Hypha app authors.
+// @hyphacommerce/app: the SDK for Hypha app authors.
 
 export * from "./manifest.ts";
 export {
