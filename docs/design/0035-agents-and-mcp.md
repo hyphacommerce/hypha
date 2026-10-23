@@ -877,7 +877,7 @@ tools' names have no dots and are unchanged.
   events read the same (`product.updated` names the fields changed, not their old
   values, so an approval after the owner retitled the product overwrote the owner's
   title). Recorded in Postgres, not in each adapter's write path: the trigger
-  `hypha_note_write` (migration 0074) on every aggregate's table (a test holds every
+  `hypha_note_write` (migration 0073) on every aggregate's table (a test holds every
   table with a bigint `version` to it) logs table, key and the version found into the
   transaction-local setting `hypha.writes`, only while `hypha.log_writes` is on (previews
   and applies set it), so a write rolled back to its savepoint takes its line with it, as
@@ -906,7 +906,49 @@ tools' names have no dots and are unchanged.
 - **Preview tokens keep the path's case.** `extract::fingerprint` no longer folds it;
   idempotency keys still do, in `KeyedJson`, as before the fingerprint was shared, so
   their stored records match their retries.
-- **A connected agent's refresh token works for its client only.** Token pairs keep the
-  client ID they were issued to (migration 0073, backfilled for agents' tokens from the
-  agent's client); a refresh naming another is `invalid_grant`, as an app's was.
+- **A connected agent's refresh token works for its client only.** Dropped in the second
+  review: a public client's refresh token is a bearer credential whichever client ID is
+  named, so the column and the check bought nothing (see below).
 - **Direct tools: 23.** `admin.inventory.list_items` (stock across products, `below`).
+
+## As built: second review fixes
+
+- **A preview reads no more than the routes, and fingerprints after authenticating.**
+  The middleware reads a previewed or applied write's body before the caller is known,
+  so it's capped at `server.max_body` (`413 body_too_large`, as the routes answer;
+  `Deployment::router(max_body)` hands it the limit), and the request is fingerprinted
+  (canonical JSON) only when a token is claimed or issued.
+- **A direct tool's `$ref`s resolve.** Each part (params, query, body) stood alone with its
+  own `$defs` nested under `properties`, where `#/$defs/X` resolves against the input
+  schema's root: the parts' `$defs` are hoisted into one root `$defs` (12 of 22 tools
+  were broken).
+- **Times counted in microseconds are times.** The digest blanks numbers under a key
+  ending in `_at` too (`customer.erasure_requested`'s `due_at`), so an agent's erasure
+  proposal (`customers:erase` is propose-only) can be approved. And it takes the rows
+  written sorted, since a multi-row `UPDATE … FROM unnest` writes them in the plan's
+  order.
+- **A proposal's write is shown only to who may see all of it.** `request`, `preview` and
+  `response` need, for a caller other than a staff session, every scope the write takes
+  and every `customer_data:*` scope; otherwise they're absent and listed in `redacted`.
+  The proposing agent is no exception: what it previewed may hold more than its own
+  redaction would show it.
+- **Approving claims the proposal.** `approve_proposal` moves it to `applying`
+  (version-checked; approver and time in `decided_by`/`decided_at`), which a second
+  approval, a rejection and the expiry job refuse (`409 proposal_applying`) until the
+  write's answer is recorded (`applied`, `failed`), it's previewed again (`refresh`) or
+  let go (`release`: the write may go through later, or the operator turned agents off
+  or capped them to reading meanwhile, which no longer fails the proposal). An approval
+  that died leaves it applying for `APPLYING_LEASE` (5 minutes), after which it counts as
+  pending. The approval names the preview the person saw: `{"refreshes": n}`, another
+  count is `409 proposal_changed` with the proposal as it is (the admin sends it and
+  shows the new preview). Migration 0074.
+- **Leaner.** `Preview` and `Apply` are one `Run` with an optional apply part; one
+  thread-local; one ending. The write log's trigger fires only while logging (its
+  `WHEN`). A preview's pooled connection dropped half-way is closed rather than pooled,
+  so its locks go at once. `/mcp` opens one connection for the credential and `acting`
+  and one after the routed request for a proposal and the log. The sales report sums
+  refunds in SQL. Gone: `Operations::find`, `agents::call` (tests use `acting` and
+  `call_as`), `StageProposals`, `StageAgents::update_agent`, `create_*_agent`, the hand-made
+  base64, `DEFAULT_INSTRUCTIONS`, `CallArgs`, the tokens' client ID (migration 0073 is
+  now the write log).
+- **Listing inventory items takes `products:read` too**: it names products and SKUs.
