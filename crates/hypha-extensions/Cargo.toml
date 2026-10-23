@@ -20,7 +20,7 @@ utoipa = { version = "6", optional = true }
 openapi = ["dep:utoipa", "hypha-core/openapi"]
 
 [dev-dependencies]
-pollster = "0.4"
+pollster = "1.0"
 uuid.workspace = true
 hypha-testkit = { path = "../hypha-testkit" }
 

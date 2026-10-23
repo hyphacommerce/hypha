@@ -65,7 +65,7 @@ serde_html_form = "0.4.1"
 url = "2.5"
 
 [dev-dependencies]
-pollster = "0.4"
+pollster = "1.0"
 
 [lints]
 workspace = true

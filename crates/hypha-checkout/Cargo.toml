@@ -23,7 +23,7 @@ uuid.workspace = true
 hypha-markets = { path = "../hypha-markets" }
 hypha-products = { path = "../hypha-products" }
 hypha-testkit = { path = "../hypha-testkit" }
-pollster = "0.4"
+pollster = "1.0"
 
 [lints]
 workspace = true

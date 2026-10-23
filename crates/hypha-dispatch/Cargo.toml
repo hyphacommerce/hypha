@@ -14,7 +14,7 @@ hypha-products = { path = "../hypha-products" }
 
 [dev-dependencies]
 hypha-testkit = { path = "../hypha-testkit" }
-pollster = "0.4"
+pollster = "1.0"
 serde_json.workspace = true
 uuid.workspace = true
 

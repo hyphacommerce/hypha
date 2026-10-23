@@ -14,7 +14,7 @@ url = "2.5"
 [dev-dependencies]
 uuid.workspace = true
 hypha-testkit = { path = "../hypha-testkit" }
-pollster = "0.4"
+pollster = "1.0"
 schemars = "1"
 
 [lints]
