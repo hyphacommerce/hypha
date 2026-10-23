@@ -274,7 +274,9 @@ pub struct UpdateAgentRequest {
     /// Replaces the whole grant, its allowlist included.
     #[serde(default, deserialize_with = "patch::non_null")]
     grant: Option<AgentGrantRequest>,
-    /// Replaces just the allowlist; `null` removes it.
+    /// Replaces just the allowlist; `null` removes it. Narrowing it needs no more than
+    /// `agents:write`; widening or removing it needs a caller who could grant the whole
+    /// grant, like changing the scopes.
     #[serde(default, deserialize_with = "patch::nullable")]
     #[schema(value_type = Option<Vec<String>>)]
     operations: Option<Option<Vec<String>>>,

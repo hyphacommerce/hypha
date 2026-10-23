@@ -246,9 +246,20 @@ pub struct UpdateAgent {
     pub enabled: Option<bool>,
 }
 
-/// Whether two grants give the same scopes in the same modes (allowlists aside).
-fn same_scopes(a: &Grant, b: &Grant) -> bool {
-    a.read() == b.read() && a.write() == b.write() && a.customer_data() == b.customer_data()
+/// Whether `new` gives no more than `old`: the same scopes in the same modes, and an
+/// allowlist no wider (one where there was none counts as narrower). Only such a change is
+/// free; any other hands out what the grant names, so the caller must be able to grant it
+/// all (`require_grantable`).
+fn only_narrows(old: &Grant, new: &Grant) -> bool {
+    let same_scopes = old.read() == new.read()
+        && old.write() == new.write()
+        && old.customer_data() == new.customer_data();
+    let narrower = match (old.operations(), new.operations()) {
+        (_, None) => old.operations().is_none(),
+        (None, Some(_)) => true,
+        (Some(old), Some(new)) => new.iter().all(|op| old.contains(op)),
+    };
+    same_scopes && narrower
 }
 
 pub async fn update_agent<S: HasAgents>(
@@ -276,8 +287,7 @@ pub async fn update_agent<S: HasAgents>(
         grant = Some(base.with_operations(operations)?);
     }
     if let Some(grant) = grant {
-        // Narrowing the allowlist alone needs no scopes; changing scopes needs them all.
-        if !same_scopes(&grant, agent.grant()) {
+        if !only_narrows(agent.grant(), &grant) {
             require_grantable(ctx, &grant)?;
         }
         agent.set_grant(grant)?;

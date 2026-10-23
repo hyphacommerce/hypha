@@ -362,6 +362,51 @@ fn narrowing_the_allowlist_needs_no_scopes_but_changing_scopes_does() {
 }
 
 #[test]
+fn widening_or_removing_the_allowlist_needs_the_whole_grant() {
+    let w = World::new();
+    let agent = w.agent();
+    let manager = key(vec![Scope::AgentsWrite]);
+    let ops = |ops: Option<&[&str]>| UpdateAgent {
+        operations: Some(ops.map(|ops| ops.iter().map(|o| o.to_string()).collect())),
+        ..UpdateAgent::default()
+    };
+    let two = ["admin.orders.list", "admin.products.update"];
+    block_on(update_agent(
+        &manager,
+        &w.ports,
+        agent.id(),
+        ops(Some(&two)),
+    ))
+    .unwrap();
+    // Narrower: free.
+    let one = ["admin.orders.list"];
+    block_on(update_agent(
+        &manager,
+        &w.ports,
+        agent.id(),
+        ops(Some(&one)),
+    ))
+    .unwrap();
+    // Wider again, or no allowlist at all: only someone who could grant it all.
+    for wider in [ops(Some(&two)), ops(None)] {
+        assert!(
+            matches!(
+                block_on(update_agent(&manager, &w.ports, agent.id(), wider)),
+                Err(CommandError::CannotGrant(_))
+            ),
+            "a caller without the agent's scopes widened it"
+        );
+    }
+    let kept = block_on(get_agent(&staff(), &w.ports, agent.id())).unwrap();
+    assert_eq!(
+        kept.grant().operations(),
+        Some(&[OperationId::new("admin.orders.list").unwrap()][..])
+    );
+    let lifted = block_on(update_agent(&staff(), &w.ports, agent.id(), ops(None))).unwrap();
+    assert_eq!(lifted.grant().operations(), None);
+}
+
+#[test]
 fn a_revoked_agent_stops_and_changes_no_more() {
     let w = World::new();
     let agent = w.agent();
