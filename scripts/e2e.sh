@@ -2265,8 +2265,14 @@ contains "waiting for a person" '\"status\":\"pending\"'
 AUTH=("${SAVED_AUTH[@]}")
 step "nothing was written yet" 200 - "$BASE/admin/products?q=agent-lamp"
 contains "no lamp" '"items":[]'
-step "the owner approves it" 200 - -X POST "$BASE/admin/agent-proposals/$PROPOSAL/approve"
+step "an approval names the preview it saw" 409 proposal_changed -X POST \
+    "$BASE/admin/agent-proposals/$PROPOSAL/approve" -H "$JSON" -d '{"refreshes":3}'
+contains "and gets the proposal as it is" '"refreshes":0'
+step "the owner approves it" 200 - -X POST "$BASE/admin/agent-proposals/$PROPOSAL/approve" \
+    -H "$JSON" -d '{"refreshes":0}'
 contains "applied" '"status":"applied"'
+step "a decided proposal is approved once" 409 proposal_decided -X POST \
+    "$BASE/admin/agent-proposals/$PROPOSAL/approve"
 step "the product exists" 200 - "$BASE/admin/products?q=agent-lamp"
 contains "the lamp" '"handle":"agent-lamp"'
 step "the call log" 200 - "$BASE/admin/agents/$MCP_AGENT/calls"
