@@ -1,33 +1,33 @@
 ---
-// The thread woven behind the landing page: one hypha that starts in the hero's bloom,
-// runs down a lane beside each section, swings across the gap to the next one, and ends
-// in the closing bloom. Signals (lime) run along it and out through the branches.
+// The thread woven behind the landing page: one hypha that grows out of the hero's web,
+// runs down a lane beside each section, swings across the gap to the next one, and opens
+// into a second web behind the closing section. Lime signals run out along the webs.
 //
 // The page marks what it hangs on, and this measures it after layout:
-// - `data-bloom` on an element: a burst of branching filaments from its centre (the first
-//   one starts the thread, one with `data-bloom="end"` ends it);
+// - `data-bloom` on an element: a web of branching filaments filling it, grown from its
+//   centre; the first one starts the thread, one with `data-bloom="end"` ends it;
 // - `data-weave="left|right"` on a section: the lane the thread takes beside it, with a
-//   knot level with the section's first heading (one lane, on the left, on phones);
+//   knot level with the section's heading (one lane, on the left, on phones);
 // - `data-hub` (an id) and `data-tie="<hub id>"`: a filament from that hub to the element;
-//   `data-tie="thread"` ties the element to the nearest point of the thread instead.
+//   `data-tie="thread"` hangs the element from the thread instead.
+//
+// Kept cheap to scroll: nothing is redrawn per frame. Each piece (a stretch of thread, a
+// web, a tie) is drawn once by a CSS transition when the reader reaches it, and signals
+// only run on the pieces near the viewport. No filters or masks.
+//
 // It's decoration: the SVG is hidden from assistive tech and the page reads the same
 // without it.
 ---
 
 <svg class="weave" aria-hidden="true" focusable="false">
-  <defs>
-    <mask id="weave-drawn" maskUnits="userSpaceOnUse">
-      <path class="weave-mask"></path>
-    </mask>
-  </defs>
-  <g class="weave-filaments"></g>
-  <path class="weave-thread"></path>
-  <g class="weave-pulses" mask="url(#weave-drawn)"></g>
+  <g class="weave-webs"></g>
+  <g class="weave-thread"></g>
   <g class="weave-ties"></g>
 </svg>
 
 <script>
   type P = { x: number; y: number };
+  type Branch = { pts: P[]; depth: number };
 
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.querySelector<SVGSVGElement>(".weave");
@@ -54,20 +54,25 @@
     return el;
   }
 
-  // Catmull-Rom through the points, as cubic Béziers.
-  function smooth(pts: P[]) {
-    let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+  const f = (n: number) => n.toFixed(1);
+  const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+  // Catmull-Rom through the points, as one cubic Bézier per gap.
+  function curves(pts: P[]) {
+    const out: string[] = [];
     for (let i = 0; i < pts.length - 1; i++) {
       const p0 = pts[i - 1] ?? pts[i];
       const p1 = pts[i];
       const p2 = pts[i + 1];
       const p3 = pts[i + 2] ?? p2;
-      const c1 = { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 };
-      const c2 = { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 };
-      d += ` C${c1.x.toFixed(1)},${c1.y.toFixed(1)} ${c2.x.toFixed(1)},${c2.y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+      out.push(
+        `C${f(p1.x + (p2.x - p0.x) / 6)},${f(p1.y + (p2.y - p0.y) / 6)} ${f(p2.x - (p3.x - p1.x) / 6)},${f(p2.y - (p3.y - p1.y) / 6)} ${f(p2.x)},${f(p2.y)}`,
+      );
     }
-    return d;
+    return out;
   }
+
+  const smooth = (pts: P[]) => `M${f(pts[0].x)},${f(pts[0].y)} ${curves(pts).join(" ")}`;
 
   // A filament: a random walk that bends a little at each step and sometimes forks.
   function grow(
@@ -77,9 +82,9 @@
     steps: number,
     step: number,
     depth: number,
-    out: { d: string; depth: number; tip: P; base: P }[],
-    bend = 0.7,
-    forks = 0.32,
+    out: Branch[],
+    bend: number,
+    forks: number,
   ) {
     const pts = [from];
     let a = angle;
@@ -88,24 +93,23 @@
       a += (rnd() - 0.5) * bend;
       p = { x: p.x + Math.cos(a) * step, y: p.y + Math.sin(a) * step };
       pts.push(p);
-      if (depth < 4 && i >= 1 && i < steps - 1 && rnd() < forks) {
+      if (depth < 3 && i >= 1 && i < steps - 1 && rnd() < forks) {
         const side = rnd() < 0.5 ? -1 : 1;
-        grow(rnd, p, a + side * (0.45 + rnd() * 0.7), Math.max(2, steps - i - 1), step * 0.82, depth + 1, out, bend, forks * 0.85);
+        const rest = Math.max(2, steps - i - 1);
+        grow(rnd, p, a + side * (0.45 + rnd() * 0.7), rest, step * 0.8, depth + 1, out, bend, forks * 0.8);
       }
     }
-    out.push({ d: smooth(pts), depth, tip: p, base: from });
+    out.push({ pts, depth });
   }
 
-  function pulse(parent: Element, d: string, cls: string, duration: number, delay: number) {
-    const path = make("path", { d, class: `pulse ${cls}`, pathLength: 1000 }, parent);
+  function pulse(parent: Element, d: string, duration: number, delay: number) {
+    const path = make("path", { d, class: "pulse", pathLength: 1000 }, parent);
     path.style.animationDuration = `${duration}s`;
     path.style.animationDelay = `${delay}s`;
-    return path;
   }
 
-  let samples: { len: number; y: number; x: number }[] = [];
-  let threadLength = 0;
-  let pending: { el: Element; y: number }[] = [];
+  // Each piece waits, undrawn, until the reader reaches its top.
+  let pieces: { el: Element; top: number; bottom: number }[] = [];
 
   function build() {
     if (!svg || !host) return;
@@ -118,15 +122,11 @@
     svg.setAttribute("width", String(w));
     svg.setAttribute("height", String(h));
 
-    const filaments = svg.querySelector(".weave-filaments")!;
-    const pulses = svg.querySelector(".weave-pulses")!;
+    const webs = svg.querySelector(".weave-webs")!;
+    const thread = svg.querySelector(".weave-thread")!;
     const ties = svg.querySelector(".weave-ties")!;
-    const thread = svg.querySelector<SVGPathElement>(".weave-thread")!;
-    const mask = svg.querySelector<SVGPathElement>(".weave-mask")!;
-    filaments.replaceChildren();
-    pulses.replaceChildren();
-    ties.replaceChildren();
-    pending = [];
+    for (const g of [webs, thread, ties]) g.replaceChildren();
+    pieces = [];
 
     const rect = (el: Element) => {
       const r = el.getBoundingClientRect();
@@ -136,11 +136,9 @@
       const r = rect(el);
       return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
     };
-
-    // Each unit (a bloom's branch, a tie) waits until the thread reaches its base.
-    const unit = (parent: Element, y: number) => {
-      const g = make("g", { class: "unit" }, parent);
-      pending.push({ el: g, y });
+    const piece = (parent: Element, top: number, bottom = top) => {
+      const g = make("g", { class: "piece" }, parent);
+      pieces.push({ el: g, top, bottom });
       return g;
     };
 
@@ -148,11 +146,70 @@
       (b) => b.offsetWidth > 0,
     );
     const sections = [...host.querySelectorAll<HTMLElement>("[data-weave]")];
-    const start = blooms[0] ? centre(blooms[0]) : { x: w / 2, y: 0 };
+    const first = blooms[0];
     const endBloom = blooms.find((b) => b.dataset.bloom === "end");
 
+    // Webs: many arms from the centre, filling the element. A branch stops where it leaves
+    // the ellipse inside the element's box, so the web ends raggedly, not on a straight
+    // edge. Each branch starts later the further out it is, so a web opens rather than
+    // appears.
+    for (const b of blooms) {
+      const r = rect(b);
+      const c = centre(b);
+      const radius = Math.max(r.w, r.h) * 0.5;
+      const inside = (p: P) => ((p.x - c.x) / (r.w / 2)) ** 2 + ((p.y - c.y) / (r.h / 2)) ** 2 <= 1;
+      const fit = (pts: P[]) => {
+        const out: P[] = [];
+        for (const p of pts) {
+          const q = { x: c.x + p.x * radius, y: c.y + p.y * radius };
+          out.push(q);
+          if (!inside(q)) break;
+        }
+        return out;
+      };
+      const arms = narrow ? 16 : 30;
+      const g = piece(webs, b === endBloom ? c.y - r.h / 4 : r.y, r.y + r.h);
+      let lit = 0;
+      for (let i = 0; i < arms; i++) {
+        const angle = (i / arms) * Math.PI * 2 + rnd() * 0.3;
+        const out: Branch[] = [];
+        const step = (0.7 + rnd() * 0.4) / 9;
+        grow(rnd, { x: 0, y: 0 }, angle, 6 + Math.floor(rnd() * 3), step, 0, out, 0.8, 0.45);
+        for (const br of out) br.pts = fit(br.pts);
+        for (const br of out) {
+          if (br.pts.length < 2) continue;
+          const path = make(
+            "path",
+            { d: smooth(br.pts), class: `filament depth-${br.depth}`, pathLength: 1 },
+            g,
+          );
+          path.style.transitionDelay = `${0.15 + br.depth * 0.35 + rnd() * 0.25}s`;
+          const tip = br.pts[br.pts.length - 1];
+          if (br.depth > 0 && rnd() < 0.3) {
+            const dot = make(
+              "circle",
+              {
+                cx: f(tip.x),
+                cy: f(tip.y),
+                r: f(1.4 + rnd() * 2),
+                class: rnd() < 0.25 ? "spore lit" : "spore",
+              },
+              g,
+            );
+            dot.style.transitionDelay = `${0.9 + br.depth * 0.35}s`;
+          }
+        }
+        // A few signals, on the longest arms.
+        const longest = out[out.length - 1].pts;
+        if (longest.length > 2 && lit < (narrow ? 4 : 7) && rnd() < 0.45) {
+          pulse(g, smooth(longest), 3 + rnd() * 2.5, rnd() * 5);
+          lit++;
+        }
+      }
+    }
+
     // The lanes sit just outside the sections' text.
-    const content = host.querySelector<HTMLElement>(".wrap");
+    const content = host.querySelector<HTMLElement>("[data-weave] .wrap");
     const inner = content ? rect(content) : { x: 0, y: 0, w, h };
     const pad = content ? parseFloat(getComputedStyle(content).paddingLeft) : 0;
     const laneX = (side: string) =>
@@ -162,17 +219,21 @@
           ? Math.min(w - 16, inner.x + inner.w - pad + 34)
           : Math.max(16, inner.x + pad - 34);
 
-    const pts: P[] = [start];
-    const hero = blooms[0]?.closest("section");
-    if (hero && hero.dataset.weave === undefined) {
-      const hr = rect(hero);
-      pts.push({ x: start.x + (rnd() - 0.5) * 30, y: hr.y + hr.h - 70 });
+    // The thread: out of the bottom of the hero's web, then lane by lane.
+    const pts: P[] = [];
+    const breaks: number[] = [];
+    if (first) {
+      const r = rect(first);
+      pts.push(
+        { x: r.x + r.w / 2, y: r.y + r.h * 0.8 },
+        { x: r.x + r.w / 2 + 12, y: r.y + r.h - 20 },
+      );
     }
-    let last: P | undefined;
+    let last: P | undefined = pts[pts.length - 1];
     for (const s of sections) {
       const r = rect(s);
       const x = laneX(s.dataset.weave ?? "left");
-      const heading = s.querySelector("h2, h3");
+      const heading = s.querySelector("h2");
       const knot = heading ? centre(heading).y : r.y + 60;
       const top = r.y + 8;
       const bottom = r.y + r.h - 8;
@@ -183,163 +244,125 @@
           y: (last.y + top) / 2 + (rnd() - 0.5) * 40,
         });
       }
+      breaks.push(pts.length);
       pts.push({ x, y: top });
       // A slight wander down the lane, so it reads as grown rather than ruled.
+      const lane: P[] = [{ x, y: knot }];
       for (let y = top + 160; y < bottom - 80; y += 180 + rnd() * 60) {
-        if (Math.abs(y - knot) > 60) pts.push({ x: x + (rnd() - 0.5) * 14, y });
+        if (Math.abs(y - knot) > 60) lane.push({ x: x + (rnd() - 0.5) * 14, y });
       }
-      pts.push({ x, y: knot });
+      pts.push(...lane.toSorted((a, b) => a.y - b.y));
       last = { x: x + (rnd() - 0.5) * 10, y: bottom };
       pts.push(last);
     }
     if (endBloom) {
-      // Swing across above the closing section, then drop into its bloom.
+      // Swing across above the closing section, then into its web.
       const end = centre(endBloom);
       const section = endBloom.closest("section");
-      if (section && last) pts.push({ x: end.x, y: rect(section).y + 30 });
+      breaks.push(pts.length);
+      if (section) pts.push({ x: end.x + 60, y: rect(section).y + 10 });
       pts.push(end);
     }
-    // Points pushed per section can overlap a knot; keep the order top to bottom.
-    const ordered = [pts[0], ...pts.slice(1).toSorted((a, b) => a.y - b.y)];
 
-    const d = smooth(ordered);
-    thread.setAttribute("d", d);
-    mask.setAttribute("d", d);
-    threadLength = thread.getTotalLength();
-    for (const p of [thread, mask]) {
-      p.style.strokeDasharray = `${threadLength} ${threadLength}`;
-    }
-    samples = [];
-    for (let len = 0; len <= threadLength; len += 8) {
-      const p = thread.getPointAtLength(len);
-      samples.push({ len, x: p.x, y: p.y });
+    // Drawn in stretches, one per section, each when the reader gets there.
+    if (pts.length > 1) {
+      const segs = curves(pts);
+      const starts = [
+        0,
+        ...breaks.filter((b) => b > 0 && b < pts.length - 1),
+        pts.length - 1,
+      ];
+      for (let i = 0; i < starts.length - 1; i++) {
+        const a = starts[i];
+        const z = starts[i + 1];
+        if (z <= a) continue;
+        const d = `M${f(pts[a].x)},${f(pts[a].y)} ${segs.slice(a, z).join(" ")}`;
+        const g = piece(thread, pts[a].y, pts[z].y);
+        const path = make("path", { d, class: "strand", pathLength: 1 }, g);
+        const seconds = Math.min(2.4, Math.max(0.8, (pts[z].y - pts[a].y) / 700));
+        path.style.transitionDuration = `${seconds}s`;
+      }
     }
 
     // Knots where the thread passes each section's heading.
     for (const s of sections) {
-      const heading = s.querySelector("h2, h3");
+      const heading = s.querySelector("h2");
       if (!heading) continue;
       const y = centre(heading).y;
-      const near = samples.reduce((a, b) => (Math.abs(b.y - y) < Math.abs(a.y - y) ? b : a));
-      const g = unit(ties, y);
-      make("circle", { cx: near.x, cy: near.y, r: 6, class: "knot" }, g);
-      make("circle", { cx: near.x, cy: near.y, r: 2.4, class: "knot-core" }, g);
-    }
-
-    // Signals along the thread itself.
-    for (let i = 0; i < (narrow ? 2 : 4); i++) {
-      pulse(pulses, d, "pulse-thread", 9 + i * 1.7, -i * 2.6);
-    }
-
-    // Fine side filaments along the thread, fewer on phones.
-    const every = narrow ? 260 : 150;
-    for (let len = 220; len < threadLength - 60; len += every + rnd() * every) {
-      const p = thread.getPointAtLength(len);
-      const q = thread.getPointAtLength(Math.min(threadLength, len + 2));
-      const along = Math.atan2(q.y - p.y, q.x - p.x);
-      const side = narrow ? -1 : rnd() < 0.5 ? -1 : 1;
-      const out: { d: string; depth: number; tip: P; base: P }[] = [];
-      grow(rnd, p, along + side * (1.1 + rnd() * 0.6), 3 + Math.floor(rnd() * 3), narrow ? 9 : 16, 1, out);
-      const g = unit(filaments, p.y);
-      for (const f of out) make("path", { d: f.d, class: `filament depth-${f.depth}`, pathLength: 1 }, g);
-    }
-
-    // Blooms: branching bursts. The hero's carries the labelled ties to its hub too.
-    for (const b of blooms) {
-      const r = rect(b);
-      const c = centre(b);
-      const reach = Math.min(r.w, r.h) / 2;
-      const arms = narrow ? 11 : 16;
-      for (let i = 0; i < arms; i++) {
-        const angle = (i / arms) * Math.PI * 2 + rnd() * 0.4;
-        const out: { d: string; depth: number; tip: P; base: P }[] = [];
-        const step = reach / 7.5;
-        grow(rnd, c, angle, 5 + Math.floor(rnd() * 4), step * (0.75 + rnd() * 0.45), 0, out, 0.95, 0.42);
-        const g = unit(filaments, c.y);
-        g.classList.add("bloom");
-        for (const f of out) {
-          make("path", { d: f.d, class: `filament depth-${f.depth}`, pathLength: 1 }, g);
-          if (f.depth > 0 && rnd() < 0.45) {
-            make("circle", { cx: f.tip.x, cy: f.tip.y, r: 1.6 + rnd() * 2.2, class: rnd() < 0.3 ? "spore lit" : "spore" }, g);
-          }
-        }
-        const main = out[out.length - 1];
-        if (main && rnd() < 0.6) pulse(g, main.d, "pulse-branch", 2.6 + rnd() * 2.2, rnd() * 4);
-      }
-      make("circle", { cx: c.x, cy: c.y, r: 7, class: "knot" }, unit(ties, c.y));
-      make("circle", { cx: c.x, cy: c.y, r: 3, class: "knot-core" }, unit(ties, c.y));
+      const x = laneX(s.dataset.weave ?? "left");
+      const g = piece(ties, y);
+      make("circle", { cx: f(x), cy: f(y), r: 6, class: "knot" }, g);
+      make("circle", { cx: f(x), cy: f(y), r: 2.4, class: "knot-core" }, g);
     }
 
     // Ties: from a hub (or the thread) to each element that names it.
     const hubs = new Map<string, HTMLElement>();
-    for (const el of host.querySelectorAll<HTMLElement>("[data-hub]")) hubs.set(el.dataset.hub!, el);
+    for (const el of host.querySelectorAll<HTMLElement>("[data-hub]")) {
+      hubs.set(el.dataset.hub!, el);
+    }
     for (const el of host.querySelectorAll<HTMLElement>("[data-tie]")) {
       const r = rect(el);
       const c = centre(el);
       const hub = el.dataset.tie === "thread" ? undefined : hubs.get(el.dataset.tie!);
       let from: P;
       let to: P;
+      let d: string;
       if (hub) {
+        // Where the line between the centres leaves each box.
         const hr = rect(hub);
         const hc = centre(hub);
-        // Where the line between the centres leaves each box.
         to = { x: clamp(hc.x, r.x, r.x + r.w), y: clamp(hc.y, r.y, r.y + r.h) };
-        from = { x: clamp(c.x, hr.x + 8, hr.x + hr.w - 8), y: clamp(c.y, hr.y + 8, hr.y + hr.h - 8) };
-        if (hub.dataset.bloom !== undefined) from = hc;
+        from = {
+          x: clamp(c.x, hr.x + 8, hr.x + hr.w - 8),
+          y: clamp(c.y, hr.y + 8, hr.y + hr.h - 8),
+        };
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const bend = (rnd() - 0.5) * 0.35;
+        d = `M${f(from.x)},${f(from.y)} C${f(from.x + dx * 0.33 - dy * bend)},${f(from.y + dy * 0.33 + dx * bend)} ${f(from.x + dx * 0.66 + dy * bend)},${f(from.y + dy * 0.66 - dx * bend)} ${f(to.x)},${f(to.y)}`;
       } else {
-        // Hangs from above: the thread at a little above the element's top.
+        // Hangs from the thread's lane, a little above the element.
+        const section = el.closest<HTMLElement>("[data-weave]");
         to = { x: r.x + 18, y: r.y };
-        const want = r.y - 48;
-        const near = samples.reduce((a, b) => (Math.abs(b.y - want) < Math.abs(a.y - want) ? b : a));
-        from = { x: near.x, y: near.y };
+        from = { x: laneX(section?.dataset.weave ?? "left"), y: r.y - 44 };
+        d = `M${f(from.x)},${f(from.y)} C${f(from.x + (to.x - from.x) * 0.55)},${f(from.y)} ${f(to.x)},${f(to.y - 28)} ${f(to.x)},${f(to.y)}`;
       }
-      const dx = to.x - from.x;
-      const dy = to.y - from.y;
-      const bend = (rnd() - 0.5) * 0.35;
-      const c1 = hub
-        ? { x: from.x + dx * 0.33 - dy * bend, y: from.y + dy * 0.33 + dx * bend }
-        : { x: from.x + dx * 0.55, y: from.y };
-      const c2 = hub
-        ? { x: from.x + dx * 0.66 + dy * bend, y: from.y + dy * 0.66 - dx * bend }
-        : { x: to.x, y: to.y - Math.max(24, Math.abs(dy) * 0.6) };
-      const td = `M${from.x.toFixed(1)},${from.y.toFixed(1)} C${c1.x.toFixed(1)},${c1.y.toFixed(1)} ${c2.x.toFixed(1)},${c2.y.toFixed(1)} ${to.x.toFixed(1)},${to.y.toFixed(1)}`;
-      const g = unit(ties, Math.min(from.y, to.y));
-      make("path", { d: td, class: "tie", pathLength: 1 }, g);
-      make("circle", { cx: to.x, cy: to.y, r: 3.4, class: "knot small" }, g);
-      pulse(g, td, "pulse-tie", 2.4 + rnd() * 1.8, rnd() * 3);
+      const g = piece(ties, Math.min(from.y, to.y), Math.max(from.y, to.y));
+      make("path", { d, class: "tie", pathLength: 1 }, g);
+      make("circle", { cx: f(to.x), cy: f(to.y), r: 3.4, class: "knot small" }, g);
+      if (hub) pulse(g, d, 2.6 + rnd() * 1.8, rnd() * 3);
     }
 
-    update();
+    // A frame later, so what's already in view draws in rather than appearing.
+    requestAnimationFrame(update);
   }
 
-  function clamp(v: number, lo: number, hi: number) {
-    return Math.min(hi, Math.max(lo, v));
-  }
-
-  // The thread grows with the reader: drawn down to a little below the viewport's middle.
+  // Draws what the reader has reached, and lets signals run only near the viewport.
   function update() {
-    if (!svg || !host || !samples.length) return;
-    const thread = svg.querySelector<SVGPathElement>(".weave-thread")!;
-    const mask = svg.querySelector<SVGPathElement>(".weave-mask")!;
-    const reach = still.matches
-      ? Infinity
-      : window.scrollY + innerHeight * 0.72 - (host.getBoundingClientRect().top + window.scrollY);
-    let drawn = threadLength;
-    if (reach !== Infinity) {
-      const past = samples.find((s) => s.y > reach);
-      drawn = past ? past.len : threadLength;
+    if (!host) return;
+    const offset = host.getBoundingClientRect().top;
+    const reach = still.matches ? Infinity : innerHeight * 0.8 - offset;
+    const near = -offset - 300;
+    const far = -offset + innerHeight + 300;
+    for (const p of pieces) {
+      p.el.classList.toggle("on", p.top <= reach);
+      p.el.classList.toggle("live", p.bottom >= near && p.top <= far);
     }
-    const offset = String(threadLength - drawn);
-    thread.style.strokeDashoffset = offset;
-    mask.style.strokeDashoffset = offset;
-    for (const p of pending) p.el.classList.toggle("on", p.y <= reach);
   }
 
   if (svg && host) {
     let frame = 0;
-    const schedule = (fn: () => void) => {
+    let queued: "build" | "update" | undefined;
+    const schedule = (what: "build" | "update") => {
+      if (queued === "build") return;
+      queued = what;
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(fn);
+      frame = requestAnimationFrame(() => {
+        const run = queued;
+        queued = undefined;
+        if (run === "build") build();
+        else update();
+      });
     };
     let width = host.clientWidth;
     let height = host.scrollHeight;
@@ -347,11 +370,11 @@
       if (host.clientWidth === width && host.scrollHeight === height) return;
       width = host.clientWidth;
       height = host.scrollHeight;
-      schedule(build);
+      schedule("build");
     }).observe(host);
-    addEventListener("scroll", () => schedule(update), { passive: true });
-    still.addEventListener("change", build);
-    document.fonts.ready.then(build);
+    addEventListener("scroll", () => schedule("update"), { passive: true });
+    still.addEventListener("change", () => schedule("build"));
+    document.fonts.ready.then(() => schedule("build"));
     build();
   }
 </script>
@@ -370,47 +393,48 @@
     stroke-linecap: round;
   }
 
-  .weave-thread {
-    stroke: var(--thread);
-    stroke-width: 1.6;
+  /* Every line draws itself in once its piece is reached. */
+  .weave :global(.strand),
+  .weave :global(.filament),
+  .weave :global(.tie) {
+    stroke-dasharray: 1 1;
+    stroke-dashoffset: 1;
+    transition: stroke-dashoffset 1.2s cubic-bezier(0.3, 0.6, 0.2, 1);
   }
 
-  .weave-mask {
-    stroke: #fff;
-    stroke-width: 14;
+  .weave :global(.on .strand),
+  .weave :global(.on .filament),
+  .weave :global(.on .tie) {
+    stroke-dashoffset: 0;
+  }
+
+  .weave :global(.strand) {
+    stroke: var(--thread);
+    stroke-width: 1.6;
+    transition-timing-function: linear;
   }
 
   .weave :global(.filament) {
-    stroke: var(--thread-faint);
+    stroke: var(--thread);
     stroke-width: 1;
-    stroke-dasharray: 1 1;
-    stroke-dashoffset: 1;
-    transition: stroke-dashoffset 1.6s cubic-bezier(0.3, 0.6, 0.2, 1);
+    opacity: 0.28;
+    transition-duration: 1.6s;
   }
 
-  .weave :global(.bloom .filament.depth-0) {
-    stroke: var(--thread);
-    stroke-width: 1.4;
-    opacity: 0.75;
+  .weave :global(.filament.depth-0) {
+    stroke-width: 1.6;
+    opacity: 0.62;
   }
 
-  .weave :global(.bloom .filament.depth-1) {
-    stroke: var(--thread);
-    opacity: 0.45;
+  .weave :global(.filament.depth-1) {
+    stroke-width: 1.2;
+    opacity: 0.44;
   }
 
   .weave :global(.tie) {
     stroke: var(--thread);
     stroke-width: 1.2;
     opacity: 0.7;
-    stroke-dasharray: 1 1;
-    stroke-dashoffset: 1;
-    transition: stroke-dashoffset 1.1s cubic-bezier(0.3, 0.6, 0.2, 1);
-  }
-
-  .weave :global(.unit.on .filament),
-  .weave :global(.unit.on .tie) {
-    stroke-dashoffset: 0;
   }
 
   .weave :global(.knot) {
@@ -426,60 +450,43 @@
 
   .weave :global(.spore) {
     fill: var(--thread);
-    opacity: 0.55;
-  }
-
-  .weave :global(.spore.lit) {
-    opacity: 1;
   }
 
   .weave :global(.knot),
   .weave :global(.knot-core),
-  .weave :global(.spore),
-  .weave :global(.pulse-branch),
-  .weave :global(.pulse-tie) {
+  .weave :global(.spore) {
     opacity: 0;
-    transition: opacity 0.6s 0.5s;
+    transition: opacity 0.6s 0.6s;
   }
 
-  .weave :global(.unit.on .knot),
-  .weave :global(.unit.on .knot-core),
-  .weave :global(.unit.on .pulse-branch),
-  .weave :global(.unit.on .pulse-tie) {
+  .weave :global(.on .knot),
+  .weave :global(.on .knot-core),
+  .weave :global(.on .spore.lit) {
     opacity: 1;
   }
 
-  .weave :global(.unit.on .spore) {
-    opacity: 0.55;
+  .weave :global(.on .spore) {
+    opacity: 0.5;
   }
 
-  .weave :global(.unit.on .spore.lit) {
-    opacity: 1;
-  }
-
-  /* A signal: a short lit stretch running the length of its path. */
+  /* A signal: a short lit stretch running out along its path, only near the viewport. */
   .weave :global(.pulse) {
     stroke: var(--signal);
-    stroke-width: 2.4;
-    stroke-dasharray: 60 1100;
-    stroke-dashoffset: 60;
-    filter: drop-shadow(0 0 3px var(--signal-glow));
-    animation: signal linear infinite;
+    stroke-width: 2.2;
+    stroke-dasharray: 90 1100;
+    stroke-dashoffset: 90;
+    visibility: hidden;
+    animation: signal linear infinite paused;
   }
 
-  .weave :global(.pulse-thread) {
-    stroke-width: 2.6;
-    stroke-dasharray: 12 1100;
-  }
-
-  .weave :global(.pulse-branch) {
-    stroke-width: 1.8;
-    stroke-dasharray: 160 1100;
+  .weave :global(.on.live .pulse) {
+    visibility: visible;
+    animation-play-state: running;
   }
 
   @keyframes signal {
     to {
-      stroke-dashoffset: -1040;
+      stroke-dashoffset: -1010;
     }
   }
 

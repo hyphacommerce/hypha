@@ -38,7 +38,8 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
         <path d="M15.5 12.6A6.5 6.5 0 0 1 7.4 4.5a6.5 6.5 0 1 0 8.1 8.1Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path>
       </svg>
     </button>
-    <a class="button primary sponsor" href={SPONSOR}>Sponsor</a>
+    <a class="button quiet cta" href={SPONSOR}>Sponsor</a>
+    <a class="button primary cta" href="/docs/getting-started">Get started</a>
     <details class="menu">
       <summary>Menu</summary>
       <ul>
@@ -49,6 +50,7 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
             </li>
           ))
         }
+        <li><a href="/docs/getting-started">Get started</a></li>
         <li><a href={SPONSOR}>Sponsor</a></li>
       </ul>
     </details>
@@ -73,9 +75,14 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
 </script>
 
 <style>
+  /* Follows the reader down the page. A plain translucent fill, no backdrop blur: blur
+     over the landing page's drawing would repaint on every scroll. */
   .header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
     border-bottom: 1px solid var(--rule);
-    background: var(--bg);
+    background: color-mix(in srgb, var(--bg) 94%, transparent);
   }
 
   .bar {
@@ -146,8 +153,18 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
     color: var(--text);
   }
 
-  .sponsor {
+  .cta {
     min-height: 38px;
+  }
+
+  .bar .quiet {
+    margin-right: -16px;
+    border-color: transparent;
+    background: none;
+  }
+
+  .bar .quiet:hover {
+    border-color: var(--rule-strong);
   }
 
   .menu {
@@ -199,7 +216,7 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
   @media (max-width: 760px) {
     /* `.bar` outweighs the global `.button`, which scoped styles don't. */
     .bar nav,
-    .bar .sponsor {
+    .bar .quiet {
       display: none;
     }
 
@@ -209,7 +226,7 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
 
     .theme {
       margin-left: auto;
-      margin-right: 0;
+      margin-right: -16px;
     }
   }
 </style>
