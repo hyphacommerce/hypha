@@ -70,10 +70,7 @@ pub struct PooledClient(Option<deadpool::managed::Object<PgManager>>);
 impl PooledClient {
     fn conn(&mut self) -> &mut PgConn {
         // `Some` until it's dropped.
-        self.0
-            .as_mut()
-            .map(|object| &mut **object)
-            .expect("a pooled client in use")
+        self.0.as_deref_mut().expect("a pooled client in use")
     }
 }
 

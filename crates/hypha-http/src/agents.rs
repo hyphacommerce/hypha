@@ -165,7 +165,7 @@ pub(crate) async fn apply_approved<S: Storage>(
 /// What sending a judged call came to: its answer, or a preview to keep as a proposal.
 enum Sent {
     Answered(Answer),
-    Proposing(Proposing),
+    Proposing(Box<Proposing>),
 }
 
 /// A write the agent proposes: previewed as `ctx`, answered `response`.
@@ -230,11 +230,11 @@ async fn judge_and_send<S: Storage>(
     match mode {
         CallMode::Propose => Ok((
             mode,
-            Sent::Proposing(Proposing {
+            Sent::Proposing(Box::new(Proposing {
                 ctx: judged.ctx,
                 operation,
                 response,
-            }),
+            })),
         )),
         _ => Ok((mode, Sent::Answered(answer_of(response).await))),
     }
@@ -544,13 +544,13 @@ async fn propose<S: Storage>(
     state: &SharedState<S>,
     ports: &S::Ports<'_>,
     call: &OperationCall,
-    proposing: Proposing,
+    proposing: Box<Proposing>,
 ) -> Result<Answer, ApiError> {
     let Proposing {
         ctx,
         operation,
         response,
-    } = proposing;
+    } = *proposing;
     let ctx = &ctx;
     let answer = answer_of(response).await;
     let (Some((ids, digest)), 200) = (answer.previewed.clone(), answer.status) else {
