@@ -529,13 +529,13 @@ impl<T: DeserializeOwned> KeyedJson<T> {
     }
 }
 
-/// A request's fingerprint: SHA-256 over the method, the path (lowercased: IDs are
-/// case-insensitive) with its query string, and the body in canonical JSON. What an
-/// idempotency key and a preview's token are bound to: a retry that re-serialized its body
-/// matches, another request doesn't.
+/// A request's fingerprint: SHA-256 over the method, the path as given, its query string,
+/// and the body in canonical JSON. What an idempotency key and a preview's token are bound
+/// to: a retry that re-serialized its body matches, another request doesn't. Paths are
+/// compared as given: some segments are case-sensitive (an app proxy's path), so only a
+/// caller that knows its path's case doesn't matter folds it (`KeyedJson`).
 pub(crate) fn fingerprint(method: &str, path: &str, query: &str, body: &[u8]) -> [u8; 32] {
     let body = canonical_json(body);
-    let path = path.to_ascii_lowercase();
     let mut hash = Sha256::new();
     for part in [method.as_bytes(), path.as_bytes(), query.as_bytes(), &body] {
         hash.update(part);
@@ -633,6 +633,16 @@ impl<F: DeserializeOwned> Query<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fingerprint_keeps_the_paths_case() {
+        let of = |path| fingerprint("POST", path, "", b"{}");
+        assert_ne!(
+            of("/admin/apps/app_x/proxy/Report"),
+            of("/admin/apps/app_x/proxy/report")
+        );
+        assert_eq!(of("/admin/products"), of("/admin/products"));
+    }
 
     #[test]
     fn canonical_json_ignores_whitespace_and_key_order() {
