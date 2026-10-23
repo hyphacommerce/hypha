@@ -5,6 +5,10 @@ export const GITHUB = "https://github.com/hyphacommerce/hypha";
  * this once it is (or to Open Collective). */
 export const SPONSOR = "https://github.com/sponsors/hyphacommerce";
 
+/** Where people and sponsors write to. The mailbox has to exist: forward it with
+ * Cloudflare Email Routing (free) or a mail provider. */
+export const EMAIL = "hello@hyphacommerce.com";
+
 export const SITE_TITLE = "Hypha";
 export const SITE_DESCRIPTION =
   "Open-source commerce you own: a small Rust core that apps, plugins, databases, hosts and AI agents connect to. Built for merchants, developers and agents, and cheap enough to run a whole store on a five-euro server.";

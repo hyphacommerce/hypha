@@ -1,14 +1,10 @@
 ---
 // The API references, rendered by Scalar from the repository's OpenAPI documents (the
-// ones the API itself serves and the SDK is generated from), each emitted as a file of the
-// build. Scalar's renderer is served from here too, not a CDN: it isn't in its package's
-// export map, so it's imported by path.
+// ones the API itself serves and the SDK is generated from), published at /openapi/*.json
+// by the `passthrough` integration in astro.config.mjs, which also serves Scalar's
+// renderer from here rather than a CDN.
 import { ScalarComponent } from "@scalar/astro";
 
-import scalarScript from "../../../../node_modules/@scalar/api-reference/dist/browser/standalone.js?url";
-import adminSpec from "../../../../../../openapi/admin.json?url";
-import extensionsSpec from "../../../../../../openapi/extensions.json?url";
-import storefrontSpec from "../../../../../../openapi/storefront.json?url";
 import Header from "../../../components/Header.astro";
 import "../../../styles/site.css";
 
@@ -18,7 +14,7 @@ export function getStaticPaths() {
       params: { spec: "admin" },
       props: {
         title: "Admin API",
-        url: adminSpec,
+        url: "/openapi/admin.json",
         lede: "Staff sessions, secret keys, apps and agents: everything the admin panel does.",
       },
     },
@@ -26,7 +22,7 @@ export function getStaticPaths() {
       params: { spec: "storefront" },
       props: {
         title: "Storefront API",
-        url: storefrontSpec,
+        url: "/openapi/storefront.json",
         lede: "Publishable keys and shoppers' sessions: catalog, carts, checkout, accounts.",
       },
     },
@@ -34,7 +30,7 @@ export function getStaticPaths() {
       params: { spec: "extensions" },
       props: {
         title: "Extension points",
-        url: extensionsSpec,
+        url: "/openapi/extensions.json",
         // Hypha sends these to apps: there's no server of ours to call.
         servers: [],
         lede: "What Hypha sends an app mid-flow (payments, shipping rates, search) and the answer it expects.",
@@ -59,7 +55,9 @@ const tabs = [
   { href: "/docs/api/extensions", label: "Extension points" },
 ];
 
-// Scalar in Hypha's type and colours.
+// Scalar in Hypha's type and colours. Scalar stays in its light mode and follows the
+// site's theme switch (`data-theme` on <html>) through these variables, rather than the
+// system's, which the rest of the site ignores.
 const customCss = `
   .scalar-app, .scalar-api-reference {
     --scalar-font: "Geist Variable", Geist, ui-sans-serif, system-ui, sans-serif;
@@ -75,7 +73,20 @@ const customCss = `
     --scalar-background-3: #e6e8e5;
     --scalar-background-accent: #eafbcf;
     --scalar-border-color: #e6e8e5;
+    /* Scalar's method colours, darkened to 4.5:1 on white: its own are read at 10px. */
+    --scalar-color-green: #00704a;
+    --scalar-color-blue: #0b5cad;
+    --scalar-color-orange: #a14b00;
+    --scalar-color-yellow: #846000;
+    --scalar-color-red: #b42318;
+    --scalar-color-purple: #6b3fa0;
   }
+  /* The sidebar's expand buttons, up to the 24px minimum target. */
+  li[data-sidebar-id] button[aria-expanded] {
+    min-width: 24px;
+    min-height: 24px;
+  }
+  [data-theme="dark"] .light-mode,
   .dark-mode {
     --scalar-color-1: #fafaf9;
     --scalar-color-2: #d4d5d2;
@@ -86,6 +97,16 @@ const customCss = `
     --scalar-background-3: #30322f;
     --scalar-background-accent: #304204;
     --scalar-border-color: #30322f;
+    --scalar-color-green: #6fdc9f;
+    --scalar-color-blue: #8cc2ff;
+    --scalar-color-orange: #ffb27a;
+    --scalar-color-yellow: #ecd06a;
+    --scalar-color-red: #ff9b92;
+    --scalar-color-purple: #cfaeff;
+  }
+  /* A link to Scalar's own MCP offering, not ours. */
+  .scalar-mcp-layer-link {
+    display: none !important;
   }
 `;
 ---
@@ -98,10 +119,18 @@ const customCss = `
     <title>{title} | Hypha docs</title>
     <meta name="description" content={lede} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script is:inline>
+      try {
+        if (localStorage.getItem("starlight-theme") === "dark") {
+          document.documentElement.dataset.theme = "dark";
+        }
+      } catch {}
+    </script>
   </head>
   <body>
+    <a class="skip" href="#main">Skip to content</a>
     <Header />
-    <div class="wrap api-head">
+    <div class="wrap api-head" role="region" aria-label={title}>
       <p class="crumbs"><a href="/docs">Docs</a> / API reference</p>
       <nav aria-label="API references">
         {
@@ -114,11 +143,12 @@ const customCss = `
       </nav>
       <p class="lede">{lede}</p>
     </div>
+    <div id="main">
     <ScalarComponent
       renderMode="client"
       configuration={{
         url,
-        cdn: scalarScript,
+        cdn: "/scalar/standalone.js",
         // Hypha's summaries are full sentences: paths make a scannable sidebar.
         operationTitleSource: "path",
         servers,
@@ -127,12 +157,25 @@ const customCss = `
         showDeveloperTools: "never",
         withDefaultFonts: false,
         hideClientButton: true,
+        forceDarkModeState: "light",
+        hideDarkModeToggle: true,
         customCss,
         metaData: { title: `${title} | Hypha docs` },
       }}
     />
+    </div>
   </body>
 </html>
+
+<script>
+  // Scalar's endpoint lists scroll without anything focusable in them; a tabindex lets
+  // keyboard users scroll them too.
+  new MutationObserver(() => {
+    for (const ul of document.querySelectorAll("ul.endpoints:not([tabindex])")) {
+      ul.setAttribute("tabindex", "0");
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+</script>
 
 <style>
   .api-head {

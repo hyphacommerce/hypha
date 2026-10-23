@@ -22,7 +22,8 @@
 
 :root[data-theme="light"] {
   --sl-color-accent-low: #eafbcf;
-  --sl-color-accent: #5f7e01;
+  /* #5f7e01 falls just short of 4.5:1 on the page as link text. */
+  --sl-color-accent: #455c01;
   --sl-color-accent-high: #304204;
 
   --sl-color-white: #1a1b19;

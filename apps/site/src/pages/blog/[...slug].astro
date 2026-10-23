@@ -3,6 +3,7 @@ import { render } from "astro:content";
 
 import Base from "../../layouts/Base.astro";
 import { formatDate, type Post, posts } from "../../lib/posts";
+import { ORG_ID, WEBSITE_ID } from "../../lib/seo";
 
 export async function getStaticPaths() {
   return (await posts()).map((post) => ({ params: { slug: post.id }, props: { post } }));
@@ -14,9 +15,30 @@ interface Props {
 
 const { post } = Astro.props;
 const { Content } = await render(post);
+const url = new URL(Astro.url.pathname, Astro.site).href;
+const article = {
+  "@type": "BlogPosting",
+  "@id": `${url}#post`,
+  headline: post.data.title,
+  description: post.data.description,
+  datePublished: post.data.date.toISOString(),
+  author: { "@type": "Organization", name: post.data.author, url: "https://hyphacommerce.com/" },
+  publisher: { "@id": ORG_ID },
+  isPartOf: { "@id": WEBSITE_ID },
+  mainEntityOfPage: url,
+  image: new URL("/og.png", Astro.site).href,
+  keywords: post.data.tags,
+};
 ---
 
-<Base title={post.data.title} description={post.data.description}>
+<Base
+  title={post.data.title}
+  description={post.data.description}
+  type="article"
+  published={post.data.date}
+  schema={[article]}
+  noindex={post.data.draft}
+>
   <article class="wrap">
     <header class="post-head">
       <p class="meta">

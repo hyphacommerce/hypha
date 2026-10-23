@@ -36,7 +36,7 @@ Custom fields add your own data to **products, variants, categories, customers a
 orders**. Each field is defined once, with a type and rules, and every value is checked
 against them.
 
-| Types | |
+| Kind | Types |
 | --- | --- |
 | Text | single line, multiline, rich text, URL |
 | Numbers | integer, decimal, money, measurement (with a unit) |
