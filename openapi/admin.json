@@ -15,7 +15,7 @@
         }
       },
       "HyphaPreviewToken": {
-        "description": "A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone.",
+        "description": "A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone.",
         "in": "header",
         "name": "Hypha-Preview-Token",
         "required": false,
@@ -7635,7 +7635,7 @@
             ]
           },
           "token": {
-            "description": "Sent back as `Hypha-Preview-Token` with the same request (method, path, query and\nbody) by the same caller, it applies exactly this: the same IDs, and only if the\nwrite records the same events (else `409 preview_stale`). Once. Absent when the\npreview isn't `complete`.",
+            "description": "Sent back as `Hypha-Preview-Token` with the same request (method, path, query and\nbody) by the same caller, it applies exactly this: the same IDs, and only if the\nwrite records the same events over records as they were when previewed (else `409\npreview_stale`). Once. Absent when the preview isn't `complete`.",
             "type": [
               "string",
               "null"
@@ -10435,7 +10435,7 @@
             ]
           },
           "operations": {
-            "description": "Replaces just the allowlist; `null` removes it.",
+            "description": "Replaces just the allowlist; `null` removes it. Narrowing it needs no more than\n`agents:write`; widening or removing it needs a caller who could grant the whole\ngrant, like changing the scopes.",
             "items": {
               "type": "string"
             },
@@ -12067,7 +12067,7 @@
             "bearer": []
           }
         ],
-        "summary": "Approves a pending proposal: its write is sent again as its agent, exactly as\npreviewed (the preview's IDs; committed only if it records the same events). Takes a\nstaff session holding every scope the proposal names. Answers the proposal, `applied`\nor `failed` with the write's answer in `response`. A write that would no longer do\nwhat was previewed (the store changed meanwhile) writes nothing and answers `409\npreview_stale`: the proposal stays `pending`, now holding what the write would do today\n(its preview, IDs and digest replaced, `refreshes` counted, `proposal.updated`\nrecorded), in `details.proposal`, with that preview in `details.preview`; review it and\napprove again. A proposal\nwhose preview stopped at an effect it couldn't run (`complete: false`) is sent as a\nplain write.",
+        "summary": "Approves a pending proposal: its write is sent again as its agent, exactly as\npreviewed (the preview's IDs; committed only if it records the same events over records\nas they were when previewed). Takes a\nstaff session holding every scope the proposal names. Answers the proposal, `applied`\nor `failed` with the write's answer in `response`. A write that would no longer do\nwhat was previewed (the store changed meanwhile) writes nothing and answers `409\npreview_stale`: the proposal stays `pending`, now holding what the write would do today\n(its preview, IDs and digest replaced, `refreshes` counted, `proposal.updated`\nrecorded), in `details.proposal`, with that preview in `details.preview`; review it and\napprove again. A proposal\nwhose preview stopped at an effect it couldn't run (`complete: false`) is sent as a\nplain write. A write refused for good (a 4xx) marks it `failed`; one that may go\nthrough later (`408`, `429`, a 5xx) answers that and leaves it pending. A write already\nmade under the proposal's idempotency key (an approval whose answer was lost) is\nrecorded `applied` with that write's answer.",
         "tags": [
           "agents"
         ],
