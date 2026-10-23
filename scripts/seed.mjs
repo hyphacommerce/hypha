@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // A demo store for the admin and the storefront: "Mycelium Works", a mycology company
-// in Zagreb selling grow kits, live cultures, lab equipment, materials grown from
+// (somewhere in Europe, deliberately unnamed) selling grow kits, live cultures, lab equipment, materials grown from
 // mycelium and courses. It's built to show what a catalogue can carry beyond shirts and
 // mugs: sparse variants (only the species and sizes that exist), per-variant shipping (an
 // eBook beside a paperback), digital products, perishables, and custom fields on
@@ -683,7 +683,7 @@ const PRODUCTS = [
       "custom.first_harvest_days": 10,
       "custom.expected_yield": g(450),
       "custom.substrate": ["hardwood", "soy_hulls"],
-      "custom.grown_in": "Zagreb, Croatia",
+      "custom.grown_in": "Our lab and farm",
       "custom.care_guide":
         "<ol><li>Cut an X in the bag's window.</li><li>Mist the cut twice a day; keep it out of direct sun.</li><li>Harvest when the caps flatten, twisting the whole cluster off.</li><li>Rest the block two weeks, soak it overnight, and it fruits again.</li></ol>",
       "custom.supplier_code": "MW-OYS-BLK",
@@ -713,7 +713,7 @@ const PRODUCTS = [
       "custom.first_harvest_days": 18,
       "custom.expected_yield": g(350),
       "custom.substrate": ["hardwood", "soy_hulls"],
-      "custom.grown_in": "Zagreb, Croatia",
+      "custom.grown_in": "Our lab and farm",
       "custom.supplier_code": "MW-LIO-BLK",
       "custom.landed_cost": eur(8.9),
     },
@@ -741,7 +741,7 @@ const PRODUCTS = [
       "custom.first_harvest_days": 240,
       "custom.expected_yield": g(300),
       "custom.substrate": ["hardwood"],
-      "custom.grown_in": "Gorski kotar, Croatia",
+      "custom.grown_in": "Our forest plots",
     },
   },
   {
@@ -927,7 +927,7 @@ const PRODUCTS = [
     tags: ["upcycled"],
     categories: ["substrates"],
     description:
-      "<p>Spent grounds collected from twelve Zagreb cafés the morning they're brewed, pasteurised with straw. Oysters love it, and it saves a skip of waste a week.</p>",
+      "<p>Spent grounds collected from twelve local cafés the morning they're brewed, pasteurised with straw. Oysters love it, and it saves a skip of waste a week.</p>",
     price: 7,
     weight: 2100,
     image: "coffee-substrate",
@@ -935,7 +935,7 @@ const PRODUCTS = [
     fields: {
       "custom.difficulty": "beginner",
       "custom.substrate": ["coffee", "straw"],
-      "custom.grown_in": "Zagreb, Croatia",
+      "custom.grown_in": "Our lab and farm",
       "custom.certifications": ["eu_organic"],
     },
   },
@@ -1077,7 +1077,7 @@ const PRODUCTS = [
     fields: {
       "custom.certifications": ["vegan", "oeko_tex"],
       "custom.substrate": ["hemp"],
-      "custom.grown_in": "Zagreb, Croatia",
+      "custom.grown_in": "Our lab and farm",
       "custom.care_guide":
         "<p>Wipe with a damp cloth; condition twice a year with a plant wax. Keep it out of long, direct sun, which fades the natural shade first.</p>",
       "custom.supplier_code": "MWM-LTH",
@@ -1109,7 +1109,7 @@ const PRODUCTS = [
     fields: {
       "custom.certifications": ["home_compostable", "vegan"],
       "custom.substrate": ["hemp"],
-      "custom.grown_in": "Zagreb, Croatia",
+      "custom.grown_in": "Our lab and farm",
     },
   },
   {
@@ -1141,7 +1141,7 @@ const PRODUCTS = [
       "custom.sound_absorption": "0.75",
       "custom.certifications": ["home_compostable", "ce"],
       "custom.spec_sheet": "https://myceliumworks.example/specs/acoustic-panel.pdf",
-      "custom.grown_in": "Zagreb, Croatia",
+      "custom.grown_in": "Our lab and farm",
     },
   },
   {
@@ -1164,7 +1164,10 @@ const PRODUCTS = [
     }),
     image: "pendant-shade",
     swatch: SWATCH.cream,
-    fields: { "custom.certifications": ["home_compostable"], "custom.grown_in": "Zagreb, Croatia" },
+    fields: {
+      "custom.certifications": ["home_compostable"],
+      "custom.grown_in": "Our lab and farm",
+    },
   },
 
   // ----- Learn -----
@@ -1327,6 +1330,14 @@ const nameOf = (url) =>
       .replace(/\.[a-z]+$/i, ""),
   );
 
+/** Uploads the image an asset at `url` was seeded from again; the new asset's ID. */
+async function again(url, alt) {
+  const name = nameOf(url);
+  const id = await upload(name, "#D4D5D2", alt);
+  if (id) console.log(`  ${name}`);
+  return id;
+}
+
 /**
  * `--images`, on a store this script already seeded: uploads each product's, variant's
  * and category's image again from `seed-assets/images` (the generated photos replacing
@@ -1335,12 +1346,6 @@ const nameOf = (url) =>
  */
 async function replaceImages() {
   const replaced = new Map();
-  const again = async (url, alt) => {
-    const name = nameOf(url);
-    const id = await upload(name, "#D4D5D2", alt);
-    if (id) console.log(`  ${name}`);
-    return id;
-  };
 
   console.log("Product and variant images");
   const products = await admin.get("/admin/products?limit=100");
@@ -1405,18 +1410,9 @@ async function main() {
     name: "Mycelium Works",
     contact_email: "hello@myceliumworks.example",
     description:
-      "Grow kits, lab cultures and materials grown from mycelium, from our lab and farm in Zagreb.",
-    legal_name: "Mycelium Works d.o.o.",
-    legal_address: {
-      last_name: "Mycelium Works d.o.o.",
-      company: "Mycelium Works d.o.o.",
-      line1: "Radnička cesta 80",
-      city: "Zagreb",
-      postal_code: "10000",
-      country: "HR",
-      phone: "+385 1 4800 200",
-    },
-    timezone: "Europe/Zagreb",
+      "Grow kits, lab cultures and materials grown from mycelium, from our own lab and farm.",
+    // No address or home country: the demo is deliberately nowhere in particular.
+    legal_name: "Mycelium Works Ltd.",
     default_language: "en",
     setup_finished: true,
   });
@@ -1429,8 +1425,7 @@ async function main() {
     accent: "#455C01",
     sender_name: "Mycelium Works",
     reply_to: "hello@myceliumworks.example",
-    footer:
-      "Mycelium Works d.o.o. · Radnička cesta 80, 10000 Zagreb, Croatia · hello@myceliumworks.example",
+    footer: "Mycelium Works Ltd. · hello@myceliumworks.example",
     staff_recipients: [EMAIL],
     order_url: `${STOREFRONT_URL}/order/{order}?token={token}`,
   });
@@ -1463,8 +1458,8 @@ async function main() {
 
   console.log("Warehouses");
   const byName = Object.fromEntries(MARKETS.map((m) => [m.name, m.id]));
-  const zagreb = await admin.post("/admin/locations", {
-    name: "Zagreb lab and farm",
+  const farm = await admin.post("/admin/locations", {
+    name: "Lab and farm",
     markets: [byName.Europe, byName["United Kingdom"], byName.Serbia],
     priority: 1,
   });
@@ -1634,7 +1629,7 @@ async function main() {
       });
       const soldOut = random() < 0.1;
       const most = live ? 15 : 60;
-      await admin.put(`/admin/inventory-items/${item.id}/levels/${zagreb.id}`, {
+      await admin.put(`/admin/inventory-items/${item.id}/levels/${farm.id}`, {
         on_hand: soldOut ? 0 : 3 + Math.floor(random() * most),
       });
       await admin.put(`/admin/inventory-items/${item.id}/levels/${newJersey.id}`, {
@@ -1729,9 +1724,9 @@ async function main() {
     name: "Bank transfer",
     instructions: [
       "Transfer the total to:",
-      "Mycelium Works d.o.o., Demo Bank d.d.",
-      "IBAN: HR00 0000 0000 0000 0000 0",
-      "BIC: DEMOHR2X",
+      "Mycelium Works Ltd., Demo Bank",
+      "IBAN: XX00 DEMO 0000 0000 0000 00",
+      "BIC: DEMOXX2X",
       "Use your order number as the reference. We ship once the payment arrives.",
     ].join("\n"),
   });
@@ -1739,13 +1734,13 @@ async function main() {
   console.log("Customers and orders");
   const SHOPPERS = [
     {
-      email: "ana.horvat@example.com",
+      email: "ana.kovac@example.com",
       first: "Ana",
-      last: "Horvat",
-      country: "HR",
-      line1: "Vlaška 12",
-      city: "Zagreb",
-      postal: "10000",
+      last: "Kovač",
+      country: "SI",
+      line1: "Trubarjeva cesta 12",
+      city: "Ljubljana",
+      postal: "1000",
     },
     {
       email: "lukas.weber@example.com",
@@ -1910,12 +1905,12 @@ async function main() {
     if (i % 3 === 2) continue; // left pending
     const cash = order.payment?.method_name === "Cash on delivery";
     await admin.post(`/admin/orders/${order.id}/paid`, {
-      reference: cash ? `Courier receipt PE-${4100 + i}` : `HR-TRF-${order.number}-${20261000 + i}`,
+      reference: cash ? `Courier receipt PE-${4100 + i}` : `TRF-${order.number}-${20261000 + i}`,
     });
     // Shipped: only what ships (a course or an eBook is never fulfilled from a shelf).
     const shippable = order.lines.filter((line) => ships.get(line.variant) !== false);
     if (i % 2 === 0 && shippable.length > 0) {
-      const location = shopper.country === "US" ? newJersey.id : zagreb.id;
+      const location = shopper.country === "US" ? newJersey.id : farm.id;
       await admin.post(`/admin/orders/${order.id}/fulfillments`, {
         location,
         lines: shippable.map((line) => ({ line: line.id, quantity: line.quantity })),

@@ -4,7 +4,7 @@
 is there, and a plain shot in the product's colour when it isn't. Each image may be up to
 20 MB; 1600 × 2000 px (4:5, portrait) WebP or JPEG at about 85% quality is plenty.
 
-The store is **Mycelium Works**, a mycology lab and farm in Zagreb. The images should look
+The store is **Mycelium Works**, a mycology lab and farm (nowhere in particular). The images should look
 like one brand shot them in one studio.
 
 ## Style (prepend to every prompt)
