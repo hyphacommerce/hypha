@@ -11,7 +11,7 @@ import { ArrowRightIcon } from "@heroicons/react/20/solid";
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
 import { ProductGrid } from "@/components/product-grid";
-import { countryOf, loadCategories, loadStore } from "@/lib/api";
+import { countryOf, loadCategories, loadCategory, loadStore } from "@/lib/api";
 import { search } from "@/lib/listing-data";
 import { link } from "@/lib/site";
 
@@ -91,7 +91,12 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
   const featured = categories.slice(0, 3);
   const digits = country.minor_units;
   const productBase = link(code, "/p");
-  const hero = newest.find((hit) => hit.image?.kind === "image")?.image;
+  // The first category's photo (a scene, not one product), else the newest product's.
+  // Either sits in a portrait frame, the shape product photos are shot in.
+  const lead = featured[0] ? await loadCategory(featured[0].handle) : null;
+  const hero =
+    (lead?.image?.kind === "image" ? lead.image : undefined) ??
+    newest.find((hit) => hit.image?.kind === "image")?.image;
 
   if (newest.length === 0) {
     return (
@@ -103,20 +108,20 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
   }
 
   return (
-    <VStack gap={10}>
-      <VStack gap={8}>
-        <VStack gap={5} hAlign="center" paddingBlock={6}>
-          <VStack gap={3} hAlign="center" maxWidth={720}>
-            <Heading level={1} type="display-1" justify="center" textWrap="balance">
+    <VStack gap={10} paddingBlockEnd={10}>
+      <div className="shop-hero">
+        <VStack gap={6} vAlign="center">
+          <VStack gap={4}>
+            <Heading level={1} type="display-1" textWrap="balance">
               {store.name}
             </Heading>
             {store.description && (
-              <Text type="large" color="secondary" justify="center" textWrap="balance">
+              <Text type="large" color="secondary" textWrap="pretty">
                 {store.description}
               </Text>
             )}
           </VStack>
-          <HStack gap={3} hAlign="center" wrap="wrap">
+          <HStack gap={3} wrap="wrap">
             <Button
               label="Shop everything"
               href={link(code, "/search")}
@@ -135,20 +140,13 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
           </HStack>
         </VStack>
         {hero && (
-          <Section variant="transparent" padding={0}>
-            <div className="shop-rounded">
-              <AspectRatio ratio={3 / 1}>
-                <img
-                  className="shop-fill"
-                  src={hero.url}
-                  alt={hero.alt ?? ""}
-                  fetchPriority="high"
-                />
-              </AspectRatio>
-            </div>
-          </Section>
+          <div className="shop-rounded shop-hero-image">
+            <AspectRatio ratio={4 / 5}>
+              <img className="shop-fill" src={hero.url} alt={hero.alt ?? ""} fetchPriority="high" />
+            </AspectRatio>
+          </div>
         )}
-      </VStack>
+      </div>
 
       {categories.length > 0 && (
         <VStack gap={4}>

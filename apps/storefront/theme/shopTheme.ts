@@ -1,7 +1,7 @@
-// The shop's theme: a warm, editorial look for shoppers, apart from the admin's Hypha
-// theme. Clay on cream, Fraunces headings over Instrument Sans, a roomier type scale.
-// Extends Neutral and only replaces what the shop changes, so a merchant forking the
-// storefront restyles it here.
+// The shop's theme: Hypha's look, like hyphacommerce.com and the admin (Foxfire lime on
+// moss-grey neutrals, Geist), with a roomier type scale for shoppers. Extends Neutral
+// and only replaces what the shop changes, so a merchant forking the storefront restyles
+// it here.
 //
 // Build after editing: `pnpm theme:build` (writes shop.css, shop.js, shop.d.ts).
 // `pnpm theme:check` fails while they're stale.
@@ -43,72 +43,73 @@ function scale([s50, s100, s200, s300, s400, s500, s600, s700, s800, s900, s950]
   };
 }
 
-/** Clay: clay-700 is the fill with white ink (5.6:1); clay-300 the fill on dark. */
-const clay = scale([
-  "#FDF4EF",
-  "#FAE5DA",
-  "#F3C9B3",
-  "#E9A584",
-  "#DD7F57",
-  "#CC6339",
-  "#B4502A",
-  "#953F21",
-  "#77331D",
-  "#5C2918",
-  "#3A190E",
+/** Foxfire, Hypha's lime (brand book v0.1): brand-400 is the fill, always with brand-950
+ * ink on it; it's never text on light grounds, where brand text is brand-800. */
+const brand = scale([
+  "#F5FEE8",
+  "#EAFBCF",
+  "#D9F7A5",
+  "#C6F073",
+  "#B8E948",
+  "#A2D128",
+  "#7EA602",
+  "#5F7E01",
+  "#455C01",
+  "#304204",
+  "#1D2904",
 ]);
-/** Warm stone greys. */
+/** Greys with a faint moss tint, the same as hyphacommerce.com's and the admin's. */
 const stone = scale([
-  "#FBF8F3",
-  "#F4EFE7",
-  "#E8E1D6",
-  "#D5CCBE",
-  "#ABA192",
-  "#7D7466",
-  "#635B4F",
-  "#4D463C",
-  "#36312A",
-  "#26221D",
-  "#1A1714",
+  "#FAFAF9",
+  "#F3F4F2",
+  "#E6E8E5",
+  "#D4D5D2",
+  "#A3A5A1",
+  "#6A6C68",
+  "#575955",
+  "#444642",
+  "#30322F",
+  "#232522",
+  "#1A1B19",
 ]);
 const moss = scale([
-  "#F1F7EE",
-  "#DEEDD8",
-  "#BFDCB3",
-  "#97C586",
-  "#6DA95A",
-  "#4E8E3C",
-  "#3C742D",
-  "#305C25",
-  "#26481E",
-  "#1C3517",
-  "#11220E",
+  "#EDFBF1",
+  "#D9F5E1",
+  "#BAECCA",
+  "#91DBAB",
+  "#5EC386",
+  "#24A965",
+  "#028B4F",
+  "#02703F",
+  "#01532D",
+  "#003B1E",
+  "#002712",
 ]);
 const amber = scale([
-  "#FFF7E8",
-  "#FEEBC8",
-  "#FBD48D",
-  "#F4B852",
-  "#E49B24",
-  "#C47F10",
-  "#A0650C",
-  "#7F4F0D",
-  "#613D0F",
-  "#472D0C",
-  "#2D1C07",
+  "#FFF5EA",
+  "#FFE9D1",
+  "#FDD7AC",
+  "#F1BC7E",
+  "#DF9B44",
+  "#C47D04",
+  "#A06604",
+  "#825100",
+  "#613C01",
+  "#462900",
+  "#2F1A00",
 ]);
 const rose = scale([
-  "#FDF2F2",
-  "#FBE3E3",
-  "#F5C3C3",
-  "#EC9B9B",
-  "#E06E6E",
-  "#CC4B4B",
-  "#B03737",
-  "#8F2D2D",
-  "#712626",
-  "#561E1E",
-  "#371212",
+  "#FFF4F3",
+  "#FEE7E4",
+  "#FFD1CD",
+  "#FFB0A9",
+  "#F28881",
+  "#E85854",
+  "#C8393A",
+  "#9A3936",
+  "#752725",
+  "#521D1B",
+  "#371210",
 ]);
 
 /** A token's `[light, dark]` values. */
@@ -127,14 +128,10 @@ export const shopTheme = defineTheme({
   // titles carry the page.
   typography: {
     scale: { base: 15, ratio: 1.25 },
-    body: {
-      family: "Instrument Sans Variable",
-      // "… Fallback": the system font sized to its metrics (globals.css), until it's in.
-      fallbacks: `"Instrument Sans Fallback", "Instrument Sans", ${sans}`,
-    },
+    body: { family: "Geist Variable", fallbacks: `Geist, ${sans}` },
     heading: {
-      family: "Fraunces Variable",
-      fallbacks: '"Fraunces Fallback", Fraunces, Georgia, "Times New Roman", serif',
+      family: "Geist Variable",
+      fallbacks: `Geist, ${sans}`,
       weights: { 1: "semibold", 2: "semibold", 3: "semibold", 4: "semibold" },
     },
     code: {
@@ -153,15 +150,15 @@ export const shopTheme = defineTheme({
     "--color-background-popover": pair("#FFFFFF", stone[800]),
     "--color-background-muted": pair(stone[100], stone[800]),
 
-    "--color-accent": pair(clay[700], clay[300]),
-    "--color-accent-muted": pair(clay[100], clay[900]),
-    "--color-on-accent": pair("#FFFFFF", clay[950]),
-    "--color-text-accent": pair(clay[700], clay[300]),
-    "--color-icon-accent": pair(clay[700], clay[300]),
-    "--focus-outline-color": pair(clay[700], clay[300]),
+    "--color-accent": pair(brand[400], brand[400]),
+    "--color-accent-muted": pair(brand[100], brand[900]),
+    "--color-on-accent": pair(brand[950], brand[950]),
+    "--color-text-accent": pair(brand[800], brand[300]),
+    "--color-icon-accent": pair(brand[700], brand[300]),
+    "--focus-outline-color": pair(brand[700], brand[400]),
 
     "--color-text-primary": pair(stone[950], stone[50]),
-    "--color-text-secondary": pair(stone[600], stone[300]),
+    "--color-text-secondary": pair(stone[700], stone[300]),
     "--color-text-disabled": pair(stone[400], stone[600]),
     "--color-icon-primary": pair(stone[950], stone[50]),
     "--color-icon-secondary": pair(stone[600], stone[400]),
@@ -182,8 +179,8 @@ export const shopTheme = defineTheme({
     "--color-border": pair(stone[200], stone[800]),
     "--color-border-emphasized": pair(stone[300], stone[700]),
 
-    "--shadow-inset-hover": `inset 0px 0px 0px 2px ${clay[700]}4D`,
-    "--shadow-inset-selected": `inset 0px 0px 0px 2px ${clay[700]}`,
+    "--shadow-inset-hover": `inset 0px 0px 0px 2px ${brand[700]}4D`,
+    "--shadow-inset-selected": `inset 0px 0px 0px 2px ${brand[700]}`,
   },
 
   components: {

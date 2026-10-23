@@ -47,6 +47,21 @@ function QueryWatch({ onQuery }: { onQuery: (query: string) => void }) {
   return null;
 }
 
+/** Fetches and decodes the first `count` cards' images, giving up after `ms`. */
+function imagesReady(
+  hits: { image?: { kind: string; url: string; thumbnail_url?: string | null } | null }[],
+  count: number,
+  ms: number,
+): Promise<unknown> {
+  const decoded = hits.slice(0, count).flatMap((hit) => {
+    if (hit.image?.kind !== "image") return [];
+    const img = new Image();
+    img.src = hit.image.thumbnail_url ?? hit.image.url;
+    return [img.decode().catch(() => undefined)];
+  });
+  return Promise.race([Promise.all(decoded), new Promise((done) => setTimeout(done, ms))]);
+}
+
 export function Listing({
   country,
   digits,
@@ -93,6 +108,9 @@ export function Listing({
     if (query === shown.query || query === initialQuery) return;
     startLoading(async () => {
       const page = await listingPage({ country, category, query });
+      // New cards fade in with their picture, not empty then popping: the first images
+      // are fetched and decoded first, waiting no more than a moment for them.
+      await imagesReady(page.items, 12, 400);
       // The cards animate (their boundaries), the page doesn't cross-fade: the type
       // goes with the update, after the wait (one added before it is lost).
       startTransition(() => {

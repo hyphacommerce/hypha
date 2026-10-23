@@ -4,82 +4,31 @@
 @import "@astryxdesign/core/astryx.css";
 @import "../theme/shop.css";
 
-/* The shop's typefaces (SIL OFL): Fraunces and Instrument Sans, variable, served from
-   public/fonts (the files and subsets of Fontsource's packages, copied so the Latin
-   ones can be preloaded in app/layout.tsx under a known URL). Each subset loads only
-   for text in its range. To add a subset, copy its file and `@font-face` from
-   `@fontsource-variable/<font>/index.css`. */
+/* The shop's typeface (SIL OFL): Geist, Hypha's, variable, served from public/fonts (the
+   files and subsets of Fontsource's package, copied so the Latin one can be preloaded in
+   app/layout.tsx under a known URL). Each subset loads only for text in its range. To add
+   a subset (Cyrillic, say), copy its file and `@font-face` from
+   `@fontsource-variable/geist/index.css`. */
 @font-face {
-  font-family: "Fraunces Variable";
+  font-family: "Geist Variable";
   font-style: normal;
   font-display: swap;
   font-weight: 100 900;
-  src: url(/fonts/fraunces-vietnamese-wght-normal.woff2) format("woff2-variations");
-  unicode-range:
-    U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301,
-    U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
-}
-@font-face {
-  font-family: "Fraunces Variable";
-  font-style: normal;
-  font-display: swap;
-  font-weight: 100 900;
-  src: url(/fonts/fraunces-latin-ext-wght-normal.woff2) format("woff2-variations");
+  src: url(/fonts/geist-latin-ext-wght-normal.woff2) format("woff2-variations");
   unicode-range:
     U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
     U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
     U+A720-A7FF;
 }
 @font-face {
-  font-family: "Fraunces Variable";
+  font-family: "Geist Variable";
   font-style: normal;
   font-display: swap;
   font-weight: 100 900;
-  src: url(/fonts/fraunces-latin-wght-normal.woff2) format("woff2-variations");
+  src: url(/fonts/geist-latin-wght-normal.woff2) format("woff2-variations");
   unicode-range:
     U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
     U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-  font-family: "Instrument Sans Variable";
-  font-style: normal;
-  font-display: swap;
-  font-weight: 400 700;
-  src: url(/fonts/instrument-sans-latin-ext-wght-normal.woff2) format("woff2-variations");
-  unicode-range:
-    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
-    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
-    U+A720-A7FF;
-}
-@font-face {
-  font-family: "Instrument Sans Variable";
-  font-style: normal;
-  font-display: swap;
-  font-weight: 400 700;
-  src: url(/fonts/instrument-sans-latin-wght-normal.woff2) format("woff2-variations");
-  unicode-range:
-    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
-    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-
-/* Until the typefaces are in, system fonts sized to their metrics (ascent, descent and
-   width adjusted, as computed by capsize from each font's tables), so the text takes the
-   same lines before and after the swap and nothing moves. The theme names them next
-   (theme/shopTheme.ts). */
-@font-face {
-  font-family: "Fraunces Fallback";
-  src: local("Georgia");
-  ascent-override: 92.9623%;
-  descent-override: 24.2386%;
-  size-adjust: 105.2039%;
-}
-@font-face {
-  font-family: "Instrument Sans Fallback";
-  src: local("Arial"), local("ArialMT");
-  ascent-override: 94.4163%;
-  descent-override: 24.3341%;
-  line-gap-override: 0%;
-  size-adjust: 102.7365%;
 }
 
 /* What Astryx's components don't express: image fills, sticky columns and the
@@ -153,6 +102,28 @@ body {
     background-color: GrayText;
     opacity: 1;
   }
+}
+
+/* The home page's hero: words beside a portrait photo on wide screens, the photo under
+   them on narrow ones (by CSS, so the HTML is the same at every width). */
+.shop-hero {
+  display: grid;
+  gap: var(--spacing-8, 32px);
+  align-items: center;
+  padding-block: var(--spacing-6, 24px);
+}
+
+@media (min-width: 860px) {
+  .shop-hero {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    gap: var(--spacing-10, 48px);
+  }
+}
+
+.shop-hero-image {
+  width: 100%;
+  max-width: 440px;
+  justify-self: center;
 }
 
 .shop-rounded {
@@ -332,13 +303,13 @@ body {
     display: none;
   }
 }
-/* While the next results are on their way the old ones stay, dimmed. */
-.shop-listing-results {
-  transition: opacity var(--duration-fast);
-}
+/* While the next results are on their way the old ones stay, dimmed. They dim gently
+   and come back at once: the cards' own transition covers the change, and a fade back
+   up running under it reads as a flicker. */
 .shop-listing-results[data-busy] {
   opacity: 0.5;
   pointer-events: none;
+  transition: opacity var(--duration-fast);
 }
 
 /* A product card (components/product-grid.tsx): one link around the image and the
@@ -506,6 +477,14 @@ body {
 ::view-transition-group(.shop-card-move) {
   animation-duration: 280ms;
   animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+/* A staying card is the same card: it moves, without cross-fading its old picture (taken
+   dimmed, while the results loaded) into the new one, which flickers. */
+::view-transition-old(.shop-card-move) {
+  display: none;
+}
+::view-transition-new(.shop-card-move) {
+  animation: none;
 }
 ::view-transition-new(.shop-card-in):only-child {
   animation: shop-vt-in 220ms ease-out;
