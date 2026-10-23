@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use hypha_agents::{Agent, AgentSnapshot, Proposal, ProposalSnapshot, StageAgents, StageProposals};
+use hypha_agents::{Agent, AgentSnapshot, StageAgents};
 use hypha_apps::{App, AppSnapshot, StageApps};
 use hypha_auth::{
     Identity, IdentitySnapshot, PasswordReset, PasswordResetSnapshot, Session, SessionSnapshot,
@@ -165,9 +165,6 @@ enum Staged {
     ReindexedCustomFieldValue(ValueRow, Version),
     RemovedCustomFieldValue(CustomFieldDefinitionId, uuid::Uuid, Option<Version>),
     NewAgent(AgentSnapshot),
-    Agent(AgentSnapshot),
-    NewProposal(ProposalSnapshot),
-    Proposal(ProposalSnapshot),
 }
 
 impl Staged {
@@ -245,9 +242,6 @@ impl Staged {
             | Staged::RemovedCustomFieldValue(..) => 49,
             // An agent before its proposals.
             Staged::NewAgent(_) => 50,
-            Staged::Agent(_) => 51,
-            Staged::NewProposal(_) => 52,
-            Staged::Proposal(_) => 53,
         }
     }
 
@@ -329,10 +323,7 @@ impl Staged {
                     | Staged::ReindexedCustomFieldValue(..)
                     | Staged::RemovedCustomFieldValue(..),
                 ) => value_key(self).cmp(&value_key(other)),
-                (Staged::NewAgent(a), Staged::NewAgent(b))
-                | (Staged::Agent(a), Staged::Agent(b)) => a.id.cmp(&b.id),
-                (Staged::NewProposal(a), Staged::NewProposal(b))
-                | (Staged::Proposal(a), Staged::Proposal(b)) => a.id.cmp(&b.id),
+                (Staged::NewAgent(a), Staged::NewAgent(b)) => a.id.cmp(&b.id),
                 _ => Ordering::Equal,
             })
     }
@@ -822,13 +813,6 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                         crate::custom_fields::remove_value(&db, definition, owner, expected).await?
                     }
                     Staged::NewAgent(s) => crate::agents::insert_agent(&db, &s).await?,
-                    Staged::Agent(s) => {
-                        crate::agents::update_agent(&db, &s).await?;
-                    }
-                    Staged::NewProposal(s) => crate::agents::insert_proposal(&db, &s).await?,
-                    Staged::Proposal(s) => {
-                        crate::agents::update_proposal(&db, &s).await?;
-                    }
                 }
             }
             insert_records(&db, &records).await?;
@@ -1038,30 +1022,5 @@ impl StageAgents for PgBatch {
         self.stage(Staged::NewAgent(agent.snapshot()));
         self.stage_events_of(agent, Version::NEW.next());
         agent.set_version(Version::NEW.next());
-    }
-
-    fn update_agent(&mut self, agent: &mut Agent) {
-        stamp_update(agent, self.now);
-        self.stage(Staged::Agent(agent.snapshot()));
-        let version = agent.version().next();
-        self.stage_events_of(agent, version);
-        agent.set_version(version);
-    }
-}
-
-impl StageProposals for PgBatch {
-    fn insert_proposal(&mut self, proposal: &mut Proposal) {
-        stamp_insert(proposal, self.now);
-        self.stage(Staged::NewProposal(proposal.snapshot()));
-        self.stage_events_of(proposal, Version::NEW.next());
-        proposal.set_version(Version::NEW.next());
-    }
-
-    fn update_proposal(&mut self, proposal: &mut Proposal) {
-        stamp_update(proposal, self.now);
-        self.stage(Staged::Proposal(proposal.snapshot()));
-        let version = proposal.version().next();
-        self.stage_events_of(proposal, version);
-        proposal.set_version(version);
     }
 }

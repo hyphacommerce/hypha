@@ -6,13 +6,14 @@ use hypha_agents::{
     APPLYING_LEASE, AgentError, AgentFilter, AgentKind, AgentRepo, CallMode, ClientInput,
     CommandError, ConnectAgent, CreateAgent, GrantError, GrantInput, ListProposals, NewAgentCall,
     OperationId, Outcome, ProposalError, ProposalRequest, ProposalStatus, Propose, UpdateAgent,
-    WriteMode, WritesCap, active_agent, approve_proposal, create_autonomous_agent,
-    create_connected_agent, create_proposal, effective, expire_proposals, get_agent, get_proposal,
-    list_agent_calls, list_agents, list_proposals, prune_agent_calls, record_agent_use,
-    record_applied, record_call, record_failed, record_refreshed, reject_proposal,
-    release_proposal, revoke_agent, update_agent,
+    WriteMode, WritesCap, active_agent, approve_proposal, create_proposal, effective,
+    expire_proposals, get_agent, get_proposal, list_agent_calls, list_agents, list_proposals,
+    prune_agent_calls, record_agent_use, record_applied, record_call, record_failed,
+    record_refreshed, reject_proposal, release_proposal, revoke_agent, update_agent,
 };
-use hypha_agents::{Agent, AgentSettings, Proposal};
+use hypha_agents::{
+    Agent, AgentSettings, HasAgents, Proposal, prepare_autonomous_agent, prepare_connected_agent,
+};
 use hypha_core::{
     Actor, AgentId, ApiKeyId, AuthError, Ctx, IdempotencyError, PageRequest, Progress, ProposalId,
     Scope, Timestamp, UserId, Versioned,
@@ -71,7 +72,9 @@ impl World {
             name: "Restocker".to_string(),
             grant: g,
         };
-        block_on(create_autonomous_agent(ctx, &self.ports, &self.ids, input))
+        let mut agent = prepare_autonomous_agent(ctx, &self.ids, input)?;
+        block_on(self.ports.agents().insert(&mut agent))?;
+        Ok(agent)
     }
 
     /// An autonomous agent proposing product writes and applying inventory ones.
@@ -248,6 +251,18 @@ fn only_a_staff_session_grants_apply() {
     );
 }
 
+/// Connects an agent for the caller, as the OAuth workflow does with its code.
+async fn connect(
+    ctx: &Ctx,
+    ports: &InMemoryPorts,
+    ids: &SequentialIds,
+    input: ConnectAgent,
+) -> Result<Agent, CommandError> {
+    let mut agent = prepare_connected_agent(ctx, ids, input)?;
+    ports.agents().insert(&mut agent).await?;
+    Ok(agent)
+}
+
 #[test]
 fn a_connected_agent_acts_for_the_staff_member_who_connected_it() {
     let w = World::new();
@@ -259,14 +274,14 @@ fn a_connected_agent_acts_for_the_staff_member_who_connected_it() {
         }),
         grant: grant(&["products:read"], &[]),
     };
-    let agent = block_on(create_connected_agent(&staff(), &w.ports, &w.ids, input())).unwrap();
+    let agent = block_on(connect(&staff(), &w.ports, &w.ids, input())).unwrap();
     assert_eq!(agent.kind(), AgentKind::Connected { user: user(1) });
     assert_eq!(
         agent.client().map(|c| c.client_id()),
         Some("https://claude.ai/oauth/mcp-client.json")
     );
     assert_eq!(
-        block_on(create_connected_agent(
+        block_on(connect(
             &key(Scope::ALL.to_vec()),
             &w.ports,
             &w.ids,
@@ -278,14 +293,14 @@ fn a_connected_agent_acts_for_the_staff_member_who_connected_it() {
     // A staff member without `agents:write` connects their own client too, granting
     // only what their role holds.
     let clerk = Ctx::new(Actor::User(user(2)), vec![Scope::ProductsRead]);
-    let own = block_on(create_connected_agent(&clerk, &w.ports, &w.ids, input())).unwrap();
+    let own = block_on(connect(&clerk, &w.ports, &w.ids, input())).unwrap();
     assert_eq!(own.kind(), AgentKind::Connected { user: user(2) });
     let wider = ConnectAgent {
         grant: grant(&["orders:read"], &[]),
         ..input()
     };
     assert_eq!(
-        block_on(create_connected_agent(&clerk, &w.ports, &w.ids, wider)).err(),
+        block_on(connect(&clerk, &w.ports, &w.ids, wider)).err(),
         Some(CommandError::CannotGrant(Scope::OrdersRead))
     );
     let mine = AgentFilter {

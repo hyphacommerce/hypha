@@ -6,7 +6,7 @@ use hypha_agents::{
     Agent, AgentCall, AgentCallRepo, AgentClient, AgentFilter, AgentKind, AgentRepo, CallMode,
     Grant, GrantInput, HasAgentCalls, HasAgents, HasProposals, NewAgent, NewAgentCall, NewProposal,
     OperationId, Proposal, ProposalFilter, ProposalRepo, ProposalRequest, ProposalResponse,
-    ProposalStatus, StageAgents, StageProposals, keys,
+    ProposalStatus, StageAgents, keys,
 };
 use hypha_core::{
     AgentCallId, AgentId, HasBatch, IdempotencyKey, PageLimit, PageRequest, ProposalId, RepoError,
@@ -218,20 +218,16 @@ async fn agent_batch<S: HasAgents + HasBatch<Batch: StageAgents>>(ports: &S) {
     assert_eq!(one.version(), Version::new(1));
     assert_eq!(ports.agents().get(aid(2)).await, Ok(Some(two.clone())));
 
-    let mut stale = one.clone();
-    one.rename("One again").unwrap();
-    let mut batch = ports.batch();
-    batch.update_agent(&mut one);
-    ports.commit(batch).await.unwrap();
-    assert_eq!(ports.agents().get(aid(1)).await, Ok(Some(one)));
-
-    // A stale update fails the whole batch: the new agent staged with it isn't written.
-    stale.rename("Lost").unwrap();
+    // A failing insert fails the whole batch: the new agent staged with it isn't written.
     let mut three = autonomous(3, "Three");
+    let mut again = autonomous(1, "One again");
     let mut batch = ports.batch();
     batch.insert_agent(&mut three);
-    batch.update_agent(&mut stale);
-    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+    batch.insert_agent(&mut again);
+    assert_eq!(
+        ports.commit(batch).await,
+        Err(RepoError::Duplicate(keys::AGENT_ID))
+    );
     assert_eq!(ports.agents().get(aid(3)).await, Ok(None));
 }
 
@@ -306,9 +302,9 @@ fn response() -> ProposalResponse {
 /// Runs every `ProposalRepo` scenario, each on fresh ports from `make`.
 pub async fn proposal_repo<S>(make: impl AsyncFn() -> S)
 where
-    S: HasAgents + HasProposals + HasBatch<Batch: StageProposals>,
+    S: HasAgents + HasProposals,
 {
-    scenario("proposal: every field round-trips, pending and in every decided state");
+    scenario("proposal: every field round-trips, pending, applying and in every decided state");
     proposal_round_trip(&make().await).await;
     scenario("proposal: its agent must exist");
     proposal_needs_agent(&make().await).await;
@@ -318,10 +314,8 @@ where
     proposal_versions(&make().await).await;
     scenario("proposal: lists page newest first, by agent, status and scopes held");
     proposal_lists(&make().await).await;
-    scenario("proposal: due ones are pending past their lifetime, earliest first");
+    scenario("proposal: due ones are pending or applying past their lifetime, earliest first");
     proposal_due(&make().await).await;
-    scenario("proposal: proposals staged in a batch commit together, or not at all");
-    proposal_batch(&make().await).await;
 }
 
 async fn with_agents<S: HasAgents>(ports: &S, agents: &[u128]) {
@@ -357,9 +351,10 @@ async fn proposal_round_trip<S: HasAgents + HasProposals>(ports: &S) {
     repo.insert(&mut bodiless).await.unwrap();
     assert_eq!(repo.get(pid(2)).await, Ok(Some(bodiless)));
 
-    // Previewed again on a stale approval: a new preview and digest, still pending.
+    // Previewed again on a stale approval: a new preview and digest, pending again.
     let mut refreshed = proposal(7, 1, None, 100);
     repo.insert(&mut refreshed).await.unwrap();
+    refreshed.start_applying(user(1), at(2)).unwrap();
     refreshed
         .refresh(
             user(1),
@@ -373,9 +368,16 @@ async fn proposal_round_trip<S: HasAgents + HasProposals>(ports: &S) {
     assert_eq!(stored, refreshed);
 
     type Decide = fn(&mut Proposal);
-    let decisions: [(u128, Decide); 4] = [
-        (3, |p| p.applied(user(1), at(5), response()).unwrap()),
-        (4, |p| p.failed(user(1), at(5), response()).unwrap()),
+    let decisions: [(u128, Decide); 5] = [
+        (3, |p| {
+            p.start_applying(user(1), at(4)).unwrap();
+            p.applied(user(1), at(5), response()).unwrap()
+        }),
+        (4, |p| {
+            p.start_applying(user(1), at(4)).unwrap();
+            p.failed(user(1), at(5), response()).unwrap()
+        }),
+        (8, |p| p.start_applying(user(1), at(4)).unwrap()),
         (5, |p| {
             p.reject(user(2), at(5), Some("Not now".to_string()))
                 .unwrap()
@@ -441,7 +443,7 @@ async fn proposal_versions<S: HasAgents + HasProposals>(ports: &S) {
     p.reject(user(1), at(1), None).unwrap();
     repo.update(&mut p).await.unwrap();
     assert_eq!(p.version(), Version::new(2));
-    stale.applied(user(1), at(2), response()).unwrap();
+    stale.start_applying(user(1), at(2)).unwrap();
     assert_eq!(repo.update(&mut stale).await, Err(RepoError::StaleVersion));
     assert_eq!(
         repo.get(pid(1)).await.unwrap().map(|p| p.status()),
@@ -526,6 +528,11 @@ async fn proposal_due<S: HasAgents + HasProposals>(ports: &S) {
     repo.insert(&mut decided).await.unwrap();
     decided.reject(user(1), at(1), None).unwrap();
     repo.update(&mut decided).await.unwrap();
+    // An approval's write running: due too (the job decides whether its lease passed).
+    let mut applying = proposal(6, 1, None, 15);
+    repo.insert(&mut applying).await.unwrap();
+    applying.start_applying(user(1), at(1)).unwrap();
+    repo.update(&mut applying).await.unwrap();
     let due = async |now: i64, limit: u32| -> Vec<ProposalId> {
         repo.due(at(now), limit)
             .await
@@ -535,44 +542,16 @@ async fn proposal_due<S: HasAgents + HasProposals>(ports: &S) {
             .collect()
     };
     assert_eq!(due(9, 10).await, Vec::<ProposalId>::new());
-    assert_eq!(due(20, 10).await, vec![pid(2), pid(3)], "at its end is due");
-    assert_eq!(due(100, 2).await, vec![pid(2), pid(3)]);
-    assert_eq!(due(100, 10).await, vec![pid(2), pid(3), pid(4), pid(1)]);
-}
-
-async fn proposal_batch<S: HasAgents + HasProposals + HasBatch<Batch: StageProposals>>(ports: &S) {
-    with_agents(ports, &[1]).await;
-    let mut one = proposal(1, 1, Some("a"), 100);
-    let mut two = proposal(2, 1, None, 100);
-    let mut batch = ports.batch();
-    batch.insert_proposal(&mut one);
-    batch.insert_proposal(&mut two);
-    ports.commit(batch).await.unwrap();
-    assert_eq!(one.version(), Version::new(1));
-    assert_eq!(ports.proposals().get(pid(1)).await, Ok(Some(one.clone())));
-
-    let mut stale = one.clone();
-    one.applied(user(1), at(3), response()).unwrap();
-    let mut batch = ports.batch();
-    batch.update_proposal(&mut one);
-    ports.commit(batch).await.unwrap();
-    assert_eq!(ports.proposals().get(pid(1)).await, Ok(Some(one)));
-
-    // The same key again fails the whole batch.
-    stale.reject(user(1), at(4), None).unwrap();
-    let mut three = proposal(3, 1, None, 100);
-    let mut again = proposal(4, 1, Some("a"), 100);
-    let mut batch = ports.batch();
-    batch.insert_proposal(&mut three);
-    batch.insert_proposal(&mut again);
     assert_eq!(
-        ports.commit(batch).await,
-        Err(RepoError::Duplicate(keys::PROPOSAL_KEY))
+        due(20, 10).await,
+        vec![pid(2), pid(6), pid(3)],
+        "at its end is due"
     );
-    assert_eq!(ports.proposals().get(pid(3)).await, Ok(None));
-    let mut batch = ports.batch();
-    batch.update_proposal(&mut stale);
-    assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+    assert_eq!(due(100, 2).await, vec![pid(2), pid(6)]);
+    assert_eq!(
+        due(100, 10).await,
+        vec![pid(2), pid(6), pid(3), pid(4), pid(1)]
+    );
 }
 
 fn call(n: u128, agent: u128, seconds: i64) -> AgentCall {

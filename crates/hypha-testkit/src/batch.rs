@@ -1,4 +1,4 @@
-use hypha_agents::{Agent, Proposal, StageAgents, StageProposals};
+use hypha_agents::{Agent, StageAgents};
 use hypha_apps::{App, StageApps};
 use hypha_auth::{
     Identity, PasswordReset, Session, StageIdentities, StagePasswordResets, StageSessions,
@@ -135,9 +135,6 @@ enum Staged {
     ),
     Events(Vec<PendingEvent>, Option<Version>),
     NewAgent(Agent),
-    Agent(Agent),
-    NewProposal(Proposal),
-    Proposal(Proposal),
 }
 
 impl StageApps for InMemoryBatch {
@@ -170,34 +167,6 @@ impl StageAgents for InMemoryBatch {
         self.stage(Staged::NewAgent(agent.clone()));
         self.stage(Staged::Events(events, Some(Version::NEW.next())));
         agent.set_version(Version::NEW.next());
-    }
-
-    fn update_agent(&mut self, agent: &mut Agent) {
-        stamp_update(agent, self.now);
-        let version = agent.version().next();
-        let events = agent.take_events();
-        self.stage(Staged::Agent(agent.clone()));
-        self.stage(Staged::Events(events, Some(version)));
-        agent.set_version(version);
-    }
-}
-
-impl StageProposals for InMemoryBatch {
-    fn insert_proposal(&mut self, proposal: &mut Proposal) {
-        stamp_insert(proposal, self.now);
-        let events = proposal.take_events();
-        self.stage(Staged::NewProposal(proposal.clone()));
-        self.stage(Staged::Events(events, Some(Version::NEW.next())));
-        proposal.set_version(Version::NEW.next());
-    }
-
-    fn update_proposal(&mut self, proposal: &mut Proposal) {
-        stamp_update(proposal, self.now);
-        let version = proposal.version().next();
-        let events = proposal.take_events();
-        self.stage(Staged::Proposal(proposal.clone()));
-        self.stage(Staged::Events(events, Some(version)));
-        proposal.set_version(version);
     }
 }
 
@@ -1046,18 +1015,6 @@ impl HasBatch for InMemoryPorts {
                         &mut agent,
                         hypha_agents::keys::AGENT_ID,
                         &no_unique_keys,
-                    )?,
-                    Staged::Agent(mut agent) => {
-                        crate::agents::update_agent(&mut agents, &mut agent)?
-                    }
-                    Staged::NewProposal(mut proposal) => {
-                        crate::agents::insert_proposal(&agents, &mut proposals, &mut proposal)?
-                    }
-                    Staged::Proposal(mut proposal) => update_row(
-                        &mut proposals,
-                        proposal.id(),
-                        &mut proposal,
-                        &crate::agents::unique_proposal,
                     )?,
                 }
             }

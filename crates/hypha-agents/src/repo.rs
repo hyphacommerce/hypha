@@ -100,17 +100,6 @@ pub trait AgentCallRepo {
 pub trait StageAgents {
     /// What `AgentRepo::insert` would write; `AGENT_ID` on commit.
     fn insert_agent(&mut self, agent: &mut Agent);
-    /// What `AgentRepo::update` would write; `StaleVersion` on commit if it moved.
-    fn update_agent(&mut self, agent: &mut Agent);
-}
-
-/// Stages proposals in a batch: a proposal's decision can commit with the write it
-/// applied.
-pub trait StageProposals {
-    /// What `ProposalRepo::insert` would write (same precondition).
-    fn insert_proposal(&mut self, proposal: &mut Proposal);
-    /// What `ProposalRepo::update` would write; `StaleVersion` on commit if it moved.
-    fn update_proposal(&mut self, proposal: &mut Proposal);
 }
 
 pub trait HasAgents {

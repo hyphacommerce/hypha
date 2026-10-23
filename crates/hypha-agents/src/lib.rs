@@ -22,12 +22,11 @@ pub use agent::{Agent, AgentClient, AgentKind, AgentSnapshot, NewAgent};
 pub use call::{AgentCall, CallMode, MAX_ERROR_CODE_LEN, NewAgentCall};
 pub use commands::{
     AgentSettings, ClientInput, CommandError, ConnectAgent, CreateAgent, ListProposals, Outcome,
-    Propose, USE_RESOLUTION, UpdateAgent, active_agent, approve_proposal, create_autonomous_agent,
-    create_connected_agent, create_proposal, expire_proposals, get_agent, get_proposal,
-    list_agent_calls, list_agents, list_proposals, prepare_autonomous_agent,
-    prepare_connected_agent, prune_agent_calls, record_agent_use, record_applied, record_call,
-    record_failed, record_refreshed, reject_proposal, release_proposal, require_grantable,
-    revoke_agent, update_agent,
+    Propose, USE_RESOLUTION, UpdateAgent, active_agent, approve_proposal, create_proposal,
+    expire_proposals, get_agent, get_proposal, list_agent_calls, list_agents, list_proposals,
+    prepare_autonomous_agent, prepare_connected_agent, prune_agent_calls, record_agent_use,
+    record_applied, record_call, record_failed, record_refreshed, reject_proposal,
+    release_proposal, require_grantable, revoke_agent, update_agent,
 };
 pub use error::{AgentError, CallError, ProposalError};
 pub use events::{
@@ -45,5 +44,5 @@ pub use proposal::{
 };
 pub use repo::{
     AgentCallRepo, AgentFilter, AgentRepo, HasAgentCalls, HasAgents, HasProposals, ProposalFilter,
-    ProposalRepo, StageAgents, StageProposals, keys,
+    ProposalRepo, StageAgents, keys,
 };

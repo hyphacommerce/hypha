@@ -5,7 +5,7 @@
 //! Credentials are not this crate's: a connected agent's OAuth pair and an autonomous
 //! agent's secret are `hypha-auth` token kinds. A workflow above both makes the agent with
 //! `prepare_autonomous_agent` / `prepare_connected_agent` and stages it (`StageAgents`)
-//! in the same batch as its credential; `create_*` write an agent alone.
+//! in the same batch as its credential.
 
 use core::time::Duration;
 
@@ -166,18 +166,6 @@ pub fn prepare_autonomous_agent(
     )?)
 }
 
-/// Creates an autonomous agent: staff's, for a job, with its own grant.
-pub async fn create_autonomous_agent<S: HasAgents>(
-    ctx: &Ctx,
-    ports: &S,
-    ids: &impl IdGenerator,
-    input: CreateAgent,
-) -> Result<Agent, CommandError> {
-    let mut agent = prepare_autonomous_agent(ctx, ids, input)?;
-    ports.agents().insert(&mut agent).await?;
-    Ok(agent)
-}
-
 /// The client that asked to connect, as its metadata document names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientInput {
@@ -221,18 +209,6 @@ pub fn prepare_connected_agent(
             grant,
         },
     )?)
-}
-
-/// Creates a connected agent for the calling staff member.
-pub async fn create_connected_agent<S: HasAgents>(
-    ctx: &Ctx,
-    ports: &S,
-    ids: &impl IdGenerator,
-    input: ConnectAgent,
-) -> Result<Agent, CommandError> {
-    let mut agent = prepare_connected_agent(ctx, ids, input)?;
-    ports.agents().insert(&mut agent).await?;
-    Ok(agent)
 }
 
 /// Changes only what's `Some`, like a JSON Merge Patch. `grant` replaces the whole grant

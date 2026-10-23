@@ -447,11 +447,11 @@ async fn a_connected_agent_is_capped_by_its_staff_members_role_now() {
             ..Default::default()
         },
     };
-    let agent = hypha_agents::create_connected_agent(&bob, &ports, &app.state.ids, input)
+    let mut agent = hypha_agents::prepare_connected_agent(&bob, &app.state.ids, input).unwrap();
+    hypha_agents::AgentRepo::insert(hypha_agents::HasAgents::agents(&ports), &mut agent)
         .await
-        .unwrap()
-        .id()
-        .to_string();
+        .unwrap();
+    let agent = agent.id().to_string();
     drop(ports);
     let orders = || op("admin.orders.list", json!({}), None, Mode::Apply);
     assert_eq!(call(&app, &agent, orders()).await.status, 200);
