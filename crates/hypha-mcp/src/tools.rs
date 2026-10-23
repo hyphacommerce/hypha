@@ -231,17 +231,20 @@ pub fn direct_definition(schema: &OperationSchema) -> Value {
     let summary = &schema.summary;
     let mut properties = Map::new();
     let mut required: Vec<&str> = Vec::new();
+    // Each part stands alone with its own `$defs`; nested under `properties`, their
+    // `#/$defs/…` would resolve against the input schema's root, so the root holds them.
+    let mut defs = Map::new();
     if has_properties(&schema.params) {
-        properties.insert("params".into(), schema.params.clone());
+        properties.insert("params".into(), hoist_defs(&schema.params, &mut defs));
         if has_required(&schema.params) {
             required.push("params");
         }
     }
     if has_properties(&schema.query) {
-        properties.insert("query".into(), schema.query.clone());
+        properties.insert("query".into(), hoist_defs(&schema.query, &mut defs));
     }
     if let Some(body) = &schema.body {
-        properties.insert("body".into(), body.schema.clone());
+        properties.insert("body".into(), hoist_defs(&body.schema, &mut defs));
         if body.required {
             required.push("body");
         }
@@ -271,12 +274,16 @@ saved, the answer shows exactly what would change), then apply."
         });
     }
 
+    let mut input = object_schema(Value::Object(properties), &required);
+    if !defs.is_empty() {
+        input["$defs"] = Value::Object(defs);
+    }
     let read = summary.access == Access::Read;
     json!({
         "name": summary.id.tool_name(),
         "title": summary.summary,
         "description": description,
-        "inputSchema": object_schema(Value::Object(properties), &required),
+        "inputSchema": input,
         "annotations": {
             "title": summary.summary,
             "readOnlyHint": read,
@@ -284,6 +291,16 @@ saved, the answer shows exactly what would change), then apply."
             "openWorldHint": false,
         },
     })
+}
+
+/// `part` without its `$defs`, which join `defs` (the same name is the same schema: both
+/// come from one document's components).
+fn hoist_defs(part: &Value, defs: &mut Map<String, Value>) -> Value {
+    let mut part = part.clone();
+    if let Some(Value::Object(own)) = part.as_object_mut().and_then(|p| p.remove("$defs")) {
+        defs.extend(own);
+    }
+    part
 }
 
 fn has_properties(schema: &Value) -> bool {
@@ -730,6 +747,37 @@ mod tests {
         );
         assert!(tool["inputSchema"]["properties"].get("query").is_none());
         assert_eq!(tool["annotations"]["readOnlyHint"], false);
+    }
+
+    #[test]
+    fn a_direct_tools_refs_resolve_from_its_input_schema() {
+        let item = json!({"type": "object", "properties": {"sku": {"type": "string"}}});
+        let schema = OperationSchema {
+            summary: op("admin.products.update", "Update", &[], Access::Write),
+            description: None,
+            params: json!({"type": "object", "properties": {"id": {"$ref": "#/$defs/Id"}},
+                "$defs": {"Id": {"type": "string"}}}),
+            query: json!({"type": "object", "properties": {}}),
+            body: Some(BodySchema {
+                schema: json!({"allOf": [{"$ref": "#/$defs/Update"}],
+                    "$defs": {"Update": {"type": "object",
+                        "properties": {"item": {"$ref": "#/$defs/Item"}}},
+                        "Item": item.clone(), "Id": {"type": "string"}}}),
+                required: true,
+            }),
+            output: None,
+            errors: vec![],
+            scopes: vec![],
+        };
+        let input = &direct_definition(&schema)["inputSchema"];
+        assert_eq!(input["$defs"]["Item"], item);
+        assert_eq!(input["$defs"]["Id"], json!({"type": "string"}));
+        assert!(input["properties"]["body"].get("$defs").is_none());
+        assert!(input["properties"]["params"].get("$defs").is_none());
+        assert_eq!(
+            input["properties"]["body"]["allOf"][0]["$ref"],
+            "#/$defs/Update"
+        );
     }
 
     #[test]
