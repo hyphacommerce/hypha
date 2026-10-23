@@ -666,7 +666,7 @@ tools' names have no dots and are unchanged.
   `409 preview_used`; a retry of an applied write sends its `Idempotency-Key` without the
   token to get the replay (with the token it would be refused before the key is read).
   Known gap: an email sent while answering (an invite) goes out before a stale apply rolls
-  back; holding emails until the commit is a follow-up.
+  back; holding emails until the commit is a follow-up (done: "As built: review fixes").
 - **The operations index** (`hypha-http`'s `operations.rs`, `AppState::operations()`): the
   admin rows of the route table and the build's spores' (`Deployment::spore_rows`, now on
   the Workers deployment too), each with its `OperationId`, method, path, `write`,
@@ -844,3 +844,69 @@ tools' names have no dots and are unchanged.
 - **`GET /admin/agent-settings`** (`agents:read`): `{enabled, writes,
   proposal_lifetime_seconds, preview_token_lifetime_seconds}`, the operator's `[agents]`,
   read-only through the API.
+
+## As built: review fixes
+
+- **A write an agent only proposes never commits without a person.** The mode of a write
+  is decided by the write scopes the agent holds (`Permissions::mode_for`: any held only
+  to propose makes it a proposal), never by a missing read scope, which used to make
+  the call a direct write the route committed when its command didn't ask for that
+  scope (`admin.carts.set_customer` with `{"customer": null}` and no `customers:read`,
+  under the cap `propose` too). And by construction: a direct read or write runs with
+  `Permissions::applied_scopes` (no write scope held only to propose); only a preview,
+  a proposal's preview (both sent with `Hypha-Preview`, so rolled back) and an approved
+  proposal's write carry them. `holds_all` is what `visible` asks.
+- **Narrowing an allowlist is the only free change.** `update_agent` asks
+  `require_grantable` for any grant change but a strictly narrower allowlist (one where
+  there was none counts as narrower): widening or lifting it hands the grant out again.
+- **Approving is the person's act.** `agents::apply_approved` spends none of the
+  agent's rate limits, doesn't note its use and isn't in its call log (the proposal
+  records who approved and what the write answered; the outbox stamps the write with
+  the agent). Only a definitive refusal (a 4xx but `408`/`429`) marks the proposal
+  `failed`; a `408`, `429` or 5xx is answered as is and the proposal stays pending.
+- **A replayed approval is applied.** An apply whose answer replays its
+  `Idempotency-Key` (`idempotent-replayed`) is answered as is, with nothing compared or
+  kept: a retried approval, or two people approving at once, records the proposal
+  `applied` with the stored answer instead of calling it stale. A route without keys
+  can't tell its own earlier write from someone else's: a retried approval there is
+  stale (the record's version moved) and shows what the write would do now.
+- **What applying compares** (§3.3, §11: "comparing more later would refuse writes that
+  pass today"; the live test showed why it must). The digest covers the events and the
+  rows of aggregates the write wrote, each with the version it found (`Inserted` for a
+  new one): an apply over anything changed since its preview is stale even when its
+  events read the same (`product.updated` names the fields changed, not their old
+  values, so an approval after the owner retitled the product overwrote the owner's
+  title). Recorded in Postgres, not in each adapter's write path: the trigger
+  `hypha_note_write` (migration 0074) on every aggregate's table (a test holds every
+  table with a bigint `version` to it) logs table, key and the version found into the
+  transaction-local setting `hypha.writes`, only while `hypha.log_writes` is on (previews
+  and applies set it), so a write rolled back to its savepoint takes its line with it, as
+  its rows. `PgPreview::recorded` reads both back (`hypha_core::WriteRecord`). Previews
+  run only on Postgres, so the in-memory adapter has nothing to diverge on. Proposals
+  previewed before this answer stale once when approved, and take the new digest.
+  Spores' own versioned tables aren't covered unless their migrations add the trigger.
+- **Apply does what was previewed or nothing, effects included.** An apply holds its
+  emails and background work (`Apply::hold_email`, `defer`) and runs them after the
+  COMMIT; a rollback drops them, and a stale apply lists the held emails in its fresh
+  preview. A held email the provider refuses after the commit is logged: the committed
+  write's answer can't change. Calls out: an apply's preview was complete, so it made
+  no call but to read-only extension points and touched no media storage. The apply
+  allows exactly that (read-only points are called again, as in a preview); any other
+  call (`payments.capture`, a webhook, a manifest), media storage or an upload URL is
+  blocked before it goes out, and the apply answers `409 preview_stale` with a fresh,
+  incomplete preview naming it in `blocked_by` (no token: such a write goes through a
+  proposal, whose approver sees what couldn't be previewed). Comparing a call against
+  the preview's record instead would allow nothing more: a complete preview has none.
+- **`/mcp` finds the agent once per request.** `serve` calls `agents::acting` (with
+  `NoteUse::Yes`, which notes its use on the same connection) and hands the `Acting` to
+  `agents::call_as` for each tool call. Connections a direct `tools/call` takes from the
+  pool: 6 before (the credential, `acting` in `serve`, `acting` again in `judge`,
+  `judge`'s for the use, the routed request, the log), 4 now (the credential, `acting`,
+  the routed request, the log); a proposal takes one more for itself, as before.
+- **Preview tokens keep the path's case.** `extract::fingerprint` no longer folds it;
+  idempotency keys still do, in `KeyedJson`, as before the fingerprint was shared, so
+  their stored records match their retries.
+- **A connected agent's refresh token works for its client only.** Token pairs keep the
+  client ID they were issued to (migration 0073, backfilled for agents' tokens from the
+  agent's client); a refresh naming another is `invalid_grant`, as an app's was.
+- **Direct tools: 23.** `admin.inventory.list_items` (stock across products, `below`).
