@@ -23,9 +23,12 @@
 // HYPHA_URL (default http://127.0.0.1:3917), HYPHA_SEED_EMAIL and HYPHA_SEED_PASSWORD
 // (default the owner above) say where and as whom. Images need the API's file storage
 // (the compose S3 server under `cargo run`); without it products get none. Each image is
-// `scripts/seed-assets/images/<name>.{webp,jpg,png}` when that file exists (the prompts
+// `scripts/seed-assets/images/<name>.{webp,jpg,jpeg,png}` when that file exists (the prompts
 // that make them are in `scripts/seed-assets/PROMPTS.md`), else a plain shot in the
 // product's colour.
+//
+// `pnpm seed --images` on a store this script seeded uploads the images again (new photos
+// replacing placeholders) and points products, variants and categories at them.
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -72,6 +75,7 @@ const admin = {
   post: (path, body) => call("POST", path, body ?? {}),
   put: (path, body) => call("PUT", path, body),
   patch: (path, body) => call("PATCH", path, body),
+  delete: (path) => call("DELETE", path),
 };
 
 // ---------- deterministic randomness, money ----------
@@ -157,7 +161,7 @@ function productImage(hex) {
 let mediaWorks = true;
 
 const IMAGES = join(import.meta.dirname, "seed-assets", "images");
-const MIME = { webp: "image/webp", jpg: "image/jpeg", png: "image/png" };
+const MIME = { webp: "image/webp", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png" };
 
 /** The image called `name`: its file when there is one, else a plain shot in `hex`. */
 async function imageFile(name, hex) {
@@ -1314,12 +1318,82 @@ function skuOf(handle, of) {
   return [initials, ...values].join("-");
 }
 
+/** The image name an uploaded asset was seeded from: its file name without extension. */
+const nameOf = (url) =>
+  decodeURIComponent(
+    url
+      .split("/")
+      .pop()
+      .replace(/\.[a-z]+$/i, ""),
+  );
+
+/**
+ * `--images`, on a store this script already seeded: uploads each product's, variant's
+ * and category's image again from `seed-assets/images` (the generated photos replacing
+ * the plain placeholders), points everything at the new assets and deletes the old ones.
+ * The catalogue itself is left as it is.
+ */
+async function replaceImages() {
+  const replaced = new Map();
+  const again = async (url, alt) => {
+    const name = nameOf(url);
+    const id = await upload(name, "#D4D5D2", alt);
+    if (id) console.log(`  ${name}`);
+    return id;
+  };
+
+  console.log("Product and variant images");
+  const products = await admin.get("/admin/products?limit=100");
+  for (const summary of products.items) {
+    const product = await admin.get(`/admin/products/${summary.id}`);
+    if (product.media.length === 0) continue;
+    const assets = [];
+    for (const m of product.media) {
+      const id = await again(m.url, m.alt ?? product.title);
+      if (!id) return;
+      replaced.set(m.asset_id, id);
+      assets.push(id);
+    }
+    await admin.put(`/admin/products/${product.id}/media`, { assets });
+    for (const variant of product.variants) {
+      const asset = variant.media_asset_id && replaced.get(variant.media_asset_id);
+      if (asset) {
+        await admin.put(`/admin/products/${product.id}/variants/${variant.id}/media`, { asset });
+      }
+    }
+  }
+
+  console.log("Category images");
+  const categories = await admin.get("/admin/categories");
+  for (const top of categories.items) {
+    const category = await admin.get(`/admin/categories/${top.id}`);
+    if (!category.image?.url) continue;
+    const id = await again(category.image.url, category.name);
+    if (!id) return;
+    replaced.set(category.image.asset_id ?? category.image.id, id);
+    await admin.put(`/admin/categories/${top.id}/image`, { image: id });
+  }
+
+  // The placeholders are no longer used by anything.
+  let removed = 0;
+  for (const old of replaced.keys()) {
+    if (!old) continue;
+    await admin.delete(`/admin/assets/${old}`).then(
+      () => removed++,
+      (e) => console.warn(`  (kept ${old}: ${e.message})`),
+    );
+  }
+  console.log(`\nDone: ${replaced.size} images replaced, ${removed} placeholders deleted.`);
+}
+
 async function main() {
   console.log(`Seeding ${BASE} as ${EMAIL}`);
   const login = await call("POST", "/admin/auth/login", { email: EMAIL, password: PASSWORD });
   if (login.status !== "authenticated")
     throw new Error(`login needs ${login.status}: use a store owner without 2FA`);
   token = login.session.token;
+
+  if (process.argv.includes("--images")) return replaceImages();
 
   const existing = await admin.get("/admin/products?limit=1");
   if (existing.items.length > 0 && !process.argv.includes("--force")) {
