@@ -7,4 +7,4 @@ export const SPONSOR = "https://github.com/sponsors/hyphacommerce";
 
 export const SITE_TITLE = "Hypha";
 export const SITE_DESCRIPTION =
-  "Open-source commerce API in Rust, with an admin panel and a storefront. Extend it with apps and plugins, run it on a server or Cloudflare Workers, and let AI agents operate it safely.";
+  "Open-source commerce you own: a small Rust core that apps, plugins, databases, hosts and AI agents connect to. Built for merchants, developers and agents, and cheap enough to run a whole store on a five-euro server.";

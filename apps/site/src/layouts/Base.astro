@@ -30,8 +30,15 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
     <meta property="og:type" content="website" />
-    <meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#1a1b19" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#fafaf9" />
+    <script is:inline>
+      // Light unless this visitor chose dark, here or in the docs (Starlight's key).
+      try {
+        if (localStorage.getItem("starlight-theme") === "dark") {
+          document.documentElement.dataset.theme = "dark";
+        }
+      } catch {}
+    </script>
   </head>
   <body>
     <a class="skip" href="#main">Skip to content</a>

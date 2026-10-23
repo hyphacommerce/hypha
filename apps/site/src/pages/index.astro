@@ -1,424 +1,1078 @@
 ---
-import Architecture from "../components/Architecture.astro";
 import Proposal from "../components/Proposal.astro";
+import Weave from "../components/Weave.astro";
 import { GITHUB, SPONSOR } from "../consts";
 import Base from "../layouts/Base.astro";
 
-// A touring bike's variants: which frame sizes come with which drivetrain. Only the
-// combinations that exist are variants; the rest are never created.
-const sizes = ["S", "M", "L", "XL"];
-const drivetrains = ["1×12 mechanical", "2×12 electronic", "Rohloff hub"];
-const exists: Record<string, boolean> = {
-  "S|1×12 mechanical": true,
-  "M|1×12 mechanical": true,
-  "L|1×12 mechanical": true,
-  "M|2×12 electronic": true,
-  "L|2×12 electronic": true,
-  "XL|2×12 electronic": true,
-  "L|Rohloff hub": true,
-  "XL|Rohloff hub": true,
+// The demo store's oyster kit: which species come in which size. Pink and golden oysters
+// keep badly, so they're sold in the starter block only; those two cells never exist.
+const species = ["Pearl oyster", "Blue oyster", "Pink oyster", "Golden oyster"];
+const sizes = ["Starter", "Family"];
+const price: Record<string, string> = {
+  "Pearl oyster|Starter": "€24",
+  "Pearl oyster|Family": "€39",
+  "Blue oyster|Starter": "€24",
+  "Blue oyster|Family": "€39",
+  "Pink oyster|Starter": "€26",
+  "Golden oyster|Starter": "€26",
 };
-const count = Object.keys(exists).length;
+
+// What the hero's web reaches: real things a store connects to today.
+const reaches = [
+  { label: "Postgres", x: 16, y: 13 },
+  { label: "Stripe", x: 76, y: 10 },
+  { label: "Meilisearch", x: 86, y: 50 },
+  { label: "Cloudflare R2", x: 72, y: 89 },
+  { label: "MCP agents", x: 20, y: 84 },
+  { label: "Your app", x: 9, y: 50 },
+];
 ---
 
 <Base>
-  <section class="hero">
-    <div class="wrap hero-grid">
-      <div class="pitch">
-        <p class="preview"><span></span>Public preview</p>
-        <h1>Commerce you can extend, that AI agents can run safely.</h1>
-        <p class="lede">
-          Hypha is an open-source commerce API in Rust, with an admin panel and a storefront. Model
-          complicated catalogs, grow it with apps and plugins instead of forks, and run it on your own
-          server or on Cloudflare Workers.
-        </p>
-        <div class="ctas">
-          <a class="button primary" href="/docs/getting-started">Run it locally</a>
-          <a class="button" href={GITHUB}>View on GitHub</a>
+  <div class="weave-host">
+    <Weave />
+
+    <section class="hero">
+      <div class="wrap hero-grid">
+        <div class="pitch">
+          <p class="preview">Open source, in public preview</p>
+          <h1>Commerce, grown as a&nbsp;network.</h1>
+          <p class="lede">
+            Hypha is commerce you own outright: a small Rust core that apps, plugins, databases,
+            hosts and AI agents all connect to. Merchants, developers and agents build on it
+            together, and a whole store runs on a five-euro server.
+          </p>
+          <div class="ctas">
+            <a class="button primary" href="/docs/getting-started">Run it locally</a>
+            <a class="button" href={GITHUB}>View on GitHub</a>
+          </div>
+          <p class="name">
+            A hypha is a single thread of a fungus. Alone it's almost nothing; joined with others,
+            hyphae become mycelium, the largest living networks on earth.
+          </p>
+        </div>
+        <div class="bloom" data-bloom data-hub="hero">
+          {
+            reaches.map((r) => (
+              <span class="reach" data-tie="hero" style={`left:${r.x}%;top:${r.y}%`}>
+                {r.label}
+              </span>
+            ))
+          }
         </div>
       </div>
-      <div class="shot">
-        <Proposal />
-      </div>
-    </div>
-  </section>
+    </section>
 
-  <section class="band">
-    <div class="wrap split">
-      <div class="copy">
-        <h2>Agents that ask before they change your store</h2>
-        <p>
-          Hypha ships an MCP server for the admin. An agent works with the scopes it was granted, and
-          one a staff member connects never gets more than their role. Before any write, it can see
-          exactly what would happen: the
-          real command runs against your store and is rolled back. Writes you hold for approval wait
-          as proposals, and approving one makes that exact write, or nothing at all if the store
-          changed in the meantime.
-        </p>
-        <p><a href="/docs/guides/agents">How agents connect and what they can do</a></p>
+    <section class="section" data-weave="left">
+      <div class="wrap">
+        <div class="intro">
+          <h2>Yours: the code, the data and the hosting.</h2>
+          <p>
+            Most commerce platforms rent you a store. Hypha is software you run. Change any line,
+            keep every row in your own database, move hosts whenever you like. No plan to upgrade
+            to unlock a feature, no fee on your sales, no export request to get your own customers
+            back.
+          </p>
+        </div>
+        <dl class="owns">
+          <div>
+            <dt>The code</dt>
+            <dd>
+              MIT or Apache-2.0. Read it, change it, ship it to your clients. Extend it through
+              apps and spores, so updates still merge.
+            </dd>
+          </div>
+          <div>
+            <dt>The data</dt>
+            <dd>
+              Your Postgres, your file bucket. Query it, back it up, join it with your other
+              systems. Customers can export and erase their own data, as the law asks.
+            </dd>
+          </div>
+          <div>
+            <dt>The hosting</dt>
+            <dd>
+              A VPS, Cloudflare Workers or your laptop. One command deploys the API, the admin
+              and the storefront to any of them.
+            </dd>
+          </div>
+        </dl>
       </div>
-      <ul class="facts">
-        <li>
-          <strong>Exact previews.</strong> The same command, the same checks, the same events, run and
-          rolled back.
-        </li>
-        <li>
-          <strong>Proposals.</strong> Staff approve or reject from the admin; the agent reads the note.
-        </li>
-        <li>
-          <strong>A log of every call.</strong> Which agent, which operation, the outcome, how long it
-          took.
-        </li>
-        <li>
-          <strong>Operator switches.</strong> Turn agent writes into proposals only, or off, for the
-          whole store.
-        </li>
-      </ul>
-    </div>
-  </section>
+    </section>
 
-  <section class="section">
-    <div class="wrap split">
-      <div class="copy">
-        <h2>Catalogs that aren't simple</h2>
-        <p>
-          Real catalogs have options that only go together in some ways. Hypha stores the variants that
-          exist, never the full grid of every combination, so a product with thousands of possible
-          combinations costs only the ones you sell.
-        </p>
-        <p>
-          Around them: custom fields on products, variants, customers, orders and categories, typed and
-          validated, with apps keeping fields of their own. Markets for countries and currencies, price
-          lists with fixed prices, sales channels that decide where each product is sold.
-        </p>
+    <section class="section" data-weave="right">
+      <div class="wrap">
+        <div class="intro">
+          <h2>One small core. Everything else connects to it.</h2>
+          <p>
+            The core knows commerce and nothing else: products, markets, carts, orders, payments.
+            Storage, hosting, email, search, payment providers and frontends plug in around it
+            through typed contracts, so each one can be swapped without touching the rest.
+          </p>
+        </div>
+        <div class="network">
+          <div class="hub" data-hub="core">
+            <strong>Hypha core</strong>
+            <span>Typed commands, scopes and errors, domain events, one crate per domain</span>
+          </div>
+          <div class="node n1" data-tie="core">
+            <strong>Spores</strong>
+            <span>Rust plugins compiled into the API, with their own tables, routes and settings</span>
+          </div>
+          <div class="node n2" data-tie="core">
+            <strong>Apps</strong>
+            <span>Any language, anywhere. OAuth install, webhooks, extension points, admin blocks</span>
+          </div>
+          <div class="node n3" data-tie="core">
+            <strong>Adapters</strong>
+            <span>Postgres, S3 or R2 for files, SMTP or Resend for email, a search engine</span>
+          </div>
+          <div class="node n4" data-tie="core">
+            <strong>Hosts</strong>
+            <span>A native server on axum, or WebAssembly on Cloudflare Workers</span>
+          </div>
+          <div class="node n5" data-tie="core">
+            <strong>Frontends</strong>
+            <span>The admin and storefront as starters, or your own on the typed SDK</span>
+          </div>
+          <div class="node n6" data-tie="core">
+            <strong>Agents</strong>
+            <span>An MCP server over the whole admin, within each agent's grant</span>
+          </div>
+        </div>
+        <p class="more"><a href="/docs/concepts/architecture">How the core and its ports fit together</a></p>
       </div>
-      <figure class="matrix">
-        <table>
-          <caption>Touring bike: frame size by drivetrain</caption>
-          <colgroup>
-            <col class="label" />
-            {drivetrains.map(() => <col />)}
-          </colgroup>
-          <thead>
-            <tr>
-              <td></td>
-              {drivetrains.map((d) => <th scope="col">{d}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {
-              sizes.map((s) => (
+    </section>
+
+    <section class="section" data-weave="left">
+      <div class="wrap">
+        <div class="intro">
+          <h2>Made for merchants, developers and agents to work on together.</h2>
+          <p>
+            One surface serves all three. Every operation is a command with typed input, the
+            scopes it needs and the errors it can return, whether a person clicks it, an app calls
+            it or an agent proposes it.
+          </p>
+        </div>
+        <div class="three">
+          <article data-tie="thread">
+            <h3>Merchants</h3>
+            <p>
+              Run the store from an admin built for real catalogues: markets and price lists,
+              orders and fulfilment by location, customers, emails, media. Grow into new countries
+              and channels without changing platforms.
+            </p>
+          </article>
+          <article data-tie="thread">
+            <h3>Developers</h3>
+            <p>
+              Build what a merchant actually asked for. Typed SDKs from OpenAPI, apps in any
+              language, spores in Rust, and the admin and storefront as starters to make your own.
+              No fork to maintain.
+            </p>
+          </article>
+          <article data-tie="thread">
+            <h3>Agents</h3>
+            <p>
+              Coding agents extend the platform: small crates, exact errors and fast tests make the
+              codebase easy to work in. Admin agents operate the store over MCP, and every write
+              they make can be previewed exactly and approved by a person first.
+            </p>
+          </article>
+        </div>
+        <div class="agents">
+          <div class="agents-copy">
+            <h3>Agents that ask before they change the store</h3>
+            <p>
+              An agent's write runs against your store and rolls back, so staff see exactly what
+              would change. Approving it makes that exact write, or nothing if the store moved on
+              in the meantime. Operators can hold every agent write for approval, or turn them
+              off.
+            </p>
+            <p><a href="/docs/guides/agents">How agents connect and what they can do</a></p>
+          </div>
+          <Proposal />
+        </div>
+      </div>
+    </section>
+
+    <section class="section" data-weave="right">
+      <div class="wrap">
+        <div class="intro">
+          <h2>The catalogue you actually sell, not the one a platform allows.</h2>
+          <p>
+            Hosted platforms cap what a product can be, then sell you apps to work around the cap.
+            Hypha models the complicated catalogue directly.
+          </p>
+        </div>
+        <div class="catalogue">
+          <figure class="matrix">
+            <table>
+              <caption>Oyster grow kit: six variants, the only six that exist</caption>
+              <thead>
                 <tr>
-                  <th scope="row">{s}</th>
-                  {drivetrains.map((d) =>
-                    exists[`${s}|${d}`] ? (
-                      <td class="on">Variant</td>
-                    ) : (
-                      <td class="off">
-                        <span class="sr">Not offered</span>
-                      </td>
-                    ),
-                  )}
+                  <td></td>
+                  {sizes.map((s) => <th scope="col">{s}</th>)}
                 </tr>
-              ))
-            }
-          </tbody>
-        </table>
-        <figcaption>
-          {count} of {sizes.length * drivetrains.length} combinations are sold, so {count} variants exist.
-        </figcaption>
-      </figure>
-    </div>
-  </section>
-
-  <section class="section">
-    <div class="wrap">
-      <div class="copy narrow">
-        <h2>Extend it without forking</h2>
-        <p>
-          Every operation is a command with typed input, required scopes and typed errors. Apps,
-          plugins, agents and frontends all go through those same commands, so what you add can't skip
-          the rules the core enforces.
-        </p>
+              </thead>
+              <tbody>
+                {
+                  species.map((sp) => (
+                    <tr>
+                      <th scope="row">{sp}</th>
+                      {sizes.map((s) => {
+                        const p = price[`${sp}|${s}`];
+                        return p ? (
+                          <td class="is">{p}</td>
+                        ) : (
+                          <td class="isnt">
+                            <span>not sold</span>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))
+                }
+              </tbody>
+            </table>
+          </figure>
+          <figure class="fields">
+            <figcaption>Custom fields on the same product</figcaption>
+            <dl>
+              <div>
+                <dt>Species</dt>
+                <dd>Pleurotus ostreatus <small>shown, filterable</small></dd>
+              </div>
+              <div>
+                <dt>Difficulty</dt>
+                <dd>Beginner <small>shown, filterable</small></dd>
+              </div>
+              <div>
+                <dt>Care guide</dt>
+                <dd>Rich text <small>shown</small></dd>
+              </div>
+              <div>
+                <dt>Works with</dt>
+                <dd>Fruiting chamber <small>a link to another product</small></dd>
+              </div>
+              <div>
+                <dt>Supplier code</dt>
+                <dd>MW-OYS-ST <small>staff only</small></dd>
+              </div>
+              <div>
+                <dt>Lot number</dt>
+                <dd>Per variant <small>staff only</small></dd>
+              </div>
+            </dl>
+          </figure>
+        </div>
+        <ul class="points">
+          <li>
+            <strong>As many options as a product needs.</strong> Not three. Only the variants that
+            exist are created, never every combination.
+          </li>
+          <li>
+            <strong>Custom fields everywhere.</strong> On products, variants, categories,
+            customers and orders: typed, validated, shown or staff only, filterable in search.
+          </li>
+          <li>
+            <strong>Markets, catalogs and price lists.</strong> Each country gets its currency,
+            taxes, prices and the products it may buy.
+          </li>
+          <li>
+            <strong>Categories as a plain tree.</strong> Nest them, give each a guide and an image,
+            no rules to learn.
+          </li>
+        </ul>
+        <div class="builtin">
+          <div>
+            <h3>A media library, built in</h3>
+            <p>
+              One library of images, video and files, reused across products, categories and
+              emails, stored in your own S3 or R2 bucket. An asset in use can't be deleted by
+              accident.
+            </p>
+          </div>
+          <div>
+            <h3>Faceted search, built in</h3>
+            <p>
+              Search per market with facets on options, vendors, prices and your own custom
+              fields. Swap the engine for Meilisearch with an app, or for any other through the
+              search extension point.
+            </p>
+          </div>
+        </div>
       </div>
-      <Architecture />
-    </div>
-  </section>
+    </section>
 
-  <section class="section">
-    <div class="wrap">
-      <div class="copy narrow">
-        <h2>Runs on a server, or on Cloudflare Workers</h2>
-        <p>
-          The core and every domain compile to WebAssembly and do no I/O of their own, so the same code
-          serves both. Hypha's CLI sets up either.
-        </p>
-      </div>
-      <div class="hosts">
-        <div>
-          <h3>Your own server</h3>
+    <section class="section" data-weave="left">
+      <div class="wrap">
+        <div class="intro">
+          <h2>Commerce is needlessly expensive.</h2>
           <p>
-            The native host on Postgres, with Docker and Caddy for HTTPS, deployed over SSH. Files in any
-            S3-compatible storage.
+            A five-euro server today does what took a rack of machines a decade ago. Hosted
+            platforms still charge by the plan, the seat and the sale. Hypha is built to fit on
+            the cheap machine and stay fast there.
           </p>
-          <pre><code>pnpm hypha init
-pnpm hypha deploy</code></pre>
         </div>
-        <div>
-          <h3>Cloudflare Workers</h3>
-          <p>
-            The API, admin and storefront as Workers, Postgres through Hyperdrive, files in R2, set up
-            with one API token.
-          </p>
-          <pre><code>pnpm hypha init --target cloudflare
-pnpm hypha deploy</code></pre>
+        <div class="costs">
+          <div class="setup">
+            <h3>On one server</h3>
+            <p class="figure"><span>about</span> €5<small>/month</small></p>
+            <p>
+              A small VPS, such as Hetzner's two-core, 4 GB machines, runs everything: Postgres,
+              file storage, the API, the admin, the storefront and HTTPS.
+            </p>
+          </div>
+          <div class="setup">
+            <h3>On Cloudflare</h3>
+            <p class="figure">$5<small>/month</small></p>
+            <p>
+              The Workers paid plan runs the API, the admin and the storefront at the edge. Postgres
+              on Neon's free plan, files on R2's free tier.
+            </p>
+          </div>
+          <div class="compare">
+            <h3>Compared with</h3>
+            <dl>
+              <div>
+                <dt>Shopify Basic</dt>
+                <dd>$39/month, plus 2% of each sale paid through another provider than Shopify's</dd>
+              </div>
+              <div>
+                <dt>Shopify Plus</dt>
+                <dd>from $2,300/month</dd>
+              </div>
+              <div>
+                <dt>Vercel Pro</dt>
+                <dd>$20 per seat per month, before usage</dd>
+              </div>
+            </dl>
+          </div>
         </div>
+        <p class="fine">
+          List prices in October 2026, billed monthly, before tax. Your payment provider's card fees
+          apply on every platform.
+        </p>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <section class="section">
-    <div class="wrap split">
-      <div class="copy">
-        <h2>Coming next: agentic shopping</h2>
-        <p>
-          A connector for the <a href="https://ucp.dev">Universal Commerce Protocol</a>, with <a
-            href="https://ucphub.ai">ucphub.ai</a
-          >, so shopping agents can browse a Hypha store, build a cart and check out. It sits beside the
-          storefront API, built on the same priced carts.
-        </p>
-      </div>
-      <div class="copy">
-        <h2>Follow along</h2>
-        <p>
-          Hypha is built in the open and released under the MIT or Apache-2.0 license. Star it, read
-          the design notes behind each decision, or sponsor the work.
-        </p>
-        <div class="ctas">
-          <a class="button" href={GITHUB}>GitHub</a>
-          <a class="button primary" href={SPONSOR}>Sponsor</a>
+    <section class="section" data-weave="right">
+      <div class="wrap">
+        <div class="intro">
+          <h2>Runs on the platforms you'd pick anyway.</h2>
+          <p>
+            Hypha's storage, hosting and email sit behind ports, so it runs where you already are
+            and moves when you want to.
+          </p>
+        </div>
+        <ul class="platforms">
+          <li><strong>Cloudflare</strong><span>Workers, Hyperdrive, R2 and KV</span></li>
+          <li><strong>Any VPS</strong><span>Hetzner or anyone else, with Docker and Caddy</span></li>
+          <li><strong>Neon</strong><span>or any Postgres, managed or your own</span></li>
+          <li><strong>S3-compatible storage</strong><span>R2, S3, SeaweedFS</span></li>
+          <li><strong>Resend</strong><span>or any SMTP server</span></li>
+          <li><strong>Stripe</strong><span>as an app or a spore</span></li>
+        </ul>
+        <div class="adapters">
+          <div>
+            <h3>Databases are adapters</h3>
+            <p>
+              Every repository is a port with a contract test suite that any adapter must pass.
+              Postgres is the first; Cloudflare D1 is next to explore, and another database is a
+              crate that passes the same suite.
+            </p>
+          </div>
+          <div class="ask">
+            <h3>Hosting and database companies</h3>
+            <p>
+              Hypha's CLI sets up the infrastructure a new store runs on. We'd like those first
+              steps to lead to the platforms that keep the project open source. If that could be
+              yours, sponsor Hypha.
+            </p>
+            <a class="button" href={SPONSOR}>Become a sponsor</a>
+          </div>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
+
+    <section class="section" data-weave="left">
+      <div class="wrap">
+        <div class="intro">
+          <h2>Where it grows next.</h2>
+          <p>Plans change as people use it. This is the direction today.</p>
+        </div>
+        <div class="roadmap">
+          <div class="stage" data-tie="thread">
+            <h3>Now</h3>
+            <p class="when">Public preview</p>
+            <ul>
+              <li>Catalogue, markets, checkout, orders and fulfilment</li>
+              <li>Payments first, manual or online</li>
+              <li>Customer accounts and privacy tools</li>
+              <li>Apps, spores and the MCP server</li>
+              <li>Servers and Cloudflare Workers</li>
+            </ul>
+          </div>
+          <div class="stage" data-tie="thread">
+            <h3>Next</h3>
+            <p class="when">Being designed</p>
+            <ul>
+              <li>Agentic shopping over the Universal Commerce Protocol, with ucphub.ai</li>
+              <li>Purchasing: suppliers, purchase orders, receiving into stock</li>
+              <li>Discounts and promotions</li>
+              <li>Analytics beyond today's sales report</li>
+            </ul>
+          </div>
+          <div class="stage" data-tie="thread">
+            <h3>Later</h3>
+            <p class="when">On the list</p>
+            <ul>
+              <li>B2B: company accounts, quotes and payment terms</li>
+              <li>Spores for accounting and carriers: QuickBooks Online, DHL, FedEx</li>
+              <li>Reviews and wishlists as apps</li>
+              <li>More database adapters, starting with D1</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="closing">
+      <div class="wrap closing-grid">
+        <div>
+          <h2>Commerce can be simpler and cheaper than it's sold to you.</h2>
+          <p>
+            Hypha is open source and stays that way with sponsors' help. Run it, build on it, tell
+            us what your store needs.
+          </p>
+          <div class="ctas">
+            <a class="button primary" href="/docs/getting-started">Run it locally</a>
+            <a class="button" href={SPONSOR}>Sponsor Hypha</a>
+          </div>
+          <p class="follow">
+            Follow along on <a href={GITHUB}>GitHub</a>, the <a href="/blog">blog</a> or
+            the <a href="/rss.xml">RSS feed</a>.
+          </p>
+        </div>
+        <div class="bloom end" data-bloom="end"></div>
+      </div>
+    </section>
+  </div>
 </Base>
 
 <style>
+  .weave-host {
+    position: relative;
+    overflow-x: clip;
+  }
+
+  .weave-host > section {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Room on both sides for the thread's lanes. */
+  .weave-host .wrap {
+    max-width: 1120px;
+    padding-inline: clamp(44px, 6vw, 72px);
+  }
+
+  h2 {
+    font-size: clamp(2rem, 4.2vw, 3.1rem);
+    letter-spacing: -0.035em;
+    max-width: 20ch;
+  }
+
+  h3 {
+    font-size: 1.15rem;
+    letter-spacing: -0.015em;
+  }
+
+  /* Hero */
   .hero {
-    padding-block: clamp(48px, 8vw, 96px) clamp(56px, 8vw, 104px);
-    border-bottom: 1px solid var(--rule);
+    padding-block: clamp(48px, 8vw, 104px) clamp(64px, 9vw, 120px);
   }
 
   .hero-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
-    gap: clamp(32px, 5vw, 72px);
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    gap: 40px;
     align-items: center;
   }
 
   .preview {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 22px;
-    color: var(--text-muted);
+    display: inline-block;
+    margin-bottom: 26px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: var(--lime-soft);
+    color: var(--text-accent);
     font-size: 0.9rem;
-    font-weight: 500;
-  }
-
-  .preview span {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--lime);
-    box-shadow: 0 0 0 3px var(--lime-soft);
+    font-weight: 560;
   }
 
   h1 {
-    font-size: clamp(2.4rem, 5.2vw, 3.9rem);
-    line-height: 1.02;
-    letter-spacing: -0.04em;
-    font-weight: 680;
-    max-width: 14ch;
+    font-size: clamp(2.9rem, 7.4vw, 5.9rem);
+    line-height: 0.98;
+    letter-spacing: -0.05em;
+    font-weight: 640;
+    max-width: 11ch;
   }
 
   .lede {
-    margin-top: 22px;
+    margin-top: 28px;
     max-width: 50ch;
+    font-size: 1.2rem;
+    line-height: 1.55;
     color: var(--text-muted);
-    font-size: 1.12rem;
   }
 
   .ctas {
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
-    margin-top: 30px;
+    margin-top: 34px;
   }
 
-  .band {
-    padding-block: clamp(56px, 8vw, 96px);
-    background: var(--bg-sunk);
-    border-bottom: 1px solid var(--rule);
+  .name {
+    margin-top: 44px;
+    max-width: 46ch;
+    padding-left: 16px;
+    border-left: 2px solid var(--lime);
+    color: var(--text-faint);
+    font-size: 0.95rem;
   }
 
+  .bloom {
+    position: relative;
+    aspect-ratio: 1;
+    width: 100%;
+    max-width: 520px;
+    justify-self: center;
+  }
+
+  .reach {
+    position: absolute;
+    padding: 5px 11px;
+    border: 1px solid var(--rule-strong);
+    border-radius: 999px;
+    background: var(--bg-raised);
+    font-size: 0.85rem;
+    font-weight: 540;
+    white-space: nowrap;
+    translate: -50% -50%;
+  }
+
+  /* Sections */
   .section {
-    padding-top: clamp(64px, 9vw, 120px);
+    padding-block: clamp(72px, 10vw, 136px);
   }
 
-  .split {
+  .intro p {
+    margin-top: 20px;
+    max-width: 60ch;
+    font-size: 1.1rem;
+    color: var(--text-muted);
+  }
+
+  .more {
+    margin-top: 40px;
+  }
+
+  /* Ownership */
+  .owns {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 40px;
+    margin: 56px 0 0;
+  }
+
+  .owns div {
+    padding-top: 18px;
+    border-top: 2px solid var(--text);
+  }
+
+  .owns dt {
+    font-size: 1.35rem;
+    font-weight: 640;
+    letter-spacing: -0.02em;
+  }
+
+  .owns dd {
+    margin: 10px 0 0;
+    color: var(--text-muted);
+  }
+
+  /* The network: a hub with what plugs into it around it. Boxes are opaque, so the ties
+     drawn behind them only show in the gaps. */
+  .network {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas:
+      "n1 n2 n3"
+      ". hub ."
+      "n4 n5 n6";
+    gap: 56px 48px;
+    margin-top: 64px;
+  }
+
+  .hub,
+  .node {
+    display: grid;
+    gap: 6px;
+    padding: 18px 20px;
+    border-radius: 14px;
+    background: var(--bg-raised);
+    border: 1px solid var(--rule-strong);
+  }
+
+  .hub {
+    grid-area: hub;
+    background: var(--graphite);
+    border-color: var(--graphite);
+    color: var(--on-graphite);
+    padding: 26px 24px;
+    border-radius: 999px;
+    text-align: center;
+  }
+
+  .hub strong {
+    font-size: 1.25rem;
+    letter-spacing: -0.02em;
+  }
+
+  .hub span {
+    font-size: 0.9rem;
+    opacity: 0.8;
+  }
+
+  .node span {
+    color: var(--text-muted);
+    font-size: 0.93rem;
+  }
+
+  .n1 {
+    grid-area: n1;
+  }
+  .n2 {
+    grid-area: n2;
+  }
+  .n3 {
+    grid-area: n3;
+  }
+  .n4 {
+    grid-area: n4;
+  }
+  .n5 {
+    grid-area: n5;
+  }
+  .n6 {
+    grid-area: n6;
+  }
+
+  /* Three audiences */
+  .three {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 40px;
+    margin-top: 88px;
+  }
+
+  .three article {
+    padding: 22px 0 0;
+    background: var(--bg);
+  }
+
+  .three h3 {
+    font-size: 1.5rem;
+  }
+
+  .three p {
+    margin-top: 10px;
+    color: var(--text-muted);
+  }
+
+  .agents {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 48px;
+    align-items: center;
+    margin-top: 96px;
+  }
+
+  .agents-copy p {
+    margin-top: 14px;
+    color: var(--text-muted);
+  }
+
+  /* Catalogue */
+  .catalogue {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: clamp(32px, 5vw, 72px);
+    gap: 32px;
+    margin-top: 56px;
     align-items: start;
   }
 
-  h2 {
-    font-size: clamp(1.7rem, 3vw, 2.3rem);
-  }
-
-  .copy p {
-    margin-top: 16px;
-    max-width: 58ch;
-    color: var(--text-muted);
-  }
-
-  .narrow {
-    max-width: 62ch;
-    margin-bottom: 44px;
-  }
-
-  .facts {
+  figure {
     margin: 0;
-    padding: 0;
-    list-style: none;
   }
 
-  .facts li {
-    padding: 16px 0;
-    border-top: 1px solid var(--rule-strong);
-    color: var(--text-muted);
-  }
-
-  .facts li:last-child {
-    border-bottom: 1px solid var(--rule-strong);
-  }
-
-  .facts strong {
-    color: var(--text);
-    font-weight: 600;
-  }
-
-  .matrix {
-    margin: 0;
+  .matrix,
+  .fields {
+    padding: 22px;
+    border-radius: var(--radius-lg);
+    background: var(--bg-raised);
+    border: 1px solid var(--rule);
   }
 
   .matrix table {
     width: 100%;
     border-collapse: separate;
     border-spacing: 6px;
-    table-layout: fixed;
+    font-size: 0.93rem;
   }
 
-  .matrix caption {
-    caption-side: top;
+  .matrix caption,
+  .fields figcaption {
+    margin-bottom: 12px;
     text-align: left;
-    padding: 0 6px 8px;
     font-weight: 600;
+    font-size: 0.95rem;
   }
 
   .matrix th {
     font-weight: 500;
-    font-size: 0.85rem;
     color: var(--text-muted);
+    text-align: left;
   }
 
   .matrix thead th {
-    text-align: left;
-    padding: 0 4px 4px;
-    vertical-align: bottom;
-  }
-
-  .matrix col.label {
-    width: 2.6em;
-  }
-
-  .matrix tbody th {
-    text-align: left;
-    padding-left: 4px;
-  }
-
-  .matrix td {
-    height: 52px;
-    border-radius: var(--radius-sm);
-    font-size: 0.85rem;
     text-align: center;
   }
 
-  .matrix thead td {
-    height: auto;
+  .matrix td {
+    height: 44px;
+    border-radius: 8px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
   }
 
-  .matrix .on {
-    background: var(--lime-soft);
-    border: 1px solid color-mix(in srgb, var(--text-accent) 35%, transparent);
-    color: var(--text-accent);
-    font-weight: 560;
+  .matrix .is {
+    background: var(--lime);
+    color: var(--ink-on-lime);
+    font-weight: 600;
   }
 
-  .matrix .off {
+  .matrix .isnt {
     border: 1px dashed var(--rule-strong);
+    color: var(--text-faint);
+    font-size: 0.8rem;
   }
 
-  .matrix figcaption {
-    padding: 8px 6px 0;
+  .fields dl {
+    display: grid;
+    margin: 0;
+  }
+
+  .fields dl div {
+    display: grid;
+    grid-template-columns: 9.5em minmax(0, 1fr);
+    gap: 12px;
+    padding: 9px 0;
+    border-top: 1px solid var(--rule);
+    font-size: 0.93rem;
+  }
+
+  .fields dt {
     color: var(--text-muted);
-    font-size: 0.9rem;
   }
 
-  .sr {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
+  .fields dd {
+    margin: 0;
   }
 
-  .hosts {
+  .fields small {
+    display: block;
+    color: var(--text-faint);
+    font-size: 0.82rem;
+  }
+
+  .points {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: clamp(24px, 4vw, 56px);
+    gap: 22px 40px;
+    margin: 48px 0 0;
+    padding: 0;
+    list-style: none;
+    color: var(--text-muted);
   }
 
-  .hosts > div {
-    padding-top: 20px;
-    border-top: 2px solid var(--text);
+  .points strong {
+    color: var(--text);
   }
 
-  .hosts h3 {
-    font-size: 1.2rem;
+  .builtin {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 40px;
+    margin-top: 64px;
+    padding-top: 40px;
+    border-top: 1px solid var(--rule-strong);
   }
 
-  .hosts p {
+  .builtin p {
     margin-top: 10px;
     color: var(--text-muted);
   }
 
-  .hosts pre {
-    margin: 18px 0 0;
-    padding: 14px 16px;
-    overflow-x: auto;
-    background: var(--bg-sunk);
-    border: 1px solid var(--rule);
-    border-radius: var(--radius);
+  /* Costs */
+  .costs {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: 40px;
+    margin-top: 56px;
   }
 
-  @media (max-width: 900px) {
-    .hero-grid,
-    .split,
-    .hosts {
+  .setup .figure {
+    margin: 10px 0 12px;
+    font-size: clamp(3.2rem, 6vw, 4.6rem);
+    line-height: 1;
+    font-weight: 650;
+    letter-spacing: -0.05em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .setup .figure span {
+    margin-right: 6px;
+    font-size: 1.1rem;
+    letter-spacing: 0;
+    font-weight: 500;
+    color: var(--text-faint);
+  }
+
+  .setup .figure small {
+    font-size: 1.1rem;
+    letter-spacing: -0.01em;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+
+  .setup > p:last-child {
+    color: var(--text-muted);
+  }
+
+  .compare dl {
+    margin: 14px 0 0;
+  }
+
+  .compare dl div {
+    padding: 12px 0;
+    border-top: 1px solid var(--rule);
+  }
+
+  .compare dt {
+    font-weight: 600;
+  }
+
+  .compare dd {
+    margin: 2px 0 0;
+    color: var(--text-muted);
+  }
+
+  .fine {
+    margin-top: 32px;
+    font-size: 0.85rem;
+    color: var(--text-faint);
+  }
+
+  /* Platforms */
+  .platforms {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0 40px;
+    margin: 48px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .platforms li {
+    display: grid;
+    gap: 2px;
+    padding: 18px 0;
+    border-top: 1px solid var(--rule);
+  }
+
+  .platforms strong {
+    font-size: 1.2rem;
+    letter-spacing: -0.015em;
+  }
+
+  .platforms span {
+    color: var(--text-muted);
+    font-size: 0.93rem;
+  }
+
+  .adapters {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 40px;
+    margin-top: 56px;
+  }
+
+  .adapters p {
+    margin-top: 10px;
+    color: var(--text-muted);
+  }
+
+  .ask {
+    padding: 26px;
+    border-radius: var(--radius-lg);
+    background: var(--lime-soft);
+  }
+
+  .ask .button {
+    margin-top: 18px;
+  }
+
+  /* Roadmap */
+  .roadmap {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 40px;
+    margin-top: 88px;
+  }
+
+  .stage {
+    padding-top: 20px;
+    background: var(--bg);
+  }
+
+  .stage h3 {
+    font-size: 1.5rem;
+  }
+
+  .when {
+    color: var(--text-accent);
+    font-size: 0.93rem;
+    font-weight: 540;
+  }
+
+  .stage ul {
+    margin: 16px 0 0;
+    padding: 0;
+    list-style: none;
+    color: var(--text-muted);
+  }
+
+  .stage li {
+    padding: 9px 0;
+    border-top: 1px solid var(--rule);
+  }
+
+  /* Closing */
+  .closing {
+    padding-block: clamp(56px, 8vw, 104px) 0;
+  }
+
+  .closing-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+    gap: 40px;
+    align-items: center;
+  }
+
+  .closing h2 {
+    max-width: 18ch;
+  }
+
+  .closing p {
+    margin-top: 18px;
+    max-width: 52ch;
+    font-size: 1.1rem;
+    color: var(--text-muted);
+  }
+
+  .closing .follow {
+    font-size: 0.95rem;
+  }
+
+  .bloom.end {
+    max-width: 340px;
+  }
+
+  @media (max-width: 1000px) {
+    .costs {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .compare {
+      grid-column: 1 / -1;
+    }
+
+    .agents {
       grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  @media (max-width: 860px) {
+    .hero-grid,
+    .closing-grid,
+    .catalogue,
+    .builtin,
+    .adapters {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .bloom {
+      max-width: 420px;
+    }
+
+    .owns,
+    .three,
+    .roadmap,
+    .platforms {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .three,
+    .roadmap {
+      gap: 48px;
+    }
+
+    .points {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .network {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "hub" "n1" "n2" "n3" "n4" "n5" "n6";
+      gap: 22px;
+    }
+
+    .network .node {
+      margin-left: 28px;
+    }
+  }
+
+  @media (max-width: 760px) {
+    .weave-host .wrap {
+      padding-left: 40px;
+      padding-right: 16px;
+    }
+
+    .costs {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .bloom.end {
+      display: none;
+    }
+
+    .reach {
+      font-size: 0.78rem;
+      padding: 4px 9px;
     }
   }
 </style>

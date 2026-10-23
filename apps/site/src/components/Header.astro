@@ -17,10 +17,8 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
 <header class="header">
   <div class="wrap bar">
     <a class="logo" href="/" aria-label="Hypha home">
-      <picture>
-        <source srcset={wordmarkDark} media="(prefers-color-scheme: dark)" />
-        <img src={wordmark} alt="Hypha" width="104" height="33" />
-      </picture>
+      <img class="on-light" src={wordmark} alt="Hypha" width="104" height="33" />
+      <img class="on-dark" src={wordmarkDark} alt="Hypha" width="104" height="33" />
     </a>
     <nav aria-label="Main">
       <ul class="links">
@@ -35,6 +33,11 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
         }
       </ul>
     </nav>
+    <button class="theme" type="button" aria-label="Dark theme" aria-pressed="false">
+      <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+        <path d="M15.5 12.6A6.5 6.5 0 0 1 7.4 4.5a6.5 6.5 0 1 0 8.1 8.1Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path>
+      </svg>
+    </button>
     <a class="button primary sponsor" href={SPONSOR}>Sponsor</a>
     <details class="menu">
       <summary>Menu</summary>
@@ -52,6 +55,23 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
   </div>
 </header>
 
+<script>
+  // Shares Starlight's key, so the docs open in the theme chosen here.
+  const button = document.querySelector<HTMLButtonElement>(".header .theme");
+  const sync = () =>
+    button?.setAttribute("aria-pressed", String(document.documentElement.dataset.theme === "dark"));
+  sync();
+  button?.addEventListener("click", () => {
+    const dark = document.documentElement.dataset.theme !== "dark";
+    if (dark) document.documentElement.dataset.theme = "dark";
+    else delete document.documentElement.dataset.theme;
+    try {
+      localStorage.setItem("starlight-theme", dark ? "dark" : "light");
+    } catch {}
+    sync();
+  });
+</script>
+
 <style>
   .header {
     border-bottom: 1px solid var(--rule);
@@ -68,6 +88,38 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
   .logo img {
     width: 104px;
     height: auto;
+  }
+
+  .on-dark,
+  :global([data-theme="dark"]) .on-light {
+    display: none;
+  }
+
+  :global([data-theme="dark"]) .on-dark {
+    display: block;
+  }
+
+  .theme {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    margin-right: -14px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+
+  .theme:hover {
+    color: var(--text);
+    border-color: var(--rule-strong);
+  }
+
+  .theme[aria-pressed="true"] svg path {
+    fill: currentColor;
   }
 
   nav {
@@ -101,7 +153,6 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
   .menu {
     display: none;
     position: relative;
-    margin-left: auto;
   }
 
   .menu summary {
@@ -154,6 +205,11 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
 
     .menu {
       display: block;
+    }
+
+    .theme {
+      margin-left: auto;
+      margin-right: 0;
     }
   }
 </style>

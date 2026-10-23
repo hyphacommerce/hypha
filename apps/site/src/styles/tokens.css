@@ -1,9 +1,10 @@
 /* The brand's colours (Hypha brand book v0.1, the same hexes as the admin's theme,
    apps/admin/theme/hyphaTheme.ts), as the site's tokens. Foxfire (lime) is a fill only,
-   always with --ink-on-lime on it; accent text is --text-accent. */
+   always with --ink-on-lime on it; accent text is --text-accent. The site starts light
+   whatever the system says; the header's switch sets `data-theme="dark"`. */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
   --lime: #b8e948;
   --lime-soft: #eafbcf;
@@ -24,6 +25,14 @@
   --removed-soft: #fff4f3;
   --focus: #5f7e01;
 
+  /* The thread woven behind the landing page, and the signals running along it. */
+  --thread: #3a3c38;
+  --thread-faint: rgb(58 60 56 / 0.28);
+  --signal: #9fd62a;
+  --signal-glow: rgb(184 233 72 / 0.45);
+  --graphite: #262825;
+  --on-graphite: #f3f4f2;
+
   --font-sans: "Geist Variable", Geist, ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, Menlo, monospace;
 
@@ -35,22 +44,27 @@
   --radius-lg: 16px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --lime-soft: #304204;
-    --bg: #1a1b19;
-    --bg-raised: #232522;
-    --bg-sunk: #151614;
-    --text: #fafaf9;
-    --text-muted: #d4d5d2;
-    --text-faint: #a3a5a1;
-    --text-accent: #c6f073;
-    --rule: #30322f;
-    --rule-strong: #444642;
-    --ok: #91dbab;
-    --ok-soft: #003b1e;
-    --removed: #ffb0a9;
-    --removed-soft: #521d1b;
-    --focus: #b8e948;
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --lime-soft: #304204;
+  --bg: #1a1b19;
+  --bg-raised: #232522;
+  --bg-sunk: #151614;
+  --text: #fafaf9;
+  --text-muted: #d4d5d2;
+  --text-faint: #a3a5a1;
+  --text-accent: #c6f073;
+  --rule: #30322f;
+  --rule-strong: #444642;
+  --ok: #91dbab;
+  --ok-soft: #003b1e;
+  --removed: #ffb0a9;
+  --removed-soft: #521d1b;
+  --focus: #b8e948;
+  --thread: #c9cbc6;
+  --thread-faint: rgb(201 203 198 / 0.22);
+  --signal: #b8e948;
+  --signal-glow: rgb(184 233 72 / 0.35);
+  --graphite: #f3f4f2;
+  --on-graphite: #1a1b19;
 }
