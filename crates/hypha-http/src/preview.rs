@@ -201,7 +201,7 @@ fn issue(
 /// in order, each as its type, version, subject and data, with every time blanked
 /// (`blank_times`: times move between a preview and its apply; nothing else should), and
 /// over the rows of aggregates it wrote, in order, each with the version it
-/// found (`Inserted` for a new one). The rows are what catch a record changed since the
+/// found (`Inserted` for a new one), in a fixed order. The rows are what catch a record changed since the
 /// preview whose change no event payload would show (`product.updated` names the fields
 /// changed, not their old values): whatever the write read and wrote again must be as it
 /// was. As `sha256:<hex>`.
@@ -218,7 +218,7 @@ pub(crate) fn digest(record: &WriteRecord) -> Result<String, ApiError> {
             "data": data,
         }));
     }
-    let rows = record
+    let mut rows: Vec<_> = record
         .rows
         .iter()
         .map(|row| {
@@ -227,8 +227,15 @@ pub(crate) fn digest(record: &WriteRecord) -> Result<String, ApiError> {
                 RowChange::Updated(v) => ("update", Some(v)),
                 RowChange::Deleted(v) => ("delete", Some(v)),
             };
-            serde_json::json!([row.kind, row.key, change, found])
+            (row.kind.as_str(), row.key.as_str(), change, found)
         })
+        .collect();
+    // The order rows are written in follows the database's plan (an `UPDATE … FROM
+    // unnest`), which a preview and its apply needn't share.
+    rows.sort();
+    let rows = rows
+        .into_iter()
+        .map(|(kind, key, change, found)| serde_json::json!([kind, key, change, found]))
         .collect();
     let all = serde_json::json!({"events": list, "rows": Value::Array(rows)});
     let mut canonical = Vec::new();
@@ -1073,6 +1080,30 @@ mod tests {
         assert_ne!(
             digest_of(serde_json::json!({"due": 1})),
             digest_of(serde_json::json!({"due": 2}))
+        );
+    }
+
+    #[test]
+    fn rows_digest_alike_in_any_order() {
+        let row = |key: &str, version| hypha_core::WrittenRow {
+            kind: "inventory_items".to_string(),
+            key: key.to_string(),
+            change: RowChange::Updated(version),
+        };
+        let digest_of = |rows| {
+            digest(&WriteRecord {
+                events: Vec::new(),
+                rows,
+            })
+            .unwrap()
+        };
+        assert_eq!(
+            digest_of(vec![row("a", 1), row("b", 2)]),
+            digest_of(vec![row("b", 2), row("a", 1)])
+        );
+        assert_ne!(
+            digest_of(vec![row("a", 1), row("b", 2)]),
+            digest_of(vec![row("a", 2), row("b", 1)])
         );
     }
 
