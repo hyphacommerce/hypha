@@ -9,8 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use hypha_core::{
-    Currency, HasBatch, Money, Price, ProductId, RepoError, SignalsDispatch, StoredEvent,
-    VariantId,
+    Currency, HasBatch, Money, Price, ProductId, RepoError, SignalsDispatch, StoredEvent, VariantId,
 };
 use hypha_products::{Handle, Product, ProductRepo, ProductStatus, StageProducts, repo::keys};
 use hypha_store_postgres::testing::TestDatabase;
