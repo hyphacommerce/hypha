@@ -38,6 +38,13 @@ impl BlobStore for HostBlobs {
             preview.block(crate::preview::BlockedBy::MediaUpload);
             return Err(BlobError::Backend(crate::preview::NOT_SENT.to_string()));
         }
+        // Its preview was complete, so it handed out no upload URL.
+        if let Some(apply) = crate::preview::applying() {
+            apply.block(crate::preview::BlockedBy::MediaUpload);
+            return Err(BlobError::Backend(
+                crate::preview::NOT_PREVIEWED.to_string(),
+            ));
+        }
         self.0.presign_upload(key, terms, now).await
     }
 

@@ -552,3 +552,40 @@ async fn a_token_is_its_callers_and_its_requests_only() {
         (StatusCode::BAD_REQUEST, "invalid_preview_header")
     );
 }
+
+#[tokio::test]
+async fn an_apply_sends_its_emails_only_once_it_commits() {
+    let app = app().await;
+    let role = r#"{"name":"support","scopes":["orders:read"]}"#;
+    let (_, role) = send(&app, "POST", "/admin/roles", Some(role)).await;
+    let support = role["id"].as_str().unwrap().to_string();
+    let invite = |email: &str| json!({ "email": email, "role": support }).to_string();
+    let sent = |app: &TestApp| app.emails.lock().unwrap().len();
+    let key = app.admin_key.clone();
+
+    // Applied as previewed: the invite's email goes out, after the commit.
+    let bob = invite("bob@example.com");
+    let (_, json) = preview(&app, "POST", "/admin/invites", Some(&bob)).await;
+    let token = json["preview"]["token"].as_str().unwrap().to_string();
+    let (status, json) = apply_as(&app, &key, &token, "POST", "/admin/invites", Some(&bob)).await;
+    assert_eq!(status, StatusCode::CREATED, "{json}");
+    assert_eq!(sent(&app), 1);
+
+    // Stale: someone invited Ana meanwhile, so the write would renew that invite rather
+    // than make the one previewed. Nothing is written, and nothing is sent.
+    let ana = invite("ana@example.com");
+    let (_, json) = preview(&app, "POST", "/admin/invites", Some(&ana)).await;
+    let token = json["preview"]["token"].as_str().unwrap().to_string();
+    let (status, _) = send(&app, "POST", "/admin/invites", Some(&ana)).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(sent(&app), 2);
+    let (status, json) = apply_as(&app, &key, &token, "POST", "/admin/invites", Some(&ana)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "preview_stale"),
+        "{json}"
+    );
+    assert_eq!(sent(&app), 2, "the stale apply's email wasn't sent");
+    let held = &json["details"]["preview"]["emails"];
+    assert_eq!(held[0]["template"], "staff_invite", "{json}");
+}
