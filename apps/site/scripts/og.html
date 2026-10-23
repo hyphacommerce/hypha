@@ -1,0 +1,134 @@
+<!doctype html>
+<!-- The social preview image, public/og.png. Re-render it after changing this file:
+     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --hide-scrollbars \
+       --force-device-scale-factor=1 --window-size=1200,630 --virtual-time-budget=2000 \
+       --screenshot=public/og.png "file://$PWD/scripts/og.html"   (from apps/site) -->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @font-face {
+        font-family: Geist;
+        src: url(../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2)
+          format("woff2");
+        font-weight: 100 900;
+      }
+      * {
+        margin: 0;
+        box-sizing: border-box;
+      }
+      body {
+        width: 1200px;
+        height: 630px;
+        background: #fafaf9;
+        font-family: Geist;
+        color: #262825;
+        position: relative;
+        overflow: hidden;
+      }
+      svg.web {
+        position: absolute;
+        inset: 0;
+      }
+      .box {
+        position: absolute;
+        left: 96px;
+        top: 120px;
+        width: 820px;
+      }
+      .mark {
+        height: 44px;
+        margin-bottom: 56px;
+      }
+      h1 {
+        font-size: 92px;
+        line-height: 0.98;
+        letter-spacing: -0.045em;
+        font-weight: 600;
+      }
+      p {
+        margin-top: 28px;
+        font-size: 30px;
+        color: #4a4c48;
+        letter-spacing: -0.01em;
+      }
+      .url {
+        position: absolute;
+        left: 96px;
+        bottom: 64px;
+        font-size: 24px;
+        color: #455c01;
+        font-weight: 600;
+      }
+      .pill {
+        position: absolute;
+        right: 80px;
+        bottom: 56px;
+        padding: 10px 22px;
+        border-radius: 999px;
+        background: #b8e948;
+        color: #1d2904;
+        font-size: 24px;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <svg
+      class="web"
+      width="1200"
+      height="630"
+      viewBox="0 0 1200 630"
+      fill="none"
+      stroke="rgba(38,40,37,.22)"
+      stroke-linecap="round"
+      id="w"
+    ></svg>
+    <div class="box">
+      <img class="mark" src="../../admin/public/brand/hypha-wordmark.svg" />
+      <h1>Commerce, grown as a network.</h1>
+      <p>Open-source commerce you own, for about €5 a month.</p>
+    </div>
+    <div class="url">hyphacommerce.com</div>
+    <div class="pill">Open source</div>
+    <script>
+      let s = 7;
+      const R = () => {
+        s = (s * 1664525 + 1013904223) >>> 0;
+        return s / 2 ** 32;
+      };
+      const w = document.getElementById("w");
+      let h = "";
+      for (let i = 0; i < 26; i++) {
+        let x = 1200,
+          y = R() * 630,
+          a = Math.PI + (R() - 0.5) * 1.4;
+        let d = `M${x} ${y}`;
+        const n = 40 + R() * 70;
+        for (let k = 0; k < n; k++) {
+          a += (R() - 0.5) * 0.5;
+          x += Math.cos(a) * 7;
+          y += Math.sin(a) * 7;
+          d += ` L${x.toFixed(1)} ${y.toFixed(1)}`;
+          if (R() < 0.04) {
+            let bx = x,
+              by = y,
+              ba = a + (R() < 0.5 ? -1 : 1) * 0.8,
+              bd = `M${bx} ${by}`;
+            for (let j = 0; j < 20; j++) {
+              ba += (R() - 0.5) * 0.6;
+              bx += Math.cos(ba) * 6;
+              by += Math.sin(ba) * 6;
+              bd += ` L${bx.toFixed(1)} ${by.toFixed(1)}`;
+            }
+            h += `<path d="${bd}" stroke-width="1"/>`;
+          }
+        }
+        h += `<path d="${d}" stroke-width="${(1.2 + R()).toFixed(1)}"/>`;
+        if (R() < 0.25)
+          h += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" fill="#B8E948" stroke="#455C01"/>`;
+      }
+      w.innerHTML = h;
+    </script>
+  </body>
+</html>

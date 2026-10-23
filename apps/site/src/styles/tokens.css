@@ -1,0 +1,78 @@
+/* The brand's colours (Hypha brand book v0.1, the same hexes as the admin's theme,
+   apps/admin/theme/hyphaTheme.ts), as the site's tokens. Foxfire (lime) is a fill only,
+   always with --ink-on-lime on it; accent text is --text-accent. The site starts light
+   whatever the system says; the header's switch sets `data-theme="dark"`. */
+
+:root {
+  color-scheme: light;
+
+  --lime: #b8e948;
+  --lime-soft: #eafbcf;
+  --ink-on-lime: #1d2904;
+
+  --bg: #fafaf9;
+  --bg-raised: #ffffff;
+  --bg-sunk: #f3f4f2;
+  --text: #1a1b19;
+  --text-muted: #444642;
+  --text-faint: #6a6c68;
+  --text-accent: #455c01;
+  --rule: #e6e8e5;
+  --rule-strong: #d4d5d2;
+  --ok: #02703f;
+  --ok-soft: #edfbf1;
+  --removed: #c8393a;
+  --removed-soft: #fff4f3;
+  --focus: #5f7e01;
+
+  /* The landing page: cards, the hyphae behind it and the signals on them, the core. */
+  --accent: #b8e948;
+  --accent-hover: #a2d128;
+  --surface: #ffffff;
+  --muted: #f2f3f0;
+  --net-thread: rgb(38 40 37 / 0.27);
+  --thread-quiet: rgb(38 40 37 / 0.2);
+  --sig-stroke: #455c01;
+  --core-bg: #262825;
+  --core-ink: #fafaf9;
+  --core-ink-2: #b9bbb6;
+  --header-bg: rgb(250 250 249 / 0.9);
+
+  --font-sans: "Geist Variable", Geist, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, Menlo, monospace;
+
+  --measure: 68ch;
+  --page: 1160px;
+  --gutter: clamp(16px, 4vw, 40px);
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --lime-soft: #304204;
+  --bg: #1a1b19;
+  --bg-raised: #232522;
+  --bg-sunk: #151614;
+  --text: #fafaf9;
+  --text-muted: #d4d5d2;
+  --text-faint: #a3a5a1;
+  --text-accent: #c6f073;
+  --rule: #30322f;
+  --rule-strong: #444642;
+  --ok: #91dbab;
+  --ok-soft: #003b1e;
+  --removed: #ffb0a9;
+  --removed-soft: #521d1b;
+  --focus: #b8e948;
+  --surface: #232522;
+  --muted: #2b2d2a;
+  --net-thread: rgb(236 238 233 / 0.2);
+  --thread-quiet: rgb(236 238 233 / 0.15);
+  --sig-stroke: transparent;
+  --core-bg: #f3f4f2;
+  --core-ink: #1a1b19;
+  --core-ink-2: #4a4c48;
+  --header-bg: rgb(26 27 25 / 0.9);
+}

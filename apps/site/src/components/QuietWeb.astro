@@ -1,0 +1,251 @@
+---
+// A quiet web for reading pages' headers: faint hyphae growing in from the right, fading
+// out to the left and the bottom, with a signal or two. It fills its parent (which must be
+// positioned), draws itself in once on load, and its signals stop while it's off screen.
+// Decoration only: hidden from assistive tech.
+interface Props {
+  seed?: number;
+  signals?: number;
+}
+
+const { seed = 7, signals = 2 } = Astro.props;
+---
+
+<div class="quiet-web" aria-hidden="true" data-seed={seed} data-signals={signals}></div>
+
+<script>
+  type Pt = [number, number];
+
+  function rng(seed: number) {
+    let s = seed >>> 0;
+    return () => {
+      s = (s + 0x6d2b79f5) >>> 0;
+      let t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  const fx = (n: number) => Math.round(n * 10) / 10;
+
+  function angDiff(a: number, b: number) {
+    let d = a - b;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    return d;
+  }
+
+  function smoothD(p: Pt[]) {
+    let d = `M${fx(p[0][0])} ${fx(p[0][1])}`;
+    for (let i = 1; i < p.length - 1; i++) {
+      d += `Q${fx(p[i][0])} ${fx(p[i][1])} ${fx((p[i][0] + p[i + 1][0]) / 2)} ${fx((p[i][1] + p[i + 1][1]) / 2)}`;
+    }
+    const l = p[p.length - 1];
+    return `${d}L${fx(l[0])} ${fx(l[1])}`;
+  }
+
+  type Tip = { x: number; y: number; a: number; life: number; w: number; d: number; pid: number; tx: number | null; ty?: number };
+
+  function draw(host: HTMLElement, seed: number, signalCount: number) {
+    const W = host.clientWidth;
+    const H = host.clientHeight;
+    if (W < 10 || H < 10) return () => {};
+    const R = rng(seed);
+    const G = new Map<string, number[]>();
+    const cell = 10;
+    let next = 1;
+    const key = (x: number, y: number) => `${Math.floor(x / cell)}:${Math.floor(y / cell)}`;
+    const add = (x: number, y: number, id: number) => {
+      const k = key(x, y);
+      let a = G.get(k);
+      if (!a) G.set(k, (a = []));
+      a.push(x, y, id);
+    };
+    const near = (x: number, y: number, id: number, pid: number): Pt | null => {
+      const cx = Math.floor(x / cell);
+      const cy = Math.floor(y / cell);
+      for (let i = -1; i <= 1; i++) {
+        for (let j = -1; j <= 1; j++) {
+          const a = G.get(`${cx + i}:${cy + j}`);
+          if (!a) continue;
+          for (let q = 0; q < a.length; q += 3) {
+            const o = a[q + 2];
+            if (o === id || o === pid) continue;
+            if ((a[q] - x) ** 2 + (a[q + 1] - y) ** 2 < 49) return [a[q], a[q + 1]];
+          }
+        }
+      }
+      return null;
+    };
+    const lines: { pts: Pt[]; w: number; d: number }[] = [];
+    const tips: Tip[] = [];
+    const n = Math.round(Math.max(8, Math.min(26, W / 55)));
+    for (let i = 0; i < n; i++) {
+      const e = R();
+      let x: number;
+      let y: number;
+      if (e < 0.55) {
+        x = W;
+        y = R() * H;
+      } else {
+        x = W * (0.3 + R() * 0.7);
+        y = e < 0.8 ? 0 : H;
+      }
+      const tx = W * (0.4 + R() * 0.55);
+      const ty = H * (0.15 + R() * 0.7);
+      tips.push({ x, y, a: Math.atan2(ty - y, tx - x) + (R() - 0.5) * 0.8, life: ((Math.hypot(tx - x, ty - y) / 6) * (0.8 + R() * 0.7)) | 0, w: 1.3, d: 0, pid: 0, tx, ty });
+    }
+    let budget = 6000;
+    while (tips.length && budget > 0) {
+      const t = tips.shift()!;
+      const id = next++;
+      let x = t.x;
+      let y = t.y;
+      let a = t.a;
+      const pts: Pt[] = [[x, y]];
+      for (let s = 0; s < t.life && budget > 0; s++) {
+        a += (R() - 0.5) * 0.4;
+        if (t.tx != null) a -= angDiff(a, Math.atan2(t.ty! - y, t.tx - x)) * 0.02;
+        x += Math.cos(a) * 6;
+        y += Math.sin(a) * 6;
+        budget--;
+        pts.push([x, y]);
+        if (x < -20 || x > W + 20 || y < -20 || y > H + 20) break;
+        if (s > 2) {
+          const h = near(x, y, id, t.pid);
+          if (h) {
+            pts.push(h);
+            break;
+          }
+        }
+        add(x, y, id);
+        if (t.d < 3 && s > 2 && R() < 0.05) {
+          tips.push({ x, y, a: a + (R() < 0.5 ? -1 : 1) * (0.4 + R() * 0.5), life: Math.max(4, ((t.life - s) * (0.4 + R() * 0.45)) | 0), w: t.w * 0.72, d: t.d + 1, pid: id, tx: null });
+        }
+      }
+      if (pts.length > 2) lines.push({ pts, w: t.w, d: t.d });
+    }
+
+    const id = `qw${seed}`;
+    // Each line draws itself in, deeper branches later.
+    const paths = lines
+      .map((L, i) => `<path class="qw-ln" pathLength="1" style="--dl:${(0.1 + L.d * 0.35 + R() * 0.4).toFixed(2)}s" d="${smoothD(L.pts)}" stroke-width="${fx(L.w)}" data-i="${i}"/>`)
+      .join("");
+    const picks = lines
+      .map((l, i) => ({ i, n: l.pts.length, d: l.d }))
+      .filter((o) => o.d === 0)
+      .toSorted((a, b) => b.n - a.n)
+      .slice(0, signalCount);
+    const dots = picks.map(() => `<g opacity="0"><circle r="6" class="qw-halo"/><circle r="2.4" class="qw-dot"/></g>`).join("");
+    host.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs><linearGradient id="${id}gh" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000"/><stop offset=".38" stop-color="#000"/><stop offset=".75" stop-color="#fff"/></linearGradient><linearGradient id="${id}gv" x1="0" y1="0" x2="0" y2="1"><stop offset=".55" stop-color="#fff"/><stop offset="1" stop-color="#000"/></linearGradient><mask id="${id}mh" maskUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="url(#${id}gh)"/></mask><mask id="${id}mv" maskUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="url(#${id}gv)"/></mask></defs><g mask="url(#${id}mh)"><g mask="url(#${id}mv)"><g class="qw-lines">${paths}</g><g class="qw-sigs">${dots}</g></g></g></svg>`;
+    const svg = host.firstElementChild as SVGSVGElement;
+    requestAnimationFrame(() => svg.classList.add("on"));
+
+    const pe = svg.querySelectorAll<SVGPathElement>("path[data-i]");
+    const ge = svg.querySelector(".qw-sigs")!.children;
+    const sigs = picks.map((p, k) => {
+      const el = pe[p.i];
+      const len = el.getTotalLength();
+      return { g: ge[k], el, len, gap: len * 0.8, off: R() * len, sp: 28 + R() * 12 };
+    });
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      for (const s of sigs) {
+        const p = s.el.getPointAtLength(s.len * 0.6);
+        s.g.setAttribute("transform", `translate(${p.x} ${p.y})`);
+        s.g.setAttribute("opacity", "1");
+      }
+      return () => {};
+    }
+    // Signals start once the lines have drawn in, and only move while the web is in view.
+    const start = performance.now() + 1800;
+    let visible = true;
+    const seen = new IntersectionObserver(([e]) => (visible = e.isIntersecting));
+    seen.observe(host);
+    let raf = 0;
+    const tick = (ts: number) => {
+      raf = requestAnimationFrame(tick);
+      if (!visible || ts < start) return;
+      for (const s of sigs) {
+        const t = (s.off + ((ts - start) / 1000) * s.sp) % (s.len + s.gap);
+        if (t > s.len) {
+          s.g.setAttribute("opacity", "0");
+          continue;
+        }
+        const p = s.el.getPointAtLength(t);
+        s.g.setAttribute("transform", `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`);
+        s.g.setAttribute("opacity", Math.min(1, t / 40, (s.len - t) / 40).toFixed(2));
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      seen.disconnect();
+    };
+  }
+
+  for (const host of document.querySelectorAll<HTMLElement>(".quiet-web")) {
+    const seed = Number(host.dataset.seed ?? 7);
+    const signals = Number(host.dataset.signals ?? 2);
+    let stop = draw(host, seed, signals);
+    let width = host.clientWidth;
+    let timer = 0;
+    new ResizeObserver(() => {
+      if (host.clientWidth === width) return;
+      width = host.clientWidth;
+      clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        stop();
+        stop = draw(host, seed, signals);
+        host.querySelector("svg")?.classList.add("now");
+      }, 150);
+    }).observe(host);
+  }
+</script>
+
+<style>
+  .quiet-web {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .quiet-web :global(svg) {
+    display: block;
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
+
+  .quiet-web :global(.qw-lines) {
+    fill: none;
+    stroke: var(--thread-quiet);
+    stroke-linecap: round;
+  }
+
+  .quiet-web :global(.qw-ln) {
+    stroke-dasharray: 1 1;
+    stroke-dashoffset: 1;
+    transition: stroke-dashoffset 1.8s cubic-bezier(0.3, 0.6, 0.2, 1) var(--dl, 0s);
+  }
+
+  .quiet-web :global(svg.on .qw-ln) {
+    stroke-dashoffset: 0;
+  }
+
+  .quiet-web :global(svg.now .qw-ln) {
+    transition: none;
+  }
+
+  .quiet-web :global(.qw-halo) {
+    fill: var(--accent);
+    opacity: 0.3;
+  }
+
+  .quiet-web :global(.qw-dot) {
+    fill: var(--accent);
+    stroke: var(--sig-stroke);
+    stroke-width: 1;
+  }
+</style>

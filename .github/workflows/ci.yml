@@ -117,3 +117,5 @@ jobs:
       - run: pnpm --filter admin exec next build
       # And the storefront.
       - run: pnpm --filter storefront exec next build
+      # The website and docs, with the API references from openapi/*.json.
+      - run: pnpm --filter site build

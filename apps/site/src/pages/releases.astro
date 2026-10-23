@@ -1,0 +1,22 @@
+---
+import PostArchive from "../components/PostArchive.astro";
+import Base from "../layouts/Base.astro";
+import { posts } from "../lib/posts";
+
+const releases = await posts((p) => p.data.release);
+---
+
+<Base title="Releases" description="What each Hypha release brings, in words.">
+  <PostArchive
+    title="Releases"
+    lede="What each release brings, in words. Every change is listed in the changelog."
+    posts={releases}
+    filters={false}
+    links={[
+      { href: "/changelog", label: "Changelog" },
+      { href: "/blog", label: "All posts" },
+      { href: "/rss.xml", label: "RSS feed" },
+    ]}
+    empty="The first release, v0.1.0, is in preparation."
+  />
+</Base>

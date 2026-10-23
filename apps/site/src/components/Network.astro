@@ -1,0 +1,620 @@
+---
+// The hyphae drawn behind the landing page: a web closing in on the hero from its edges,
+// one trunk down the sections' rail through each section's node, side branches into the
+// gutter, filaments from the rail (or a hub) to the cards, and a second web fanning out
+// from the trunk's end behind the closing section. Lime signals travel along them.
+//
+// The page marks what it hangs on (measured after layout):
+// - `data-hy-zone="hero"` and `data-hy-zone="close"`: the two webs' sections;
+// - `data-hy-node="<n>"`: the trunk passes through each, in order;
+// - `data-hy-clear`: the webs fade out behind this element so its text stays readable;
+// - `data-hy-id="<id>"`, and `data-hy-link="rail|<id>"`: a filament from the rail (or
+//   from that element) to this one; `data-hy-chain="<group>"`: a row of elements, the
+//   first tied to the rail and each to the next.
+//
+// Entrances: every line draws itself in once (a CSS transition on its dash) when the
+// reader reaches it, the hero's web on load. Nothing is redrawn on scroll; signals only
+// move near the viewport and on lines already drawn. It's decoration, hidden from
+// assistive tech.
+---
+
+<div class="net" aria-hidden="true"></div>
+
+<script>
+  type Pt = [number, number];
+  type Line = { pts: Pt[]; w: number; d: number; top: number; delay: number; dur: number };
+  type Tip = {
+    x: number;
+    y: number;
+    a: number;
+    life: number;
+    w: number;
+    d: number;
+    pid: number;
+    tx: number | null;
+    ty?: number;
+  };
+  type Grid = { m: Map<string, number[]>; cell: number; next: number };
+  type Box = { x0: number; y0: number; x1: number; y1: number; cx: number; cy: number; w: number; h: number };
+  type Signal = {
+    g: SVGGElement;
+    p: SVGPathElement;
+    line: number;
+    len: number;
+    gap: number;
+    sp: number;
+    off: number;
+    y0: number;
+    y1: number;
+    st: number;
+    vis: boolean;
+    placed: boolean;
+  };
+
+  const host = document.querySelector<HTMLElement>(".net");
+  const page = host?.parentElement;
+  const still = matchMedia("(prefers-reduced-motion: reduce)");
+
+  // Seeded, so the network keeps its shape from one visit (and one resize) to the next.
+  function rng(seed: number) {
+    let s = seed >>> 0;
+    return () => {
+      s = (s + 0x6d2b79f5) >>> 0;
+      let t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  const fx = (n: number) => Math.round(n * 10) / 10;
+
+  function smoothD(p: Pt[]) {
+    let d = `M${fx(p[0][0])} ${fx(p[0][1])}`;
+    if (p.length === 2) return `${d}L${fx(p[1][0])} ${fx(p[1][1])}`;
+    for (let i = 1; i < p.length - 1; i++) {
+      const mx = (p[i][0] + p[i + 1][0]) / 2;
+      const my = (p[i][1] + p[i + 1][1]) / 2;
+      d += `Q${fx(p[i][0])} ${fx(p[i][1])} ${fx(mx)} ${fx(my)}`;
+    }
+    const l = p[p.length - 1];
+    return `${d}L${fx(l[0])} ${fx(l[1])}`;
+  }
+
+  function angDiff(a: number, b: number) {
+    let d = a - b;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    return d;
+  }
+
+  // A spatial hash of every point drawn, so a growing tip can fuse into a line it meets.
+  function gAdd(G: Grid, x: number, y: number, id: number) {
+    const k = `${Math.floor(x / G.cell)}:${Math.floor(y / G.cell)}`;
+    let a = G.m.get(k);
+    if (!a) G.m.set(k, (a = []));
+    a.push(x, y, id);
+  }
+
+  function gNear(G: Grid, x: number, y: number, id: number, pid: number, r: number): Pt | null {
+    const cx = Math.floor(x / G.cell);
+    const cy = Math.floor(y / G.cell);
+    let best: Pt | null = null;
+    let bd = r * r;
+    for (let i = -1; i <= 1; i++) {
+      for (let j = -1; j <= 1; j++) {
+        const a = G.m.get(`${cx + i}:${cy + j}`);
+        if (!a) continue;
+        for (let q = 0; q < a.length; q += 3) {
+          const o = a[q + 2];
+          if (o === id || o === pid) continue;
+          const d = (a[q] - x) ** 2 + (a[q + 1] - y) ** 2;
+          if (d < bd) {
+            bd = d;
+            best = [a[q], a[q + 1]];
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  type GrowOpts = {
+    step: number;
+    wiggle: number;
+    pull: number;
+    branch: number;
+    depth: number;
+    fuse: number;
+    maxPts: number;
+    floor?: number;
+  };
+
+  // Tips walk, wander, fork, and stop when they leave the box or fuse into another line.
+  function grow(
+    R: () => number,
+    G: Grid,
+    seeds: Tip[],
+    box: { x0: number; y0: number; x1: number; y1: number },
+    o: GrowOpts,
+    out: { pts: Pt[]; w: number; d: number }[],
+  ) {
+    const tips = seeds.slice();
+    let budget = o.maxPts;
+    while (tips.length && budget > 0) {
+      const t = tips.shift()!;
+      const id = G.next++;
+      let x = t.x;
+      let y = t.y;
+      let a = t.a;
+      const pts: Pt[] = [[x, y]];
+      for (let s = 0; s < t.life && budget > 0; s++) {
+        a += (R() - 0.5) * o.wiggle;
+        if (t.tx != null) a -= angDiff(a, Math.atan2(t.ty! - y, t.tx - x)) * o.pull;
+        if (o.floor != null && y > o.floor - 90) {
+          a -= angDiff(a, -Math.PI / 2) * 0.08;
+          if (y > o.floor - 30 && R() < 0.25) break;
+        }
+        x += Math.cos(a) * o.step;
+        y += Math.sin(a) * o.step;
+        budget--;
+        pts.push([x, y]);
+        if (x < box.x0 || x > box.x1 || y < box.y0 || y > box.y1) break;
+        if (s > 2) {
+          const h = gNear(G, x, y, id, t.pid, o.fuse);
+          if (h) {
+            pts.push(h);
+            break;
+          }
+        }
+        gAdd(G, x, y, id);
+        if (t.d < o.depth && s > 2 && R() < o.branch) {
+          const side = R() < 0.5 ? -1 : 1;
+          tips.push({
+            x,
+            y,
+            a: a + side * (0.4 + R() * 0.5),
+            life: Math.max(4, ((t.life - s) * (0.4 + R() * 0.45)) | 0),
+            w: t.w * 0.72,
+            d: t.d + 1,
+            pid: id,
+            tx: null,
+          });
+        }
+      }
+      if (pts.length > 2) out.push({ pts, w: t.w, d: t.d });
+    }
+  }
+
+  let signals: Signal[] = [];
+  let paths: SVGPathElement[] = [];
+  let lineTops: number[] = [];
+  let readyAt: number[] = [];
+  let order: number[] = [];
+  let next = 0;
+  let built = false;
+
+  function build() {
+    if (!host || !page) return;
+    const cr = page.getBoundingClientRect();
+    const W = page.clientWidth;
+    const H = page.scrollHeight;
+    if (W < 10) return;
+    const bx = (el: Element): Box => {
+      const b = el.getBoundingClientRect();
+      const x0 = b.left - cr.left;
+      const y0 = b.top - cr.top;
+      return { x0, y0, x1: x0 + b.width, y1: y0 + b.height, cx: x0 + b.width / 2, cy: y0 + b.height / 2, w: b.width, h: b.height };
+    };
+    const q = (s: string) => [...page.querySelectorAll<HTMLElement>(s)];
+    const R = rng(11);
+    const G: Grid = { m: new Map(), cell: 10, next: 1 };
+    const lines: Line[] = [];
+    const sig: { li: number; n: number; sp: number; gap: number }[] = [];
+    const add = (pts: Pt[], w: number, d: number, top: number, delay: number, dur: number) => {
+      lines.push({ pts, w, d, top, delay, dur });
+      return lines.length - 1;
+    };
+
+    const heroEl = q('[data-hy-zone="hero"]')[0];
+    const closeEl = q('[data-hy-zone="close"]')[0];
+    if (!heroEl || !closeEl) return;
+    const hb = bx(heroEl);
+    const cb = bx(closeEl);
+    const nodes = q("[data-hy-node]")
+      .toSorted((a, b) => Number(a.dataset.hyNode) - Number(b.dataset.hyNode))
+      .map(bx);
+    const railX = nodes.length ? nodes[0].cx : 40;
+    const E: Pt = [cb.cx, cb.y0 + Math.min(130, cb.h * 0.2)];
+    const way: Pt[] = [[railX, hb.y1 - 210], ...nodes.map((n): Pt => [n.cx, n.cy]), [railX, cb.y0 + 10], E];
+
+    // The trunk, one stretch per gap between waypoints, each drawn when reached.
+    const trunk: Pt[] = [];
+    const trunkId = G.next++;
+    const trunkLines: number[] = [];
+    for (let k = 0; k < way.length - 1; k++) {
+      const A = way[k];
+      const B = way[k + 1];
+      const L = Math.hypot(B[0] - A[0], B[1] - A[1]);
+      const n = Math.max(2, Math.round(L / 30));
+      const p1 = R() * 6.28;
+      const p2 = R() * 6.28;
+      const amp = Math.min(12, L * 0.03);
+      const hz = Math.abs(B[0] - A[0]) > Math.abs(B[1] - A[1]);
+      const stretch: Pt[] = k ? [trunk[trunk.length - 1]] : [];
+      for (let i = k ? 1 : 0; i <= n; i++) {
+        const t = i / n;
+        const e = t * t * (3 - 2 * t);
+        const env = Math.sin(Math.PI * t);
+        const off = env * amp * (Math.sin(t * 8.2 + p1) * 0.7 + Math.sin(t * 17 + p2) * 0.3);
+        const p: Pt = hz
+          ? [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * e + off]
+          : [A[0] + (B[0] - A[0]) * e + off, A[1] + (B[1] - A[1]) * t];
+        trunk.push(p);
+        stretch.push(p);
+        gAdd(G, p[0], p[1], trunkId);
+      }
+      const dur = Math.min(2.2, Math.max(0.7, L / 650));
+      trunkLines.push(add(stretch, 1.9, 0, A[1], 0, dur));
+    }
+    for (const li of trunkLines) sig.push({ li, n: 1, sp: 110, gap: 0.4 });
+
+    const railAt = (y: number) => {
+      let best = trunk[0];
+      let bd = 1e9;
+      for (const p of trunk) {
+        if (p[1] > cb.y0) break;
+        const d = Math.abs(p[1] - y);
+        if (d < bd) {
+          bd = d;
+          best = p;
+        }
+      }
+      return best;
+    };
+
+    // Side branches into the left gutter.
+    const side: Tip[] = [];
+    for (let i = 4; i < trunk.length; i += 3 + Math.floor(R() * 4)) {
+      const p = trunk[i];
+      if (p[1] < hb.y1 + 20 || p[1] > cb.y0 - 20) continue;
+      side.push({
+        x: p[0],
+        y: p[1],
+        a: Math.PI + (R() - 0.5) * 1.7,
+        life: (3 + R() * Math.min(22, railX / 9)) | 0,
+        w: 1.1,
+        d: 1,
+        pid: trunkId,
+        tx: null,
+      });
+    }
+    const grown: { pts: Pt[]; w: number; d: number }[] = [];
+    grow(R, G, side, { x0: 0, y0: hb.y1 - 40, x1: railX + 2, y1: cb.y0 }, { step: 6, wiggle: 0.55, pull: 0, branch: 0.14, depth: 3, fuse: 6, maxPts: 2500 }, grown);
+    for (const l of grown) add(l.pts, l.w, l.d, l.pts[0][1], 0.3 + l.d * 0.25, 1);
+
+    // Filaments to the cards.
+    const wobble = (A: Pt, B: Pt, w: number) => {
+      const dx = B[0] - A[0];
+      const dy = B[1] - A[1];
+      const L = Math.hypot(dx, dy) || 1;
+      const hz = Math.abs(dx) >= Math.abs(dy);
+      const c1: Pt = hz ? [A[0] + dx * 0.5, A[1]] : [A[0], A[1] + dy * 0.5];
+      const c2: Pt = hz ? [B[0] - dx * 0.5, B[1]] : [B[0], B[1] - dy * 0.5];
+      const n = Math.max(6, Math.round(L / 20));
+      const ph = R() * 6.28;
+      const amp = Math.min(9, L * 0.04);
+      const pts: Pt[] = [];
+      for (let i = 0; i <= n; i++) {
+        const t = i / n;
+        const u = 1 - t;
+        const x = u * u * u * A[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t * t * t * B[0];
+        const y = u * u * u * A[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t * t * t * B[1];
+        const s = Math.sin(Math.PI * t) * amp * Math.sin(t * 9 + ph);
+        pts.push([x - (dy / L) * s, y + (dx / L) * s]);
+      }
+      const id = G.next++;
+      for (const p of pts) gAdd(G, p[0], p[1], id);
+      const li = add(pts, w, 0, Math.min(A[1], B[1]) - 40, 0.35, Math.min(1.4, Math.max(0.6, L / 500)));
+      sig.push({ li, n: 1, sp: 70 + R() * 40, gap: 1 + R() * 2.5 });
+    };
+    const ids: Record<string, Box> = {};
+    for (const el of q("[data-hy-id]")) ids[el.dataset.hyId!] = bx(el);
+    for (const el of q("[data-hy-link]")) {
+      const b = bx(el);
+      const to = el.dataset.hyLink!;
+      if (to === "rail") {
+        const yy = b.y0 + Math.min(44, b.h * 0.3);
+        const p = railAt(yy);
+        wobble([p[0], p[1]], [b.x0 + Math.min(70, b.w * 0.3), yy + (R() - 0.5) * 8], 1.25);
+      } else if (ids[to]) {
+        wobble([ids[to].cx, ids[to].cy], [b.cx, b.cy], 1.25);
+      }
+    }
+    const chains: Record<string, Box[]> = {};
+    for (const el of q("[data-hy-chain]")) (chains[el.dataset.hyChain!] ??= []).push(bx(el));
+    for (const arr of Object.values(chains)) {
+      arr.sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
+      const rows: Box[][] = [];
+      for (const b of arr) {
+        const r = rows.find((row) => Math.abs(row[0].y0 - b.y0) < 16);
+        if (r) r.push(b);
+        else rows.push([b]);
+      }
+      for (const r of rows) {
+        r.sort((a, b) => a.x0 - b.x0);
+        const at = (b: Box) => b.y0 + Math.min(36, b.h * 0.45);
+        const p = railAt(at(r[0]));
+        wobble([p[0], p[1]], [r[0].cx, at(r[0])], 1.25);
+        for (let i = 1; i < r.length; i++) wobble([r[i - 1].cx, at(r[i - 1])], [r[i].cx, at(r[i])], 1.25);
+      }
+    }
+
+    // The hero's web, closing in from the edges on load: deeper branches start later.
+    const h0 = lines.length;
+    const hn = Math.round(Math.min(46, Math.max(14, hb.w / 32)));
+    const hs: Tip[] = [];
+    for (let i = 0; i < hn; i++) {
+      const e = R();
+      let x: number;
+      let y: number;
+      if (e < 0.38) {
+        x = 0;
+        y = hb.y0 + R() * hb.h * 0.85;
+      } else if (e < 0.76) {
+        x = W;
+        y = hb.y0 + R() * hb.h * 0.85;
+      } else {
+        x = R() * W;
+        y = hb.y0;
+      }
+      const tx = hb.cx + (R() - 0.5) * W * 0.75;
+      const ty = hb.cy + (R() - 0.5) * hb.h * 0.6;
+      hs.push({ x, y, a: Math.atan2(ty - y, tx - x) + (R() - 0.5) * 0.8, life: ((Math.hypot(tx - x, ty - y) / 6) * (0.7 + R() * 0.7)) | 0, w: 1.5, d: 0, pid: 0, tx, ty });
+    }
+    grown.length = 0;
+    grow(R, G, hs, { x0: -20, y0: hb.y0 - 80, x1: W + 20, y1: hb.y1 + 140 }, { floor: hb.y1 + 40, step: 6, wiggle: 0.4, pull: 0.025, branch: 0.05, depth: 3, fuse: 7, maxPts: 14000 }, grown);
+    for (const l of grown) add(l.pts, l.w, l.d, hb.y0, 0.1 + l.d * 0.45 + R() * 0.5, 1.6 + R() * 0.8);
+    const h1 = lines.length;
+
+    // The closing web: a fan out of the trunk's end, and threads in from the edges.
+    const cs: Tip[] = [];
+    const fan = 10;
+    for (let i = 0; i < fan; i++) {
+      const a = Math.PI * (0.06 + (0.88 * (i + 0.5)) / fan) + (R() - 0.5) * 0.25;
+      const tp = trunk[Math.max(0, trunk.length - 1 - Math.floor(R() * 10))];
+      cs.push({ x: tp[0] + (R() - 0.5) * 6, y: tp[1] + (R() - 0.5) * 6, a, life: ((cb.h * 0.75) / 6) * (0.6 + R() * 0.6) | 0, w: 1.5, d: 0, pid: trunkId, tx: null });
+    }
+    const cn = Math.round(Math.min(28, Math.max(8, W / 60)));
+    for (let i = 0; i < cn; i++) {
+      const e = R();
+      let x: number;
+      let y: number;
+      if (e < 0.38) {
+        x = 0;
+        y = cb.y0 + R() * cb.h;
+      } else if (e < 0.76) {
+        x = W;
+        y = cb.y0 + R() * cb.h;
+      } else {
+        x = R() * W;
+        y = cb.y1;
+      }
+      const tx = cb.cx + (R() - 0.5) * W * 0.6;
+      const ty = cb.cy + (R() - 0.5) * cb.h * 0.5;
+      cs.push({ x, y, a: Math.atan2(ty - y, tx - x) + (R() - 0.5) * 0.8, life: ((Math.hypot(tx - x, ty - y) / 6) * (0.7 + R() * 0.6)) | 0, w: 1.5, d: 0, pid: 0, tx, ty });
+    }
+    grown.length = 0;
+    grow(R, G, cs, { x0: -20, y0: cb.y0 - 30, x1: W + 20, y1: cb.y1 + 4 }, { step: 6, wiggle: 0.4, pull: 0.02, branch: 0.05, depth: 3, fuse: 7, maxPts: 11000 }, grown);
+    const closeTop = cb.y0 + cb.h * 0.15;
+    for (const l of grown) add(l.pts, l.w, l.d, closeTop, 0.6 + l.d * 0.45 + R() * 0.5, 1.6 + R() * 0.8);
+    const c1 = lines.length;
+
+    const longest = (a: number, b: number, n: number) =>
+      lines
+        .map((l, i) => ({ i, l }))
+        .slice(a, b)
+        .filter((o) => o.l.d === 0)
+        .toSorted((x, y) => y.l.pts.length - x.l.pts.length)
+        .slice(0, n);
+    for (const o of longest(h0, h1, 9)) sig.push({ li: o.i, n: 1, sp: 55 + R() * 25, gap: 0.3 + R() * 0.8 });
+    for (const o of longest(h1, c1, 7)) sig.push({ li: o.i, n: 1, sp: 55 + R() * 25, gap: 0.3 + R() * 0.8 });
+
+    // The webs fade behind each `data-hy-clear` element and out across the hero's foot.
+    const ells = q("[data-hy-clear]")
+      .map(bx)
+      .map((b) => `<ellipse cx="${fx(b.cx)}" cy="${fx(b.cy)}" rx="${fx(b.w / 2 + 90)}" ry="${fx(b.h / 2 + 80)}" fill="url(#hyF)"/>`)
+      .join("");
+    const isWeb = (i: number) => i >= h0;
+    let open = "";
+    let webs = "";
+    lines.forEach((L, i) => {
+      const opacity = L.d ? Math.max(0.5, 1 - L.d * 0.18).toFixed(2) : "1";
+      const s = `<path class="ln" pathLength="1" d="${smoothD(L.pts)}" stroke-width="${fx(L.w)}" stroke-opacity="${opacity}" style="--dl:${L.delay.toFixed(2)}s;--du:${L.dur.toFixed(2)}s" data-i="${i}"/>`;
+      if (isWeb(i)) webs += s;
+      else open += s;
+    });
+    let dots = "";
+    const defs: { li: number; sp: number; gapF: number; j: number; n: number }[] = [];
+    for (const r of sig) {
+      for (let j = 0; j < r.n; j++) {
+        defs.push({ li: r.li, sp: r.sp, gapF: r.gap, j, n: r.n });
+        dots += `<g opacity="0"><circle r="7" class="halo"/><circle r="2.8" class="dot"/></g>`;
+      }
+    }
+    host.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs><linearGradient id="hyB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#000"/></linearGradient><radialGradient id="hyF"><stop offset="0" stop-color="#1c1c1c"/><stop offset=".5" stop-color="#2e2e2e"/><stop offset="1" stop-color="#fff"/></radialGradient><mask id="hyM" maskUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><rect x="0" y="${fx(hb.y1 - 120)}" width="${W}" height="200" fill="url(#hyB)"/>${ells}</mask></defs><g class="lines">${open}</g><g mask="url(#hyM)"><g class="lines">${webs}</g></g><g class="sigs">${dots}</g></svg>`;
+
+    const svg = host.firstElementChild as SVGSVGElement;
+    paths = [];
+    for (const p of svg.querySelectorAll<SVGPathElement>("path[data-i]")) paths[Number(p.dataset.i)] = p;
+    lineTops = lines.map((l) => l.top);
+    readyAt = lines.map((l) => (l.delay + l.dur) * 1000);
+    order = lines.map((_, i) => i).toSorted((a, b) => lineTops[a] - lineTops[b]);
+    next = 0;
+    const groups = svg.querySelector(".sigs")!.children;
+    signals = defs.map((d, k) => {
+      const p = paths[d.li];
+      const len = p.getTotalLength();
+      const bb = p.getBBox();
+      return {
+        g: groups[k] as SVGGElement,
+        p,
+        line: d.li,
+        len,
+        gap: len * d.gapF,
+        sp: d.sp,
+        off: (d.j / d.n) * (len + len * d.gapF) + R() * len * 0.5,
+        y0: bb.y,
+        y1: bb.y + bb.height,
+        st: 0.2 + R() * 0.6,
+        vis: false,
+        placed: false,
+      };
+    });
+
+    // After a rebuild (resize, fonts), what was already drawn stays drawn, without
+    // replaying its entrance.
+    if (built) {
+      host.classList.add("now");
+      reveal(performance.now(), true);
+      requestAnimationFrame(() => requestAnimationFrame(() => host.classList.remove("now")));
+    } else {
+      requestAnimationFrame(() => reveal(performance.now(), false));
+    }
+    built = true;
+  }
+
+  let reached = 0;
+
+  // Reveals, once, every line whose top the reader has reached.
+  function reveal(now: number, instantly: boolean) {
+    if (!page) return;
+    const top = -page.getBoundingClientRect().top;
+    reached = Math.max(reached, still.matches ? Infinity : top + innerHeight * 0.85);
+    while (next < order.length && lineTops[order[next]] <= reached) {
+      const i = order[next++];
+      paths[i]?.classList.add("on");
+      readyAt[i] = instantly ? 0 : now + readyAt[i];
+    }
+  }
+
+  function tick(ts: number) {
+    requestAnimationFrame(tick);
+    if (!page || !signals.length) return;
+    const top = -page.getBoundingClientRect().top;
+    const bottom = top + innerHeight;
+    const animate = !still.matches;
+    for (const s of signals) {
+      // Only near the viewport, and only on lines that have finished drawing in.
+      if (s.y1 < top - 60 || s.y0 > bottom + 60 || readyAt[s.line] === undefined) continue;
+      if (!paths[s.line]?.classList.contains("on") || ts < readyAt[s.line]) {
+        if (s.vis) {
+          s.g.setAttribute("opacity", "0");
+          s.vis = false;
+        }
+        continue;
+      }
+      let t: number;
+      if (animate) {
+        t = (s.off + (ts / 1000) * s.sp) % (s.len + s.gap);
+      } else {
+        if (s.placed) continue;
+        t = s.len * s.st;
+        s.placed = true;
+      }
+      if (t > s.len) {
+        if (s.vis) {
+          s.g.setAttribute("opacity", "0");
+          s.vis = false;
+        }
+        continue;
+      }
+      const p = s.p.getPointAtLength(t);
+      const fade = Math.max(0, Math.min(1, t / 40, (s.len - t) / 40));
+      s.g.setAttribute("transform", `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`);
+      s.g.setAttribute("opacity", fade.toFixed(2));
+      s.vis = true;
+    }
+  }
+
+  if (host && page) {
+    let timer = 0;
+    let width = page.clientWidth;
+    let height = page.scrollHeight;
+    new ResizeObserver(() => {
+      if (page.clientWidth === width && page.scrollHeight === height) return;
+      width = page.clientWidth;
+      height = page.scrollHeight;
+      clearTimeout(timer);
+      timer = window.setTimeout(build, 160);
+    }).observe(page);
+    let frame = 0;
+    addEventListener(
+      "scroll",
+      () => {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame((now) => reveal(now, false));
+      },
+      { passive: true },
+    );
+    still.addEventListener("change", build);
+    // Measured once the fonts are in, so the entrance isn't cut short by a rebuild when
+    // they land and the text reflows.
+    const start = async () => {
+      await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 1200))]);
+      build();
+      requestAnimationFrame(tick);
+    };
+    void start();
+  }
+</script>
+
+<style>
+  .net {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .net :global(svg) {
+    display: block;
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
+
+  .net :global(.lines) {
+    fill: none;
+    stroke: var(--net-thread);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* Each line draws itself in once it's reached. */
+  .net :global(.ln) {
+    stroke-dasharray: 1 1;
+    stroke-dashoffset: 1;
+    transition: stroke-dashoffset var(--du, 1.4s) cubic-bezier(0.3, 0.6, 0.2, 1) var(--dl, 0s);
+  }
+
+  .net :global(.ln.on) {
+    stroke-dashoffset: 0;
+  }
+
+  .net:global(.now) :global(.ln) {
+    transition: none;
+  }
+
+  .net :global(.halo) {
+    fill: var(--accent);
+    opacity: 0.32;
+  }
+
+  .net :global(.dot) {
+    fill: var(--accent);
+    stroke: var(--sig-stroke);
+    stroke-width: 1;
+  }
+</style>

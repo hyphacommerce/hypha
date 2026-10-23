@@ -1,0 +1,95 @@
+---
+import wordmarkDark from "../../../admin/public/brand/hypha-wordmark-on-dark.svg?url";
+import wordmark from "../../../admin/public/brand/hypha-wordmark.svg?url";
+import { EMAIL, GITHUB, SPONSOR } from "../consts";
+
+const links = [
+  { href: "/docs", label: "Docs" },
+  { href: "/docs/api/admin", label: "API" },
+  { href: "/blog", label: "Blog" },
+  { href: "/releases", label: "Releases" },
+  { href: "/changelog", label: "Changelog" },
+  { href: "/rss.xml", label: "RSS" },
+  { href: GITHUB, label: "GitHub" },
+  { href: SPONSOR, label: "Sponsor" },
+  { href: `mailto:${EMAIL}`, label: EMAIL },
+];
+---
+
+<footer class="footer">
+  <div class="bar">
+    <div class="brand">
+      <img class="on-light" src={wordmark} alt="Hypha" width="63" height="20" />
+      <img class="on-dark" src={wordmarkDark} alt="Hypha" width="63" height="20" />
+      <span>Open source under MIT or Apache-2.0 · © 2026</span>
+    </div>
+    <nav aria-label="Footer">
+      {links.map((l) => <a href={l.href}>{l.label}</a>)}
+    </nav>
+  </div>
+</footer>
+
+<style>
+  .footer {
+    position: relative;
+    z-index: 1;
+    margin-top: 96px;
+    border-top: 1px solid var(--rule);
+    background: var(--bg);
+  }
+
+  /* The landing page ends on its own closing section. */
+  :global(main:has(.page)) + .footer {
+    margin-top: 0;
+  }
+
+  .bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px 32px;
+    align-items: center;
+    justify-content: space-between;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 28px 20px 36px;
+  }
+
+  .brand {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+    font-size: 13px;
+    color: var(--text-faint);
+  }
+
+  .brand img {
+    width: auto;
+    height: 20px;
+  }
+
+  .on-dark,
+  :global([data-theme="dark"]) .on-light {
+    display: none;
+  }
+
+  :global([data-theme="dark"]) .on-dark {
+    display: block;
+  }
+
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 18px;
+    font-size: 14px;
+  }
+
+  a {
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+
+  a:hover {
+    color: var(--text);
+  }
+</style>

@@ -1,0 +1,222 @@
+---
+// The API references, rendered by Scalar from the repository's OpenAPI documents (the
+// ones the API itself serves and the SDK is generated from), published at /openapi/*.json
+// by the `passthrough` integration in astro.config.mjs, which also serves Scalar's
+// renderer from here rather than a CDN.
+import { ScalarComponent } from "@scalar/astro";
+
+import Header from "../../../components/Header.astro";
+import "../../../styles/site.css";
+
+export function getStaticPaths() {
+  return [
+    {
+      params: { spec: "admin" },
+      props: {
+        title: "Admin API",
+        url: "/openapi/admin.json",
+        lede: "Staff sessions, secret keys, apps and agents: everything the admin panel does.",
+      },
+    },
+    {
+      params: { spec: "storefront" },
+      props: {
+        title: "Storefront API",
+        url: "/openapi/storefront.json",
+        lede: "Publishable keys and shoppers' sessions: catalog, carts, checkout, accounts.",
+      },
+    },
+    {
+      params: { spec: "extensions" },
+      props: {
+        title: "Extension points",
+        url: "/openapi/extensions.json",
+        // Hypha sends these to apps: there's no server of ours to call.
+        servers: [],
+        lede: "What Hypha sends an app mid-flow (payments, shipping rates, search) and the answer it expects.",
+      },
+    },
+  ];
+}
+
+interface Props {
+  title: string;
+  url: string;
+  lede: string;
+  servers?: { url: string; description: string }[];
+}
+
+// Every store has an API of its own; the documents name none.
+const yourApi = [{ url: "https://api.your-shop.example", description: "Your store's API" }];
+const { title, url, lede, servers = yourApi } = Astro.props;
+const tabs = [
+  { href: "/docs/api/admin", label: "Admin API" },
+  { href: "/docs/api/storefront", label: "Storefront API" },
+  { href: "/docs/api/extensions", label: "Extension points" },
+];
+
+// Scalar in Hypha's type and colours. Scalar stays in its light mode and follows the
+// site's theme switch (`data-theme` on <html>) through these variables, rather than the
+// system's, which the rest of the site ignores.
+const customCss = `
+  .scalar-app, .scalar-api-reference {
+    --scalar-font: "Geist Variable", Geist, ui-sans-serif, system-ui, sans-serif;
+    --scalar-font-code: "Geist Mono Variable", "Geist Mono", ui-monospace, Menlo, monospace;
+  }
+  .light-mode {
+    --scalar-color-1: #1a1b19;
+    --scalar-color-2: #444642;
+    --scalar-color-3: #6a6c68;
+    --scalar-color-accent: #455c01;
+    --scalar-background-1: #ffffff;
+    --scalar-background-2: #f3f4f2;
+    --scalar-background-3: #e6e8e5;
+    --scalar-background-accent: #eafbcf;
+    --scalar-border-color: #e6e8e5;
+    /* Scalar's method colours, darkened to 4.5:1 on white: its own are read at 10px. */
+    --scalar-color-green: #00704a;
+    --scalar-color-blue: #0b5cad;
+    --scalar-color-orange: #a14b00;
+    --scalar-color-yellow: #846000;
+    --scalar-color-red: #b42318;
+    --scalar-color-purple: #6b3fa0;
+  }
+  /* The sidebar's expand buttons, up to the 24px minimum target. */
+  li[data-sidebar-id] button[aria-expanded] {
+    min-width: 24px;
+    min-height: 24px;
+  }
+  [data-theme="dark"] .light-mode,
+  .dark-mode {
+    --scalar-color-1: #fafaf9;
+    --scalar-color-2: #d4d5d2;
+    --scalar-color-3: #a3a5a1;
+    --scalar-color-accent: #c6f073;
+    --scalar-background-1: #1a1b19;
+    --scalar-background-2: #232522;
+    --scalar-background-3: #30322f;
+    --scalar-background-accent: #304204;
+    --scalar-border-color: #30322f;
+    --scalar-color-green: #6fdc9f;
+    --scalar-color-blue: #8cc2ff;
+    --scalar-color-orange: #ffb27a;
+    --scalar-color-yellow: #ecd06a;
+    --scalar-color-red: #ff9b92;
+    --scalar-color-purple: #cfaeff;
+  }
+  /* A link to Scalar's own MCP offering, not ours. */
+  .scalar-mcp-layer-link {
+    display: none !important;
+  }
+`;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} | Hypha docs</title>
+    <meta name="description" content={lede} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script is:inline>
+      try {
+        if (localStorage.getItem("starlight-theme") === "dark") {
+          document.documentElement.dataset.theme = "dark";
+        }
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <Header />
+    <div class="wrap api-head" role="region" aria-label={title}>
+      <p class="crumbs"><a href="/docs">Docs</a> / API reference</p>
+      <nav aria-label="API references">
+        {
+          tabs.map((t) => (
+            <a href={t.href} aria-current={t.label === title ? "page" : undefined}>
+              {t.label}
+            </a>
+          ))
+        }
+      </nav>
+      <p class="lede">{lede}</p>
+    </div>
+    <div id="main">
+    <ScalarComponent
+      renderMode="client"
+      configuration={{
+        url,
+        cdn: "/scalar/standalone.js",
+        // Hypha's summaries are full sentences: paths make a scannable sidebar.
+        operationTitleSource: "path",
+        servers,
+        // Scalar's hosted features (its AI agent, sharing, deploying) aren't ours to offer.
+        agent: { disabled: true },
+        showDeveloperTools: "never",
+        withDefaultFonts: false,
+        hideClientButton: true,
+        forceDarkModeState: "light",
+        hideDarkModeToggle: true,
+        customCss,
+        metaData: { title: `${title} | Hypha docs` },
+      }}
+    />
+    </div>
+  </body>
+</html>
+
+<script>
+  // Scalar's endpoint lists scroll without anything focusable in them; a tabindex lets
+  // keyboard users scroll them too.
+  new MutationObserver(() => {
+    for (const ul of document.querySelectorAll("ul.endpoints:not([tabindex])")) {
+      ul.setAttribute("tabindex", "0");
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+</script>
+
+<style>
+  .api-head {
+    padding-block: 24px 16px;
+  }
+
+  .crumbs {
+    color: var(--text-faint);
+    font-size: 0.9rem;
+  }
+
+  .crumbs a {
+    color: var(--text-muted);
+  }
+
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  nav a {
+    padding: 7px 14px;
+    border: 1px solid var(--rule-strong);
+    border-radius: 999px;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.92rem;
+    font-weight: 500;
+  }
+
+  nav a[aria-current="page"] {
+    background: var(--lime);
+    border-color: var(--lime);
+    color: var(--ink-on-lime);
+  }
+
+  .lede {
+    margin-top: 12px;
+    color: var(--text-muted);
+    max-width: 70ch;
+  }
+</style>

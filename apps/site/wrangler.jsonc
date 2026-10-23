@@ -1,0 +1,11 @@
+// hyphacommerce.com on Cloudflare: the static build as Workers static assets, with no
+// Worker code. Build first (`pnpm --filter site build`), then `wrangler deploy` here.
+{
+  "name": "hypha-site",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page",
+    "html_handling": "auto-trailing-slash",
+  },
+}
