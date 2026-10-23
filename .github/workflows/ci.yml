@@ -2,10 +2,13 @@
 # pull request. The services come from compose.yaml, as in local development.
 name: CI
 
+# Markdown alone (the README, guides, design notes) changes nothing CI checks.
 on:
   push:
     branches: [main]
+    paths-ignore: ["**/*.md"]
   pull_request:
+    paths-ignore: ["**/*.md"]
 
 concurrency:
   group: ci-${{ github.ref }}
