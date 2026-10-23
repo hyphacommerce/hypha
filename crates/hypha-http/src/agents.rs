@@ -562,7 +562,8 @@ async fn propose<S: Storage>(
         input,
     )
     .await?;
-    let dto = crate::routes::agents::ProposalResponse::new(&proposal.value, state.operations())?;
+    let dto =
+        crate::routes::agents::ProposalResponse::new(ctx, &proposal.value, state.operations())?;
     Ok(Answer {
         status: StatusCode::ACCEPTED.as_u16(),
         body: json!({ "proposal": dto }),

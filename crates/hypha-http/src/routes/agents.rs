@@ -18,8 +18,8 @@ use hypha_agents::{
 };
 use hypha_auth::{Identity, NewToken, StageIdentities, TokenKind};
 use hypha_core::{
-    AgentCallId, AgentId, HasBatch, IdGenerator, IdentityId, OAuthRequestId, ProposalId, Scope,
-    Stamped, UserId,
+    AgentCallId, AgentId, Ctx, HasBatch, IdGenerator, IdentityId, OAuthRequestId, ProposalId,
+    Scope, Stamped, UserId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -432,12 +432,18 @@ pub struct ProposalResponse {
     /// The operation's summary (`Update a product`); `null` when this build has no such
     /// operation any more.
     summary: Option<String>,
-    request: ProposalRequestResponse,
+    /// Absent for a caller other than a staff session that doesn't hold every scope in
+    /// `scopes` and every `customer_data:*` scope (listed in `redacted`): what the write
+    /// sends and answers may hold what those scopes guard.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request: Option<ProposalRequestResponse>,
     idempotency_key: Option<String>,
     /// The write's preview when it was proposed (`#/components/schemas/PreviewBody`,
     /// without a token): its response, events, emails and calls, or what blocked it.
-    #[schema(value_type = Object)]
-    preview: Value,
+    /// Absent like `request`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
+    preview: Option<Value>,
     /// Every scope approving it takes.
     scopes: Vec<Scope>,
     /// `pending`, `applied`, `rejected`, `expired` or `failed` (approved, but its write
@@ -447,12 +453,34 @@ pub struct ProposalResponse {
     decided_at: Option<String>,
     /// Why it was rejected, for the agent.
     note: Option<String>,
+    /// What its write answered once approved; absent until then, and like `request`.
+    #[serde(skip_serializing_if = "Option::is_none")]
     response: Option<ProposalOutcomeResponse>,
     /// How many times approving found the store changed and previewed it again.
     refreshes: u32,
     expires_at: String,
     created_at: String,
     updated_at: String,
+    /// The fields left out for this caller (`request`, `preview`, `response`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    redacted: Vec<&'static str>,
+}
+
+/// Whether `ctx` may see what `proposal`'s write sends and answers: a staff session may;
+/// anyone else needs every scope the write takes and every `customer_data:*` scope.
+fn shows_write(ctx: &Ctx, proposal: &Proposal) -> bool {
+    const PERSONAL: [Scope; 4] = [
+        Scope::CustomerDataName,
+        Scope::CustomerDataEmail,
+        Scope::CustomerDataPhone,
+        Scope::CustomerDataAddress,
+    ];
+    ctx.is_staff()
+        || proposal
+            .scopes()
+            .iter()
+            .chain(PERSONAL.iter())
+            .all(|s| ctx.has_scope(*s))
 }
 
 /// The summary of `operation`, if this build has it.
@@ -461,8 +489,14 @@ fn summary_of(operations: &Operations, operation: &hypha_agents::OperationId) ->
 }
 
 impl ProposalResponse {
-    pub(crate) fn new(proposal: &Proposal, operations: &Operations) -> Result<Self, ApiError> {
+    /// `proposal` as `ctx` may see it (`shows_write`).
+    pub(crate) fn new(
+        ctx: &Ctx,
+        proposal: &Proposal,
+        operations: &Operations,
+    ) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(proposal.stamps())?;
+        let shown = shows_write(ctx, proposal);
         let mut preview = proposal.preview().clone();
         // The IDs the approval reuses: the host's, not the reader's.
         if let Value::Object(fields) = &mut preview {
@@ -473,26 +507,33 @@ impl ProposalResponse {
             agent: proposal.agent(),
             operation: proposal.operation().as_str().to_string(),
             summary: summary_of(operations, proposal.operation()),
-            request: ProposalRequestResponse {
+            request: shown.then(|| ProposalRequestResponse {
                 params: proposal.request().params.clone(),
                 query: proposal.request().query.clone(),
                 body: proposal.request().body.clone(),
-            },
+            }),
             idempotency_key: proposal.idempotency_key().map(|k| k.as_str().to_string()),
-            preview,
+            preview: shown.then_some(preview),
             scopes: proposal.scopes().to_vec(),
             status: proposal.status().as_str(),
             decided_by: proposal.decided_by(),
             decided_at: proposal.decided_at().map(rfc3339).transpose()?,
             note: proposal.note().map(str::to_string),
-            response: proposal.response().map(|r| ProposalOutcomeResponse {
-                status: r.status(),
-                body: r.body().clone(),
-            }),
+            response: proposal
+                .response()
+                .filter(|_| shown)
+                .map(|r| ProposalOutcomeResponse {
+                    status: r.status(),
+                    body: r.body().clone(),
+                }),
             refreshes: proposal.refreshes(),
             expires_at: rfc3339(proposal.expires_at())?,
             created_at,
             updated_at,
+            redacted: match shown {
+                true => Vec::new(),
+                false => vec!["request", "preview", "response"],
+            },
         })
     }
 }
@@ -559,7 +600,7 @@ pub async fn list_proposals<S: Storage>(
         page,
         &scope,
         |p| p.id(),
-        |p| ProposalResponse::new(&p, state.operations()),
+        |p| ProposalResponse::new(&ctx, &p, state.operations()),
     )?))
 }
 
@@ -578,7 +619,11 @@ pub async fn fetch_proposal<S: Storage>(
 ) -> Result<Json<ProposalResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let proposal = hypha_agents::get_proposal(&ctx, &ports, id).await?;
-    Ok(Json(ProposalResponse::new(&proposal, state.operations())?))
+    Ok(Json(ProposalResponse::new(
+        &ctx,
+        &proposal,
+        state.operations(),
+    )?))
 }
 
 /// Approves a pending proposal: its write is sent again as its agent, exactly as
@@ -637,7 +682,7 @@ pub async fn approve<S: Storage>(
         }
         let refreshed =
             hypha_agents::record_refreshed(&staff.ctx, &ports, id, kept, digest.clone()).await?;
-        let response = ProposalResponse::new(&refreshed, state.operations())?;
+        let response = ProposalResponse::new(&staff.ctx, &refreshed, state.operations())?;
         let proposal = serde_json::to_value(&response).map_err(ApiError::internal)?;
         return Ok(ApiError::proposal_stale(fresh, proposal).into_response());
     }
@@ -656,7 +701,12 @@ pub async fn approve<S: Storage>(
             return Ok((status, Json(answer.body)).into_response());
         }
     };
-    Ok(Json(ProposalResponse::new(&decided, state.operations())?).into_response())
+    Ok(Json(ProposalResponse::new(
+        &staff.ctx,
+        &decided,
+        state.operations(),
+    )?)
+    .into_response())
 }
 
 /// What an approved write's answer says about the proposal.
@@ -706,7 +756,11 @@ pub async fn reject<S: Storage>(
     let note = body.parse_optional()?.and_then(|r| r.note);
     let proposal =
         hypha_agents::reject_proposal(&staff.ctx, &ports, &state.clock, id, note).await?;
-    Ok(Json(ProposalResponse::new(&proposal, state.operations())?))
+    Ok(Json(ProposalResponse::new(
+        &staff.ctx,
+        &proposal,
+        state.operations(),
+    )?))
 }
 
 // ---------- connecting an MCP client ----------

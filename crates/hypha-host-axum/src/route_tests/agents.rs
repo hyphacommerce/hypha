@@ -523,6 +523,86 @@ async fn an_agent_sees_personal_data_only_with_its_scopes() {
     assert!(seen.body.get("first_name").is_none());
 }
 
+/// A proposal holds what its write sends and answers: a caller other than a staff session
+/// sees that only with every scope the write takes and every `customer_data:*` scope, the
+/// agent that proposed it included.
+#[tokio::test]
+async fn a_proposals_write_is_shown_only_to_who_may_see_all_of_it() {
+    let app = app().await;
+    let (status, created) = send(
+        &app,
+        "POST",
+        "/admin/customers",
+        Some(r#"{"email": "pii@example.hr", "first_name": "Piiana"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let customer = created["id"].as_str().unwrap();
+    let agent = agent_with(
+        &app,
+        json!({"read": ["customers:read"], "write": {"customers:write": "propose"}}),
+    )
+    .await;
+    let proposed = call(
+        &app,
+        &agent,
+        op(
+            "admin.customers.update",
+            json!({"id": customer}),
+            Some(json!({"phone": "+385 PII 9"})),
+            Mode::Apply,
+        ),
+    )
+    .await;
+    assert_eq!(proposed.status, 202, "{:?}", proposed.body);
+    let hidden = json!(["request", "preview", "response"]);
+    let proposal = &proposed.body["proposal"];
+    assert!(!proposal.to_string().contains("PII"), "{proposal}");
+    assert_eq!(proposal["redacted"], hidden);
+    let id = proposal["id"].as_str().unwrap();
+
+    let plain = key(
+        &app,
+        json!({"kind": "secret", "name": "inbox", "scopes": ["agents:read", "customers:write"]}),
+    )
+    .await;
+    let trusted = key(
+        &app,
+        json!({"kind": "secret", "name": "trusted", "scopes": ["agents:read", "customers:write",
+            "customer_data:name", "customer_data:email", "customer_data:phone",
+            "customer_data:address"]}),
+    )
+    .await;
+    for path in [
+        "/admin/agent-proposals".to_string(),
+        format!("/admin/agent-proposals/{id}"),
+    ] {
+        let (status, json) = send_as(&app, &plain, "GET", &path, None).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+        assert!(!json.to_string().contains("PII"), "{path}: {json}");
+        let (status, json) = send_as(&app, &trusted, "GET", &path, None).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+        assert!(json.to_string().contains("PII"), "{path}: {json}");
+    }
+    let (_, one) = send_as(
+        &app,
+        &plain,
+        "GET",
+        &format!("/admin/agent-proposals/{id}"),
+        None,
+    )
+    .await;
+    assert_eq!(one["redacted"], hidden);
+    let session = owner_session(&app).await;
+    let path = format!("/admin/agent-proposals/{id}");
+    let (_, one) = send_as(&app, &session, "GET", &path, None).await;
+    assert_eq!(
+        one["request"]["body"]["phone"], "+385 PII 9",
+        "staff see it"
+    );
+    assert!(one.get("redacted").is_none());
+}
+
 #[tokio::test]
 async fn an_agents_preview_answers_a_token_it_can_apply() {
     let app = app().await;
@@ -599,9 +679,11 @@ async fn a_proposal_is_approved_and_applied_as_previewed() {
     assert_eq!(proposal["operation"], "admin.products.create");
     assert!(proposal["summary"].is_string(), "{proposal}");
     assert_eq!(proposal["scopes"], json!(["products:write"]));
-    assert!(proposal["preview"].get("token").is_none());
-    assert!(proposal["preview"].get("ids").is_none());
-    let previewed = proposal["preview"]["response"]["body"]["id"].clone();
+    // The agent holds no `customer_data:*` scope: its proposal's write isn't shown to it.
+    assert_eq!(
+        proposal["redacted"],
+        json!(["request", "preview", "response"])
+    );
     assert_eq!(rows(&app, "products").await, 0, "nothing written yet");
     // The same key again: the same proposal.
     let again = call(&app, &agent, create).await;
@@ -616,6 +698,9 @@ async fn a_proposal_is_approved_and_applied_as_previewed() {
         (status, &one["preview"]["complete"]),
         (StatusCode::OK, &json!(true))
     );
+    assert!(one["preview"].get("token").is_none());
+    assert!(one["preview"].get("ids").is_none());
+    let previewed = one["preview"]["response"]["body"]["id"].clone();
 
     let session = owner_session(&app).await;
     let approve = format!("/admin/agent-proposals/{id}/approve");
