@@ -1,6 +1,8 @@
-# Weekly dependency PRs, grouped so a week's updates arrive as a few PRs. A release must be a
-# week old before it's proposed (`cooldown`): most compromised packages are caught sooner.
-# Security updates aren't held back by either.
+# Weekly dependency PRs, at most two per ecosystem: minor and patch updates together, majors
+# together (to read before merging). Each PR runs the whole CI, which private repositories
+# pay for in Actions minutes, hence the grouping. A release must be a week old before it's
+# proposed (`cooldown`): most compromised packages are caught sooner. Security updates aren't
+# held back by either.
 version: 2
 updates:
   - package-ecosystem: cargo
@@ -12,9 +14,12 @@ updates:
     groups:
       cargo:
         update-types: [minor, patch]
+      cargo-major:
+        update-types: [major]
 
+  # The pnpm workspace from its root: one PR covers every package that uses a dependency.
   - package-ecosystem: npm
-    directories: ["/", "/apps/*", "/packages/*"]
+    directory: /
     schedule:
       interval: weekly
     cooldown:
@@ -25,6 +30,9 @@ updates:
         patterns: ["@astryxdesign/*"]
       npm:
         update-types: [minor, patch]
+        exclude-patterns: ["@astryxdesign/*"]
+      npm-major:
+        update-types: [major]
         exclude-patterns: ["@astryxdesign/*"]
 
   - package-ecosystem: github-actions
