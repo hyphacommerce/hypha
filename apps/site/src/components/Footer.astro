@@ -1,0 +1,78 @@
+---
+import { GITHUB, SPONSOR } from "../consts";
+---
+
+<footer class="footer">
+  <div class="wrap cols">
+    <p class="note">
+      Hypha is open source under the MIT or Apache-2.0 license. It's a public preview: it works end
+      to end, it isn't production-proven yet, and its APIs may change between 0.x releases.
+    </p>
+    <ul>
+      <li><a href="/docs">Docs</a></li>
+      <li><a href="/docs/api/admin">Admin API</a></li>
+      <li><a href="/docs/api/storefront">Storefront API</a></li>
+    </ul>
+    <ul>
+      <li><a href="/blog">Blog</a></li>
+      <li><a href="/releases">Releases</a></li>
+      <li><a href="/changelog">Changelog</a></li>
+      <li><a href="/rss.xml">RSS</a></li>
+    </ul>
+    <ul>
+      <li><a href={GITHUB}>GitHub</a></li>
+      <li><a href={SPONSOR}>Sponsor</a></li>
+    </ul>
+  </div>
+</footer>
+
+<style>
+  .footer {
+    margin-top: 120px;
+    padding-block: 48px 64px;
+    border-top: 1px solid var(--rule);
+    background: var(--bg-sunk);
+    font-size: 0.93rem;
+  }
+
+  .cols {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
+    gap: 32px;
+  }
+
+  .note {
+    max-width: 44ch;
+    color: var(--text-muted);
+  }
+
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  li + li {
+    margin-top: 8px;
+  }
+
+  a {
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+
+  a:hover {
+    color: var(--text);
+    text-decoration: underline;
+  }
+
+  @media (max-width: 760px) {
+    .cols {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .note {
+      grid-column: 1 / -1;
+    }
+  }
+</style>

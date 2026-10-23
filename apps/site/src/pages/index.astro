@@ -1,0 +1,424 @@
+---
+import Architecture from "../components/Architecture.astro";
+import Proposal from "../components/Proposal.astro";
+import { GITHUB, SPONSOR } from "../consts";
+import Base from "../layouts/Base.astro";
+
+// A touring bike's variants: which frame sizes come with which drivetrain. Only the
+// combinations that exist are variants; the rest are never created.
+const sizes = ["S", "M", "L", "XL"];
+const drivetrains = ["1×12 mechanical", "2×12 electronic", "Rohloff hub"];
+const exists: Record<string, boolean> = {
+  "S|1×12 mechanical": true,
+  "M|1×12 mechanical": true,
+  "L|1×12 mechanical": true,
+  "M|2×12 electronic": true,
+  "L|2×12 electronic": true,
+  "XL|2×12 electronic": true,
+  "L|Rohloff hub": true,
+  "XL|Rohloff hub": true,
+};
+const count = Object.keys(exists).length;
+---
+
+<Base>
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="pitch">
+        <p class="preview"><span></span>Public preview</p>
+        <h1>Commerce you can extend, that AI agents can run safely.</h1>
+        <p class="lede">
+          Hypha is an open-source commerce API in Rust, with an admin panel and a storefront. Model
+          complicated catalogs, grow it with apps and plugins instead of forks, and run it on your own
+          server or on Cloudflare Workers.
+        </p>
+        <div class="ctas">
+          <a class="button primary" href="/docs/getting-started">Run it locally</a>
+          <a class="button" href={GITHUB}>View on GitHub</a>
+        </div>
+      </div>
+      <div class="shot">
+        <Proposal />
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap split">
+      <div class="copy">
+        <h2>Agents that ask before they change your store</h2>
+        <p>
+          Hypha ships an MCP server for the admin. An agent works with the scopes it was granted, and
+          one a staff member connects never gets more than their role. Before any write, it can see
+          exactly what would happen: the
+          real command runs against your store and is rolled back. Writes you hold for approval wait
+          as proposals, and approving one makes that exact write, or nothing at all if the store
+          changed in the meantime.
+        </p>
+        <p><a href="/docs/guides/agents">How agents connect and what they can do</a></p>
+      </div>
+      <ul class="facts">
+        <li>
+          <strong>Exact previews.</strong> The same command, the same checks, the same events, run and
+          rolled back.
+        </li>
+        <li>
+          <strong>Proposals.</strong> Staff approve or reject from the admin; the agent reads the note.
+        </li>
+        <li>
+          <strong>A log of every call.</strong> Which agent, which operation, the outcome, how long it
+          took.
+        </li>
+        <li>
+          <strong>Operator switches.</strong> Turn agent writes into proposals only, or off, for the
+          whole store.
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap split">
+      <div class="copy">
+        <h2>Catalogs that aren't simple</h2>
+        <p>
+          Real catalogs have options that only go together in some ways. Hypha stores the variants that
+          exist, never the full grid of every combination, so a product with thousands of possible
+          combinations costs only the ones you sell.
+        </p>
+        <p>
+          Around them: custom fields on products, variants, customers, orders and categories, typed and
+          validated, with apps keeping fields of their own. Markets for countries and currencies, price
+          lists with fixed prices, sales channels that decide where each product is sold.
+        </p>
+      </div>
+      <figure class="matrix">
+        <table>
+          <caption>Touring bike: frame size by drivetrain</caption>
+          <colgroup>
+            <col class="label" />
+            {drivetrains.map(() => <col />)}
+          </colgroup>
+          <thead>
+            <tr>
+              <td></td>
+              {drivetrains.map((d) => <th scope="col">{d}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {
+              sizes.map((s) => (
+                <tr>
+                  <th scope="row">{s}</th>
+                  {drivetrains.map((d) =>
+                    exists[`${s}|${d}`] ? (
+                      <td class="on">Variant</td>
+                    ) : (
+                      <td class="off">
+                        <span class="sr">Not offered</span>
+                      </td>
+                    ),
+                  )}
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+        <figcaption>
+          {count} of {sizes.length * drivetrains.length} combinations are sold, so {count} variants exist.
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="copy narrow">
+        <h2>Extend it without forking</h2>
+        <p>
+          Every operation is a command with typed input, required scopes and typed errors. Apps,
+          plugins, agents and frontends all go through those same commands, so what you add can't skip
+          the rules the core enforces.
+        </p>
+      </div>
+      <Architecture />
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="copy narrow">
+        <h2>Runs on a server, or on Cloudflare Workers</h2>
+        <p>
+          The core and every domain compile to WebAssembly and do no I/O of their own, so the same code
+          serves both. Hypha's CLI sets up either.
+        </p>
+      </div>
+      <div class="hosts">
+        <div>
+          <h3>Your own server</h3>
+          <p>
+            The native host on Postgres, with Docker and Caddy for HTTPS, deployed over SSH. Files in any
+            S3-compatible storage.
+          </p>
+          <pre><code>pnpm hypha init
+pnpm hypha deploy</code></pre>
+        </div>
+        <div>
+          <h3>Cloudflare Workers</h3>
+          <p>
+            The API, admin and storefront as Workers, Postgres through Hyperdrive, files in R2, set up
+            with one API token.
+          </p>
+          <pre><code>pnpm hypha init --target cloudflare
+pnpm hypha deploy</code></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap split">
+      <div class="copy">
+        <h2>Coming next: agentic shopping</h2>
+        <p>
+          A connector for the <a href="https://ucp.dev">Universal Commerce Protocol</a>, with <a
+            href="https://ucphub.ai">ucphub.ai</a
+          >, so shopping agents can browse a Hypha store, build a cart and check out. It sits beside the
+          storefront API, built on the same priced carts.
+        </p>
+      </div>
+      <div class="copy">
+        <h2>Follow along</h2>
+        <p>
+          Hypha is built in the open and released under the MIT or Apache-2.0 license. Star it, read
+          the design notes behind each decision, or sponsor the work.
+        </p>
+        <div class="ctas">
+          <a class="button" href={GITHUB}>GitHub</a>
+          <a class="button primary" href={SPONSOR}>Sponsor</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .hero {
+    padding-block: clamp(48px, 8vw, 96px) clamp(56px, 8vw, 104px);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    gap: clamp(32px, 5vw, 72px);
+    align-items: center;
+  }
+
+  .preview {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 22px;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+
+  .preview span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--lime);
+    box-shadow: 0 0 0 3px var(--lime-soft);
+  }
+
+  h1 {
+    font-size: clamp(2.4rem, 5.2vw, 3.9rem);
+    line-height: 1.02;
+    letter-spacing: -0.04em;
+    font-weight: 680;
+    max-width: 14ch;
+  }
+
+  .lede {
+    margin-top: 22px;
+    max-width: 50ch;
+    color: var(--text-muted);
+    font-size: 1.12rem;
+  }
+
+  .ctas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 30px;
+  }
+
+  .band {
+    padding-block: clamp(56px, 8vw, 96px);
+    background: var(--bg-sunk);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .section {
+    padding-top: clamp(64px, 9vw, 120px);
+  }
+
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: clamp(32px, 5vw, 72px);
+    align-items: start;
+  }
+
+  h2 {
+    font-size: clamp(1.7rem, 3vw, 2.3rem);
+  }
+
+  .copy p {
+    margin-top: 16px;
+    max-width: 58ch;
+    color: var(--text-muted);
+  }
+
+  .narrow {
+    max-width: 62ch;
+    margin-bottom: 44px;
+  }
+
+  .facts {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .facts li {
+    padding: 16px 0;
+    border-top: 1px solid var(--rule-strong);
+    color: var(--text-muted);
+  }
+
+  .facts li:last-child {
+    border-bottom: 1px solid var(--rule-strong);
+  }
+
+  .facts strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .matrix {
+    margin: 0;
+  }
+
+  .matrix table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 6px;
+    table-layout: fixed;
+  }
+
+  .matrix caption {
+    caption-side: top;
+    text-align: left;
+    padding: 0 6px 8px;
+    font-weight: 600;
+  }
+
+  .matrix th {
+    font-weight: 500;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  .matrix thead th {
+    text-align: left;
+    padding: 0 4px 4px;
+    vertical-align: bottom;
+  }
+
+  .matrix col.label {
+    width: 2.6em;
+  }
+
+  .matrix tbody th {
+    text-align: left;
+    padding-left: 4px;
+  }
+
+  .matrix td {
+    height: 52px;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    text-align: center;
+  }
+
+  .matrix thead td {
+    height: auto;
+  }
+
+  .matrix .on {
+    background: var(--lime-soft);
+    border: 1px solid color-mix(in srgb, var(--text-accent) 35%, transparent);
+    color: var(--text-accent);
+    font-weight: 560;
+  }
+
+  .matrix .off {
+    border: 1px dashed var(--rule-strong);
+  }
+
+  .matrix figcaption {
+    padding: 8px 6px 0;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+
+  .sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .hosts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: clamp(24px, 4vw, 56px);
+  }
+
+  .hosts > div {
+    padding-top: 20px;
+    border-top: 2px solid var(--text);
+  }
+
+  .hosts h3 {
+    font-size: 1.2rem;
+  }
+
+  .hosts p {
+    margin-top: 10px;
+    color: var(--text-muted);
+  }
+
+  .hosts pre {
+    margin: 18px 0 0;
+    padding: 14px 16px;
+    overflow-x: auto;
+    background: var(--bg-sunk);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+  }
+
+  @media (max-width: 900px) {
+    .hero-grid,
+    .split,
+    .hosts {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+</style>

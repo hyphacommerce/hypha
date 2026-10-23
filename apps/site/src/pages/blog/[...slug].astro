@@ -1,0 +1,74 @@
+---
+import { render } from "astro:content";
+
+import Base from "../../layouts/Base.astro";
+import { formatDate, type Post, posts } from "../../lib/posts";
+
+export async function getStaticPaths() {
+  return (await posts()).map((post) => ({ params: { slug: post.id }, props: { post } }));
+}
+
+interface Props {
+  post: Post;
+}
+
+const { post } = Astro.props;
+const { Content } = await render(post);
+---
+
+<Base title={post.data.title} description={post.data.description}>
+  <article class="wrap">
+    <header class="post-head">
+      <p class="meta">
+        <time datetime={post.data.date.toISOString()}>{formatDate(post.data.date)}</time>, by {
+          post.data.author
+        }
+        {post.data.draft && <span class="draft">Draft: not published</span>}
+      </p>
+      <h1>{post.data.title}</h1>
+      <p class="lede">{post.data.description}</p>
+    </header>
+    <div class="prose">
+      <Content />
+    </div>
+    <p class="back"><a href={post.data.release ? "/releases" : "/blog"}>All posts</a></p>
+  </article>
+</Base>
+
+<style>
+  .post-head {
+    max-width: var(--measure);
+    padding-block: clamp(48px, 7vw, 88px) 36px;
+  }
+
+  .meta {
+    color: var(--text-faint);
+    font-size: 0.93rem;
+  }
+
+  h1 {
+    margin-top: 14px;
+    font-size: clamp(2rem, 4.2vw, 3rem);
+    letter-spacing: -0.035em;
+  }
+
+  .lede {
+    margin-top: 16px;
+    color: var(--text-muted);
+    font-size: 1.15rem;
+  }
+
+  .draft {
+    margin-left: 10px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--lime-soft);
+    color: var(--text-accent);
+    font-size: 0.78rem;
+    font-weight: 560;
+  }
+
+  .back {
+    margin-top: 56px;
+  }
+</style>

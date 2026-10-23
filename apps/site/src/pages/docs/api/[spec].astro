@@ -1,0 +1,179 @@
+---
+// The API references, rendered by Scalar from the repository's OpenAPI documents (the
+// ones the API itself serves and the SDK is generated from), each emitted as a file of the
+// build. Scalar's renderer is served from here too, not a CDN: it isn't in its package's
+// export map, so it's imported by path.
+import { ScalarComponent } from "@scalar/astro";
+
+import scalarScript from "../../../../node_modules/@scalar/api-reference/dist/browser/standalone.js?url";
+import adminSpec from "../../../../../../openapi/admin.json?url";
+import extensionsSpec from "../../../../../../openapi/extensions.json?url";
+import storefrontSpec from "../../../../../../openapi/storefront.json?url";
+import Header from "../../../components/Header.astro";
+import "../../../styles/site.css";
+
+export function getStaticPaths() {
+  return [
+    {
+      params: { spec: "admin" },
+      props: {
+        title: "Admin API",
+        url: adminSpec,
+        lede: "Staff sessions, secret keys, apps and agents: everything the admin panel does.",
+      },
+    },
+    {
+      params: { spec: "storefront" },
+      props: {
+        title: "Storefront API",
+        url: storefrontSpec,
+        lede: "Publishable keys and shoppers' sessions: catalog, carts, checkout, accounts.",
+      },
+    },
+    {
+      params: { spec: "extensions" },
+      props: {
+        title: "Extension points",
+        url: extensionsSpec,
+        // Hypha sends these to apps: there's no server of ours to call.
+        servers: [],
+        lede: "What Hypha sends an app mid-flow (payments, shipping rates, search) and the answer it expects.",
+      },
+    },
+  ];
+}
+
+interface Props {
+  title: string;
+  url: string;
+  lede: string;
+  servers?: { url: string; description: string }[];
+}
+
+// Every store has an API of its own; the documents name none.
+const yourApi = [{ url: "https://api.your-shop.example", description: "Your store's API" }];
+const { title, url, lede, servers = yourApi } = Astro.props;
+const tabs = [
+  { href: "/docs/api/admin", label: "Admin API" },
+  { href: "/docs/api/storefront", label: "Storefront API" },
+  { href: "/docs/api/extensions", label: "Extension points" },
+];
+
+// Scalar in Hypha's type and colours.
+const customCss = `
+  .scalar-app, .scalar-api-reference {
+    --scalar-font: "Geist Variable", Geist, ui-sans-serif, system-ui, sans-serif;
+    --scalar-font-code: "Geist Mono Variable", "Geist Mono", ui-monospace, Menlo, monospace;
+  }
+  .light-mode {
+    --scalar-color-1: #1a1b19;
+    --scalar-color-2: #444642;
+    --scalar-color-3: #6a6c68;
+    --scalar-color-accent: #455c01;
+    --scalar-background-1: #ffffff;
+    --scalar-background-2: #f3f4f2;
+    --scalar-background-3: #e6e8e5;
+    --scalar-background-accent: #eafbcf;
+    --scalar-border-color: #e6e8e5;
+  }
+  .dark-mode {
+    --scalar-color-1: #fafaf9;
+    --scalar-color-2: #d4d5d2;
+    --scalar-color-3: #a3a5a1;
+    --scalar-color-accent: #c6f073;
+    --scalar-background-1: #1a1b19;
+    --scalar-background-2: #232522;
+    --scalar-background-3: #30322f;
+    --scalar-background-accent: #304204;
+    --scalar-border-color: #30322f;
+  }
+`;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} | Hypha docs</title>
+    <meta name="description" content={lede} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <Header />
+    <div class="wrap api-head">
+      <p class="crumbs"><a href="/docs">Docs</a> / API reference</p>
+      <nav aria-label="API references">
+        {
+          tabs.map((t) => (
+            <a href={t.href} aria-current={t.label === title ? "page" : undefined}>
+              {t.label}
+            </a>
+          ))
+        }
+      </nav>
+      <p class="lede">{lede}</p>
+    </div>
+    <ScalarComponent
+      renderMode="client"
+      configuration={{
+        url,
+        cdn: scalarScript,
+        // Hypha's summaries are full sentences: paths make a scannable sidebar.
+        operationTitleSource: "path",
+        servers,
+        // Scalar's hosted features (its AI agent, sharing, deploying) aren't ours to offer.
+        agent: { disabled: true },
+        showDeveloperTools: "never",
+        withDefaultFonts: false,
+        hideClientButton: true,
+        customCss,
+        metaData: { title: `${title} | Hypha docs` },
+      }}
+    />
+  </body>
+</html>
+
+<style>
+  .api-head {
+    padding-block: 24px 16px;
+  }
+
+  .crumbs {
+    color: var(--text-faint);
+    font-size: 0.9rem;
+  }
+
+  .crumbs a {
+    color: var(--text-muted);
+  }
+
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  nav a {
+    padding: 7px 14px;
+    border: 1px solid var(--rule-strong);
+    border-radius: 999px;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.92rem;
+    font-weight: 500;
+  }
+
+  nav a[aria-current="page"] {
+    background: var(--lime);
+    border-color: var(--lime);
+    color: var(--ink-on-lime);
+  }
+
+  .lede {
+    margin-top: 12px;
+    color: var(--text-muted);
+    max-width: 70ch;
+  }
+</style>

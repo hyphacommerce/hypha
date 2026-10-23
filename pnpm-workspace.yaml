@@ -34,8 +34,11 @@ minimumReleaseAgeExclude:
 # workerd fetches the Workers runtime binary the dev server runs in. Astryx's scripts
 # only print a setup hint, so they stay off. esbuild (react-email's preview server, which
 # packages/emails doesn't run) finds its binary in its platform package without its script.
+# vue-demi (Scalar's API reference, in apps/site) only picks Vue 2 or 3 shims; Vue 3, which
+# Scalar uses, works without it.
 allowBuilds:
   workerd: true
   esbuild: false
+  vue-demi: false
   "@astryxdesign/core": false
   "@astryxdesign/cli": false

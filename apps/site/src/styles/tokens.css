@@ -1,0 +1,56 @@
+/* The brand's colours (Hypha brand book v0.1, the same hexes as the admin's theme,
+   apps/admin/theme/hyphaTheme.ts), as the site's tokens. Foxfire (lime) is a fill only,
+   always with --ink-on-lime on it; accent text is --text-accent. */
+
+:root {
+  color-scheme: light dark;
+
+  --lime: #b8e948;
+  --lime-soft: #eafbcf;
+  --ink-on-lime: #1d2904;
+
+  --bg: #fafaf9;
+  --bg-raised: #ffffff;
+  --bg-sunk: #f3f4f2;
+  --text: #1a1b19;
+  --text-muted: #444642;
+  --text-faint: #6a6c68;
+  --text-accent: #455c01;
+  --rule: #e6e8e5;
+  --rule-strong: #d4d5d2;
+  --ok: #02703f;
+  --ok-soft: #edfbf1;
+  --removed: #c8393a;
+  --removed-soft: #fff4f3;
+  --focus: #5f7e01;
+
+  --font-sans: "Geist Variable", Geist, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, Menlo, monospace;
+
+  --measure: 68ch;
+  --page: 1160px;
+  --gutter: clamp(16px, 4vw, 40px);
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --lime-soft: #304204;
+    --bg: #1a1b19;
+    --bg-raised: #232522;
+    --bg-sunk: #151614;
+    --text: #fafaf9;
+    --text-muted: #d4d5d2;
+    --text-faint: #a3a5a1;
+    --text-accent: #c6f073;
+    --rule: #30322f;
+    --rule-strong: #444642;
+    --ok: #91dbab;
+    --ok-soft: #003b1e;
+    --removed: #ffb0a9;
+    --removed-soft: #521d1b;
+    --focus: #b8e948;
+  }
+}

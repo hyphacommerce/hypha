@@ -21,6 +21,8 @@ const generated = [
   "hypha-deploy*/**",
   // A spore's element as bundled (`spores/*/element/*.js`, built from its `.ts` beside).
   "spores/*/element/*.js",
+  // Astro's generated content types (apps/site).
+  "**/.astro/**",
 ];
 
 export default defineConfig({

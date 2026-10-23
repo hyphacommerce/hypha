@@ -1,0 +1,42 @@
+---
+import { getCollection, render } from "astro:content";
+
+import PageHead from "../components/PageHead.astro";
+import Base from "../layouts/Base.astro";
+
+// The repository's CHANGELOG.md, which release-please writes with each release.
+const [changelog] = await getCollection("changelog");
+const Content = changelog ? (await render(changelog)).Content : undefined;
+---
+
+<Base title="Changelog" description="Every change in each Hypha release.">
+  <div class="wrap">
+    <PageHead
+      title="Changelog"
+      lede="Every change in each release, from the commit history. Release posts tell the story behind the bigger ones."
+    />
+    {
+      Content ? (
+        <div class="prose changelog">
+          <Content />
+        </div>
+      ) : (
+        <p class="empty">
+          No releases yet. The first public preview, v0.1.0, is in preparation; its changes will be
+          listed here.
+        </p>
+      )
+    }
+  </div>
+</Base>
+
+<style>
+  .empty {
+    color: var(--text-muted);
+  }
+
+  /* release-please's own title duplicates the page's. */
+  .changelog :global(h1:first-child) {
+    display: none;
+  }
+</style>

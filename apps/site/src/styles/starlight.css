@@ -1,0 +1,50 @@
+/* Starlight in Hypha's colours and type. Starlight's dark theme is its default (`:root`)
+   and light is `[data-theme="light"]`; its grays run from --sl-color-white (text) to
+   --sl-color-black (the page). */
+
+:root {
+  --sl-font: "Geist Variable", Geist, ui-sans-serif, system-ui, sans-serif;
+  --sl-font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, Menlo, monospace;
+
+  --sl-color-accent-low: #304204;
+  --sl-color-accent: #b8e948;
+  --sl-color-accent-high: #d9f7a5;
+
+  --sl-color-white: #fafaf9;
+  --sl-color-gray-1: #e6e8e5;
+  --sl-color-gray-2: #d4d5d2;
+  --sl-color-gray-3: #a3a5a1;
+  --sl-color-gray-4: #6a6c68;
+  --sl-color-gray-5: #444642;
+  --sl-color-gray-6: #30322f;
+  --sl-color-black: #1a1b19;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #eafbcf;
+  --sl-color-accent: #5f7e01;
+  --sl-color-accent-high: #304204;
+
+  --sl-color-white: #1a1b19;
+  --sl-color-gray-1: #232522;
+  --sl-color-gray-2: #30322f;
+  --sl-color-gray-3: #444642;
+  --sl-color-gray-4: #6a6c68;
+  --sl-color-gray-5: #a3a5a1;
+  --sl-color-gray-6: #e6e8e5;
+  --sl-color-gray-7: #f3f4f2;
+  --sl-color-black: #fafaf9;
+}
+
+/* Foxfire is a fill with dark ink on it, in both themes. */
+.sl-link-button.primary,
+.hero .action.primary,
+.sidebar-content a[aria-current="page"] {
+  background: #b8e948;
+  border-color: #b8e948;
+  color: #1d2904;
+}
+
+.site-title img {
+  height: 1.6rem;
+}

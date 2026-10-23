@@ -1,0 +1,159 @@
+---
+import wordmarkDark from "../../../admin/public/brand/hypha-wordmark-on-dark.svg?url";
+import wordmark from "../../../admin/public/brand/hypha-wordmark.svg?url";
+import { GITHUB, SPONSOR } from "../consts";
+
+const links = [
+  { href: "/docs", label: "Docs" },
+  { href: "/docs/api/admin", label: "API" },
+  { href: "/blog", label: "Blog" },
+  { href: "/changelog", label: "Changelog" },
+  { href: GITHUB, label: "GitHub" },
+];
+const path = Astro.url.pathname;
+const current = (href: string) => href.startsWith("/") && path.startsWith(href);
+---
+
+<header class="header">
+  <div class="wrap bar">
+    <a class="logo" href="/" aria-label="Hypha home">
+      <picture>
+        <source srcset={wordmarkDark} media="(prefers-color-scheme: dark)" />
+        <img src={wordmark} alt="Hypha" width="104" height="33" />
+      </picture>
+    </a>
+    <nav aria-label="Main">
+      <ul class="links">
+        {
+          links.map((l) => (
+            <li>
+              <a href={l.href} aria-current={current(l.href) ? "page" : undefined}>
+                {l.label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </nav>
+    <a class="button primary sponsor" href={SPONSOR}>Sponsor</a>
+    <details class="menu">
+      <summary>Menu</summary>
+      <ul>
+        {
+          links.map((l) => (
+            <li>
+              <a href={l.href}>{l.label}</a>
+            </li>
+          ))
+        }
+        <li><a href={SPONSOR}>Sponsor</a></li>
+      </ul>
+    </details>
+  </div>
+</header>
+
+<style>
+  .header {
+    border-bottom: 1px solid var(--rule);
+    background: var(--bg);
+  }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    min-height: 68px;
+  }
+
+  .logo img {
+    width: 104px;
+    height: auto;
+  }
+
+  nav {
+    margin-left: auto;
+  }
+
+  .links {
+    display: flex;
+    gap: 26px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .links a {
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.95rem;
+    font-weight: 500;
+  }
+
+  .links a:hover,
+  .links a[aria-current="page"] {
+    color: var(--text);
+  }
+
+  .sponsor {
+    min-height: 38px;
+  }
+
+  .menu {
+    display: none;
+    position: relative;
+    margin-left: auto;
+  }
+
+  .menu summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 8px 12px;
+    border: 1px solid var(--rule-strong);
+    border-radius: var(--radius-sm);
+    font-size: 0.95rem;
+    font-weight: 500;
+  }
+
+  .menu summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .menu ul {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    z-index: 5;
+    min-width: 200px;
+    margin: 0;
+    padding: 8px;
+    list-style: none;
+    background: var(--bg-raised);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    box-shadow: 0 12px 32px rgb(26 27 25 / 0.12);
+  }
+
+  .menu a {
+    display: block;
+    padding: 10px 12px;
+    color: var(--text);
+    text-decoration: none;
+    border-radius: var(--radius-sm);
+  }
+
+  .menu a:hover {
+    background: var(--bg-sunk);
+  }
+
+  @media (max-width: 760px) {
+    /* `.bar` outweighs the global `.button`, which scoped styles don't. */
+    .bar nav,
+    .bar .sponsor {
+      display: none;
+    }
+
+    .menu {
+      display: block;
+    }
+  }
+</style>

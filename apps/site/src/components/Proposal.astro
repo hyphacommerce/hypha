@@ -1,0 +1,226 @@
+---
+// An agent's proposal as the admin shows it: the write it wants to make, previewed
+// exactly (run against the store and rolled back), waiting for a person. Static: the
+// buttons are a picture of the admin's, not controls.
+const rows = [
+  { variant: "Alpine shell jacket", option: "M / Glacier", now: "€189.00", after: "€169.00" },
+  { variant: "Alpine shell jacket", option: "L / Glacier", now: "€189.00", after: "€169.00" },
+  { variant: "Merino base layer", option: "S / Charcoal", now: "€59.00", after: "€52.00" },
+];
+---
+
+<figure class="proposal" aria-label="An agent's proposal waiting for approval in Hypha's admin">
+  <div class="head">
+    <div>
+      <p class="who">Pricing assistant <span>proposes</span></p>
+      <p class="what">Set winter prices on the EU price list</p>
+    </div>
+    <span class="status">Waiting for you</span>
+  </div>
+
+  <dl class="meta">
+    <div>
+      <dt>Operation</dt>
+      <dd><code>admin.markets.set_fixed_prices</code></dd>
+    </div>
+    <div>
+      <dt>Acts for</dt>
+      <dd>Ana, within her role</dd>
+    </div>
+  </dl>
+
+  <table>
+    <caption>Exact preview: run against the store, then rolled back</caption>
+    <thead>
+      <tr>
+        <th scope="col">Variant</th>
+        <th scope="col" class="num">Now</th>
+        <th scope="col" class="num">After</th>
+      </tr>
+    </thead>
+    <tbody>
+      {
+        rows.map((r) => (
+          <tr>
+            <td>
+              {r.variant}
+              <small>{r.option}</small>
+            </td>
+            <td class="num">
+              <del>{r.now}</del>
+            </td>
+            <td class="num">
+              <ins>{r.after}</ins>
+            </td>
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+
+  <p class="records">
+    Records one event, <code>price_list.prices_set</code>, for 3 variants. If the store changes
+    before you approve, nothing is written and you see the new preview.
+  </p>
+
+  <div class="actions" aria-hidden="true">
+    <span class="btn approve">Approve</span>
+    <span class="btn">Reject</span>
+  </div>
+</figure>
+
+<style>
+  .proposal {
+    margin: 0;
+    padding: 22px 22px 20px;
+    background: var(--bg-raised);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-lg);
+    box-shadow:
+      0 1px 0 var(--rule),
+      0 30px 60px -30px rgb(26 27 25 / 0.28);
+    font-size: 0.9rem;
+  }
+
+  .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .who {
+    color: var(--text-faint);
+    font-size: 0.85rem;
+  }
+
+  .who span {
+    color: var(--text-faint);
+  }
+
+  .what {
+    margin-top: 2px;
+    font-size: 1.08rem;
+    font-weight: 620;
+    letter-spacing: -0.01em;
+  }
+
+  .status {
+    flex-shrink: 0;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--lime-soft);
+    color: var(--text-accent);
+    font-size: 0.8rem;
+    font-weight: 560;
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 28px;
+    margin: 16px 0 0;
+    padding: 12px 0;
+    border-block: 1px solid var(--rule);
+  }
+
+  .meta dt {
+    color: var(--text-faint);
+    font-size: 0.8rem;
+  }
+
+  .meta dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .meta code {
+    font-size: 0.82rem;
+  }
+
+  table {
+    width: 100%;
+    margin-top: 14px;
+    border-collapse: collapse;
+  }
+
+  caption {
+    caption-side: top;
+    text-align: left;
+    padding-bottom: 6px;
+    color: var(--text-faint);
+    font-size: 0.8rem;
+  }
+
+  th {
+    padding: 6px 0;
+    color: var(--text-faint);
+    font-weight: 500;
+    font-size: 0.8rem;
+    text-align: left;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  td {
+    padding: 9px 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+
+  td small {
+    display: block;
+    color: var(--text-faint);
+    font-size: 0.8rem;
+  }
+
+  .num {
+    text-align: right;
+    padding-left: 12px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  del {
+    color: var(--text-faint);
+    text-decoration-color: var(--removed);
+  }
+
+  ins {
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--ok-soft);
+    color: var(--ok);
+    font-weight: 560;
+    text-decoration: none;
+  }
+
+  .records {
+    margin-top: 14px;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+
+  .records code {
+    font-size: 0.8rem;
+  }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .btn {
+    padding: 7px 14px;
+    border: 1px solid var(--rule-strong);
+    border-radius: var(--radius-sm);
+    font-weight: 560;
+    font-size: 0.85rem;
+  }
+
+  .approve {
+    background: var(--lime);
+    border-color: var(--lime);
+    color: var(--ink-on-lime);
+  }
+</style>
