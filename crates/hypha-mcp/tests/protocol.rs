@@ -164,8 +164,12 @@ impl Operations for FakeOps {
 
 const MODERN: &str = "2026-07-28";
 
+/// What the tests' server tells clients about itself.
+const INSTRUCTIONS: &str = "Preview writes first.";
+
 fn server() -> Server {
     let mut config = ServerConfig::new("hypha", "0.1.0");
+    config.instructions = Some(INSTRUCTIONS.to_string());
     config.direct_tools = vec![
         OperationId::new("admin.orders.list").unwrap_or_else(|e| panic!("{e}")),
         OperationId::new("admin.inventory.adjust_level").unwrap_or_else(|e| panic!("{e}")),
@@ -560,7 +564,7 @@ fn discover_lists_both_eras() {
         json!(["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26"])
     );
     assert_eq!(result["capabilities"], json!({"tools": {}}));
-    assert_eq!(result["instructions"], DEFAULT_INSTRUCTIONS);
+    assert_eq!(result["instructions"], INSTRUCTIONS);
     assert_eq!(result["cacheScope"], "public");
     assert_eq!(result["resultType"], "complete");
 }
@@ -639,7 +643,7 @@ fn legacy_initialize_negotiates_and_describes_the_server() {
             "protocolVersion": "2025-06-18",
             "capabilities": {"tools": {"listChanged": false}},
             "serverInfo": {"name": "hypha", "version": "0.1.0"},
-            "instructions": DEFAULT_INSTRUCTIONS,
+            "instructions": INSTRUCTIONS,
         }})
     );
 }

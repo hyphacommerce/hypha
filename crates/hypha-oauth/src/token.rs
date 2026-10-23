@@ -18,9 +18,6 @@ pub struct OAuthToken {
     version: Version,
     family: Uuid,
     client: OAuthClient,
-    /// The client ID it was issued to (an app's manifest URL, an MCP client's metadata
-    /// document's): what a refresh must name. `None` on tokens issued before it was kept.
-    client_id: Option<String>,
     /// An app's: what its grant gave (read against the grant again at each request). An
     /// agent's: what the staff member granted when connecting it, for the token answer;
     /// what it may do is its grant's, read at each request.
@@ -49,7 +46,6 @@ pub struct NewTokenPair {
     pub id: Uuid,
     pub family: Uuid,
     pub client: OAuthClient,
-    pub client_id: Option<String>,
     pub scopes: Vec<Scope>,
     pub access_hash: TokenHash,
     pub access_expires_at: Timestamp,
@@ -65,7 +61,6 @@ impl OAuthToken {
             version: Version::NEW,
             family: new.family,
             client: new.client,
-            client_id: new.client_id,
             scopes: normalize(&new.scopes),
             access_hash: new.access_hash,
             access_expires_at: new.access_expires_at,
@@ -100,9 +95,6 @@ impl OAuthToken {
     }
     pub fn client(&self) -> &OAuthClient {
         &self.client
-    }
-    pub fn client_id(&self) -> Option<&str> {
-        self.client_id.as_deref()
     }
     pub fn scopes(&self) -> &[Scope] {
         &self.scopes
@@ -139,7 +131,6 @@ pub struct TokenSnapshot {
     /// The app's key or the agent: exactly one.
     pub app: Option<String>,
     pub agent: Option<AgentId>,
-    pub client_id: Option<String>,
     pub scopes: Vec<Scope>,
     pub access_hash: TokenHash,
     pub access_expires_at: Timestamp,
@@ -158,7 +149,6 @@ impl OAuthToken {
             family: self.family,
             app: self.client.app().map(|k| k.as_str().to_string()),
             agent: self.client.agent(),
-            client_id: self.client_id.clone(),
             scopes: self.scopes.clone(),
             access_hash: self.access_hash,
             access_expires_at: self.access_expires_at,
@@ -176,7 +166,6 @@ impl OAuthToken {
             id: s.id,
             family: s.family,
             client,
-            client_id: s.client_id,
             scopes: s.scopes,
             access_hash: s.access_hash,
             access_expires_at: s.access_expires_at,

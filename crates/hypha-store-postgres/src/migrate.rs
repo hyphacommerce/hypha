@@ -386,13 +386,13 @@ pub const CORE: MigrationSet = MigrationSet {
         },
         Migration {
             version: 73,
-            name: "oauth_token_clients",
-            sql: include_str!("../migrations/0073_oauth_token_clients.sql"),
+            name: "write_log",
+            sql: include_str!("../migrations/0073_write_log.sql"),
         },
         Migration {
             version: 74,
-            name: "write_log",
-            sql: include_str!("../migrations/0074_write_log.sql"),
+            name: "proposal_applying",
+            sql: include_str!("../migrations/0074_proposal_applying.sql"),
         },
     ],
 };

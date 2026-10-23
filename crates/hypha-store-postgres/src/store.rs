@@ -510,7 +510,7 @@ impl<C: PgConnection> PgPreview<C> {
     }
 
     /// The rows of aggregates its writes wrote and kept, in the order written, each with the
-    /// version it found (`hypha_note_write`, migration 0074): read from the transaction's
+    /// version it found (`hypha_note_write`, migration 0073): read from the transaction's
     /// own log, so a write rolled back to its savepoint isn't there.
     pub async fn rows(&self) -> Result<Vec<WrittenRow>, RepoError> {
         let mut conn = self.conn.lock().await;

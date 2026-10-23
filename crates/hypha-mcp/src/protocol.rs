@@ -7,6 +7,8 @@
 //! in the `MCP-Protocol-Version` header. The server is stateless either way, so a
 //! legacy client's `initialize` is answered and forgotten.
 
+use base64::Engine;
+use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 use serde_json::{Map, Value, json};
 
 use crate::jsonrpc::{HEADER_MISMATCH, INVALID_PARAMS, RpcError, UNSUPPORTED_PROTOCOL_VERSION};
@@ -172,40 +174,19 @@ pub fn decode_header_value(raw: &str) -> Option<String> {
         .strip_prefix("=?base64?")
         .and_then(|rest| rest.strip_suffix("?="))
     {
-        Some(encoded) => base64_decode(encoded).and_then(|bytes| String::from_utf8(bytes).ok()),
+        Some(encoded) => BASE64
+            .decode(encoded)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok()),
         None => Some(raw.to_string()),
     }
 }
 
 /// Standard alphabet, padding optional.
-fn base64_decode(encoded: &str) -> Option<Vec<u8>> {
-    let encoded = encoded.trim_end_matches('=');
-    let mut out = Vec::with_capacity(encoded.len() * 3 / 4);
-    let mut buffer: u32 = 0;
-    let mut bits = 0;
-    for byte in encoded.bytes() {
-        let value = match byte {
-            b'A'..=b'Z' => byte - b'A',
-            b'a'..=b'z' => byte - b'a' + 26,
-            b'0'..=b'9' => byte - b'0' + 52,
-            b'+' => 62,
-            b'/' => 63,
-            _ => return None,
-        };
-        buffer = (buffer << 6) | u32::from(value);
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((buffer >> bits) as u8);
-            buffer &= (1 << bits) - 1;
-        }
-    }
-    // A lone leftover character (6 bits) can't end a valid encoding.
-    if bits >= 6 {
-        return None;
-    }
-    Some(out)
-}
+const BASE64: GeneralPurpose = GeneralPurpose::new(
+    &base64::alphabet::STANDARD,
+    GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
+);
 
 #[cfg(test)]
 mod tests {

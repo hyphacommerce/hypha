@@ -9,9 +9,9 @@ use crate::ops::{
 };
 use crate::protocol::{self, Era, Headers, META_SERVER_INFO};
 use crate::tools::{
-    self, CALL, CallArgs, DESCRIBE_OPERATION, DescribeArgs, DirectArgs, FIND_DEFAULT_LIMIT,
-    FIND_MAX_LIMIT, FIND_OPERATIONS, FIXED_TOOLS, FindArgs, GET_PROPOSAL, LIST_PROPOSALS,
-    ListProposalsArgs, NoArgs, PROPOSALS_MAX_LIMIT, ProposalArgs, WHOAMI,
+    self, CALL, DESCRIBE_OPERATION, DescribeArgs, DirectArgs, FIND_DEFAULT_LIMIT, FIND_MAX_LIMIT,
+    FIND_OPERATIONS, FIXED_TOOLS, FindArgs, GET_PROPOSAL, LIST_PROPOSALS, ListProposalsArgs,
+    NoArgs, PROPOSALS_MAX_LIMIT, ProposalArgs, WHOAMI,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,22 +26,20 @@ pub struct ServerConfig {
     /// Operations offered as tools of their own, in this order, when the caller can
     /// see them.
     pub direct_tools: Vec<OperationId>,
-    /// How long a client may keep a `tools/list` answer, in milliseconds. It differs
-    /// per caller (their grant), so it's always answered as private.
-    pub list_ttl_ms: u64,
 }
 
-impl ServerConfig {
-    pub const DEFAULT_LIST_TTL_MS: u64 = 60_000;
+/// How long a client may keep a `tools/list` answer, in milliseconds. It differs per
+/// caller (their grant), so it's always answered as private.
+pub const LIST_TTL_MS: u64 = 60_000;
 
+impl ServerConfig {
     pub fn new(name: impl Into<String>, version: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             title: None,
             version: version.into(),
-            instructions: Some(tools::DEFAULT_INSTRUCTIONS.to_string()),
+            instructions: None,
             direct_tools: Vec::new(),
-            list_ttl_ms: Self::DEFAULT_LIST_TTL_MS,
         }
     }
 }
@@ -213,7 +211,7 @@ impl Server {
         if let Some(instructions) = &self.config.instructions {
             result.insert("instructions".into(), json!(instructions));
         }
-        result.insert("ttlMs".into(), json!(self.config.list_ttl_ms));
+        result.insert("ttlMs".into(), json!(LIST_TTL_MS));
         result.insert("cacheScope".into(), json!("public"));
         Value::Object(result)
     }
@@ -269,7 +267,7 @@ impl Server {
         let mut result = Map::new();
         result.insert("tools".into(), Value::Array(list));
         if era == Era::Modern {
-            result.insert("ttlMs".into(), json!(self.config.list_ttl_ms));
+            result.insert("ttlMs".into(), json!(LIST_TTL_MS));
             result.insert("cacheScope".into(), json!("private"));
         }
         Ok(Value::Object(result))
@@ -415,9 +413,18 @@ async fn describe_operation<O: Operations>(ops: &O, args: Map<String, Value>) ->
     Ok(tools::json_result(tools::schema_json(&schema), false))
 }
 
-async fn call<O: Operations>(ops: &O, args: Map<String, Value>) -> Outcome {
-    let args: CallArgs = args!(args);
-    let (operation, inputs) = args.split();
+async fn call<O: Operations>(ops: &O, mut args: Map<String, Value>) -> Outcome {
+    let operation = match args.remove("operation") {
+        Some(Value::String(operation)) => operation,
+        _ => {
+            return Ok(tools::tool_error(
+                "invalid_arguments",
+                "Invalid arguments: operation is a string, the operation's ID".to_string(),
+                Value::Null,
+            ));
+        }
+    };
+    let inputs: DirectArgs = args!(args);
     let operation = match operation_id(operation) {
         Ok(id) => id,
         Err(tool_error) => return Ok(tool_error),

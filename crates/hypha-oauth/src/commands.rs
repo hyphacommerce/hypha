@@ -537,13 +537,7 @@ fn approve_private<B: StageApps + StageOAuth>(
         }
     };
     let client = OAuthClient::App(app.key().clone());
-    let (access, refresh, mut token) = new_pair(
-        env.new_uuid(),
-        client,
-        Some(request.client_id()),
-        request.scopes(),
-        env,
-    );
+    let (access, refresh, mut token) = new_pair(env.new_uuid(), client, request.scopes(), env);
     batch.update_oauth_request(&mut request);
     batch.insert_oauth_token(&mut token);
     Ok(IssuedTokens {
@@ -843,59 +837,42 @@ pub async fn exchange_code<S: OAuthPorts>(
     if !pkce::verify(&input.code_verifier, code.code_challenge()) {
         return Err(invalid("code_verifier doesn't match the code_challenge"));
     }
-    let key = match code.client() {
-        OAuthClient::App(key) => key.clone(),
-        // A connected agent: nothing to install, no secret. Whether it may act is
-        // checked at every request to `/mcp`.
-        OAuthClient::Agent(agent) => {
-            let scopes = code.scopes().to_vec();
-            let client = OAuthClient::Agent(*agent);
-            code.use_up(now);
-            let (access, refresh, mut token) =
-                new_pair(code.family(), client, Some(code.client_id()), &scopes, env);
-            let mut batch = ports.batch();
-            batch.update_oauth_code(&mut code);
-            batch.insert_oauth_token(&mut token);
-            match ports.commit(batch).await {
-                Err(RepoError::StaleVersion) => return Err(invalid("the code was used already")),
-                written => written?,
-            }
-            return Ok(IssuedTokens {
-                access_token: access,
-                refresh_token: refresh,
-                expires_in: ACCESS_TOKEN_LIFETIME.as_secs(),
-                scopes,
-                app_secret: None,
-            });
-        }
+    // A connected agent's code installs nothing and hands out no secret: whether it may
+    // act is checked at every request to `/mcp`.
+    let client = code.client().clone();
+    let mut app = match &client {
+        OAuthClient::App(key) => Some(
+            installed_app(ports, key)
+                .await?
+                .ok_or_else(|| invalid("the app is not installed"))?,
+        ),
+        OAuthClient::Agent(_) => None,
     };
-    let mut app = installed_app(ports, &key)
-        .await?
-        .ok_or_else(|| invalid("the app is not installed"))?;
-    let scopes = within_grant(code.scopes(), &app);
+    let scopes = match &app {
+        Some(app) => within_grant(code.scopes(), app),
+        None => code.scopes().to_vec(),
+    };
     code.use_up(now);
-    let client = OAuthClient::App(key);
-    let (access, refresh, mut token) =
-        new_pair(code.family(), client, Some(code.client_id()), &scopes, env);
+    let (access, refresh, mut token) = new_pair(code.family(), client, &scopes, env);
     let mut batch = ports.batch();
     batch.update_oauth_code(&mut code);
     batch.insert_oauth_token(&mut token);
     // The app gets its secret with these tokens: only now can it verify deliveries, so
     // `app.installed` is recorded here, not at approval.
-    if code.first_install() {
+    let installing = app.as_mut().filter(|_| code.first_install());
+    if let Some(app) = installing {
         app.installed()
             .map_err(|_| invalid("the app is not installed"))?;
-        batch.update_app(&mut app);
+        batch.update_app(app);
     }
     match ports.commit(batch).await {
         // Another exchange of the same code won.
         Err(RepoError::StaleVersion) => return Err(invalid("the code was used already")),
         written => written?,
     }
-    let app_secret = if code.first_install() {
-        Some(open_secret(env, &app)?)
-    } else {
-        None
+    let app_secret = match &app {
+        Some(app) if code.first_install() => Some(open_secret(env, app)?),
+        _ => None,
     };
     Ok(IssuedTokens {
         access_token: access,
@@ -967,14 +944,7 @@ pub async fn refresh<S: OAuthPorts>(
         }
         // A connected agent's: its grant is read at every request to `/mcp`; a revoked
         // agent's tokens were revoked with it.
-        OAuthClient::Agent(_) => {
-            if let (Some(client), Some(issued)) = (&input.client_id, old.client_id())
-                && client != issued
-            {
-                return Err(invalid("the refresh token was issued to another client"));
-            }
-            old.scopes().to_vec()
-        }
+        OAuthClient::Agent(_) => old.scopes().to_vec(),
     };
     if let Some(scope) = &input.scope {
         let mut asked = Vec::new();
@@ -992,9 +962,7 @@ pub async fn refresh<S: OAuthPorts>(
     }
     old.rotate(now);
     let client = old.client().clone();
-    let client_id = old.client_id().map(str::to_string);
-    let (access, refresh, mut token) =
-        new_pair(old.family(), client, client_id.as_deref(), &scopes, env);
+    let (access, refresh, mut token) = new_pair(old.family(), client, &scopes, env);
     let mut batch = ports.batch();
     batch.update_oauth_token(&mut old);
     batch.insert_oauth_token(&mut token);
@@ -1115,7 +1083,6 @@ fn within_grant(scopes: &[Scope], app: &App) -> Vec<Scope> {
 fn new_pair(
     family: Uuid,
     client: OAuthClient,
-    client_id: Option<&str>,
     scopes: &[Scope],
     env: &(impl Random + IdGenerator + Clock),
 ) -> (NewToken, NewToken, OAuthToken) {
@@ -1126,7 +1093,6 @@ fn new_pair(
         id: env.new_uuid(),
         family,
         client,
-        client_id: client_id.map(str::to_string),
         scopes: scopes.to_vec(),
         access_hash: access.hash(),
         access_expires_at: now.plus(ACCESS_TOKEN_LIFETIME),
