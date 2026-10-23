@@ -137,31 +137,66 @@ function Change({ event, names }: { event: PreviewEvent; names: Record<string, s
 }
 
 /**
+ * Where the write a preview shows stands: still to decide (`pending`, also a plain
+ * preview), done (`applied`), or never done (`not_applied`: rejected, expired, failed).
+ */
+export type PreviewState = "pending" | "applied" | "not_applied";
+
+/** How each card speaks of the write, by where it stands. */
+const WORDING: Record<
+  PreviewState,
+  { changes: string; changesNote: string; emails: string; answer: string; partial: string }
+> = {
+  pending: {
+    changes: "What would change",
+    changesNote: "The changes the write would record, in order. Nothing has changed yet.",
+    emails: "Emails it would send",
+    answer: "What it would answer",
+    partial: "What it did up to there is shown; approving runs it in full, including that step.",
+  },
+  applied: {
+    changes: "What changed",
+    changesNote: "The changes the write recorded, in order, as previewed.",
+    emails: "Emails it sent",
+    answer: "What it answered when previewed",
+    partial: "What it did up to there was shown; it ran in full when approved.",
+  },
+  not_applied: {
+    changes: "What was proposed",
+    changesNote: "The changes the write would have recorded, in order. None was made.",
+    emails: "Emails it would have sent",
+    answer: "What it would have answered",
+    partial: "What it did up to there is shown.",
+  },
+};
+
+/**
  * The preview's parts as cards. `names` are records the page could name (locations);
- * the response's own record is named from its body.
+ * the response's own record is named from its body. `state` says whether the write is
+ * still to decide, was applied or never was.
  */
 export function PreviewView({
   preview,
   names = NO_NAMES,
+  state = "pending",
 }: {
   preview: Preview;
   names?: Record<string, string>;
+  state?: PreviewState;
 }) {
   const named = previewNames(preview, names);
+  const words = WORDING[state];
   return (
     <VStack gap={5}>
       {!preview.complete && (
         <Banner
           status="warning"
           title="Only part of this could be previewed"
-          description={`${preview.blocked_by ? blockedLabel(preview.blocked_by) : "It stopped at an effect a preview can't run."} What it did up to there is shown; approving runs it in full, including that step.`}
+          description={`${preview.blocked_by ? blockedLabel(preview.blocked_by) : "It stopped at an effect a preview can't run."} ${words.partial}`}
         />
       )}
 
-      <PreviewCard
-        title="What would change"
-        description="The changes the write would record, in order. Nothing has changed yet."
-      >
+      <PreviewCard title={words.changes} description={words.changesNote}>
         {preview.events.length === 0 ? (
           <Text color="secondary">No recorded changes.</Text>
         ) : (
@@ -176,7 +211,7 @@ export function PreviewView({
       </PreviewCard>
 
       {preview.emails.length > 0 && (
-        <PreviewCard title="Emails it would send" description="Sent while answering the write.">
+        <PreviewCard title={words.emails} description="Sent while answering the write.">
           <VStack gap={2}>
             {keyed(preview.emails, (e) => `${e.template}:${e.to ?? ""}:${e.subject}`).map(
               ({ key, item: email }) => (
@@ -209,7 +244,7 @@ export function PreviewView({
         </PreviewCard>
       )}
 
-      <PreviewCard title="What it would answer">
+      <PreviewCard title={words.answer}>
         {preview.response ? (
           <VStack gap={2}>
             <HStack gap={2} vAlign="center">

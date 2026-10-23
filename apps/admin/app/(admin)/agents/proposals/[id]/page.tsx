@@ -8,7 +8,7 @@ import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 import { Suspense } from "react";
 
-import { JsonDisclosure, PreviewView } from "@/components/agents/preview-view";
+import { JsonDisclosure, type PreviewState, PreviewView } from "@/components/agents/preview-view";
 import { DateTime } from "@/components/date-time";
 import { type Crumb, PageHeader } from "@/components/page-header";
 import { DetailSkeleton } from "@/components/skeletons";
@@ -101,11 +101,11 @@ async function ProposalDetail({ id }: { id: string }) {
           )}
           {proposal.status !== "pending" && (
             <Text type="display-3" as="h2">
-              As proposed
+              {proposal.status === "applied" ? "As applied" : "As proposed"}
             </Text>
           )}
           {preview ? (
-            <PreviewView preview={preview} names={names} />
+            <PreviewView preview={preview} names={names} state={previewState(proposal.status)} />
           ) : (
             <JsonDisclosure label="Preview" value={proposal.preview} isOpen />
           )}
@@ -176,6 +176,18 @@ async function ProposalDetail({ id }: { id: string }) {
       </div>
     </>
   );
+}
+
+/** Where a proposal's write stands, for how its preview speaks of it. */
+function previewState(status: Proposal["status"]): PreviewState {
+  switch (status) {
+    case "pending":
+      return "pending";
+    case "applied":
+      return "applied";
+    default:
+      return "not_applied";
+  }
 }
 
 /** How a decided proposal ended: applied, failed (stale or refused), rejected or expired. */
