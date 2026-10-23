@@ -55,8 +55,9 @@ pub trait Deployment: Sized + 'static {
         + hypha_spore_core::SporeRuntime<PgPorts>;
 
     /// `hypha_http::router!` for this deployment's storage, with its spores' routes
-    /// (`spore_routes!`).
-    fn router() -> axum::Router<SharedState<PgStorage<Self>>>;
+    /// (`spore_routes!`); a previewed or applied write's body is read up to `max_body`
+    /// (`server.max_body`) before its caller is known.
+    fn router(max_body: usize) -> axum::Router<SharedState<PgStorage<Self>>>;
 
     /// Its spores' routes as OpenAPI rows (the `openapi` command documents them).
     fn spore_rows() -> Vec<hypha_http::routes::openapi::Row>;
@@ -128,7 +129,7 @@ macro_rules! deployment {
         impl $crate::Deployment for $name {
             type Spores = ($($spore,)*);
 
-            fn router() -> $crate::__private::Router<
+            fn router(max_body: usize) -> $crate::__private::Router<
                 $crate::__private::SharedState<$crate::PgStorage<Self>>,
             > {
                 // Every admin write previewable (`Hypha-Preview`), the spores' too.
@@ -139,7 +140,8 @@ macro_rules! deployment {
                         // already there, and every error is `{code, error, details}`.
                         .method_not_allowed_fallback(|| async {
                             $crate::__private::hypha_http::error::ApiError::method_not_allowed()
-                        })
+                        }),
+                    max_body,
                 )
             }
 

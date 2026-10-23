@@ -76,10 +76,6 @@ pub const PREVIEW_TOKEN_HEADER: &str = "hypha-preview-token";
 /// The most of a handler's answer a preview reads (its `response.body`).
 const MAX_RESPONSE_BYTES: usize = 16 << 20;
 
-/// The most of a request's body a preview or an apply reads to fingerprint it: the
-/// largest `server.max_body` allows. The route still refuses what's over its own limit.
-const MAX_REQUEST_BYTES: usize = 64 << 20;
-
 thread_local! {
     /// The preview or apply whose request is being polled (`Scoped`).
     static CURRENT: RefCell<Option<Arc<Run>>> = const { RefCell::new(None) };
@@ -171,8 +167,8 @@ struct Issued {
     expires_at: String,
 }
 
-/// A token applying `request` as `actor` previewed it: its `ids`, what it did digested
-/// to `digest`.
+/// A token applying the request fingerprinted `request` as `actor` previewed it: its
+/// `ids`, what it did digested to `digest`.
 fn issue(
     host: &TokenHost,
     actor: Actor,
@@ -280,7 +276,7 @@ pub(crate) type Deferred = Box<dyn FnOnce() -> BoxFuture<()> + Send>;
 /// points (which are made again, as in a preview) and touched no media storage; anything
 /// else is blocked before it goes out and the apply answers stale.
 pub(crate) struct Run {
-    request: [u8; 32],
+    request: Sent,
     /// `Some` for an apply.
     apply: Option<Applying>,
     stores: Mutex<Vec<OpenPreview>>,
@@ -289,6 +285,22 @@ pub(crate) struct Run {
     viewer: Mutex<Option<Viewer>>,
     effects: Effects,
     deferred: Mutex<Vec<Deferred>>,
+}
+
+/// The request as it was sent, which a token is bound to. It's fingerprinted only when
+/// a token is claimed or issued: after the caller is known.
+#[derive(Default)]
+struct Sent {
+    method: Method,
+    path: String,
+    query: String,
+    body: Bytes,
+}
+
+impl Sent {
+    fn fingerprint(&self) -> [u8; 32] {
+        crate::extract::fingerprint(self.method.as_str(), &self.path, &self.query, &self.body)
+    }
 }
 
 /// What an apply has beyond a preview: the token sent, the preview's IDs still to hand
@@ -344,7 +356,7 @@ enum Ending {
 }
 
 impl Run {
-    fn new(request: [u8; 32], apply: Option<TokenHash>) -> Self {
+    fn new(request: Sent, apply: Option<TokenHash>) -> Self {
         Self {
             request,
             apply: apply.map(|token| Applying {
@@ -462,7 +474,7 @@ impl Run {
         if token.actor != ctx.actor() {
             return Err(ApiError::preview_token_invalid("it's another caller's"));
         }
-        if token.request != self.request {
+        if token.request != self.request.fingerprint() {
             return Err(ApiError::preview_token_invalid(
                 "it previewed another request",
             ));
@@ -565,7 +577,7 @@ impl Run {
                 let issued = issue(
                     &host,
                     viewer.ctx.actor(),
-                    self.request,
+                    self.request.fingerprint(),
                     ids.clone(),
                     digest.clone(),
                 )?;
@@ -578,10 +590,10 @@ impl Run {
         let mut answer = match self.apply {
             None => (StatusCode::OK, axum::Json(PreviewResponse { preview })).into_response(),
             // What a stale proposal keeps to be approved again.
-            Some(_) => ApiError::preview_stale(
-                serde_json::to_value(&preview).map_err(ApiError::internal)?,
-            )
-            .into_response(),
+            Some(_) => {
+                ApiError::preview_stale(serde_json::to_value(&preview).map_err(ApiError::internal)?)
+                    .into_response()
+            }
         };
         answer.extensions_mut().insert(PreviewIds(ids));
         answer.extensions_mut().insert(PreviewDigest(digest));
@@ -673,25 +685,30 @@ fn is_admin_write(request: &Request) -> bool {
     ) && request.uri().path().starts_with("/admin/")
 }
 
-/// `request` with its body read, and its fingerprint (`extract::fingerprint`).
-async fn fingerprinted(request: Request) -> Result<(Request, [u8; 32]), ApiError> {
+/// `request` with its body read, at most `limit` bytes (`server.max_body`, the routes'
+/// limit, answered alike: this runs before the caller is known), and what was sent.
+async fn read(request: Request, limit: usize) -> Result<(Request, Sent), ApiError> {
     let (parts, body) = request.into_parts();
-    let bytes: Bytes = axum::body::to_bytes(body, MAX_REQUEST_BYTES)
+    let bytes: Bytes = axum::body::to_bytes(body, limit)
         .await
-        .map_err(|_| ApiError::body_too_large(MAX_REQUEST_BYTES))?;
-    let fingerprint = crate::extract::fingerprint(
-        parts.method.as_str(),
-        parts.uri.path(),
-        parts.uri.query().unwrap_or(""),
-        &bytes,
-    );
-    Ok((Request::from_parts(parts, Body::from(bytes)), fingerprint))
+        .map_err(|_| ApiError::body_too_large(limit))?;
+    let sent = Sent {
+        method: parts.method.clone(),
+        path: parts.uri.path().to_string(),
+        query: parts.uri.query().unwrap_or("").to_string(),
+        body: bytes.clone(),
+    };
+    Ok((Request::from_parts(parts, Body::from(bytes)), sent))
 }
 
 /// The middleware that previews admin writes sent with `Hypha-Preview: 1` and applies those
 /// sent with `Hypha-Preview-Token`; reads ignore both. Hosts layer it over every route,
-/// their spores' included (`with_previews`).
-pub async fn middleware(request: Request, next: Next) -> Response {
+/// their spores' included (`with_previews`), with `server.max_body`.
+pub async fn middleware(
+    axum::extract::State(limit): axum::extract::State<usize>,
+    request: Request,
+    next: Next,
+) -> Response {
     if !is_admin_write(&request) {
         return next.run(request).await;
     }
@@ -703,18 +720,18 @@ pub async fn middleware(request: Request, next: Next) -> Response {
         (None, _) => ApiError::invalid_preview_header().into_response(),
         (Some(true), Some(_)) => ApiError::preview_with_token().into_response(),
         (Some(false), None) => next.run(request).await,
-        (Some(true), None) => run(request, next, None).await,
-        (Some(false), Some(token)) => run(request, next, Some(token)).await,
+        (Some(true), None) => run(request, limit, next, None).await,
+        (Some(false), Some(token)) => run(request, limit, next, Some(token)).await,
     }
 }
 
 /// Runs `request` as a preview, or (`token`) as an apply.
-async fn run(request: Request, next: Next, token: Option<TokenHash>) -> Response {
-    let (request, fingerprint) = match fingerprinted(request).await {
-        Ok(fingerprinted) => fingerprinted,
+async fn run(request: Request, limit: usize, next: Next, token: Option<TokenHash>) -> Response {
+    let (request, sent) = match read(request, limit).await {
+        Ok(read) => read,
         Err(e) => return e.into_response(),
     };
-    let run = Arc::new(Run::new(fingerprint, token));
+    let run = Arc::new(Run::new(sent, token));
     let response = Scoped {
         run: Some(Arc::clone(&run)),
         inner: Box::pin(next.run(request)),
@@ -723,9 +740,13 @@ async fn run(request: Request, next: Next, token: Option<TokenHash>) -> Response
     run.finish(response).await
 }
 
-/// `router` with admin writes previewable and applicable as previewed (`middleware`).
-pub fn with_previews<S: Clone + Send + Sync + 'static>(router: axum::Router<S>) -> axum::Router<S> {
-    router.layer(axum::middleware::from_fn(middleware))
+/// `router` with admin writes previewable and applicable as previewed (`middleware`),
+/// reading at most `max_body` bytes of a body (`server.max_body`).
+pub fn with_previews<S: Clone + Send + Sync + 'static>(
+    router: axum::Router<S>,
+    max_body: usize,
+) -> axum::Router<S> {
+    router.layer(axum::middleware::from_fn_with_state(max_body, middleware))
 }
 
 /// What a previewed write answers.
@@ -984,7 +1005,7 @@ mod tests {
 
     #[test]
     fn the_preview_is_current_only_while_its_future_is_polled() {
-        let run = Arc::new(Run::new([0; 32], None));
+        let run = Arc::new(Run::new(Sent::default(), None));
         let seen = pollster::block_on(Scoped {
             run: Some(Arc::clone(&run)),
             inner: Box::pin(async { previewing() }),
@@ -1042,7 +1063,7 @@ mod tests {
 
     #[test]
     fn an_apply_makes_no_call_its_preview_couldnt_have_made() {
-        let apply = Run::new([0; 32], Some(TokenHash::of("hypha_pv_x")));
+        let apply = Run::new(Sent::default(), Some(TokenHash::of("hypha_pv_x")));
         assert!(apply.allows_call(&CallPurpose::Extension {
             point: "shipping.rates",
             app: "app_rates".to_string(),
@@ -1109,7 +1130,7 @@ mod tests {
 
     #[test]
     fn the_first_blocked_effect_is_the_one_reported() {
-        let preview = Run::new([0; 32], None);
+        let preview = Run::new(Sent::default(), None);
         assert!(!preview.allows_call(&CallPurpose::Extension {
             point: "payments.refund",
             app: "app_pay".to_string(),

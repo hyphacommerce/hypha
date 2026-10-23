@@ -59,7 +59,11 @@ pub trait Deployment: Sized + 'static {
         + hypha_spore_core::SporeRuntime<WorkersPorts>;
 
     /// `hypha_http::router!` for this deployment's storage.
-    fn router() -> axum::Router<hypha_http::state::SharedState<WorkersStorage<Self>>>;
+    /// A previewed or applied write's body is read up to `max_body` (`server.max_body`)
+    /// before its caller is known.
+    fn router(
+        max_body: usize,
+    ) -> axum::Router<hypha_http::state::SharedState<WorkersStorage<Self>>>;
 
     /// Its spores' routes as OpenAPI rows: the operations they add for agents.
     fn spore_rows() -> Vec<hypha_http::routes::openapi::Row>;
@@ -91,7 +95,7 @@ macro_rules! deployment {
         impl $crate::Deployment for $name {
             type Spores = ($($spore,)*);
 
-            fn router() -> $crate::__private::Router<
+            fn router(max_body: usize) -> $crate::__private::Router<
                 $crate::__private::SharedState<$crate::WorkersStorage<Self>>,
             > {
                 // Every admin write previewable (`Hypha-Preview`), the spores' too.
@@ -102,7 +106,8 @@ macro_rules! deployment {
                         // already there, and every error is `{code, error, details}`.
                         .method_not_allowed_fallback(|| async {
                             $crate::__private::hypha_http::error::ApiError::method_not_allowed()
-                        })
+                        }),
+                    max_body,
                 )
             }
 
@@ -460,11 +465,12 @@ mod worker_main {
             config,
         ));
         // What agents' calls and approved proposals are sent through, in process.
-        state.install(D::router(), D::spore_rows());
+        let max_body = state.config.server.max_body;
+        state.install(D::router(max_body), D::spore_rows());
         spores_set_up::<D>(&state).await?;
         // Expanded for the concrete deployment (`worker!`): axum can only prove its
         // handlers' futures `Send` there.
-        let app = D::router().with_state(Arc::clone(&state));
+        let app = D::router(max_body).with_state(Arc::clone(&state));
         Ok(Rc::new(Isolate {
             state,
             app,

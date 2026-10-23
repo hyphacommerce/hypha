@@ -279,7 +279,8 @@ async fn app_exactly<D: crate::Deployment>(
         config,
     ));
     // As `prepare` does at startup.
-    state.install(D::router(), D::spore_rows());
+    let max_body = state.config.server.max_body;
+    state.install(D::router(max_body), D::spore_rows());
     crate::start::register_spores(&state).await.unwrap();
     let ports = state.public_ports().await.unwrap();
     let owner = NewOwner {
@@ -308,7 +309,7 @@ async fn app_exactly<D: crate::Deployment>(
         .await
         .unwrap();
     TestApp {
-        router: D::router()
+        router: D::router(max_body)
             .layer(axum::middleware::from_fn(crate::start::record_peer))
             .with_state(state.clone())
             .layer(MockConnectInfo(SocketAddr::from(PEER))),
@@ -410,6 +411,19 @@ async fn the_body_limit_and_rate_limits_are_configurable() {
     .await;
     let big = format!("{{\"title\": \"{}\"}}", "x".repeat(1024));
     let (status, body) = send(&app, "POST", "/admin/products", Some(&big)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::PAYLOAD_TOO_LARGE, "body_too_large")
+    );
+    // A preview reads the body before its caller is known: no more of it than the routes.
+    let (status, body) = send_with(
+        &app,
+        &[("hypha-preview", "1")],
+        "POST",
+        "/admin/products",
+        Some(&big),
+    )
+    .await;
     assert_eq!(
         (status, code(&body)),
         (StatusCode::PAYLOAD_TOO_LARGE, "body_too_large")
