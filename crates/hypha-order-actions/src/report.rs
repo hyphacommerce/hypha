@@ -8,11 +8,10 @@
 use std::collections::BTreeMap;
 
 use hypha_core::{
-    AuthError, ChannelId, Clock, Ctx, Currency, ErrorCode, MarketId, Money, OrderId, RepoError,
-    Scope, Timestamp, Timezone,
+    AuthError, ChannelId, Clock, Ctx, Currency, ErrorCode, MarketId, Money, RepoError, Scope,
+    Timestamp, Timezone,
 };
 use hypha_orders::{CurrencyTop, HasOrders, OrderRepo, ProductUnits, SalesQuery};
-use hypha_payments::{HasPayments, PaymentRepo};
 use jiff::{Span, Zoned, tz::TimeZone};
 use thiserror::Error;
 
@@ -116,7 +115,7 @@ pub struct SalesReport {
 }
 
 /// The report for `input`'s period, as of `clock`'s now.
-pub async fn sales_report<S: HasOrders + HasPayments>(
+pub async fn sales_report<S: HasOrders>(
     ctx: &Ctx,
     ports: &S,
     clock: &impl Clock,
@@ -139,34 +138,11 @@ pub async fn sales_report<S: HasOrders + HasPayments>(
     };
     let figures = ports.orders().sales(&query).await?;
 
-    // Refunds by order, from its payments.
-    let refunded_orders: Vec<OrderId> = figures.refunded.iter().map(|(o, _)| *o).collect();
-    let payments = ports.payments().list_for_orders(&refunded_orders).await?;
-    let mut refunds: BTreeMap<OrderId, (Currency, i128)> = BTreeMap::new();
-    for payment in &payments {
-        let (Some(order), refunded) = (payment.order(), payment.refunded()) else {
-            continue;
-        };
-        refunds.entry(order).or_insert((refunded.currency(), 0)).1 += i128::from(refunded.amount());
-    }
-
-    let mut rows: Vec<Vec<Sums>> = figures
+    let rows: Vec<Vec<Sums>> = figures
         .buckets
         .iter()
         .map(|b| b.sales.iter().map(Sums::of).collect())
         .collect();
-    for (order, bucket) in &figures.refunded {
-        let Some((currency, amount)) = refunds.get(order) else {
-            continue;
-        };
-        // Counted orders always have their currency's row in their bucket.
-        if let Some(row) = rows
-            .get_mut(*bucket)
-            .and_then(|r| r.iter_mut().find(|r| r.currency == *currency))
-        {
-            row.refunded += amount;
-        }
-    }
 
     let mut overall: BTreeMap<&'static str, Sums> = BTreeMap::new();
     for row in rows.iter().flatten() {
@@ -236,7 +212,7 @@ impl Sums {
             shipping: i128::from(s.shipping.amount()),
             taxes: i128::from(s.taxes.amount()),
             total: i128::from(s.total.amount()),
-            refunded: 0,
+            refunded: i128::from(s.refunded.amount()),
         }
     }
 

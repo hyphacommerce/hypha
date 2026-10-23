@@ -119,7 +119,9 @@ impl Default for InMemoryPorts {
             customer_groups,
             idempotency: InMemoryIdempotencyRepo::default(),
             preview_tokens: crate::InMemoryPreviewTokenRepo::default(),
-            orders: InMemoryOrderRepo::sharing(&outbox).joining_fields(&custom_fields),
+            orders: InMemoryOrderRepo::sharing(&outbox)
+                .joining_fields(&custom_fields)
+                .joining_payments(&payments),
             fulfillments: InMemoryFulfillmentRepo::sharing(&outbox),
             payment_methods,
             payments,

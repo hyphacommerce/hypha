@@ -964,6 +964,7 @@ async fn sales<R: OrderRepo>(repo: &R) {
                     shipping: eur(400),
                     taxes: eur(150),
                     total: eur(3050),
+                    refunded: eur(0),
                 }],
                 cancelled_count: 0,
             },
@@ -975,6 +976,7 @@ async fn sales<R: OrderRepo>(repo: &R) {
                     shipping: usd(0),
                     taxes: usd(0),
                     total: usd(2100),
+                    refunded: usd(0),
                 }],
                 cancelled_count: 1,
             },
@@ -986,6 +988,7 @@ async fn sales<R: OrderRepo>(repo: &R) {
                     shipping: eur(0),
                     taxes: eur(0),
                     total: eur(9000),
+                    refunded: eur(0),
                 }],
                 cancelled_count: 0,
             },
@@ -1037,10 +1040,9 @@ async fn sales<R: OrderRepo>(repo: &R) {
             },
         ]
     );
-    assert_eq!(figures.refunded, vec![(oid(3), 1), (oid(5), 2)]);
     assert_eq!(
         figures,
-        SalesFigures::of(&orders, &query(2, None, None)),
+        SalesFigures::of(&orders, |_| 0, &query(2, None, None)),
         "storage agrees with the reference"
     );
 
@@ -1053,7 +1055,7 @@ async fn sales<R: OrderRepo>(repo: &R) {
     ] {
         assert_eq!(
             repo.sales(&q).await.unwrap(),
-            SalesFigures::of(&orders, &q),
+            SalesFigures::of(&orders, |_| 0, &q),
             "{q:?}"
         );
     }
@@ -1067,9 +1069,8 @@ async fn sales<R: OrderRepo>(repo: &R) {
         ..query(5, None, None)
     };
     let figures = repo.sales(&whole).await.unwrap();
-    assert_eq!(figures, SalesFigures::of(&orders, &whole));
+    assert_eq!(figures, SalesFigures::of(&orders, |_| 0, &whole));
     assert_eq!(figures.buckets[0].cancelled_count, 1);
-    assert_eq!(figures.refunded, vec![(oid(3), 0), (oid(5), 0)]);
     let backwards = SalesQuery {
         starts: vec![at(t0 + DAY), at(t0)],
         ..query(5, None, None)

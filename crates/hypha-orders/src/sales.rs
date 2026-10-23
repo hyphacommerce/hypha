@@ -1,6 +1,7 @@
 //! What orders placed in a period add up to, in buckets of time: the sales report's
 //! figures. A read model like `OrderStats`: adapters compute it in storage, and the
-//! repository contract checks it equals `SalesFigures::of` the stored orders.
+//! repository contract checks it equals `SalesFigures::of` the stored orders (and, for
+//! refunds, their payments).
 //!
 //! The buckets' starts come from the caller (a workflow that knows the store's time zone),
 //! so storage only compares instants. Amounts are added per currency, never across
@@ -61,6 +62,9 @@ pub struct CurrencySales {
     pub shipping: Money,
     pub taxes: Money,
     pub total: Money,
+    /// What the orders' payments gave back, added up (`partially_refunded` and
+    /// `refunded` orders).
+    pub refunded: Money,
 }
 
 /// One bucket: the currencies with any order that wasn't cancelled, by currency code,
@@ -107,9 +111,6 @@ pub struct SalesFigures {
     /// Per currency, by currency code: most revenue first, then by product ID; at most
     /// `top` each.
     pub top_by_revenue: Vec<CurrencyTop>,
-    /// The orders whose payments gave money back (`partially_refunded` or `refunded`),
-    /// by ID, each with its bucket: the payments know how much.
-    pub refunded: Vec<(OrderId, usize)>,
 }
 
 /// Sums in `i128`, capped at `Money::MAX_AMOUNT` when read.
@@ -120,6 +121,7 @@ struct Sums {
     shipping: i128,
     taxes: i128,
     total: i128,
+    refunded: i128,
 }
 
 /// A bucket's sums by currency code, and how many of its orders were cancelled.
@@ -160,15 +162,20 @@ pub fn capped(amount: i128, currency: Currency) -> Money {
 }
 
 impl SalesFigures {
-    /// What `query` reads from `orders`: the reference every adapter is held to.
-    pub fn of<'a>(orders: impl IntoIterator<Item = &'a Order>, query: &SalesQuery) -> Self {
+    /// What `query` reads from `orders`, given what each order's payments gave back
+    /// (`refunded`, in its currency's minor units): the reference every adapter is held
+    /// to.
+    pub fn of<'a>(
+        orders: impl IntoIterator<Item = &'a Order>,
+        refunded: impl Fn(OrderId) -> i64,
+        query: &SalesQuery,
+    ) -> Self {
         let mut buckets: Vec<BucketSums> = (0..query.starts.len())
             .map(|_| Default::default())
             .collect();
         let mut units: BTreeMap<ProductId, ProductSums> = BTreeMap::new();
         let mut revenue: BTreeMap<(&'static str, ProductId), (Currency, ProductSums)> =
             BTreeMap::new();
-        let mut refunded = Vec::new();
         for order in orders {
             let Some(bucket) = query.bucket(order.placed_at()) else {
                 continue;
@@ -209,10 +216,9 @@ impl SalesFigures {
                 order.financial_status(),
                 FinancialStatus::PartiallyRefunded | FinancialStatus::Refunded
             ) {
-                refunded.push((order.id(), bucket));
+                s.refunded += i128::from(refunded(order.id()));
             }
         }
-        refunded.sort();
 
         let top = query.top as usize;
         let mut by_units: Vec<ProductUnits> = units
@@ -265,6 +271,7 @@ impl SalesFigures {
                             shipping: capped(s.shipping, currency),
                             taxes: capped(s.taxes, currency),
                             total: capped(s.total, currency),
+                            refunded: capped(s.refunded, currency),
                         })
                         .collect(),
                     cancelled_count,
@@ -272,7 +279,6 @@ impl SalesFigures {
                 .collect(),
             top_by_units: by_units,
             top_by_revenue,
-            refunded,
         }
     }
 }

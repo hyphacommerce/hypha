@@ -65,6 +65,8 @@ where
     stale_order_writes_no_payment(&make().await).await;
     scenario("payment batch: a stale payment writes nothing");
     stale_payment_writes_nothing(&make().await).await;
+    scenario("sales add up what counted orders' payments gave back");
+    sales_add_up_refunds(&make().await).await;
 }
 
 fn mid(n: u128) -> PaymentMethodId {
@@ -523,4 +525,37 @@ where
     assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
     assert_eq!(ports.payments().get(pid(1)).await, Ok(Some(rival)));
     assert_eq!(ports.orders().get(o.id()).await, Ok(Some(o)));
+}
+
+/// Order 1 gave back 200 of one payment and all of another's 100; order 2, nothing.
+async fn sales_add_up_refunds<S: HasOrders + HasPayments>(ports: &S) {
+    use hypha_orders::{SalesFigures, SalesQuery};
+    let (mut o, mut first) = order_and_payment(ports).await;
+    let mut second = Payment::new(NewPayment::recorded_by_hand(pid(2), o.id(), eur(100))).unwrap();
+    for (p, back) in [(&mut first, 200), (&mut second, 100)] {
+        p.pay(at(1), None).unwrap();
+        let reported = match back == p.amount().amount() {
+            true => PaymentStatus::Refunded,
+            false => PaymentStatus::PartiallyRefunded,
+        };
+        p.refund(Some(eur(back)), reported, None).unwrap();
+        ports.payments().insert(p).await.unwrap();
+    }
+    o.set_financial_status(FinancialStatus::PartiallyRefunded);
+    ports.orders().update(&mut o).await.unwrap();
+    let mut other = order(2);
+    ports.orders().insert(&mut other).await.unwrap();
+
+    let query = SalesQuery {
+        starts: vec![o.placed_at()],
+        end: o.placed_at().plus_secs(86_400),
+        channel: None,
+        market: None,
+        top: 5,
+    };
+    let figures = ports.orders().sales(&query).await.unwrap();
+    assert_eq!(figures.buckets[0].sales[0].refunded, eur(300));
+    let orders = [ports.orders().get(o.id()).await.unwrap().unwrap(), other];
+    let refunded = |order| if order == o.id() { 300 } else { 0 };
+    assert_eq!(figures, SalesFigures::of(&orders, refunded, &query));
 }

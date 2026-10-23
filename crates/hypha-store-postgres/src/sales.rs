@@ -1,8 +1,9 @@
 //! `OrderRepo::sales`: the sales report's figures summed in SQL over `orders_by_placed_at`
-//! (migration 0069), four aggregate queries sent together in one snapshot.
+//! (migration 0069), four aggregate queries sent together in one snapshot (refunds from
+//! the orders' payments).
 
 use futures_util::future::try_join4;
-use hypha_core::{Currency, Money, OrderId, ProductId, RepoError};
+use hypha_core::{Currency, Money, ProductId, RepoError};
 use hypha_orders::{
     BucketFigures, CurrencySales, CurrencyTop, ProductRevenue, ProductUnits, SalesFigures,
     SalesQuery, sales::capped,
@@ -11,7 +12,6 @@ use tokio_postgres::{
     Row,
     types::{ToSql, Type},
 };
-use uuid::Uuid;
 
 use crate::{
     columns::{col, currency_from_db},
@@ -90,11 +90,13 @@ pub(crate) async fn sales(
          ) AS ranked
          WHERE rank <= $5 ORDER BY currency, rank"
     );
+    // `payments_by_order` serves the join; only orders that gave money back have any.
     let refunded_sql = format!(
-        "SELECT o.id, {BUCKET} AS bucket FROM orders o
+        "SELECT {BUCKET} AS bucket, o.currency, sum(p.refunded)::text AS refunded
+         FROM orders o JOIN payments p ON p.order_id = o.id
          WHERE {COUNTED} AND o.cancelled_at IS NULL
            AND o.financial_status IN ('partially_refunded', 'refunded')
-         ORDER BY o.id"
+         GROUP BY 1, o.currency"
     );
     let (totals, units, revenue, refunded) = try_join4(
         tx.query_typed(&totals_sql, &params),
@@ -122,6 +124,7 @@ pub(crate) async fn sales(
             shipping: sum(row, "shipping", currency)?,
             taxes: sum(row, "taxes", currency)?,
             total: sum(row, "total", currency)?,
+            refunded: Money::zero(currency),
         });
     }
 
@@ -154,19 +157,23 @@ pub(crate) async fn sales(
         }
     }
 
-    let refunded = refunded
-        .iter()
-        .map(|row| {
-            let id: Uuid = col(row, "id")?;
-            Ok((OrderId::from_uuid(id), bucket_of(row, buckets.len())?))
-        })
-        .collect::<Result<_, RepoError>>()?;
+    for row in &refunded {
+        let bucket = bucket_of(row, buckets.len())?;
+        let currency = currency_from_db(&col::<String>(row, "currency")?)?;
+        // Orders that gave money back were counted, so their currency has its row.
+        if let Some(sales) = buckets[bucket]
+            .sales
+            .iter_mut()
+            .find(|s| s.currency == currency)
+        {
+            sales.refunded = sum(row, "refunded", currency)?;
+        }
+    }
 
     Ok(SalesFigures {
         buckets,
         top_by_units,
         top_by_revenue,
-        refunded,
     })
 }
 

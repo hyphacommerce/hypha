@@ -26,6 +26,8 @@ pub struct InMemoryOrderRepo {
     /// What the next `get` returns instead of the stored order (`serve_next_get`).
     stale: Mutex<Option<Order>>,
     field_values: SharedValues,
+    /// The payments `sales` sums refunds from, as a database joins them (none alone).
+    payments: Option<std::sync::Arc<Table<hypha_core::PaymentId, hypha_payments::Payment>>>,
 }
 
 impl Default for InMemoryOrderRepo {
@@ -36,6 +38,7 @@ impl Default for InMemoryOrderRepo {
             outbox: InMemoryOutbox::default(),
             stale: Mutex::new(None),
             field_values: SharedValues::default(),
+            payments: None,
         }
     }
 }
@@ -54,6 +57,14 @@ impl InMemoryOrderRepo {
     pub fn joining_fields(self, fields: &crate::InMemoryCustomFields) -> Self {
         Self {
             field_values: fields.shared_values(),
+            ..self
+        }
+    }
+
+    /// The same repo, summing refunds in `sales` from `payments`' payments.
+    pub fn joining_payments(self, payments: &crate::InMemoryPaymentRepo) -> Self {
+        Self {
+            payments: Some(std::sync::Arc::clone(&payments.payments)),
             ..self
         }
     }
@@ -138,7 +149,15 @@ impl OrderRepo for InMemoryOrderRepo {
                 "an invalid sales query: {query:?}"
             )));
         }
-        Ok(SalesFigures::of(&self.orders.all(), query))
+        let payments = self.payments.as_ref().map(|p| p.all()).unwrap_or_default();
+        let refunded = |order| {
+            payments
+                .iter()
+                .filter(|p| p.order() == Some(order))
+                .map(|p| p.refunded().amount())
+                .sum()
+        };
+        Ok(SalesFigures::of(&self.orders.all(), refunded, query))
     }
 
     async fn insert(&self, order: &mut Order) -> Result<(), RepoError> {
