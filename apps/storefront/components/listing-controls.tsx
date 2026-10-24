@@ -14,6 +14,7 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { Selector } from "@astryxdesign/core/Selector";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
+import { Switch } from "@astryxdesign/core/Switch";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { AdjustmentsHorizontalIcon } from "@heroicons/react/24/outline";
@@ -28,6 +29,8 @@ import {
   facetName,
   isSort,
   listingHref,
+  onSaleOnly,
+  withOnSale,
 } from "@/lib/listing";
 
 /** The phones' filter sheet, loaded the first time it opens: wide screens never need
@@ -48,6 +51,10 @@ export type Props = {
   /** The results' price range in major units, as hints for the range fields. */
   priceHint?: { min: string; max: string };
   currency?: string;
+  /** How many results are on sale, when the merchant counts it. */
+  onSaleCount?: number;
+  /** The listing is only what's on sale (the sale page): no toggle. */
+  saleOnly?: boolean;
 };
 
 /** A facet's heading: the merchant's label for an option or a custom field, else its name.
@@ -176,6 +183,8 @@ export function FacetPanel({
   facets,
   priceHint,
   currency,
+  onSaleCount,
+  saleOnly,
   onDone,
 }: Props & {
   onDone?: () => void;
@@ -187,6 +196,20 @@ export function FacetPanel({
   const narrowed = state.filters.length > 0 || state.min || state.max;
   return (
     <VStack gap={5}>
+      {!saleOnly && (
+        <>
+          <Switch
+            label="On sale"
+            description={onSaleCount === undefined ? undefined : `${onSaleCount} on sale`}
+            value={onSaleOnly(state)}
+            onChange={(on) => {
+              go(base, withOnSale(state, on));
+              onDone?.();
+            }}
+          />
+          <Divider />
+        </>
+      )}
       {facets.map((facet, i) => (
         <VStack key={facet.key} gap={5}>
           {i > 0 && <Divider />}

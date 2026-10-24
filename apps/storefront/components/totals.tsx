@@ -1,6 +1,7 @@
 import { Divider } from "@astryxdesign/core/Divider";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
+import type { ReactNode } from "react";
 
 import { type Money, formatMoney } from "@/lib/money";
 
@@ -65,7 +66,8 @@ export function SummaryLine({
   quantity: number;
   title: string;
   variant?: string | null;
-  total: string;
+  /** Formatted, or a `Price` (a sale's struck-through compare-at beside it). */
+  total: string | ReactNode;
   /** The line's thumbnail URL, if it has an image. */
   image?: string | null;
 }) {
@@ -80,9 +82,13 @@ export function SummaryLine({
           {variant && <Text type="supporting">{variant}</Text>}
         </VStack>
       </StackItem>
-      <Text type="body" hasTabularNumbers>
-        {total}
-      </Text>
+      {typeof total === "string" ? (
+        <Text type="body" hasTabularNumbers>
+          {total}
+        </Text>
+      ) : (
+        total
+      )}
     </HStack>
   );
 }

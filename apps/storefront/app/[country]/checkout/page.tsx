@@ -12,7 +12,9 @@ import { lineImage } from "@/components/line-image";
 import { SummaryLine, Totals } from "@/components/totals";
 import { loadAccount } from "@/lib/account";
 import { api, countryOf } from "@/lib/api";
+import { Price } from "@/components/price";
 import { formatMoney } from "@/lib/money";
+import { lineCompareAt } from "@/lib/prices";
 import { cartId, link } from "@/lib/site";
 
 import {
@@ -211,7 +213,21 @@ export default async function CheckoutPage({
                     title={line.product_title ?? "A product no longer sold"}
                     image={lineImage(line.image)}
                     variant={line.variant_title}
-                    total={line.status === "priced" ? formatMoney(line.total, digits) : "—"}
+                    total={
+                      line.status === "priced" ? (
+                        <Price
+                          price={line.total}
+                          compareAt={lineCompareAt(
+                            line.compare_at_price,
+                            line.quantity,
+                            line.total,
+                          )}
+                          digits={digits}
+                        />
+                      ) : (
+                        "—"
+                      )
+                    }
                   />
                 ))}
                 <Divider />
