@@ -1264,17 +1264,20 @@ impl From<hypha_media::CommandError> for ApiError {
         use hypha_media::{CommandError as E, MediaError as M};
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
-            // Every asset route names the asset in its URL.
-            E::AssetNotFound(_) => StatusCode::NOT_FOUND,
-            // The asset's state: not uploaded yet, or not pending any more.
-            E::UploadMissing(_) | E::Media(M::NotPending { .. }) | E::AssetInUse { .. } => {
-                StatusCode::CONFLICT
-            }
+            // Every asset and upload route names the asset or upload in its URL.
+            E::AssetNotFound(_) | E::TemporaryUploadNotFound(_) => StatusCode::NOT_FOUND,
+            // The asset's or upload's state: not uploaded yet, or not pending any more.
+            E::UploadMissing(_)
+            | E::TemporaryUploadMissing(_)
+            | E::Media(M::NotPending { .. })
+            | E::AssetInUse { .. } => StatusCode::CONFLICT,
             E::Media(
                 M::Text(_)
                 | M::UnsupportedMediaType(_)
                 | M::EmptyFile
                 | M::FileTooLarge { .. }
+                | M::UploadTooLarge { .. }
+                | M::UnknownPurpose(_)
                 | M::InvalidChecksum(_)
                 | M::InvalidOwnerKind(_)
                 | M::InvalidOwnerId(_)

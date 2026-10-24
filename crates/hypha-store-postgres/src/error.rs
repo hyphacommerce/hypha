@@ -120,6 +120,7 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("invite_email", user_keys::INVITE_EMAIL),
     ("invite_token", user_keys::INVITE_TOKEN),
     ("assets_pkey", media_keys::ASSET_ID),
+    ("temporary_uploads_pkey", media_keys::TEMPORARY_UPLOAD_ID),
     ("app_key", app_keys::APP_KEY),
     ("app_id", app_keys::APP_ID),
     ("oauth_request_id", oauth_keys::OAUTH_REQUEST_ID),

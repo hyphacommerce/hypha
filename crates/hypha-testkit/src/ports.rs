@@ -53,6 +53,7 @@ pub struct InMemoryPorts {
     pub payment_methods: InMemoryPaymentMethodRepo,
     pub payments: InMemoryPaymentRepo,
     pub assets: InMemoryAssetRepo,
+    pub temporary_uploads: crate::InMemoryTemporaryUploadRepo,
     pub shipping_zones: InMemoryShippingZoneRepo,
     pub app_providers: InMemoryAppProviderRepo,
     pub apps: InMemoryAppRepo,
@@ -131,6 +132,7 @@ impl Default for InMemoryPorts {
             payment_methods,
             payments,
             assets: InMemoryAssetRepo::sharing(&outbox),
+            temporary_uploads: crate::InMemoryTemporaryUploadRepo::default(),
             shipping_zones: InMemoryShippingZoneRepo::sharing(&outbox),
             app_providers,
             apps: apps.joining_fields(&custom_fields),
@@ -356,6 +358,13 @@ impl HasAssets for InMemoryPorts {
     type Assets = InMemoryAssetRepo;
     fn assets(&self) -> &InMemoryAssetRepo {
         &self.assets
+    }
+}
+
+impl hypha_media::HasTemporaryUploads for InMemoryPorts {
+    type TemporaryUploads = crate::InMemoryTemporaryUploadRepo;
+    fn temporary_uploads(&self) -> &crate::InMemoryTemporaryUploadRepo {
+        &self.temporary_uploads
     }
 }
 

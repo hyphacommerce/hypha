@@ -420,7 +420,8 @@ pub async fn price_list_schedule<S: Storage>(state: &AppState<S>) -> Step {
     })
 }
 
-/// Deletes uploads abandoned for over `media.abandoned_after`.
+/// Deletes uploads abandoned for over `media.abandoned_after`, and temporary uploads past
+/// their lifetime, with their files.
 pub async fn media_sweep<S: Storage>(state: &AppState<S>) -> Step {
     let Some(media) = &state.media else {
         return Ok(Ran {
@@ -445,9 +446,20 @@ pub async fn media_sweep<S: Storage>(state: &AppState<S>) -> Step {
     if swept > 0 {
         tracing::info!(deleted = swept, "media: swept abandoned uploads");
     }
+    let expired = hypha_media::sweep_expired_uploads(
+        &hypha_core::Ctx::system(),
+        hypha_media::HasTemporaryUploads::temporary_uploads(&ports),
+        &media.blobs,
+        &state.clock,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    if expired > 0 {
+        tracing::info!(deleted = expired, "media: swept expired temporary uploads");
+    }
     Ok(Ran {
         more: false,
-        idle: swept == 0,
+        idle: swept == 0 && expired == 0,
         retry_at: None,
     })
 }

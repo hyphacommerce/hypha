@@ -1843,6 +1843,124 @@ async fn an_upload_goes_straight_to_storage_and_completes_into_a_ready_asset() {
     );
 }
 
+#[tokio::test]
+async fn a_price_import_is_uploaded_to_storage_and_read_back() {
+    let app = app_with_media().await;
+    let csv = b"variant,price\nvar_1,9.50\n".to_vec();
+    let body =
+        json!({ "purpose": "price_import", "filename": "Prices.csv", "byte_size": csv.len() });
+    let (status, created) = send(&app, "POST", "/admin/uploads", Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap();
+    assert!(id.starts_with("upl_"), "{created}");
+    assert_eq!(
+        (
+            &created["purpose"],
+            &created["filename"],
+            &created["upload"]["method"]
+        ),
+        (&json!("price_import"), &json!("Prices.csv"), &json!("PUT"))
+    );
+    let content = format!("/admin/uploads/{id}/content");
+    let (status, body) = send(&app, "GET", &content, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "upload_missing"),
+        "not uploaded yet"
+    );
+
+    assert_eq!(put_file(&created["upload"], csv.clone()).await, 200);
+    let request = axum::http::Request::builder()
+        .uri(&content)
+        .header("authorization", format!("Bearer {}", app.admin_key()))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let read = tower::ServiceExt::oneshot(app.router(), request)
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            read.status(),
+            read.headers()["content-type"].to_str().unwrap()
+        ),
+        (StatusCode::OK, "text/csv")
+    );
+    let bytes = axum::body::to_bytes(read.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(bytes.to_vec(), csv);
+
+    // The purpose's scope, not media's.
+    let media_only = key(
+        &app,
+        json!({ "kind": "secret", "name": "Media", "scopes": ["media:write"] }),
+    )
+    .await;
+    let (status, body) = send_as(&app, &media_only, "GET", &content, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "missing_scope")
+    );
+    let too_big = json!({ "purpose": "price_import", "filename": "big.csv",
+        "byte_size": 20 * 1024 * 1024 + 1 });
+    let (status, body) = send(&app, "POST", "/admin/uploads", Some(&too_big.to_string())).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "file_too_large")
+    );
+
+    let (status, _) = send(&app, "DELETE", &format!("/admin/uploads/{id}"), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = send(&app, "GET", &content, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "upload_not_found")
+    );
+}
+
+#[tokio::test]
+async fn an_expired_upload_is_gone_and_swept_with_its_file() {
+    let app = app_with_media().await;
+    let body = json!({ "purpose": "price_import", "filename": "old.csv", "byte_size": 3 });
+    let (_, created) = send(&app, "POST", "/admin/uploads", Some(&body.to_string())).await;
+    assert_eq!(put_file(&created["upload"], b"a,b".to_vec()).await, 200);
+    let id: hypha_core::UploadId = created["id"].as_str().unwrap().parse().unwrap();
+    sql(
+        &app,
+        &format!(
+            "UPDATE temporary_uploads SET expires_at = now() - interval '1 minute' WHERE id = '{}'",
+            id.as_uuid()
+        ),
+    )
+    .await;
+    let (status, body) = send(&app, "GET", &format!("/admin/uploads/{id}/content"), None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "upload_not_found")
+    );
+    let ran = hypha_http::jobs::media_sweep(&app.state).await.unwrap();
+    assert!(!ran.idle);
+    // The row went too: given back its time, it still isn't found.
+    sql(
+        &app,
+        "UPDATE temporary_uploads SET expires_at = now() + interval '1 day'",
+    )
+    .await;
+    let (status, _) = send(&app, "GET", &format!("/admin/uploads/{id}/content"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn uploads_need_media_storage() {
+    let app = app().await;
+    let body = json!({ "purpose": "price_import", "filename": "p.csv", "byte_size": 3 });
+    let (status, body) = send(&app, "POST", "/admin/uploads", Some(&body.to_string())).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::SERVICE_UNAVAILABLE, "media_not_configured")
+    );
+}
+
 /// Uploads a PNG and completes it; returns the asset's ID.
 async fn ready_png(app: &TestApp) -> String {
     let created = start_png_upload(app, 100).await;

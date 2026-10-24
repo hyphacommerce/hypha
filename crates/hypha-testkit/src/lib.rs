@@ -62,7 +62,7 @@ pub use ids::SequentialIds;
 pub use inventory_items::InMemoryInventoryItemRepo;
 pub use locations::InMemoryLocationRepo;
 pub use markets::InMemoryMarketRepo;
-pub use media::{InMemoryAssetRepo, InMemoryBlobStore};
+pub use media::{InMemoryAssetRepo, InMemoryBlobStore, InMemoryTemporaryUploadRepo};
 pub use notifications::{
     InMemoryEmailSender, InMemoryNotificationRepo, InMemoryNotificationSettingsRepo,
     InMemoryNotificationTemplateRepo,

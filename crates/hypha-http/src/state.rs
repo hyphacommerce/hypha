@@ -563,6 +563,7 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_users::HasStaffSessions
         + HasApiKeys
         + hypha_media::HasAssets
+        + hypha_media::HasTemporaryUploads
         + hypha_media::HasAssetUsages
         + hypha_merchandising::MerchandisingPorts
         + hypha_shipping::HasShippingZones

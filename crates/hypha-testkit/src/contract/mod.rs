@@ -72,7 +72,7 @@ pub use inventory::{inventory_item_repo, location_repo};
 pub use markets::{
     catalog_repo, market_repo, price_list_joins, price_list_repo, price_list_schedule,
 };
-pub use media::{asset_repo, blob_store};
+pub use media::{asset_repo, blob_store, temporary_upload_repo};
 pub use notifications::{
     notification_repo, notification_settings_batch, notification_settings_repo,
     notification_template_repo,

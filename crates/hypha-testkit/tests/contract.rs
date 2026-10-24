@@ -230,6 +230,13 @@ fn asset_repo() {
 }
 
 #[test]
+fn temporary_upload_repo() {
+    block_on(contract::temporary_upload_repo(async || {
+        hypha_testkit::InMemoryTemporaryUploadRepo::default()
+    }));
+}
+
+#[test]
 fn asset_usages() {
     block_on(contract::asset_usages(async || InMemoryPorts::default()));
 }

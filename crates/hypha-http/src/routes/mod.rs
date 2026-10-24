@@ -39,6 +39,7 @@ pub mod shipping;
 pub mod staff;
 pub mod stores;
 pub mod taxes;
+pub mod uploads;
 
 use hypha_core::{Stamps, Timestamp};
 
@@ -148,6 +149,9 @@ macro_rules! route_table {
             [admin, DELETE, "/admin/assets/{id}", assets::remove],
             [admin, POST, "/admin/assets/{id}/complete", assets::complete],
             [admin, GET, "/admin/assets/{id}/usages", assets::usages],
+            [admin, POST, "/admin/uploads", uploads::create],
+            [admin, GET, "/admin/uploads/{id}/content", uploads::content],
+            [admin, DELETE, "/admin/uploads/{id}", uploads::remove],
             // markets, price lists, catalogs
             [admin, GET, "/admin/markets", markets::list_markets_handler],
             [admin, POST, "/admin/markets", markets::create_market_handler],

@@ -166,6 +166,8 @@ define_id!(AppId, "appid");
 define_id!(OAuthRequestId, "oareq");
 // Custom field definitions.
 define_id!(CustomFieldDefinitionId, "cfd");
+// Files uploaded for a while, to be read back (a CSV to import).
+define_id!(UploadId, "upl");
 
 #[cfg(test)]
 mod tests {

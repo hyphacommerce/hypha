@@ -454,6 +454,31 @@ contains "the variant shows nothing now" '"media_asset_id":null'
 step "delete the asset" 204 - -X DELETE "$BASE/admin/assets/$ASSET"
 step "it is gone" 404 asset_not_found "$BASE/admin/assets/$ASSET"
 
+# temporary uploads: a price CSV goes straight to storage, and the admin's server reads it
+# back.
+CSV_FILE=$(mktemp)
+printf 'variant,price\nvar_1,9.50\n' > "$CSV_FILE"
+CSV_SIZE=$(wc -c < "$CSV_FILE" | tr -d ' ')
+step "start a price import upload" 201 - -X POST "$BASE/admin/uploads" -H "$JSON" \
+    -d "{\"purpose\":\"price_import\",\"filename\":\"prices.csv\",\"byte_size\":$CSV_SIZE}"
+contains "signed for CSV" '"name":"content-type","value":"text/csv"'
+UPLOAD=$(sed -E 's/^\{"id":"([^"]+)".*/\1/' <<<"$BODY")
+UPLOAD_URL=$(sed -E 's/.*"upload":\{"method":"PUT","url":"([^"]+)".*/\1/' <<<"$BODY")
+step "read before uploading" 409 upload_missing "$BASE/admin/uploads/$UPLOAD/content"
+STORED=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: text/csv' \
+    -H 'cache-control: private, no-store' --data-binary "@$CSV_FILE" "$UPLOAD_URL")
+if [[ $STORED == 200 ]]; then echo "ok   upload the CSV to storage"; else
+    echo "FAIL upload the CSV to storage: HTTP $STORED"; FAILED=$((FAILED + 1)); fi
+rm -f "$CSV_FILE"
+step "read the CSV back" 200 - "$BASE/admin/uploads/$UPLOAD/content"
+contains "its rows" 'var_1,9.50'
+step "an upload too large" 422 file_too_large -X POST "$BASE/admin/uploads" -H "$JSON" \
+    -d '{"purpose":"price_import","filename":"big.csv","byte_size":20971521}'
+step "an unknown purpose" 422 invalid_body -X POST "$BASE/admin/uploads" -H "$JSON" \
+    -d '{"purpose":"avatar","filename":"me.png","byte_size":10}'
+step "delete the upload" 204 - -X DELETE "$BASE/admin/uploads/$UPLOAD"
+step "the upload is gone" 404 upload_not_found "$BASE/admin/uploads/$UPLOAD/content"
+
 step "currencies for pickers" 200 - "$BASE/admin/currencies"
 contains "yen has no minor units" '{"code":"JPY","name":"Japanese Yen","minor_units":0}'
 contains "dinar has three" '{"code":"KWD","name":"Kuwaiti Dinar","minor_units":3}'

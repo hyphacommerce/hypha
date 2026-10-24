@@ -60,7 +60,7 @@ pub use ids::{
     MarketId, NotificationId, OAuthRequestId, OptionId, OptionValueId, OrderId, OrderLineId,
     PasswordResetId, PaymentId, PaymentMethodId, PriceListId, ProductId, ProposalId, RoleId,
     SessionId, ShippingGroupId, ShippingOptionId, ShippingZoneId, StoreId, TaxClassId, TaxRegionId,
-    UserId, VariantId,
+    UploadId, UserId, VariantId,
 };
 pub use language::{Language, LanguageError};
 pub use money::{BasisPoints, Currency, CurrencyError, Money, MoneyError, Price, TaxRate};
