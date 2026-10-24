@@ -1,3 +1,4 @@
+use futures_util::future::try_join3;
 use hypha_core::{
     AddressError, AddressParts, AuthError, CartId, Clock, CountryCode, CountryError, Ctx,
     CustomerGroupId, CustomerId, Email, EmailError, ErrorCode, HasBatch, HasClock, HasIdempotency,
@@ -829,32 +830,47 @@ async fn load_pricing<
 
 /// The discounts that may apply to `cart` at `at`, and its buyer: the linked customer, or
 /// for a guest the customer their email belongs to (once-per-customer counts by email
-/// too). Signed in means the cart has a customer.
+/// too; looked up only when a discount here is once per customer). Signed in means the
+/// cart has a customer. The discounts come in one round of reads; their usage, the
+/// products' categories and the summaries' names in the next.
 async fn load_discounts<S: HasDiscounts + HasCustomers + HasPriceLists>(
     ports: &S,
     cart: &Cart,
     groups: Vec<CustomerGroupId>,
     at: Timestamp,
 ) -> Result<DiscountReading, CommandError> {
-    let customer = match (cart.customer(), cart.email()) {
-        (Some(customer), _) => Some(customer),
-        (None, Some(email)) => ports.customers().get_by_email(email).await?.map(|c| c.id()),
-        (None, None) => None,
+    let mut context = DiscountContext::load(ports, at, cart.discount_codes()).await?;
+    let per_customer = context.counts_per_customer();
+    let usage = async {
+        let customer = match (cart.customer(), cart.email()) {
+            (Some(customer), _) => Some(customer),
+            (None, Some(email)) if per_customer => {
+                ports.customers().get_by_email(email).await?.map(|c| c.id())
+            }
+            _ => None,
+        };
+        let usage = context.usage(ports, customer).await?;
+        Ok::<_, CommandError>((customer, usage))
     };
-    let context = DiscountContext::load(ports, at, cart.discount_codes(), customer).await?;
     let products = product_ids(cart);
-    let categories = if context.names_categories() && !products.is_empty() {
-        ports.price_lists().product_categories(&products).await?
-    } else {
-        Default::default()
+    let categories = async {
+        if context.names_categories() && !products.is_empty() {
+            Ok::<_, CommandError>(ports.price_lists().product_categories(&products).await?)
+        } else {
+            Ok(Default::default())
+        }
     };
     // Summaries go into the cart and the order, so they name only what shoppers may see.
     let request = NameRequest::for_shoppers(context.candidates().iter().map(|l| l.discount));
-    let names = if request.is_empty() {
-        Names::new()
-    } else {
-        ports.discounts().names(&request).await?
+    let names = async {
+        if request.is_empty() {
+            Ok::<_, CommandError>(Names::new())
+        } else {
+            Ok(ports.discounts().names(&request).await?)
+        }
     };
+    let ((customer, usage), categories, names) = try_join3(usage, categories, names).await?;
+    context.set_usage(usage);
     Ok(DiscountReading {
         context,
         buyer: Buyer {

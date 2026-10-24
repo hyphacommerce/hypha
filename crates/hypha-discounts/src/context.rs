@@ -3,6 +3,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use futures_util::future::try_join;
+
 use hypha_core::{
     CategoryId, ChannelId, CustomerId, DiscountId, MarketId, ProductId, RepoError, Timestamp,
 };
@@ -29,59 +31,102 @@ pub struct DiscountContext {
 }
 
 impl DiscountContext {
-    /// Loads what pricing a cart holding `codes` (normalised) for `customer` needs at `at`.
+    /// Loads the discounts a cart holding `codes` (normalised) may get at `at`: the live
+    /// automatic ones and the codes' (in the order given), the two reads sent together.
+    /// Their usage comes after (`usage`), once the buyer is known.
     pub async fn load<S: HasDiscounts>(
         ports: &S,
         at: Timestamp,
         codes: &[String],
-        customer: Option<CustomerId>,
     ) -> Result<Self, RepoError> {
-        let automatic = ports.discounts().live_automatic(at).await?;
-        let found = if codes.is_empty() {
-            Vec::new()
-        } else {
-            ports.discounts().find_codes(codes).await?
-        };
-        let found: Vec<DiscountCode> = found.into_iter().filter(|c| c.active).collect();
-        let ids: Vec<DiscountId> = found.iter().map(|c| c.discount).collect();
-        let discounts = if ids.is_empty() {
-            Vec::new()
-        } else {
-            ports.discounts().get_many(&ids).await?
-        };
-        let coded: Vec<(DiscountCode, Discount)> = found
-            .into_iter()
-            .filter_map(|code| {
-                let discount = discounts.iter().find(|d| d.id() == code.discount)?;
-                (discount.method() == Method::Codes).then(|| (code, discount.clone()))
-            })
-            .collect();
-        let all = || automatic.iter().chain(coded.iter().map(|(_, d)| d));
-        let limited: Vec<DiscountId> = all()
-            .filter(|d| d.limits().total.is_some())
-            .map(|d| d.id())
-            .collect();
-        let used = if limited.is_empty() {
-            HashMap::new()
-        } else {
-            ports.discounts().usage_counts(&limited).await?
-        };
-        let once: Vec<DiscountId> = all()
-            .filter(|d| d.limits().once_per_customer)
-            .map(|d| d.id())
-            .collect();
-        let used_by_buyer = match customer {
-            Some(customer) if !once.is_empty() => {
-                ports.discounts().used_by(&once, customer).await?
+        let repo = ports.discounts();
+        let coded = async {
+            if codes.is_empty() {
+                return Ok(Vec::new());
             }
-            _ => HashSet::new(),
+            let mut found: Vec<DiscountCode> = repo
+                .find_codes(codes)
+                .await?
+                .into_iter()
+                .filter(|c| c.active)
+                .collect();
+            found.sort_by_key(|c| codes.iter().position(|e| *e == c.normalized));
+            let ids: Vec<DiscountId> = found.iter().map(|c| c.discount).collect();
+            let discounts = if ids.is_empty() {
+                Vec::new()
+            } else {
+                repo.get_many(&ids).await?
+            };
+            Ok(found
+                .into_iter()
+                .filter_map(|code| {
+                    let discount = discounts.iter().find(|d| d.id() == code.discount)?;
+                    (discount.method() == Method::Codes).then(|| (code, discount.clone()))
+                })
+                .collect())
         };
+        let (automatic, coded) = try_join(repo.live_automatic(at), coded).await?;
         Ok(Self {
             automatic,
             coded,
-            used,
-            used_by_buyer,
+            used: HashMap::new(),
+            used_by_buyer: HashSet::new(),
         })
+    }
+
+    /// Whether a discount here is once per customer: only then does the buyer matter to
+    /// its limits.
+    pub fn counts_per_customer(&self) -> bool {
+        self.all().any(|d| d.limits().once_per_customer)
+    }
+
+    /// The uses so far of the discounts here with a total limit, and which of the once
+    /// per customer ones `customer` used, the two reads sent together; `set_usage` keeps
+    /// them.
+    pub async fn usage<S: HasDiscounts>(
+        &self,
+        ports: &S,
+        customer: Option<CustomerId>,
+    ) -> Result<(HashMap<DiscountId, u64>, HashSet<DiscountId>), RepoError> {
+        let repo = ports.discounts();
+        let limited: Vec<DiscountId> = self
+            .all()
+            .filter(|d| d.limits().total.is_some())
+            .map(|d| d.id())
+            .collect();
+        let once: Vec<DiscountId> = self
+            .all()
+            .filter(|d| d.limits().once_per_customer)
+            .map(|d| d.id())
+            .collect();
+        let used = async {
+            if limited.is_empty() {
+                Ok(HashMap::new())
+            } else {
+                repo.usage_counts(&limited).await
+            }
+        };
+        let used_by_buyer = async {
+            match customer {
+                Some(customer) if !once.is_empty() => repo.used_by(&once, customer).await,
+                _ => Ok(HashSet::new()),
+            }
+        };
+        try_join(used, used_by_buyer).await
+    }
+
+    pub fn set_usage(
+        &mut self,
+        (used, used_by_buyer): (HashMap<DiscountId, u64>, HashSet<DiscountId>),
+    ) {
+        self.used = used;
+        self.used_by_buyer = used_by_buyer;
+    }
+
+    fn all(&self) -> impl Iterator<Item = &Discount> {
+        self.automatic
+            .iter()
+            .chain(self.coded.iter().map(|(_, d)| d))
     }
 
     /// Whether a discount here names categories: only then does pricing need the
