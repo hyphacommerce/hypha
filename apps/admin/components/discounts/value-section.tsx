@@ -14,11 +14,7 @@ import { type StandardDraft, amountMarkets, emptyItems, emptyValue } from "@/lib
 import type { MarketOption } from "@/lib/discounts/validate";
 
 import { AmountsByMarket, type SectionProps, ValueFields } from "./fields";
-
-const LATER: Record<string, string> = {
-  buy_x_get_y: "Buy X get Y",
-  tiered: "Volume",
-};
+import { BuyXGetYValue, TieredValue } from "./kind-value";
 
 export function ValueSection({
   draft,
@@ -30,19 +26,28 @@ export function ValueSection({
   const kind = draft.kind;
   const priced = amountMarkets(draft.conditions, markets);
 
-  if (kind.type !== "standard") {
+  if (kind.type === "buy_x_get_y") {
     return (
-      <Card>
-        <VStack gap={3}>
-          <Text type="display-3" as="h2">
-            Value
-          </Text>
-          <Banner
-            status="info"
-            title={`${LATER[kind.type] ?? kind.type} discounts can't be edited here yet.`}
-          />
-        </VStack>
-      </Card>
+      <BuyXGetYValue
+        draft={draft}
+        kind={kind}
+        errors={errors}
+        onChange={onChange}
+        isReadOnly={isReadOnly}
+        markets={priced}
+      />
+    );
+  }
+  if (kind.type === "tiered") {
+    return (
+      <TieredValue
+        draft={draft}
+        kind={kind}
+        errors={errors}
+        onChange={onChange}
+        isReadOnly={isReadOnly}
+        markets={priced}
+      />
     );
   }
 

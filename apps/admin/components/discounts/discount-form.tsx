@@ -1,9 +1,9 @@
 "use client";
 
-// The discount form: its sections beside the sticky summary. It holds no state of its
-// own and calls no API: the page keeps the draft and its errors, saves (a JSON Merge
-// Patch of `changedSections`), previews the write for the server's summary and picks
-// variants and customers, and passes what it learns back in.
+// The discount form: its sections beside the sticky summary. It holds no draft of its
+// own: the page keeps the draft and its errors, saves (a JSON Merge Patch of
+// `changedSections`) and previews the write for the server's summary. The variant,
+// product and customer pickers search the API themselves and hand back names.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { VStack } from "@astryxdesign/core/Layout";
@@ -36,8 +36,6 @@ export function DiscountForm({
   isReadOnly = false,
   live,
   selfId,
-  onPickVariants,
-  onPickCustomers,
   serverSummary,
   isRefreshing,
   usage,
@@ -57,8 +55,6 @@ export function DiscountForm({
   /** The store's live discounts, for what each combination box affects. */
   live?: readonly LiveDiscount[];
   selfId?: string;
-  onPickVariants?: () => void;
-  onPickCustomers?: () => void;
   serverSummary?: string | null;
   isRefreshing?: boolean;
   usage?: string;
@@ -96,14 +92,8 @@ export function DiscountForm({
           categories={options.categories}
           names={allNames}
           onNames={onNames}
-          onPickVariants={onPickVariants}
         />
-        <ConditionsSection
-          {...section}
-          options={options}
-          names={allNames}
-          onPickCustomers={onPickCustomers}
-        />
+        <ConditionsSection {...section} options={options} names={allNames} onNames={onNames} />
         <CombinationsSection
           draft={draft}
           onChange={onChange}

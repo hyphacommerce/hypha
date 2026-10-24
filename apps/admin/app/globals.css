@@ -131,6 +131,10 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   padding: 8px 16px;
   cursor: pointer;
 }
+/* A row without a thumbnail (the discount form's variant and customer pickers). */
+.picker-row-plain {
+  grid-template-columns: auto minmax(0, 1fr);
+}
 .picker-row + .picker-row {
   border-top: var(--border-width, 1px) solid var(--color-border);
 }

@@ -11,6 +11,7 @@ import { MultiSelector } from "@astryxdesign/core/MultiSelector";
 import { Switch } from "@astryxdesign/core/Switch";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
+import { useState } from "react";
 
 import { type ConditionsDraft, amountMarkets } from "@/lib/discounts/draft";
 
@@ -23,6 +24,7 @@ import {
   FieldError,
   fieldStatus,
 } from "./fields";
+import { SearchPicker } from "./search-picker";
 
 /** Options plus any ID the draft names that isn't among them (not readable), by ID. */
 function withUnknown(options: readonly Option[], ids: readonly string[]): Option[] {
@@ -41,13 +43,14 @@ export function ConditionsSection({
   isReadOnly,
   options,
   names,
-  onPickCustomers,
+  onNames,
 }: SectionProps & {
   options: DiscountOptions;
   names: Readonly<Record<string, string>>;
-  /** Opens the page's customer picker; without one, customers can only be removed. */
-  onPickCustomers?: () => void;
+  /** Names of customers picked here, for the tokens and the summary. */
+  onNames: (names: Record<string, string>) => void;
 }) {
+  const [isPicking, setIsPicking] = useState(false);
   const c = draft.conditions;
   const set = (change: Partial<ConditionsDraft>, field: string) =>
     onChange({ ...draft, conditions: { ...c, ...change } }, [`conditions.${field}`]);
@@ -120,8 +123,25 @@ export function ConditionsSection({
                 : (id) => set({ customers: c.customers.filter((x) => x !== id) }, "customers")
             }
           />
-          {!isReadOnly && onPickCustomers && (
-            <Button label="Choose customers" variant="secondary" onClick={onPickCustomers} />
+          {!isReadOnly && (
+            <Button
+              label="Choose customers"
+              variant="secondary"
+              onClick={() => setIsPicking(true)}
+            />
+          )}
+          {isPicking && (
+            <SearchPicker
+              source="customers"
+              title="Customers it's for"
+              chosen={c.customers}
+              onConfirm={(picked) => {
+                onNames(Object.fromEntries(picked.map((p) => [p.id, p.label])));
+                set({ customers: [...c.customers, ...picked.map((p) => p.id)] }, "customers");
+                setIsPicking(false);
+              }}
+              onClose={() => setIsPicking(false)}
+            />
           )}
         </VStack>
         <Switch
