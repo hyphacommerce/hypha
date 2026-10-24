@@ -1750,7 +1750,7 @@ export interface paths {
         };
         /**
          * The orders a discount was used on, newest first, with each order's number and its
-         *     customer's names and email.
+         *     customer's names and email: it needs reading orders and customers too.
          */
         get: operations["admin.discounts.usage"];
         put?: never;

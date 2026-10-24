@@ -1699,13 +1699,13 @@ impl DiscountUsageResponse {
 type DiscountUsagePage = PageResponse<DiscountUsageResponse>;
 
 /// The orders a discount was used on, newest first, with each order's number and its
-/// customer's names and email.
+/// customer's names and email: it needs reading orders and customers too.
 #[utoipa::path(
     get,
     path = "/admin/discounts/{id}/usage",
     params(("id" = DiscountId, Path), PageParams),
     responses((status = 200, description = "OK", body = DiscountUsagePage)),
-    extensions(("x-hypha-scopes" = json!(["discounts:read"]))),
+    extensions(("x-hypha-scopes" = json!(["discounts:read", "customers:read", "orders:read"]))),
 )]
 pub async fn usage<S: Storage>(
     State(state): State<SharedState<S>>,

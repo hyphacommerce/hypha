@@ -11,7 +11,7 @@ use hypha_discounts::{
     DiscountError, DiscountFilter, DiscountPatch, DiscountRepo, Generation, Kind,
     MAX_LIVE_AUTOMATIC, Method, NewCode, PerMarket, Reward, Status, Target, Value, add_codes,
     create_discount, delete_discount, find_live_code, generate_codes, get_discount, list_codes,
-    list_discounts, remove_codes, update_discount,
+    list_discounts, list_usage, remove_codes, update_discount,
 };
 use hypha_testkit::{InMemoryPorts, SequentialIds, TestEnv};
 use pollster::block_on;
@@ -123,6 +123,35 @@ fn writing_needs_discounts_write() {
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::DiscountsWrite
         )))
+    );
+}
+
+#[test]
+fn the_usage_needs_reading_customers_and_orders_too() {
+    let w = World::new();
+    let id = w.create(Method::Codes, &[]).unwrap();
+    let only =
+        |scopes: Vec<Scope>| Ctx::new(Actor::User(UserId::from_uuid(Uuid::from_u128(1))), scopes);
+    let usage = |ctx: Ctx| block_on(list_usage(&ctx, &w.ports, id, page())).map(|p| p.items.len());
+    assert_eq!(
+        usage(only(vec![Scope::DiscountsRead, Scope::OrdersRead])),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::CustomersRead
+        )))
+    );
+    assert_eq!(
+        usage(only(vec![Scope::DiscountsRead, Scope::CustomersRead])),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::OrdersRead
+        )))
+    );
+    assert_eq!(
+        usage(only(vec![
+            Scope::DiscountsRead,
+            Scope::CustomersRead,
+            Scope::OrdersRead
+        ])),
+        Ok(0)
     );
 }
 

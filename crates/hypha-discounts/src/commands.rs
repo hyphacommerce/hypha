@@ -580,7 +580,8 @@ pub async fn remove_codes<S: DiscountPorts>(
     Ok(count)
 }
 
-/// A page of the orders a discount was used on.
+/// A page of the orders a discount was used on. It names orders and the customers who
+/// placed them, so it needs reading both besides the discount.
 pub async fn list_usage<S: HasDiscounts>(
     ctx: &Ctx,
     ports: &S,
@@ -588,6 +589,8 @@ pub async fn list_usage<S: HasDiscounts>(
     page: PageRequest<OrderId>,
 ) -> Result<Page<Usage>, CommandError> {
     ctx.require(Scope::DiscountsRead)?;
+    ctx.require(Scope::CustomersRead)?;
+    ctx.require(Scope::OrdersRead)?;
     ports
         .discounts()
         .get(id)

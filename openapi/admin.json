@@ -29787,12 +29787,14 @@
             "bearer": []
           }
         ],
-        "summary": "The orders a discount was used on, newest first, with each order's number and its\ncustomer's names and email.",
+        "summary": "The orders a discount was used on, newest first, with each order's number and its\ncustomer's names and email: it needs reading orders and customers too.",
         "tags": [
           "discounts"
         ],
         "x-hypha-scopes": [
-          "discounts:read"
+          "discounts:read",
+          "customers:read",
+          "orders:read"
         ]
       }
     },
