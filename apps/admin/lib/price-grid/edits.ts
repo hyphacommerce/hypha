@@ -158,7 +158,8 @@ function sameMoney(a: Money | null, b: Money | null): boolean {
   );
 }
 
-function sameFixed(a: FixedPrice, b: FixedPrice): boolean {
+/** Whether two fixed prices are the same price, compare-at and breaks. */
+export function sameFixed(a: FixedPrice, b: FixedPrice): boolean {
   return (
     sameMoney(a.price, b.price) &&
     sameMoney(a.compare_at, b.compare_at) &&
