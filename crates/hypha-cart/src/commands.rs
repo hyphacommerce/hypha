@@ -1,11 +1,11 @@
 use hypha_core::{
     AddressError, AddressParts, AuthError, CartId, Clock, CountryCode, CountryError, Ctx,
-    CustomerId, Email, EmailError, ErrorCode, HasBatch, HasClock, HasIdempotency, IdGenerator,
-    IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, MarketId, MoneyError,
-    ProductId, Quantity, QuantityError, RepoError, Scope, ShippingGroupId, ShippingOptionId,
-    StageIdempotency, Timestamp, VariantId, earlier_id,
+    CustomerGroupId, CustomerId, Email, EmailError, ErrorCode, HasBatch, HasClock, HasIdempotency,
+    IdGenerator, IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, MarketId,
+    MoneyError, ProductId, Quantity, QuantityError, RepoError, Scope, ShippingGroupId,
+    ShippingOptionId, StageIdempotency, Timestamp, VariantId, earlier_id,
 };
-use hypha_customers::{CustomerRepo, HasCustomers};
+use hypha_customers::{CustomerGroupRepo, CustomerRepo, HasCustomerGroups, HasCustomers};
 use hypha_inventory::{HasInventoryItems, HasLocations, StockContext};
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo};
 use hypha_pricing::PricingContext;
@@ -163,9 +163,11 @@ impl<T> IdempotentCartPorts for T where
 {
 }
 
-/// What pricing a cart reads: everything but the carts and customers themselves.
+/// What pricing a cart reads: everything but the carts and customers themselves (their
+/// groups, which decide the lists that price for them, included).
 pub trait PricingPorts:
     HasClock
+    + HasCustomerGroups
     + HasChannels
     + HasProducts
     + HasMarkets
@@ -181,6 +183,7 @@ pub trait PricingPorts:
 
 impl<T> PricingPorts for T where
     T: HasClock
+        + HasCustomerGroups
         + HasChannels
         + HasProducts
         + HasMarkets
@@ -730,14 +733,33 @@ async fn load_publication<S: HasChannels>(
 /// number of round trips for 1 line or 100 (on Postgres about 20, counting the
 /// BEGIN/COMMIT of each multi-query load); an empty cart reads only its market
 /// (`empty_reading`).
-async fn load_pricing<S: HasMarkets + HasCatalogs + HasPriceLists + HasClock>(
+async fn load_pricing<
+    S: HasMarkets + HasCatalogs + HasPriceLists + HasCustomerGroups + HasClock,
+>(
     ports: &S,
     cart: &Cart,
 ) -> Result<PricingContext, CommandError> {
     let variants: Vec<VariantId> = cart.lines().iter().map(|l| l.variant()).collect();
-    hypha_pricing::load_pricing(ports, cart.market(), &product_ids(cart), &variants)
+    let groups = match cart.customer() {
+        Some(customer) => buyer_groups(ports, customer).await?,
+        None => Vec::new(),
+    };
+    hypha_pricing::load_pricing(ports, cart.market(), &product_ids(cart), &variants, &groups)
         .await?
         .ok_or(CommandError::MarketNotFound(cart.market()))
+}
+
+/// The groups `customer` is in: who a list for groups prices for.
+pub async fn buyer_groups<S: HasCustomerGroups>(
+    ports: &S,
+    customer: CustomerId,
+) -> Result<Vec<CustomerGroupId>, RepoError> {
+    Ok(ports
+        .customer_groups()
+        .groups_of(&[customer])
+        .await?
+        .remove(&customer)
+        .unwrap_or_default())
 }
 
 /// The tax rates of the cart's country and its products' tax classes, in 2 queries.

@@ -5,9 +5,10 @@ use std::{
 
 use hypha_categories::Category;
 use hypha_core::{
-    CategoryId, Keyset, Page, PageRequest, PriceListId, ProductId, Recorded, RepoError, Timestamp,
-    VariantId, Versioned, stamp_insert, stamp_update,
+    CategoryId, CustomerGroupId, Keyset, Page, PageRequest, PriceListId, ProductId, Recorded,
+    RepoError, Timestamp, VariantId, Versioned, stamp_insert, stamp_update,
 };
+use hypha_customers::CustomerGroup;
 use hypha_markets::{
     FixedPrice, FixedPriceFilter, PriceList, PriceListFilter, PriceListRepo, PriceListSort,
     repo::keys,
@@ -36,6 +37,8 @@ pub struct InMemoryPriceListRepo {
     products: Arc<Table<ProductId, Product>>,
     categories: Arc<Table<CategoryId, Category>>,
     members: Arc<Mutex<Members>>,
+    /// The customer groups audiences name; `None` (not shared) checks nothing.
+    groups: Option<Arc<Table<CustomerGroupId, CustomerGroup>>>,
 }
 
 impl InMemoryPriceListRepo {
@@ -62,6 +65,39 @@ impl InMemoryPriceListRepo {
             members: categories.members.clone(),
             ..self
         }
+    }
+
+    /// The same repo, refusing an audience that names a group `groups` doesn't have, as a
+    /// database's reference does.
+    pub fn joining_groups(self, groups: &crate::InMemoryCustomerGroupRepo) -> Self {
+        Self {
+            groups: Some(groups.groups.clone()),
+            ..self
+        }
+    }
+
+    /// Whether some list's audience names `group`: a group in use can't be deleted.
+    pub(crate) fn names_group(&self, group: CustomerGroupId) -> bool {
+        self.price_lists
+            .find(|l| l.audience().groups().contains(&group))
+            .is_some()
+    }
+
+    /// `Reference(PRICE_LIST_GROUP)` when `list`'s audience names a group that isn't
+    /// stored (when groups are shared).
+    fn check_groups(&self, list: &PriceList) -> Result<(), RepoError> {
+        let Some(groups) = &self.groups else {
+            return Ok(());
+        };
+        if list
+            .audience()
+            .groups()
+            .iter()
+            .any(|g| groups.get(g).is_none())
+        {
+            return Err(RepoError::Reference(keys::PRICE_LIST_GROUP));
+        }
+        Ok(())
     }
 
     /// The events this repo wrote (into its outbox, shared or not).
@@ -195,6 +231,7 @@ impl PriceListRepo for InMemoryPriceListRepo {
     }
 
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
+        self.check_groups(price_list)?;
         stamp_insert(price_list, self.outbox.now());
         let events = price_list.take_events();
         self.price_lists
@@ -204,6 +241,7 @@ impl PriceListRepo for InMemoryPriceListRepo {
     }
 
     async fn update(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
+        self.check_groups(price_list)?;
         stamp_update(price_list, self.outbox.now());
         let events = price_list.take_events();
         self.price_lists

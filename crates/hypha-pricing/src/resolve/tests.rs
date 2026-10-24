@@ -1,5 +1,5 @@
 use hypha_core::{BasisPoints, CatalogId, CategoryId, CountryCode, MarketId, Money};
-use hypha_markets::{AppliesTo, CatalogContext, PriceListDraft, PriceListStatus};
+use hypha_markets::{AppliesTo, Audience, CatalogContext, PriceListDraft, PriceListStatus};
 use uuid::Uuid;
 
 use super::*;
@@ -72,6 +72,7 @@ fn context(market_currency: Currency, price_list: Option<PriceList>) -> PricingC
         fixed_prices: HashMap::new(),
         product_categories: HashMap::new(),
         at: at(1_000),
+        groups: Vec::new(),
     }
 }
 
@@ -645,5 +646,62 @@ fn a_sale_break_is_measured_against_the_regular_price_at_the_quantity() {
     assert_eq!(
         (resolved.price, resolved.compare_at),
         (eur(600), Some(eur(900)))
+    );
+}
+
+fn group(n: u128) -> CustomerGroupId {
+    CustomerGroupId::from_uuid(Uuid::from_u128(300 + n))
+}
+
+/// `list(n, …)` for buyers in group `g` only.
+fn for_group(n: u128, bp: i32, g: u128) -> PriceList {
+    let mut l = list(n, Currency::EUR, Some(bp));
+    l.set_audience(Audience::of_groups(vec![group(g)]).unwrap());
+    l
+}
+
+#[test]
+fn a_group_list_prices_nothing_for_a_buyer_in_no_group() {
+    let ctx = context(Currency::EUR, Some(for_group(1, -2000, 1)));
+    assert_eq!(price_of(&ctx, variant(eur(1000))), Ok(eur(1000)));
+}
+
+#[test]
+fn a_group_list_prices_for_a_buyer_in_its_group() {
+    let ctx = PricingContext {
+        groups: vec![group(2), group(1)],
+        ..context(Currency::EUR, Some(for_group(1, -2000, 1)))
+    };
+    assert_eq!(price_of(&ctx, variant(eur(1000))), Ok(eur(800)));
+}
+
+#[test]
+fn a_group_list_prices_nothing_for_a_buyer_in_another_group() {
+    let ctx = PricingContext {
+        groups: vec![group(2)],
+        ..context(Currency::EUR, Some(for_group(1, -2000, 1)))
+    };
+    assert_eq!(price_of(&ctx, variant(eur(1000))), Ok(eur(1000)));
+}
+
+#[test]
+fn a_public_sale_below_a_group_price_still_wins_for_the_group() {
+    let ctx = PricingContext {
+        groups: vec![group(1)],
+        ..with_lists(vec![for_group(1, -1000, 1), sale(2, Some(-3000))])
+    };
+    assert_eq!(price_of(&ctx, variant(eur(1000))), Ok(eur(700)));
+}
+
+#[test]
+fn explains_a_list_for_groups_the_buyer_is_not_in() {
+    let ctx = context(Currency::EUR, Some(for_group(1, -2000, 1)));
+    assert_eq!(
+        explain_price(&ctx, variant(eur(1000)), one()).candidates,
+        [Candidate {
+            price_list: plid(1),
+            price: None,
+            result: CandidateResult::NotInAudience,
+        }]
     );
 }

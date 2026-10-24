@@ -27,6 +27,9 @@ pub mod keys {
     /// A catalog's price lists exist, and one a catalog holds can't be deleted
     /// (`RepoError::Reference`).
     pub const CATALOG_PRICE_LIST: &str = "catalog_price_list";
+    /// A list's audience names customer groups that exist, and a group an audience names
+    /// can't be deleted (`RepoError::Reference`).
+    pub const PRICE_LIST_GROUP: &str = "price_list_group";
 }
 
 #[allow(async_fn_in_trait)]
@@ -115,10 +118,12 @@ pub trait PriceListRepo {
         sort: PriceListSort,
         page: PageRequest<Keyset<PriceListId>>,
     ) -> Result<Page<PriceList>, RepoError>;
-    /// Stores a new price list (version 1). Enforces `PRICE_LIST_ID` and `PRICE_LIST_NAME`.
+    /// Stores a new price list (version 1). Enforces `PRICE_LIST_ID` and `PRICE_LIST_NAME`;
+    /// adapters that can see customer groups refuse an audience naming one that doesn't
+    /// exist with `Reference(PRICE_LIST_GROUP)`.
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError>;
     /// Stores changes and bumps the version, or fails with `StaleVersion`. Enforces
-    /// `PRICE_LIST_NAME`.
+    /// `PRICE_LIST_NAME` and the audience's groups as `insert` does.
     async fn update(&self, price_list: &mut PriceList) -> Result<(), RepoError>;
     /// Removes the list with its fixed prices, writing the events it recorded
     /// (`PriceList::delete`); one that doesn't exist any more is fine. Refused with

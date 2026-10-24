@@ -105,8 +105,9 @@ impl Default for InMemoryPorts {
             .joining(&categories, &channels)
             .joining_fields(&custom_fields);
         let catalogs = InMemoryCatalogRepo::sharing(&outbox);
-        let price_lists =
-            InMemoryPriceListRepo::sharing(&outbox).joining(&catalogs, &products, &categories);
+        let price_lists = InMemoryPriceListRepo::sharing(&outbox)
+            .joining(&catalogs, &products, &categories)
+            .joining_groups(&customer_groups);
         Self {
             carts: InMemoryCartRepo::sharing(&outbox),
             products,

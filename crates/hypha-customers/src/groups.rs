@@ -143,8 +143,8 @@ pub async fn update_group<S: HasCustomerGroups>(
 }
 
 /// Removes the group with its memberships, recording `customer_group.deleted` with the
-/// customers that were in it. Once prices or payment methods point at groups, one in
-/// use is refused (`RepoError::Reference`).
+/// customers that were in it. One that something points at (a price list's audience) is
+/// refused (`GroupInUse`): storage's rule, since this domain can't see what points at it.
 pub async fn delete_group<S: GroupPorts>(
     ctx: &Ctx,
     ports: &S,
@@ -160,7 +160,10 @@ pub async fn delete_group<S: GroupPorts>(
         customers,
     };
     batch.record_events(vec![PendingEvent::new(group_subject(id), &event)]);
-    Ok(ports.commit(batch).await?)
+    match ports.commit(batch).await {
+        Err(RepoError::Reference(_)) => Err(CommandError::GroupInUse(id)),
+        other => Ok(other?),
+    }
 }
 
 pub async fn get_group<S: HasCustomerGroups>(

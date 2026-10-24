@@ -707,3 +707,141 @@ async fn a_sales_start_is_announced_once_and_search_follows() {
         "{found}"
     );
 }
+
+#[tokio::test]
+async fn a_list_for_a_group_prices_only_for_its_signed_in_members() {
+    use super::accounts::{send_signed_in, signed_in};
+    let app = app().await;
+    let (status, group) = send(
+        &app,
+        "POST",
+        "/admin/customer-groups",
+        Some(r#"{"name":"Wholesale","handle":"wholesale"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{group}");
+    let group = group["id"].as_str().unwrap().to_string();
+    let unknown = "cgrp_00000000000000000000000000000063";
+
+    let body = json!({"name": "Nobody's", "currency": "EUR", "audience": {"groups": [unknown]}});
+    let (status, error) = send(&app, "POST", "/admin/price-lists", Some(&body.to_string())).await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "customer_group_not_found")
+    );
+
+    let (market, mug, lists) = lists_on_the_catalog(
+        &app,
+        vec![json!({"name": "Trade", "currency": "EUR",
+            "adjustment": {"percent_bps": -2000}, "audience": {"groups": [group]}})],
+    )
+    .await;
+    let trade = &lists[0];
+    let (_, listed) = send(
+        &app,
+        "GET",
+        &format!("/admin/price-lists?group={group}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (&listed["items"][0]["id"], &listed["items"][0]["audience"]),
+        (&json!(trade), &json!({"groups": [group]}))
+    );
+    let (_, listed) = send(
+        &app,
+        "GET",
+        &format!("/admin/price-lists?group={unknown}"),
+        None,
+    )
+    .await;
+    assert_eq!(listed["items"], json!([]));
+
+    let product = mug_product(&app).await;
+    let read = format!("/storefront/products/{product}?country=HR");
+    let price_seen = |page: &Value| page["variants"][0]["price"].clone();
+    let pk = publishable(&app).await;
+    let (_, page) = send_as(&app, &pk, "GET", &read, None).await;
+    assert_eq!(price_seen(&page), eur(1000), "anyone: the public price");
+
+    let (pk, session) = signed_in(&app, "ana@example.hr").await;
+    let (_, page) = send_signed_in(&app, &pk, &session, "GET", &read, None).await;
+    assert_eq!(price_seen(&page), eur(1000), "signed in, in no group");
+    let (_, account) =
+        send_signed_in(&app, &pk, &session, "GET", "/storefront/account", None).await;
+    let members = json!({"customers": [account["id"]]}).to_string();
+    let path = format!("/admin/customer-groups/{group}/customers");
+    let (status, json) = send(&app, "POST", &path, Some(&members)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{json}");
+    let (_, page) = send_signed_in(&app, &pk, &session, "GET", &read, None).await;
+    assert_eq!(price_seen(&page), eur(800), "in the group");
+
+    // Their cart is priced for them; a stranger's isn't.
+    let line = json!({"variant": mug, "quantity": 1}).to_string();
+    let (_, cart) = send_signed_in(
+        &app,
+        &pk,
+        &session,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    let lines = format!("/storefront/carts/{}/lines", cart["id"].as_str().unwrap());
+    let (_, cart) = send_signed_in(&app, &pk, &session, "POST", &lines, Some(&line)).await;
+    assert_eq!(cart["lines"][0]["unit_price"], eur(800), "{cart}");
+    let (_, cart) = send_as(
+        &app,
+        &pk,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    let lines = format!("/storefront/carts/{}/lines", cart["id"].as_str().unwrap());
+    let (_, cart) = send_as(&app, &pk, "POST", &lines, Some(&line)).await;
+    assert_eq!(cart["lines"][0]["unit_price"], eur(1000), "{cart}");
+
+    // The admin explains it for anyone, or for the group.
+    let prices = format!("/admin/products/{product}/prices?market={market}");
+    let (_, explained) = send(&app, "GET", &prices, None).await;
+    let variant = &explained["markets"][0]["variants"][0];
+    assert_eq!(
+        (&variant["price"], &variant["candidates"][0]["result"]),
+        (&eur(1000), &json!("not_in_audience"))
+    );
+    let (_, explained) = send(&app, "GET", &format!("{prices}&group={group}"), None).await;
+    let variant = &explained["markets"][0]["variants"][0];
+    assert_eq!(
+        (&variant["price"], &variant["candidates"][0]["result"]),
+        (&eur(800), &json!("won"))
+    );
+    let (status, error) = send(&app, "GET", &format!("{prices}&group={unknown}"), None).await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::NOT_FOUND, "customer_group_not_found")
+    );
+
+    // A group an audience names stays until the list lets it go.
+    let group_path = format!("/admin/customer-groups/{group}");
+    let (status, error) = send(&app, "DELETE", &group_path, None).await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::CONFLICT, "customer_group_in_use")
+    );
+    let (status, list) = send(
+        &app,
+        "PATCH",
+        &format!("/admin/price-lists/{trade}"),
+        Some(r#"{"audience":{"groups":[]}}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, &list["audience"]),
+        (StatusCode::OK, &json!({"groups": []}))
+    );
+    let (_, page) = send_as(&app, &pk, "GET", &read, None).await;
+    assert_eq!(price_seen(&page), eur(800), "everyone's now");
+    let (status, _) = send(&app, "DELETE", &group_path, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+}

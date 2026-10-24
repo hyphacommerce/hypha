@@ -2875,8 +2875,9 @@ export interface paths {
         /**
          * A product's prices in each market (or one), each variant's with every price list of
          *     the market's catalog and why it won or lost: the lowest live price wins, a tie going
-         *     to the oldest list, and the base price only when no live list prices the variant. A
-         *     product that isn't active is priced too.
+         *     to the oldest list, and the base price only when no live list prices the variant. Lists
+         *     for customer groups price only for a buyer in one (`group`). A product that isn't
+         *     active is priced too.
          */
         get: operations["admin.markets.product_prices"];
         put?: never;
@@ -3975,6 +3976,14 @@ export interface components {
             tax_class?: components["schemas"]["TaxClassId"] | null;
         };
         /**
+         * @description Who a price list prices for: buyers signed in as a customer in any of `groups` (up to
+         *     100, each existing, `422 customer_group_not_found`), or everyone when it's empty. A
+         *     list for groups never prices search documents or a shopper who isn't signed in.
+         */
+        AudienceDto: {
+            groups: components["schemas"]["CustomerGroupId"][];
+        };
+        /**
          * @description Known values: `flat`, `subtotal`, `weight`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
@@ -4038,7 +4047,7 @@ export interface components {
         /**
          * @description What became of one price list for a variant.
          *
-         *     Known values: `won`, `higher`, `tied_with_older`, `not_live`, `not_pricing`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         *     Known values: `won`, `higher`, `tied_with_older`, `not_live`, `not_in_audience`, `not_pricing`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         CandidateResultDto: string;
@@ -4596,6 +4605,7 @@ export interface components {
         };
         CreatePriceListRequest: {
             adjustment?: components["schemas"]["AdjustmentDto"] | null;
+            audience?: components["schemas"]["AudienceDto"] | null;
             compare_at?: components["schemas"]["CompareAtModeDto"] | null;
             /** @description Fixed for good: catalogs and fixed prices depend on it. */
             currency: components["schemas"]["Currency"];
@@ -6355,6 +6365,8 @@ export interface components {
         PriceListPhaseDto: string;
         PriceListResponse: {
             adjustment?: components["schemas"]["AdjustmentDto"] | null;
+            /** @description Its customer groups, sorted; none for everyone. */
+            audience: components["schemas"]["AudienceDto"];
             compare_at: components["schemas"]["CompareAtModeDto"];
             created_at: string;
             currency: components["schemas"]["Currency"];
@@ -7522,6 +7534,8 @@ export interface components {
         /** @description A price list's changes (JSON Merge Patch). Its currency is fixed. */
         UpdatePriceListRequest: {
             adjustment?: components["schemas"]["AdjustmentDto"] | null;
+            /** @description Replaces the audience; `{"groups": []}` for everyone. */
+            audience?: components["schemas"]["AudienceDto"];
             compare_at?: components["schemas"]["CompareAtModeDto"];
             /** @description `null` clears it. */
             description?: string | null;
@@ -24455,6 +24469,8 @@ export interface operations {
                 status?: "draft" | "scheduled" | "active" | "expired";
                 /** @description Only those on this market's catalog. */
                 market?: components["schemas"]["MarketId"];
+                /** @description Only those whose audience names this customer group. */
+                group?: components["schemas"]["CustomerGroupId"];
                 sort?: "newest" | "oldest" | "name_asc" | "name_desc";
             };
             header?: never;
@@ -26374,6 +26390,11 @@ export interface operations {
                 market?: components["schemas"]["MarketId"];
                 /** @description How many of each variant, for quantity prices; 1 without it. */
                 quantity?: number;
+                /**
+                 * @description Priced for a customer in this group (`404 customer_group_not_found`); without it,
+                 *     for a shopper who isn't signed in.
+                 */
+                group?: components["schemas"]["CustomerGroupId"];
             };
             header?: never;
             path: {

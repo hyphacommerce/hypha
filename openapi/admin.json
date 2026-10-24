@@ -1584,6 +1584,22 @@
         ],
         "type": "object"
       },
+      "AudienceDto": {
+        "additionalProperties": false,
+        "description": "Who a price list prices for: buyers signed in as a customer in any of `groups` (up to\n100, each existing, `422 customer_group_not_found`), or everyone when it's empty. A\nlist for groups never prices search documents or a shopper who isn't signed in.",
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/CustomerGroupId"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "groups"
+        ],
+        "type": "object"
+      },
       "BasisDto": {
         "description": "Known values: `flat`, `subtotal`, `weight`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
@@ -1762,12 +1778,13 @@
         "x-hypha-open-enum": true
       },
       "CandidateResultDto": {
-        "description": "What became of one price list for a variant.\n\nKnown values: `won`, `higher`, `tied_with_older`, `not_live`, `not_pricing`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "What became of one price list for a variant.\n\nKnown values: `won`, `higher`, `tied_with_older`, `not_live`, `not_in_audience`, `not_pricing`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "won",
           "higher",
           "tied_with_older",
           "not_live",
+          "not_in_audience",
           "not_pricing"
         ],
         "type": "string",
@@ -3366,6 +3383,17 @@
               {
                 "$ref": "#/components/schemas/AdjustmentDto",
                 "description": "`null` (the default) adjusts nothing: the list prices only the variants it has\nfixed prices for."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "audience": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AudienceDto",
+                "description": "Who it prices for; absent for everyone."
               },
               {
                 "type": "null"
@@ -8198,6 +8226,10 @@
               }
             ]
           },
+          "audience": {
+            "$ref": "#/components/schemas/AudienceDto",
+            "description": "Its customer groups, sorted; none for everyone."
+          },
           "compare_at": {
             "$ref": "#/components/schemas/CompareAtModeDto"
           },
@@ -8268,6 +8300,7 @@
           "status",
           "phase",
           "compare_at",
+          "audience",
           "markets",
           "fixed_price_count",
           "created_at",
@@ -11424,6 +11457,10 @@
                 "type": "null"
               }
             ]
+          },
+          "audience": {
+            "$ref": "#/components/schemas/AudienceDto",
+            "description": "Replaces the audience; `{\"groups\": []}` for everyone."
           },
           "compare_at": {
             "$ref": "#/components/schemas/CompareAtModeDto"
@@ -34374,6 +34411,15 @@
             }
           },
           {
+            "description": "Only those whose audience names this customer group.",
+            "in": "query",
+            "name": "group",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerGroupId"
+            }
+          },
+          {
             "in": "query",
             "name": "sort",
             "required": false,
@@ -37021,6 +37067,15 @@
               "minimum": 1,
               "type": "integer"
             }
+          },
+          {
+            "description": "Priced for a customer in this group (`404 customer_group_not_found`); without it,\nfor a shopper who isn't signed in.",
+            "in": "query",
+            "name": "group",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CustomerGroupId"
+            }
           }
         ],
         "responses": {
@@ -37090,7 +37145,7 @@
             "bearer": []
           }
         ],
-        "summary": "A product's prices in each market (or one), each variant's with every price list of\nthe market's catalog and why it won or lost: the lowest live price wins, a tie going\nto the oldest list, and the base price only when no live list prices the variant. A\nproduct that isn't active is priced too.",
+        "summary": "A product's prices in each market (or one), each variant's with every price list of\nthe market's catalog and why it won or lost: the lowest live price wins, a tie going\nto the oldest list, and the base price only when no live list prices the variant. Lists\nfor customer groups price only for a buyer in one (`group`). A product that isn't\nactive is priced too.",
         "tags": [
           "markets"
         ],

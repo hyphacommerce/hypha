@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use futures_util::future::try_join;
 use hypha_core::{
-    BasisPoints, CatalogId, CategoryId, CountryCode, Direction, Keyset, MarketId, Page,
-    PageRequest, Price, PriceListId, ProductId, Recorded, RepoError, SortKey, Timestamp, VariantId,
-    Version, Versioned, stamp_insert, stamp_update,
+    BasisPoints, CatalogId, CategoryId, CountryCode, CustomerGroupId, Direction, Keyset, MarketId,
+    Page, PageRequest, Price, PriceListId, ProductId, Recorded, RepoError, SortKey, Timestamp,
+    VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_markets::{
     Adjustment, AppliesTo, Catalog, CatalogContext, CatalogRepo, CatalogSnapshot, CompareAtMode,
@@ -506,14 +506,45 @@ pub(crate) async fn remove_catalog_products(
 
 /// `price_lists`' columns, as `price_list_from_row` reads them.
 fn price_list_columns(prefix: &str) -> String {
+    let owner = if prefix.is_empty() {
+        "price_lists."
+    } else {
+        prefix
+    };
     format!(
         "{prefix}id, {prefix}version, {prefix}name, {prefix}description, {prefix}currency,
          {prefix}kind, {prefix}status, {}, {}, {prefix}compare_at, {prefix}adjustment,
-         {prefix}applies_to, {prefix}applies_to_ids, {}",
+         {prefix}applies_to, {prefix}applies_to_ids, {},
+         ARRAY(SELECT g.group_id FROM price_list_groups g
+               WHERE g.price_list_id = {owner}id ORDER BY g.group_id) AS audience_groups",
         micros(&format!("{prefix}starts_at")),
         micros(&format!("{prefix}ends_at")),
         stamp_columns(prefix),
     )
+}
+
+/// Replaces the list's audience with `s.groups`. An unknown group is
+/// `Reference(PRICE_LIST_GROUP)`.
+async fn write_audience(tx: &impl Queries, s: &PriceListSnapshot) -> Result<(), RepoError> {
+    let groups: Vec<Uuid> = s.groups.iter().map(|g| g.as_uuid()).collect();
+    let params: [(&(dyn ToSql + Sync), Type); 2] =
+        [(&s.id.as_uuid(), Type::UUID), (&groups, Type::UUID_ARRAY)];
+    tx.query_typed(
+        "DELETE FROM price_list_groups WHERE price_list_id = $1 AND NOT (group_id = ANY($2))",
+        &params,
+    )
+    .await
+    .map_err(repo_error)?;
+    if !groups.is_empty() {
+        tx.query_typed(
+            "INSERT INTO price_list_groups (price_list_id, group_id)
+             SELECT $1, g FROM unnest($2::uuid[]) AS t (g) ON CONFLICT DO NOTHING",
+            &params,
+        )
+        .await
+        .map_err(repo_error)?;
+    }
+    Ok(())
 }
 
 impl<C: PgConnection> PriceListRepo for PgStore<C> {
@@ -634,6 +665,9 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
                      WHERE ($1::uuid IS NULL OR {position})
                        AND ($4::text IS NULL OR kind = $4)
                        AND ($5::uuid[] IS NULL OR id = ANY($5))
+                       AND ($7::uuid IS NULL OR EXISTS (
+                           SELECT 1 FROM price_list_groups g
+                           WHERE g.price_list_id = price_lists.id AND g.group_id = $7))
                        AND {phase}
                      ORDER BY {order} LIMIT $3",
                     price_list_columns(""),
@@ -646,6 +680,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
                     (&kind, Type::TEXT),
                     (&ids, Type::UUID_ARRAY),
                     (&filter.at.unix_micros(), Type::INT8),
+                    (&filter.group.map(|g| g.as_uuid()), Type::UUID),
                 ],
             )
             .await
@@ -1021,6 +1056,7 @@ pub(crate) async fn insert_price_list(
     )
     .await
     .map_err(repo_error)?;
+    write_audience(tx, s).await?;
     write_stamps(
         tx,
         "price_lists",
@@ -1069,6 +1105,7 @@ pub(crate) async fn update_price_list(
         .map_err(repo_error)?;
     let row = bumped.ok_or(RepoError::StaleVersion)?;
     let written = version_from_db(col(&row, "version")?)?;
+    write_audience(tx, s).await?;
     write_stamps(
         tx,
         "price_lists",
@@ -1190,6 +1227,10 @@ fn price_list_from_row(row: &Row) -> Result<PriceList, RepoError> {
     let status: String = col(row, "status")?;
     let compare_at: String = col(row, "compare_at")?;
     PriceList::restore(PriceListSnapshot {
+        groups: col::<Vec<Uuid>>(row, "audience_groups")?
+            .into_iter()
+            .map(CustomerGroupId::from_uuid)
+            .collect(),
         id: PriceListId::from_uuid(id),
         version: version_from_db(col(row, "version")?)?,
         stamps: stamps_from_row(row)?,

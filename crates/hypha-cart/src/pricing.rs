@@ -483,6 +483,7 @@ mod tests {
             fixed_prices: HashMap::new(),
             product_categories: HashMap::new(),
             at: hypha_core::Timestamp::UNIX_EPOCH,
+            groups: Vec::new(),
         }
     }
 

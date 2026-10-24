@@ -1,8 +1,8 @@
 use hypha_core::{
-    AuthError, BasisPoints, CatalogId, CountryCode, CountryError, Ctx, Currency, ErrorCode,
-    HasBatch, IdGenerator, Keyset, MarketId, Money, MoneyError, Page, PageRequest, PendingEvent,
-    Price, PriceListId, ProductId, RepoError, Scope, StageEvents, Subject, Timestamp, VariantId,
-    report_duplicate,
+    AuthError, BasisPoints, CatalogId, CountryCode, CountryError, Ctx, Currency, CustomerGroupId,
+    ErrorCode, HasBatch, IdGenerator, Keyset, MarketId, Money, MoneyError, Page, PageRequest,
+    PendingEvent, Price, PriceListId, ProductId, RepoError, Scope, StageEvents, Subject, Timestamp,
+    VariantId, report_duplicate,
 };
 use thiserror::Error;
 
@@ -16,8 +16,8 @@ use crate::{
     },
     filter::{FixedPriceFilter, PriceListFilter, PriceListSort},
     price_list::{
-        Adjustment, AppliesTo, CompareAtMode, EntryProblem, FixedPrice, PriceBreak, PriceListDraft,
-        PriceListKind, PriceListPhase, PriceListStatus, Window,
+        Adjustment, AppliesTo, Audience, CompareAtMode, EntryProblem, FixedPrice, PriceBreak,
+        PriceListDraft, PriceListKind, PriceListPhase, PriceListStatus, Window,
     },
     repo::keys,
 };
@@ -68,6 +68,10 @@ pub enum CommandError {
         price_list: PriceListId,
         catalogs: Vec<CatalogId>,
     },
+    /// The audience names a group that doesn't exist (storage's check: this leaf can't
+    /// see groups).
+    #[error("a customer group the audience names doesn't exist")]
+    AudienceGroupNotFound,
 }
 
 impl ErrorCode for CommandError {
@@ -88,6 +92,7 @@ impl ErrorCode for CommandError {
             CommandError::PriceListNameTaken { .. } => "price_list_name_taken",
             CommandError::TooManyPrices { .. } => "too_many_prices",
             CommandError::PriceListInUse { .. } => "price_list_in_use",
+            CommandError::AudienceGroupNotFound => "customer_group_not_found",
         }
     }
 }
@@ -337,6 +342,8 @@ pub struct CreatePriceList {
     /// `None` adjusts nothing, so the list prices only the variants it has fixed prices
     /// for.
     pub adjustment: Option<AdjustmentInput>,
+    /// The customer groups it prices for; none is everyone.
+    pub groups: Vec<CustomerGroupId>,
 }
 
 /// An adjustment as a caller sends it.
@@ -365,6 +372,7 @@ pub async fn create_price_list<P: PriceListRepo, I: IdGenerator>(
     ctx.require(Scope::PricingWrite)?;
 
     let adjustment = input.adjustment.map(adjustment).transpose()?;
+    let audience = Audience::of_groups(input.groups)?;
     let mut list = PriceList::new(
         PriceListId::from_uuid(ids.new_uuid()),
         PriceListDraft {
@@ -377,13 +385,14 @@ pub async fn create_price_list<P: PriceListRepo, I: IdGenerator>(
             ends_at: input.ends_at,
             compare_at: input.compare_at,
             adjustment,
+            audience,
         },
     )?;
     // Precise error in the normal case; the repo's unique key catches a concurrent insert.
     if let Some(taken) = name_taken(price_lists, &list).await? {
         return Err(taken);
     }
-    let written = price_lists.insert(&mut list).await;
+    let written = unknown_group(price_lists.insert(&mut list).await)?;
     report_duplicate(
         written,
         keys::PRICE_LIST_NAME,
@@ -391,6 +400,17 @@ pub async fn create_price_list<P: PriceListRepo, I: IdGenerator>(
     )
     .await?;
     Ok(list)
+}
+
+/// A write refused for an audience group that doesn't exist as `AudienceGroupNotFound`;
+/// everything else (a duplicate name included) passed on for the caller to judge.
+fn unknown_group(written: Result<(), RepoError>) -> Result<Result<(), RepoError>, CommandError> {
+    match written {
+        Err(RepoError::Reference(key)) if key == keys::PRICE_LIST_GROUP => {
+            Err(CommandError::AudienceGroupNotFound)
+        }
+        other => Ok(other),
+    }
 }
 
 /// `PriceListNameTaken` when another list has `list`'s name, ignoring case.
@@ -552,6 +572,8 @@ pub struct UpdatePriceList {
     pub ends_at: Option<Option<Timestamp>>,
     pub compare_at: Option<CompareAtMode>,
     pub adjustment: Option<Option<AdjustmentInput>>,
+    /// The audience's groups, replacing them; none is everyone.
+    pub groups: Option<Vec<CustomerGroupId>>,
 }
 
 /// Changes a price list. Its currency is fixed: catalogs and fixed prices depend on it.
@@ -592,12 +614,15 @@ pub async fn update_price_list<P: PriceListRepo>(
     if let Some(new) = input.adjustment {
         list.set_adjustment(new.map(adjustment).transpose()?);
     }
+    if let Some(groups) = input.groups {
+        list.set_audience(Audience::of_groups(groups)?);
+    }
     if input.name.is_some()
         && let Some(taken) = name_taken(lists, &list).await?
     {
         return Err(taken);
     }
-    let written = lists.update(&mut list).await;
+    let written = unknown_group(lists.update(&mut list).await)?;
     report_duplicate(written, keys::PRICE_LIST_NAME, name_taken(lists, &list)).await?;
     Ok(list)
 }
@@ -856,6 +881,8 @@ pub struct ListPriceLists {
     pub phase: Option<PriceListPhase>,
     /// Only the lists on this market's catalog; a market without one has none.
     pub market: Option<MarketId>,
+    /// Only the lists whose audience names this group.
+    pub group: Option<CustomerGroupId>,
     pub sort: PriceListSort,
 }
 
@@ -889,6 +916,7 @@ pub async fn list_price_lists<S: HasMarkets + HasCatalogs + HasPriceLists>(
         phase: input.phase,
         at,
         ids,
+        group: input.group,
     };
     Ok(ports.price_lists().list(&filter, input.sort, page).await?)
 }

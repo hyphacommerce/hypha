@@ -158,6 +158,7 @@ fn named_list(name: &str, adjustment: Option<i32>) -> CreatePriceList {
             percent,
             applies_to: AppliesTo::All,
         }),
+        groups: vec![],
     }
 }
 
@@ -1010,4 +1011,68 @@ fn market_and_catalog_writes_need_markets_write() {
             )))
         );
     }
+}
+
+#[test]
+fn an_audience_naming_a_group_that_doesnt_exist_is_refused() {
+    let ports = InMemoryPorts::default();
+    let ids = SequentialIds::default();
+    let group = hypha_core::CustomerGroupId::from_uuid(Uuid::from_u128(77));
+    let input = CreatePriceList {
+        groups: vec![group],
+        ..named_list("Wholesale", None)
+    };
+    assert_eq!(
+        block_on(create_price_list(
+            &Ctx::system(),
+            &ports.price_lists,
+            &ids,
+            input
+        ))
+        .map(|l| l.id()),
+        Err(CommandError::AudienceGroupNotFound)
+    );
+    let list = block_on(create_price_list(
+        &Ctx::system(),
+        &ports.price_lists,
+        &ids,
+        named_list("Wholesale", None),
+    ))
+    .unwrap();
+    let widen = UpdatePriceList {
+        groups: Some(vec![group]),
+        ..UpdatePriceList::default()
+    };
+    assert_eq!(
+        block_on(update_price_list(
+            &Ctx::system(),
+            &ports.price_lists,
+            list.id(),
+            widen
+        ))
+        .map(|l| l.id()),
+        Err(CommandError::AudienceGroupNotFound)
+    );
+}
+
+#[test]
+fn an_audience_names_each_group_once() {
+    let lists = InMemoryPriceListRepo::default();
+    let group = hypha_core::CustomerGroupId::from_uuid(Uuid::from_u128(77));
+    let input = CreatePriceList {
+        groups: vec![group, group],
+        ..named_list("Wholesale", None)
+    };
+    assert_eq!(
+        block_on(create_price_list(
+            &Ctx::system(),
+            &lists,
+            &SequentialIds::default(),
+            input
+        ))
+        .map(|l| l.id()),
+        Err(CommandError::PriceList(
+            PriceListError::DuplicateAudienceGroup(group)
+        ))
+    );
 }

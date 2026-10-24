@@ -2,7 +2,10 @@
 //! anything is in a cart. Priced with the cart's loaders and rules (`load_pricing`,
 //! `price_line`, `StockContext::load`), so the page, search and the cart can't disagree.
 
-use hypha_core::{CountryCode, Ctx, HasClock, MarketId, Quantity, Scope, VariantId};
+use hypha_core::{
+    CountryCode, Ctx, CustomerGroupId, HasClock, MarketId, Quantity, Scope, VariantId,
+};
+use hypha_customers::HasCustomerGroups;
 use hypha_inventory::{Availability, HasInventoryItems, HasLocations, StockContext};
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo, PriceList};
 use hypha_pricing::{
@@ -44,9 +47,11 @@ impl ProductOffer {
     }
 }
 
-/// `product`'s prices and stock in `country`'s market. A country no market sells to
-/// isn't an error: the product simply isn't sold there. The caller decides whether the
-/// product may be shown at all (status, channel).
+/// `product`'s prices and stock in `country`'s market, for the caller: a signed-in
+/// customer (`Ctx::customer`) sees the lists for their groups too, anyone else the
+/// public prices. A country no market sells to isn't an error: the product simply isn't
+/// sold there. The caller decides whether the product may be shown at all (status,
+/// channel).
 pub async fn price_product<S>(
     ctx: &Ctx,
     ports: &S,
@@ -54,7 +59,13 @@ pub async fn price_product<S>(
     country: &str,
 ) -> Result<ProductOffer, CommandError>
 where
-    S: HasMarkets + HasCatalogs + HasPriceLists + HasInventoryItems + HasLocations + HasClock,
+    S: HasMarkets
+        + HasCatalogs
+        + HasPriceLists
+        + HasCustomerGroups
+        + HasInventoryItems
+        + HasLocations
+        + HasClock,
 {
     ctx.require(Scope::ProductsRead)?;
     let country = CountryCode::new(country)?;
@@ -76,8 +87,13 @@ where
     };
     let variants: Vec<VariantId> = product.variants().iter().map(|v| v.id()).collect();
     let stock = StockContext::load(ports, market.id(), &variants).await?;
+    let groups = match ctx.customer() {
+        Some(customer) => crate::buyer_groups(ports, customer).await?,
+        None => Vec::new(),
+    };
     // The market as found by country, not read again.
-    let pricing = load_pricing_for(ports, market.clone(), &[product.id()], &variants).await?;
+    let pricing =
+        load_pricing_for(ports, market.clone(), &[product.id()], &variants, &groups).await?;
     let variants = variants
         .into_iter()
         .map(|variant| {
@@ -115,15 +131,17 @@ pub struct MarketPrices {
     pub variants: Vec<(VariantId, PriceExplanation)>,
 }
 
-/// `product`'s prices for `quantity` of each variant, in `market` or every market, with
-/// every price list of each market's catalog and what became of it. Unlike a shopper's
-/// read, a product that isn't active is priced too: the admin sees what it would cost.
+/// `product`'s prices for `quantity` of each variant, in `market` or every market, for a
+/// buyer in `groups` (none: a shopper who isn't signed in), with every price list of each
+/// market's catalog and what became of it. Unlike a shopper's read, a product that isn't
+/// active is priced too: the admin sees what it would cost.
 pub async fn explain_product_prices<S>(
     ctx: &Ctx,
     ports: &S,
     product: &Product,
     market: Option<MarketId>,
     quantity: Quantity,
+    groups: &[CustomerGroupId],
 ) -> Result<Vec<MarketPrices>, CommandError>
 where
     S: HasMarkets + HasCatalogs + HasPriceLists + HasClock,
@@ -142,7 +160,8 @@ where
     let variants: Vec<VariantId> = product.variants().iter().map(|v| v.id()).collect();
     let mut found = Vec::with_capacity(markets.len());
     for market in markets {
-        let pricing = load_pricing_for(ports, market.clone(), &[product.id()], &variants).await?;
+        let pricing =
+            load_pricing_for(ports, market.clone(), &[product.id()], &variants, groups).await?;
         let explained = product
             .variants()
             .iter()

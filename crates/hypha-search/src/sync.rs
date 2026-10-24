@@ -325,8 +325,9 @@ impl Sources {
         ids: &[ProductId],
     ) -> Result<Vec<SearchDocument>, SyncError> {
         let market_id = market.id();
-        // The market as the caller has it, not read again.
-        let pricing = load_pricing_for(ports, market, ids, &self.variants).await?;
+        // The market as the caller has it, not read again. Every shopper shares a
+        // document, so it carries public prices: no customer groups.
+        let pricing = load_pricing_for(ports, market, ids, &self.variants, &[]).await?;
         self.stock.locations = ports.locations().serving(market_id).await?;
         let none: &[ChannelId] = &[];
         let no_categories: &[CategoryId] = &[];

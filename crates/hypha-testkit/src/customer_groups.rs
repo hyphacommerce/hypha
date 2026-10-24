@@ -22,7 +22,9 @@ pub(crate) type SharedGroupMembers = Arc<Mutex<GroupMembers>>;
 
 #[derive(Default)]
 pub struct InMemoryCustomerGroupRepo {
-    pub(crate) groups: Table<CustomerGroupId, CustomerGroup>,
+    /// Shared with the price list repo, which refuses an audience naming a group that
+    /// doesn't exist, as a database's reference would.
+    pub(crate) groups: Arc<Table<CustomerGroupId, CustomerGroup>>,
     pub(crate) members: SharedGroupMembers,
     pub(crate) outbox: InMemoryOutbox,
 }

@@ -1,9 +1,9 @@
 use std::collections::{BTreeSet, HashSet};
 
 use hypha_core::{
-    BasisPoints, CategoryId, Currency, PendingEvent, Price, PriceListId, ProductId, Recorded,
-    Stamped, Stamps, Subject, Timestamp, VariantId, Version, Versioned, optional_text,
-    required_text,
+    BasisPoints, CategoryId, Currency, CustomerGroupId, PendingEvent, Price, PriceListId,
+    ProductId, Recorded, Stamped, Stamps, Subject, Timestamp, VariantId, Version, Versioned,
+    optional_text, required_text,
 };
 
 use crate::{
@@ -198,6 +198,54 @@ impl Adjustment {
     }
 }
 
+/// Who a list prices for: everyone, or only buyers in at least one of its customer
+/// groups. A struct rather than a bare list so other audiences (channels) can join it
+/// without reshaping the field.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Audience {
+    /// Sorted; empty is everyone.
+    groups: Vec<CustomerGroupId>,
+}
+
+impl Audience {
+    /// Most groups one audience names.
+    pub const MAX_GROUPS: usize = 100;
+
+    pub fn everyone() -> Self {
+        Self::default()
+    }
+
+    /// Buyers in any of `groups`: each once, at most `MAX_GROUPS`; none is everyone.
+    /// Groups are another domain's: storage refuses one that doesn't exist.
+    pub fn of_groups(mut groups: Vec<CustomerGroupId>) -> Result<Self, PriceListError> {
+        if groups.len() > Self::MAX_GROUPS {
+            return Err(PriceListError::TooManyAudienceGroups {
+                max: Self::MAX_GROUPS,
+            });
+        }
+        groups.sort();
+        if let Some(twice) = groups.windows(2).find(|w| w[0] == w[1]) {
+            return Err(PriceListError::DuplicateAudienceGroup(twice[0]));
+        }
+        Ok(Self { groups })
+    }
+
+    /// Sorted; empty for everyone.
+    pub fn groups(&self) -> &[CustomerGroupId] {
+        &self.groups
+    }
+
+    pub fn is_everyone(&self) -> bool {
+        self.groups.is_empty()
+    }
+
+    /// Whether a buyer in `groups` (none for a shopper who isn't signed in, or a page
+    /// every shopper shares) is in it.
+    pub fn includes(&self, groups: &[CustomerGroupId]) -> bool {
+        self.groups.is_empty() || self.groups.iter().any(|g| groups.contains(g))
+    }
+}
+
 /// When a list may price: from `starts_at` (inclusive) to `ends_at` (exclusive), either
 /// end open when `None`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -250,6 +298,7 @@ pub struct PriceList {
     window: Window,
     compare_at: CompareAtMode,
     adjustment: Option<Adjustment>,
+    audience: Audience,
     changes: Changes,
 }
 
@@ -329,11 +378,12 @@ pub struct PriceListDraft {
     pub ends_at: Option<Timestamp>,
     pub compare_at: CompareAtMode,
     pub adjustment: Option<Adjustment>,
+    pub audience: Audience,
 }
 
 impl PriceListDraft {
-    /// An active `override` list without a window or an adjustment, showing compare-at
-    /// prices adjusted: the defaults a new list starts from.
+    /// An active `override` list for everyone, without a window or an adjustment, showing
+    /// compare-at prices adjusted: the defaults a new list starts from.
     pub fn new(name: &str, currency: Currency) -> Self {
         Self {
             name: name.to_string(),
@@ -345,6 +395,7 @@ impl PriceListDraft {
             ends_at: None,
             compare_at: CompareAtMode::Adjusted,
             adjustment: None,
+            audience: Audience::everyone(),
         }
     }
 
@@ -374,6 +425,7 @@ impl PriceList {
             window: Window::new(draft.starts_at, draft.ends_at)?,
             compare_at: draft.compare_at,
             adjustment: draft.adjustment,
+            audience: draft.audience,
             changes: Changes::default(),
         };
         list.changes.created = true;
@@ -477,6 +529,13 @@ impl PriceList {
         }
     }
 
+    pub fn set_audience(&mut self, audience: Audience) {
+        if self.audience != audience {
+            self.audience = audience;
+            self.changed("audience");
+        }
+    }
+
     /// Records `price_list.deleted`; the repository removes it (`PriceListRepo::delete`).
     pub fn delete(&mut self) {
         self.changes.deleted = true;
@@ -499,6 +558,12 @@ impl PriceList {
     /// Whether it prices anything at `at`: active, and within its window.
     pub fn is_live(&self, at: Timestamp) -> bool {
         self.phase(at) == PriceListPhase::Active
+    }
+
+    /// Whether it prices for a buyer in `groups` at `at`: live, and they're in its
+    /// audience.
+    pub fn is_live_for(&self, at: Timestamp, groups: &[CustomerGroupId]) -> bool {
+        self.is_live(at) && self.audience.includes(groups)
     }
 
     pub fn id(&self) -> PriceListId {
@@ -535,6 +600,10 @@ impl PriceList {
 
     pub fn adjustment(&self) -> Option<&Adjustment> {
         self.adjustment.as_ref()
+    }
+
+    pub fn audience(&self) -> &Audience {
+        &self.audience
     }
 }
 
@@ -661,6 +730,8 @@ pub struct PriceListSnapshot {
     pub ends_at: Option<Timestamp>,
     pub compare_at: CompareAtMode,
     pub adjustment: Option<Adjustment>,
+    /// The audience's groups, in any order.
+    pub groups: Vec<CustomerGroupId>,
 }
 
 impl PriceList {
@@ -678,6 +749,7 @@ impl PriceList {
             ends_at: self.window.ends_at,
             compare_at: self.compare_at,
             adjustment: self.adjustment.clone(),
+            groups: self.audience.groups.clone(),
         }
     }
 
@@ -698,6 +770,7 @@ impl PriceList {
                 .adjustment
                 .map(|a| Adjustment::new(a.percent, a.applies_to))
                 .transpose()?,
+            audience: Audience::of_groups(s.groups)?,
             changes: Changes::default(),
         })
     }
@@ -1043,5 +1116,52 @@ mod tests {
             PriceList::restore(snapshot),
             Err(PriceListError::EndsNotAfterStart)
         );
+    }
+
+    fn gid(n: u128) -> CustomerGroupId {
+        CustomerGroupId::from_uuid(Uuid::from_u128(n))
+    }
+
+    #[test]
+    fn an_empty_audience_is_everyone() {
+        assert!(Audience::everyone().includes(&[]));
+        assert!(Audience::of_groups(vec![]).unwrap().is_everyone());
+    }
+
+    #[test]
+    fn an_audience_includes_a_buyer_in_any_of_its_groups() {
+        let audience = Audience::of_groups(vec![gid(2), gid(1)]).unwrap();
+        assert_eq!(audience.groups(), [gid(1), gid(2)]);
+        assert!(audience.includes(&[gid(3), gid(2)]));
+        assert!(!audience.includes(&[gid(3)]));
+        assert!(!audience.includes(&[]));
+    }
+
+    #[test]
+    fn an_audience_names_a_group_once() {
+        assert_eq!(
+            Audience::of_groups(vec![gid(1), gid(2), gid(1)]),
+            Err(PriceListError::DuplicateAudienceGroup(gid(1)))
+        );
+    }
+
+    #[test]
+    fn an_audience_names_at_most_100_groups() {
+        assert!(Audience::of_groups((0..100).map(gid).collect()).is_ok());
+        assert_eq!(
+            Audience::of_groups((0..101).map(gid).collect()),
+            Err(PriceListError::TooManyAudienceGroups { max: 100 })
+        );
+    }
+
+    #[test]
+    fn a_new_audience_is_a_change() {
+        let mut list = eur_list();
+        list.take_events();
+        list.set_audience(Audience::of_groups(vec![gid(1)]).unwrap());
+        let events = list.take_events();
+        assert_eq!(events[0].data["fields"], serde_json::json!(["audience"]));
+        list.set_audience(Audience::of_groups(vec![gid(1)]).unwrap());
+        assert!(list.take_events().is_empty());
     }
 }

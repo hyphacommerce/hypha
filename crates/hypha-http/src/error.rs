@@ -722,7 +722,8 @@ impl From<hypha_markets::CommandError> for ApiError {
             | E::PriceListNotFound(_)
             | E::MarketNotFound(_)
             | E::CurrencyMismatch { .. }
-            | E::TooManyPrices { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            | E::TooManyPrices { .. }
+            | E::AudienceGroupNotFound => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
@@ -1044,9 +1045,10 @@ impl From<hypha_customers::CommandError> for ApiError {
             E::Auth(_) => StatusCode::FORBIDDEN,
             // Customer and address IDs only ever arrive in URLs.
             E::CustomerNotFound(_) | E::Customer(C::AddressNotFound(_)) => StatusCode::NOT_FOUND,
-            E::CustomerExists { .. } | E::GroupHandleTaken(_) | E::GroupNameTaken(_) => {
-                StatusCode::CONFLICT
-            }
+            E::CustomerExists { .. }
+            | E::GroupHandleTaken(_)
+            | E::GroupNameTaken(_)
+            | E::GroupInUse(_) => StatusCode::CONFLICT,
             // A group in a body (a customer's groups) unless a route says it's its URL's.
             E::GroupNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Email(_)

@@ -754,6 +754,7 @@ where
         + HasMarkets
         + HasCatalogs
         + HasPriceLists
+        + hypha_customers::HasCustomerGroups
         + HasInventoryItems
         + HasLocations
         + HasCustomFieldDefinitions

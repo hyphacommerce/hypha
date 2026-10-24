@@ -2,15 +2,16 @@ use std::collections::{HashMap, HashSet};
 
 use hypha_categories::{Category, CategoryRepo, HasCategories, NewCategory};
 use hypha_core::{
-    BasisPoints, CatalogId, CategoryId, CountryCode, Currency, Handle, HasBatch, Keyset, MarketId,
-    Money, Page, PageLimit, PageRequest, Price, PriceListId, ProductId, RepoError, Timestamp,
-    VariantId, Version, Versioned,
+    BasisPoints, CatalogId, CategoryId, CountryCode, Currency, CustomerGroupId, Handle, HasBatch,
+    Keyset, MarketId, Money, Page, PageLimit, PageRequest, Price, PriceListId, ProductId,
+    RepoError, Timestamp, VariantId, Version, Versioned,
 };
+use hypha_customers::{CustomerGroup, CustomerGroupRepo, HasCustomerGroups, StageCustomerGroups};
 use hypha_markets::{
-    Adjustment, AppliesTo, Catalog, CatalogContext, CatalogRepo, CompareAtMode, FixedPrice,
-    FixedPriceFilter, HasCatalogs, HasPriceLists, Market, MarketRepo, PriceBreak, PriceList,
-    PriceListDraft, PriceListFilter, PriceListKind, PriceListPhase, PriceListRepo, PriceListSort,
-    PriceListStatus, StagePriceListSchedule, repo::keys,
+    Adjustment, AppliesTo, Audience, Catalog, CatalogContext, CatalogRepo, CompareAtMode,
+    FixedPrice, FixedPriceFilter, HasCatalogs, HasPriceLists, Market, MarketRepo, PriceBreak,
+    PriceList, PriceListDraft, PriceListFilter, PriceListKind, PriceListPhase, PriceListRepo,
+    PriceListSort, PriceListStatus, StagePriceListSchedule, repo::keys,
 };
 use hypha_products::{HasProducts, Product, ProductRepo, VariantPatch};
 use uuid::Uuid;
@@ -609,6 +610,7 @@ async fn price_list_round_trips<R: PriceListRepo>(repo: &R) {
             ends_at: Some(Timestamp::from_unix_micros(2_000_000)),
             compare_at: CompareAtMode::Hidden,
             adjustment: Some(Adjustment::all(BasisPoints::new(-2000).unwrap())),
+            audience: Audience::everyone(),
         },
     )
     .unwrap();
@@ -923,15 +925,145 @@ where
 }
 
 /// Runs the scenarios that read other domains' records, as the adapter stores them: the
-/// products and categories fixed prices are filtered by, and the category tree.
+/// products and categories fixed prices are filtered by, the category tree, and the
+/// customer groups audiences name.
 pub async fn price_list_joins<S>(make: impl AsyncFn() -> S)
 where
-    S: HasProducts + HasCategories + HasPriceLists,
+    S: HasProducts + HasCategories + HasPriceLists + HasCustomerGroups + HasBatch,
+    S::Batch: StageCustomerGroups,
 {
+    scenario("price list: an audience's groups round-trip and filter the list");
+    audience_groups(&make().await).await;
+    scenario("price list: an audience names only groups that exist, and keeps them");
+    audience_references(&make().await).await;
     scenario("price list: fixed prices filtered by product, category and text");
     fixed_price_filters(&make().await).await;
     scenario("price list: a product's categories come with their ancestors");
     product_categories(&make().await).await;
+}
+
+fn group(n: u128) -> CustomerGroup {
+    CustomerGroup::new(
+        CustomerGroupId::from_uuid(Uuid::from_u128(n)),
+        &format!("Group {n}"),
+        Handle::new(&format!("group-{n}")).unwrap(),
+        None,
+    )
+    .unwrap()
+}
+
+fn for_groups(n: u128, groups: &[&CustomerGroup]) -> PriceList {
+    let mut list = named_list(n, &format!("For groups {n}"));
+    list.set_audience(Audience::of_groups(groups.iter().map(|g| g.id()).collect()).unwrap());
+    list
+}
+
+async fn audience_groups<S: HasPriceLists + HasCustomerGroups>(ports: &S) {
+    let (mut wholesale, mut vip) = (group(1), group(2));
+    ports
+        .customer_groups()
+        .insert(&mut wholesale)
+        .await
+        .unwrap();
+    ports.customer_groups().insert(&mut vip).await.unwrap();
+    let repo = ports.price_lists();
+    let mut both = for_groups(1, &[&vip, &wholesale]);
+    repo.insert(&mut both).await.unwrap();
+    let mut public = named_list(2, "Public");
+    repo.insert(&mut public).await.unwrap();
+    let stored = repo.get(both.id()).await.unwrap().unwrap();
+    assert_eq!(stored.audience().groups(), [wholesale.id(), vip.id()]);
+    assert_eq!(stored, both);
+
+    // Narrowed to one group, then to everyone.
+    both.set_audience(Audience::of_groups(vec![vip.id()]).unwrap());
+    repo.update(&mut both).await.unwrap();
+    assert_eq!(
+        repo.get(both.id())
+            .await
+            .unwrap()
+            .unwrap()
+            .audience()
+            .groups(),
+        [vip.id()]
+    );
+    let first = page(None, 10);
+    let named = |g: &CustomerGroup| PriceListFilter {
+        group: Some(g.id()),
+        ..PriceListFilter::everything(Timestamp::from_unix_micros(0))
+    };
+    let found = repo
+        .list(&named(&vip), PriceListSort::Newest, first.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        found.items.iter().map(|l| l.id()).collect::<Vec<_>>(),
+        [both.id()]
+    );
+    let found = repo
+        .list(&named(&wholesale), PriceListSort::Newest, first)
+        .await
+        .unwrap();
+    assert!(found.items.is_empty());
+    both.set_audience(Audience::everyone());
+    repo.update(&mut both).await.unwrap();
+    assert!(
+        repo.get(both.id())
+            .await
+            .unwrap()
+            .unwrap()
+            .audience()
+            .is_everyone()
+    );
+}
+
+async fn audience_references<S>(ports: &S)
+where
+    S: HasPriceLists + HasCustomerGroups + HasBatch,
+    S::Batch: StageCustomerGroups,
+{
+    let mut wholesale = group(1);
+    ports
+        .customer_groups()
+        .insert(&mut wholesale)
+        .await
+        .unwrap();
+    let repo = ports.price_lists();
+    let gone = group(9);
+    assert_eq!(
+        repo.insert(&mut for_groups(1, &[&gone])).await,
+        Err(RepoError::Reference(keys::PRICE_LIST_GROUP))
+    );
+    let mut list = for_groups(2, &[&wholesale]);
+    repo.insert(&mut list).await.unwrap();
+    let mut widened = list.clone();
+    widened.set_audience(Audience::of_groups(vec![wholesale.id(), gone.id()]).unwrap());
+    assert_eq!(
+        repo.update(&mut widened).await,
+        Err(RepoError::Reference(keys::PRICE_LIST_GROUP))
+    );
+    assert_eq!(repo.get(list.id()).await.unwrap(), Some(list.clone()));
+
+    // A group an audience names stays; free again, it goes.
+    let mut batch = ports.batch();
+    batch.delete_group(wholesale.id());
+    assert_eq!(
+        ports.commit(batch).await,
+        Err(RepoError::Reference(keys::PRICE_LIST_GROUP))
+    );
+    assert!(
+        ports
+            .customer_groups()
+            .get(wholesale.id())
+            .await
+            .unwrap()
+            .is_some()
+    );
+    list.set_audience(Audience::everyone());
+    repo.update(&mut list).await.unwrap();
+    let mut batch = ports.batch();
+    batch.delete_group(wholesale.id());
+    ports.commit(batch).await.unwrap();
 }
 
 fn product_with_sku(n: u128, title: &str, sku: &str) -> Product {

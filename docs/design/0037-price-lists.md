@@ -468,3 +468,17 @@ Where steps 4 and 5 differ from the sections above:
   A search that filters or counts `on_sale` is always the built-in engine's: a search
   app indexes from webhooks and can't know what's on sale. Migration 0079 empties the
   index (the host rebuilds it on start), as 0039 did.
+- **The audience** is `{"groups": [...]}` on create, `PATCH` (replacing it; `[]` for
+  everyone) and reads, sorted, at most 100, each once (`too_many_audience_groups`,
+  `duplicate_audience_group`). Markets can't see groups, so storage checks they exist
+  (`price_list_groups`' reference: `422 customer_group_not_found`) and refuses deleting
+  one an audience names as `409 customer_group_in_use` (not `group_in_use`: customers'
+  codes all start `customer_group_`).
+- **The buyer's groups** reach pricing as plain IDs: `PricingContext.groups`, passed to
+  `load_pricing` / `load_pricing_for`, which load fixed prices only for lists live for
+  them. `hypha-cart` reads them (`buyer_groups`, from the cart's customer, or
+  `Ctx::customer` for a product read sent with a customer session); no new crate edge.
+  Search documents and reads without a session pass none. A list outside the buyer's
+  audience is the candidate result `not_in_audience`; `GET /admin/products/{id}/prices`
+  takes `group` to price for a customer in it (`404 customer_group_not_found`), and
+  `GET /admin/price-lists` takes `group` too.

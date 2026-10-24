@@ -1,4 +1,6 @@
-use hypha_core::{CountryCode, Currency, ErrorCode, MoneyError, PriceListId, TextError};
+use hypha_core::{
+    CountryCode, Currency, CustomerGroupId, ErrorCode, MoneyError, PriceListId, TextError,
+};
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum MarketError {
@@ -56,6 +58,10 @@ pub enum PriceListError {
     /// Every entry's problem, by its position in the request.
     #[error("{} fixed price(s) are invalid", .0.len())]
     InvalidFixedPrices(Vec<crate::price_list::EntryProblem>),
+    #[error("an audience names at most {max} customer groups")]
+    TooManyAudienceGroups { max: usize },
+    #[error("customer group {0} is listed twice in the audience")]
+    DuplicateAudienceGroup(CustomerGroupId),
 }
 
 impl ErrorCode for MarketError {
@@ -97,6 +103,8 @@ impl ErrorCode for PriceListError {
             PriceListError::TooManyTargets { .. } => "too_many_adjustment_targets",
             PriceListError::DuplicateTarget(_) => "duplicate_adjustment_target",
             PriceListError::InvalidFixedPrices(_) => "fixed_prices_invalid",
+            PriceListError::TooManyAudienceGroups { .. } => "too_many_audience_groups",
+            PriceListError::DuplicateAudienceGroup(_) => "duplicate_audience_group",
         }
     }
 }

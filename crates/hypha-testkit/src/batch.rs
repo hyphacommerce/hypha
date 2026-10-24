@@ -715,6 +715,11 @@ impl HasBatch for InMemoryPorts {
                         update_row(&mut groups, group.id(), &mut group, &unique_group)?
                     }
                     Staged::DeletedCustomerGroup(id) => {
+                        if self.price_lists.names_group(id) {
+                            return Err(RepoError::Reference(
+                                hypha_markets::repo::keys::PRICE_LIST_GROUP,
+                            ));
+                        }
                         groups.remove(&id);
                         group_members.remove(&id);
                     }

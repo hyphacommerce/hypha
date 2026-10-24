@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    CategoryId, Currency, Price, PriceListId, ProductId, Quantity, Timestamp, VariantId,
+    CategoryId, Currency, CustomerGroupId, Price, PriceListId, ProductId, Quantity, Timestamp,
+    VariantId,
 };
 use hypha_markets::{
     Adjustment, Catalog, CompareAtMode, FixedPrice, Market, PriceBreak, PriceList, PriceListKind,
@@ -34,6 +35,10 @@ pub struct PricingContext {
     pub product_categories: HashMap<ProductId, HashSet<CategoryId>>,
     /// The moment prices are for: a list prices only while its window is open then.
     pub at: Timestamp,
+    /// The buyer's customer groups: a list for groups prices only for a buyer in one of
+    /// them. Empty for a shopper who isn't signed in and for what every shopper shares
+    /// (search documents, cached pages).
+    pub groups: Vec<CustomerGroupId>,
 }
 
 impl PricingContext {
@@ -48,6 +53,7 @@ impl PricingContext {
             fixed_prices: HashMap::new(),
             product_categories: HashMap::new(),
             at,
+            groups: Vec::new(),
         }
     }
 }
@@ -94,6 +100,8 @@ pub enum CandidateResult {
     TiedWithOlder,
     /// Draft, not started yet or ended.
     NotLive(PriceListPhase),
+    /// Live, but for customer groups the buyer isn't in.
+    NotInAudience,
     /// No fixed price for the variant, and no adjustment covering its product.
     NotPricing,
 }
@@ -128,8 +136,9 @@ struct Offer<'a> {
 /// Price of a variant at `quantity` in the context's market, at the context's time.
 ///
 /// 1. The market's catalog must include the product, otherwise it's not available there.
-/// 2. Every live list on the catalog that prices the variant (a fixed price for it, or an
-///    adjustment reaching its product) offers its price for `quantity` (its best break
+/// 2. Every live list on the catalog whose audience includes the buyer and that prices
+///    the variant (a fixed price for it, or an adjustment reaching its product) offers
+///    its price for `quantity` (its best break
 ///    at or below it, else its fixed price, else the base price adjusted); the lowest
 ///    wins, a tie going to the oldest list.
 /// 3. With no offer, the base price is the price.
@@ -202,6 +211,14 @@ fn evaluate(
                 price_list: list_id,
                 price: None,
                 result: CandidateResult::NotLive(phase),
+            });
+            continue;
+        }
+        if !list.audience().includes(&pricing.groups) {
+            candidates.push(Candidate {
+                price_list: list_id,
+                price: None,
+                result: CandidateResult::NotInAudience,
             });
             continue;
         }

@@ -5,9 +5,10 @@ use std::collections::HashMap;
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_cart::explain_product_prices;
 use hypha_core::{
-    CatalogId, CategoryId, Clock, CountryCode, Ctx, Currency, ErrorCode, Keyset, MarketId, Money,
-    PriceListId, ProductId, Quantity, SortKey, Stamped, Timestamp, VariantId,
+    CatalogId, CategoryId, Clock, CountryCode, Ctx, Currency, CustomerGroupId, ErrorCode, Keyset,
+    MarketId, Money, PriceListId, ProductId, Quantity, SortKey, Stamped, Timestamp, VariantId,
 };
+use hypha_customers::{CustomerGroupRepo, HasCustomerGroups};
 use hypha_markets::{
     AdjustmentInput, AppliesTo, Catalog, CatalogContext, CatalogRepo, CompareAtMode, CreateCatalog,
     CreateMarket, CreatePriceList, FixedPriceFilter, HasCatalogs, HasMarkets, HasPriceLists,
@@ -467,6 +468,18 @@ pub struct CreatePriceListRequest {
     /// fixed prices for.
     #[serde(default)]
     adjustment: Option<AdjustmentDto>,
+    /// Who it prices for; absent for everyone.
+    #[serde(default)]
+    audience: Option<AudienceDto>,
+}
+
+/// Who a price list prices for: buyers signed in as a customer in any of `groups` (up to
+/// 100, each existing, `422 customer_group_not_found`), or everyone when it's empty. A
+/// list for groups never prices search documents or a shopper who isn't signed in.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AudienceDto {
+    groups: Vec<CustomerGroupId>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -486,6 +499,8 @@ pub struct PriceListResponse {
     compare_at: CompareAtModeDto,
     /// `null` without one: the list prices only its fixed variants.
     adjustment: Option<AdjustmentDto>,
+    /// Its customer groups, sorted; none for everyone.
+    audience: AudienceDto,
     /// The markets whose catalogs hold it.
     markets: Vec<MarketId>,
     /// How many fixed prices it has.
@@ -564,6 +579,9 @@ impl PriceListResponse {
                 percent_bps: a.percent().value(),
                 applies_to: a.applies_to().into(),
             }),
+            audience: AudienceDto {
+                groups: l.audience().groups().to_vec(),
+            },
             markets,
             fixed_price_count,
             created_at,
@@ -639,6 +657,7 @@ pub async fn create_price_list_handler<S: Storage>(
         ends_at: req.ends_at.map(|i| i.0),
         compare_at: req.compare_at.map_or(CompareAtMode::Adjusted, Into::into),
         adjustment: req.adjustment.map(Into::into),
+        groups: req.audience.unwrap_or_default().groups,
     };
     let list = create_price_list(&ctx, ports.price_lists(), &state.ids, input).await?;
     Ok((
@@ -913,6 +932,9 @@ pub struct PriceListFilters {
     status: Option<PriceListPhaseDto>,
     /// Only those on this market's catalog.
     market: Option<MarketId>,
+    /// Only those whose audience names this customer group.
+    #[param(value_type = Option<CustomerGroupId>)]
+    group: Option<CustomerGroupId>,
     #[param(inline)]
     sort: Option<PriceListSortDto>,
 }
@@ -978,6 +1000,7 @@ pub async fn list_price_lists_handler<S: Storage>(
         kind: filters.kind.map(Into::into),
         phase: filters.status.map(Into::into),
         market: filters.market,
+        group: filters.group,
         sort,
     };
     let now = state.clock.now();
@@ -1070,6 +1093,10 @@ pub struct UpdatePriceListRequest {
     #[serde(default, deserialize_with = "patch::nullable")]
     #[schema(value_type = Option<AdjustmentDto>, required = false)]
     adjustment: Option<Option<AdjustmentDto>>,
+    /// Replaces the audience; `{"groups": []}` for everyone.
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = AudienceDto, required = false)]
+    audience: Option<AudienceDto>,
 }
 
 /// Changes a price list; its currency is fixed.
@@ -1098,6 +1125,7 @@ pub async fn update_price_list_handler<S: Storage>(
         ends_at: req.ends_at.map(|t| t.map(|i| i.0)),
         compare_at: req.compare_at.map(Into::into),
         adjustment: req.adjustment.map(|a| a.map(Into::into)),
+        groups: req.audience.map(|a| a.groups),
     };
     let list = update_price_list(&ctx, ports.price_lists(), id, input)
         .await
@@ -1332,6 +1360,10 @@ pub struct ProductPricesParams {
     /// How many of each variant, for quantity prices; 1 without it.
     #[param(minimum = 1)]
     quantity: Option<u32>,
+    /// Priced for a customer in this group (`404 customer_group_not_found`); without it,
+    /// for a shopper who isn't signed in.
+    #[param(value_type = Option<CustomerGroupId>)]
+    group: Option<CustomerGroupId>,
 }
 
 /// What became of one price list for a variant.
@@ -1346,6 +1378,8 @@ pub enum CandidateResultDto {
     TiedWithOlder,
     /// Draft, not started yet, or ended (`phase` says which).
     NotLive,
+    /// Live, but for customer groups the buyer (the `group` asked about) isn't in.
+    NotInAudience,
     /// No fixed price for the variant, and no adjustment reaching its product.
     NotPricing,
 }
@@ -1406,8 +1440,9 @@ pub struct ProductPricesResponse {
 
 /// A product's prices in each market (or one), each variant's with every price list of
 /// the market's catalog and why it won or lost: the lowest live price wins, a tie going
-/// to the oldest list, and the base price only when no live list prices the variant. A
-/// product that isn't active is priced too.
+/// to the oldest list, and the base price only when no live list prices the variant. Lists
+/// for customer groups price only for a buyer in one (`group`). A product that isn't
+/// active is priced too.
 #[utoipa::path(
     get,
     path = "/admin/products/{id}/prices",
@@ -1428,7 +1463,24 @@ pub async fn product_prices_handler<S: Storage>(
     let product = hypha_products::get_product(&ctx, ports.products(), id)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("product_not_found"))?;
-    let markets = explain_product_prices(&ctx, &ports, &product, params.market, quantity)
+    let groups = match params.group {
+        Some(group) => {
+            let found = ports
+                .customer_groups()
+                .get(group)
+                .await
+                .map_err(hypha_customers::CommandError::from)?;
+            if found.is_none() {
+                return Err(
+                    ApiError::from(hypha_customers::CommandError::GroupNotFound(group))
+                        .not_found_if("customer_group_not_found"),
+                );
+            }
+            vec![group]
+        }
+        None => Vec::new(),
+    };
+    let markets = explain_product_prices(&ctx, &ports, &product, params.market, quantity, &groups)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("market_not_found"))?;
     let now = state.clock.now();
@@ -1478,6 +1530,9 @@ pub async fn product_prices_handler<S: Storage>(
                                             CandidateResultDto::TiedWithOlder
                                         }
                                         CandidateResult::NotLive(_) => CandidateResultDto::NotLive,
+                                        CandidateResult::NotInAudience => {
+                                            CandidateResultDto::NotInAudience
+                                        }
                                         CandidateResult::NotPricing => {
                                             CandidateResultDto::NotPricing
                                         }

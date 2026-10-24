@@ -1159,6 +1159,27 @@ contains "out again" '"groups":[]'
 step "every group" 200 - "$BASE/admin/customer-groups"
 contains "one" '"handle":"wholesale"'
 step "an unknown group" 404 customer_group_not_found "$BASE/admin/customer-groups/cgrp_00000000000000000000000000000063"
+step "trade prices, for the group" 201 - -X POST "$BASE/admin/price-lists" -H "$JSON" \
+    -d "{\"name\":\"Trade prices\",\"currency\":\"EUR\",\"adjustment\":{\"percent_bps\":-3000},\"audience\":{\"groups\":[\"$WHOLESALE\"]}}"
+TRADE=$(id)
+contains "its audience" "\"audience\":{\"groups\":[\"$WHOLESALE\"]}"
+step "an audience of a group that doesn't exist" 422 customer_group_not_found -X POST "$BASE/admin/price-lists" -H "$JSON" \
+    -d '{"name":"Nobody","currency":"EUR","audience":{"groups":["cgrp_00000000000000000000000000000063"]}}'
+step "the market's catalog holds it" 200 - -X POST "$BASE/admin/catalogs/$CATALOG/price-lists" -H "$JSON" \
+    -d "{\"price_list\":\"$TRADE\"}"
+step "the group's lists" 200 - "$BASE/admin/price-lists?group=$WHOLESALE"
+contains "trade prices" '"name":"Trade prices"'
+step "the mug for anyone" 200 - "$BASE/admin/products/$MUG/prices?market=$MARKET"
+contains "the trade list isn't theirs" '"result":"not_in_audience"'
+step "the mug for the group" 200 - "$BASE/admin/products/$MUG/prices?market=$MARKET&group=$WHOLESALE"
+contains "30% off" "\"price\":{\"amount\":700,\"currency\":\"EUR\"},\"compare_at_price\":null,\"on_sale\":false,\"price_list\":\"$TRADE\""
+step "for a group that doesn't exist" 404 customer_group_not_found \
+    "$BASE/admin/products/$MUG/prices?group=cgrp_00000000000000000000000000000063"
+step "a group a list names stays" 409 customer_group_in_use -X DELETE "$BASE/admin/customer-groups/$WHOLESALE"
+step "the lamp, for a shopper not signed in" 200 - "$BASE/storefront/products/$LAMP?country=HR"
+contains "the public price" '"price":{"amount":900,"currency":"EUR"}'
+step "off the catalog again" 200 - -X DELETE "$BASE/admin/catalogs/$CATALOG/price-lists/$TRADE"
+step "and gone" 204 - -X DELETE "$BASE/admin/price-lists/$TRADE"
 step "a passer-by" 201 - -X POST "$BASE/admin/customers" -H "$JSON" -d '{"email":"passerby@example.hr"}'
 PASSERBY=$(id)
 step "is deleted" 204 - -X DELETE "$BASE/admin/customers/$PASSERBY"

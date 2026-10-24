@@ -52,8 +52,8 @@ const WINDOWS: &[&str] = &["price_list.started", "price_list.ended"];
 ///   every price there: everything;
 /// - a category's `parent` or `visible` change which categories the products below it are
 ///   listed under: that subtree;
-/// - a price list's adjustment, kind, status, window and compare-at mode change what it
-///   prices and how: everything (its name and description don't).
+/// - a price list's adjustment, kind, status, window, compare-at mode and audience change
+///   what it prices and how: everything (its name and description don't).
 ///
 /// Names and the like aren't in documents and rebuild nothing.
 const WHEN_FIELD: &[(&str, &[&str], Rebuild)] = &[
@@ -78,6 +78,7 @@ const WHEN_FIELD: &[(&str, &[&str], Rebuild)] = &[
             "starts_at",
             "ends_at",
             "compare_at",
+            "audience",
         ],
         Rebuild::All,
     ),

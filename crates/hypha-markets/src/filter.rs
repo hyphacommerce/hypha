@@ -1,12 +1,14 @@
 //! What lists of price lists and of fixed prices may be narrowed to, and their orders.
 
 use hypha_core::{
-    CategoryId, Direction, PriceListId, ProductId, SortKey, Timestamp, optional_text,
+    CategoryId, CustomerGroupId, Direction, PriceListId, ProductId, SortKey, Timestamp,
+    optional_text,
 };
 
 use crate::{PriceList, PriceListError, PriceListKind, PriceListPhase};
 
-/// Price lists of a kind, in a phase at a moment, among some IDs; `None` filters nothing.
+/// Price lists of a kind, in a phase at a moment, among some IDs, for a customer group;
+/// `None` filters nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PriceListFilter {
     pub kind: Option<PriceListKind>,
@@ -15,6 +17,8 @@ pub struct PriceListFilter {
     pub at: Timestamp,
     /// Only these lists (a market's catalog's, say); empty matches none.
     pub ids: Option<Vec<PriceListId>>,
+    /// Only lists whose audience names this group.
+    pub group: Option<CustomerGroupId>,
 }
 
 impl PriceListFilter {
@@ -25,6 +29,7 @@ impl PriceListFilter {
             phase: None,
             at,
             ids: None,
+            group: None,
         }
     }
 
@@ -33,6 +38,9 @@ impl PriceListFilter {
         self.kind.is_none_or(|k| list.kind() == k)
             && self.phase.is_none_or(|p| list.phase(self.at) == p)
             && self.ids.as_ref().is_none_or(|ids| ids.contains(&list.id()))
+            && self
+                .group
+                .is_none_or(|g| list.audience().groups().contains(&g))
     }
 }
 

@@ -3,7 +3,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use hypha_core::{HasClock, MarketId, PriceListId, ProductId, RepoError, VariantId};
+use hypha_core::{
+    CustomerGroupId, HasClock, MarketId, PriceListId, ProductId, RepoError, VariantId,
+};
 use hypha_markets::{
     AppliesTo, CatalogContext, CatalogRepo, HasCatalogs, HasMarkets, HasPriceLists, Market,
     MarketRepo, PriceList, PriceListRepo,
@@ -12,8 +14,9 @@ use hypha_markets::{
 use crate::PricingContext;
 
 /// Everything needed to price `variants` (of `products`) in `market` now (the ports'
-/// clock), with a fixed number of queries however many there are: membership and fixed
-/// prices are fetched in batches. `None` when the market doesn't exist.
+/// clock) for a buyer in `groups` (none: anyone, as a shopper who isn't signed in), with
+/// a fixed number of queries however many there are: membership and fixed prices are
+/// fetched in batches. `None` when the market doesn't exist.
 ///
 /// A missing catalog or price list is left out rather than reported here:
 /// `resolve_price` turns it into a precise reason per variant. Ask for every product
@@ -24,11 +27,12 @@ pub async fn load_pricing<S: HasMarkets + HasCatalogs + HasPriceLists + HasClock
     market: MarketId,
     products: &[ProductId],
     variants: &[VariantId],
+    groups: &[CustomerGroupId],
 ) -> Result<Option<PricingContext>, RepoError> {
     let Some(market) = ports.markets().get(market).await? else {
         return Ok(None);
     };
-    load_pricing_for(ports, market, products, variants)
+    load_pricing_for(ports, market, products, variants, groups)
         .await
         .map(Some)
 }
@@ -40,6 +44,7 @@ pub async fn load_pricing_for<S: HasCatalogs + HasPriceLists + HasClock>(
     market: Market,
     products: &[ProductId],
     variants: &[VariantId],
+    groups: &[CustomerGroupId],
 ) -> Result<PricingContext, RepoError> {
     let at = ports.now();
     let catalog = ports
@@ -58,8 +63,11 @@ pub async fn load_pricing_for<S: HasCatalogs + HasPriceLists + HasClock>(
         }
         _ => HashSet::new(),
     };
-    // Only a live list's fixed prices can count.
-    let live: Vec<&PriceList> = price_lists.iter().filter(|l| l.is_live(at)).collect();
+    // Only the fixed prices of a list live for this buyer can count.
+    let live: Vec<&PriceList> = price_lists
+        .iter()
+        .filter(|l| l.is_live_for(at, groups))
+        .collect();
     let live_ids: Vec<PriceListId> = live.iter().map(|l| l.id()).collect();
     let fixed_prices = if live_ids.is_empty() || variants.is_empty() {
         HashMap::new()
@@ -86,5 +94,6 @@ pub async fn load_pricing_for<S: HasCatalogs + HasPriceLists + HasClock>(
         fixed_prices,
         product_categories,
         at,
+        groups: groups.to_vec(),
     })
 }
