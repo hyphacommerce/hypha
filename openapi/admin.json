@@ -1896,7 +1896,7 @@
             "$ref": "#/components/schemas/DiscountId"
           },
           "summary": {
-            "description": "One sentence from its data, amounts in the cart's market.",
+            "description": "One sentence from its data, naming what it applies to as a shopper may see it,\namounts in the cart's market.",
             "type": "string"
           },
           "target": {
@@ -5475,7 +5475,7 @@
             "$ref": "#/components/schemas/DiscountStatusDto"
           },
           "summary": {
-            "description": "One sentence from its data (\"10% off 2 categories · orders from 50.00 EUR\"):\nwhat the admin, emails, the storefront and agents show alike.",
+            "description": "One sentence from its data, naming what it applies to (\"10% off Grow kits on\norders from €50\"): what the admin, the storefront and agents show alike. Customers\nare named only to a caller who may see their names; otherwise counted.",
             "type": "string"
           },
           "title": {
@@ -8230,6 +8230,7 @@
             "$ref": "#/components/schemas/DiscountId"
           },
           "summary": {
+            "description": "The sentence the shopper saw at checkout, kept as it was.",
             "type": "string"
           },
           "target": {

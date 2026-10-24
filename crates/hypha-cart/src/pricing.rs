@@ -6,8 +6,8 @@ use hypha_core::{
     Timestamp, VariantId,
 };
 use hypha_discounts::{
-    Application, Buyer, CodeOutcome, DiscountContext, DiscountInput, Line, Share, ShippingGroup,
-    apply,
+    Application, Buyer, CodeOutcome, DiscountContext, DiscountInput, Line, Names, Share,
+    ShippingGroup, apply,
 };
 use hypha_inventory::{Availability, StockContext};
 use hypha_pricing::{PricingContext, ResolvedPrice, VariantPrices, resolve_price};
@@ -207,6 +207,8 @@ pub struct DiscountReading {
     /// Loaded only when a discount names categories.
     pub categories: HashMap<ProductId, HashSet<CategoryId>>,
     pub at: Timestamp,
+    /// What the discounts' summaries call what they name, as shoppers may see it.
+    pub names: Names,
 }
 
 /// Nothing to weigh: no discount applies.
@@ -217,6 +219,7 @@ impl Default for DiscountReading {
             buyer: Buyer::default(),
             categories: HashMap::new(),
             at: Timestamp::UNIX_EPOCH,
+            names: Names::new(),
         }
     }
 }
@@ -317,6 +320,7 @@ pub fn price_cart_with_shipping(
         lines: input_lines,
         shipping: groups,
         codes: cart.discount_codes().to_vec(),
+        names: &discounts.names,
     };
     let outcome = apply(&input, &discounts.context.candidates());
 
@@ -505,6 +509,7 @@ pub fn shipping_after_discounts(
             rate: &rate,
         }],
         codes: cart.discount_codes().to_vec(),
+        names: &discounts.names,
     };
     let outcome = apply(&input, &discounts.context.candidates());
     let off = outcome

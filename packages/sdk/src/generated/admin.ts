@@ -4329,7 +4329,10 @@ export interface components {
             /** @description The code it came by, normalised; `null` for an automatic discount. */
             code?: string | null;
             discount: components["schemas"]["DiscountId"];
-            /** @description One sentence from its data, amounts in the cart's market. */
+            /**
+             * @description One sentence from its data, naming what it applies to as a shopper may see it,
+             *     amounts in the cart's market.
+             */
             summary: string;
             target: components["schemas"]["DiscountTargetDto"];
             /** @description The discount's title, shown to buyers. */
@@ -5612,8 +5615,9 @@ export interface components {
             starts_at?: string | null;
             status: components["schemas"]["DiscountStatusDto"];
             /**
-             * @description One sentence from its data ("10% off 2 categories · orders from 50.00 EUR"):
-             *     what the admin, emails, the storefront and agents show alike.
+             * @description One sentence from its data, naming what it applies to ("10% off Grow kits on
+             *     orders from €50"): what the admin, the storefront and agents show alike. Customers
+             *     are named only to a caller who may see their names; otherwise counted.
              */
             summary: string;
             /** @description Shown to buyers. */
@@ -6579,6 +6583,7 @@ export interface components {
             /** @description The code it came by, normalised; `null` for an automatic discount. */
             code?: string | null;
             discount: components["schemas"]["DiscountId"];
+            /** @description The sentence the shopper saw at checkout, kept as it was. */
             summary: string;
             target: components["schemas"]["DiscountTargetDto"];
             title: string;

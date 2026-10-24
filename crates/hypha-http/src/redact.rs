@@ -88,6 +88,11 @@ impl Redaction {
         *self == Self::NONE
     }
 
+    /// Whether names go.
+    pub fn removes_name(&self) -> bool {
+        self.name
+    }
+
     /// Whether email addresses go.
     pub fn removes_email(&self) -> bool {
         self.email

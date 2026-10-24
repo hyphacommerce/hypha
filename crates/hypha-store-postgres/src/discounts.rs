@@ -12,7 +12,8 @@ use hypha_core::{
 use hypha_discounts::{
     Allocation, Class, ClassSet, CodeFilter, CodeSelection, Condition, Discount, DiscountCode,
     DiscountFilter, DiscountRepo, DiscountSnapshot, ItemSet, Items, Kind, Limits, Measure, Method,
-    PerMarket, Phase, Reward, Status, Target, Threshold, Tier, Usage, UsageClaim, Value, keys,
+    NameRequest, Names, PerMarket, Phase, Reward, Status, Target, Threshold, Tier, Usage,
+    UsageClaim, Value, keys,
 };
 use serde::{Deserialize, Serialize};
 use tokio_postgres::{Row, types::Type};
@@ -790,6 +791,92 @@ impl<C: PgConnection> DiscountRepo for PgStore<C> {
             .iter()
             .map(discount_from_row)
             .collect()
+    }
+
+    async fn names(&self, request: &NameRequest) -> Result<Names, RepoError> {
+        let mut names = Names::new();
+        if request.is_empty() {
+            return Ok(names);
+        }
+        let products = uuids(&request.products, ProductId::as_uuid);
+        let variants = uuids(&request.variants, VariantId::as_uuid);
+        let categories = uuids(&request.categories, CategoryId::as_uuid);
+        let markets = uuids(&request.markets, MarketId::as_uuid);
+        let channels = uuids(&request.channels, ChannelId::as_uuid);
+        let groups = uuids(&request.customer_groups, CustomerGroupId::as_uuid);
+        let customers = uuids(&request.customers, CustomerId::as_uuid);
+        let mut conn = self.conn().await;
+        let rows = conn
+            .db()
+            .query_typed(
+                "SELECT 'product' AS kind, id, title AS name FROM products
+                 WHERE id = ANY($1) AND (NOT $8 OR status = 'active')
+                 UNION ALL
+                 SELECT 'variant', v.id, p.title || coalesce(' (' || (
+                     SELECT string_agg(ov.label, ' / ' ORDER BY s.ord)
+                     FROM unnest(v.selections) WITH ORDINALITY AS s (value_id, ord)
+                     JOIN product_option_values ov ON ov.id = s.value_id
+                 ) || ')', '')
+                 FROM variants v JOIN products p ON p.id = v.product_id
+                 WHERE v.id = ANY($2) AND (NOT $8 OR p.status = 'active')
+                 UNION ALL
+                 SELECT 'category', id, name FROM categories WHERE id = ANY($3)
+                 UNION ALL
+                 SELECT 'market', id, name FROM markets WHERE id = ANY($4)
+                 UNION ALL
+                 SELECT 'channel', id, name FROM channels WHERE id = ANY($5)
+                 UNION ALL
+                 SELECT 'group', id, name FROM customer_groups WHERE id = ANY($6)
+                 UNION ALL
+                 SELECT 'customer', id, nullif(btrim(concat_ws(' ', first_name, last_name)), '')
+                 FROM customers WHERE id = ANY($7)",
+                &[
+                    (&products, Type::UUID_ARRAY),
+                    (&variants, Type::UUID_ARRAY),
+                    (&categories, Type::UUID_ARRAY),
+                    (&markets, Type::UUID_ARRAY),
+                    (&channels, Type::UUID_ARRAY),
+                    (&groups, Type::UUID_ARRAY),
+                    (&customers, Type::UUID_ARRAY),
+                    (&request.active_products_only, Type::BOOL),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+        for row in &rows {
+            let kind: String = col(row, "kind")?;
+            let id: Uuid = col(row, "id")?;
+            let Some(name) = col::<Option<String>>(row, "name")? else {
+                continue;
+            };
+            match kind.as_str() {
+                "product" => {
+                    names.products.insert(ProductId::from_uuid(id), name);
+                }
+                "variant" => {
+                    names.variants.insert(VariantId::from_uuid(id), name);
+                }
+                "category" => {
+                    names.categories.insert(CategoryId::from_uuid(id), name);
+                }
+                "market" => {
+                    names.markets.insert(MarketId::from_uuid(id), name);
+                }
+                "channel" => {
+                    names.channels.insert(ChannelId::from_uuid(id), name);
+                }
+                "group" => {
+                    names
+                        .customer_groups
+                        .insert(CustomerGroupId::from_uuid(id), name);
+                }
+                "customer" => {
+                    names.customers.insert(CustomerId::from_uuid(id), name);
+                }
+                other => return Err(corrupt(format!("a name of kind {other:?}"))),
+            }
+        }
+        Ok(names)
     }
 
     async fn list(

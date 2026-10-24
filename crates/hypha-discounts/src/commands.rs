@@ -272,15 +272,15 @@ impl DiscountPatch {
     }
 }
 
-/// What a discount being written would read as, writing nothing: its summary, or every
-/// rule it breaks (amounts checked against `currencies`): a new discount's draft, or a
+/// What a discount being written would read as, writing nothing: the discount it would
+/// be (for the caller to summarise with the names it may show), or every rule it breaks (amounts checked against `currencies`): a new discount's draft, or a
 /// saved one's with a patch over it.
 pub async fn summarize<S: HasDiscounts>(
     ctx: &Ctx,
     ports: &S,
     draft: SummaryDraft,
     currencies: &HashMap<MarketId, Currency>,
-) -> Result<Result<String, Vec<Problem>>, CommandError> {
+) -> Result<Result<Discount, Vec<Problem>>, CommandError> {
     ctx.require(Scope::DiscountsRead)?;
     let (id, draft) = match draft {
         // It has no ID yet, and a summary doesn't show one.
@@ -299,7 +299,7 @@ pub async fn summarize<S: HasDiscounts>(
             .map(|()| d)
     });
     let e = match checked {
-        Ok(discount) => return Ok(Ok(crate::summary(&discount, None))),
+        Ok(discount) => return Ok(Ok(discount)),
         Err(e) => e,
     };
     let path = match &e {

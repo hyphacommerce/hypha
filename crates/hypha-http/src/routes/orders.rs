@@ -204,6 +204,7 @@ pub struct OrderDiscountResponse {
     /// The code it came by, normalised; `null` for an automatic discount.
     code: Option<String>,
     title: String,
+    /// The sentence the shopper saw at checkout, kept as it was.
     summary: String,
     class: DiscountClassDto,
     #[schema(value_type = DiscountValueDto)]

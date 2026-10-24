@@ -901,7 +901,10 @@ export interface components {
             /** @description The code it came by, normalised; `null` for an automatic discount. */
             code?: string | null;
             discount: components["schemas"]["DiscountId"];
-            /** @description One sentence from its data, amounts in the cart's market. */
+            /**
+             * @description One sentence from its data, naming what it applies to as a shopper may see it,
+             *     amounts in the cart's market.
+             */
             summary: string;
             target: components["schemas"]["DiscountTargetDto"];
             /** @description The discount's title, shown to buyers. */
@@ -1488,6 +1491,7 @@ export interface components {
             /** @description The code it came by, normalised; `null` for an automatic discount. */
             code?: string | null;
             discount: components["schemas"]["DiscountId"];
+            /** @description The sentence the shopper saw at checkout, kept as it was. */
             summary: string;
             target: components["schemas"]["DiscountTargetDto"];
             title: string;

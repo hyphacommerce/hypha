@@ -1,16 +1,21 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    sync::{Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
+use hypha_categories::Category;
+use hypha_channels::Channel;
 use hypha_core::{
-    CustomerId, DiscountId, Money, OrderId, Page, PageRequest, Recorded, RepoError, Timestamp,
-    Versioned, stamp_insert, stamp_update,
+    CategoryId, ChannelId, CustomerGroupId, CustomerId, DiscountId, MarketId, Money, OrderId, Page,
+    PageRequest, ProductId, Recorded, RepoError, Timestamp, Versioned, stamp_insert, stamp_update,
 };
+use hypha_customers::{Customer, CustomerGroup};
 use hypha_discounts::{
     CodeFilter, CodeSelection, Discount, DiscountCode, DiscountFilter, DiscountRepo, Method,
-    Status, Usage, UsageClaim, keys,
+    NameRequest, Names, Status, Usage, UsageClaim, keys,
 };
+use hypha_markets::Market;
+use hypha_products::{Product, ProductStatus};
 
 use crate::{
     InMemoryOutbox,
@@ -137,6 +142,19 @@ pub struct InMemoryDiscounts {
     outbox: InMemoryOutbox,
     /// How many of the next `usage_counts` reads see no uses (`hide_next_usage_counts`).
     hidden_counts: std::sync::atomic::AtomicUsize,
+    /// What `names` reads, as a database joins it. Empty unless shared (`joining`).
+    named: Named,
+}
+
+/// The other repos' tables `names` reads.
+#[derive(Default)]
+struct Named {
+    products: Arc<Table<ProductId, Product>>,
+    categories: Arc<Table<CategoryId, Category>>,
+    markets: Arc<Table<MarketId, Market>>,
+    channels: Arc<Table<ChannelId, Channel>>,
+    groups: Arc<Table<CustomerGroupId, CustomerGroup>>,
+    customers: Arc<Table<CustomerId, Customer>>,
 }
 
 impl InMemoryDiscounts {
@@ -144,6 +162,29 @@ impl InMemoryDiscounts {
         Self {
             outbox: outbox.clone(),
             ..Self::default()
+        }
+    }
+
+    /// The same repo, naming what discounts hold from these repos' tables.
+    pub fn joining(
+        self,
+        products: &crate::InMemoryProductRepo,
+        categories: &crate::InMemoryCategoryRepo,
+        markets: &crate::InMemoryMarketRepo,
+        channels: &crate::InMemoryChannelRepo,
+        groups: &crate::InMemoryCustomerGroupRepo,
+        customers: &crate::InMemoryCustomerRepo,
+    ) -> Self {
+        Self {
+            named: Named {
+                products: products.products.clone(),
+                categories: categories.categories.clone(),
+                markets: markets.markets.clone(),
+                channels: channels.channels.clone(),
+                groups: groups.groups.clone(),
+                customers: customers.customers.clone(),
+            },
+            ..self
         }
     }
 
@@ -197,6 +238,55 @@ impl DiscountRepo for InMemoryDiscounts {
         found.sort_by_key(Discount::id);
         found.dedup_by_key(|d| d.id());
         Ok(found)
+    }
+
+    async fn names(&self, request: &NameRequest) -> Result<Names, RepoError> {
+        let named = &self.named;
+        let shown =
+            |p: &Product| !request.active_products_only || p.status() == ProductStatus::Active;
+        let mut names = Names::new();
+        for p in named.products.get_many(&request.products) {
+            if shown(&p) {
+                names.products.insert(p.id(), p.title().to_string());
+            }
+        }
+        for variant in &request.variants {
+            let Some(p) = named
+                .products
+                .find(|p| p.variants().iter().any(|v| v.id() == *variant))
+            else {
+                continue;
+            };
+            if shown(&p) {
+                let name = match p.variant_title(*variant) {
+                    Some(options) => format!("{} ({options})", p.title()),
+                    None => p.title().to_string(),
+                };
+                names.variants.insert(*variant, name);
+            }
+        }
+        for c in named.categories.get_many(&request.categories) {
+            names.categories.insert(c.id(), c.name().to_string());
+        }
+        for m in named.markets.get_many(&request.markets) {
+            names.markets.insert(m.id(), m.name().to_string());
+        }
+        for c in named.channels.get_many(&request.channels) {
+            names.channels.insert(c.id(), c.name().to_string());
+        }
+        for g in named.groups.get_many(&request.customer_groups) {
+            names.customer_groups.insert(g.id(), g.name().to_string());
+        }
+        for c in named.customers.get_many(&request.customers) {
+            let full: Vec<&str> = [c.first_name(), c.last_name()]
+                .into_iter()
+                .flatten()
+                .collect();
+            if !full.is_empty() {
+                names.customers.insert(c.id(), full.join(" "));
+            }
+        }
+        Ok(names)
     }
 
     async fn list(

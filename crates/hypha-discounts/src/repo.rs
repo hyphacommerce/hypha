@@ -5,6 +5,7 @@ use hypha_core::{CustomerId, DiscountId, Money, OrderId, Page, PageRequest, Repo
 use crate::{
     code::DiscountCode,
     discount::{Class, Discount, Method, Phase},
+    summary::{NameRequest, Names},
 };
 
 /// Uniqueness rules the discounts repo enforces, reported as `RepoError::Duplicate(key)`.
@@ -101,6 +102,14 @@ pub trait DiscountRepo {
     async fn get(&self, id: DiscountId) -> Result<Option<Discount>, RepoError>;
     /// Those of `ids` that exist, by ID.
     async fn get_many(&self, ids: &[DiscountId]) -> Result<Vec<Discount>, RepoError>;
+    /// What the IDs `request` lists are called, in one read, for summaries: product
+    /// titles, a variant as its product's title with its option values in option order
+    /// ("Grow Kit (Oyster / Large)", the title alone without options), category, market,
+    /// channel and customer group names, and a customer's first and last name. What
+    /// doesn't exist is left out, as is a customer without either name (never their
+    /// email), and with `active_products_only` every product that isn't active with its
+    /// variants.
+    async fn names(&self, request: &NameRequest) -> Result<Names, RepoError>;
     /// A page of what `filter` matches, newest first.
     async fn list(
         &self,

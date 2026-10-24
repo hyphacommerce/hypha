@@ -65,7 +65,7 @@ pub use custom_fields::{custom_field_definitions, custom_field_filters, custom_f
 pub use customer_groups::customer_group_repo;
 pub use customers::customer_repo;
 pub use deletions::deletions;
-pub use discounts::discount_repo;
+pub use discounts::{discount_names, discount_repo};
 pub use endpoints::extension_endpoint_repo;
 pub use extensions::extension_call_repo;
 pub use fulfillments::fulfillment_repo;

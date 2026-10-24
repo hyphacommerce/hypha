@@ -23,7 +23,10 @@ use crate::{
     price_cart_with_shipping, price_line, shipping_after_discounts,
 };
 use hypha_channels::{ChannelRepo, HasChannels};
-use hypha_discounts::{Buyer, DiscountContext, HasDiscounts, find_live_code, normalize};
+use hypha_discounts::{
+    Buyer, DiscountContext, DiscountRepo, HasDiscounts, NameRequest, Names, find_live_code,
+    normalize,
+};
 
 use crate::DiscountReading;
 
@@ -845,6 +848,13 @@ async fn load_discounts<S: HasDiscounts + HasCustomers + HasPriceLists>(
     } else {
         Default::default()
     };
+    // Summaries go into the cart and the order, so they name only what shoppers may see.
+    let request = NameRequest::for_shoppers(context.candidates().iter().map(|l| l.discount));
+    let names = if request.is_empty() {
+        Names::new()
+    } else {
+        ports.discounts().names(&request).await?
+    };
     Ok(DiscountReading {
         context,
         buyer: Buyer {
@@ -854,6 +864,7 @@ async fn load_discounts<S: HasDiscounts + HasCustomers + HasPriceLists>(
         },
         categories,
         at,
+        names,
     })
 }
 

@@ -330,7 +330,8 @@ pub struct CartDiscountResponse {
     code: Option<String>,
     /// The discount's title, shown to buyers.
     title: String,
-    /// One sentence from its data, amounts in the cart's market.
+    /// One sentence from its data, naming what it applies to as a shopper may see it,
+    /// amounts in the cart's market.
     summary: String,
     class: DiscountClassDto,
     value: DiscountValueDto,

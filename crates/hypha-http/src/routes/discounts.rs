@@ -18,12 +18,12 @@ use hypha_core::{
 };
 use hypha_customers::{CustomerFilter, CustomerRepo, CustomerSort, CustomerSummary, HasCustomers};
 use hypha_discounts::{
-    Allocation, Class, ClassSet, CodeFilter, CodeSelection, Condition, CreateDiscount, Discount,
-    DiscountCode, DiscountDraft, DiscountFilter, DiscountPatch, DiscountRepo, Generation, ItemSet,
-    Items, Kind, Limits, Measure, Method, NewCode, PerMarket, Phase, Reward, Status, SummaryDraft,
-    Target, Threshold, Tier, Usage, Value, add_codes, create_discount, delete_discount,
-    generate_codes, get_discount, list_codes, list_discounts, list_usage, remove_codes,
-    set_codes_active, summarize, summary, update_discount,
+    Allocation, Audience, Class, ClassSet, CodeFilter, CodeSelection, Condition, CreateDiscount,
+    Discount, DiscountCode, DiscountDraft, DiscountFilter, DiscountPatch, DiscountRepo, Generation,
+    ItemSet, Items, Kind, Limits, Measure, Method, NameRequest, Names, NewCode, PerMarket, Phase,
+    Reward, Status, SummaryDraft, Target, Threshold, Tier, Usage, Value, add_codes,
+    create_discount, delete_discount, generate_codes, get_discount, list_codes, list_discounts,
+    list_usage, remove_codes, set_codes_active, summarize, summary, update_discount,
 };
 use hypha_markets::{HasMarkets, MarketRepo};
 use hypha_orders::{HasOrders, OrderNumber, OrderRepo};
@@ -709,8 +709,9 @@ pub struct DiscountResponse {
     conditions: Vec<DiscountConditionDto>,
     kind: DiscountKindDto,
     limits: DiscountLimitsDto,
-    /// One sentence from its data ("10% off 2 categories · orders from 50.00 EUR"):
-    /// what the admin, emails, the storefront and agents show alike.
+    /// One sentence from its data, naming what it applies to ("10% off Grow kits on
+    /// orders from €50"): what the admin, the storefront and agents show alike. Customers
+    /// are named only to a caller who may see their names; otherwise counted.
     summary: String,
     /// How many codes it has (0 for an automatic one).
     #[schema(minimum = 0)]
@@ -732,6 +733,7 @@ impl DiscountResponse {
         code_count: u64,
         used: u64,
         discounted_total: Vec<Money>,
+        names: &Names,
     ) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(d.stamps())?;
         Ok(Self {
@@ -747,7 +749,7 @@ impl DiscountResponse {
             conditions: d.conditions().iter().map(Into::into).collect(),
             kind: d.kind().into(),
             limits: d.limits().into(),
-            summary: summary(d, None),
+            summary: summary(d, None, names, Audience::Staff),
             code_count,
             used,
             discounted_total,
@@ -757,12 +759,38 @@ impl DiscountResponse {
     }
 }
 
-/// `discounts` as responses, with their code counts and uses read once for them all.
+/// What staff summaries of `discounts` name, in one read. Customers are named only to a
+/// caller who may read customers and see their names.
+async fn staff_names<P: hypha_discounts::HasDiscounts>(
+    ports: &P,
+    ctx: &hypha_core::Ctx,
+    discounts: &[Discount],
+) -> Result<Names, ApiError> {
+    let mut request = NameRequest::for_staff(discounts);
+    if !ctx.has_scope(hypha_core::Scope::CustomersRead)
+        || crate::redact::Redaction::of(ctx).removes_name()
+    {
+        request.customers.clear();
+    }
+    if request.is_empty() {
+        return Ok(Names::new());
+    }
+    Ok(ports
+        .discounts()
+        .names(&request)
+        .await
+        .map_err(hypha_discounts::CommandError::from)?)
+}
+
+/// `discounts` as responses, with their code counts, uses and names read once for them
+/// all.
 async fn responses<P: hypha_discounts::HasDiscounts>(
     ports: &P,
+    ctx: &hypha_core::Ctx,
     discounts: &[Discount],
     now: hypha_core::Timestamp,
 ) -> Result<Vec<DiscountResponse>, ApiError> {
+    let names = staff_names(ports, ctx, discounts).await?;
     let ids: Vec<DiscountId> = discounts.iter().map(Discount::id).collect();
     let repo = ports.discounts();
     let codes = repo
@@ -786,6 +814,7 @@ async fn responses<P: hypha_discounts::HasDiscounts>(
                 codes.get(&d.id()).copied().unwrap_or(0),
                 used.get(&d.id()).copied().unwrap_or(0),
                 totals.remove(&d.id()).unwrap_or_default(),
+                &names,
             )
         })
         .collect()
@@ -793,10 +822,11 @@ async fn responses<P: hypha_discounts::HasDiscounts>(
 
 async fn one<P: hypha_discounts::HasDiscounts>(
     ports: &P,
+    ctx: &hypha_core::Ctx,
     d: &Discount,
     now: hypha_core::Timestamp,
 ) -> Result<DiscountResponse, ApiError> {
-    responses(ports, std::slice::from_ref(d), now)
+    responses(ports, ctx, std::slice::from_ref(d), now)
         .await?
         .pop()
         .ok_or_else(|| ApiError::internal("a discount without a response"))
@@ -859,7 +889,7 @@ pub async fn list<S: Storage>(
         at: now,
     };
     let page = list_discounts(&ctx, &ports, filter, page).await?;
-    let mut items = responses(&ports, &page.items, now).await?.into_iter();
+    let mut items = responses(&ports, &ctx, &page.items, now).await?.into_iter();
     Ok(Json(PageResponse::new(page, &scope, Discount::id, |_| {
         items
             .next()
@@ -971,7 +1001,7 @@ pub async fn create<S: Storage>(
     let created = create_discount(&ctx, &ports, &state.ids, input).await?;
     Ok((
         StatusCode::CREATED,
-        Json(one(&ports, &created, state.clock.now()).await?),
+        Json(one(&ports, &ctx, &created, state.clock.now()).await?),
     ))
 }
 
@@ -990,7 +1020,7 @@ pub async fn fetch<S: Storage>(
 ) -> Result<Json<DiscountResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let d = get_discount(&ctx, &ports, id).await?;
-    Ok(Json(one(&ports, &d, state.clock.now()).await?))
+    Ok(Json(one(&ports, &ctx, &d, state.clock.now()).await?))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -1061,7 +1091,7 @@ pub async fn update<S: Storage>(
     let patch = patch_of(body.parse()?)?;
     let currencies = currencies(&ports).await?;
     let d = update_discount(&ctx, &ports, id, patch, &currencies).await?;
-    Ok(Json(one(&ports, &d, state.clock.now()).await?))
+    Ok(Json(one(&ports, &ctx, &d, state.clock.now()).await?))
 }
 
 /// What `POST /admin/discounts/summary` reads: a new discount's body (as `POST
@@ -1187,8 +1217,13 @@ pub async fn summarize_handler<S: Storage>(
     let currencies = currencies(&ports).await?;
     Ok(Json(
         match summarize(&ctx, &ports, draft, &currencies).await? {
-            Ok(summary) => DiscountSummaryResponse {
-                summary: Some(summary),
+            Ok(discount) => DiscountSummaryResponse {
+                summary: Some(summary(
+                    &discount,
+                    None,
+                    &staff_names(&ports, &ctx, std::slice::from_ref(&discount)).await?,
+                    Audience::Staff,
+                )),
                 problems: Vec::new(),
             },
             Err(problems) => DiscountSummaryResponse {
@@ -1789,6 +1824,16 @@ pub(crate) async fn promotions_of<
     } else {
         HashMap::new()
     };
+    let request = NameRequest::for_shoppers(&context.automatic);
+    let names = if request.is_empty() {
+        Names::new()
+    } else {
+        ports
+            .discounts()
+            .names(&request)
+            .await
+            .map_err(hypha_discounts::CommandError::from)?
+    };
     let none = std::collections::HashSet::new();
     let mut found = HashMap::new();
     for product in products {
@@ -1799,6 +1844,7 @@ pub(crate) async fn promotions_of<
             market,
             channel,
             at,
+            &names,
         )
         .into_iter()
         .map(|p| PromotionResponse {

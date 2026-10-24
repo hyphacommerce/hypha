@@ -74,6 +74,7 @@ fn input(lines: Vec<Line>) -> DiscountInput<'static> {
         lines,
         shipping: Vec::new(),
         codes: Vec::new(),
+        names: crate::Names::none(),
     }
 }
 

@@ -137,7 +137,7 @@ async fn amounts_are_per_market_in_its_currency() {
         )
     );
     let d = create(&app, amount_off(eur(500))).await;
-    assert_eq!(d["summary"], json!("5.00 EUR off the order"));
+    assert_eq!(d["summary"], json!("€5 off the order"));
     assert_eq!(
         d["kind"]["rewards"][0]["value"],
         json!({"type": "amount", "amounts": {market: eur(500)}, "allocation": {"type": "across"}})
@@ -545,7 +545,7 @@ async fn buy_two_get_one_free_takes_the_third_mug_off() {
         (&d["classes"], &d["summary"]),
         (
             &json!(["product"]),
-            &json!("Buy 2 × all items, get 1 × all items free (up to 1 time per order)")
+            &json!("Buy 2 items, get 1 item free (once per order)")
         )
     );
     let (_, mug) = market_selling_a_mug(&app).await;
@@ -649,6 +649,78 @@ async fn a_product_shows_the_promotions_that_may_reach_it() {
     let (_, without_country) =
         send_as(&app, &pk, "GET", "/storefront/products/by-handle/mug", None).await;
     assert_eq!(without_country["promotions"], json!([]));
+}
+
+#[tokio::test]
+async fn summaries_name_what_they_apply_to() {
+    let app = app().await;
+    let (market, mug) = market_selling_a_mug(&app).await;
+    let d = create(
+        &app,
+        json!({"title": "Mugs", "method": "automatic",
+            "conditions": [{"type": "markets", "markets": [market]}],
+            "kind": {"type": "standard", "rewards": [{
+                "target": {"type": "items", "items": {"type": "variants", "ids": [mug]}},
+                "value": {"type": "percent", "basis_points": 1000}}]}}),
+    )
+    .await;
+    assert_eq!(d["summary"], json!("10% off Mug in Croatia"));
+    let (_, page) = send(&app, "GET", "/admin/discounts", None).await;
+    assert_eq!(page["items"][0]["summary"], json!("10% off Mug in Croatia"));
+    // The cart's application, and the promotion, say the same.
+    let (pk, cart) = cart_of_mugs(&app, &mug, 1).await;
+    let (_, priced) = send_as(&app, &pk, "GET", &cart, None).await;
+    assert_eq!(
+        priced["discounts"][0]["summary"],
+        json!("10% off Mug in Croatia"),
+        "{priced}"
+    );
+    let (_, product) = send_as(
+        &app,
+        &pk,
+        "GET",
+        "/storefront/products/by-handle/mug?country=HR",
+        None,
+    )
+    .await;
+    assert_eq!(
+        product["promotions"][0]["summary"],
+        json!("10% off Mug in Croatia")
+    );
+}
+
+#[tokio::test]
+async fn customers_are_named_only_to_who_may_see_their_names() {
+    let app = app().await;
+    let (_, customer) = send(
+        &app,
+        "POST",
+        "/admin/customers",
+        Some(r#"{"email":"ana@example.rs","first_name":"Ana","last_name":"Petrović"}"#),
+    )
+    .await;
+    let draft = json!({"title": "Ana's", "method": "automatic",
+        "conditions": [{"type": "customers", "customers": [customer["id"]]}],
+        "kind": ten_percent_off_the_order()});
+    let d = create(&app, draft.clone()).await;
+    assert_eq!(d["summary"], json!("10% off the order for Ana Petrović"));
+    let no_names = key(
+        &app,
+        json!({"kind": "secret", "name": "R", "scopes": ["discounts:read", "customers:read"]}),
+    )
+    .await;
+    let url = format!("/admin/discounts/{}", d["id"].as_str().unwrap());
+    let (_, seen) = send_as(&app, &no_names, "GET", &url, None).await;
+    assert_eq!(seen["summary"], json!("10% off the order for 1 customer"));
+    let (_, answer) = send_as(
+        &app,
+        &no_names,
+        "POST",
+        "/admin/discounts/summary",
+        Some(&draft.to_string()),
+    )
+    .await;
+    assert_eq!(answer["summary"], json!("10% off the order for 1 customer"));
 }
 
 #[tokio::test]

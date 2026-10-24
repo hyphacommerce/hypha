@@ -12,7 +12,7 @@ use crate::{
     discount::{Condition, Discount, Kind, Method, Target},
     engine::Live,
     repo::{DiscountRepo, HasDiscounts},
-    summary::summary,
+    summary::{Audience, Names, summary},
 };
 
 /// The live automatic discounts, the cart's codes with their discounts, and the counts
@@ -154,7 +154,8 @@ pub struct Promotion {
 }
 
 /// The promotions of `product` (in `categories` with their ancestors) among `automatic`
-/// (live ones, `DiscountRepo::live_automatic`), in `market` and `channel` at `at`, by ID.
+/// (live ones, `DiscountRepo::live_automatic`), in `market` and `channel` at `at`, by ID,
+/// summarised with `names` (`NameRequest::for_shoppers`).
 pub fn promotions(
     automatic: &[Discount],
     product: ProductId,
@@ -162,6 +163,7 @@ pub fn promotions(
     market: MarketId,
     channel: Option<ChannelId>,
     at: Timestamp,
+    names: &Names,
 ) -> Vec<Promotion> {
     automatic
         .iter()
@@ -181,7 +183,7 @@ pub fn promotions(
         .map(|d| Promotion {
             discount: d.id(),
             title: d.title().to_string(),
-            summary: summary(d, Some(market)),
+            summary: summary(d, Some(market), names, Audience::Shoppers),
         })
         .collect()
 }

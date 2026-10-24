@@ -11,8 +11,8 @@ use hypha_core::{
 use hypha_discounts::{
     Allocation, Class, ClassSet, CodeFilter, CodeSelection, Condition, Discount, DiscountCode,
     DiscountDraft, DiscountFilter, DiscountRepo, HasDiscounts, ItemSet, Items, Kind, Limits,
-    Measure, Method, PerMarket, Phase, Reward, StageDiscounts, Status, Target, Threshold, Tier,
-    UsageClaim, Value, keys,
+    Measure, Method, NameRequest, Names, PerMarket, Phase, Reward, StageDiscounts, Status, Target,
+    Threshold, Tier, UsageClaim, Value, keys,
 };
 use uuid::Uuid;
 
@@ -872,4 +872,153 @@ async fn once_per_customer<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(po
         repo.usage_counts(&[did(1)]).await,
         Ok(HashMap::from([(did(1), 3)]))
     );
+}
+
+/// Runs the scenario of `DiscountRepo::names`, which reads the other domains' tables.
+pub async fn discount_names<S>(make: impl AsyncFn() -> S)
+where
+    S: HasDiscounts
+        + hypha_products::HasProducts
+        + hypha_categories::HasCategories
+        + hypha_markets::HasMarkets
+        + hypha_channels::HasChannels
+        + hypha_customers::HasCustomerGroups
+        + hypha_customers::HasCustomers,
+{
+    scenario("discount names: what exists is named, a variant with its options, in one read");
+    names(&make().await).await;
+    scenario("discount names: for shoppers, only active products and their variants");
+    active_names(&make().await).await;
+}
+
+async fn names<S>(ports: &S)
+where
+    S: HasDiscounts
+        + hypha_products::HasProducts
+        + hypha_categories::HasCategories
+        + hypha_markets::HasMarkets
+        + hypha_channels::HasChannels
+        + hypha_customers::HasCustomerGroups
+        + hypha_customers::HasCustomers,
+{
+    use hypha_categories::CategoryRepo;
+    use hypha_channels::ChannelRepo;
+    use hypha_customers::{CustomerGroupRepo, CustomerRepo};
+    use hypha_markets::MarketRepo;
+    use hypha_products::ProductRepo;
+
+    // Product 1 is simple (variant 101); product 2 is a shirt (S / Red 201, M / Blue 202).
+    let mut simple = super::products::simple(1, "mug");
+    ports.products().insert(&mut simple).await.unwrap();
+    let mut shirt = super::products::shirt(2, "shirt");
+    ports.products().insert(&mut shirt).await.unwrap();
+    let mut category = super::categories::category(1, None, 0);
+    ports.categories().insert(&mut category).await.unwrap();
+    let mut market = hypha_markets::Market::new(
+        mkt(1),
+        "Serbia".to_string(),
+        vec![hypha_core::CountryCode::new("RS").unwrap()],
+        Currency::new("RSD").unwrap(),
+    )
+    .unwrap();
+    ports.markets().insert(&mut market).await.unwrap();
+    let mut channel = hypha_channels::Channel::new(
+        ChannelId::from_uuid(Uuid::from_u128(1)),
+        "Wholesale portal",
+        hypha_channels::ChannelKind::Custom,
+    )
+    .unwrap();
+    ports.channels().insert(&mut channel).await.unwrap();
+    let group_id = CustomerGroupId::from_uuid(Uuid::from_u128(1));
+    let mut group = hypha_customers::CustomerGroup::new(
+        group_id,
+        "VIP",
+        hypha_core::Handle::new("vip").unwrap(),
+        None,
+    )
+    .unwrap();
+    ports.customer_groups().insert(&mut group).await.unwrap();
+    let customer = |n: u128| CustomerId::from_uuid(Uuid::from_u128(n));
+    let mut named = hypha_customers::Customer::new(
+        customer(1),
+        hypha_core::Email::new("ana@example.rs").unwrap(),
+    );
+    named.set_first_name(Some("Ana".to_string())).unwrap();
+    named.set_last_name(Some("Petrović".to_string())).unwrap();
+    ports.customers().insert(&mut named).await.unwrap();
+    let mut first_only = hypha_customers::Customer::new(
+        customer(2),
+        hypha_core::Email::new("marko@example.rs").unwrap(),
+    );
+    first_only
+        .set_first_name(Some("Marko".to_string()))
+        .unwrap();
+    ports.customers().insert(&mut first_only).await.unwrap();
+    // Known only by their email, which a summary never shows.
+    let mut unnamed = hypha_customers::Customer::new(
+        customer(3),
+        hypha_core::Email::new("anon@example.rs").unwrap(),
+    );
+    ports.customers().insert(&mut unnamed).await.unwrap();
+
+    let pid = |n: u128| ProductId::from_uuid(Uuid::from_u128(n));
+    let vid = |n: u128| VariantId::from_uuid(Uuid::from_u128(n));
+    let cat = |n: u128| CategoryId::from_uuid(Uuid::from_u128(n));
+    let request = NameRequest {
+        products: vec![pid(1), pid(9)],
+        variants: vec![vid(101), vid(201), vid(202), vid(909)],
+        categories: vec![cat(1), cat(9)],
+        markets: vec![mkt(1), mkt(9)],
+        channels: vec![ChannelId::from_uuid(Uuid::from_u128(1))],
+        customer_groups: vec![group_id],
+        customers: vec![customer(1), customer(2), customer(3)],
+        active_products_only: false,
+    };
+    let mut expected = Names::new();
+    expected.products.insert(pid(1), "Product 1".to_string());
+    expected.variants.insert(vid(101), "Product 1".to_string());
+    expected
+        .variants
+        .insert(vid(201), "Shirt (S / Red)".to_string());
+    expected
+        .variants
+        .insert(vid(202), "Shirt (M / Blue)".to_string());
+    expected.categories.insert(cat(1), "Category 1".to_string());
+    expected.markets.insert(mkt(1), "Serbia".to_string());
+    expected.channels.insert(
+        ChannelId::from_uuid(Uuid::from_u128(1)),
+        "Wholesale portal".to_string(),
+    );
+    expected.customer_groups.insert(group_id, "VIP".to_string());
+    expected
+        .customers
+        .insert(customer(1), "Ana Petrović".to_string());
+    expected.customers.insert(customer(2), "Marko".to_string());
+    assert_eq!(ports.discounts().names(&request).await, Ok(expected));
+    assert_eq!(
+        ports.discounts().names(&NameRequest::default()).await,
+        Ok(Names::new())
+    );
+}
+
+async fn active_names<S: HasDiscounts + hypha_products::HasProducts>(ports: &S) {
+    use hypha_products::{ProductRepo, ProductStatus};
+
+    let mut draft = super::products::simple(1, "draft");
+    ports.products().insert(&mut draft).await.unwrap();
+    let mut active = super::products::simple(2, "active");
+    active.set_status(ProductStatus::Active).unwrap();
+    ports.products().insert(&mut active).await.unwrap();
+    let pid = |n: u128| ProductId::from_uuid(Uuid::from_u128(n));
+    let vid = |n: u128| VariantId::from_uuid(Uuid::from_u128(n));
+    let request = NameRequest {
+        products: vec![pid(1), pid(2)],
+        variants: vec![vid(101), vid(201)],
+        active_products_only: true,
+        ..NameRequest::default()
+    };
+    let mut expected = Names::new();
+    expected.products.insert(pid(2), "Product 2".to_string());
+    expected.variants.insert(vid(201), "Product 2".to_string());
+    assert_eq!(ports.discounts().names(&request).await, Ok(expected));
 }

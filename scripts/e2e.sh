@@ -2543,9 +2543,9 @@ step "buy 2 cups, get 1 free" 201 - -X POST "$BASE/admin/discounts" -H "$JSON" \
     -d "{\"title\":\"3 for 2\",\"method\":\"automatic\",\"kind\":{\"type\":\"buy_x_get_y\",\"buys\":{\"items\":{\"type\":\"products\",\"ids\":[\"$DEAL_CUP\"]}},\"buy\":{\"type\":\"quantity\",\"quantity\":2},\"gets\":{\"items\":{\"type\":\"products\",\"ids\":[\"$DEAL_CUP\"]}},\"get_quantity\":1,\"value\":{\"type\":\"percent\",\"basis_points\":10000},\"uses_per_order\":1}}"
 DEAL=$(id)
 contains "a product discount" '"classes":["product"]'
-contains "said as a deal" '"summary":"Buy 2 × 1 product, get 1 × 1 product free (up to 1 time per order)"'
+contains "said as a deal, naming the cup" '"summary":"Buy 2 Deal cup, get 1 Deal cup free (once per order)"'
 step "the cup shows it" 200 - "$BASE/storefront/products/by-handle/deal-cup?country=HR"
-contains "as a promotion" "\"promotions\":[{\"discount\":\"$DEAL\",\"title\":\"3 for 2\""
+contains "as a promotion" "\"promotions\":[{\"discount\":\"$DEAL\",\"title\":\"3 for 2\",\"summary\":\"Buy 2 Deal cup, get 1 Deal cup free (once per order)\""
 step "a cart for the deal" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 DEAL_CART=$(id)
 step "three cups" 200 - -X POST "$BASE/storefront/carts/$DEAL_CART/lines" -H "$JSON" \
@@ -2558,7 +2558,7 @@ step "tiers must rise" 422 invalid_discount -X POST "$BASE/admin/discounts" -H "
 contains "naming the tier" '"path":"kind.tiers[1].threshold"'
 step "a volume discount, kept as a draft" 201 - -X POST "$BASE/admin/discounts" -H "$JSON" \
     -d '{"title":"Volume","method":"automatic","status":"draft","kind":{"type":"tiered","items":{"items":{"type":"all"},"exclude_on_sale":true},"measure":"quantity","tiers":[{"threshold":{"type":"quantity","quantity":3},"value":{"type":"percent","basis_points":1000}},{"threshold":{"type":"quantity","quantity":5},"value":{"type":"percent","basis_points":1500}}]}}'
-contains "its steps" '"summary":"10% off from 3 items, 15% off from 5 items on all items not on sale"'
+contains "its steps" '"summary":"10% off 3+ items, 15% off 5+ items not on sale"'
 
 echo
 echo "## rate limits"

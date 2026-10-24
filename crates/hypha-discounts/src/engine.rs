@@ -25,7 +25,7 @@ use crate::{
         Allocation, Class, Condition, Discount, ItemSet, Kind, Measure, PerMarket, Phase, Reward,
         Target, Threshold, Value,
     },
-    summary::summary,
+    summary::{Audience, Names, summary},
 };
 
 /// Who is buying.
@@ -85,6 +85,8 @@ pub struct DiscountInput<'a> {
     /// The codes the cart holds, normalised, in the order they were entered: each gets a
     /// state.
     pub codes: Vec<String>,
+    /// What the discounts' summaries call what they name (`Names::none()` to count).
+    pub names: &'a Names,
 }
 
 /// A discount that may apply: a live automatic one, or the discount of a code the cart
@@ -513,7 +515,12 @@ impl Evaluation {
                     discount: live.discount.id(),
                     code: live.code.map(str::to_string),
                     title: live.discount.title().to_string(),
-                    summary: summary(live.discount, Some(input.market)),
+                    summary: summary(
+                        live.discount,
+                        Some(input.market),
+                        input.names,
+                        Audience::Shoppers,
+                    ),
                     class: raw.class,
                     value: raw.value.clone(),
                     target: raw.target.clone(),

@@ -43,4 +43,4 @@ pub use repo::{
     UsageClaim, keys,
 };
 pub use schedule::{announce_windows, boundaries, next_boundary};
-pub use summary::summary;
+pub use summary::{Audience, NameRequest, Names, summary};

@@ -415,7 +415,7 @@
             "$ref": "#/components/schemas/DiscountId"
           },
           "summary": {
-            "description": "One sentence from its data, amounts in the cart's market.",
+            "description": "One sentence from its data, naming what it applies to as a shopper may see it,\namounts in the cart's market.",
             "type": "string"
           },
           "target": {
@@ -2030,6 +2030,7 @@
             "$ref": "#/components/schemas/DiscountId"
           },
           "summary": {
+            "description": "The sentence the shopper saw at checkout, kept as it was.",
             "type": "string"
           },
           "target": {

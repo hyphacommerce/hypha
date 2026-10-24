@@ -720,9 +720,18 @@ what they left open:
   (`hypha_discounts::json`); Postgres's `jsonb` doesn't keep the keys' order.
   `OrderLine::refund_of(refunded, units)` is the per-line refund rule for when refunds by
   line come.
-- **Summaries** (§10) count what they name ("2 categories"), show amounts in the market
-  asked for (else every market's, "5.00 EUR / 600 JPY") and dates as UTC days; an end at
-  midnight reads as the day before.
+- **Summaries** (§10) name what they apply to ("Buy 1 from Grow kits, get 1 Liquid
+  Culture Syringe free (once per order)", "Free shipping in Serbia on orders from 6,000
+  RSD"; more than two names read "Grow kits and 2 more"), from `Names` the caller reads in
+  one query (`DiscountRepo::names` over a `NameRequest`), counting whatever has no name
+  ("2 categories"). Amounts are formatted as emails do (€, $ and £ before, other codes
+  after, thousands grouped) without a fraction of zeros ("€50", "€12.50"), in the market
+  asked for (else every market's, "€5 / 600 JPY"), and dates as UTC days; an end at
+  midnight reads as the day before. Shoppers' summaries (carts, so orders, and
+  promotions: `Audience::Shoppers`, `NameRequest::for_shoppers`) name only active
+  products and never customers or groups ("for members", "for selected customers"); the
+  admin's name customers only to a caller holding `customers:read` who may see names.
+  Orders keep the sentence checkout rendered.
 - **Promotions** (§9) are on storefront product reads with `country` and on search hits,
   `[{discount, title, summary}]`, read at request time: live automatic discounts that may
   reach the product (a variant list may reach any product), with no condition about the

@@ -7,7 +7,7 @@ use crate::{InMemoryOutbox, table::Table};
 
 #[derive(Default)]
 pub struct InMemoryMarketRepo {
-    markets: Table<MarketId, Market>,
+    pub(crate) markets: std::sync::Arc<Table<MarketId, Market>>,
     pub(crate) outbox: InMemoryOutbox,
 }
 

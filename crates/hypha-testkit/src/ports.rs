@@ -111,19 +111,29 @@ impl Default for InMemoryPorts {
         let price_lists = InMemoryPriceListRepo::sharing(&outbox)
             .joining(&catalogs, &products, &categories)
             .joining_groups(&customer_groups);
+        let markets = InMemoryMarketRepo::sharing(&outbox);
+        let customers = InMemoryCustomerRepo::sharing(&outbox)
+            .joining_fields(&custom_fields)
+            .joining_groups(&customer_groups);
+        let discounts = crate::InMemoryDiscounts::sharing(&outbox).joining(
+            &products,
+            &categories,
+            &markets,
+            &channels,
+            &customer_groups,
+            &customers,
+        );
         Self {
             carts: InMemoryCartRepo::sharing(&outbox),
             products,
-            markets: InMemoryMarketRepo::sharing(&outbox),
+            markets,
             catalogs,
             price_lists,
             tax_classes: InMemoryTaxClassRepo::sharing(&outbox),
             tax_regions: InMemoryTaxRegionRepo::sharing(&outbox),
             inventory_items: InMemoryInventoryItemRepo::sharing(&outbox),
             locations: InMemoryLocationRepo::sharing(&outbox),
-            customers: InMemoryCustomerRepo::sharing(&outbox)
-                .joining_fields(&custom_fields)
-                .joining_groups(&customer_groups),
+            customers,
             customer_groups,
             idempotency: InMemoryIdempotencyRepo::default(),
             preview_tokens: crate::InMemoryPreviewTokenRepo::default(),
@@ -159,7 +169,7 @@ impl Default for InMemoryPorts {
             spore_settings: crate::InMemorySporeSettingsRepo::sharing(&outbox),
             custom_fields,
             agents: crate::InMemoryAgents::sharing(&outbox),
-            discounts: crate::InMemoryDiscounts::sharing(&outbox),
+            discounts,
             outbox,
         }
     }
