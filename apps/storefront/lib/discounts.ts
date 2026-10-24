@@ -12,6 +12,9 @@ import { lineCompareAt } from "./prices.ts";
 
 /** Why a code the cart keeps does or doesn't apply now. */
 export type CodeState =
+  | { state: "limit_reached" }
+  /** It would leave the cart costing no less, say by losing free shipping. */
+  | { state: "no_saving" }
   | { state: "applied" }
   /** A condition fails: `markets`, `channels`, `customer_groups`, `customers`,
    * `signed_in`. Open: an unknown one gets a general message. */
@@ -134,6 +137,7 @@ export function readCodeState(entry: Omit<CodeResponse, "code">): CodeState {
     case "applied":
     case "no_matching_items":
     case "limit_reached":
+    case "no_saving":
     case "not_available_in_market":
     case "expired":
     case "invalid":
@@ -355,6 +359,8 @@ export function codeMessage(
     }
     case "limit_reached":
       return { text: `${c} can't be used any more`, tone: "warning" };
+    case "no_saving":
+      return { text: `${c} wouldn't lower your total`, tone: "warning" };
     case "not_available_in_market":
       return { text: `${c} can't be used in this country`, tone: "warning" };
     case "expired":

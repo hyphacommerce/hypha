@@ -321,6 +321,7 @@ test("each other state has its message", () => {
     "Nothing in your cart qualifies for KIT",
   );
   assert.equal(message({ code: "ONCE", state: "limit_reached" }), "ONCE can't be used any more");
+  assert.equal(message({ code: "FIVE", state: "no_saving" }), "FIVE wouldn't lower your total");
   assert.equal(
     message({ code: "EU", state: "not_available_in_market" }),
     "EU can't be used in this country",
