@@ -45,6 +45,8 @@ pub struct ApiErrorBody {
 /// - `out_of_stock`: `{"lines": [{"variant", "requested", "available"}]}`
 /// - `cart_unavailable`: `{"lines": ["var_…"]}`, the lines `GET /storefront/carts/{id}` explains
 /// - `total_changed`: `{"expected": Money, "actual": Money}`
+/// - `discounts_changed`: `{"total": Money, "discount_codes": [{"code", "state", …}]}`, the
+///   cart's total and codes' states now (a discount's last use went to another order)
 /// - `cart_completed`: `{"order": "ord_…"}`
 /// - `mfa_locked`: `{"locked_until": "<RFC 3339>"}`
 /// - `rate_limited`: `{"retry_after_secs": n}`, also sent as `Retry-After`
@@ -1115,6 +1117,7 @@ fn order_error_status(e: &hypha_orders::OrderError) -> Option<StatusCode> {
         | O::CurrencyMismatch { .. }
         | O::LineTotalMismatch(_)
         | O::TotalsMismatch
+        | O::DiscountsMismatch
         | O::InvalidNumber(_)
         | O::ShippingWithoutAddress
         | O::UnknownShippedLine(_)
@@ -1429,6 +1432,7 @@ impl From<hypha_checkout::CommandError> for ApiError {
             | E::MissingEmail(_)
             | E::Unavailable { .. }
             | E::TotalChanged { .. }
+            | E::DiscountsChanged { .. }
             | E::ShippingAddressRequired(_)
             | E::ShippingOptionRequired(_)
             | E::ShippingUnavailable(_)
@@ -1452,6 +1456,14 @@ impl From<hypha_checkout::CommandError> for ApiError {
             E::TotalChanged { expected, actual } => {
                 Some(json!({ "expected": expected, "actual": actual }))
             }
+            E::DiscountsChanged { total, codes } => Some(json!({
+                "total": total,
+                "discount_codes": codes
+                    .iter()
+                    .map(crate::routes::carts::CartDiscountCodeResponse::from)
+                    .map(|c| serde_json::to_value(c).unwrap_or(Value::Null))
+                    .collect::<Vec<_>>(),
+            })),
             E::CartPaymentCommitted { payment, .. } | E::PaymentPending { payment, .. } => {
                 Some(json!({ "payment": payment }))
             }

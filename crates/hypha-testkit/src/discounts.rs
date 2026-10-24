@@ -115,6 +115,8 @@ pub struct InMemoryDiscounts {
     pub(crate) discounts: Table<DiscountId, Discount>,
     rows: Mutex<DiscountRows>,
     outbox: InMemoryOutbox,
+    /// How many of the next `usage_counts` reads see no uses (`hide_next_usage_counts`).
+    hidden_counts: std::sync::atomic::AtomicUsize,
 }
 
 impl InMemoryDiscounts {
@@ -123,6 +125,14 @@ impl InMemoryDiscounts {
             outbox: outbox.clone(),
             ..Self::default()
         }
+    }
+
+    /// Makes the next `n` reads of usage counts see none, as if another checkout used
+    /// the discount right after: to lose the race for the last use, which the batch's
+    /// claim must still catch.
+    pub fn hide_next_usage_counts(&self, n: usize) {
+        self.hidden_counts
+            .store(n, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub(crate) fn lock_rows(&self) -> MutexGuard<'_, DiscountRows> {
@@ -300,6 +310,14 @@ impl DiscountRepo for InMemoryDiscounts {
         &self,
         discounts: &[DiscountId],
     ) -> Result<HashMap<DiscountId, u64>, RepoError> {
+        use std::sync::atomic::Ordering;
+        if self
+            .hidden_counts
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok()
+        {
+            return Ok(HashMap::new());
+        }
         Ok(self
             .lock_rows()
             .counts

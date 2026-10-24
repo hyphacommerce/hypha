@@ -9,7 +9,7 @@
 export const greeting = "Hi{% if customer and customer.name %} {{ customer.name }}{% endif %},";
 
 export const orderLines = `{%- for line in order.lines %}
-- {{ line.quantity }} × {{ line.title }}{% if line.variant %} ({{ line.variant }}){% endif %}: {{ line.total.formatted }}
+- {{ line.quantity }} × {{ line.title }}{% if line.variant %} ({{ line.variant }}){% endif %}: {{ line.total.formatted }}{% if line.discount %} (was {{ line.original_total.formatted }}){% endif %}
 {%- endfor %}`;
 
 export const shippedLines = `{%- for line in fulfillment.lines %}
@@ -17,6 +17,9 @@ export const shippedLines = `{%- for line in fulfillment.lines %}
 {%- endfor %}`;
 
 export const totals = `Subtotal: {{ order.subtotal.formatted }}
+{%- for discount in order.discounts %}
+{{ discount.title }}{% if discount.code %} ({{ discount.code }}){% endif %}: −{{ discount.amount.formatted }}
+{%- endfor %}
 Shipping: {{ order.shipping.formatted }}
 {%- if not order.taxes_included %}
 Tax: {{ order.tax.formatted }}

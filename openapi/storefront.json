@@ -2009,6 +2009,50 @@
         ],
         "type": "object"
       },
+      "OrderDiscountResponse": {
+        "description": "A discount as it applied to an order.",
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What it took off in all."
+          },
+          "class": {
+            "$ref": "#/components/schemas/DiscountClassDto"
+          },
+          "code": {
+            "description": "The code it came by, normalised; `null` for an automatic discount.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discount": {
+            "$ref": "#/components/schemas/DiscountId"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/DiscountTargetDto"
+          },
+          "title": {
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/DiscountValueDto"
+          }
+        },
+        "required": [
+          "discount",
+          "title",
+          "summary",
+          "class",
+          "value",
+          "target",
+          "amount"
+        ],
+        "type": "object"
+      },
       "OrderId": {
         "description": "A OrderId: `ord_` and 32 hex digits.",
         "examples": [
@@ -3294,6 +3338,13 @@
               }
             ]
           },
+          "discounts": {
+            "description": "What discounts took off the line.",
+            "items": {
+              "$ref": "#/components/schemas/DiscountShareResponse"
+            },
+            "type": "array"
+          },
           "fulfilled_quantity": {
             "description": "How many of `quantity` standing fulfilments shipped.",
             "format": "int32",
@@ -3331,6 +3382,10 @@
               "null"
             ]
           },
+          "subtotal": {
+            "$ref": "#/components/schemas/Money",
+            "description": "`unit_price` × `quantity`: before discounts."
+          },
           "tax": {
             "oneOf": [
               {
@@ -3343,7 +3398,8 @@
             ]
           },
           "total": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "What the buyer was charged for the line, after its discounts."
           },
           "unit_price": {
             "$ref": "#/components/schemas/Money"
@@ -3367,7 +3423,9 @@
           "product_title",
           "unit_price",
           "total",
-          "fulfilled_quantity"
+          "fulfilled_quantity",
+          "subtotal",
+          "discounts"
         ],
         "type": "object"
       },
@@ -3393,6 +3451,17 @@
           },
           "customer": {
             "$ref": "#/components/schemas/CustomerId"
+          },
+          "discount_total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What they took off: already out of `subtotal` and `shipping_total`."
+          },
+          "discounts": {
+            "description": "The discounts it got, one per reward; lines and shipping lines name them by index.",
+            "items": {
+              "$ref": "#/components/schemas/OrderDiscountResponse"
+            },
+            "type": "array"
           },
           "email": {
             "$ref": "#/components/schemas/Email"
@@ -3486,7 +3555,9 @@
           "lines",
           "shipping_lines",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "discounts",
+          "discount_total"
         ],
         "type": "object"
       },
@@ -3602,6 +3673,13 @@
           "code": {
             "type": "string"
           },
+          "discounts": {
+            "description": "What shipping discounts took off `amount`.",
+            "items": {
+              "$ref": "#/components/schemas/DiscountShareResponse"
+            },
+            "type": "array"
+          },
           "estimate": {
             "oneOf": [
               {
@@ -3645,6 +3723,10 @@
                 "type": "null"
               }
             ]
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "`amount` less the discounts."
           }
         },
         "required": [
@@ -3653,7 +3735,9 @@
           "option",
           "code",
           "name",
-          "amount"
+          "amount",
+          "discounts",
+          "total"
         ],
         "type": "object"
       },

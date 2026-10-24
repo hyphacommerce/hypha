@@ -6,8 +6,8 @@ use hypha_checkout::{Checkout, checkout};
 use std::collections::HashMap;
 
 use hypha_core::{
-    AssetId, CartId, ChannelId, CountryCode, Currency, CustomerId, Email, Keyset, LocationId,
-    MarketId, Money, OrderId, OrderLineId, PaymentId, PriceListId, ProductId, Scope,
+    AssetId, CartId, ChannelId, CountryCode, Currency, CustomerId, DiscountId, Email, Keyset,
+    LocationId, MarketId, Money, OrderId, OrderLineId, PaymentId, PriceListId, ProductId, Scope,
     ShippingGroupId, ShippingOptionId, SortKey, TaxClassId, TaxRate, Timestamp, VariantId,
 };
 use hypha_media::{AssetRepo, HasAssets};
@@ -15,8 +15,9 @@ use hypha_order_actions::{
     CancelOrder, MarkPaid, OrderView, cancel_order, mark_paid as record_paid, order_view, view_of,
 };
 use hypha_orders::{
-    CancelReason, FinancialStatus, FulfillmentStatus, HasOrders, ListOrders, Order,
-    OrderFilterInput, OrderLine, OrderSort, OrderSummary, get_placed_order, list_orders,
+    CancelReason, DiscountClass, FinancialStatus, FulfillmentStatus, HasOrders, ListOrders, Order,
+    OrderDiscount, OrderFilterInput, OrderLine, OrderSort, OrderSummary, get_placed_order,
+    list_orders,
 };
 use hypha_products::{HasProducts, ProductRepo};
 use serde::{Deserialize, Serialize};
@@ -27,7 +28,9 @@ use hypha_custom_fields::{HasCustomFieldDefinitions, HasCustomFieldValues, Owner
 
 use super::{
     address::PostalAddressResponse,
+    carts::DiscountShareResponse,
     custom_fields::{self, CustomFieldValues, FieldParams},
+    discounts::{DiscountClassDto, DiscountTargetDto, DiscountValueDto},
     page::{ListQuery, PageParams, PageResponse, SortedFilters},
     payments::{NextActionResponse, PaymentResponse, PlacedPaymentResponse},
     products::ProductMediaResponse,
@@ -187,6 +190,47 @@ pub struct OrderResponse {
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
     updated_at: String,
+    /// The discounts it got, one per reward, as they were then (kept after the discount
+    /// changes or is deleted). Lines and shipping lines name them by index.
+    discounts: Vec<OrderDiscountResponse>,
+    /// What they took off: already out of `subtotal` and `shipping_total`.
+    discount_total: Money,
+}
+
+/// A discount as it applied to an order.
+#[derive(Serialize, Clone, utoipa::ToSchema)]
+pub struct OrderDiscountResponse {
+    discount: DiscountId,
+    /// The code it came by, normalised; `null` for an automatic discount.
+    code: Option<String>,
+    title: String,
+    summary: String,
+    class: DiscountClassDto,
+    #[schema(value_type = DiscountValueDto)]
+    value: serde_json::Value,
+    #[schema(value_type = DiscountTargetDto)]
+    target: serde_json::Value,
+    /// What it took off in all.
+    amount: Money,
+}
+
+impl From<&OrderDiscount> for OrderDiscountResponse {
+    fn from(d: &OrderDiscount) -> Self {
+        Self {
+            discount: d.discount,
+            code: d.code.clone(),
+            title: d.title.clone(),
+            summary: d.summary.clone(),
+            class: match d.class {
+                DiscountClass::Product => DiscountClassDto::Product,
+                DiscountClass::Order => DiscountClassDto::Order,
+                DiscountClass::Shipping => DiscountClassDto::Shipping,
+            },
+            value: d.value.clone(),
+            target: d.target.clone(),
+            amount: d.amount,
+        }
+    }
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -207,6 +251,10 @@ pub struct OrderShippingLineResponse {
     estimate: Option<DeliveryEstimateDto>,
     /// `null` when the country had no tax rates.
     tax: Option<OrderTaxResponse>,
+    /// What shipping discounts took off `amount`.
+    discounts: Vec<DiscountShareResponse>,
+    /// `amount` less the discounts: what was charged for it, and what its tax is on.
+    total: Money,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -226,6 +274,8 @@ pub struct OrderLineResponse {
     compare_at_price: Option<Money>,
     /// The price list `unit_price` came from; `null` for the variant's base price.
     price_list: Option<PriceListId>,
+    /// What the buyer was charged for the line: `subtotal` less its discounts. Tax is on
+    /// this, and a refund of part of the line refunds that part of it.
     total: Money,
     /// `null` when the country had no tax rates.
     tax: Option<OrderTaxResponse>,
@@ -235,6 +285,10 @@ pub struct OrderLineResponse {
     /// image, else the product's first media item; `null` for a product gone or without
     /// media, or without file storage.
     image: Option<ProductMediaResponse>,
+    /// `unit_price` × `quantity`: before discounts.
+    subtotal: Money,
+    /// What discounts took off the line.
+    discounts: Vec<DiscountShareResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -307,8 +361,16 @@ impl OrderResponse {
                         amount: t.amount,
                         tax_class: t.class,
                     }),
+                    discounts: s
+                        .discounts
+                        .iter()
+                        .map(DiscountShareResponse::from)
+                        .collect(),
+                    total: s.total,
                 })
                 .collect(),
+            discounts: order.discounts().iter().map(Into::into).collect(),
+            discount_total: order.discount_total(),
         })
     }
 }
@@ -334,6 +396,12 @@ impl From<&OrderLine> for OrderLineResponse {
             }),
             fulfilled_quantity: l.fulfilled_quantity,
             image: None,
+            subtotal: l.subtotal,
+            discounts: l
+                .discounts
+                .iter()
+                .map(DiscountShareResponse::from)
+                .collect(),
         }
     }
 }
@@ -376,6 +444,10 @@ pub struct StorefrontOrderResponse {
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
     updated_at: String,
+    /// The discounts it got, one per reward; lines and shipping lines name them by index.
+    discounts: Vec<OrderDiscountResponse>,
+    /// What they took off: already out of `subtotal` and `shipping_total`.
+    discount_total: Money,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -392,6 +464,7 @@ pub struct StorefrontOrderLineResponse {
     /// What `unit_price` was shown against at checkout, struck through ("you saved");
     /// never part of the totals. `null` without one.
     compare_at_price: Option<Money>,
+    /// What the buyer was charged for the line, after its discounts.
     total: Money,
     /// `null` when the country had no tax rates.
     tax: Option<StorefrontTaxResponse>,
@@ -400,6 +473,10 @@ pub struct StorefrontOrderLineResponse {
     /// The line's picture as its product is now: the variant's image, else the product's
     /// first media item; `null` for a product gone or without media.
     image: Option<ProductMediaResponse>,
+    /// `unit_price` × `quantity`: before discounts.
+    subtotal: Money,
+    /// What discounts took off the line.
+    discounts: Vec<DiscountShareResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -416,6 +493,10 @@ pub struct StorefrontShippingLineResponse {
     estimate: Option<DeliveryEstimateDto>,
     /// `null` when the country had no tax rates.
     tax: Option<StorefrontTaxResponse>,
+    /// What shipping discounts took off `amount`.
+    discounts: Vec<DiscountShareResponse>,
+    /// `amount` less the discounts.
+    total: Money,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -471,6 +552,8 @@ impl From<OrderResponse> for StorefrontOrderResponse {
                     tax: l.tax.map(Into::into),
                     fulfilled_quantity: l.fulfilled_quantity,
                     image: l.image,
+                    subtotal: l.subtotal,
+                    discounts: l.discounts,
                 })
                 .collect(),
             shipping_address: o.shipping_address,
@@ -487,10 +570,14 @@ impl From<OrderResponse> for StorefrontOrderResponse {
                     amount: s.amount,
                     estimate: s.estimate,
                     tax: s.tax.map(Into::into),
+                    discounts: s.discounts,
+                    total: s.total,
                 })
                 .collect(),
             created_at: o.created_at,
             updated_at: o.updated_at,
+            discounts: o.discounts,
+            discount_total: o.discount_total,
         }
     }
 }

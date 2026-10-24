@@ -6495,6 +6495,19 @@ export interface components {
             id: components["schemas"]["OptionValueId"];
             label: string;
         };
+        /** @description A discount as it applied to an order. */
+        OrderDiscountResponse: {
+            /** @description What it took off in all. */
+            amount: components["schemas"]["Money"];
+            class: components["schemas"]["DiscountClassDto"];
+            /** @description The code it came by, normalised; `null` for an automatic discount. */
+            code?: string | null;
+            discount: components["schemas"]["DiscountId"];
+            summary: string;
+            target: components["schemas"]["DiscountTargetDto"];
+            title: string;
+            value: components["schemas"]["DiscountValueDto"];
+        };
         /**
          * @description A OrderId: `ord_` and 32 hex digits.
          * @example ord_0190f1a2b3c47d8e9f00112233445566
@@ -6507,6 +6520,8 @@ export interface components {
         OrderLineId: string;
         OrderLineResponse: {
             compare_at_price?: components["schemas"]["Money"] | null;
+            /** @description What discounts took off the line. */
+            discounts: components["schemas"]["DiscountShareResponse"][];
             /**
              * Format: int32
              * @description How many of `quantity` standing fulfilments shipped.
@@ -6520,7 +6535,13 @@ export interface components {
             /** Format: int32 */
             quantity: number;
             sku?: string | null;
+            /** @description `unit_price` × `quantity`: before discounts. */
+            subtotal: components["schemas"]["Money"];
             tax?: components["schemas"]["OrderTaxResponse"] | null;
+            /**
+             * @description What the buyer was charged for the line: `subtotal` less its discounts. Tax is on
+             *     this, and a refund of part of the line refunds that part of it.
+             */
             total: components["schemas"]["Money"];
             unit_price: components["schemas"]["Money"];
             variant: components["schemas"]["VariantId"];
@@ -6536,6 +6557,13 @@ export interface components {
             created_at: string;
             currency: components["schemas"]["Currency"];
             customer: components["schemas"]["CustomerId"];
+            /** @description What they took off: already out of `subtotal` and `shipping_total`. */
+            discount_total: components["schemas"]["Money"];
+            /**
+             * @description The discounts it got, one per reward, as they were then (kept after the discount
+             *     changes or is deleted). Lines and shipping lines name them by index.
+             */
+            discounts: components["schemas"]["OrderDiscountResponse"][];
             email: components["schemas"]["Email"];
             financial_status: components["schemas"]["FinancialStatusDto"];
             fulfillment_status: components["schemas"]["FulfillmentStatusDto"];
@@ -6575,6 +6603,8 @@ export interface components {
         OrderShippingLineResponse: {
             amount: components["schemas"]["Money"];
             code: string;
+            /** @description What shipping discounts took off `amount`. */
+            discounts: components["schemas"]["DiscountShareResponse"][];
             estimate?: components["schemas"]["DeliveryEstimateDto"] | null;
             group: components["schemas"]["ShippingGroupId"];
             /** @description The order lines this ships. */
@@ -6587,6 +6617,8 @@ export interface components {
             reference?: string | null;
             service?: string | null;
             tax?: components["schemas"]["OrderTaxResponse"] | null;
+            /** @description `amount` less the discounts: what was charged for it, and what its tax is on. */
+            total: components["schemas"]["Money"];
         };
         /**
          * @description A customer's orders, added up over those that weren't cancelled: `GET

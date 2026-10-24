@@ -427,3 +427,90 @@ async fn a_code_short_of_its_minimum_is_kept_with_what_is_missing() {
     );
     assert_eq!(priced["total"], eur(2000));
 }
+
+#[tokio::test]
+async fn an_order_keeps_what_its_code_took_off_and_counts_the_use() {
+    let app = app().await;
+    let d = create(
+        &app,
+        json!({"title": "Welcome", "method": "codes", "kind": ten_percent_off_the_order(),
+            "codes": ["WELCOME10"], "limits": {"total": 1}}),
+    )
+    .await;
+    let (pk, cart_path, _) = cart_for_three_mugs(&app).await;
+    let (_, priced) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/discount-codes"),
+        Some(r#"{"code":"welcome10"}"#),
+    )
+    .await;
+    assert_eq!(priced["total"], eur(2700));
+    pay_on_delivery(&app, &pk, &cart_path).await;
+    let body = json!({"expected_total": eur(2700)}).to_string();
+    let (status, placed) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/checkout"),
+        Some(&body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{placed}");
+    let order = &placed;
+    assert_eq!(
+        (
+            &order["discount_total"],
+            &order["total"],
+            &order["subtotal"]
+        ),
+        (&eur(300), &eur(2700), &eur(2700))
+    );
+    assert_eq!(
+        (
+            &order["discounts"][0]["code"],
+            &order["discounts"][0]["value"],
+            &order["lines"][0]["subtotal"],
+            &order["lines"][0]["discounts"],
+        ),
+        (
+            &json!("WELCOME10"),
+            &json!({"type": "percent", "basis_points": 1000}),
+            &eur(3000),
+            &json!([{"application": 0, "amount": eur(300)}])
+        )
+    );
+
+    let url = format!("/admin/discounts/{}", d["id"].as_str().unwrap());
+    let (_, usage) = send(&app, "GET", &format!("{url}/usage"), None).await;
+    assert_eq!(
+        (&usage["items"][0]["code"], &usage["items"][0]["amount"]),
+        (&json!("WELCOME10"), &eur(300))
+    );
+    let (_, d) = send(&app, "GET", &url, None).await;
+    assert_eq!(d["used"], json!(1));
+
+    // Its one use is taken: another cart keeps the code, not applied.
+    let (_, cart) = send_as(
+        &app,
+        &pk,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    let other = format!("/storefront/carts/{}", cart["id"].as_str().unwrap());
+    let (_, again) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{other}/discount-codes"),
+        Some(r#"{"code":"WELCOME10"}"#),
+    )
+    .await;
+    assert_eq!(
+        again["discount_codes"],
+        json!([{"code": "WELCOME10", "state": "limit_reached"}])
+    );
+}

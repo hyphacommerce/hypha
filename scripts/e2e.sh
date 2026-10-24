@@ -954,14 +954,20 @@ step "an order ID of the wrong kind" 400 invalid_path "$BASE/admin/orders/$CART"
 step "a new cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 contains "an open cart has no order" '"order":null'
 step "checkout an empty cart" 409 cart_empty -X POST "$BASE/storefront/carts/$(id)/checkout" -H "$JSON" -d '{}'
+step "the welcome code on the shipping cart" 200 - -X POST "$SHIP/discount-codes" -H "$JSON" -d '{"code":"WELCOME10"}'
+contains "0.90 off the mug, shipping as it was" '"total":{"amount":1300,"currency":"EUR"},"fully_available":true'
 step "pay the shipping cart on delivery" 200 - -X PUT "$SHIP/payment-method" -H "$JSON" \
     -d "{\"payment_method\":\"$COD\"}"
-step "checkout the shipping cart" 201 - -X POST "$SHIP/checkout" -H "$JSON" -d '{}'
+step "checkout the shipping cart" 201 - -X POST "$SHIP/checkout" -H "$JSON" -d '{"expected_total":{"amount":1300,"currency":"EUR"}}'
 contains "told to pay the courier" '"next_action":{"type":"instructions","instructions":"Pay the courier."}'
-contains "the order charges shipping" '"shipping_total":{"amount":490,"currency":"EUR"},"tax_total":{"amount":0,"currency":"EUR"},"total":{"amount":1390'
+contains "the order charges shipping" '"shipping_total":{"amount":490,"currency":"EUR"},"tax_total":{"amount":0,"currency":"EUR"},"total":{"amount":1300'
+contains "the order keeps the discount" '"discount_total":{"amount":90,"currency":"EUR"}'
+contains "with its code and value" '"code":"WELCOME10","title":"Welcome","summary":"10% off the order · once per customer","class":"order","value":{"basis_points":1000,"type":"percent"}'
 contains "it copies the address" '"shipping_address":{"first_name":"Ana","last_name":"Horvat"'
 contains "and the shipping line" '"code":"standard","name":"Standard","service":null,"amount":{"amount":490,"currency":"EUR"},"estimate":{"min_days":2,"max_days":4}'
 lacks "but not its provider, which is for staff" '"provider"'
+step "the welcome code was used once" 200 - "$BASE/admin/discounts/$WELCOME/usage"
+contains "on the shipping cart's order" '"code":"WELCOME10","amount":{"amount":90,"currency":"EUR"}'
 
 echo "## payment and search apps"
 step "a payment app that isn't installed" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \

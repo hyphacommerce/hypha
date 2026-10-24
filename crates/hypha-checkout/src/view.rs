@@ -2,10 +2,19 @@
 
 use hypha_cart::{
     Cart, CartRepo, CartStatus, HasCarts, LineDetails, LineStatus, PricedCart, PricedLine,
-    PricedShipping, PricedShippingGroup, PricingPorts, price_for_checkout,
+    PricedShipping, PricedShippingGroup, PricingPorts,
+    discounts::{
+        Application, Class, Share, Target, Value,
+        json::{target_from_json, value_from_json},
+    },
+    price_for_checkout,
 };
+use hypha_core::BasisPoints;
 use hypha_core::{CartId, Ctx, RepoError, Scope};
-use hypha_orders::{HasOrders, Order, OrderRepo, OrderTax, OrderTaxSource};
+use hypha_orders::{
+    DiscountClass, DiscountShare, HasOrders, Order, OrderDiscount, OrderRepo, OrderTax,
+    OrderTaxSource,
+};
 use hypha_shipping::DeliveryEstimate;
 use hypha_tax::{TaxLine, TaxSource};
 
@@ -66,8 +75,8 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
                 unit_price: line.unit_price,
                 compare_at: line.compare_at_price,
                 price_list: line.price_list,
-                subtotal: line.total,
-                discounts: Vec::new(),
+                subtotal: line.subtotal,
+                discounts: shares(&line.discounts),
                 total: line.total,
                 tax: line.tax.map(tax_line),
             },
@@ -102,8 +111,8 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
                     code: s.code.clone(),
                     name: s.name.clone(),
                     amount: s.amount.money(),
-                    discounts: Vec::new(),
-                    total: s.amount.money(),
+                    discounts: shares(&s.discounts),
+                    total: s.total,
                     tax: s.tax.map(tax_line),
                     estimate: s
                         .estimate_days
@@ -115,12 +124,44 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
             })
             .collect(),
         shipping_total: order.shipping_total(),
-        discounts: Vec::new(),
-        discount_total: hypha_core::Money::zero(order.currency()),
+        discounts: order.discounts().iter().map(application).collect(),
+        discount_total: order.discount_total(),
+        // Checked out: what applied is in `discounts`; the codes' states were for pricing.
         discount_codes: Vec::new(),
         tax_total: order.tax_total(),
         total: order.total(),
         payment_method: cart.payment_method(),
+    }
+}
+
+fn shares(shares: &[DiscountShare]) -> Vec<Share> {
+    shares
+        .iter()
+        .map(|s| Share {
+            application: usize::from(s.application),
+            amount: s.amount,
+            units: s.units,
+        })
+        .collect()
+}
+
+/// An order's discount as the cart showed it. Its value and target are the discounts
+/// domain's JSON, written by checkout; JSON in another shape reads as nothing off the
+/// subtotal (it can't be, short of a bug), so the cart still reads.
+fn application(d: &OrderDiscount) -> Application {
+    Application {
+        discount: d.discount,
+        code: d.code.clone(),
+        title: d.title.clone(),
+        summary: d.summary.clone(),
+        class: match d.class {
+            DiscountClass::Product => Class::Product,
+            DiscountClass::Order => Class::Order,
+            DiscountClass::Shipping => Class::Shipping,
+        },
+        value: value_from_json(&d.value).unwrap_or(Value::Percent(BasisPoints::ZERO)),
+        target: target_from_json(&d.target).unwrap_or(Target::Subtotal),
+        amount: d.amount,
     }
 }
 

@@ -376,6 +376,16 @@ impl From<&hypha_cart::discounts::Share> for DiscountShareResponse {
     }
 }
 
+impl From<&hypha_orders::DiscountShare> for DiscountShareResponse {
+    fn from(s: &hypha_orders::DiscountShare) -> Self {
+        Self {
+            application: usize::from(s.application),
+            amount: s.amount,
+            units: s.units,
+        }
+    }
+}
+
 /// Where a code the cart holds stands, for a UCP-style message pointing at
 /// `$.discount_codes[i]`.
 #[derive(Serialize, utoipa::ToSchema)]

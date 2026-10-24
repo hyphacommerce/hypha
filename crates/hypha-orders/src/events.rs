@@ -15,6 +15,10 @@ pub struct OrderPlaced {
     /// Where it was placed: an added field, so still version 1.
     pub channel: ChannelId,
     pub total: Money,
+    /// The discount codes it used, normalised: an added field.
+    pub discount_codes: Vec<String>,
+    /// What discounts took off it: an added field.
+    pub discount_total: Money,
 }
 
 impl Event for OrderPlaced {

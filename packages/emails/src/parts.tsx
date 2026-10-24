@@ -74,6 +74,11 @@ export function OrderLines() {
           </Column>
           <Column style={{ ...cell, width: "110px" }} align="right">
             <Text style={amount}>{v("line.total.formatted")}</Text>
+            <If test="line.discount">
+              <Text style={{ ...muted, margin: 0, textDecoration: "line-through" }}>
+                {v("line.original_total.formatted")}
+              </Text>
+            </If>
           </Column>
         </Row>
       </For>
@@ -118,11 +123,17 @@ function TotalRow(props: { label: string; value: string; strong?: boolean }) {
   );
 }
 
-/** Subtotal, shipping, tax (a line of its own, or included in the total) and total. */
+/**
+ * Subtotal (after discounts), the discounts it includes, shipping, tax (a line of its own,
+ * or included in the total) and total.
+ */
 export function Totals() {
   return (
     <Section style={{ marginTop: "12px" }}>
       <TotalRow label="Subtotal" value={v("order.subtotal.formatted")} />
+      <For each="discount in order.discounts">
+        <TotalRow label={v("discount.title")} value={`−${v("discount.amount.formatted")}`} />
+      </For>
       <TotalRow label="Shipping" value={v("order.shipping.formatted")} />
       <If test="not order.taxes_included">
         <TotalRow label="Tax" value={v("order.tax.formatted")} />
