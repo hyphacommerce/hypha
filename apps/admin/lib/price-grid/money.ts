@@ -178,6 +178,20 @@ export function formatAmount(amount: number, digits: number): string {
 }
 
 /**
+ * A read-only amount as a grid cell shows it: plain decimals when it's in the list's
+ * currency (the column header names that), with its own code after when it isn't
+ * ("12.50 USD": a variant's base price may be in another currency).
+ */
+export function cellAmount(
+  money: { amount: number; currency: string },
+  digits: number,
+  listCurrency: string,
+): string {
+  const text = formatAmount(money.amount, digits);
+  return money.currency === listCurrency ? text : `${text} ${money.currency}`;
+}
+
+/**
  * `amount` adjusted by `bps` basis points (−1000 is 10% off), rounded half away from
  * zero in minor units: the backend's `Money::adjust`, so the grid shows what the API
  * computes. Null when the result is out of range.

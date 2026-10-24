@@ -6,10 +6,13 @@ import {
   contains,
   extendTo,
   moveBy,
+  nextEditableInColumn,
   rectOf,
+  sameCell,
   selectAll,
   selectCell,
   tabFrom,
+  tabToEditable,
 } from "./selection.ts";
 
 const size = { rows: 4, cols: 3 };
@@ -59,4 +62,46 @@ test("cells of a rectangle, row by row", () => {
 
 test("select all covers the grid", () => {
   assert.deepEqual(rectOf(selectAll(size)), { top: 0, left: 0, bottom: 3, right: 2 });
+});
+
+// Rows 0 and 2 are product headers; only column 2 takes prices.
+const editable = ({ row, col }: { row: number; col: number }) =>
+  row !== 0 && row !== 2 && col === 2;
+
+test("enter moves to the next editable cell down the column, past product headers", () => {
+  assert.deepEqual(nextEditableInColumn({ row: 1, col: 2 }, 1, size, editable), {
+    row: 3,
+    col: 2,
+  });
+  assert.deepEqual(nextEditableInColumn({ row: 3, col: 2 }, -1, size, editable), {
+    row: 1,
+    col: 2,
+  });
+});
+
+test("enter stays put when no editable cell is left that way", () => {
+  assert.deepEqual(nextEditableInColumn({ row: 3, col: 2 }, 1, size, editable), {
+    row: 3,
+    col: 2,
+  });
+  assert.deepEqual(nextEditableInColumn({ row: 1, col: 2 }, -1, size, editable), {
+    row: 1,
+    col: 2,
+  });
+});
+
+test("tab skips names, read-only prices and headers to the next editable cell", () => {
+  assert.deepEqual(tabToEditable({ row: 1, col: 2 }, size, false, editable), { row: 3, col: 2 });
+  assert.deepEqual(tabToEditable({ row: 3, col: 2 }, size, true, editable), { row: 1, col: 2 });
+  assert.deepEqual(tabToEditable({ row: 0, col: 0 }, size, false, editable), { row: 1, col: 2 });
+});
+
+test("tab past the last editable cell stays, so focus can leave the grid", () => {
+  assert.deepEqual(tabToEditable({ row: 3, col: 2 }, size, false, editable), { row: 3, col: 2 });
+  assert.deepEqual(tabToEditable({ row: 1, col: 2 }, size, true, editable), { row: 1, col: 2 });
+});
+
+test("same cell compares rows and columns", () => {
+  assert.equal(sameCell({ row: 1, col: 2 }, { row: 1, col: 2 }), true);
+  assert.equal(sameCell({ row: 1, col: 2 }, { row: 2, col: 1 }), false);
 });

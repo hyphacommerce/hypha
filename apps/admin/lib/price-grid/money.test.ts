@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { MAX_AMOUNT, adjustAmount, formatAmount, parseAmount, parsePercent } from "./money.ts";
+import {
+  MAX_AMOUNT,
+  adjustAmount,
+  cellAmount,
+  formatAmount,
+  parseAmount,
+  parsePercent,
+} from "./money.ts";
 
 const amount = (input: string, digits = 2, currency = "EUR") => {
   const parsed = parseAmount(input, digits, currency);
@@ -140,4 +147,10 @@ test("percentages out of range, with three decimals or no number are refused", (
   assert.equal(bps("ten"), "A percentage, like -10 or 5.5.");
   assert.equal(bps("12."), "A percentage, like -10 or 5.5.");
   assert.equal(bps(""), "A percentage, like -10 or 5.5.");
+});
+
+test("a cell's amount in the list's currency is plain; another currency is named", () => {
+  assert.equal(cellAmount({ amount: 1250, currency: "EUR" }, 2, "EUR"), "12.50");
+  assert.equal(cellAmount({ amount: 1250, currency: "USD" }, 2, "EUR"), "12.50 USD");
+  assert.equal(cellAmount({ amount: 500, currency: "JPY" }, 0, "JPY"), "500");
 });

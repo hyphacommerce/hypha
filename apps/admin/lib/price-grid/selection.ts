@@ -89,3 +89,45 @@ export function selectAll(size: Size): Selection {
     focus: { row: Math.max(size.rows - 1, 0), col: Math.max(size.cols - 1, 0) },
   };
 }
+
+export function sameCell(a: Cell, b: Cell): boolean {
+  return a.row === b.row && a.col === b.col;
+}
+
+/**
+ * Enter after an edit: the nearest editable cell `by` rows away (down for 1, up for -1)
+ * in the same column, past product headers and other rows that take no price. Where
+ * there's none, the selection stays on `cell`.
+ */
+export function nextEditableInColumn(
+  cell: Cell,
+  by: 1 | -1,
+  size: Size,
+  isEditable: (cell: Cell) => boolean,
+): Cell {
+  for (let row = cell.row + by; row >= 0 && row < size.rows; row += by) {
+    const next = { row, col: cell.col };
+    if (isEditable(next)) return next;
+  }
+  return cell;
+}
+
+/**
+ * Tab and Shift+Tab where cells take prices: the next editable cell along the rows,
+ * skipping names and read-only prices. Where there's none, `cell` itself (Tab then
+ * leaves the grid, as it would any other control).
+ */
+export function tabToEditable(
+  cell: Cell,
+  size: Size,
+  backwards: boolean,
+  isEditable: (cell: Cell) => boolean,
+): Cell {
+  let at = cell;
+  for (;;) {
+    const next = tabFrom(at, size, backwards);
+    if (sameCell(next, at)) return cell;
+    if (isEditable(next)) return next;
+    at = next;
+  }
+}
