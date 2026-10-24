@@ -69,6 +69,7 @@ function roundTrip(d: DiscountDraft): DiscountDraft {
     summary: "",
     code_count: 0,
     used: 0,
+    discounted_total: [],
     created_at: "2026-10-24T00:00:00Z",
     updated_at: "2026-10-24T00:00:00Z",
     title: sent.title,
