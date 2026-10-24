@@ -41,6 +41,8 @@ mod app_fields;
 mod custom_fields;
 // Customers: deleting, consent, groups and erasure.
 mod customers;
+// Discounts and their codes, on carts and orders.
+mod discounts;
 // Customer accounts: signing in with an email code.
 mod accounts;
 mod oauth;

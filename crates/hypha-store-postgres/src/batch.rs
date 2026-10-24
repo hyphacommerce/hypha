@@ -10,9 +10,9 @@ use hypha_cart::{Cart, CartSnapshot, StageCarts};
 use hypha_categories::{Category, CategorySnapshot, StageCategories};
 use hypha_core::{
     CartId, CatalogId, CategoryId, ChannelId, CustomFieldDefinitionId, CustomerGroupId, CustomerId,
-    HasBatch, IdempotencyRecord, IdentityId, PendingEvent, PriceListId, ProductId, Recorded,
-    RepoError, SessionId, StageEvents, StageIdempotency, TaxClassId, Timestamp, VariantId, Version,
-    Versioned, stamp_insert, stamp_update,
+    DiscountId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, PriceListId, ProductId,
+    Recorded, RepoError, SessionId, StageEvents, StageIdempotency, TaxClassId, Timestamp,
+    VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_custom_fields::{
     CustomFieldDefinition, DefinitionSnapshot, StageCustomFieldDefinitions, StageCustomFieldValues,
@@ -21,6 +21,9 @@ use hypha_custom_fields::{
 use hypha_customers::{
     Customer, CustomerGroup, CustomerGroupSnapshot, CustomerSnapshot, StageCustomerGroups,
     StageCustomers,
+};
+use hypha_discounts::{
+    ClassSet, CodeSelection, Discount, DiscountCode, DiscountSnapshot, StageDiscounts, UsageClaim,
 };
 use hypha_fulfillment::{Fulfillment, FulfillmentSnapshot, StageFulfillments};
 use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
@@ -56,6 +59,7 @@ use crate::{
         add_group_members, delete_group, insert_group, remove_group_members, update_group,
     },
     customers::{delete_customer, insert_customer, update_customer},
+    discounts::{add_codes, claim_usage, insert_discount, remove_codes},
     fulfillments::{insert_fulfillment, update_fulfillment},
     idempotency::insert_records,
     inventory::update_items,
@@ -167,6 +171,11 @@ enum Staged {
     ReindexedCustomFieldValue(ValueRow, Version),
     RemovedCustomFieldValue(CustomFieldDefinitionId, uuid::Uuid, Option<Version>),
     NewAgent(AgentSnapshot),
+    /// A new discount with its classes (derived, stored for lists).
+    NewDiscount(DiscountSnapshot, ClassSet),
+    DiscountCodes(Vec<DiscountCode>),
+    RemovedDiscountCodes(DiscountId, CodeSelection),
+    DiscountUsage(UsageClaim),
 }
 
 impl Staged {
@@ -245,6 +254,11 @@ impl Staged {
             | Staged::RemovedCustomFieldValue(..) => 49,
             // An agent before its proposals.
             Staged::NewAgent(_) => 50,
+            // A discount before its codes; usage claims last, by discount, so two checkouts
+            // lock counters in the same order.
+            Staged::NewDiscount(..) => 51,
+            Staged::DiscountCodes(_) | Staged::RemovedDiscountCodes(..) => 52,
+            Staged::DiscountUsage(_) => 53,
         }
     }
 
@@ -327,6 +341,11 @@ impl Staged {
                     | Staged::RemovedCustomFieldValue(..),
                 ) => value_key(self).cmp(&value_key(other)),
                 (Staged::NewAgent(a), Staged::NewAgent(b)) => a.id.cmp(&b.id),
+                (Staged::NewDiscount(a, _), Staged::NewDiscount(b, _)) => a.id.cmp(&b.id),
+                (Staged::DiscountUsage(a), Staged::DiscountUsage(b)) => a
+                    .discount
+                    .cmp(&b.discount)
+                    .then_with(|| a.code.cmp(&b.code)),
                 _ => Ordering::Equal,
             })
     }
@@ -819,6 +838,12 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                         crate::custom_fields::remove_value(&db, definition, owner, expected).await?
                     }
                     Staged::NewAgent(s) => crate::agents::insert_agent(&db, &s).await?,
+                    Staged::NewDiscount(s, classes) => insert_discount(&db, &s, classes).await?,
+                    Staged::DiscountCodes(codes) => add_codes(&db, &codes).await?,
+                    Staged::RemovedDiscountCodes(discount, selection) => {
+                        remove_codes(&db, discount, &selection).await?
+                    }
+                    Staged::DiscountUsage(claim) => claim_usage(&db, &claim).await?,
                 }
             }
             insert_records(&db, &records).await?;
@@ -1025,6 +1050,27 @@ impl StageCustomFieldValues for PgBatch {
 
     fn reindex_custom_field_value(&mut self, row: ValueRow, at: Version) {
         self.stage(Staged::ReindexedCustomFieldValue(row, at));
+    }
+}
+
+impl StageDiscounts for PgBatch {
+    fn insert_discount(&mut self, discount: &mut Discount) {
+        stamp_insert(discount, self.now);
+        self.stage(Staged::NewDiscount(discount.snapshot(), discount.classes()));
+        self.stage_events_of(discount, Version::NEW.next());
+        discount.set_version(Version::NEW.next());
+    }
+
+    fn add_discount_codes(&mut self, codes: &[DiscountCode]) {
+        self.stage(Staged::DiscountCodes(codes.to_vec()));
+    }
+
+    fn remove_discount_codes(&mut self, discount: DiscountId, codes: CodeSelection) {
+        self.stage(Staged::RemovedDiscountCodes(discount, codes));
+    }
+
+    fn claim_discount_usage(&mut self, claim: UsageClaim) {
+        self.stage(Staged::DiscountUsage(claim));
     }
 }
 

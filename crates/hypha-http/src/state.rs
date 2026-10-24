@@ -592,6 +592,7 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_agents::HasAgents
         + hypha_agents::HasProposals
         + hypha_agents::HasAgentCalls
+        + hypha_discounts::HasDiscounts
         + HasBatch<
             Batch: hypha_core::StageEvents
                        + hypha_markets::StageCatalogProducts
@@ -606,7 +607,8 @@ pub trait Storage: Send + Sync + 'static {
                        + hypha_notifications::StageNotificationSettings
                        + hypha_apps::StageApps
                        + hypha_oauth::StageOAuth
-                       + hypha_agents::StageAgents,
+                       + hypha_agents::StageAgents
+                       + hypha_discounts::StageDiscounts,
         >
     where
         Self: 'a;

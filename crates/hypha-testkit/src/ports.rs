@@ -91,6 +91,8 @@ pub struct InMemoryPorts {
     pub custom_fields: crate::InMemoryCustomFields,
     /// Admin agents, their proposals and their call log.
     pub agents: crate::InMemoryAgents,
+    /// Discounts, their codes and their usage.
+    pub discounts: crate::InMemoryDiscounts,
 }
 
 impl Default for InMemoryPorts {
@@ -157,6 +159,7 @@ impl Default for InMemoryPorts {
             spore_settings: crate::InMemorySporeSettingsRepo::sharing(&outbox),
             custom_fields,
             agents: crate::InMemoryAgents::sharing(&outbox),
+            discounts: crate::InMemoryDiscounts::sharing(&outbox),
             outbox,
         }
     }
@@ -166,6 +169,13 @@ impl hypha_core::HasPreviewTokens for InMemoryPorts {
     type PreviewTokens = crate::InMemoryPreviewTokenRepo;
     fn preview_tokens(&self) -> &crate::InMemoryPreviewTokenRepo {
         &self.preview_tokens
+    }
+}
+
+impl hypha_discounts::HasDiscounts for InMemoryPorts {
+    type Discounts = crate::InMemoryDiscounts;
+    fn discounts(&self) -> &crate::InMemoryDiscounts {
+        &self.discounts
     }
 }
 

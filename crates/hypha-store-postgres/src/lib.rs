@@ -26,6 +26,7 @@ mod config;
 mod custom_fields;
 mod customer_groups;
 mod customers;
+mod discounts;
 mod endpoints;
 mod error;
 mod extensions;

@@ -426,7 +426,7 @@ impl From<AdjustmentDto> for AdjustmentInput {
 
 /// An RFC 3339 instant in a request body.
 #[derive(Debug, Clone, Copy)]
-pub struct Instant(Timestamp);
+pub struct Instant(pub(crate) Timestamp);
 
 impl<'de> Deserialize<'de> for Instant {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {

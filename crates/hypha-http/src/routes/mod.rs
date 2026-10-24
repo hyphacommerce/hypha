@@ -19,6 +19,7 @@ pub mod channels;
 pub mod custom_fields;
 pub mod customer_groups;
 pub mod customers;
+pub mod discounts;
 pub mod fulfillments;
 pub mod health;
 pub mod inventory;
@@ -216,6 +217,18 @@ macro_rules! route_table {
             [admin, POST, "/admin/customers/{id}/sessions/revoke", customers::revoke_sessions],
             [admin, PUT, "/admin/customers/{id}/marketing/{channel}", customers::set_consent],
             [admin, PUT, "/admin/customers/{id}/groups", customers::set_groups],
+            // discounts and their codes
+            [admin, GET, "/admin/discounts", discounts::list],
+            [admin, POST, "/admin/discounts", discounts::create],
+            [admin, GET, "/admin/discounts/{id}", discounts::fetch],
+            [admin, PATCH, "/admin/discounts/{id}", discounts::update],
+            [admin, DELETE, "/admin/discounts/{id}", discounts::remove],
+            [admin, GET, "/admin/discounts/{id}/codes", discounts::codes],
+            [admin, POST, "/admin/discounts/{id}/codes", discounts::add],
+            [admin, DELETE, "/admin/discounts/{id}/codes", discounts::remove_codes_handler],
+            [admin, POST, "/admin/discounts/{id}/codes/generate", discounts::generate],
+            [admin, GET, "/admin/discounts/{id}/codes/export", discounts::export],
+            [admin, GET, "/admin/discounts/{id}/usage", discounts::usage],
             [admin, GET, "/admin/customer-groups", customer_groups::list],
             [admin, POST, "/admin/customer-groups", customer_groups::create],
             [admin, GET, "/admin/customer-groups/{id}", customer_groups::fetch],

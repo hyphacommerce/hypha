@@ -723,6 +723,7 @@ accessors! {
     hypha_custom_fields::HasCustomFieldDefinitions => CustomFieldDefinitions, custom_field_definitions;
     hypha_custom_fields::HasCustomFieldValues => CustomFieldValues, custom_field_values;
     hypha_agents::HasAgents => Agents, agents;
+    hypha_discounts::HasDiscounts => Discounts, discounts;
     hypha_agents::HasProposals => Proposals, proposals;
     hypha_agents::HasAgentCalls => AgentCalls, agent_calls;
     hypha_core::HasPreviewTokens => PreviewTokens, preview_tokens;

@@ -558,6 +558,44 @@ contains "alphabetically first" '"name":"Eurozone prices"'
 step "the market's" 200 - "$BASE/admin/price-lists?market=$MARKET"
 contains "on its catalog" "\"markets\":[\"$MARKET\"]"
 step "delete the paused sale" 204 - -X DELETE "$BASE/admin/price-lists/$SCHEDULED_LIST"
+
+# Discounts: typed rules, codes in their own rows. Only codes apply here, so the carts
+# below are untouched until one is entered.
+step "a 10% welcome code in one call" 201 - -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Welcome","method":"codes","kind":{"type":"standard","rewards":[{"target":{"type":"subtotal"},"value":{"type":"percent","basis_points":1000}}]},"codes":["welcome10"],"limits":{"once_per_customer":true}}'
+WELCOME=$(id)
+contains "summarised from its data" '"summary":"10% off the order · once per customer"'
+contains "an order discount" '"classes":["order"]'
+step "every broken rule at once" 422 invalid_discount -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":" ","method":"codes","kind":{"type":"standard","rewards":[]},"limits":{"total":0}}'
+contains "with its path" '"path":"kind.rewards"'
+step "an amount in another currency than the market's" 422 discount_currency_mismatch -X POST "$BASE/admin/discounts" \
+    -H "$JSON" -d "{\"title\":\"Off\",\"method\":\"codes\",\"kind\":{\"type\":\"standard\",\"rewards\":[{\"target\":{\"type\":\"subtotal\"},\"value\":{\"type\":\"amount\",\"amounts\":{\"$MARKET\":{\"amount\":500,\"currency\":\"USD\"}}}}]}}"
+step "a code another discount has" 409 discount_code_taken -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Again","method":"codes","kind":{"type":"standard","rewards":[{"target":{"type":"subtotal"},"value":{"type":"percent","basis_points":500}}]},"codes":["WELCOME10"]}'
+step "an automatic discount has no codes" 409 discount_automatic -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Auto","method":"automatic","kind":{"type":"standard","rewards":[{"target":{"type":"subtotal"},"value":{"type":"percent","basis_points":500}}]},"codes":["X"]}'
+step "generate single-use codes" 201 - -X POST "$BASE/admin/discounts/$WELCOME/codes/generate" -H "$JSON" \
+    -d '{"count":3,"prefix":"nl-","length":10,"batch":"Newsletter"}'
+contains "single use, with the prefix" '"code":"NL-'
+step "the codes, by code" 200 - "$BASE/admin/discounts/$WELCOME/codes"
+contains "as typed and normalised" '"code":"welcome10","normalized":"WELCOME10"'
+step "export a batch as CSV" 200 - "$BASE/admin/discounts/$WELCOME/codes/export?batch=Newsletter"
+contains "with its header" 'code,normalized,usage_limit,used,active,batch,created_at'
+step "remove the batch" 200 - -X DELETE "$BASE/admin/discounts/$WELCOME/codes" -H "$JSON" -d '{"batch":"Newsletter"}'
+contains "three went" '"removed":3'
+step "found by its code" 200 - "$BASE/admin/discounts?code=Welcome10"
+contains "the welcome offer" "\"id\":\"$WELCOME\""
+step "no uses yet" 200 - "$BASE/admin/discounts/$WELCOME/usage"
+contains "an empty page" '"items":[]'
+step "a draft automatic discount" 201 - -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Later","method":"automatic","status":"draft","kind":{"type":"standard","rewards":[{"target":{"type":"shipping"},"value":{"type":"percent","basis_points":10000}}]}}'
+DRAFT_DISCOUNT=$(id)
+step "only the drafts" 200 - "$BASE/admin/discounts?status=draft"
+contains "the draft" "\"id\":\"$DRAFT_DISCOUNT\""
+step "its method is fixed" 422 invalid_body -X PATCH "$BASE/admin/discounts/$DRAFT_DISCOUNT" -H "$JSON" -d '{"method":"codes"}'
+step "delete it" 204 - -X DELETE "$BASE/admin/discounts/$DRAFT_DISCOUNT"
+step "gone" 404 discount_not_found "$BASE/admin/discounts/$DRAFT_DISCOUNT"
 step "it is gone" 404 price_list_not_found "$BASE/admin/price-lists/$SCHEDULED_LIST"
 step "deleting it again" 404 price_list_not_found -X DELETE "$BASE/admin/price-lists/$SCHEDULED_LIST"
 step "fetch the price list" 200 - "$BASE/admin/price-lists/$LIST"

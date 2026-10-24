@@ -1122,6 +1122,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-discounts"
+version = "0.1.0"
+dependencies = [
+ "hypha-core",
+ "hypha-testkit",
+ "pollster",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "unicode-normalization",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-dispatch"
 version = "0.1.0"
 dependencies = [
@@ -1269,6 +1283,7 @@ dependencies = [
  "hypha-custom-fields",
  "hypha-customer-accounts",
  "hypha-customers",
+ "hypha-discounts",
  "hypha-dispatch",
  "hypha-extensions",
  "hypha-fulfillment",
@@ -1627,6 +1642,7 @@ dependencies = [
  "hypha-core",
  "hypha-custom-fields",
  "hypha-customers",
+ "hypha-discounts",
  "hypha-extensions",
  "hypha-fulfillment",
  "hypha-inventory",
@@ -1645,6 +1661,7 @@ dependencies = [
  "hypha-tax",
  "hypha-testkit",
  "hypha-users",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-postgres",
@@ -1704,6 +1721,7 @@ dependencies = [
  "hypha-custom-fields",
  "hypha-customer-accounts",
  "hypha-customers",
+ "hypha-discounts",
  "hypha-extensions",
  "hypha-fulfillment",
  "hypha-inventory",

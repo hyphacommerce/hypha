@@ -172,6 +172,29 @@
         ],
         "type": "object"
       },
+      "AddCodesRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "batch": {
+            "description": "A label to find, export or remove them by.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "codes": {
+            "description": "1 to 1,000; all are added or none.",
+            "items": {
+              "$ref": "#/components/schemas/DiscountNewCodeDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "codes"
+        ],
+        "type": "object"
+      },
       "AddCountryRequest": {
         "additionalProperties": false,
         "properties": {
@@ -278,6 +301,21 @@
         },
         "required": [
           "price"
+        ],
+        "type": "object"
+      },
+      "AddedCodesResponse": {
+        "properties": {
+          "codes": {
+            "description": "The codes added, in the order given.",
+            "items": {
+              "$ref": "#/components/schemas/DiscountCodeResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "codes"
         ],
         "type": "object"
       },
@@ -3213,6 +3251,80 @@
         ],
         "type": "object"
       },
+      "CreateDiscountRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "codes": {
+            "description": "Codes to add with it (`method: codes` only), at most 1,000; more through\n`POST …/codes` and `…/codes/generate`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "combines_with": {
+            "description": "Defaults to none: it applies alone.",
+            "items": {
+              "$ref": "#/components/schemas/DiscountClassDto"
+            },
+            "type": "array"
+          },
+          "conditions": {
+            "description": "All must hold; none for everyone.",
+            "items": {
+              "$ref": "#/components/schemas/DiscountConditionDto"
+            },
+            "type": "array"
+          },
+          "ends_at": {
+            "description": "RFC 3339, exclusive; `null` for never. After `starts_at`.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DiscountKindDto"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/DiscountLimitsDto",
+            "description": "Defaults to no limit."
+          },
+          "method": {
+            "$ref": "#/components/schemas/DiscountMethodDto",
+            "description": "Fixed for good."
+          },
+          "starts_at": {
+            "description": "RFC 3339; `null` for at once.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DiscountStatusDto",
+                "description": "Defaults to `active`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "description": "Shown to buyers; 1 to 255 characters.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "method",
+          "kind"
+        ],
+        "type": "object"
+      },
       "CreateFulfillmentRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4552,6 +4664,1006 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "DiscountAllocationDto": {
+        "description": "How an amount off is spread over the items it reaches.",
+        "oneOf": [
+          {
+            "description": "Off every unit (items only).",
+            "properties": {
+              "type": {
+                "enum": [
+                  "each"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Once, split over the items (or the order, or shipping) in proportion.",
+            "properties": {
+              "type": {
+                "enum": [
+                  "across"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Off each of the cheapest `units` units (items only).",
+            "properties": {
+              "type": {
+                "enum": [
+                  "cheapest"
+                ],
+                "type": "string"
+              },
+              "units": {
+                "format": "int32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "units",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DiscountClassDto": {
+        "description": "What a reward reduces, for combining: `product` (item lines), `order` (the subtotal\nafter product discounts), `shipping`.\n\nKnown values: `product`, `order`, `shipping`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "product",
+          "order",
+          "shipping"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "DiscountCodePage": {
+        "description": "A page of a list, newest first.",
+        "properties": {
+          "has_more": {
+            "description": "Whether there are more after these.",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DiscountCodeResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "DiscountCodeResponse": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "batch": {
+            "description": "The label it was added or generated under.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "code": {
+            "description": "As added.",
+            "type": "string"
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "normalized": {
+            "description": "As compared: trimmed, compatibility-normalised and upper-cased. Unique in the\nstore.",
+            "type": "string"
+          },
+          "usage_limit": {
+            "description": "Orders it may be used on (1 for a single-use code); `null` for no limit of its own.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "used": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "normalized",
+          "used",
+          "active"
+        ],
+        "type": "object"
+      },
+      "DiscountConditionDto": {
+        "description": "A condition: all of a discount's must hold; inside one, any of its values will do.\nLists hold 1 to 1,000 IDs, each once; each condition type appears at most once.",
+        "oneOf": [
+          {
+            "description": "The cart's market is one of these.",
+            "properties": {
+              "markets": {
+                "items": {
+                  "$ref": "#/components/schemas/MarketId"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "markets"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "markets",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The cart's sales channel is one of these.",
+            "properties": {
+              "channels": {
+                "items": {
+                  "$ref": "#/components/schemas/ChannelId"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "channels"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "channels",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The buyer is in any of these groups.",
+            "properties": {
+              "groups": {
+                "items": {
+                  "$ref": "#/components/schemas/CustomerGroupId"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "customer_groups"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "groups",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The buyer is one of these customers (a guest by their email's customer).",
+            "properties": {
+              "customers": {
+                "items": {
+                  "$ref": "#/components/schemas/CustomerId"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "customers"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "customers",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The cart belongs to a customer: signed in, or linked by staff.",
+            "properties": {
+              "type": {
+                "enum": [
+                  "signed_in"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The qualifying items cost at least this much in the cart's market: before discounts\nfor a discount that reduces items, after product discounts otherwise. A market\nwithout an amount isn't served.",
+            "properties": {
+              "amounts": {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/Money"
+                },
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "type": {
+                "enum": [
+                  "min_subtotal"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "amounts",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The cart holds at least this many qualifying units.",
+            "properties": {
+              "quantity": {
+                "format": "int32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "enum": [
+                  "min_quantity"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "quantity",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DiscountId": {
+        "description": "A DiscountId: `disc_` and 32 hex digits.",
+        "examples": [
+          "disc_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^disc_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "DiscountItemSetDto": {
+        "additionalProperties": false,
+        "description": "A set of items, optionally leaving out those on sale (shown against a compare-at\nprice).",
+        "properties": {
+          "exclude_on_sale": {
+            "description": "Defaults to `false`.",
+            "type": "boolean"
+          },
+          "items": {
+            "$ref": "#/components/schemas/DiscountItemsDto"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "DiscountItemsDto": {
+        "description": "Which items: all, or listed products, variants or categories (a category reaches the\nproducts in it and in every category below it).",
+        "oneOf": [
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "all"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "ids": {
+                "items": {
+                  "$ref": "#/components/schemas/ProductId"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "products"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "ids",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "ids": {
+                "items": {
+                  "$ref": "#/components/schemas/VariantId"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "variants"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "ids",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "ids": {
+                "items": {
+                  "$ref": "#/components/schemas/CategoryId"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "categories"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "ids",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DiscountKindDto": {
+        "description": "The shape of a discount. Its classes follow: a standard discount's are its rewards'\ntargets', buy X get Y and tiers are `product`.",
+        "oneOf": [
+          {
+            "description": "One to three rewards, at most one per class (\"20% off cultures + free shipping\").",
+            "properties": {
+              "rewards": {
+                "items": {
+                  "$ref": "#/components/schemas/DiscountRewardDto"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "standard"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "rewards",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Buy `buy` of `buys` (at full price, not reduced by another discount), get\n`get_quantity` of the cheapest units of `gets` at `value` off; repeats while the cart\nqualifies, at most `uses_per_order` times (`null`: no limit).",
+            "properties": {
+              "buy": {
+                "$ref": "#/components/schemas/DiscountThresholdDto"
+              },
+              "buys": {
+                "$ref": "#/components/schemas/DiscountItemSetDto"
+              },
+              "get_quantity": {
+                "format": "int32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "gets": {
+                "$ref": "#/components/schemas/DiscountItemSetDto"
+              },
+              "type": {
+                "enum": [
+                  "buy_x_get_y"
+                ],
+                "type": "string"
+              },
+              "uses_per_order": {
+                "format": "int32",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/DiscountValueDto",
+                "description": "A percentage (10000 is free) or an amount off each unit got (`allocation:\neach`)."
+              }
+            },
+            "required": [
+              "buys",
+              "buy",
+              "gets",
+              "get_quantity",
+              "value",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The highest of up to 10 rising tiers the items reach applies to them.",
+            "properties": {
+              "items": {
+                "$ref": "#/components/schemas/DiscountItemSetDto"
+              },
+              "measure": {
+                "$ref": "#/components/schemas/DiscountMeasureDto"
+              },
+              "tiers": {
+                "items": {
+                  "$ref": "#/components/schemas/DiscountTierDto"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "tiered"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "items",
+              "measure",
+              "tiers",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DiscountLimitsDto": {
+        "additionalProperties": false,
+        "description": "How often a discount may be used. Uses are counted when orders are placed and not\ngiven back when an order is cancelled.",
+        "properties": {
+          "once_per_customer": {
+            "description": "At most one order per customer (a guest counts by their email's customer).",
+            "type": "boolean"
+          },
+          "total": {
+            "description": "Orders it may apply to in all; `null` for no limit.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "DiscountMeasureDto": {
+        "description": "Known values: `quantity`, `subtotal`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "quantity",
+          "subtotal"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "DiscountMethodDto": {
+        "description": "Known values: `automatic`, `codes`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "automatic",
+          "codes"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "DiscountNewCodeDto": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "1 to 64 characters, no spaces; unique in the store ignoring case.",
+            "type": "string"
+          },
+          "usage_limit": {
+            "description": "`null` (the default) for no limit of its own; 1 for single use.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
+      "DiscountPage": {
+        "description": "A page of a list, newest first.",
+        "properties": {
+          "has_more": {
+            "description": "Whether there are more after these.",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DiscountResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "DiscountPhaseDto": {
+        "description": "Where a discount stands now, from its status and dates.\n\nKnown values: `draft`, `scheduled`, `active`, `expired`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "draft",
+          "scheduled",
+          "active",
+          "expired"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "DiscountResponse": {
+        "properties": {
+          "classes": {
+            "description": "What its rewards reduce.",
+            "items": {
+              "$ref": "#/components/schemas/DiscountClassDto"
+            },
+            "type": "array"
+          },
+          "code_count": {
+            "description": "How many codes it has (0 for an automatic one).",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "combines_with": {
+            "description": "The classes of the discounts it may apply together with. Two apply together only\nwhen each allows every class of the other.",
+            "items": {
+              "$ref": "#/components/schemas/DiscountClassDto"
+            },
+            "type": "array"
+          },
+          "conditions": {
+            "items": {
+              "$ref": "#/components/schemas/DiscountConditionDto"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "ends_at": {
+            "description": "RFC 3339, exclusive; `null` for never.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/DiscountId"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DiscountKindDto"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/DiscountLimitsDto"
+          },
+          "method": {
+            "$ref": "#/components/schemas/DiscountMethodDto"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/DiscountPhaseDto",
+            "description": "Where it stands now, from `status` and the dates."
+          },
+          "starts_at": {
+            "description": "RFC 3339; `null` for at once.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/DiscountStatusDto"
+          },
+          "summary": {
+            "description": "One sentence from its data (\"10% off 2 categories · orders from 50.00 EUR\"):\nwhat the admin, emails, the storefront and agents show alike.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Shown to buyers.",
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "used": {
+            "description": "Orders it was used on.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "method",
+          "status",
+          "phase",
+          "classes",
+          "combines_with",
+          "conditions",
+          "kind",
+          "limits",
+          "summary",
+          "code_count",
+          "used",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "DiscountRewardDto": {
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "$ref": "#/components/schemas/DiscountTargetDto"
+          },
+          "value": {
+            "$ref": "#/components/schemas/DiscountValueDto"
+          }
+        },
+        "required": [
+          "target",
+          "value"
+        ],
+        "type": "object"
+      },
+      "DiscountStatusDto": {
+        "description": "Known values: `draft`, `active`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "draft",
+          "active"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "DiscountTargetDto": {
+        "description": "What a reward reduces: items (its class is `product`), the subtotal (`order`), or\nshipping (`shipping`, at most `max_amount` off when given).",
+        "oneOf": [
+          {
+            "properties": {
+              "exclude_on_sale": {
+                "description": "Defaults to `false`.",
+                "type": "boolean"
+              },
+              "items": {
+                "$ref": "#/components/schemas/DiscountItemsDto"
+              },
+              "type": {
+                "enum": [
+                  "items"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "items",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "subtotal"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "max_amount": {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/Money"
+                },
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "type": {
+                "enum": [
+                  "shipping"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DiscountThresholdDto": {
+        "description": "What must be bought (buy X get Y) or reached (a tier).",
+        "oneOf": [
+          {
+            "properties": {
+              "quantity": {
+                "format": "int32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "enum": [
+                  "quantity"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "quantity",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Per market, at prices before discounts.",
+            "properties": {
+              "amounts": {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/Money"
+                },
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "type": {
+                "enum": [
+                  "amount"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "amounts",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DiscountTierDto": {
+        "additionalProperties": false,
+        "description": "From `threshold` (a quantity or an amount, as the tiers' `measure` says), `value` off\nthe items: a percentage, or an amount spread across them.",
+        "properties": {
+          "threshold": {
+            "$ref": "#/components/schemas/DiscountThresholdDto"
+          },
+          "value": {
+            "$ref": "#/components/schemas/DiscountValueDto"
+          }
+        },
+        "required": [
+          "threshold",
+          "value"
+        ],
+        "type": "object"
+      },
+      "DiscountUsagePage": {
+        "description": "A page of a list, newest first.",
+        "properties": {
+          "has_more": {
+            "description": "Whether there are more after these.",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DiscountUsageResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "DiscountUsageResponse": {
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What it took off the order."
+          },
+          "code": {
+            "description": "The code it came by, normalised; `null` for an automatic discount.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "customer": {
+            "$ref": "#/components/schemas/CustomerId"
+          },
+          "order": {
+            "$ref": "#/components/schemas/OrderId"
+          },
+          "used_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "order",
+          "customer",
+          "amount",
+          "used_at"
+        ],
+        "type": "object"
+      },
+      "DiscountValueDto": {
+        "description": "How much comes off.",
+        "oneOf": [
+          {
+            "description": "1 to 10000 basis points: 1000 is 10%, 10000 everything (free).",
+            "properties": {
+              "basis_points": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "type": {
+                "enum": [
+                  "percent"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "basis_points",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "An amount per market; `allocation` defaults to `across`.",
+            "properties": {
+              "allocation": {
+                "$ref": "#/components/schemas/DiscountAllocationDto"
+              },
+              "amounts": {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/Money"
+                },
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "type": {
+                "enum": [
+                  "amount"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "amounts",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Items only: each unit costs this much in the market, when that's lower than its\nprice (0 makes them free).",
+            "properties": {
+              "amounts": {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/Money"
+                },
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "type": {
+                "enum": [
+                  "fixed_price"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "amounts",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "Email": {
         "description": "An email address; stored trimmed and lowercased, so responses show it that way.",
         "examples": [
@@ -5230,6 +6342,48 @@
         ],
         "type": "string",
         "x-hypha-open-enum": true
+      },
+      "GenerateCodesRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "batch": {
+            "description": "A label to find, export or remove them by.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "count": {
+            "description": "1 to 10,000.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "length": {
+            "description": "8 to 24 characters, the prefix included; defaults to 12.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "prefix": {
+            "description": "Starts every code (normalised like a code), leaving room for 4 random characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "usage_limit": {
+            "description": "Defaults to 1: single-use codes. `null` for no limit of their own.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "type": "object"
       },
       "GrantHistoryEntry": {
         "description": "One authorization request in an app's history.",
@@ -9343,6 +10497,29 @@
         },
         "type": "object"
       },
+      "RemoveCodesRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "batch": {
+            "description": "Or every code of this batch.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "codes": {
+            "description": "These codes (as typed), at most 1,000.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "RemoveFixedPricesRequest": {
         "additionalProperties": false,
         "properties": {
@@ -9355,6 +10532,20 @@
         },
         "required": [
           "variants"
+        ],
+        "type": "object"
+      },
+      "RemovedCodesResponse": {
+        "properties": {
+          "removed": {
+            "description": "How many went.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "removed"
         ],
         "type": "object"
       },
@@ -9638,7 +10829,7 @@
         "type": "object"
       },
       "Scope": {
-        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `customers:erase`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `agents:read`, `agents:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `customers:erase`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `agents:read`, `agents:write`, `discounts:read`, `discounts:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "products:read",
           "products:write",
@@ -9682,6 +10873,8 @@
           "custom_fields:write",
           "agents:read",
           "agents:write",
+          "discounts:read",
+          "discounts:write",
           "customer_data:name",
           "customer_data:email",
           "customer_data:phone",
@@ -11265,6 +12458,54 @@
               "string",
               "null"
             ]
+          }
+        },
+        "type": "object"
+      },
+      "UpdateDiscountRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "combines_with": {
+            "items": {
+              "$ref": "#/components/schemas/DiscountClassDto"
+            },
+            "type": "array"
+          },
+          "conditions": {
+            "description": "Replaces them all; `[]` for none.",
+            "items": {
+              "$ref": "#/components/schemas/DiscountConditionDto"
+            },
+            "type": "array"
+          },
+          "ends_at": {
+            "description": "`null` clears it.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DiscountKindDto",
+            "description": "Replaces it."
+          },
+          "limits": {
+            "$ref": "#/components/schemas/DiscountLimitsDto"
+          },
+          "starts_at": {
+            "description": "`null` clears it.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/DiscountStatusDto"
+          },
+          "title": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -26339,6 +27580,1441 @@
         },
         "x-hypha-scopes": [
           "customers:write"
+        ]
+      }
+    },
+    "/admin/discounts": {
+      "get": {
+        "operationId": "admin.discounts.list",
+        "parameters": [
+          {
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 100 (default 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Where they stand now.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "description": "Where a discount stands now, from its status and dates.\n\nKnown values: `draft`, `scheduled`, `active`, `expired`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "draft",
+                "scheduled",
+                "active",
+                "expired"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          },
+          {
+            "in": "query",
+            "name": "method",
+            "required": false,
+            "schema": {
+              "description": "Known values: `automatic`, `codes`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "automatic",
+                "codes"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          },
+          {
+            "description": "Those with a reward of this class.",
+            "in": "query",
+            "name": "class",
+            "required": false,
+            "schema": {
+              "description": "What a reward reduces, for combining: `product` (item lines), `order` (the subtotal\nafter product discounts), `shipping`.\n\nKnown values: `product`, `order`, `shipping`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "product",
+                "order",
+                "shipping"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          },
+          {
+            "description": "In the title, ignoring case, or a part of one of its codes.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The discount with this code (as typed: it's normalised).",
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscountPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Discounts, newest first.",
+        "tags": [
+          "discounts"
+        ],
+        "x-hypha-scopes": [
+          "discounts:read"
+        ]
+      },
+      "post": {
+        "operationId": "admin.discounts.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDiscountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscountResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Creates a discount, with its first codes in the same write. \"A 10% welcome code\" is\n`{\"title\": \"Welcome\", \"method\": \"codes\", \"kind\": {\"type\": \"standard\", \"rewards\":\n[{\"target\": {\"type\": \"subtotal\"}, \"value\": {\"type\": \"percent\", \"basis_points\":\n1000}}]}, \"codes\": [\"WELCOME10\"]}`. Every broken rule is answered at once\n(`invalid_discount`); at most 100 automatic discounts are active and not expired.",
+        "tags": [
+          "discounts"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "discounts:write"
+        ]
+      }
+    },
+    "/admin/discounts/{id}": {
+      "delete": {
+        "operationId": "admin.discounts.remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiscountId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Deletes a discount with its codes and usage records. Orders keep their copies of what\nit took off; carts holding its codes show them `invalid`.",
+        "tags": [
+          "discounts"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "discounts:write"
+        ]
+      },
+      "get": {
+        "operationId": "admin.discounts.fetch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiscountId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscountResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A discount.",
+        "tags": [
+          "discounts"
+        ],
+        "x-hypha-scopes": [
+          "discounts:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.discounts.update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiscountId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDiscountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscountResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Changes a discount (JSON Merge Patch); its method is fixed. The result is checked as\na whole, like a new one.",
+        "tags": [
+          "discounts"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "discounts:write"
+        ]
+      }
+    },
+    "/admin/discounts/{id}/codes": {
+      "delete": {
+        "operationId": "admin.discounts.remove_codes",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiscountId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveCodesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemovedCodesResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Removes listed codes or a whole batch: one of `codes` and `batch`.",
+        "tags": [
+          "discounts"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "discounts:write"
+        ]
+      },
+      "get": {
+        "operationId": "admin.discounts.codes",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiscountId"
+            }
+          },
+          {
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 100 (default 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "A part of the code, as typed.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only those added under this batch label.",
+            "in": "query",
+            "name": "batch",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscountCodePage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A discount's codes, by code.",
+        "tags": [
+          "discounts"
+        ],
+        "x-hypha-scopes": [
+          "discounts:read"
+        ]
+      },
+      "post": {
+        "operationId": "admin.discounts.add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiscountId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddCodesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddedCodesResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Adds codes to a discount by code (`409 discount_automatic` for an automatic one). A\ncode another discount has is `409 discount_code_taken`, and nothing is added.",
+        "tags": [
+          "discounts"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "discounts:write"
+        ]
+      }
+    },
+    "/admin/discounts/{id}/codes/export": {
+      "get": {
+        "operationId": "admin.discounts.export",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiscountId"
+            }
+          },
+          {
+            "description": "Only this batch's codes.",
+            "in": "query",
+            "name": "batch",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The codes"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every code of a discount as CSV (`code,normalized,usage_limit,used,active,batch,\ncreated_at`), by code; `batch` narrows it.",
+        "tags": [
+          "discounts"
+        ],
+        "x-hypha-scopes": [
+          "discounts:read"
+        ]
+      }
+    },
+    "/admin/discounts/{id}/codes/generate": {
+      "post": {
+        "operationId": "admin.discounts.generate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiscountId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateCodesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddedCodesResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Generates codes: random letters and digits without look-alikes (no `0`/`O`, `1`/`I`/\n`L`), drawn again when taken, all added in one write.",
+        "tags": [
+          "discounts"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "discounts:write"
+        ]
+      }
+    },
+    "/admin/discounts/{id}/usage": {
+      "get": {
+        "operationId": "admin.discounts.usage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiscountId"
+            }
+          },
+          {
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 100 (default 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscountUsagePage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The orders a discount was used on, newest first.",
+        "tags": [
+          "discounts"
+        ],
+        "x-hypha-scopes": [
+          "discounts:read"
         ]
       }
     },

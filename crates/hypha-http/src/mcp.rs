@@ -31,7 +31,7 @@ use crate::state::{SharedState, Storage};
 /// daily work (what came in, what to ship, what's running low, what to change in the
 /// catalog). Tool names are these IDs with each `.` as `__`, a contract with agents'
 /// prompts: a renamed route breaks `direct_tools_are_operations`.
-pub const DIRECT_TOOLS: [&str; 23] = [
+pub const DIRECT_TOOLS: [&str; 24] = [
     // orientation
     "admin.setup.checklist",
     // orders
@@ -61,6 +61,8 @@ pub const DIRECT_TOOLS: [&str; 23] = [
     "admin.markets.list_markets",
     "admin.markets.list_fixed_prices",
     "admin.markets.set_fixed_prices",
+    // discounts: "make a 10% welcome code" in one call
+    "admin.discounts.create",
 ];
 
 /// What the server tells a client's model about using it.
@@ -448,7 +450,7 @@ mod tests {
                     .write
             })
             .count();
-        assert_eq!((DIRECT_TOOLS.len() - writes, writes), (14, 9));
+        assert_eq!((DIRECT_TOOLS.len() - writes, writes), (14, 10));
     }
 
     #[test]

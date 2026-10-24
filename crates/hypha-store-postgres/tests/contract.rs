@@ -154,6 +154,12 @@ async fn agent_repo() {
 }
 
 #[tokio::test]
+async fn discount_repo() {
+    let Some(url) = database_url() else { return };
+    contract::discount_repo(async || fresh_store(&url, "contract_discounts").await).await;
+}
+
+#[tokio::test]
 async fn proposal_repo() {
     let Some(url) = database_url() else { return };
     contract::proposal_repo(async || fresh_store(&url, "contract_agent_proposals").await).await;

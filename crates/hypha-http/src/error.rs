@@ -82,6 +82,10 @@ pub struct ApiErrorBody {
 /// - `too_many_prices`: `{"max"}`, the most one request may set
 /// - `price_list_in_use`: `{"catalogs": ["cat_…"]}`, the catalogs holding it
 /// - `price_list_name_taken`: `{"price_list": "pl_…"}`, the list that has the name
+/// - `invalid_discount`: `{"problems": [{"path", "code", "message"}]}`, every rule the
+///   discount breaks at once (`path` like `kind.rewards[0].value.basis_points`)
+/// - `discount_currency_mismatch` / `market_not_found` (discounts): `{"path", "market"}`
+/// - `discount_code_taken`: `{"code"}`, the code another discount has
 /// - `compare_at_not_above_price` / `compare_at_currency_mismatch` (variants):
 ///   `{"variant": "var_…"}`
 ///
@@ -255,6 +259,12 @@ impl ApiError {
             "invalid_query",
             format!("invalid query string: {message}"),
         )
+    }
+
+    /// A body that parses but breaks a rule of its shape the types can't say (one of two
+    /// fields).
+    pub fn invalid_body(message: impl std::fmt::Display) -> Self {
+        Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_body", message)
     }
 
     /// A list's `?cursor=` that isn't one the list handed out.
@@ -1589,6 +1599,58 @@ impl From<hypha_oauth::CommandError> for ApiError {
             ) => StatusCode::CONFLICT,
         };
         Self::domain(status, e)
+    }
+}
+
+impl From<hypha_discounts::CommandError> for ApiError {
+    fn from(e: hypha_discounts::CommandError) -> Self {
+        use hypha_discounts::{CodeError as C, CommandError as E, DiscountError as D};
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Discounts only arrive in URLs.
+            E::NotFound(_) => StatusCode::NOT_FOUND,
+            E::Discount(D::Invalid(_) | D::MarketNotFound { .. } | D::CurrencyMismatch { .. })
+            | E::Code(
+                C::Length
+                | C::Character(_)
+                | C::GeneratedLength
+                | C::TooMany
+                | C::Batch
+                | C::UsageLimit,
+            )
+            | E::TooManyCodes => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Discount(D::MethodFixed)
+            | E::CodeTaken(_)
+            | E::TooManyAutomatic
+            | E::AutomaticHasNoCodes(_)
+            | E::CodeSpaceExhausted(_) => StatusCode::CONFLICT,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        let details = discount_details(&e);
+        Self::domain(status, e).with_details(details)
+    }
+}
+
+/// `invalid_discount`: `{"problems": [{"path", "code", "message"}]}`, every broken rule;
+/// `discount_currency_mismatch` / `market_not_found`: `{"path", "market"}`;
+/// `discount_code_taken`: `{"code"}`.
+fn discount_details(e: &hypha_discounts::CommandError) -> Option<Value> {
+    use hypha_discounts::{CommandError as E, DiscountError as D};
+    match e {
+        E::Discount(D::Invalid(problems)) => Some(json!({
+            "problems": problems
+                .iter()
+                .map(|p| json!({"path": p.path, "code": p.code, "message": p.message}))
+                .collect::<Vec<_>>()
+        })),
+        E::Discount(
+            D::CurrencyMismatch { path, market, .. } | D::MarketNotFound { path, market },
+        ) => Some(json!({"path": path, "market": market})),
+        E::CodeTaken(code) => Some(json!({ "code": code })),
+        _ => None,
     }
 }
 
