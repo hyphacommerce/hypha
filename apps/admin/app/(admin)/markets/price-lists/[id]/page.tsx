@@ -17,7 +17,7 @@ import { describe, loaded, perRequest, requireStaff, sessionClient } from "@/lib
 import { hasScope } from "@/lib/navigation";
 import { type PriceList, adjustmentLabel, kindLabel, phaseBadge } from "@/lib/price-lists";
 
-import { type GridFilters, gridPage } from "../grid-data";
+import { type GridFilters, gridPage, productSummaries } from "../grid-data";
 import { EditPriceListForm } from "../price-list-form";
 import { ListWindow } from "../price-lists-table";
 import { DeletePriceList } from "./delete-list";
@@ -128,14 +128,12 @@ async function Settings({ id }: { id: string }) {
     client.GET("/admin/customer-groups"),
   ]);
   const to = list.adjustment?.applies_to;
-  // The adjustment names products by ID: read the first ones' titles for the chips.
-  const named = to?.type === "products" ? to.products.slice(0, 100) : [];
-  const titles = await Promise.all(
-    named.map((product) =>
-      client
-        .GET("/admin/products/{id}", { params: { path: { id: product } } })
-        .then((r) => [product, r.data?.title ?? product] as const),
-    ),
+  // The adjustment names products by ID: their titles for the chips (a product gone, or
+  // a failed read, shows by ID).
+  const named = to?.type === "products" ? to.products : [];
+  const titles = await productSummaries(client, named).then(
+    (products) => products.map((p) => [p.id, p.title] as const),
+    () => [],
   );
   const canWrite = hasScope(me.scopes, "pricing:write");
 

@@ -1,31 +1,49 @@
-// Server-only: a price list's prices as the grid and the CSV files work on them. The API
-// lists products without their variants, so each product of a page is read whole, with
-// its fixed prices in the list; the list's adjusted price is worked out here from the
-// list's adjustment (`adjustedPrice`), which saves a pricing read per product. Never
-// import this from a "use client" file.
+// Server-only: a price list's prices as the grid and the CSV files work on them. The
+// variants come from `GET /admin/variants`, a page at a time, grouped by product; the
+// list's adjusted price is worked out here from the list's adjustment (`adjustedPrice`),
+// which saves a pricing read per product. Never import this from a "use client" file.
 
 import type { AdminSchemas, ApiError } from "@hyphacommerce/sdk/admin";
 
 import type { CategoryNode } from "@/lib/categories";
 import { sessionClient } from "@/lib/hypha";
-import type { PriceGridProduct, PriceGridVariant } from "@/lib/price-grid/types";
-import { type PriceList, adjustedPrice, coveredCategories } from "@/lib/price-lists";
+import {
+  type FixedItem,
+  type VariantItem,
+  chunks,
+  groupVariants,
+  productIdsOf,
+} from "@/lib/price-grid/group";
+import type { PriceGridProduct } from "@/lib/price-grid/types";
+import { type PriceList, coveredCategories } from "@/lib/price-lists";
 
 type Client = Awaited<ReturnType<typeof sessionClient>>;
-type Product = AdminSchemas["ProductResponse"];
 type Fixed = AdminSchemas["FixedPriceResponse"];
+type ProductSummary = AdminSchemas["ProductSummaryResponse"];
 
 /** What the prices tab's URL narrows the grid to. */
 export type GridFilters = {
   q?: string;
-  /** Products directly in this category. */
+  /** Products in this category or one below it. */
   category?: string;
   /** Only variants with a fixed price in the list. */
   fixedOnly: boolean;
 };
 
-/** Products per page of the grid. */
-export const GRID_PAGE = 25;
+/**
+ * Variants per page of the grid. A page may end inside a product: the next page shows
+ * the product's header again, above the rest of its variants.
+ */
+export const GRID_PAGE = 100;
+/** The most IDs `GET /admin/products?ids=` and `GET /admin/variants?ids=` take. */
+const IDS_PER_READ = 250;
+/** The most items a page of any list holds. */
+const MAX_LIMIT = 100;
+/**
+ * Up to this many fixed prices, a page reads all of the list's at once; above it, those
+ * of the page's products, one read each.
+ */
+const READ_ALL_FIXED = 500;
 /** Reads at once: enough to be quick, few enough not to flood the API. */
 const PARALLEL = 8;
 
@@ -45,60 +63,120 @@ async function each<T, R>(items: readonly T[], run: (item: T) => Promise<R>): Pr
   return results;
 }
 
-async function readProduct(client: Client, id: string): Promise<Product | null> {
-  const { data } = await client.GET("/admin/products/{id}", { params: { path: { id } } });
-  return data ?? null;
-}
-
-/** Every fixed price of the list matching `query`, page after page. */
-async function allFixed(
-  client: Client,
-  list: string,
-  query: { product?: string; category?: string; q?: string },
-): Promise<Fixed[]> {
-  const found: Fixed[] = [];
+/** Every page of a list, from the first. */
+async function everyPage<T>(
+  read: (cursor: string | undefined) => Promise<{ items: T[]; next_cursor?: string | null }>,
+): Promise<T[]> {
+  const found: T[] = [];
   let cursor: string | undefined;
   do {
-    const { data, error } = await client.GET("/admin/price-lists/{id}/fixed-prices", {
-      params: { path: { id: list }, query: { ...query, cursor, limit: 100 } },
-    });
-    if (!data) throw new Error(`fixed prices of ${list} failed: ${error?.code ?? "unknown"}`);
-    found.push(...data.items);
-    cursor = data.next_cursor ?? undefined;
+    const page = await read(cursor);
+    found.push(...page.items);
+    cursor = page.next_cursor ?? undefined;
   } while (cursor);
   return found;
 }
 
-/** The grid's row for `product`: its variants (only `only` when given) with the list's prices. */
-function rowOf(
-  list: PriceList,
-  product: Product,
-  fixed: ReadonlyMap<string, Fixed>,
-  covered: Set<string> | null,
-  only?: ReadonlySet<string>,
-): PriceGridProduct {
-  const variants: PriceGridVariant[] = product.variants
-    .filter((v) => !only || only.has(v.id))
-    .map((v) => {
-      const own = fixed.get(v.id);
-      return {
-        variant: v.id,
-        title: v.title ?? null,
-        sku: v.sku ?? null,
-        base_price: v.price,
-        compare_at_price: v.compare_at_price ?? null,
-        adjusted_price: adjustedPrice(list, product, v.price, covered),
-        fixed: own
-          ? { price: own.price, compare_at: own.compare_at ?? null, breaks: own.breaks }
-          : null,
-      };
+/** Every fixed price of the list matching `query`. */
+function allFixed(
+  client: Client,
+  list: string,
+  query: { product?: string; category?: string; q?: string },
+): Promise<Fixed[]> {
+  return everyPage(async (cursor) => {
+    const { data, error } = await client.GET("/admin/price-lists/{id}/fixed-prices", {
+      params: { path: { id: list }, query: { ...query, cursor, limit: MAX_LIMIT } },
     });
-  return { id: product.id, title: product.title, handle: product.handle, variants };
+    if (!data) throw new Error(`fixed prices of ${list} failed: ${error?.code ?? "unknown"}`);
+    return data;
+  });
+}
+
+/** Every variant matching `query`, newest product first. */
+function allVariants(
+  client: Client,
+  query: { q?: string; category?: string; ids?: string[] },
+): Promise<VariantItem[]> {
+  return everyPage(async (cursor) => {
+    const { data, error } = await client.GET("/admin/variants", {
+      params: { query: { ...query, cursor, limit: MAX_LIMIT } },
+    });
+    if (!data) throw new Error(`variants failed: ${error?.code ?? "unknown"}`);
+    return data;
+  });
+}
+
+/** These variants (those that still exist), in the API's order, 250 IDs per read. */
+async function variantsByIds(client: Client, ids: readonly string[]): Promise<VariantItem[]> {
+  const runs = await each(chunks(ids, IDS_PER_READ), (run) => allVariants(client, { ids: run }));
+  return runs.flat();
+}
+
+/** These products' summaries (those that still exist), 250 IDs per read. */
+export async function productSummaries(
+  client: Client,
+  ids: readonly string[],
+): Promise<ProductSummary[]> {
+  const runs = await each(chunks([...new Set(ids)], IDS_PER_READ), (run) =>
+    everyPage(async (cursor) => {
+      const { data, error } = await client.GET("/admin/products", {
+        params: { query: { ids: run, cursor, limit: MAX_LIMIT } },
+      });
+      if (!data) throw new Error(`products failed: ${error?.code ?? "unknown"}`);
+      return data;
+    }),
+  );
+  return runs.flat();
 }
 
 /**
- * A page of the grid. Normally a page of products (newest first, narrowed by `q` and
- * `category`), each with all its variants. With `fixedOnly`, a page of the list's fixed
+ * The categories of `items`' products, which only an adjustment by category needs (the
+ * variants list doesn't carry them): none read otherwise.
+ */
+async function categoriesOf(
+  client: Client,
+  list: PriceList,
+  items: readonly VariantItem[],
+): Promise<Map<string, readonly string[]>> {
+  if (list.adjustment?.applies_to?.type !== "categories" || items.length === 0) return new Map();
+  const products = await productSummaries(client, productIdsOf(items));
+  return new Map(products.map((p) => [p.id, p.categories]));
+}
+
+/** The list's fixed prices for `items`, by variant. */
+async function fixedOf(
+  client: Client,
+  list: PriceList,
+  items: readonly VariantItem[],
+): Promise<Map<string, FixedItem>> {
+  if (list.fixed_price_count === 0 || items.length === 0) return new Map();
+  const fixed =
+    list.fixed_price_count <= READ_ALL_FIXED
+      ? await allFixed(client, list.id, {})
+      : (
+          await each(productIdsOf(items), (product) => allFixed(client, list.id, { product }))
+        ).flat();
+  return new Map(fixed.map((f) => [f.variant, f]));
+}
+
+async function grouped(
+  client: Client,
+  list: PriceList,
+  tree: CategoryNode[],
+  items: readonly VariantItem[],
+  fixed: Map<string, FixedItem> | null,
+): Promise<PriceGridProduct[]> {
+  const [prices, categories] = await Promise.all([
+    fixed ?? fixedOf(client, list, items),
+    categoriesOf(client, list, items),
+  ]);
+  const covered = coveredCategories(list.adjustment?.applies_to, tree);
+  return groupVariants(list, items, prices, categories, covered);
+}
+
+/**
+ * A page of the grid. Normally a page of variants (newest product first, narrowed by `q`
+ * and `category`), grouped by product. With `fixedOnly`, a page of the list's fixed
  * prices instead, grouped by product, each product showing only those variants.
  */
 export async function gridPage(
@@ -108,12 +186,11 @@ export async function gridPage(
   filters: GridFilters,
   cursor: string | undefined,
 ): Promise<GridPage> {
-  const covered = coveredCategories(list.adjustment?.applies_to, tree);
   if (filters.fixedOnly) {
     const result = await client.GET("/admin/price-lists/{id}/fixed-prices", {
       params: {
         path: { id: list.id },
-        query: { q: filters.q, category: filters.category, cursor, limit: 100 },
+        query: { q: filters.q, category: filters.category, cursor, limit: MAX_LIMIT },
       },
     });
     if (!result.data) {
@@ -123,25 +200,16 @@ export async function gridPage(
         failure: { status: result.response.status, error: result.error },
       };
     }
-    const byProduct = new Map<string, Fixed[]>();
-    for (const item of result.data.items) {
-      // A fixed price whose variant is gone has no product: nothing to show it beside.
-      if (!item.product) continue;
-      byProduct.set(item.product.id, [...(byProduct.get(item.product.id) ?? []), item]);
-    }
-    const products = await each([...byProduct.keys()], (id) => readProduct(client, id));
+    const fixed = new Map(result.data.items.map((f) => [f.variant, f]));
+    // A fixed price whose variant is gone isn't listed: nothing to show it beside.
+    const items = await variantsByIds(client, [...fixed.keys()]);
     return {
-      products: products.flatMap((product) => {
-        if (!product) return [];
-        const items = byProduct.get(product.id) ?? [];
-        const fixed = new Map(items.map((f) => [f.variant, f]));
-        return [rowOf(list, product, fixed, covered, new Set(fixed.keys()))];
-      }),
+      products: await grouped(client, list, tree, items, fixed),
       nextCursor: result.data.next_cursor ?? null,
     };
   }
 
-  const result = await client.GET("/admin/products", {
+  const result = await client.GET("/admin/variants", {
     params: {
       query: { q: filters.q, category: filters.category, cursor, limit: GRID_PAGE },
     },
@@ -153,27 +221,16 @@ export async function gridPage(
       failure: { status: result.response.status, error: result.error },
     };
   }
-  const rows = await each(result.data.items, async (summary) => {
-    const [product, fixed] = await Promise.all([
-      readProduct(client, summary.id),
-      list.fixed_price_count > 0
-        ? allFixed(client, list.id, { product: summary.id })
-        : Promise.resolve([]),
-    ]);
-    return product
-      ? rowOf(list, product, new Map(fixed.map((f) => [f.variant, f])), covered)
-      : null;
-  });
   return {
-    products: rows.filter((row): row is PriceGridProduct => row !== null),
+    products: await grouped(client, list, tree, result.data.items, null),
     nextCursor: result.data.next_cursor ?? null,
   };
 }
 
 /**
  * Every product matching `filters` (all of them without), with every variant and the
- * list's prices: what an export writes and an import is matched against. Products are
- * read one by one, so a large catalog takes a while.
+ * list's prices (only those with a fixed price with `fixedOnly`): what an export writes
+ * and an import is matched against. Each product is one, its variants together.
  */
 export async function allGridProducts(
   client: Client,
@@ -182,44 +239,14 @@ export async function allGridProducts(
   filters: GridFilters,
 ): Promise<PriceGridProduct[]> {
   if (filters.fixedOnly) {
-    const products: PriceGridProduct[] = [];
-    let cursor: string | undefined;
-    do {
-      const page = await gridPage(client, list, tree, filters, cursor);
-      if (page.failure)
-        throw new Error(`fixed prices of ${list.id} failed: ${page.failure.status}`);
-      products.push(...page.products);
-      cursor = page.nextCursor ?? undefined;
-    } while (cursor);
-    // A product whose variants came on several pages: one row, its variants together.
-    const merged = new Map<string, PriceGridProduct>();
-    for (const p of products) {
-      const seen = merged.get(p.id);
-      merged.set(p.id, seen ? { ...seen, variants: [...seen.variants, ...p.variants] } : p);
-    }
-    return [...merged.values()];
+    const fixed = await allFixed(client, list.id, { q: filters.q, category: filters.category });
+    const byVariant = new Map(fixed.map((f) => [f.variant, f]));
+    const items = await variantsByIds(client, [...byVariant.keys()]);
+    return grouped(client, list, tree, items, byVariant);
   }
-
-  const covered = coveredCategories(list.adjustment?.applies_to, tree);
-  const [summaries, fixed] = await Promise.all([
-    (async () => {
-      const ids: string[] = [];
-      let cursor: string | undefined;
-      do {
-        const { data, error } = await client.GET("/admin/products", {
-          params: {
-            query: { q: filters.q, category: filters.category, cursor, limit: 100 },
-          },
-        });
-        if (!data) throw new Error(`products failed: ${error?.code ?? "unknown"}`);
-        ids.push(...data.items.map((p) => p.id));
-        cursor = data.next_cursor ?? undefined;
-      } while (cursor);
-      return ids;
-    })(),
+  const [items, fixed] = await Promise.all([
+    allVariants(client, { q: filters.q, category: filters.category }),
     list.fixed_price_count > 0 ? allFixed(client, list.id, {}) : Promise.resolve([]),
   ]);
-  const byVariant = new Map(fixed.map((f) => [f.variant, f]));
-  const products = await each(summaries, (id) => readProduct(client, id));
-  return products.flatMap((product) => (product ? [rowOf(list, product, byVariant, covered)] : []));
+  return grouped(client, list, tree, items, new Map(fixed.map((f) => [f.variant, f])));
 }
