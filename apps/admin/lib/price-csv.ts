@@ -4,6 +4,7 @@
 // diff, sent the same way. Plain string work, no browser or Node APIs, so it runs in a
 // server action on any host.
 
+import { formatBreaks } from "./price-grid/breaks.ts";
 import { checkDraft, sameFixed } from "./price-grid/edits.ts";
 import { formatAmount } from "./price-grid/money.ts";
 import type {
@@ -237,7 +238,15 @@ export function previewPriceImport(
   if (!field.has("variant_id") && !field.has("sku") && !field.has("handle")) {
     return fail("The file needs a variant_id, sku or handle column to find each variant.");
   }
-  const breakColumns = header.filter((name) => /^break_\d+_qty$/i.test(name.trim())).length;
+  // The break numbers the header names, in order: a file may skip some (break_1, break_3).
+  const breakNumbers = [
+    ...new Set(
+      header.flatMap((name) => {
+        const match = /^break_(\d+)_(?:qty|price)$/i.exec(name.trim());
+        return match ? [Number(match[1])] : [];
+      }),
+    ),
+  ].sort((a, b) => a - b);
 
   const byId = new Map<string, PriceGridVariant>();
   const bySku = new Map<string, PriceGridVariant[]>();
@@ -299,7 +308,7 @@ export function previewPriceImport(
     // Read its prices.
     const reasons: string[] = [];
     const breaks: string[] = [];
-    for (let n = 1; n <= breakColumns; n++) {
+    for (const n of breakNumbers) {
       const qty = field.get(row, `break_${n}_qty`);
       const price = field.get(row, `break_${n}_price`);
       if (qty === "" && price === "") continue;
@@ -310,12 +319,28 @@ export function previewPriceImport(
     }
     if (reasons.length > 0) return done("invalid", reasons, variant.variant);
 
+    // A column the file doesn't have keeps what the variant has, so a `sku,fixed_price`
+    // file changes prices without wiping compare-ats and breaks. An empty fixed price
+    // still removes the whole fixed price.
+    const fixedPrice = field.get(row, "fixed_price");
+    const stored = fixedPrice === "" ? null : variant.fixed;
+    const compareAt = field.has("compare_at")
+      ? field.get(row, "compare_at")
+      : stored?.compare_at
+        ? formatAmount(stored.compare_at.amount, digits)
+        : "";
+    const breaksText =
+      breakNumbers.length > 0
+        ? breaks.join("; ")
+        : formatBreaks(
+            (stored?.breaks ?? []).map((b) => ({
+              min_quantity: b.min_quantity,
+              amount: b.price.amount,
+            })),
+            digits,
+          );
     const checked = checkDraft(
-      {
-        fixed_price: field.get(row, "fixed_price"),
-        fixed_compare_at: field.get(row, "compare_at"),
-        breaks: breaks.join("; "),
-      },
+      { fixed_price: fixedPrice, fixed_compare_at: compareAt, breaks: breaksText },
       currency,
       digits,
     );

@@ -243,6 +243,36 @@ test("changes and removals become the grid's diff, decimal commas and all", () =
   assert.deepEqual(preview.rows[1]?.reasons, ["Sets a fixed price."]);
 });
 
+test("columns the file doesn't have keep what the variant has", () => {
+  const preview = previewPriceImport("sku,fixed_price\nGK-S,19", products, "EUR", currencies);
+  assert.deepEqual(preview.diff.upserts, [
+    {
+      variant: "var_s",
+      price: eur(1900),
+      compare_at: eur(2200),
+      breaks: [
+        { min_quantity: 5, price: eur(1700) },
+        { min_quantity: 10, price: eur(1600) },
+      ],
+    },
+  ]);
+  const removed = previewPriceImport("sku,fixed_price\nGK-S,", products, "EUR", currencies);
+  assert.deepEqual(removed.diff.clears, [{ variant: "var_s" }]);
+});
+
+test("break columns may skip numbers", () => {
+  const preview = previewPriceImport(
+    "variant_id,fixed_price,break_1_qty,break_1_price,break_3_qty,break_3_price\nvar_l,10,5,9,10,8",
+    products,
+    "EUR",
+    currencies,
+  );
+  assert.deepEqual(preview.diff.upserts[0]?.breaks, [
+    { min_quantity: 5, price: eur(900) },
+    { min_quantity: 10, price: eur(800) },
+  ]);
+});
+
 test("a file it can't read says why", () => {
   assert.equal(previewPriceImport("", products, "EUR", currencies).error, "The file is empty.");
   assert.equal(
