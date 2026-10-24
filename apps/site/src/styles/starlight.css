@@ -3,7 +3,7 @@
    --sl-color-black (the page). */
 
 :root {
-  --sl-font: "Geist Variable", Geist, ui-sans-serif, system-ui, sans-serif;
+  --sl-font: "Geist Variable", Geist, "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
   --sl-font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, Menlo, monospace;
 
   --sl-color-accent-low: #304204;

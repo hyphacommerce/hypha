@@ -1,0 +1,11 @@
+/* A fallback that takes Geist's measure, so text laid out before Geist arrives keeps its
+   line breaks and height when the font swaps in (the overrides are Geist's metrics scaled
+   by the width ratio measured against Arial on a sample of the site's copy). */
+@font-face {
+  font-family: "Geist Fallback";
+  src: local("Arial"), local("Helvetica Neue"), local("Helvetica");
+  size-adjust: 104.4%;
+  ascent-override: 96.3%;
+  descent-override: 28.3%;
+  line-gap-override: 0%;
+}

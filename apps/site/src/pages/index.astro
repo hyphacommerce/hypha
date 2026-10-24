@@ -2,7 +2,7 @@
 import logomarkOnDark from "../../../admin/public/brand/hypha-logomark-on-dark.svg?url";
 import logomark from "../../../admin/public/brand/hypha-logomark.svg?url";
 import Network from "../components/Network.astro";
-import { DEMO_ADMIN, DEMO_LOGIN, DEMO_STORE, EMAIL, GITHUB, SPONSOR } from "../consts";
+import { EMAIL, GITHUB, SPONSOR } from "../consts";
 import Base from "../layouts/Base.astro";
 import { software, sourceCode } from "../lib/seo";
 
@@ -64,11 +64,6 @@ const PROPOSAL = [
           <a class="btn primary" href="/docs/getting-started">Get started</a>
           <a class="btn" href={GITHUB}>View on GitHub</a>
         </div>
-        <p class="demo">
-          Try the live demo: <a href={DEMO_STORE}>the store</a> and
-          <a href={DEMO_ADMIN}>the admin</a> (sign in as <code>{DEMO_LOGIN.email}</code>,
-          password <code>{DEMO_LOGIN.password}</code>; it's read-only).
-        </p>
       </div>
     </section>
 
@@ -552,25 +547,6 @@ const PROPOSAL = [
 
   .hero .ctas {
     padding-top: 4px;
-  }
-
-  .demo {
-    max-width: 560px;
-    font-size: 15px;
-    color: var(--text-muted);
-  }
-
-  .demo a {
-    color: var(--text-accent);
-    text-underline-offset: 3px;
-  }
-
-  .demo code {
-    padding: 1px 6px;
-    border-radius: 6px;
-    background: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 0.88em;
   }
 
   /* The sections hang off a rail on the left, where the trunk runs. */

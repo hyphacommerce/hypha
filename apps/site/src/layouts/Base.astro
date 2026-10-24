@@ -4,6 +4,7 @@ import Header from "../components/Header.astro";
 import { SITE_DESCRIPTION, SITE_TITLE } from "../consts";
 import { graph } from "../lib/seo";
 import "../styles/site.css";
+import geist from "@fontsource-variable/geist/files/geist-latin-wght-normal.woff2?url";
 
 interface Props {
   title?: string;
@@ -37,6 +38,8 @@ const image = new URL("/og.png", Astro.site);
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{fullTitle}</title>
     <meta name="description" content={description} />
+    {/* Fetched with the HTML rather than after the stylesheet, so the first paint is in Geist. */}
+    <link rel="preload" as="font" type="font/woff2" href={geist} crossorigin />
     <link rel="canonical" href={canonical} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
