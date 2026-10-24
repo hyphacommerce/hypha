@@ -1,7 +1,8 @@
 "use client";
 
-// A codes discount's codes: searched and filtered by batch on the API, added by hand or
-// generated in a batch, exported as CSV, and removed (the selected ones, or a batch).
+// A codes discount's codes: searched and filtered by batch and state on the API, added
+// by hand or generated in a batch, exported as CSV, deactivated or reactivated, and
+// removed (the selected ones, or a batch).
 
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Badge } from "@astryxdesign/core/Badge";
@@ -22,13 +23,22 @@ import { type FilterDef, ResourceTable } from "@/components/resource-table/resou
 import { codesFrom } from "@/lib/discounts/codes";
 import { parseCount } from "@/lib/discounts/validate";
 
-import { addCodes, generateCodes, removeCodes } from "../actions";
+import { addCodes, generateCodes, removeCodes, setCodesActive } from "../actions";
 
 type Code = AdminSchemas["DiscountCodeResponse"];
 
 const FILTERS: FilterDef[] = [
   { kind: "search", param: "q", label: "Search", placeholder: "Search codes" },
   { kind: "text", param: "batch", label: "Batch", placeholder: "A batch's label" },
+  {
+    kind: "select",
+    param: "active",
+    label: "Status",
+    options: [
+      { value: "true", label: "Active" },
+      { value: "false", label: "Inactive" },
+    ],
+  },
 ];
 
 /** The most codes added in one go, and generated. */
@@ -251,17 +261,12 @@ function RemoveDialog({
   onClose,
 }: {
   id: string;
-  which: { codes: string[] } | { batch: string };
+  which: Which;
   onClose: (removed: boolean) => void;
 }) {
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
-  const what =
-    "batch" in which
-      ? `every code of the batch ${which.batch}`
-      : which.codes.length === 1
-        ? which.codes[0]
-        : `${which.codes.length} codes`;
+  const what = describeWhich(which);
   return (
     <AlertDialog
       isOpen
@@ -284,10 +289,57 @@ function RemoveDialog({
   );
 }
 
+type Which = { codes: string[] } | { batch: string };
+
+/** "SPRING10", "3 codes", "every code of the batch flyers". */
+function describeWhich(which: Which): string {
+  if ("batch" in which) return `every code of the batch ${which.batch}`;
+  return which.codes.length === 1 ? (which.codes[0] ?? "") : `${which.codes.length} codes`;
+}
+
+function ActivateDialog({
+  id,
+  which,
+  active,
+  onClose,
+}: {
+  id: string;
+  which: Which;
+  active: boolean;
+  onClose: (done: boolean) => void;
+}) {
+  const [error, setError] = useState<string>();
+  const [isPending, startTransition] = useTransition();
+  const what = describeWhich(which);
+  return (
+    <AlertDialog
+      isOpen
+      onOpenChange={(open) => !open && onClose(false)}
+      title={active ? `Reactivate ${what}?` : `Deactivate ${what}?`}
+      description={
+        error ??
+        (active
+          ? "Buyers can enter them again, within their limits."
+          : "Carts refuse them as unknown until they're reactivated. Their uses so far stay, and orders keep their discount.")
+      }
+      actionLabel={active ? "Reactivate" : "Deactivate"}
+      isActionLoading={isPending}
+      onAction={() =>
+        startTransition(async () => {
+          const result = await setCodesActive(id, which, active);
+          if (result.error) setError(result.error);
+          else onClose(true);
+        })
+      }
+    />
+  );
+}
+
 type Open =
   | { kind: "add" }
   | { kind: "generate" }
-  | { kind: "remove"; which: { codes: string[] } | { batch: string }; clear?: () => void };
+  | { kind: "remove"; which: Which; clear?: () => void }
+  | { kind: "activate"; which: Which; active: boolean; clear?: () => void };
 
 export function CodesTable({
   id,
@@ -324,11 +376,23 @@ export function CodesTable({
               href={exportHref}
             />
             {canWrite && batch && (
-              <Button
-                label="Remove batch"
-                variant="secondary"
-                onClick={() => setOpen({ kind: "remove", which: { batch } })}
-              />
+              <>
+                <Button
+                  label="Deactivate batch"
+                  variant="secondary"
+                  onClick={() => setOpen({ kind: "activate", which: { batch }, active: false })}
+                />
+                <Button
+                  label="Reactivate batch"
+                  variant="secondary"
+                  onClick={() => setOpen({ kind: "activate", which: { batch }, active: true })}
+                />
+                <Button
+                  label="Remove batch"
+                  variant="secondary"
+                  onClick={() => setOpen({ kind: "remove", which: { batch } })}
+                />
+              </>
             )}
             {canWrite && (
               <Button
@@ -346,16 +410,35 @@ export function CodesTable({
             )}
           </HStack>
         }
-        renderBulkActions={(selected, clear) => (
-          <Button
-            label="Remove"
-            variant="secondary"
-            size="sm"
-            onClick={() =>
-              setOpen({ kind: "remove", which: { codes: selected.map((c) => c.code) }, clear })
-            }
-          />
-        )}
+        renderBulkActions={(selected, clear) => {
+          const which = { codes: selected.map((c) => c.code) };
+          return (
+            <HStack gap={2}>
+              {selected.some((c) => c.active) && (
+                <Button
+                  label="Deactivate"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setOpen({ kind: "activate", which, active: false, clear })}
+                />
+              )}
+              {selected.some((c) => !c.active) && (
+                <Button
+                  label="Reactivate"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setOpen({ kind: "activate", which, active: true, clear })}
+                />
+              )}
+              <Button
+                label="Remove"
+                variant="secondary"
+                size="sm"
+                onClick={() => setOpen({ kind: "remove", which, clear })}
+              />
+            </HStack>
+          );
+        }}
         empty={{
           icon: <TicketIcon width={32} />,
           title: "No codes yet",
@@ -367,6 +450,17 @@ export function CodesTable({
       />
       {open?.kind === "add" && <AddCodesDialog id={id} onClose={() => setOpen(null)} />}
       {open?.kind === "generate" && <GenerateDialog id={id} onClose={() => setOpen(null)} />}
+      {open?.kind === "activate" && (
+        <ActivateDialog
+          id={id}
+          which={open.which}
+          active={open.active}
+          onClose={(done) => {
+            if (done) open.clear?.();
+            setOpen(null);
+          }}
+        />
+      )}
       {open?.kind === "remove" && (
         <RemoveDialog
           id={id}

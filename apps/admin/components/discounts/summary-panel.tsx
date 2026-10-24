@@ -1,8 +1,8 @@
 "use client";
 
 // The form's sticky summary (`.discount-summary`): the discount in one line, its method, classes and phase.
-// The server's summary (the words buyers see) replaces the instant preview once a
-// preview of the write has answered with it.
+// The server's summary (the words buyers see) replaces the instant preview once the
+// store has answered with it (`POST /admin/discounts/summary`).
 
 import { Card } from "@astryxdesign/core/Card";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
@@ -27,9 +27,9 @@ export function SummaryPanel({
   draft: DiscountDraft;
   /** `draftSummary` of the draft: shown until the server's arrives. */
   preview: string;
-  /** The server's `summary()` for this draft, when its preview answered for it. */
+  /** The store's summary of this draft, once it answered with one. */
   serverSummary?: string | null;
-  /** A preview of the write is on its way. */
+  /** The store's summary is on its way. */
   isRefreshing?: boolean;
   timeZone: string;
   /** The instant (ms) the phase is judged at. */

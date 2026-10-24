@@ -2,8 +2,9 @@
 
 // A discount's form with its draft, errors and the store's own summary: a new one from a
 // template, created in one go, or a saved one, whose changed sections are saved as a
-// JSON Merge Patch from the save bar. The summary is the API's: each change is
-// previewed (`Hypha-Preview: 1`) once typing stops, the instant one shown meanwhile.
+// JSON Merge Patch from the save bar. The summary is the API's: each change is sent to
+// `POST /admin/discounts/summary` once typing stops, the instant one shown meanwhile and
+// whenever a rule is broken (the rules it names are marked on their fields).
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -25,19 +26,21 @@ import {
   type FieldErrors,
   clearErrors,
   fieldErrors,
+  problemsFromDetails,
 } from "@/lib/discounts/validate";
 import {
   type Discount,
+  apiPathMapper,
   createBody,
   draftOf,
   patchBody,
   refusalProblems,
 } from "@/lib/discounts/wire";
 
-import { createDiscount, previewSummary, updateDiscount } from "./actions";
+import { type SummaryAnswer, createDiscount, discountSummary, updateDiscount } from "./actions";
 
-/** How long typing must stop before the write is previewed for its summary. */
-const PREVIEW_AFTER_MS = 600;
+/** How long typing must stop before the store is asked for its summary. */
+const SUMMARY_AFTER_MS = 600;
 
 type Common = {
   options: DiscountOptions;
@@ -49,14 +52,16 @@ type Common = {
 };
 
 /**
- * The store's summary of `draft`, read through a preview of the write `body` would make
- * (null while there's none to read: a draft that breaks a rule, a refused preview).
+ * The store's summary of the discount `write` would make, once typing stops: the text
+ * (`fallback` while there's no request to send; null while a rule is broken), the
+ * problems the store found in `draft` by field, and whether an answer is on its way.
  */
 function useServerSummary(
-  write: Parameters<typeof previewSummary>[0] | null,
+  write: Parameters<typeof discountSummary>[0] | null,
   fallback: string | null,
+  draft: DiscountDraft | null,
 ) {
-  const [summary, setSummary] = useState<{ for: string; text: string | null }>();
+  const [answer, setAnswer] = useState<{ for: string; answer: SummaryAnswer | null }>();
   const latest = useRef(0);
   const key = write ? JSON.stringify(write) : null;
 
@@ -64,17 +69,28 @@ function useServerSummary(
     if (!write || key === null) return;
     const request = ++latest.current;
     const timer = setTimeout(async () => {
-      const text = await previewSummary(write).catch(() => null);
-      if (request === latest.current) setSummary({ for: key, text });
-    }, PREVIEW_AFTER_MS);
+      const next = await discountSummary(write).catch(() => null);
+      if (request === latest.current) setAnswer({ for: key, answer: next });
+    }, SUMMARY_AFTER_MS);
     return () => clearTimeout(timer);
     // `key` stands for `write`: a new object with the same contents isn't a change.
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- write is compared by its JSON (key)
   }, [key]);
 
-  if (key === null) return { text: fallback, isRefreshing: false };
-  if (summary?.for === key) return { text: summary.text, isRefreshing: false };
-  return { text: summary?.text ?? fallback, isRefreshing: true };
+  const none: FieldErrors = {};
+  if (key === null) return { text: fallback, errors: none, isRefreshing: false };
+  if (answer?.for === key) {
+    const problems = answer.answer?.problems ?? [];
+    return {
+      text: answer.answer?.summary ?? null,
+      errors:
+        draft && problems.length > 0
+          ? fieldErrors(problemsFromDetails(problems, apiPathMapper(draft)))
+          : none,
+      isRefreshing: false,
+    };
+  }
+  return { text: answer?.answer?.summary ?? fallback, errors: none, isRefreshing: true };
 }
 
 function useCheckContext(options: DiscountOptions): CheckContext {
@@ -105,6 +121,7 @@ export function NewDiscount({
   const preview = useServerSummary(
     built && "body" in built ? { id: null, body: built.body } : null,
     null,
+    draft,
   );
 
   if (!draft) {
@@ -151,7 +168,7 @@ export function NewDiscount({
       </HStack>
       <DiscountForm
         draft={draft}
-        errors={errors}
+        errors={{ ...preview.errors, ...errors }}
         onChange={(next, paths) => {
           setDraft(next);
           setErrors((before) => clearErrors(before, ["", ...paths]));
@@ -196,8 +213,9 @@ export function EditDiscount({
   const preview = useServerSummary(
     !isReadOnly && changes ? { id: discount.id, body: changes } : null,
     discount.summary,
+    draft,
   );
-  // A draft with a broken rule has no preview: the saved summary would be wrong for it.
+  // A draft with a broken rule has no store summary: the saved one would be wrong for it.
   const serverSummary = "problems" in built ? null : preview.text;
 
   const save = () =>
@@ -240,7 +258,7 @@ export function EditDiscount({
       )}
       <DiscountForm
         draft={draft}
-        errors={errors}
+        errors={{ ...preview.errors, ...errors }}
         onChange={(next, paths) => {
           setDraft(next);
           setErrors((before) => clearErrors(before, ["", ...paths]));

@@ -2,8 +2,6 @@
 // choices (markets, channels, customer groups, categories), the names of what a
 // discount lists, and the live discounts the combinations card weighs.
 
-import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
-
 import type { LiveDiscount } from "@/components/discounts/combinations-section";
 import type { DiscountOptions } from "@/components/discounts/fields";
 import { flatten } from "@/lib/categories";
@@ -15,7 +13,6 @@ import type { sessionClient } from "@/lib/hypha";
 import { productSummaries } from "../markets/price-lists/grid-data";
 
 type Client = Awaited<ReturnType<typeof sessionClient>>;
-type Money = AdminSchemas["Money"];
 
 /**
  * The form's choices. A list the role can't read is empty: markets without
@@ -58,42 +55,15 @@ export async function loadLive(client: Client): Promise<LiveDiscount[]> {
   }));
 }
 
-/** The most usage records added up for the usage tab's total. */
-const MAX_USAGE_SUMMED = 2000;
+/** Variants or customers read by ID at once: one page of their list (at most 100). */
+const IDS_PER_READ = 100;
 
-/**
- * What a discount took off in all, by currency, from its usage records (newest first,
- * at most `MAX_USAGE_SUMMED`; `partial` past that). The API has no total of its own.
- */
-export async function usageTotals(
-  client: Client,
-  id: string,
-): Promise<{ totals: Money[]; partial: boolean }> {
-  const sums = new Map<string, number>();
-  let cursor: string | undefined;
-  let read = 0;
-  do {
-    const { data } = await client.GET("/admin/discounts/{id}/usage", {
-      params: { path: { id }, query: { cursor, limit: 100 } },
-    });
-    if (!data) break;
-    for (const usage of data.items) {
-      const { amount, currency } = usage.amount;
-      sums.set(currency, (sums.get(currency) ?? 0) + amount);
-    }
-    read += data.items.length;
-    cursor = data.next_cursor ?? undefined;
-  } while (cursor && read < MAX_USAGE_SUMMED);
-  return {
-    totals: [...sums].map(([currency, amount]) => ({ amount, currency })),
-    partial: cursor !== undefined,
-  };
+/** `ids` in chunks of `IDS_PER_READ`, one list read each. */
+function chunks(ids: readonly string[]): string[][] {
+  return Array.from({ length: Math.ceil(ids.length / IDS_PER_READ) }, (_, i) =>
+    ids.slice(i * IDS_PER_READ, (i + 1) * IDS_PER_READ),
+  );
 }
-
-/** The most customers named one by one: past it, they show by ID. */
-const MAX_CUSTOMER_READS = 50;
-/** Variants read by ID at once: one page of the variants list. */
-const VARIANTS_PER_READ = 100;
 
 /**
  * Names of the products, variants and customers `discount` lists, by ID. A read that
@@ -111,7 +81,7 @@ export async function loadNames(
   if (kind.type === "tiered") sets.push(kind.items);
   const products = [...new Set(sets.flatMap((s) => s.products))];
   const variants = [...new Set(sets.flatMap((s) => s.variants))];
-  const customers = draft.conditions.customers.slice(0, MAX_CUSTOMER_READS);
+  const customers = [...new Set(draft.conditions.customers)];
 
   const [productNames, variantNames, customerNames] = await Promise.all([
     productSummaries(client, products).then(
@@ -119,15 +89,8 @@ export async function loadNames(
       () => [],
     ),
     Promise.all(
-      Array.from({ length: Math.ceil(variants.length / VARIANTS_PER_READ) }, (_, i) =>
-        client.GET("/admin/variants", {
-          params: {
-            query: {
-              ids: variants.slice(i * VARIANTS_PER_READ, (i + 1) * VARIANTS_PER_READ),
-              limit: 100,
-            },
-          },
-        }),
+      chunks(variants).map((ids) =>
+        client.GET("/admin/variants", { params: { query: { ids, limit: IDS_PER_READ } } }),
       ),
     ).then(
       (pages) =>
@@ -139,13 +102,14 @@ export async function loadNames(
       () => [],
     ),
     Promise.all(
-      customers.map((id) =>
-        client
-          .GET("/admin/customers/{id}", { params: { path: { id } } })
-          .then(({ data }) => (data ? [[id, customerName(data) || data.email]] : [])),
+      chunks(customers).map((ids) =>
+        client.GET("/admin/customers", { params: { query: { ids, limit: IDS_PER_READ } } }),
       ),
     ).then(
-      (found) => found.flat(),
+      (pages) =>
+        pages.flatMap((page) =>
+          (page.data?.items ?? []).map((c) => [c.id, customerName(c) || c.email] as const),
+        ),
       () => [],
     ),
   ]);

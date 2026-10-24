@@ -1,7 +1,5 @@
-import { Card } from "@astryxdesign/core/Card";
 import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
-import { Text } from "@astryxdesign/core/Text";
 import { Suspense } from "react";
 
 import { DiscountStatusBadge } from "@/components/discounts/status-badge";
@@ -13,7 +11,7 @@ import { type Discount, methodLabel, withDiscountMarkets } from "@/lib/discounts
 import { loaded, perRequest, requireStaff, sessionClient } from "@/lib/hypha";
 import { hasScope } from "@/lib/navigation";
 
-import { loadLive, loadNames, loadOptions, usageTotals } from "../data";
+import { loadLive, loadNames, loadOptions } from "../data";
 import { EditDiscount } from "../discount-editor";
 import { CodesTable } from "./codes-table";
 import { DeleteDiscount } from "./delete-discount";
@@ -41,10 +39,18 @@ function tabOf(value: string | undefined): DiscountTab {
   return value === "codes" || value === "usage" ? value : "settings";
 }
 
+/** What a tab shows while its reads are on their way. */
+function tabFallback(id: string, tab: DiscountTab) {
+  if (tab === "codes") return <CodesTable id={id} canWrite={false} />;
+  if (tab === "usage") return <UsageTable />;
+  return <FormSkeleton cards={5} />;
+}
+
 /**
  * A discount: its settings (the form, saved from the save bar), its codes and the orders
- * it was used on, as tabs (`?tab=codes`, `?tab=usage`). The way back and the tabs render
- * at once; the discount streams in.
+ * it was used on, as tabs (`?tab=codes`, `?tab=usage`). The header and the tabs come
+ * with the discount (an automatic one has no codes tab); each tab's own reads stream in
+ * after.
  */
 export default async function DiscountPage({
   params,
@@ -58,38 +64,53 @@ export default async function DiscountPage({
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1320}>
-        <Suspense fallback={<PageHeader back={BACK} />}>
-          <Header id={id} />
+        <Suspense
+          fallback={
+            <>
+              <PageHeader back={BACK} />
+              {tabFallback(id, tab)}
+            </>
+          }
+        >
+          <DiscountView id={id} tab={tab} query={query} />
         </Suspense>
-        <DiscountTabs id={id} tab={tab}>
-          {tab === "codes" ? (
-            <Suspense fallback={<CodesTable id={id} canWrite={false} />}>
-              <Codes id={id} params={query} />
-            </Suspense>
-          ) : tab === "usage" ? (
-            <Suspense fallback={<UsageTable />}>
-              <Usage id={id} params={query} />
-            </Suspense>
-          ) : (
-            <Suspense fallback={<FormSkeleton cards={5} />}>
-              <Settings id={id} />
-            </Suspense>
-          )}
-        </DiscountTabs>
       </VStack>
     </Section>
   );
 }
 
-async function Header({ id }: { id: string }) {
+async function DiscountView({
+  id,
+  tab: asked,
+  query,
+}: {
+  id: string;
+  tab: DiscountTab;
+  query: SearchParams;
+}) {
   const discount = await loadDiscount(id);
+  const hasCodes = discount.method === "codes";
+  const tab = asked === "codes" && !hasCodes ? "settings" : asked;
   return (
-    <PageHeader
-      title={discount.title}
-      back={BACK}
-      badges={<DiscountStatusBadge phase={discount.phase} />}
-      description={`${methodLabel(discount)} · ${discount.summary}`}
-    />
+    <>
+      <PageHeader
+        title={discount.title}
+        back={BACK}
+        badges={<DiscountStatusBadge phase={discount.phase} />}
+        description={`${methodLabel(discount)} · ${discount.summary}`}
+      />
+      <DiscountTabs id={id} tab={tab} hasCodes={hasCodes}>
+        <Suspense fallback={tabFallback(id, tab)}>
+          {tab === "codes" ? (
+            <Codes id={id} params={query} />
+          ) : tab === "usage" ? (
+            <Usage id={id} params={query} discount={discount} />
+          ) : (
+            <Settings id={id} />
+          )}
+        </Suspense>
+      </DiscountTabs>
+    </>
   );
 }
 
@@ -125,8 +146,8 @@ async function Settings({ id }: { id: string }) {
 
 async function Codes({ id, params }: { id: string; params: SearchParams }) {
   const client = await sessionClient();
-  const [discount, me, result] = await Promise.all([
-    loadDiscount(id),
+  const active = one(params, "active");
+  const [me, result] = await Promise.all([
     requireStaff(),
     client.GET("/admin/discounts/{id}/codes", {
       params: {
@@ -135,19 +156,11 @@ async function Codes({ id, params }: { id: string; params: SearchParams }) {
           ...pageQuery(params),
           q: one(params, "q")?.trim() || undefined,
           batch: one(params, "batch")?.trim() || undefined,
+          active: active === "true" ? true : active === "false" ? false : undefined,
         },
       },
     }),
   ]);
-  if (discount.method === "automatic") {
-    return (
-      <Card>
-        <Text color="secondary">
-          An automatic discount has no codes: it applies by itself to every cart that qualifies.
-        </Text>
-      </Card>
-    );
-  }
   return (
     <CodesTable
       id={id}
@@ -158,20 +171,24 @@ async function Codes({ id, params }: { id: string; params: SearchParams }) {
   );
 }
 
-async function Usage({ id, params }: { id: string; params: SearchParams }) {
+async function Usage({
+  id,
+  params,
+  discount,
+}: {
+  id: string;
+  params: SearchParams;
+  discount: Discount;
+}) {
   const client = await sessionClient();
-  const [discount, result, totals] = await Promise.all([
-    loadDiscount(id),
-    client.GET("/admin/discounts/{id}/usage", {
-      params: { path: { id }, query: pageQuery(params) },
-    }),
-    usageTotals(client, id),
-  ]);
+  const result = await client.GET("/admin/discounts/{id}/usage", {
+    params: { path: { id }, query: pageQuery(params) },
+  });
   return (
     <UsageTable
       page={listPage(result, `/discounts/${id}`, params)}
       used={discount.used}
-      totals={totals}
+      totals={discount.discounted_total}
     />
   );
 }

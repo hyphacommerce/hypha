@@ -1,10 +1,9 @@
 "use server";
 
 // Discounts: creating and changing them (the form builds the request, `lib/discounts/
-// wire.ts`), previewing a write for the store's own summary, deleting them, and their
-// codes.
+// wire.ts`), the store's own summary of a draft, deleting them, and their codes.
 
-import type { ApiError } from "@hyphacommerce/sdk/admin";
+import type { AdminSchemas, ApiError } from "@hyphacommerce/sdk/admin";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -45,38 +44,21 @@ export async function updateDiscount(id: string, body: UpdateDiscount): Promise<
   return {};
 }
 
-/** The `summary` a previewed answer carries, if it is one. */
-function previewedSummary(answer: unknown): string | null {
-  if (typeof answer !== "object" || answer === null) return null;
-  const preview: unknown = Reflect.get(answer, "preview");
-  if (typeof preview !== "object" || preview === null) return null;
-  const response: unknown = Reflect.get(preview, "response");
-  if (typeof response !== "object" || response === null) return null;
-  const body: unknown = Reflect.get(response, "body");
-  if (typeof body !== "object" || body === null) return null;
-  const summary: unknown = Reflect.get(body, "summary");
-  return typeof summary === "string" ? summary : null;
-}
+/** The store's own summary of a discount, and the rules it breaks. */
+export type SummaryAnswer = AdminSchemas["DiscountSummaryResponse"];
 
 /**
- * The store's own summary of the discount the write would make or leave (`Hypha-Preview:
- * 1`: the write runs and is rolled back), or null when the preview was refused (a rule
- * broken, a code taken) or answered without one.
+ * The store's own summary of the discount a create would make, or a saved one with the
+ * changes a `PATCH` would make (`null` while it breaks a rule, the `problems` saying
+ * which); null when the request failed. It writes nothing: `discounts:read` is enough.
  */
-export async function previewSummary(
+export async function discountSummary(
   write: { id: null; body: CreateDiscount } | { id: string; body: UpdateDiscount },
-): Promise<string | null> {
+): Promise<SummaryAnswer | null> {
   const client = await sessionClient();
-  const headers = { "Hypha-Preview": "1" } as const;
-  const result =
-    write.id === null
-      ? await client.POST("/admin/discounts", { body: write.body, headers })
-      : await client.PATCH("/admin/discounts/{id}", {
-          params: { path: { id: write.id } },
-          body: write.body,
-          headers,
-        });
-  return result.error ? null : previewedSummary(result.data);
+  const body = write.id === null ? write.body : { ...write.body, id: write.id };
+  const { data } = await client.POST("/admin/discounts/summary", { body });
+  return data ?? null;
 }
 
 export async function deleteDiscount(id: string): Promise<Result> {
@@ -150,4 +132,23 @@ export async function removeCodes(
   if (error) return { error: describe(error) };
   refresh();
   return { removed: data.removed };
+}
+
+/**
+ * Deactivates (`active: false`) or reactivates the codes named, or a whole batch. Carts
+ * refuse an inactive code as unknown; its uses so far stay.
+ */
+export async function setCodesActive(
+  id: string,
+  which: { codes: string[] } | { batch: string },
+  active: boolean,
+): Promise<CodesResult & { updated?: number }> {
+  const client = await sessionClient();
+  const { data, error } = await client.PATCH("/admin/discounts/{id}/codes", {
+    params: { path: { id } },
+    body: { ...which, active },
+  });
+  if (error) return { error: describe(error) };
+  refresh();
+  return { updated: data.updated };
 }

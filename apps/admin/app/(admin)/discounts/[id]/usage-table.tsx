@@ -1,7 +1,7 @@
 "use client";
 
 // The orders a discount was used on, newest first, with what it took off each and in
-// all.
+// all (the discount's own sums, one per currency).
 
 import { Card } from "@astryxdesign/core/Card";
 import { VStack } from "@astryxdesign/core/Layout";
@@ -15,7 +15,8 @@ import { ShoppingBagIcon } from "@heroicons/react/24/outline";
 import { useCurrencies } from "@/components/currencies";
 import { DateTime } from "@/components/date-time";
 import { ResourceTable } from "@/components/resource-table/resource-table";
-import { formatMoney } from "@/lib/format";
+import { customerLabel, orderLabel } from "@/lib/discounts/usage";
+import { customerName, formatMoney } from "@/lib/format";
 
 type Usage = AdminSchemas["DiscountUsageResponse"];
 type Money = AdminSchemas["Money"];
@@ -29,8 +30,8 @@ export function UsageTable({
   page?: { items: Usage[]; next_cursor: string | null; error?: string };
   /** Orders it was used on (the discount's count). */
   used?: number;
-  /** What it took off in all, by currency; `partial` when only the latest were added. */
-  totals?: { totals: Money[]; partial: boolean };
+  /** What it took off in all, one sum per currency (the discount's `discounted_total`). */
+  totals?: Money[];
 }) {
   const currencies = useCurrencies();
   const columns: TableColumn<Usage>[] = [
@@ -40,7 +41,7 @@ export function UsageTable({
       width: proportional(2, { minWidth: 200 }),
       renderCell: (u) => (
         <Link href={`/orders/${u.order}`} weight="semibold" color="primary">
-          {u.order}
+          {orderLabel(u)}
         </Link>
       ),
     },
@@ -48,7 +49,15 @@ export function UsageTable({
       key: "customer",
       header: "Customer",
       width: proportional(2, { minWidth: 200 }),
-      renderCell: (u) => <Link href={`/customers/${u.customer}`}>{u.customer}</Link>,
+      renderCell: (u) => {
+        const name = customerName(u);
+        return (
+          <VStack gap={0}>
+            <Link href={`/customers/${u.customer}`}>{customerLabel(u)}</Link>
+            {name && u.email && <Text type="supporting">{u.email}</Text>}
+          </VStack>
+        );
+      },
     },
     {
       key: "code",
@@ -86,10 +95,9 @@ export function UsageTable({
             </MetadataListItem>
             <MetadataListItem label="Total discounted">
               <Text>
-                {totals.totals.length === 0
+                {totals.length === 0
                   ? "Nothing yet"
-                  : totals.totals.map((m) => formatMoney(m, currencies)).join(" + ")}
-                {totals.partial && " (latest 2,000 orders)"}
+                  : totals.map((m) => formatMoney(m, currencies)).join(" + ")}
               </Text>
             </MetadataListItem>
           </MetadataList>
