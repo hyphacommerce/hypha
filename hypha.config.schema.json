@@ -73,6 +73,10 @@
           "enabled": true,
           "interval": "1h"
         },
+        "price_list_schedule": {
+          "enabled": true,
+          "interval": "1m"
+        },
         "prune": {
           "agent_calls_after": "30d",
           "enabled": true,
@@ -525,6 +529,14 @@
           "default": {
             "enabled": true,
             "interval": "1h"
+          }
+        },
+        "price_list_schedule": {
+          "description": "Announcing price lists' windows opening and closing (`price_list.started` /\n`.ended`), so search and storefront caches follow. Prices themselves follow the\nclock without it. A Workers host runs it on the minute's ticks that have work.",
+          "$ref": "#/$defs/Job",
+          "default": {
+            "enabled": true,
+            "interval": "1m"
           }
         },
         "prune": {

@@ -399,7 +399,29 @@ pub async fn search_sync<S: Storage>(state: &AppState<S>) -> Step {
     })
 }
 
-/// Deletes uploads abandoned for over `media.abandoned_after`.
+/// Announces the price list windows that opened or closed since the last announcement
+/// (`price_list.started` / `.ended`), so search rebuilds and storefronts revalidate. Its
+/// `retry_at` is the next boundary, for a host that runs jobs only when they're due.
+pub async fn price_list_schedule<S: Storage>(state: &AppState<S>) -> Step {
+    let ports = state
+        .public_ports()
+        .await
+        .map_err(|_| "no connection".to_string())?;
+    let announced = hypha_markets::announce_windows(&ports, &state.clock)
+        .await
+        .map_err(|e| e.to_string())?;
+    if announced.events > 0 {
+        tracing::info!(events = announced.events, "price lists: announced windows");
+    }
+    Ok(Ran {
+        more: false,
+        idle: announced.events == 0,
+        retry_at: announced.next,
+    })
+}
+
+/// Deletes uploads abandoned for over `media.abandoned_after`, and temporary uploads past
+/// their lifetime, with their files.
 pub async fn media_sweep<S: Storage>(state: &AppState<S>) -> Step {
     let Some(media) = &state.media else {
         return Ok(Ran {
@@ -424,9 +446,20 @@ pub async fn media_sweep<S: Storage>(state: &AppState<S>) -> Step {
     if swept > 0 {
         tracing::info!(deleted = swept, "media: swept abandoned uploads");
     }
+    let expired = hypha_media::sweep_expired_uploads(
+        &hypha_core::Ctx::system(),
+        hypha_media::HasTemporaryUploads::temporary_uploads(&ports),
+        &media.blobs,
+        &state.clock,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    if expired > 0 {
+        tracing::info!(deleted = expired, "media: swept expired temporary uploads");
+    }
     Ok(Ran {
         more: false,
-        idle: swept == 0,
+        idle: swept == 0 && expired == 0,
         retry_at: None,
     })
 }
@@ -520,10 +553,12 @@ async fn agent_upkeep<S: Storage>(
     Ok([calls, Progress::of(tokens, batch), proposals])
 }
 
-/// When dispatch or the send job next has work (`OutboxRepo::next_due`,
-/// `NotificationRepo::next_due`), for a host that runs the jobs only when there's some.
+/// When dispatch, the send job or the price list schedule next has work
+/// (`OutboxRepo::next_due`, `NotificationRepo::next_due`, the next window boundary of an
+/// active list), for a host that runs the jobs only when there's some.
 pub async fn next_due<S: Storage>(state: &AppState<S>) -> Result<Option<Timestamp>, String> {
     use hypha_core::{HasOutbox, OutboxRepo};
+    use hypha_markets::{HasPriceLists, PriceListRepo};
     use hypha_notifications::{HasNotifications, NotificationRepo};
     let ports = state
         .public_ports()
@@ -535,7 +570,17 @@ pub async fn next_due<S: Storage>(state: &AppState<S>) -> Result<Option<Timestam
         .next_due()
         .await
         .map_err(|e| e.to_string())?;
-    Ok(earliest(events, emails))
+    let boundary = if state.config.jobs.price_list_schedule.enabled {
+        let lists = ports
+            .price_lists()
+            .list_all()
+            .await
+            .map_err(|e| e.to_string())?;
+        hypha_markets::next_boundary(&lists, state.clock.now())
+    } else {
+        None
+    };
+    Ok(earliest(earliest(events, emails), boundary))
 }
 
 /// How many search targets are queued, for a host whose runs don't follow each other on a

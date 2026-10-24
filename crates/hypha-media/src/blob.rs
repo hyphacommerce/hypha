@@ -9,7 +9,7 @@ use std::fmt;
 
 use hypha_core::Timestamp;
 
-use crate::{BlobError, Checksum, MimeType};
+use crate::{BlobError, Checksum};
 
 /// Where a file is stored: `assets/…` for public files, `private/…` for the rest.
 /// Built by `Asset`, so it is always made of `[a-z0-9._/-]`.
@@ -37,7 +37,8 @@ impl fmt::Display for BlobKey {
 /// so storage refuses anything else.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UploadTerms {
-    pub content_type: MimeType,
+    /// `Content-Type`, as a MIME type (`MimeType::as_str`, `UploadPurpose::content_type`).
+    pub content_type: &'static str,
     pub content_length: u64,
     pub checksum: Option<Checksum>,
     /// Stored with the object and sent back on every download.

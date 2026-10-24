@@ -2,10 +2,10 @@ use std::collections::HashSet;
 
 use hypha_core::{
     Address, AssetId, CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money,
-    MoneyError, OrderId, PaymentMethodId, Price, ProductId, Quantity, VariantId,
+    MoneyError, OrderId, PaymentMethodId, Price, PriceListId, ProductId, Quantity, VariantId,
 };
 use hypha_inventory::{Availability, StockContext};
-use hypha_pricing::{PricingContext, resolve_price};
+use hypha_pricing::{PricingContext, ResolvedPrice, VariantPrices, resolve_price};
 use hypha_products::{Product, ProductStatus};
 use hypha_tax::{TaxContext, TaxLine, TaxableKind, TaxableLine, tax_line};
 
@@ -25,6 +25,10 @@ use crate::{
 pub enum LineStatus {
     Priced {
         unit_price: Price,
+        /// What `unit_price` is shown against, struck through; only ever above it.
+        compare_at: Option<Price>,
+        /// The price list `unit_price` came from; `None` for the base price.
+        price_list: Option<PriceListId>,
         total: Money,
         /// `None` when the cart's country has no tax region.
         tax: Option<TaxLine>,
@@ -141,31 +145,36 @@ impl PricedCart {
     }
 }
 
-/// Unit price of `variant` in the pricing context's market. The product must be active
-/// and own the variant.
+/// Unit price of `quantity` of `variant` in the pricing context's market. The product
+/// must be active and own the variant.
 ///
-/// This is where the cart composes the leaf domains: it pulls the base price out of
-/// the `Product` and hands plain values to `resolve_price`.
+/// This is where the cart composes the leaf domains: it pulls the base and compare-at
+/// prices out of the `Product` and hands plain values to `resolve_price`.
 pub fn price_line(
     product: &Product,
     variant: VariantId,
+    quantity: Quantity,
     pricing: &PricingContext,
-) -> Result<Price, LineError> {
+) -> Result<ResolvedPrice, LineError> {
     if product.status() != ProductStatus::Active {
         return Err(LineError::ProductNotActive(product.id()));
     }
 
-    let base = product
+    let found = product
         .variants()
         .iter()
         .find(|v| v.id() == variant)
         .ok_or(LineError::VariantNotFound {
             product: product.id(),
             variant,
-        })?
-        .base_price();
-
-    Ok(resolve_price(pricing, product.id(), variant, base)?)
+        })?;
+    let prices = VariantPrices {
+        product: product.id(),
+        variant,
+        base: found.base_price(),
+        compare_at: found.compare_at_price(),
+    };
+    Ok(resolve_price(pricing, prices, quantity)?)
 }
 
 /// Prices and taxes every line at current prices and rates, and checks its stock. Lines
@@ -199,13 +208,15 @@ pub fn price_cart_with_shipping(
     for line in cart.lines() {
         let product = products.iter().find(|p| p.id() == line.product());
         let status = match line_total(line, product, pricing, tax, stock, published) {
-            Ok((unit_price, total, line_tax)) => {
+            Ok((resolved, total, line_tax)) => {
                 let line_tax_amount = line_tax.map(|t| t.amount);
                 match totals.add(total, line_tax_amount, tax.prices_include_tax) {
                     Ok(new_totals) => {
                         totals = new_totals;
                         LineStatus::Priced {
-                            unit_price,
+                            unit_price: resolved.price,
+                            compare_at: resolved.compare_at,
+                            price_list: resolved.price_list,
                             total,
                             tax: line_tax,
                         }
@@ -349,21 +360,24 @@ fn line_total(
     tax: &TaxContext,
     stock: &StockContext,
     published: &Publication,
-) -> Result<(Price, Money, Option<TaxLine>), LineError> {
+) -> Result<(ResolvedPrice, Money, Option<TaxLine>), LineError> {
     let product = product.ok_or(LineError::ProductNotFound(line.product()))?;
     if !published.allows(product.id()) {
         return Err(LineError::ProductNotPublished(product.id()));
     }
-    let unit_price = price_line(product, line.variant(), pricing)?;
+    let resolved = price_line(product, line.variant(), line.quantity(), pricing)?;
     check_stock(stock, line.variant(), line.quantity())?;
-    let total = unit_price.money().checked_mul(line.quantity().value())?;
+    let total = resolved
+        .price
+        .money()
+        .checked_mul(line.quantity().value())?;
     let taxable = TaxableLine {
         kind: TaxableKind::Item {
             product: line.product(),
         },
         amount: total,
     };
-    Ok((unit_price, total, tax_line(tax, &taxable)?))
+    Ok((resolved, total, tax_line(tax, &taxable)?))
 }
 
 /// Whether the market's locations can supply `quantity` of `variant` right now.
@@ -393,7 +407,7 @@ mod tests {
     };
     use hypha_core::{OptionId, OptionValueId};
     use hypha_inventory::{InventoryItem, Location};
-    use hypha_markets::{Catalog, CatalogContext, Market, PriceList};
+    use hypha_markets::{Catalog, CatalogContext, FixedPrice, Market, PriceList, PriceListDraft};
     use hypha_pricing::PricingError;
     use hypha_products::{Handle, NewVariant, OptionValue, ProductOption};
     use hypha_tax::{TaxRegion, TaxSource};
@@ -464,9 +478,12 @@ mod tests {
                 CatalogContext::Market(mid()),
                 None,
             )),
-            price_list: None,
+            price_lists: Vec::new(),
             included_products: products.iter().map(|n| pid(*n)).collect::<HashSet<_>>(),
             fixed_prices: HashMap::new(),
+            product_categories: HashMap::new(),
+            at: hypha_core::Timestamp::UNIX_EPOCH,
+            groups: Vec::new(),
         }
     }
 
@@ -524,6 +541,8 @@ mod tests {
     fn priced(unit: i64, total: i64) -> LineStatus {
         LineStatus::Priced {
             unit_price: eur(unit),
+            compare_at: None,
+            price_list: None,
             total: money(total),
             tax: None,
         }
@@ -562,18 +581,23 @@ mod tests {
 
     #[test]
     fn uses_price_list_prices() {
+        let list_id = PriceListId::from_uuid(Uuid::from_u128(400));
         let list = PriceList::new(
-            PriceListId::from_uuid(Uuid::from_u128(400)),
-            Currency::EUR,
-            BasisPoints::new(-1000).unwrap(),
-        );
+            list_id,
+            PriceListDraft::new("Sale", Currency::EUR).adjusted(BasisPoints::new(-1000).unwrap()),
+        )
+        .unwrap();
         let mut ctx = pricing(&[1, 2]);
         ctx.catalog
             .as_mut()
             .unwrap()
-            .set_price_list(Some(list.id()));
-        ctx.price_list = Some(list);
-        ctx.fixed_prices.insert(vid(12), eur(100));
+            .set_price_lists(vec![list_id])
+            .unwrap();
+        ctx.price_lists = vec![list];
+        ctx.fixed_prices.insert(
+            list_id,
+            HashMap::from([(vid(12), FixedPrice::plain(eur(100)))]),
+        );
 
         let result = price_cart(
             &cart(&[(1, 1), (2, 1)]),
@@ -584,7 +608,44 @@ mod tests {
         );
 
         // Product 1 gets the -10% adjustment, product 2 its fixed price.
-        assert_eq!(statuses(&result), vec![priced(900, 900), priced(100, 100)]);
+        let from_list = |unit: i64| LineStatus::Priced {
+            unit_price: eur(unit),
+            compare_at: None,
+            price_list: Some(list_id),
+            total: money(unit),
+            tax: None,
+        };
+        assert_eq!(statuses(&result), vec![from_list(900), from_list(100)]);
+    }
+
+    #[test]
+    fn a_line_carries_the_variants_compare_at() {
+        let mut p = product(1, eur(1000));
+        p.update_variant(
+            vid(11),
+            hypha_products::VariantPatch {
+                compare_at_price: Some(Some(eur(1500))),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let result = price_cart(
+            &cart(&[(1, 2)]),
+            &[p],
+            &pricing(&[1]),
+            &no_tax(),
+            &no_stock(),
+        );
+        assert_eq!(
+            statuses(&result),
+            vec![LineStatus::Priced {
+                unit_price: eur(1000),
+                compare_at: Some(eur(1500)),
+                price_list: None,
+                total: money(2000),
+                tax: None,
+            }]
+        );
     }
 
     #[test]
@@ -791,6 +852,8 @@ mod tests {
     fn taxed(unit: i64, total: i64, tax: i64, class: Option<TaxClassId>) -> LineStatus {
         LineStatus::Priced {
             unit_price: eur(unit),
+            compare_at: None,
+            price_list: None,
             total: money(total),
             tax: Some(TaxLine {
                 rate: TaxRate::new(250_000).unwrap(),
@@ -867,7 +930,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            price_line(&draft, vid(11), &pricing(&[1])),
+            price_line(&draft, vid(11), Quantity::ONE, &pricing(&[1])),
             Err(LineError::ProductNotActive(pid(1)))
         );
     }
@@ -875,7 +938,12 @@ mod tests {
     #[test]
     fn price_line_rejects_variant_of_another_product() {
         assert_eq!(
-            price_line(&product(1, eur(1000)), vid(99), &pricing(&[1])),
+            price_line(
+                &product(1, eur(1000)),
+                vid(99),
+                Quantity::ONE,
+                &pricing(&[1])
+            ),
             Err(LineError::VariantNotFound {
                 product: pid(1),
                 variant: vid(99),
@@ -886,7 +954,12 @@ mod tests {
     #[test]
     fn price_line_passes_through_pricing_errors() {
         assert_eq!(
-            price_line(&product(1, eur(1000)), vid(11), &pricing(&[])),
+            price_line(
+                &product(1, eur(1000)),
+                vid(11),
+                Quantity::ONE,
+                &pricing(&[])
+            ),
             Err(LineError::Pricing(PricingError::NotAvailable {
                 product: pid(1),
                 market: mid(),

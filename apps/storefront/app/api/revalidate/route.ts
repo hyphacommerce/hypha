@@ -132,6 +132,16 @@ async function affected(event: Envelope): Promise<{ tags: string[]; paths: strin
     case "market.changed":
     case "catalog.changed":
       return { tags: [TAGS.prices, TAGS.store], paths: [] };
+    // A list started or stopped pricing (its window opened or closed, it joined or left a
+    // catalog): any price may have changed. A list on no catalog prices nothing.
+    case "price_list.started":
+    case "price_list.ended":
+      return ids(data.catalogs).length > 0
+        ? { tags: [TAGS.prices], paths: [] }
+        : { tags: [], paths: [] };
+    case "catalog.price_lists_added":
+    case "catalog.price_lists_removed":
+      return { tags: [TAGS.prices], paths: [] };
     // Custom fields: values appear on product pages and, when a field is a facet, in
     // listings.
     case "product.custom_fields_updated": {

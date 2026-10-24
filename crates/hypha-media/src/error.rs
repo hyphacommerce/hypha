@@ -1,7 +1,7 @@
 use hypha_core::{ErrorCode, TextError};
 use thiserror::Error;
 
-use crate::{AssetKind, AssetStatus, MimeType};
+use crate::{AssetKind, AssetStatus, MimeType, UploadPurpose};
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum MediaError {
@@ -14,6 +14,10 @@ pub enum MediaError {
     EmptyFile,
     #[error("{kind} files are at most {max} bytes")]
     FileTooLarge { kind: AssetKind, max: u64 },
+    #[error("{purpose} files are at most {max} bytes")]
+    UploadTooLarge { purpose: UploadPurpose, max: u64 },
+    #[error("{0:?} isn't an upload purpose")]
+    UnknownPurpose(String),
     #[error("a SHA-256 checksum is 64 hex characters, not {0:?}")]
     InvalidChecksum(String),
     #[error("the asset is {status}, so its upload can't be completed")]
@@ -38,7 +42,8 @@ impl ErrorCode for MediaError {
             MediaError::Text(e) => e.code(),
             MediaError::UnsupportedMediaType(_) => "unsupported_media_type",
             MediaError::EmptyFile => "empty_file",
-            MediaError::FileTooLarge { .. } => "file_too_large",
+            MediaError::FileTooLarge { .. } | MediaError::UploadTooLarge { .. } => "file_too_large",
+            MediaError::UnknownPurpose(_) => "unknown_upload_purpose",
             MediaError::InvalidChecksum(_) => "invalid_checksum",
             MediaError::NotPending { .. } => "asset_not_pending",
             MediaError::InvalidOwnerKind(_)

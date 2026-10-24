@@ -31,6 +31,8 @@ use tokio_postgres::error::SqlState;
 const REFERENCE_KEYS: &[(&str, &str)] = &[
     ("asset_usage_asset", media_keys::USAGE_ASSET),
     ("shipping_provider_app", shipping_keys::PROVIDER_APP),
+    ("catalog_price_list", market_keys::CATALOG_PRICE_LIST),
+    ("price_list_group", market_keys::PRICE_LIST_GROUP),
 ];
 
 /// Unique constraint names (see `migrations/`) and the repo key each one reports.
@@ -48,6 +50,7 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("catalogs_pkey", market_keys::CATALOG_ID),
     ("catalog_context", market_keys::CATALOG_CONTEXT),
     ("price_lists_pkey", market_keys::PRICE_LIST_ID),
+    ("price_list_name", market_keys::PRICE_LIST_NAME),
     ("carts_pkey", cart_keys::CART_ID),
     ("tax_classes_pkey", tax_keys::TAX_CLASS_ID),
     ("tax_regions_pkey", tax_keys::TAX_REGION_ID),
@@ -117,6 +120,7 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("invite_email", user_keys::INVITE_EMAIL),
     ("invite_token", user_keys::INVITE_TOKEN),
     ("assets_pkey", media_keys::ASSET_ID),
+    ("temporary_uploads_pkey", media_keys::TEMPORARY_UPLOAD_ID),
     ("app_key", app_keys::APP_KEY),
     ("app_id", app_keys::APP_ID),
     ("oauth_request_id", oauth_keys::OAUTH_REQUEST_ID),

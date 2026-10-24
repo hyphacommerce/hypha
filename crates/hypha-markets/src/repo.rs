@@ -1,14 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    CatalogId, CountryCode, MarketId, Page, PageRequest, Price, PriceListId, ProductId, RepoError,
-    VariantId,
+    CatalogId, CategoryId, CountryCode, Keyset, MarketId, Page, PageRequest, PriceListId,
+    ProductId, RepoError, Timestamp, VariantId,
 };
 
 use crate::{
     catalog::{Catalog, CatalogContext},
+    filter::{FixedPriceFilter, PriceListFilter, PriceListSort},
     market::Market,
-    price_list::PriceList,
+    price_list::{FixedPrice, PriceList},
 };
 
 /// Uniqueness rules the markets repos enforce, reported as `RepoError::Duplicate(key)`.
@@ -21,6 +22,14 @@ pub mod keys {
     /// At most one catalog per context.
     pub const CATALOG_CONTEXT: &str = "catalog_context";
     pub const PRICE_LIST_ID: &str = "price_list_id";
+    /// A price list's name, ignoring case.
+    pub const PRICE_LIST_NAME: &str = "price_list_name";
+    /// A catalog's price lists exist, and one a catalog holds can't be deleted
+    /// (`RepoError::Reference`).
+    pub const CATALOG_PRICE_LIST: &str = "catalog_price_list";
+    /// A list's audience names customer groups that exist, and a group an audience names
+    /// can't be deleted (`RepoError::Reference`).
+    pub const PRICE_LIST_GROUP: &str = "price_list_group";
 }
 
 #[allow(async_fn_in_trait)]
@@ -47,9 +56,16 @@ pub trait CatalogRepo {
     async fn get_by_context(&self, context: CatalogContext) -> Result<Option<Catalog>, RepoError>;
     /// Every catalog, oldest first (by ID). A store has one per market.
     async fn list_all(&self) -> Result<Vec<Catalog>, RepoError>;
-    /// Stores a new catalog (version 1). Enforces `CATALOG_ID` and `CATALOG_CONTEXT`.
+    /// The catalogs holding `list`, oldest first (by ID).
+    async fn holding_price_list(&self, list: PriceListId) -> Result<Vec<Catalog>, RepoError>;
+    /// Stores a new catalog (version 1) with its price lists. Enforces `CATALOG_ID` and
+    /// `CATALOG_CONTEXT`.
+    ///
+    /// Precondition: its price lists exist (commands load them first); adapters that can
+    /// see them refuse others with `Reference(CATALOG_PRICE_LIST)`.
     async fn insert(&self, catalog: &mut Catalog) -> Result<(), RepoError>;
-    /// Stores changes and bumps the version, or fails with `StaleVersion`.
+    /// Stores changes, its set of price lists included, and bumps the version, or fails
+    /// with `StaleVersion`. The same precondition as `insert`.
     async fn update(&self, catalog: &mut Catalog) -> Result<(), RepoError>;
 
     /// Adds products to the catalog. Products already in it are ignored. Records no
@@ -92,12 +108,33 @@ pub trait CatalogRepo {
 #[allow(async_fn_in_trait)]
 pub trait PriceListRepo {
     async fn get(&self, id: PriceListId) -> Result<Option<PriceList>, RepoError>;
-    /// Every price list, oldest first (by ID). A store has a handful.
+    /// The lists of `ids` that exist, oldest first (by ID).
+    async fn get_many(&self, ids: &[PriceListId]) -> Result<Vec<PriceList>, RepoError>;
+    /// Every price list, oldest first (by ID).
     async fn list_all(&self) -> Result<Vec<PriceList>, RepoError>;
-    /// Stores a new price list (version 1). Enforces `PRICE_LIST_ID`.
+    /// The list named `name`, ignoring case (`keys::PRICE_LIST_NAME` allows one).
+    async fn get_by_name(&self, name: &str) -> Result<Option<PriceList>, RepoError>;
+    /// A page of the lists `filter` matches, in `sort`'s order. `page.after`'s key fits
+    /// the sort (`PriceListSort::fits`; hosts check cursors).
+    async fn list(
+        &self,
+        filter: &PriceListFilter,
+        sort: PriceListSort,
+        page: PageRequest<Keyset<PriceListId>>,
+    ) -> Result<Page<PriceList>, RepoError>;
+    /// Stores a new price list (version 1). Enforces `PRICE_LIST_ID` and `PRICE_LIST_NAME`;
+    /// adapters that can see customer groups refuse an audience naming one that doesn't
+    /// exist with `Reference(PRICE_LIST_GROUP)`.
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError>;
-    /// Stores changes and bumps the version, or fails with `StaleVersion`.
+    /// Stores changes and bumps the version, or fails with `StaleVersion`. Enforces
+    /// `PRICE_LIST_NAME` and the audience's groups as `insert` does.
     async fn update(&self, price_list: &mut PriceList) -> Result<(), RepoError>;
+    /// Removes the list with its fixed prices, writing the events it recorded
+    /// (`PriceList::delete`), when it's still at the version loaded: otherwise (changed,
+    /// or gone already) `StaleVersion`, and no event. Refused with
+    /// `Reference(CATALOG_PRICE_LIST)` while a catalog holds it, in the same step as the
+    /// delete.
+    async fn delete(&self, price_list: &mut PriceList) -> Result<(), RepoError>;
 
     /// Inserts or replaces fixed prices for the given variants. Records no event:
     /// commands stage it (`StageFixedPrices`) with `price_list.prices_set`; this is for
@@ -109,7 +146,7 @@ pub trait PriceListRepo {
     async fn set_fixed_prices(
         &self,
         list: PriceListId,
-        prices: &[(VariantId, Price)],
+        prices: &[(VariantId, FixedPrice)],
     ) -> Result<(), RepoError>;
     /// Removes fixed prices. Variants without one are ignored. Records no event, like
     /// `set_fixed_prices`.
@@ -121,19 +158,51 @@ pub trait PriceListRepo {
     /// The price lists with a fixed price for `variant`, by ID: what to clean up when the
     /// variant is removed.
     async fn lists_pricing(&self, variant: VariantId) -> Result<Vec<PriceListId>, RepoError>;
+    /// Up to `limit` of the variants `list` has a fixed price for, by ID: what it prices
+    /// beside its adjustment.
+    async fn priced_variants(
+        &self,
+        list: PriceListId,
+        limit: u32,
+    ) -> Result<Vec<VariantId>, RepoError>;
     /// A page of the list's fixed prices, newest variant first (by variant ID). An
     /// unknown list has none.
+    /// `filter` joins the products and categories the variants belong to: a variant no
+    /// product has matches only an empty filter.
     async fn fixed_price_page(
         &self,
         list: PriceListId,
+        filter: &FixedPriceFilter,
         page: PageRequest<VariantId>,
-    ) -> Result<Page<(VariantId, Price)>, RepoError>;
+    ) -> Result<Page<(VariantId, FixedPrice)>, RepoError>;
+    /// How many fixed prices each of `lists` has; a list without any is left out.
+    async fn fixed_price_counts(
+        &self,
+        lists: &[PriceListId],
+    ) -> Result<HashMap<PriceListId, u64>, RepoError>;
+    /// Each of `lists`' fixed prices for those of `variants` that have one, in one read: a
+    /// list with none is left out.
+    async fn fixed_prices_in(
+        &self,
+        lists: &[PriceListId],
+        variants: &[VariantId],
+    ) -> Result<HashMap<PriceListId, HashMap<VariantId, FixedPrice>>, RepoError>;
+    /// Each of `products`' categories with all their ancestors, as the categories domain
+    /// stores them: what an adjustment applying to categories reaches. A product in none
+    /// is left out.
+    async fn product_categories(
+        &self,
+        products: &[ProductId],
+    ) -> Result<HashMap<ProductId, HashSet<CategoryId>>, RepoError>;
     /// The fixed prices of those of `variants` that have one.
     async fn fixed_prices(
         &self,
         list: PriceListId,
         variants: &[VariantId],
-    ) -> Result<HashMap<VariantId, Price>, RepoError>;
+    ) -> Result<HashMap<VariantId, FixedPrice>, RepoError>;
+    /// How far the schedule job has announced window boundaries
+    /// (`StagePriceListSchedule`); `None` before its first run.
+    async fn schedule_ran_until(&self) -> Result<Option<Timestamp>, RepoError>;
 }
 
 /// Whatever holds the `MarketRepo`: a host's per-request ports, a test world. Commands
@@ -194,6 +263,13 @@ pub trait StageCatalogProducts {
 /// Fixed prices as a batch writes them. Same preconditions as
 /// `PriceListRepo::set_fixed_prices` and `remove_fixed_prices`.
 pub trait StageFixedPrices {
-    fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, Price)]);
+    fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, FixedPrice)]);
     fn remove_fixed_prices(&mut self, list: PriceListId, variants: &[VariantId]);
+}
+
+/// The schedule job's progress as a batch writes it, with the events it announced: every
+/// boundary up to `to`, where the run found it at `from` (`None`: never ran). If another
+/// run moved it since, the commit fails with `StaleVersion` and writes nothing.
+pub trait StagePriceListSchedule {
+    fn advance_price_list_schedule(&mut self, from: Option<Timestamp>, to: Timestamp);
 }

@@ -1,8 +1,8 @@
 //! `SearchIndexer`: the event handler that queues what to rebuild. It only marks; the sync
 //! job does the work, so a busy product is rebuilt once however many events it had.
 
-use hypha_core::{EventHandler, StoredEvent};
-
+use hypha_core::{EventHandler, PriceListId, RepoError, StoredEvent};
+use hypha_markets::{AppliesTo, CatalogRepo, HasCatalogs, HasPriceLists, PriceListRepo};
 use hypha_search_index::{HasSearchQueue, SearchQueue, Target};
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -41,8 +41,25 @@ const CATEGORY_PRODUCTS: &[&str] = &[
 ];
 const VARIANT_PRICES: &[&str] = &["price_list.prices_set", "price_list.prices_removed"];
 const STOCK: &[&str] = &["inventory_item.changed", "inventory_item.deleted"];
-/// Rare and wide: which products a market sells, at what price, from where.
-const EVERYTHING: &[&str] = &["catalog.changed", "price_list.changed"];
+/// A list's window opened or closed: what it prices changed in its catalogs' markets, as
+/// when it's edited. One on no catalog prices nothing.
+const WINDOWS: &[&str] = &["price_list.started", "price_list.ended"];
+/// Lists joined or left a catalog: what they price there changed. (`catalog.changed`,
+/// recorded beside them and when a catalog is made, empty, asks nothing more.)
+const CATALOG_LISTS: &[&str] = &["catalog.price_lists_added", "catalog.price_lists_removed"];
+/// A list's change to these changes what it prices or how (its name and description
+/// don't).
+const LIST_PRICING: &[&str] = &[
+    "adjustment",
+    "kind",
+    "status",
+    "starts_at",
+    "ends_at",
+    "compare_at",
+    "audience",
+];
+/// Past this many fixed prices a list's variants aren't marked one by one: everything is.
+pub const MAX_VARIANT_MARKS: u32 = 1000;
 /// What to rebuild when one of the fields named changed (the event's `fields`):
 /// - a location's `markets` decide where its stock counts, the settings' `split_by`
 ///   changes every listing key, and a market's countries, currency and tax rule decide
@@ -74,7 +91,7 @@ enum Rebuild {
     Category,
 }
 
-impl<P: HasSearchQueue> EventHandler<P> for SearchIndexer {
+impl<P: HasSearchQueue + HasPriceLists + HasCatalogs> EventHandler<P> for SearchIndexer {
     fn name(&self) -> &'static str {
         "search_index"
     }
@@ -88,16 +105,18 @@ impl<P: HasSearchQueue> EventHandler<P> for SearchIndexer {
             CATEGORY_PRODUCTS,
             VARIANT_PRICES,
             STOCK,
-            EVERYTHING,
+            WINDOWS,
+            CATALOG_LISTS,
         ]
         .iter()
         .any(|types| types.contains(&event_type))
+            || event_type == "price_list.changed"
             || WHEN_FIELD.iter().any(|(t, ..)| *t == event_type)
             || FIELD_DEFINITIONS.iter().any(|(t, _)| *t == event_type)
     }
 
     async fn handle(&self, ports: &P, event: &StoredEvent) -> Result<(), String> {
-        let targets = targets(event)?;
+        let targets = marks(ports, event).await?;
         if targets.is_empty() {
             return Ok(());
         }
@@ -109,7 +128,171 @@ impl<P: HasSearchQueue> EventHandler<P> for SearchIndexer {
     }
 }
 
-/// What `event` asks to rebuild. `Err` when its payload isn't what its type promises.
+/// What `event` asks to rebuild, reading what its price lists reach from storage. `Err`
+/// when its payload isn't what its type promises, or storage fails.
+pub async fn marks<P: HasPriceLists + HasCatalogs>(
+    ports: &P,
+    event: &StoredEvent,
+) -> Result<Vec<Target>, String> {
+    match list_reach(event)? {
+        Some(reach) => reach.targets(ports).await.map_err(|e| e.to_string()),
+        None => targets(event),
+    }
+}
+
+/// Price lists whose pricing changed, for a rebuild of what they reach.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListReach {
+    lists: Vec<PriceListId>,
+    /// Only when a catalog holds them (an edit; a window's or a catalog's event says).
+    if_held: bool,
+    /// Their audience changed: a list for customer groups may have priced for everyone.
+    audience_changed: bool,
+    /// What the adjustment reached before the change, when that changed.
+    previously: Option<AppliesTo>,
+}
+
+impl ListReach {
+    /// Each list's fixed-priced variants (everything, past `MAX_VARIANT_MARKS`) and what
+    /// its adjustment reaches now and reached before. Search documents price for no
+    /// customer group, so a list for groups marks nothing unless its audience changed. A
+    /// list that's gone can't say what it priced: everything.
+    pub async fn targets<P: HasPriceLists + HasCatalogs>(
+        &self,
+        ports: &P,
+    ) -> Result<Vec<Target>, RepoError> {
+        let mut marks = Vec::new();
+        for &id in &self.lists {
+            if self.if_held && ports.catalogs().holding_price_list(id).await?.is_empty() {
+                continue;
+            }
+            let Some(list) = ports.price_lists().get(id).await? else {
+                return Ok(vec![Target::All]);
+            };
+            if !list.audience().is_everyone() && !self.audience_changed {
+                continue;
+            }
+            let everything = list
+                .adjustment()
+                .is_some_and(|a| reach(a.applies_to(), &mut marks))
+                | self
+                    .previously
+                    .as_ref()
+                    .is_some_and(|a| reach(a, &mut marks));
+            if everything {
+                return Ok(vec![Target::All]);
+            }
+            let variants = ports
+                .price_lists()
+                .priced_variants(id, MAX_VARIANT_MARKS + 1)
+                .await?;
+            if variants.len() > MAX_VARIANT_MARKS as usize {
+                return Ok(vec![Target::All]);
+            }
+            marks.extend(variants.into_iter().map(Target::Variant));
+        }
+        Ok(marks)
+    }
+}
+
+/// Marks what `applies_to` reaches; `true` when that's every product.
+fn reach(applies_to: &AppliesTo, marks: &mut Vec<Target>) -> bool {
+    match applies_to {
+        AppliesTo::All => return true,
+        AppliesTo::Products(products) => marks.extend(products.iter().map(|p| Target::Product(*p))),
+        AppliesTo::Categories(categories) => {
+            marks.extend(categories.iter().map(|c| Target::Category(*c)))
+        }
+    }
+    false
+}
+
+/// The price lists `event` changed the pricing of, if it's such an event; `Ok(None)` for
+/// any other.
+pub fn list_reach(event: &StoredEvent) -> Result<Option<ListReach>, String> {
+    let t = event.event_type.as_str();
+    let bad = |what: &str| format!("event {} ({t}) has no {what}", event.id);
+    let list_ids = |field: &str| -> Result<Vec<PriceListId>, String> {
+        let one = |v: &serde_json::Value| v.as_str().and_then(|id| id.parse().ok());
+        match &event.data[field] {
+            serde_json::Value::Array(ids) => ids
+                .iter()
+                .map(|id| one(id).ok_or_else(|| bad(field)))
+                .collect(),
+            id => Ok(vec![one(id).ok_or_else(|| bad(field))?]),
+        }
+    };
+    let none = ListReach {
+        lists: Vec::new(),
+        if_held: false,
+        audience_changed: false,
+        previously: None,
+    };
+    if WINDOWS.contains(&t) {
+        let held = match &event.data["catalogs"] {
+            serde_json::Value::Array(catalogs) => !catalogs.is_empty(),
+            _ => return Err(bad("catalogs")),
+        };
+        return Ok(Some(if held {
+            ListReach {
+                lists: list_ids("price_list")?,
+                ..none
+            }
+        } else {
+            none
+        }));
+    }
+    if CATALOG_LISTS.contains(&t) {
+        return Ok(Some(ListReach {
+            lists: list_ids("price_lists")?,
+            ..none
+        }));
+    }
+    if t != "price_list.changed" {
+        return Ok(None);
+    }
+    // Events written before `fields` existed (a creation or a new adjustment) count as
+    // every field changed: the safe guess.
+    let fields: Vec<&str> = match &event.data["fields"] {
+        serde_json::Value::Null => LIST_PRICING.to_vec(),
+        serde_json::Value::Array(fields) => fields.iter().filter_map(|f| f.as_str()).collect(),
+        _ => return Err(bad("fields")),
+    };
+    if !fields.iter().any(|f| LIST_PRICING.contains(f)) {
+        return Ok(Some(none));
+    }
+    let previous = &event.data["previous_applies_to"];
+    let parsed = |field: &str| -> Option<Vec<String>> {
+        previous[field]
+            .as_array()?
+            .iter()
+            .map(|id| id.as_str().map(str::to_string))
+            .collect()
+    };
+    let previously = match previous["type"].as_str() {
+        None if previous.is_null() => None,
+        Some("all") => Some(AppliesTo::All),
+        Some("products") => parsed("products")
+            .and_then(|ids| ids.iter().map(|id| id.parse().ok()).collect())
+            .map(AppliesTo::Products),
+        Some("categories") => parsed("categories")
+            .and_then(|ids| ids.iter().map(|id| id.parse().ok()).collect())
+            .map(AppliesTo::Categories),
+        _ => None,
+    };
+    if previously.is_none() && !previous.is_null() {
+        return Err(bad("previous_applies_to"));
+    }
+    Ok(Some(ListReach {
+        lists: list_ids("price_list")?,
+        if_held: true,
+        audience_changed: fields.contains(&"audience"),
+        previously,
+    }))
+}
+
+/// What `event` asks to rebuild, for the events whose payload says it all (not a price
+/// list's: `marks`). `Err` when its payload isn't what its type promises.
 pub fn targets(event: &StoredEvent) -> Result<Vec<Target>, String> {
     let t = event.event_type.as_str();
     let bad = |what: &str| format!("event {} ({t}) has no {what}", event.id);
@@ -141,8 +324,6 @@ pub fn targets(event: &StoredEvent) -> Result<Vec<Target>, String> {
         parse("variants", |id| id.parse().ok().map(Target::Variant))
     } else if STOCK.contains(&t) {
         parse("variant", |id| id.parse().ok().map(Target::Variant))
-    } else if EVERYTHING.contains(&t) {
-        Ok(vec![Target::All])
     } else if let Some((_, wanted)) = FIELD_DEFINITIONS.iter().find(|(w, _)| *w == t) {
         let owner = event.data["owner_type"]
             .as_str()

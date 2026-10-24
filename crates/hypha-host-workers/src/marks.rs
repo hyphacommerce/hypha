@@ -8,8 +8,9 @@
 //! - `checked`: the start of the last tick whose run left nothing;
 //! - `due`: when work is next due: the dispatcher's (`OutboxRepo::next_due`: a retry,
 //!   the end of a lease), the send job's (`NotificationRepo::next_due`: a queued email's
-//!   next attempt, the end of a lease) or a failed search rebuild's (its lease's end), as
-//!   the last run that did something found it.
+//!   next attempt, the end of a lease), a failed search rebuild's (its lease's end) or the
+//!   price list schedule's (the next window boundary of an active list), as the last run
+//!   that did something found it.
 //!
 //! A tick runs the jobs when a run left work since the last clean check, when `due` came
 //! between that check and now, or when nothing was ever checked (a new namespace: setup may

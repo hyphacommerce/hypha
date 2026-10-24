@@ -19,7 +19,7 @@ import { formatRange } from "@/lib/money";
 import { COUNTRY_COOKIE } from "@/lib/routing";
 import { paymentElementModule } from "@/lib/app-elements";
 import { checkOutCart } from "@/lib/checkout";
-import { forgetSession, sessionHeaders } from "@/lib/account";
+import { accountApi, forgetSession, sessionHeaders } from "@/lib/account";
 import { cartId, forgetCart, link, mode, rememberCart } from "@/lib/site";
 
 /** What a refused action tells its form. */
@@ -84,6 +84,45 @@ export async function loadCart(country: string): Promise<Cart | null> {
   // Gone or an order now: forget it (and its flag), so pages stop asking.
   if (data || response.status === 404) await forgetCart(country);
   return null;
+}
+
+/** A variant's prices: what the product page shows and follows the quantity with. */
+export type VariantPrices = Pick<
+  StorefrontSchemas["StorefrontVariantResponse"],
+  "price" | "compare_at_price" | "on_sale" | "price_breaks"
+>;
+
+/**
+ * The signed-in shopper's own prices for a product page's variants, by variant ID: the
+ * product read with their session, so price lists for their customer groups count. The
+ * page is static and shows everyone's prices; it asks this once, only when the browser
+ * says there's a session. `null` without one (or when it ended: the cookie goes), or
+ * when the product can't be read.
+ */
+export async function customerPrices(input: {
+  country: string;
+  handle: string;
+}): Promise<Record<string, VariantPrices> | null> {
+  const client = await accountApi();
+  if (!client) return null;
+  const { data, response } = await client.GET("/storefront/products/by-handle/{handle}", {
+    params: { path: { handle: input.handle }, query: { country: input.country } },
+  });
+  if (!data) {
+    if (response.status === 401) await forgetSession();
+    return null;
+  }
+  return Object.fromEntries(
+    data.variants.map((v) => [
+      v.id,
+      {
+        price: v.price,
+        compare_at_price: v.compare_at_price,
+        on_sale: v.on_sale,
+        price_breaks: v.price_breaks,
+      },
+    ]),
+  );
 }
 
 /** Adds a variant to the cart (opening one if needed), and answers with the cart. */
@@ -354,6 +393,8 @@ export async function suggest(country: string, q: string): Promise<Suggestion[]>
 export async function listingPage(input: {
   country: string;
   category?: string;
+  /** Only what's on sale (the sale page). */
+  onSale?: boolean;
   query: string;
 }): Promise<ListingPage> {
   const known = (await loadCountries()).find((c) => c.country === input.country);
@@ -364,5 +405,6 @@ export async function listingPage(input: {
     digits: known?.minor_units ?? 2,
     params,
     category: input.category,
+    onSale: input.onSale,
   });
 }

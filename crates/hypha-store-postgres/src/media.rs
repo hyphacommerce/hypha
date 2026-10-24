@@ -1,10 +1,11 @@
 use hypha_core::{
     AssetId, Direction, Keyset, Page, PageRequest, Recorded, RepoError, SortKey, Timestamp,
-    Version, Versioned,
+    UploadId, Version, Versioned,
 };
 use hypha_media::{
     Asset, AssetFilter, AssetRepo, AssetSnapshot, AssetSort, AssetUsage, AssetUsageRepo, BlobKey,
-    Checksum, MimeType, UsageOwner, UsageRole,
+    Checksum, MimeType, TemporaryUpload, TemporaryUploadRepo, TemporaryUploadSnapshot,
+    UploadPurpose, UsageOwner, UsageRole,
 };
 use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
@@ -427,4 +428,120 @@ fn asset_from_db(row: &Row) -> Result<Asset, RepoError> {
         updated_at: Timestamp::from_unix_micros(col(row, "updated_at")?),
     };
     Asset::restore(snapshot).map_err(|e| corrupt(format!("asset {id}: {e}")))
+}
+
+// ---------- temporary uploads ----------
+
+fn upload_columns() -> String {
+    format!(
+        "id, purpose, filename, byte_size, checksum, {}, {}",
+        micros("created_at"),
+        micros("expires_at"),
+    )
+}
+
+fn upload_from_db(row: &Row) -> Result<TemporaryUpload, RepoError> {
+    let id: Uuid = col(row, "id")?;
+    let purpose: String = col(row, "purpose")?;
+    let byte_size: i64 = col(row, "byte_size")?;
+    let checksum: Option<Vec<u8>> = col(row, "checksum")?;
+    let checksum = checksum
+        .map(|bytes| {
+            <[u8; 32]>::try_from(bytes.as_slice())
+                .map(Checksum::from_bytes)
+                .map_err(|_| corrupt(format!("temporary upload {id}: a checksum isn't 32 bytes")))
+        })
+        .transpose()?;
+    Ok(TemporaryUpload::restore(TemporaryUploadSnapshot {
+        id: UploadId::from_uuid(id),
+        purpose: purpose
+            .parse::<UploadPurpose>()
+            .map_err(|e| corrupt(format!("temporary upload {id}: {e}")))?,
+        filename: col(row, "filename")?,
+        byte_size: u64::try_from(byte_size).map_err(corrupt)?,
+        checksum,
+        created_at: Timestamp::from_unix_micros(col(row, "created_at")?),
+        expires_at: Timestamp::from_unix_micros(col(row, "expires_at")?),
+    }))
+}
+
+impl<C: PgConnection> TemporaryUploadRepo for PgStore<C> {
+    async fn get(&self, id: UploadId) -> Result<Option<TemporaryUpload>, RepoError> {
+        let mut conn = self.conn().await;
+        let row = conn
+            .db()
+            .query_typed_opt(
+                &format!(
+                    "SELECT {} FROM temporary_uploads WHERE id = $1",
+                    upload_columns()
+                ),
+                &[(&id.as_uuid(), Type::UUID)],
+            )
+            .await
+            .map_err(repo_error)?;
+        row.as_ref().map(upload_from_db).transpose()
+    }
+
+    async fn insert(&self, upload: &TemporaryUpload) -> Result<(), RepoError> {
+        let s = upload.snapshot();
+        let byte_size = i64::try_from(s.byte_size).map_err(corrupt)?;
+        let checksum = s.checksum.map(|c| c.as_bytes().to_vec());
+        let mut conn = self.conn().await;
+        conn.db()
+            .query_typed(
+                &format!(
+                    "INSERT INTO temporary_uploads
+                         (id, purpose, filename, byte_size, checksum, created_at, expires_at)
+                     VALUES ($1, $2, $3, $4, $5, {}, {})",
+                    ts(6),
+                    ts(7),
+                ),
+                &[
+                    (&s.id.as_uuid(), Type::UUID),
+                    (&s.purpose.as_str(), Type::TEXT),
+                    (&s.filename, Type::TEXT),
+                    (&byte_size, Type::INT8),
+                    (&checksum, Type::BYTEA),
+                    (&s.created_at.unix_micros(), Type::INT8),
+                    (&s.expires_at.unix_micros(), Type::INT8),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+        Ok(())
+    }
+
+    async fn delete(&self, id: UploadId) -> Result<bool, RepoError> {
+        let mut conn = self.conn().await;
+        let gone = conn
+            .db()
+            .query_typed_opt(
+                "DELETE FROM temporary_uploads WHERE id = $1 RETURNING id",
+                &[(&id.as_uuid(), Type::UUID)],
+            )
+            .await
+            .map_err(repo_error)?;
+        Ok(gone.is_some())
+    }
+
+    async fn expired(&self, at: Timestamp, limit: u32) -> Result<Vec<TemporaryUpload>, RepoError> {
+        let mut conn = self.conn().await;
+        let rows = conn
+            .db()
+            .query_typed(
+                &format!(
+                    "SELECT {} FROM temporary_uploads WHERE expires_at <= {}
+                     ORDER BY id LIMIT $2",
+                    upload_columns(),
+                    ts(1),
+                ),
+                &[
+                    (&at.unix_micros(), Type::INT8),
+                    (&i64::from(limit), Type::INT8),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+        rows.iter().map(upload_from_db).collect()
+    }
 }

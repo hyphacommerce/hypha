@@ -2,9 +2,9 @@ use std::{collections::HashSet, fmt, str::FromStr};
 
 use hypha_core::{
     Address, CartId, ChannelId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId,
-    OrderLineId, PendingEvent, Price, ProductId, Quantity, Recorded, Recorder, ShippingGroupId,
-    ShippingOptionId, Stamped, Stamps, Subject, TaxClassId, TaxRate, TaxRegionId, Timestamp,
-    VariantId, Version, Versioned, required_text,
+    OrderLineId, PendingEvent, Price, PriceListId, ProductId, Quantity, Recorded, Recorder,
+    ShippingGroupId, ShippingOptionId, Stamped, Stamps, Subject, TaxClassId, TaxRate, TaxRegionId,
+    Timestamp, VariantId, Version, Versioned, required_text,
 };
 
 use crate::{
@@ -191,6 +191,12 @@ pub struct OrderLine {
     /// How many of `quantity` standing fulfilments shipped: 0 at checkout, never more than
     /// `quantity`.
     pub fulfilled_quantity: u32,
+    /// What `unit_price` was shown against at checkout, struck through: for emails
+    /// ("you saved") and reports, never for totals. `None` without one, and for lines
+    /// placed before it was kept.
+    pub compare_at_price: Option<Price>,
+    /// The price list `unit_price` came from; `None` for the base price.
+    pub price_list: Option<PriceListId>,
 }
 
 impl OrderLine {
@@ -806,6 +812,8 @@ mod tests {
                 },
             }),
             fulfilled_quantity: 0,
+            compare_at_price: None,
+            price_list: None,
         }
     }
 

@@ -669,6 +669,12 @@ macro_rules! accessors {
     )*};
 }
 
+impl<C: PgConnection> hypha_core::HasClock for PgStore<C> {
+    fn now(&self) -> Timestamp {
+        self.clock.now()
+    }
+}
+
 accessors! {
     hypha_cart::HasCarts => Carts, carts;
     hypha_products::HasProducts => Products, products;
@@ -696,6 +702,7 @@ accessors! {
     hypha_users::HasStaffSessions => StaffSessions, staff_sessions;
     hypha_media::HasAssets => Assets, assets;
     hypha_media::HasAssetUsages => AssetUsages, asset_usages;
+    hypha_media::HasTemporaryUploads => TemporaryUploads, temporary_uploads;
     hypha_shipping::HasShippingZones => ShippingZones, shipping_zones;
     hypha_shipping::HasAppProviders => AppProviders, app_providers;
     hypha_core::HasOutbox => Outbox, outbox;

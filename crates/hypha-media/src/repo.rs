@@ -1,6 +1,6 @@
-use hypha_core::{AssetId, Keyset, Page, PageRequest, RepoError, Timestamp};
+use hypha_core::{AssetId, Keyset, Page, PageRequest, RepoError, Timestamp, UploadId};
 
-use crate::{Asset, AssetFilter, AssetSort, AssetUsage, UsageOwner, UsageRole};
+use crate::{Asset, AssetFilter, AssetSort, AssetUsage, TemporaryUpload, UsageOwner, UsageRole};
 
 /// Rules the media repositories enforce, reported as `RepoError::Duplicate(key)` or
 /// `RepoError::Reference(key)`.
@@ -9,6 +9,7 @@ pub mod keys {
     /// Every usage's asset exists: staging usages of a missing asset, or deleting an asset
     /// that has usages, fails with `Reference(USAGE_ASSET)`.
     pub const USAGE_ASSET: &str = "asset_usage_asset";
+    pub const TEMPORARY_UPLOAD_ID: &str = "temporary_upload_id";
 }
 
 #[allow(async_fn_in_trait)]
@@ -87,5 +88,31 @@ impl<T: HasAssets + ?Sized> HasAssets for &T {
     type Assets = T::Assets;
     fn assets(&self) -> &Self::Assets {
         (**self).assets()
+    }
+}
+
+/// Temporary uploads' records; their files live in the `BlobStore`.
+#[allow(async_fn_in_trait)]
+pub trait TemporaryUploadRepo {
+    /// The upload, expired or not.
+    async fn get(&self, id: UploadId) -> Result<Option<TemporaryUpload>, RepoError>;
+    /// Stores a new upload. Fails with `Duplicate(TEMPORARY_UPLOAD_ID)`.
+    async fn insert(&self, upload: &TemporaryUpload) -> Result<(), RepoError>;
+    /// Removes it; says whether it was there.
+    async fn delete(&self, id: UploadId) -> Result<bool, RepoError>;
+    /// Up to `limit` uploads that expired at or before `at`, oldest first (by ID).
+    async fn expired(&self, at: Timestamp, limit: u32) -> Result<Vec<TemporaryUpload>, RepoError>;
+}
+
+/// Whatever holds the `TemporaryUploadRepo`.
+pub trait HasTemporaryUploads {
+    type TemporaryUploads: TemporaryUploadRepo;
+    fn temporary_uploads(&self) -> &Self::TemporaryUploads;
+}
+
+impl<T: HasTemporaryUploads + ?Sized> HasTemporaryUploads for &T {
+    type TemporaryUploads = T::TemporaryUploads;
+    fn temporary_uploads(&self) -> &Self::TemporaryUploads {
+        (**self).temporary_uploads()
     }
 }

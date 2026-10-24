@@ -366,8 +366,10 @@ export function eventSentence(type: string, data: Data): Part[] | null {
         " from price list ",
         id(data.price_list),
       ];
+    case "price_list.created":
+      return ["Creates price list ", id(data.price_list)];
     case "price_list.changed":
-      return ["Changes price list ", id(data.price_list), "'s adjustment"];
+      return ["Changes price list ", id(data.price_list), `: ${fields(data)}`];
     case "catalog.products_added":
       return [
         "Adds ",
@@ -379,6 +381,22 @@ export function eventSentence(type: string, data: Data): Part[] | null {
       return [
         "Removes ",
         count(data.products, "product", "products"),
+        " from catalog ",
+        id(data.catalog),
+      ];
+    case "price_list.deleted":
+      return ["Deletes price list ", id(data.price_list)];
+    case "catalog.price_lists_added":
+      return [
+        "Adds ",
+        count(data.price_lists, "price list", "price lists"),
+        " to catalog ",
+        id(data.catalog),
+      ];
+    case "catalog.price_lists_removed":
+      return [
+        "Removes ",
+        count(data.price_lists, "price list", "price lists"),
         " from catalog ",
         id(data.catalog),
       ];

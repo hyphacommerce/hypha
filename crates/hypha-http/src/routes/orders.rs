@@ -7,8 +7,8 @@ use std::collections::HashMap;
 
 use hypha_core::{
     AssetId, CartId, ChannelId, CountryCode, Currency, CustomerId, Email, Keyset, LocationId,
-    MarketId, Money, OrderId, OrderLineId, PaymentId, ProductId, Scope, ShippingGroupId,
-    ShippingOptionId, SortKey, TaxClassId, TaxRate, Timestamp, VariantId,
+    MarketId, Money, OrderId, OrderLineId, PaymentId, PriceListId, ProductId, Scope,
+    ShippingGroupId, ShippingOptionId, SortKey, TaxClassId, TaxRate, Timestamp, VariantId,
 };
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_order_actions::{
@@ -220,6 +220,12 @@ pub struct OrderLineResponse {
     variant_title: Option<String>,
     sku: Option<String>,
     unit_price: Money,
+    /// What `unit_price` was shown against at checkout, struck through ("you saved");
+    /// never part of the totals. `null` without one, and for lines placed before it was
+    /// kept.
+    compare_at_price: Option<Money>,
+    /// The price list `unit_price` came from; `null` for the variant's base price.
+    price_list: Option<PriceListId>,
     total: Money,
     /// `null` when the country had no tax rates.
     tax: Option<OrderTaxResponse>,
@@ -318,6 +324,8 @@ impl From<&OrderLine> for OrderLineResponse {
             variant_title: l.variant_title.clone(),
             sku: l.sku.clone(),
             unit_price: l.unit_price.money(),
+            compare_at_price: l.compare_at_price.map(|p| p.money()),
+            price_list: l.price_list,
             total: l.total,
             tax: l.tax.map(|t| OrderTaxResponse {
                 rate_ppm: t.rate,
@@ -327,6 +335,180 @@ impl From<&OrderLine> for OrderLineResponse {
             fulfilled_quantity: l.fulfilled_quantity,
             image: None,
         }
+    }
+}
+
+/// An order as its buyer sees it (a storefront's confirmation, the account's orders):
+/// what `OrderResponse` holds but what only staff read: the price list a line was priced
+/// from, a shipping rate's provider and quote, tax classes and `redacted`.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct StorefrontOrderResponse {
+    id: OrderId,
+    /// The human number, shown as "#1001".
+    number: i64,
+    /// RFC 3339, UTC.
+    placed_at: String,
+    cart: CartId,
+    market: MarketId,
+    /// The sales channel it was placed through.
+    channel: ChannelId,
+    currency: Currency,
+    country: CountryCode,
+    customer: CustomerId,
+    email: Email,
+    financial_status: FinancialStatusDto,
+    fulfillment_status: FulfillmentStatusDto,
+    /// Whether line prices include tax (the market decided, at checkout).
+    taxes_included: bool,
+    subtotal: Money,
+    /// What shipping was charged, as part of `total`.
+    shipping_total: Money,
+    /// Tax on lines and shipping: part of `subtotal` and `shipping_total` if
+    /// `taxes_included`, else on top.
+    tax_total: Money,
+    total: Money,
+    lines: Vec<StorefrontOrderLineResponse>,
+    /// `null` when nothing in the order ships.
+    shipping_address: Option<PostalAddressResponse>,
+    /// How each group of lines ships, as charged.
+    shipping_lines: Vec<StorefrontShippingLineResponse>,
+    /// When it was created, RFC 3339 in UTC.
+    created_at: String,
+    /// When it last changed, RFC 3339 in UTC.
+    updated_at: String,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct StorefrontOrderLineResponse {
+    id: OrderLineId,
+    product: ProductId,
+    variant: VariantId,
+    quantity: u32,
+    product_title: String,
+    /// The variant's option values ("M / Blue"); `null` for a product without options.
+    variant_title: Option<String>,
+    sku: Option<String>,
+    unit_price: Money,
+    /// What `unit_price` was shown against at checkout, struck through ("you saved");
+    /// never part of the totals. `null` without one.
+    compare_at_price: Option<Money>,
+    total: Money,
+    /// `null` when the country had no tax rates.
+    tax: Option<StorefrontTaxResponse>,
+    /// How many of `quantity` standing fulfilments shipped.
+    fulfilled_quantity: u32,
+    /// The line's picture as its product is now: the variant's image, else the product's
+    /// first media item; `null` for a product gone or without media.
+    image: Option<ProductMediaResponse>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct StorefrontShippingLineResponse {
+    group: ShippingGroupId,
+    /// The order lines this ships.
+    lines: Vec<OrderLineId>,
+    option: ShippingOptionId,
+    code: String,
+    name: String,
+    service: Option<String>,
+    amount: Money,
+    /// As estimated at checkout.
+    estimate: Option<DeliveryEstimateDto>,
+    /// `null` when the country had no tax rates.
+    tax: Option<StorefrontTaxResponse>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct StorefrontTaxResponse {
+    /// Parts per million: 250000 = 25%.
+    rate_ppm: TaxRate,
+    amount: Money,
+}
+
+impl From<OrderTaxResponse> for StorefrontTaxResponse {
+    fn from(t: OrderTaxResponse) -> Self {
+        Self {
+            rate_ppm: t.rate_ppm,
+            amount: t.amount,
+        }
+    }
+}
+
+impl From<OrderResponse> for StorefrontOrderResponse {
+    fn from(o: OrderResponse) -> Self {
+        Self {
+            id: o.id,
+            number: o.number,
+            placed_at: o.placed_at,
+            cart: o.cart,
+            market: o.market,
+            channel: o.channel,
+            currency: o.currency,
+            country: o.country,
+            customer: o.customer,
+            email: o.email,
+            financial_status: o.financial_status,
+            fulfillment_status: o.fulfillment_status,
+            taxes_included: o.taxes_included,
+            subtotal: o.subtotal,
+            shipping_total: o.shipping_total,
+            tax_total: o.tax_total,
+            total: o.total,
+            lines: o
+                .lines
+                .into_iter()
+                .map(|l| StorefrontOrderLineResponse {
+                    id: l.id,
+                    product: l.product,
+                    variant: l.variant,
+                    quantity: l.quantity,
+                    product_title: l.product_title,
+                    variant_title: l.variant_title,
+                    sku: l.sku,
+                    unit_price: l.unit_price,
+                    compare_at_price: l.compare_at_price,
+                    total: l.total,
+                    tax: l.tax.map(Into::into),
+                    fulfilled_quantity: l.fulfilled_quantity,
+                    image: l.image,
+                })
+                .collect(),
+            shipping_address: o.shipping_address,
+            shipping_lines: o
+                .shipping_lines
+                .into_iter()
+                .map(|s| StorefrontShippingLineResponse {
+                    group: s.group,
+                    lines: s.lines,
+                    option: s.option,
+                    code: s.code,
+                    name: s.name,
+                    service: s.service,
+                    amount: s.amount,
+                    estimate: s.estimate,
+                    tax: s.tax.map(Into::into),
+                })
+                .collect(),
+            created_at: o.created_at,
+            updated_at: o.updated_at,
+        }
+    }
+}
+
+impl StorefrontOrderResponse {
+    /// The buyer's view of `order`, with each line's image.
+    pub(super) async fn with_images<P: HasProducts + HasAssets>(
+        order: &Order,
+        ports: &P,
+        media: Option<&Media>,
+    ) -> Result<Self, ApiError> {
+        OrderResponse::with_images(order, ports, media)
+            .await
+            .map(Into::into)
+    }
+
+    pub(super) fn new(order: &Order) -> Result<Self, ApiError> {
+        OrderResponse::new(order).map(Into::into)
     }
 }
 
@@ -374,7 +556,7 @@ async fn line_images<P: HasProducts + HasAssets>(
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct PlacedOrderResponse {
     #[serde(flatten)]
-    pub(super) order: OrderResponse,
+    pub(super) order: StorefrontOrderResponse,
     /// Lets whoever holds it read this order: keep it with the buyer (a cookie, the
     /// confirmation email's link), never in a public place. The same for every read.
     pub(super) access_token: String,
@@ -481,7 +663,8 @@ pub async fn checkout_handler<S: Storage>(
         StatusCode::CREATED,
         CheckoutResponse {
             placed: PlacedOrderResponse {
-                order: OrderResponse::with_images(order, &ports, state.media.as_deref()).await?,
+                order: StorefrontOrderResponse::with_images(order, &ports, state.media.as_deref())
+                    .await?,
                 access_token: state.env.order_token(order.id()),
                 payment: placed
                     .value
@@ -528,7 +711,7 @@ pub async fn fetch_placed<S: Storage>(
     let order = get_placed_order(&ctx, ports.orders(), id).await?;
     let payment = hypha_payments::newest_payment(&ports, id).await?;
     Ok(Json(PlacedOrderResponse {
-        order: OrderResponse::with_images(&order, &ports, state.media.as_deref()).await?,
+        order: StorefrontOrderResponse::with_images(&order, &ports, state.media.as_deref()).await?,
         access_token: token,
         payment: payment.as_ref().map(PlacedPaymentResponse::new),
     }))

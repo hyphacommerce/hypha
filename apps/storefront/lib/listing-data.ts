@@ -7,13 +7,24 @@ import { unstable_cache } from "next/cache";
 
 import { api } from "./api";
 import { FRESH_SECONDS, TAGS } from "./cache-tags";
-import { type ListingParams, type ListingState, readListing, sortOf, toMinor } from "./listing";
+import {
+  ON_SALE,
+  type ListingParams,
+  type ListingState,
+  readListing,
+  sortOf,
+  toMinor,
+} from "./listing";
 
 export type ListingPage = {
   state: ListingState;
   items: StorefrontSchemas["SearchHitResponse"][];
   total: number;
+  /** Without `on_sale`: the listing's on-sale toggle stands for it. */
   facets: StorefrontSchemas["FacetResponse"][];
+  /** How many of the results are on sale, when the merchant counts it (`on_sale` among
+   * the search facets). */
+  onSaleCount?: number;
   /** The results' price range in major units, for the range fields' hints. */
   priceHint?: { min: string; max: string };
   nextCursor: string | null;
@@ -64,12 +75,16 @@ export async function readListingPage(input: {
   digits: number;
   params: ListingParams;
   category?: string;
+  /** Only what's on sale, whatever the URL says (the sale page). */
+  onSale?: boolean;
 }): Promise<ListingPage> {
   const state = readListing(input.params);
+  const filter =
+    input.onSale && !state.filters.includes(ON_SALE) ? [...state.filters, ON_SALE] : state.filters;
   const { data, error } = await search({
     country: input.country,
     q: state.q,
-    filter: state.filters,
+    filter,
     price_min: toMinor(state.min, input.digits),
     price_max: toMinor(state.max, input.digits),
     category: input.category,
@@ -84,7 +99,10 @@ export async function readListingPage(input: {
     state,
     items: data.items,
     total: data.total,
-    facets: data.facets.filter((f) => f.values.length > 0),
+    facets: data.facets.filter((f) => f.values.length > 0 && f.key !== "on_sale"),
+    onSaleCount: data.facets
+      .find((f) => f.key === "on_sale")
+      ?.values.find((v) => v.value === "true")?.count,
     priceHint: data.price
       ? {
           min: major(data.price.min.amount, input.digits),

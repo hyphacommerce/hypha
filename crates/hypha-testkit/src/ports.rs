@@ -53,6 +53,7 @@ pub struct InMemoryPorts {
     pub payment_methods: InMemoryPaymentMethodRepo,
     pub payments: InMemoryPaymentRepo,
     pub assets: InMemoryAssetRepo,
+    pub temporary_uploads: crate::InMemoryTemporaryUploadRepo,
     pub shipping_zones: InMemoryShippingZoneRepo,
     pub app_providers: InMemoryAppProviderRepo,
     pub apps: InMemoryAppRepo,
@@ -101,14 +102,19 @@ impl Default for InMemoryPorts {
         let custom_fields = crate::InMemoryCustomFields::sharing(&outbox);
         let categories = InMemoryCategoryRepo::sharing(&outbox).joining_fields(&custom_fields);
         let customer_groups = crate::InMemoryCustomerGroupRepo::sharing(&outbox);
+        let products = InMemoryProductRepo::sharing(&outbox)
+            .joining(&categories, &channels)
+            .joining_fields(&custom_fields);
+        let catalogs = InMemoryCatalogRepo::sharing(&outbox);
+        let price_lists = InMemoryPriceListRepo::sharing(&outbox)
+            .joining(&catalogs, &products, &categories)
+            .joining_groups(&customer_groups);
         Self {
             carts: InMemoryCartRepo::sharing(&outbox),
-            products: InMemoryProductRepo::sharing(&outbox)
-                .joining(&categories, &channels)
-                .joining_fields(&custom_fields),
+            products,
             markets: InMemoryMarketRepo::sharing(&outbox),
-            catalogs: InMemoryCatalogRepo::sharing(&outbox),
-            price_lists: InMemoryPriceListRepo::sharing(&outbox),
+            catalogs,
+            price_lists,
             tax_classes: InMemoryTaxClassRepo::sharing(&outbox),
             tax_regions: InMemoryTaxRegionRepo::sharing(&outbox),
             inventory_items: InMemoryInventoryItemRepo::sharing(&outbox),
@@ -126,6 +132,7 @@ impl Default for InMemoryPorts {
             payment_methods,
             payments,
             assets: InMemoryAssetRepo::sharing(&outbox),
+            temporary_uploads: crate::InMemoryTemporaryUploadRepo::default(),
             shipping_zones: InMemoryShippingZoneRepo::sharing(&outbox),
             app_providers,
             apps: apps.joining_fields(&custom_fields),
@@ -285,6 +292,12 @@ impl HasCatalogs for InMemoryPorts {
     }
 }
 
+impl hypha_core::HasClock for InMemoryPorts {
+    fn now(&self) -> hypha_core::Timestamp {
+        self.outbox.now()
+    }
+}
+
 impl HasPriceLists for InMemoryPorts {
     type PriceLists = InMemoryPriceListRepo;
     fn price_lists(&self) -> &InMemoryPriceListRepo {
@@ -345,6 +358,13 @@ impl HasAssets for InMemoryPorts {
     type Assets = InMemoryAssetRepo;
     fn assets(&self) -> &InMemoryAssetRepo {
         &self.assets
+    }
+}
+
+impl hypha_media::HasTemporaryUploads for InMemoryPorts {
+    type TemporaryUploads = crate::InMemoryTemporaryUploadRepo;
+    fn temporary_uploads(&self) -> &crate::InMemoryTemporaryUploadRepo {
+        &self.temporary_uploads
     }
 }
 

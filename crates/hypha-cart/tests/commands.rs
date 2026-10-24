@@ -160,11 +160,15 @@ impl World {
         let bp = BasisPoints::new(bp).unwrap();
         match block_on(self.price_lists.get(list_id())).unwrap() {
             Some(mut list) => {
-                list.set_adjustment(bp);
+                list.set_adjustment(Some(hypha_markets::Adjustment::all(bp)));
                 block_on(self.price_lists.update(&mut list)).unwrap();
             }
             None => {
-                let mut list = PriceList::new(list_id(), Currency::EUR, bp);
+                let mut list = PriceList::new(
+                    list_id(),
+                    hypha_markets::PriceListDraft::new("Euro", Currency::EUR).adjusted(bp),
+                )
+                .unwrap();
                 block_on(self.price_lists.insert(&mut list)).unwrap();
             }
         }
@@ -383,6 +387,8 @@ fn add_line_returns_priced_cart() {
         priced.lines[0].status,
         LineStatus::Priced {
             unit_price: Price::new(eur(1000)).unwrap(),
+            compare_at: None,
+            price_list: Some(list_id()),
             total: eur(2000),
             tax: None,
         }
@@ -544,10 +550,39 @@ fn add_line_still_works_when_another_line_is_stale() {
 }
 
 #[test]
+fn a_line_is_priced_at_its_quantity() {
+    let world = World::new();
+    let cart = world.create_cart();
+    let price = |a| Price::new(eur(a)).unwrap();
+    let tiered = hypha_markets::FixedPrice::plain(price(450))
+        .with_breaks(vec![hypha_markets::PriceBreak {
+            min_quantity: 3,
+            price: price(400),
+        }])
+        .unwrap();
+    block_on(
+        world
+            .price_lists
+            .set_fixed_prices(list_id(), &[(vid("cup"), tiered)]),
+    )
+    .unwrap();
+
+    assert_eq!(
+        world.add(&Ctx::system(), cart, "cup", 2).unwrap().total,
+        eur(900)
+    );
+    // A third makes every one cheaper.
+    assert_eq!(
+        world.add(&Ctx::system(), cart, "cup", 1).unwrap().total,
+        eur(1200)
+    );
+}
+
+#[test]
 fn uses_fixed_price_from_price_list() {
     let world = World::new();
     let cart = world.create_cart();
-    let fixed = Price::new(eur(450)).unwrap();
+    let fixed = hypha_markets::FixedPrice::plain(Price::new(eur(450)).unwrap());
     block_on(
         world
             .price_lists
@@ -1336,7 +1371,12 @@ fn a_product_is_priced_and_stocked_in_the_countrys_market() {
         offer.variants,
         vec![hypha_cart::VariantOffer {
             variant: vid("mug"),
-            price: Some(Price::new(eur(900)).unwrap()),
+            price: Some(hypha_pricing::ResolvedPrice {
+                price: Price::new(eur(900)).unwrap(),
+                compare_at: None,
+                price_list: Some(list_id()),
+                breaks: vec![],
+            }),
             available: true,
             sellable: Some(1),
         }]
@@ -1367,7 +1407,10 @@ fn a_product_outside_the_catalog_or_country_is_not_sold_there() {
     .unwrap();
     assert!(poster.market.is_some() && !poster.sold());
     assert_eq!(
-        (poster.variants[0].price, poster.variants[0].available),
+        (
+            poster.variants[0].price.clone(),
+            poster.variants[0].available
+        ),
         (None, false)
     );
 

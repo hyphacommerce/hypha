@@ -3,14 +3,15 @@
 
 use hypha_core::{
     AssetId, AuthError, Clock, Ctx, ErrorCode, IdGenerator, Keyset, Page, PageLimit, PageRequest,
-    RepoError, Scope,
+    RepoError, Scope, UploadId,
 };
 use thiserror::Error;
 
 use crate::{
     Asset, AssetFilter, AssetKind, AssetRepo, AssetSort, AssetStatus, AssetUsage, AssetUsageRepo,
     BlobError, BlobStore, Checksum, HEAD_BYTES, HasAssetUsages, HasAssets, MediaError, MimeType,
-    NewUpload, PresignedUpload, UploadMismatch, UploadTerms, UsageOwner, Visibility, repo::keys,
+    NewTemporaryUpload, NewUpload, PresignedUpload, TemporaryUpload, TemporaryUploadRepo,
+    UploadMismatch, UploadPurpose, UploadTerms, UsageOwner, Visibility, repo::keys,
     settings::MediaSettings,
 };
 
@@ -42,6 +43,12 @@ pub enum CommandError {
         usages: Vec<AssetUsage>,
         has_more: bool,
     },
+    /// No such temporary upload, or it expired.
+    #[error("upload {0} not found")]
+    TemporaryUploadNotFound(UploadId),
+    /// Reading found nothing stored: the client hasn't uploaded (yet).
+    #[error("nothing has been uploaded for upload {0}")]
+    TemporaryUploadMissing(UploadId),
 }
 
 impl ErrorCode for CommandError {
@@ -55,6 +62,8 @@ impl ErrorCode for CommandError {
             CommandError::UploadMissing(_) => "upload_missing",
             CommandError::UploadMismatch(e) => e.code(),
             CommandError::AssetInUse { .. } => "asset_in_use",
+            CommandError::TemporaryUploadNotFound(_) => "upload_not_found",
+            CommandError::TemporaryUploadMissing(_) => "upload_missing",
         }
     }
 }
@@ -98,7 +107,7 @@ pub async fn create_upload<R: AssetRepo, B: BlobStore>(
         now,
     })?;
     let terms = UploadTerms {
-        content_type: mime_type,
+        content_type: mime_type.as_str(),
         content_length: asset.byte_size(),
         checksum,
         cache_control: asset.visibility().cache_control(),
@@ -323,6 +332,134 @@ pub async fn sweep_abandoned_uploads<R: AssetRepo, B: BlobStore>(
             return Ok(deleted);
         }
     }
+}
+
+/// A file a client is about to upload for a while.
+pub struct CreateTemporaryUpload {
+    /// `UploadPurpose`'s name, as the caller sent it.
+    pub purpose: String,
+    pub filename: String,
+    pub byte_size: u64,
+    /// SHA-256 as 64 hex characters: storage then refuses an upload with other contents.
+    pub checksum: Option<String>,
+}
+
+/// Records a temporary upload and signs the request that sends its file straight to
+/// storage, with the purpose's type and the declared size (and checksum) signed in. Needs
+/// the purpose's scope.
+pub async fn create_temporary_upload<R: TemporaryUploadRepo, B: BlobStore>(
+    ctx: &Ctx,
+    uploads: &R,
+    blobs: &B,
+    ids: &impl IdGenerator,
+    clock: &impl Clock,
+    settings: &MediaSettings,
+    input: CreateTemporaryUpload,
+) -> Result<(TemporaryUpload, PresignedUpload), CommandError> {
+    let purpose: UploadPurpose = input.purpose.parse()?;
+    ctx.require(purpose.scope())?;
+    let checksum = input
+        .checksum
+        .as_deref()
+        .map(Checksum::from_hex)
+        .transpose()?;
+    let now = clock.now();
+    let upload = TemporaryUpload::new(NewTemporaryUpload {
+        id: UploadId::from_uuid(ids.new_uuid()),
+        purpose,
+        filename: input.filename,
+        byte_size: input.byte_size,
+        checksum,
+        now,
+    })?;
+    let terms = UploadTerms {
+        content_type: purpose.content_type(),
+        content_length: upload.byte_size(),
+        checksum,
+        cache_control: Visibility::Private.cache_control(),
+        expires_in_secs: MediaSettings::secs(settings.upload_expires),
+    };
+    let request = blobs.presign_upload(&upload.key(), &terms, now).await?;
+    uploads.insert(&upload).await?;
+    Ok((upload, request))
+}
+
+/// The upload and its file's bytes, for the server side that reads it back. Needs the
+/// purpose's scope; an expired one reads as not found, and one whose file isn't stored
+/// yet is `TemporaryUploadMissing`.
+pub async fn read_temporary_upload<R: TemporaryUploadRepo, B: BlobStore>(
+    ctx: &Ctx,
+    uploads: &R,
+    blobs: &B,
+    clock: &impl Clock,
+    id: UploadId,
+) -> Result<(TemporaryUpload, Vec<u8>), CommandError> {
+    let upload = load_upload(ctx, uploads, clock, id).await?;
+    let Some(stored) = blobs.head(&upload.key()).await? else {
+        return Err(CommandError::TemporaryUploadMissing(id));
+    };
+    // Storage took exactly the declared size; reading at most that much keeps a file
+    // replaced some other way from growing the read.
+    let bytes = blobs
+        .read_range(&upload.key(), 0, stored.size.min(upload.byte_size()))
+        .await?;
+    Ok((upload, bytes))
+}
+
+/// Deletes the upload and its file. Needs the purpose's scope.
+pub async fn delete_temporary_upload<R: TemporaryUploadRepo, B: BlobStore>(
+    ctx: &Ctx,
+    uploads: &R,
+    blobs: &B,
+    clock: &impl Clock,
+    id: UploadId,
+) -> Result<(), CommandError> {
+    let upload = load_upload(ctx, uploads, clock, id).await?;
+    // The file first: a failure leaves the row for a retry or the sweep.
+    blobs.delete(&upload.key()).await?;
+    uploads.delete(id).await?;
+    Ok(())
+}
+
+/// Deletes temporary uploads past their lifetime, files first. Hosts run it with the
+/// media sweep. Returns how many it deleted.
+pub async fn sweep_expired_uploads<R: TemporaryUploadRepo, B: BlobStore>(
+    ctx: &Ctx,
+    uploads: &R,
+    blobs: &B,
+    clock: &impl Clock,
+) -> Result<usize, CommandError> {
+    ctx.require(Scope::MediaWrite)?;
+    const BATCH: u32 = 100;
+    let now = clock.now();
+    let mut deleted = 0;
+    loop {
+        let batch = uploads.expired(now, BATCH).await?;
+        for upload in &batch {
+            blobs.delete(&upload.key()).await?;
+            uploads.delete(upload.id()).await?;
+        }
+        deleted += batch.len();
+        if batch.len() < BATCH as usize {
+            return Ok(deleted);
+        }
+    }
+}
+
+/// The upload, unexpired, once the caller holds its purpose's scope.
+async fn load_upload<R: TemporaryUploadRepo>(
+    ctx: &Ctx,
+    uploads: &R,
+    clock: &impl Clock,
+    id: UploadId,
+) -> Result<TemporaryUpload, CommandError> {
+    let upload = uploads
+        .get(id)
+        .await?
+        .filter(|u| !u.is_expired(clock.now()))
+        .ok_or(CommandError::TemporaryUploadNotFound(id))?;
+    ctx.require(upload.purpose().scope())?;
+    Ok(upload)
 }
 
 async fn load<R: AssetRepo>(assets: &R, id: AssetId) -> Result<Asset, CommandError> {

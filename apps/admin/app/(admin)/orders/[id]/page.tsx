@@ -60,6 +60,76 @@ function items(n: number): string {
   return `${n} ${n === 1 ? "item" : "items"}`;
 }
 
+type OrderLine = AdminSchemas["OrderLineResponse"];
+
+/**
+ * A line's unit price, its compare-at struck through beside it when that's above what it
+ * cost, and the price list that priced it (linked; by ID until its name is read, and
+ * when it can't be).
+ */
+function UnitPrice({
+  line,
+  currencies,
+  listNames,
+}: {
+  line: OrderLine;
+  currencies: Currencies;
+  listNames: Promise<Map<string, string>>;
+}) {
+  const was = line.compare_at_price;
+  const isStruck =
+    was && was.currency === line.unit_price.currency && was.amount > line.unit_price.amount;
+  return (
+    <VStack gap={0.5}>
+      <HStack gap={2} wrap="wrap">
+        <Text type="body" hasTabularNumbers>
+          {formatMoney(line.unit_price, currencies)}
+        </Text>
+        {isStruck && (
+          <Text type="body" color="secondary" hasStrikethrough hasTabularNumbers>
+            {formatMoney(was, currencies)}
+          </Text>
+        )}
+      </HStack>
+      {line.price_list && (
+        <Link href={`/markets/price-lists/${line.price_list}`}>
+          <Text type="supporting">
+            <Suspense fallback={line.price_list}>
+              <ListName id={line.price_list} names={listNames} />
+            </Suspense>
+          </Text>
+        </Link>
+      )}
+    </VStack>
+  );
+}
+
+/** A price list's name once `names` is read; its ID when it isn't among them. */
+async function ListName({ id, names }: { id: string; names: Promise<Map<string, string>> }) {
+  return (await names).get(id) ?? id;
+}
+
+/**
+ * The names of the price lists that priced `lines`, by ID: one read per list, none for
+ * an order without. Without `pricing:read` (or when a read fails), none: the lines show
+ * the lists by ID. Never awaited by the page, so the order shows without waiting.
+ */
+async function priceListNames(
+  client: Awaited<ReturnType<typeof sessionClient>>,
+  lines: readonly OrderLine[],
+): Promise<Map<string, string>> {
+  const ids = [...new Set(lines.flatMap((l) => (l.price_list ? [l.price_list] : [])))];
+  const read = await Promise.all(
+    ids.map((id) =>
+      client
+        .GET("/admin/price-lists/{id}", { params: { path: { id } } })
+        .then((r) => (r.data ? ([id, r.data.name] as const) : null))
+        .catch(() => null),
+    ),
+  );
+  return new Map(read.filter((e) => e !== null));
+}
+
 /** A footer row of the items table: its label, and the amount in the last column. */
 function TotalRow({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
@@ -126,6 +196,7 @@ async function Order({ id }: { id: string }) {
     client.GET("/admin/orders/{id}/custom-fields", { params: { path: { id } } }),
   ]);
   const order = loaded(found);
+  const listNames = priceListNames(client, order.lines);
   const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
   const fulfillments = shipments.data?.items ?? [];
   const places: Place[] = (locations.data?.items ?? []).map((l) => ({ id: l.id, name: l.name }));
@@ -211,7 +282,9 @@ async function Order({ id }: { id: string }) {
                           )}
                         </VStack>
                       </TableCell>
-                      <TableCell>{formatMoney(line.unit_price, currencies)}</TableCell>
+                      <TableCell>
+                        <UnitPrice line={line} currencies={currencies} listNames={listNames} />
+                      </TableCell>
                       <TableCell>{line.quantity}</TableCell>
                       <TableCell>
                         {line.fulfilled_quantity} of {line.quantity}

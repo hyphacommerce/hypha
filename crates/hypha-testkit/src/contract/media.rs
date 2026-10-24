@@ -1,9 +1,11 @@
 use hypha_core::{
-    AssetId, Keyset, PageLimit, PageRequest, RepoError, SortKey, Timestamp, Version, Versioned,
+    AssetId, Keyset, PageLimit, PageRequest, RepoError, SortKey, Timestamp, UploadId, Version,
+    Versioned,
 };
 use hypha_media::{
     Asset, AssetFilter, AssetKind, AssetRepo, AssetSort, BlobKey, BlobStore, Checksum, FileFacts,
-    MimeType, NewUpload, PresignedUpload, UploadTerms, Visibility, repo::keys,
+    MimeType, NewTemporaryUpload, NewUpload, PresignedUpload, TemporaryUpload, TemporaryUploadRepo,
+    UploadPurpose, UploadTerms, Visibility, repo::keys,
 };
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -377,7 +379,7 @@ pub async fn blob_store<B: BlobStore>(
         |name: &str| BlobKey::restore(format!("assets/contract-{}/1/{name}", now.unix_micros()));
     let body: Vec<u8> = (0..=255u8).cycle().take(1000).collect();
     let terms = |len: usize, checksum: Option<Checksum>| UploadTerms {
-        content_type: MimeType::Png,
+        content_type: MimeType::Png.as_str(),
         content_length: len as u64,
         checksum,
         cache_control: Visibility::Public.cache_control(),
@@ -481,4 +483,62 @@ pub async fn blob_store<B: BlobStore>(
         .unwrap();
     assert!(!upload(&signed, body.clone()).await);
     assert_eq!(store.head(&file).await, Ok(None));
+}
+
+/// Runs every `TemporaryUploadRepo` scenario, each on a fresh repo from `make`.
+pub async fn temporary_upload_repo<R: TemporaryUploadRepo>(make: impl AsyncFn() -> R) {
+    let upload = |n: u128, created: i64, checksum: Option<Checksum>| {
+        TemporaryUpload::new(NewTemporaryUpload {
+            id: UploadId::from_uuid(Uuid::from_u128(n)),
+            purpose: UploadPurpose::PriceImport,
+            filename: format!("prices {n}.csv"),
+            byte_size: 1000 + n as u64,
+            checksum,
+            now: Timestamp::from_unix_micros(created),
+        })
+        .unwrap()
+    };
+    let day = TemporaryUpload::LIFETIME.as_micros() as i64;
+
+    scenario("temporary upload: insert stores every field; the ID is unique");
+    let repo = make().await;
+    let full = upload(1, 1_000, Some(Checksum::from_bytes([7; 32])));
+    repo.insert(&full).await.unwrap();
+    assert_eq!(repo.get(full.id()).await, Ok(Some(full.clone())));
+    let bare = upload(2, 2_000, None);
+    repo.insert(&bare).await.unwrap();
+    assert_eq!(repo.get(bare.id()).await, Ok(Some(bare)));
+    assert_eq!(
+        repo.insert(&full).await,
+        Err(RepoError::Duplicate(keys::TEMPORARY_UPLOAD_ID))
+    );
+    assert_eq!(
+        repo.get(UploadId::from_uuid(Uuid::from_u128(99))).await,
+        Ok(None)
+    );
+
+    scenario("temporary upload: delete says whether it was there");
+    let repo = make().await;
+    repo.insert(&full).await.unwrap();
+    assert_eq!(repo.delete(full.id()).await, Ok(true));
+    assert_eq!(repo.get(full.id()).await, Ok(None));
+    assert_eq!(repo.delete(full.id()).await, Ok(false));
+
+    scenario("temporary upload: expired finds those past their lifetime, oldest first");
+    let repo = make().await;
+    for (n, created) in [(3, 300), (1, 100), (2, 200)] {
+        repo.insert(&upload(n, created, None)).await.unwrap();
+    }
+    let ids = |found: Vec<TemporaryUpload>| found.iter().map(|u| u.id()).collect::<Vec<_>>();
+    let id = |n: u128| UploadId::from_uuid(Uuid::from_u128(n));
+    let at = |micros: i64| Timestamp::from_unix_micros(micros);
+    assert_eq!(repo.expired(at(day + 99), 10).await.map(ids), Ok(vec![]));
+    assert_eq!(
+        repo.expired(at(day + 200), 10).await.map(ids),
+        Ok(vec![id(1), id(2)])
+    );
+    assert_eq!(
+        repo.expired(at(day + 300), 2).await.map(ids),
+        Ok(vec![id(1), id(2)])
+    );
 }

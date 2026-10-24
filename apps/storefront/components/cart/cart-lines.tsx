@@ -1,7 +1,8 @@
 "use client";
 
 // A cart's lines, shared by the drawer and the cart page: the picture, the product
-// (linked), its variant, the quantity, Remove, and the line's total. An unavailable line
+// (linked), its variant, the quantity, Remove, and the line's total (its compare-at
+// total struck through beside it when it's on sale). An unavailable line
 // says why; it's left out of the totals.
 
 import { Banner } from "@astryxdesign/core/Banner";
@@ -15,7 +16,8 @@ import { useEffect, useRef } from "react";
 
 import type { Cart } from "@/app/[country]/actions";
 import { LineImage, lineImage } from "@/components/line-image";
-import { formatMoney } from "@/lib/money";
+import { Price } from "@/components/price";
+import { lineCompareAt } from "@/lib/prices";
 
 import { useCart } from "./cart-provider";
 
@@ -88,9 +90,18 @@ function CartLineRow({
                   title
                 )}
               </Text>
-              <Text type="body" weight="medium" hasTabularNumbers>
-                {line.status === "priced" ? formatMoney(line.total, digits) : "—"}
-              </Text>
+              {line.status === "priced" ? (
+                <Price
+                  price={line.total}
+                  compareAt={lineCompareAt(line.compare_at_price, line.quantity, line.total)}
+                  digits={digits}
+                  weight="medium"
+                />
+              ) : (
+                <Text type="body" weight="medium">
+                  —
+                </Text>
+              )}
             </HStack>
             {line.variant_title && <Text type="supporting">{line.variant_title}</Text>}
             <HStack gap={2} vAlign="center">

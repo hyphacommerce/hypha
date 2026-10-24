@@ -20,7 +20,8 @@ use hypha_merchandising::{
 use hypha_products::{
     AddVariant, CreateSimpleProduct, HasProducts, ListProducts, OptionDraft, OptionValueDraft,
     Product, ProductFilterInput, ProductOption, ProductSort, ProductStatus, SetProductOptions,
-    SetVariant, UpdateProduct, UpdateVariant, add_product_variant, create_simple_product,
+    SetVariant, UpdateProduct, UpdateVariant, VariantFilterInput, VariantSummary,
+    add_product_variant, create_simple_product, list_variants as list_variant_summaries,
     remove_product_variant, set_product_options, set_product_status, set_product_variants,
     update_product, update_product_variant,
 };
@@ -33,7 +34,7 @@ use hypha_custom_fields::{
 use super::{
     assets::AssetKindDto,
     custom_fields::{self, CustomFieldValues, FieldParams},
-    page::{ListQuery, PageParams, PageResponse, SortedFilters},
+    page::{ListQuery, PageParams, PageResponse, SortedFilters, id_list},
 };
 use crate::{
     error::ApiError,
@@ -49,6 +50,9 @@ pub struct CreateProductRequest {
     handle: String,
     title: String,
     price: Money,
+    /// The "was" price shown struck through beside `price`: above it, in its currency.
+    #[serde(default)]
+    compare_at_price: Option<Money>,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -227,6 +231,8 @@ pub struct VariantResponse {
     weight_grams: Option<u32>,
     /// `false` for what is never shipped (downloads, gift cards).
     requires_shipping: bool,
+    /// The "was" price shown struck through beside the base price; `null` for none.
+    compare_at_price: Option<Money>,
     /// Its own custom field values the caller may read (variant fields); `PATCH
     /// /admin/variants/{id}/custom-fields` writes them.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
@@ -267,6 +273,7 @@ impl ProductResponse {
                     media_asset_id: v.media(),
                     weight_grams: v.weight().map(Weight::grams),
                     requires_shipping: v.requires_shipping(),
+                    compare_at_price: v.compare_at_price().map(|p| p.money()),
                     custom_fields: fields.json_of(v.id().as_uuid()),
                 })
                 .collect(),
@@ -358,6 +365,12 @@ pub struct ProductFilters {
     /// matches nothing.
     #[param(value_type = Option<ChannelId>)]
     channel: Option<ChannelId>,
+    /// Only these products: repeat it (`ids=prod_…&ids=prod_…`) or separate them with
+    /// commas, up to 250 (`422 too_many_filter_ids`). IDs that name no product match
+    /// nothing.
+    #[serde(default)]
+    #[param(value_type = Vec<ProductId>)]
+    ids: Vec<String>,
     #[param(inline)]
     sort: Option<ProductSortDto>,
 }
@@ -507,6 +520,7 @@ pub async fn list<S: Storage>(
             tag: filters.tag,
             category: filters.category,
             channel: filters.channel,
+            ids: id_list("ids", filters.ids)?,
         },
         sort,
         fields: fields.filters,
@@ -553,6 +567,103 @@ pub async fn list<S: Storage>(
     )?))
 }
 
+/// What a variant list is narrowed to.
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct VariantFilters {
+    /// Only variants whose product's title or handle, or whose own SKU, contains this
+    /// text, ignoring case. Up to 255 characters; blank filters nothing.
+    q: Option<String>,
+    /// Only these products' variants: repeat it (`product=prod_…&product=prod_…`) or
+    /// separate them with commas, up to 100 (`422 too_many_filter_ids`).
+    #[serde(default)]
+    #[param(value_type = Vec<ProductId>)]
+    product: Vec<String>,
+    /// Only variants of products in this category or any category below it. An ID that
+    /// names no category matches nothing.
+    #[param(value_type = Option<CategoryId>)]
+    category: Option<CategoryId>,
+    /// Only these variants, repeated or comma-separated like `product`, up to 250
+    /// (`422 too_many_filter_ids`).
+    #[serde(default)]
+    #[param(value_type = Vec<VariantId>)]
+    ids: Vec<String>,
+}
+
+/// A variant's product in a variant list.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct VariantProductResponse {
+    id: ProductId,
+    title: String,
+    handle: String,
+}
+
+/// A variant in a list across products: what a price grid or an export shows.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct VariantSummaryResponse {
+    id: VariantId,
+    sku: Option<String>,
+    /// Its option values ("M / Blue"); `null` for a product without options.
+    title: Option<String>,
+    /// The base price, before markets and price lists.
+    price: Money,
+    /// The "was" price shown struck through beside the base price; `null` for none.
+    compare_at_price: Option<Money>,
+    product: VariantProductResponse,
+}
+
+impl From<VariantSummary> for VariantSummaryResponse {
+    fn from(v: VariantSummary) -> Self {
+        Self {
+            id: v.id,
+            sku: v.sku,
+            title: v.title,
+            price: v.price.money(),
+            compare_at_price: v.compare_at_price.map(|p| p.money()),
+            product: VariantProductResponse {
+                id: v.product,
+                title: v.product_title,
+                handle: v.product_handle.as_str().to_string(),
+            },
+        }
+    }
+}
+
+type VariantSummaryPage = PageResponse<VariantSummaryResponse>;
+
+/// Variants across products, in any status: the newest product first, each product's
+/// variants in their order, narrowed by the filters (every one given must match). A price
+/// grid or an export pages through them without reading each product.
+#[utoipa::path(
+    get,
+    path = "/admin/variants",
+    params(PageParams, VariantFilters),
+    responses((status = 200, description = "OK", body = VariantSummaryPage)),
+    extensions(("x-hypha-scopes" = json!(["products:read"]))),
+)]
+pub async fn list_variants<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    query: ListQuery<VariantFilters>,
+) -> Result<Json<VariantSummaryPage>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let (page, filters, scope) = query.parse()?;
+    let input = VariantFilterInput {
+        q: filters.q,
+        products: id_list("product", filters.product)?,
+        category: filters.category,
+        ids: id_list("ids", filters.ids)?,
+    };
+    let page = list_variant_summaries(&ctx, ports.products(), input, page).await?;
+    Ok(Json(PageResponse::new(
+        page,
+        &scope,
+        VariantSummary::at,
+        |v| Ok(v.into()),
+    )?))
+}
+
 /// Creates a product with one variant, as a draft.
 #[utoipa::path(
     post,
@@ -572,6 +683,7 @@ pub async fn create<S: Storage>(
         handle: req.handle,
         title: req.title,
         price: req.price,
+        compare_at_price: req.compare_at_price,
     };
     let product = create_simple_product(&ctx, ports.products(), &state.ids, input).await?;
     Ok((
@@ -652,6 +764,16 @@ pub struct StorefrontVariantResponse {
     /// when there's no limit (stock isn't tracked, or it sells past zero). `0` where
     /// there's no price.
     available_quantity: Option<u64>,
+    /// What `price` is shown against, struck through: only ever above it; `null` for
+    /// none.
+    compare_at_price: Option<Money>,
+    /// Whether a compare-at price is shown: the variant is on sale.
+    on_sale: bool,
+    /// What larger cart lines cost each ("8.00 each from 10"), whichever price list wins
+    /// them: by quantity, each below `price` and the one before it. The cart prices each
+    /// line at its quantity, so a line of `min_quantity` pays that break's `price`. Empty
+    /// when buying more costs no less.
+    price_breaks: Vec<super::markets::PriceBreakDto>,
     /// The variant's own custom field values storefronts are shown.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     custom_fields: CustomFieldValues,
@@ -683,12 +805,20 @@ impl StorefrontProductResponse {
                     let priced = market
                         .and(offer)
                         .and_then(|o| o.variants.iter().find(|offered| offered.variant == v.id()));
+                    let resolved = priced.and_then(|o| o.price.as_ref());
                     StorefrontVariantResponse {
                         id: v.id(),
                         title: p.variant_title(v.id()),
                         selections: v.selections().to_vec(),
                         media_asset_id: v.media(),
-                        price: priced.and_then(|o| o.price).map(|price| price.money()),
+                        price: resolved.map(|r| r.price.money()),
+                        compare_at_price: resolved
+                            .and_then(|r| r.compare_at)
+                            .map(|price| price.money()),
+                        on_sale: resolved.is_some_and(|r| r.on_sale()),
+                        price_breaks: resolved
+                            .map(|r| r.breaks.iter().map(Into::into).collect())
+                            .unwrap_or_default(),
                         available: priced.filter(|o| o.price.is_some()).map(|o| o.available),
                         available_quantity: match priced {
                             Some(o) => o.sellable,
@@ -727,9 +857,11 @@ async fn storefront_product<P>(
 ) -> Result<Json<StorefrontProductResponse>, ApiError>
 where
     P: HasChannels
+        + hypha_core::HasClock
         + HasMarkets
         + HasCatalogs
         + HasPriceLists
+        + hypha_customers::HasCustomerGroups
         + HasInventoryItems
         + HasLocations
         + HasCustomFieldDefinitions
@@ -965,6 +1097,9 @@ pub struct AddVariantRequest {
     sku: Option<String>,
     /// The base price, before markets and price lists.
     price: Money,
+    /// The "was" price shown struck through: above `price`, in its currency.
+    #[serde(default)]
+    compare_at_price: Option<Money>,
     /// One value per option, in the order of the product's `options`; empty for a
     /// product without options.
     #[serde(default)]
@@ -1000,6 +1135,7 @@ pub async fn add_variant<S: Storage>(
     let input = AddVariant {
         sku: req.sku,
         price: req.price,
+        compare_at_price: req.compare_at_price,
         selections: req.selections,
         weight: req.weight_grams.map(Weight::from_grams),
         requires_shipping: req.requires_shipping,
@@ -1026,6 +1162,11 @@ pub struct SetVariantRequest {
     sku: Option<String>,
     /// The base price, before markets and price lists.
     price: Money,
+    /// The "was" price shown struck through: above `price`, in its currency; `null` for
+    /// none.
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[schema(required = true)]
+    compare_at_price: Option<Money>,
     /// One value per option, in the order of the product's `options`; empty for a
     /// product without options.
     selections: Vec<OptionValueId>,
@@ -1070,6 +1211,7 @@ pub async fn set_variants<S: Storage>(
             id: v.id,
             sku: v.sku,
             price: v.price,
+            compare_at_price: v.compare_at_price,
             selections: v.selections,
             weight: v.weight_grams.map(Weight::from_grams),
             requires_shipping: v.requires_shipping,
@@ -1090,6 +1232,11 @@ pub struct UpdateVariantRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = Money, required = false)]
     price: Option<Money>,
+    /// The "was" price shown struck through: above the price, in its currency; `null`
+    /// clears it. Checked against the price as it ends up, so lowering both at once works.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    #[schema(value_type = Option<Money>, required = false)]
+    compare_at_price: Option<Option<Money>>,
     /// One value per option, in option order; another variant can't have them.
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = Vec<OptionValueId>, required = false)]
@@ -1123,6 +1270,7 @@ pub async fn update_variant<S: Storage>(
     let input = UpdateVariant {
         sku: req.sku,
         price: req.price,
+        compare_at_price: req.compare_at_price,
         selections: req.selections,
         weight: req.weight_grams.map(|w| w.map(Weight::from_grams)),
         requires_shipping: req.requires_shipping,

@@ -1,11 +1,12 @@
 import { AspectRatio } from "@astryxdesign/core/AspectRatio";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Grid } from "@astryxdesign/core/Grid";
-import { VStack } from "@astryxdesign/core/Stack";
+import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 import { formatRange } from "@/lib/money";
 
+import { Price, SaleBadge } from "./price";
 import { SiteLink as Link } from "./site-link";
 import { ViewTransition } from "./view-transition";
 
@@ -18,7 +19,8 @@ export function productImageName(handle: string): string {
 
 /**
  * Search results as product cards (the `product-gallery` template): image, title, the
- * vendor, the price in the country's digits. Each card is one `next/link` anchor
+ * vendor, the price in the country's digits (the variant shown's compare-at struck
+ * through beside it, with a Sale badge, when it's on sale). Each card is one `next/link` anchor
  * (`.shop-product-card`, globals.css), so Next prefetches it as it scrolls into view
  * and on hover, and the product page is there when it's clicked. (Astryx's ClickableCard
  * hides its link in a 1px element, which the viewport prefetch never sees.) Each card is
@@ -64,7 +66,7 @@ export function ProductGrid({
             <Link
               href={`${productBase}/${hit.handle}`}
               className="shop-product-card"
-              aria-label={hit.title}
+              aria-label={hit.on_sale ? `${hit.title}, on sale` : hit.title}
             >
               <VStack gap={3}>
                 <ViewTransition
@@ -99,13 +101,18 @@ export function ProductGrid({
                   <Text type="body" weight="medium" maxLines={2}>
                     {hit.title}
                   </Text>
-                  <Text type="body" color="secondary">
-                    {formatRange(hit.listing_price.min, hit.listing_price.max, digits)}
-                  </Text>
-                  {!hit.available && (
-                    <div>
-                      <Badge label="Sold out" variant="neutral" />
-                    </div>
+                  <Price
+                    price={hit.price}
+                    compareAt={hit.on_sale ? hit.compare_at : null}
+                    text={formatRange(hit.listing_price.min, hit.listing_price.max, digits)}
+                    digits={digits}
+                    color="secondary"
+                  />
+                  {(!hit.available || hit.on_sale) && (
+                    <HStack gap={1}>
+                      {hit.on_sale && <SaleBadge />}
+                      {!hit.available && <Badge label="Sold out" variant="neutral" />}
+                    </HStack>
                   )}
                 </VStack>
               </VStack>

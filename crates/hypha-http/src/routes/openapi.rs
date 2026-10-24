@@ -870,8 +870,10 @@ mod tests {
                 "get /admin/inventory-items",
                 "get /admin/notifications",
                 "get /admin/orders",
+                "get /admin/price-lists",
                 "get /admin/price-lists/{id}/fixed-prices",
-                "get /admin/products"
+                "get /admin/products",
+                "get /admin/variants"
             ]
         );
     }

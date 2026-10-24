@@ -48,6 +48,8 @@ mod oauth;
 mod mcp;
 // Previews of admin writes (`Hypha-Preview`).
 mod previews;
+// Price lists: names, kinds, windows and compare-at prices.
+mod price_lists;
 // A host built with a spore.
 mod spores;
 
@@ -523,11 +525,14 @@ async fn the_admin_reads_its_whole_setup() {
         json!({"id": "prod_00000000000000000000000000000063", "title": null, "handle": null, "status": null})
     );
 
-    let body = r#"{"currency":"EUR","adjustment_bps":-1000}"#;
+    let body = r#"{"name":"Euro","currency":"EUR","adjustment":{"percent_bps":-1000}}"#;
     let (_, list) = send(&app, "POST", "/admin/price-lists", Some(body)).await;
     let list_id = list["id"].as_str().unwrap();
     let (_, lists) = send(&app, "GET", "/admin/price-lists", None).await;
-    assert_eq!(lists["items"][0]["adjustment_bps"], json!(-1000));
+    assert_eq!(
+        lists["items"][0]["adjustment"],
+        json!({"percent_bps": -1000, "applies_to": {"type": "all"}})
+    );
     let (status, _) = send(&app, "GET", &format!("/admin/price-lists/{list_id}"), None).await;
     assert_eq!(status, StatusCode::OK);
     let url = format!("/admin/price-lists/{list_id}/fixed-prices");
@@ -879,13 +884,24 @@ async fn the_dispatcher_cleans_up_after_a_removed_variant() {
         ProductRepo::insert(ports.products(), &mut shirt)
             .await
             .unwrap();
-        let mut prices = PriceList::new(list, Currency::EUR, BasisPoints::new(0).unwrap());
+        let mut prices = PriceList::new(
+            list,
+            hypha_markets::PriceListDraft::new("Shirts", Currency::EUR)
+                .adjusted(BasisPoints::new(0).unwrap()),
+        )
+        .unwrap();
         PriceListRepo::insert(ports.price_lists(), &mut prices)
             .await
             .unwrap();
         ports
             .price_lists()
-            .set_fixed_prices(list, &[(s, eur(900)), (l, eur(1100))])
+            .set_fixed_prices(
+                list,
+                &[
+                    (s, hypha_markets::FixedPrice::plain(eur(900))),
+                    (l, hypha_markets::FixedPrice::plain(eur(1100))),
+                ],
+            )
             .await
             .unwrap();
     }
@@ -1070,6 +1086,152 @@ async fn products_are_listed_by_text() {
     assert_eq!(
         (status, code(&body)),
         (StatusCode::UNPROCESSABLE_ENTITY, "field_too_long")
+    );
+}
+
+#[tokio::test]
+async fn products_are_listed_by_id_repeated_or_comma_separated() {
+    let app = app().await;
+    let a = create_product(&app, "a").await;
+    let b = create_product(&app, "b").await;
+    let c = create_product(&app, "c").await;
+    let unknown = "prod_00000000000000000000000000000063";
+
+    let uri = format!("/admin/products?ids={a}&ids={c},{unknown}");
+    let (status, page) = send(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(ids(&page), [c.as_str(), a.as_str()]);
+    let (_, page) = send(&app, "GET", &format!("/admin/products?ids={b}"), None).await;
+    assert_eq!(ids(&page), [b.as_str()]);
+
+    let (status, body) = send(&app, "GET", "/admin/products?ids=mug", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+    let many: Vec<String> = (1..=251u128)
+        .map(|n| hypha_core::ProductId::from_uuid(uuid::Uuid::from_u128(n)).to_string())
+        .collect();
+    let uri = format!("/admin/products?ids={}", many.join(","));
+    let (status, body) = send(&app, "GET", &uri, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "too_many_filter_ids")
+    );
+    assert_eq!(body["details"], json!({"field": "ids", "max": 250}));
+}
+
+#[tokio::test]
+async fn variants_are_listed_across_products_in_pages() {
+    let app = app().await;
+    let mug = create_product(&app, "mug").await;
+    let shirt = create_product(&app, "shirt").await;
+    let product = format!("/admin/products/{shirt}");
+    let body = r#"{"options":[{"name":"Size","values":[{"label":"S"},{"label":"M"}]}]}"#;
+    let (_, sized) = send(&app, "PUT", &format!("{product}/options"), Some(body)).await;
+    let s = sized["variants"][0]["id"].as_str().unwrap().to_string();
+    let m_value = &sized["options"][0]["values"][1]["id"];
+    let body = json!({
+        "price": { "amount": 1200, "currency": "EUR" },
+        "compare_at_price": { "amount": 1500, "currency": "EUR" },
+        "sku": "SHIRT-M",
+        "selections": [m_value],
+    });
+    let (status, added) = send(
+        &app,
+        "POST",
+        &format!("{product}/variants"),
+        Some(&body.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{added}");
+    let m = added["variants"][1]["id"].as_str().unwrap().to_string();
+    let (_, mug_page) = send(&app, "GET", &format!("/admin/products/{mug}"), None).await;
+    let cup = mug_page["variants"][0]["id"].as_str().unwrap().to_string();
+
+    // The newest product first, its variants in their order, paged.
+    let (status, first) = send(&app, "GET", "/admin/variants?limit=2", None).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(ids(&first), [s.as_str(), m.as_str()]);
+    assert_eq!(
+        first["items"][1],
+        json!({
+            "id": m,
+            "sku": "SHIRT-M",
+            "title": "M",
+            "price": { "amount": 1200, "currency": "EUR" },
+            "compare_at_price": { "amount": 1500, "currency": "EUR" },
+            "product": { "id": shirt, "title": "shirt", "handle": "shirt" },
+        })
+    );
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let (_, second) = send(
+        &app,
+        "GET",
+        &format!("/admin/variants?limit=2&cursor={cursor}"),
+        None,
+    )
+    .await;
+    assert_eq!(ids(&second), [cup.as_str()]);
+    assert_eq!(second["items"][0]["title"], Value::Null);
+    assert_eq!(second["next_cursor"], Value::Null);
+    // A cursor belongs to its filters.
+    let uri = format!("/admin/variants?limit=2&q=shirt&cursor={cursor}");
+    let (status, body) = send(&app, "GET", &uri, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_cursor")
+    );
+
+    let get = async |query: String| {
+        let (status, page) = send(&app, "GET", &format!("/admin/variants?{query}"), None).await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        ids(&page)
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(get(format!("product={mug}")).await, [cup.as_str()]);
+    assert_eq!(
+        get(format!("product={mug},{shirt}")).await,
+        [s.as_str(), m.as_str(), cup.as_str()]
+    );
+    assert_eq!(
+        get(format!("ids={cup}&ids={m}")).await,
+        [m.as_str(), cup.as_str()]
+    );
+    assert_eq!(
+        get("q=shirt-m".to_string()).await,
+        [m.as_str()],
+        "the variant's own SKU"
+    );
+    assert_eq!(get("q=SHIRT".to_string()).await, [s.as_str(), m.as_str()]);
+
+    // A category reaches the products below it.
+    let create = async |body: Value| {
+        let (status, json) = send(&app, "POST", "/admin/categories", Some(&body.to_string())).await;
+        assert_eq!(status, StatusCode::CREATED, "{json}");
+        json["id"].as_str().unwrap().to_string()
+    };
+    let kitchen = create(json!({"name": "Kitchen", "handle": "kitchen", "visible": true})).await;
+    let mugs =
+        create(json!({"name": "Mugs", "handle": "mugs", "parent": kitchen, "visible": true})).await;
+    let body = json!({"products": [mug]}).to_string();
+    let uri = format!("/admin/categories/{mugs}/products");
+    let (status, _) = send(&app, "POST", &uri, Some(&body)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(get(format!("category={kitchen}")).await, [cup.as_str()]);
+    assert_eq!(get(format!("category={mugs}")).await, [cup.as_str()]);
+
+    let (status, body) = send(&app, "GET", "/admin/variants?product=mug", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+    let (status, body) = send(&app, "GET", "/admin/variants?status=draft", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
     );
 }
 
@@ -1678,6 +1840,124 @@ async fn an_upload_goes_straight_to_storage_and_completes_into_a_ready_asset() {
     assert_eq!(
         (status, code(&body)),
         (StatusCode::NOT_FOUND, "asset_not_found")
+    );
+}
+
+#[tokio::test]
+async fn a_price_import_is_uploaded_to_storage_and_read_back() {
+    let app = app_with_media().await;
+    let csv = b"variant,price\nvar_1,9.50\n".to_vec();
+    let body =
+        json!({ "purpose": "price_import", "filename": "Prices.csv", "byte_size": csv.len() });
+    let (status, created) = send(&app, "POST", "/admin/uploads", Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap();
+    assert!(id.starts_with("upl_"), "{created}");
+    assert_eq!(
+        (
+            &created["purpose"],
+            &created["filename"],
+            &created["upload"]["method"]
+        ),
+        (&json!("price_import"), &json!("Prices.csv"), &json!("PUT"))
+    );
+    let content = format!("/admin/uploads/{id}/content");
+    let (status, body) = send(&app, "GET", &content, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "upload_missing"),
+        "not uploaded yet"
+    );
+
+    assert_eq!(put_file(&created["upload"], csv.clone()).await, 200);
+    let request = axum::http::Request::builder()
+        .uri(&content)
+        .header("authorization", format!("Bearer {}", app.admin_key()))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let read = tower::ServiceExt::oneshot(app.router(), request)
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            read.status(),
+            read.headers()["content-type"].to_str().unwrap()
+        ),
+        (StatusCode::OK, "text/csv")
+    );
+    let bytes = axum::body::to_bytes(read.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(bytes.to_vec(), csv);
+
+    // The purpose's scope, not media's.
+    let media_only = key(
+        &app,
+        json!({ "kind": "secret", "name": "Media", "scopes": ["media:write"] }),
+    )
+    .await;
+    let (status, body) = send_as(&app, &media_only, "GET", &content, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "missing_scope")
+    );
+    let too_big = json!({ "purpose": "price_import", "filename": "big.csv",
+        "byte_size": 20 * 1024 * 1024 + 1 });
+    let (status, body) = send(&app, "POST", "/admin/uploads", Some(&too_big.to_string())).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "file_too_large")
+    );
+
+    let (status, _) = send(&app, "DELETE", &format!("/admin/uploads/{id}"), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = send(&app, "GET", &content, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "upload_not_found")
+    );
+}
+
+#[tokio::test]
+async fn an_expired_upload_is_gone_and_swept_with_its_file() {
+    let app = app_with_media().await;
+    let body = json!({ "purpose": "price_import", "filename": "old.csv", "byte_size": 3 });
+    let (_, created) = send(&app, "POST", "/admin/uploads", Some(&body.to_string())).await;
+    assert_eq!(put_file(&created["upload"], b"a,b".to_vec()).await, 200);
+    let id: hypha_core::UploadId = created["id"].as_str().unwrap().parse().unwrap();
+    sql(
+        &app,
+        &format!(
+            "UPDATE temporary_uploads SET expires_at = now() - interval '1 minute' WHERE id = '{}'",
+            id.as_uuid()
+        ),
+    )
+    .await;
+    let (status, body) = send(&app, "GET", &format!("/admin/uploads/{id}/content"), None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "upload_not_found")
+    );
+    let ran = hypha_http::jobs::media_sweep(&app.state).await.unwrap();
+    assert!(!ran.idle);
+    // The row went too: given back its time, it still isn't found.
+    sql(
+        &app,
+        "UPDATE temporary_uploads SET expires_at = now() + interval '1 day'",
+    )
+    .await;
+    let (status, _) = send(&app, "GET", &format!("/admin/uploads/{id}/content"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn uploads_need_media_storage() {
+    let app = app().await;
+    let body = json!({ "purpose": "price_import", "filename": "p.csv", "byte_size": 3 });
+    let (status, body) = send(&app, "POST", "/admin/uploads", Some(&body.to_string())).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::SERVICE_UNAVAILABLE, "media_not_configured")
     );
 }
 
@@ -3617,9 +3897,17 @@ async fn a_cart_ships_by_an_app_providers_signed_quote() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{order}");
     let shipped = &order["shipping_lines"][0];
+    assert_eq!(shipped["amount"], json!({"amount": 700, "currency": "EUR"}));
+    // The provider and its quote are for staff.
+    assert_eq!(
+        (shipped.get("provider"), shipped.get("reference")),
+        (None, None)
+    );
+    let admin = format!("/admin/orders/{}", order["id"].as_str().unwrap());
+    let (_, admin) = send(&app, "GET", &admin, None).await;
+    let shipped = &admin["shipping_lines"][0];
     assert_eq!(shipped["provider"], "app_courier");
     assert_eq!(shipped["reference"], "quote-42");
-    assert_eq!(shipped["amount"], json!({"amount": 700, "currency": "EUR"}));
     assert_eq!(
         order["shipping_total"],
         json!({"amount": 700, "currency": "EUR"})
@@ -5127,14 +5415,18 @@ async fn markets_are_renamed_price_lists_adjusted_and_keys_listed() {
         &app,
         "POST",
         "/admin/price-lists",
-        Some(r#"{"currency":"EUR"}"#),
+        Some(r#"{"name":"Euro","currency":"EUR"}"#),
     )
     .await;
     let url = format!("/admin/price-lists/{}", list["id"].as_str().unwrap());
-    let (status, list) = send(&app, "PATCH", &url, Some(r#"{"adjustment_bps":-1500}"#)).await;
+    let patch = r#"{"adjustment":{"percent_bps":-1500}}"#;
+    let (status, list) = send(&app, "PATCH", &url, Some(patch)).await;
     assert_eq!(
-        (status, &list["adjustment_bps"]),
-        (StatusCode::OK, &json!(-1500))
+        (status, &list["adjustment"]),
+        (
+            StatusCode::OK,
+            &json!({"percent_bps": -1500, "applies_to": {"type": "all"}})
+        )
     );
     let body = json!({"fixed_prices": [{"variant": mug_variant, "price": {"amount": 750, "currency": "EUR"}}]});
     send(
@@ -5176,8 +5468,8 @@ async fn a_products_whole_variant_list_is_set_in_one_put() {
 
     // "Create all variants": the admin sends every combination as an explicit list.
     let body = json!({"variants": [
-        {"id": first, "sku": "TEE-S", "price": {"amount": 1000, "currency": "EUR"}, "selections": [small], "weight_grams": 180, "requires_shipping": true},
-        {"id": null, "sku": "TEE-M", "price": {"amount": 1100, "currency": "EUR"}, "selections": [medium], "weight_grams": null, "requires_shipping": true}
+        {"id": first, "sku": "TEE-S", "price": {"amount": 1000, "currency": "EUR"}, "compare_at_price": null, "selections": [small], "weight_grams": 180, "requires_shipping": true},
+        {"id": null, "sku": "TEE-M", "price": {"amount": 1100, "currency": "EUR"}, "compare_at_price": {"amount": 1500, "currency": "EUR"}, "selections": [medium], "weight_grams": null, "requires_shipping": true}
     ]});
     let url = format!("/admin/products/{product}/variants");
     let (status, tee) = send(&app, "PUT", &url, Some(&body.to_string())).await;
@@ -5190,17 +5482,21 @@ async fn a_products_whole_variant_list_is_set_in_one_put() {
         .collect();
     assert_eq!(skus, [&json!("TEE-S"), &json!("TEE-M")]);
     assert_eq!(tee["variants"][0]["weight_grams"], json!(180));
+    assert_eq!(
+        tee["variants"][1]["compare_at_price"],
+        json!({"amount": 1500, "currency": "EUR"})
+    );
 
     // Every key is required, so nothing is cleared by leaving it out.
-    let body = json!({"variants": [{"id": first, "price": {"amount": 1000, "currency": "EUR"}, "selections": [small], "weight_grams": null, "requires_shipping": true}]});
+    let body = json!({"variants": [{"id": first, "price": {"amount": 1000, "currency": "EUR"}, "compare_at_price": null, "selections": [small], "weight_grams": null, "requires_shipping": true}]});
     let (status, error) = send(&app, "PUT", &url, Some(&body.to_string())).await;
     assert_eq!(
         (status, code(&error)),
         (StatusCode::UNPROCESSABLE_ENTITY, "invalid_body")
     );
     let body = json!({"variants": [
-        {"id": null, "sku": null, "price": {"amount": 1, "currency": "EUR"}, "selections": [small], "weight_grams": null, "requires_shipping": true},
-        {"id": null, "sku": null, "price": {"amount": 1, "currency": "EUR"}, "selections": [small], "weight_grams": null, "requires_shipping": true}
+        {"id": null, "sku": null, "price": {"amount": 1, "currency": "EUR"}, "compare_at_price": null, "selections": [small], "weight_grams": null, "requires_shipping": true},
+        {"id": null, "sku": null, "price": {"amount": 1, "currency": "EUR"}, "compare_at_price": null, "selections": [small], "weight_grams": null, "requires_shipping": true}
     ]});
     let (status, error) = send(&app, "PUT", &url, Some(&body.to_string())).await;
     assert_eq!(

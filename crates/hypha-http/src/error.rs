@@ -75,6 +75,15 @@ pub struct ApiErrorBody {
 /// - `too_many_items` / `too_few_items`: `{"owner", "count", "max"}` / `{…, "min"}`
 /// - `owner_not_found` / `invalid_owner`: `{"owners": ["prod_…"]}`, owners of a bulk
 ///   custom fields call that don't exist or aren't the definition's owner type
+/// - `fixed_prices_invalid`: `{"entries": [{"index", "variant", "code", "message"}]}`,
+///   every entry's problem at once, by its position in the request (`code`:
+///   `duplicate_fixed_price`, `fixed_price_currency_mismatch`, `negative_amount`,
+///   `compare_at_not_above_price`, `compare_at_currency_mismatch`, …)
+/// - `too_many_prices`: `{"max"}`, the most one request may set
+/// - `price_list_in_use`: `{"catalogs": ["cat_…"]}`, the catalogs holding it
+/// - `price_list_name_taken`: `{"price_list": "pl_…"}`, the list that has the name
+/// - `compare_at_not_above_price` / `compare_at_currency_mismatch` (variants):
+///   `{"variant": "var_…"}`
 ///
 /// Status rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 429 over
 /// a rate limit or locked second factor; 403
@@ -651,7 +660,10 @@ fn product_status(e: &hypha_products::ProductError) -> StatusCode {
         | P::DuplicateMedia(_)
         | P::MediaNotInProduct(_)
         | P::DescriptionTooLong { .. }
-        | P::TooManyTags { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+        | P::TooManyTags { .. }
+        | P::TooManyFilterIds { .. }
+        | P::CompareAtNotAbovePrice(_)
+        | P::CompareAtCurrencyMismatch(_) => StatusCode::UNPROCESSABLE_ENTITY,
     }
 }
 
@@ -660,6 +672,10 @@ fn product_details(e: &hypha_products::ProductError) -> Option<Value> {
     match e {
         P::OptionValueInUse { variants } => Some(json!({ "variants": variants })),
         P::VariantsCollide { first, second } => Some(json!({ "variants": [first, second] })),
+        P::CompareAtNotAbovePrice(variant) | P::CompareAtCurrencyMismatch(variant) => {
+            Some(json!({ "variant": variant }))
+        }
+        P::TooManyFilterIds { field, max } => Some(json!({ "field": field, "max": max })),
         _ => None,
     }
 }
@@ -697,20 +713,48 @@ impl From<hypha_markets::CommandError> for ApiError {
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
             E::CatalogNotFound(_) => StatusCode::NOT_FOUND,
-            E::CountryInOtherMarket { .. } | E::CatalogExists { .. } => StatusCode::CONFLICT,
+            E::CountryInOtherMarket { .. }
+            | E::CatalogExists { .. }
+            | E::PriceListNameTaken { .. }
+            | E::PriceListInUse { .. } => StatusCode::CONFLICT,
             E::Country(_)
             | E::Market(_)
             | E::Money(_)
             | E::PriceList(_)
             | E::PriceListNotFound(_)
             | E::MarketNotFound(_)
-            | E::CurrencyMismatch { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            | E::CurrencyMismatch { .. }
+            | E::TooManyPrices { .. }
+            | E::AudienceGroupNotFound => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,
         };
-        Self::domain(status, e)
+        let details = match &e {
+            E::PriceList(hypha_markets::PriceListError::InvalidFixedPrices(entries)) => {
+                let entries: Vec<Value> = entries
+                    .iter()
+                    .map(|p| {
+                        json!({
+                            "index": p.index,
+                            "variant": p.variant,
+                            "code": p.problem.code(),
+                            "message": p.problem.to_string(),
+                        })
+                    })
+                    .collect();
+                Some(json!({ "entries": entries }))
+            }
+            E::PriceListNameTaken { price_list, .. } => Some(json!({ "price_list": price_list })),
+            E::TooManyPrices { max } => Some(json!({ "max": max })),
+            E::PriceListInUse { catalogs, .. } => Some(json!({ "catalogs": catalogs })),
+            E::PriceList(hypha_markets::PriceListError::TooManyFilterIds { field, max }) => {
+                Some(json!({ "field": field, "max": max }))
+            }
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 
@@ -1006,9 +1050,10 @@ impl From<hypha_customers::CommandError> for ApiError {
             E::Auth(_) => StatusCode::FORBIDDEN,
             // Customer and address IDs only ever arrive in URLs.
             E::CustomerNotFound(_) | E::Customer(C::AddressNotFound(_)) => StatusCode::NOT_FOUND,
-            E::CustomerExists { .. } | E::GroupHandleTaken(_) | E::GroupNameTaken(_) => {
-                StatusCode::CONFLICT
-            }
+            E::CustomerExists { .. }
+            | E::GroupHandleTaken(_)
+            | E::GroupNameTaken(_)
+            | E::GroupInUse(_) => StatusCode::CONFLICT,
             // A group in a body (a customer's groups) unless a route says it's its URL's.
             E::GroupNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Email(_)
@@ -1219,17 +1264,20 @@ impl From<hypha_media::CommandError> for ApiError {
         use hypha_media::{CommandError as E, MediaError as M};
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
-            // Every asset route names the asset in its URL.
-            E::AssetNotFound(_) => StatusCode::NOT_FOUND,
-            // The asset's state: not uploaded yet, or not pending any more.
-            E::UploadMissing(_) | E::Media(M::NotPending { .. }) | E::AssetInUse { .. } => {
-                StatusCode::CONFLICT
-            }
+            // Every asset and upload route names the asset or upload in its URL.
+            E::AssetNotFound(_) | E::TemporaryUploadNotFound(_) => StatusCode::NOT_FOUND,
+            // The asset's or upload's state: not uploaded yet, or not pending any more.
+            E::UploadMissing(_)
+            | E::TemporaryUploadMissing(_)
+            | E::Media(M::NotPending { .. })
+            | E::AssetInUse { .. } => StatusCode::CONFLICT,
             E::Media(
                 M::Text(_)
                 | M::UnsupportedMediaType(_)
                 | M::EmptyFile
                 | M::FileTooLarge { .. }
+                | M::UploadTooLarge { .. }
+                | M::UnknownPurpose(_)
                 | M::InvalidChecksum(_)
                 | M::InvalidOwnerKind(_)
                 | M::InvalidOwnerId(_)

@@ -248,17 +248,20 @@ where
     store.catalogs().insert(&mut catalog).await.unwrap();
     let mut list = PriceList::new(
         PriceListId::from_uuid(Uuid::from_u128(7)),
-        Currency::EUR,
-        BasisPoints::new(0).unwrap(),
-    );
+        hypha_markets::PriceListDraft::new("Euro", Currency::EUR)
+            .adjusted(BasisPoints::new(0).unwrap()),
+    )
+    .unwrap();
     store.price_lists().insert(&mut list).await.unwrap();
     let member = ProductId::from_uuid(Uuid::from_u128(1));
     let variant = VariantId::from_uuid(Uuid::from_u128(101));
-    let price = Price::new(Money::new(900, Currency::EUR).unwrap()).unwrap();
+    let price = hypha_markets::FixedPrice::plain(
+        Price::new(Money::new(900, Currency::EUR).unwrap()).unwrap(),
+    );
 
     let mut batch = store.batch();
     batch.add_catalog_products(catalog.id(), &[member]);
-    batch.set_fixed_prices(list.id(), &[(variant, price)]);
+    batch.set_fixed_prices(list.id(), &[(variant, price.clone())]);
     batch.record_events(vec![tagged("set")]);
     store.commit(batch).await.unwrap();
     let included = store

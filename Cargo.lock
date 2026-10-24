@@ -976,6 +976,7 @@ dependencies = [
 name = "hypha-cart"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "hypha-channels",
  "hypha-core",
  "hypha-customers",
@@ -1282,6 +1283,7 @@ dependencies = [
  "hypha-order-actions",
  "hypha-orders",
  "hypha-payments",
+ "hypha-pricing",
  "hypha-privacy",
  "hypha-products",
  "hypha-search",
@@ -1536,6 +1538,7 @@ dependencies = [
  "hypha-channels",
  "hypha-core",
  "hypha-custom-fields",
+ "hypha-customers",
  "hypha-inventory",
  "hypha-markets",
  "hypha-pricing",

@@ -2,11 +2,11 @@
 
 use hypha_core::Timestamp;
 use hypha_testkit::{
-    InMemoryAppRepo, InMemoryAssetRepo, InMemoryBlobStore, InMemoryCartRepo, InMemoryCatalogRepo,
-    InMemoryCustomerRepo, InMemoryFulfillmentRepo, InMemoryInventoryItemRepo, InMemoryLocationRepo,
-    InMemoryMarketRepo, InMemoryOrderRepo, InMemoryPorts, InMemoryPriceListRepo,
-    InMemoryProductRepo, InMemorySearchIndex, InMemorySearchQueue, InMemorySearchSettingsRepo,
-    InMemoryStoreRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, contract,
+    InMemoryAppRepo, InMemoryAssetRepo, InMemoryBlobStore, InMemoryCartRepo, InMemoryCustomerRepo,
+    InMemoryFulfillmentRepo, InMemoryInventoryItemRepo, InMemoryLocationRepo, InMemoryMarketRepo,
+    InMemoryOrderRepo, InMemoryPorts, InMemoryPriceListRepo, InMemoryProductRepo,
+    InMemorySearchIndex, InMemorySearchQueue, InMemorySearchSettingsRepo, InMemoryStoreRepo,
+    InMemoryTaxClassRepo, InMemoryTaxRegionRepo, contract,
 };
 use pollster::block_on;
 
@@ -46,8 +46,20 @@ fn market_repo() {
 
 #[test]
 fn catalog_repo() {
-    block_on(contract::catalog_repo(async || {
-        InMemoryCatalogRepo::default()
+    block_on(contract::catalog_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn price_list_joins() {
+    block_on(contract::price_list_joins(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
+fn price_list_schedule() {
+    block_on(contract::price_list_schedule(async || {
+        InMemoryPorts::default()
     }));
 }
 
@@ -215,6 +227,13 @@ fn staff_batch() {
 #[test]
 fn asset_repo() {
     block_on(contract::asset_repo(async || InMemoryAssetRepo::default()));
+}
+
+#[test]
+fn temporary_upload_repo() {
+    block_on(contract::temporary_upload_repo(async || {
+        hypha_testkit::InMemoryTemporaryUploadRepo::default()
+    }));
 }
 
 #[test]

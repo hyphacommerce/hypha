@@ -9,7 +9,7 @@ use hypha_categories::{Category, StageCategories, keys as category_keys};
 use hypha_channels::StagePublications;
 use hypha_core::AppKey;
 use hypha_core::{
-    CatalogId, CategoryId, ChannelId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price,
+    CatalogId, CategoryId, ChannelId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent,
     PriceListId, ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency,
     TaxClassId, Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
@@ -22,7 +22,7 @@ use hypha_customers::{
 };
 use hypha_fulfillment::{Fulfillment, StageFulfillments, keys as fulfillment_keys};
 use hypha_inventory::{InventoryItem, StageInventoryItems};
-use hypha_markets::{StageCatalogProducts, StageFixedPrices};
+use hypha_markets::{FixedPrice, StageCatalogProducts, StageFixedPrices, StagePriceListSchedule};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_notifications::{
     NotificationSettings, StageNotificationSettings, keys as notification_keys,
@@ -111,7 +111,9 @@ enum Staged {
     DeletedCategory(CategoryId),
     CategoryProducts(CategoryId, Vec<ProductId>, bool),
     TaxAssignment(Vec<ProductId>, Option<TaxClassId>),
-    FixedPrices(PriceListId, Vec<(VariantId, Option<Price>)>),
+    FixedPrices(PriceListId, Vec<(VariantId, Option<FixedPrice>)>),
+    /// The schedule job's progress moved from the first to the second.
+    PriceListSchedule(Option<Timestamp>, Timestamp),
     NewNotificationSettings(NotificationSettings),
     NotificationSettings(NotificationSettings),
     NewApp(App),
@@ -550,6 +552,8 @@ impl HasBatch for InMemoryPorts {
         let group_members_before = group_members.clone();
         let mut fixed_prices = self.price_lists.lock_fixed_prices();
         let fixed_prices_before = fixed_prices.clone();
+        let mut schedule = self.price_lists.lock_schedule();
+        let schedule_before = *schedule;
         let mut tax_classes = self.tax_classes.lock_assignments();
         let tax_classes_before = tax_classes.clone();
         let mut notification_settings = self.notification_settings.settings.lock();
@@ -711,6 +715,11 @@ impl HasBatch for InMemoryPorts {
                         update_row(&mut groups, group.id(), &mut group, &unique_group)?
                     }
                     Staged::DeletedCustomerGroup(id) => {
+                        if self.price_lists.names_group(id) {
+                            return Err(RepoError::Reference(
+                                hypha_markets::repo::keys::PRICE_LIST_GROUP,
+                            ));
+                        }
                         groups.remove(&id);
                         group_members.remove(&id);
                     }
@@ -902,6 +911,12 @@ impl HasBatch for InMemoryPorts {
                             };
                         }
                     }
+                    Staged::PriceListSchedule(from, to) => {
+                        if *schedule != from {
+                            return Err(RepoError::StaleVersion);
+                        }
+                        *schedule = Some(to);
+                    }
                     Staged::NewNotificationSettings(mut settings) => insert_row(
                         &mut notification_settings,
                         (),
@@ -1041,6 +1056,7 @@ impl HasBatch for InMemoryPorts {
             *groups = groups_before;
             *group_members = group_members_before;
             *fixed_prices = fixed_prices_before;
+            *schedule = schedule_before;
             *tax_classes = tax_classes_before;
             *notification_settings = notification_settings_before;
             *apps = apps_before;
@@ -1121,14 +1137,20 @@ impl StageCatalogProducts for InMemoryBatch {
 }
 
 impl StageFixedPrices for InMemoryBatch {
-    fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, Price)]) {
-        let changes = prices.iter().map(|(v, p)| (*v, Some(*p))).collect();
+    fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, FixedPrice)]) {
+        let changes = prices.iter().map(|(v, p)| (*v, Some(p.clone()))).collect();
         self.stage(Staged::FixedPrices(list, changes));
     }
 
     fn remove_fixed_prices(&mut self, list: PriceListId, variants: &[VariantId]) {
         let changes = variants.iter().map(|v| (*v, None)).collect();
         self.stage(Staged::FixedPrices(list, changes));
+    }
+}
+
+impl StagePriceListSchedule for InMemoryBatch {
+    fn advance_price_list_schedule(&mut self, from: Option<Timestamp>, to: Timestamp) {
+        self.stage(Staged::PriceListSchedule(from, to));
     }
 }
 

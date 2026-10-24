@@ -1067,6 +1067,8 @@ fn order_line(line: &PricedLine, id: OrderLineId) -> Result<OrderLine, CommandEr
     };
     let LineStatus::Priced {
         unit_price,
+        compare_at,
+        price_list,
         total,
         tax,
     } = &line.status
@@ -1086,6 +1088,8 @@ fn order_line(line: &PricedLine, id: OrderLineId) -> Result<OrderLine, CommandEr
         total: *total,
         tax: tax.map(order_tax),
         fulfilled_quantity: 0,
+        compare_at_price: *compare_at,
+        price_list: *price_list,
     })
 }
 

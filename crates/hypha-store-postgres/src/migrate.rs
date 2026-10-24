@@ -394,6 +394,46 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "proposal_applying",
             sql: include_str!("../migrations/0074_proposal_applying.sql"),
         },
+        Migration {
+            version: 75,
+            name: "price_list_names",
+            sql: include_str!("../migrations/0075_price_list_names.sql"),
+        },
+        Migration {
+            version: 76,
+            name: "compare_at_prices",
+            sql: include_str!("../migrations/0076_compare_at_prices.sql"),
+        },
+        Migration {
+            version: 77,
+            name: "catalog_price_lists",
+            sql: include_str!("../migrations/0077_catalog_price_lists.sql"),
+        },
+        Migration {
+            version: 78,
+            name: "price_breaks",
+            sql: include_str!("../migrations/0078_price_breaks.sql"),
+        },
+        Migration {
+            version: 79,
+            name: "price_list_schedule",
+            sql: include_str!("../migrations/0079_price_list_schedule.sql"),
+        },
+        Migration {
+            version: 80,
+            name: "price_list_groups",
+            sql: include_str!("../migrations/0080_price_list_groups.sql"),
+        },
+        Migration {
+            version: 81,
+            name: "variants_by_product",
+            sql: include_str!("../migrations/0081_variants_by_product.sql"),
+        },
+        Migration {
+            version: 82,
+            name: "temporary_uploads",
+            sql: include_str!("../migrations/0082_temporary_uploads.sql"),
+        },
     ],
 };
 

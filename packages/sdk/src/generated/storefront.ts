@@ -735,7 +735,7 @@ export interface components {
             emails: components["schemas"]["NotificationResponse"][];
             /** @description When the export was made, RFC 3339 in UTC. */
             exported_at: string;
-            orders: components["schemas"]["OrderResponse"][];
+            orders: components["schemas"]["StorefrontOrderResponse"][];
             payments: components["schemas"]["PaymentResponse"][];
         };
         /** @description The signed-in customer, as they see themselves. */
@@ -1033,8 +1033,9 @@ export interface components {
         EventId: string;
         FacetResponse: {
             /**
-             * @description As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`, or
-             *     `field.<namespace>.<key>` for a custom field (`field.custom.material`).
+             * @description As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`, `on_sale`
+             *     (values `true` and `false`), or `field.<namespace>.<key>` for a custom field
+             *     (`field.custom.material`).
              */
             key: string;
             /** @description The merchant's label, if they set one. */
@@ -1118,6 +1119,7 @@ export interface components {
             variant_title?: string | null;
         };
         LineState: {
+            compare_at_price?: components["schemas"]["Money"] | null;
             /** @enum {string} */
             status: "priced";
             tax?: components["schemas"]["TaxLineResponse"] | null;
@@ -1276,87 +1278,6 @@ export interface components {
          * @example ordl_0190f1a2b3c47d8e9f00112233445566
          */
         OrderLineId: string;
-        OrderLineResponse: {
-            /**
-             * Format: int32
-             * @description How many of `quantity` standing fulfilments shipped.
-             */
-            fulfilled_quantity: number;
-            id: components["schemas"]["OrderLineId"];
-            image?: components["schemas"]["ProductMediaResponse"] | null;
-            product: components["schemas"]["ProductId"];
-            product_title: string;
-            /** Format: int32 */
-            quantity: number;
-            sku?: string | null;
-            tax?: components["schemas"]["OrderTaxResponse"] | null;
-            total: components["schemas"]["Money"];
-            unit_price: components["schemas"]["Money"];
-            variant: components["schemas"]["VariantId"];
-            /** @description The variant's option values ("M / Blue"); `null` for a product without options. */
-            variant_title?: string | null;
-        };
-        OrderResponse: {
-            cart: components["schemas"]["CartId"];
-            /** @description The sales channel it was placed through. */
-            channel: components["schemas"]["ChannelId"];
-            country: components["schemas"]["CountryCode"];
-            /** @description When it was created, RFC 3339 in UTC. */
-            created_at: string;
-            currency: components["schemas"]["Currency"];
-            customer: components["schemas"]["CustomerId"];
-            email: components["schemas"]["Email"];
-            financial_status: components["schemas"]["FinancialStatusDto"];
-            fulfillment_status: components["schemas"]["FulfillmentStatusDto"];
-            id: components["schemas"]["OrderId"];
-            lines: components["schemas"]["OrderLineResponse"][];
-            market: components["schemas"]["MarketId"];
-            /**
-             * Format: int64
-             * @description The human number, shown as "#1001".
-             */
-            number: number;
-            /** @description RFC 3339, UTC. */
-            placed_at: string;
-            /**
-             * @description Personal fields left out for this caller: an API key or app without the matching
-             *     `customer_data:*` scope. They are absent from the object then, whatever the schema
-             *     says. Never sent to staff or storefronts.
-             */
-            redacted?: string[] | null;
-            shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
-            /** @description How each group of lines ships, as charged. */
-            shipping_lines: components["schemas"]["OrderShippingLineResponse"][];
-            /** @description What shipping was charged, as part of `total`. */
-            shipping_total: components["schemas"]["Money"];
-            subtotal: components["schemas"]["Money"];
-            /**
-             * @description Tax on lines and shipping: part of `subtotal` and `shipping_total` if
-             *     `taxes_included`, else on top.
-             */
-            tax_total: components["schemas"]["Money"];
-            /** @description Whether line prices include tax (the market decided, at checkout). */
-            taxes_included: boolean;
-            total: components["schemas"]["Money"];
-            /** @description When it last changed, RFC 3339 in UTC. */
-            updated_at: string;
-        };
-        OrderShippingLineResponse: {
-            amount: components["schemas"]["Money"];
-            code: string;
-            estimate?: components["schemas"]["DeliveryEstimateDto"] | null;
-            group: components["schemas"]["ShippingGroupId"];
-            /** @description The order lines this ships. */
-            lines: components["schemas"]["OrderLineId"][];
-            name: string;
-            option: components["schemas"]["ShippingOptionId"];
-            /** @description `app_…` or `spore_…`; `null` for a built-in rate. */
-            provider?: string | null;
-            /** @description The provider's quote ID. */
-            reference?: string | null;
-            service?: string | null;
-            tax?: components["schemas"]["OrderTaxResponse"] | null;
-        };
         /** @description A page of a list, newest first. */
         OrderSummaryPage: {
             /** @description Whether there are more after these. */
@@ -1400,12 +1321,6 @@ export interface components {
              */
             redacted?: string[] | null;
             total: components["schemas"]["Money"];
-        };
-        OrderTaxResponse: {
-            amount: components["schemas"]["Money"];
-            /** @description Parts per million: 250000 = 25%. */
-            rate_ppm: components["schemas"]["TaxRate"];
-            tax_class?: components["schemas"]["TaxClassId"] | null;
         };
         /**
          * @description The kinds of record fields belong to.
@@ -1471,7 +1386,7 @@ export interface components {
          * @description A storefront's view of an order it placed: the order with its access token, the key to
          *     reading it again (`GET /storefront/orders/{id}?token=`).
          */
-        PlacedOrderResponse: components["schemas"]["OrderResponse"] & {
+        PlacedOrderResponse: components["schemas"]["StorefrontOrderResponse"] & {
             /**
              * @description Lets whoever holds it read this order: keep it with the buyer (a cookie, the
              *     confirmation email's link), never in a public place. The same for every read.
@@ -1529,6 +1444,12 @@ export interface components {
              */
             redacted?: string[] | null;
         };
+        /** @description From `min_quantity` of the variant in one cart line, each costs `price`. */
+        PriceBreakDto: {
+            /** Format: int32 */
+            min_quantity: number;
+            price: components["schemas"]["Money"];
+        };
         /**
          * @description A ProductId: `prod_` and 32 hex digits.
          * @example prod_0190f1a2b3c47d8e9f00112233445566
@@ -1575,6 +1496,7 @@ export interface components {
         SearchHitResponse: {
             /** @description Whether the variant shown can be sold now. */
             available: boolean;
+            compare_at?: components["schemas"]["Money"] | null;
             handle: string;
             image?: components["schemas"]["ProductMediaResponse"] | null;
             /** @description The listing it belongs to: the product, split by the merchant's options. */
@@ -1586,9 +1508,11 @@ export interface components {
              * @description How many of the group's variants matched.
              */
             matched_variants: number;
+            /** @description Whether the variant shown has a compare-at price (the `on_sale` facet). */
+            on_sale: boolean;
             /** @description The variant's options, in order. */
             options: components["schemas"]["SearchOption"][];
-            /** @description In the market's currency. */
+            /** @description In the market's currency: what one of the variant shown costs. */
             price: components["schemas"]["Money"];
             product: components["schemas"]["ProductId"];
             /** @description Over the product's variants in this market. */
@@ -1787,6 +1711,71 @@ export interface components {
             /** @description The apps a storefront may call through the app proxy. */
             proxies: components["schemas"]["ProxyExtension"][];
         };
+        StorefrontOrderLineResponse: {
+            compare_at_price?: components["schemas"]["Money"] | null;
+            /**
+             * Format: int32
+             * @description How many of `quantity` standing fulfilments shipped.
+             */
+            fulfilled_quantity: number;
+            id: components["schemas"]["OrderLineId"];
+            image?: components["schemas"]["ProductMediaResponse"] | null;
+            product: components["schemas"]["ProductId"];
+            product_title: string;
+            /** Format: int32 */
+            quantity: number;
+            sku?: string | null;
+            tax?: components["schemas"]["StorefrontTaxResponse"] | null;
+            total: components["schemas"]["Money"];
+            unit_price: components["schemas"]["Money"];
+            variant: components["schemas"]["VariantId"];
+            /** @description The variant's option values ("M / Blue"); `null` for a product without options. */
+            variant_title?: string | null;
+        };
+        /**
+         * @description An order as its buyer sees it (a storefront's confirmation, the account's orders):
+         *     what `OrderResponse` holds but what only staff read: the price list a line was priced
+         *     from, a shipping rate's provider and quote, tax classes and `redacted`.
+         */
+        StorefrontOrderResponse: {
+            cart: components["schemas"]["CartId"];
+            /** @description The sales channel it was placed through. */
+            channel: components["schemas"]["ChannelId"];
+            country: components["schemas"]["CountryCode"];
+            /** @description When it was created, RFC 3339 in UTC. */
+            created_at: string;
+            currency: components["schemas"]["Currency"];
+            customer: components["schemas"]["CustomerId"];
+            email: components["schemas"]["Email"];
+            financial_status: components["schemas"]["FinancialStatusDto"];
+            fulfillment_status: components["schemas"]["FulfillmentStatusDto"];
+            id: components["schemas"]["OrderId"];
+            lines: components["schemas"]["StorefrontOrderLineResponse"][];
+            market: components["schemas"]["MarketId"];
+            /**
+             * Format: int64
+             * @description The human number, shown as "#1001".
+             */
+            number: number;
+            /** @description RFC 3339, UTC. */
+            placed_at: string;
+            shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
+            /** @description How each group of lines ships, as charged. */
+            shipping_lines: components["schemas"]["StorefrontShippingLineResponse"][];
+            /** @description What shipping was charged, as part of `total`. */
+            shipping_total: components["schemas"]["Money"];
+            subtotal: components["schemas"]["Money"];
+            /**
+             * @description Tax on lines and shipping: part of `subtotal` and `shipping_total` if
+             *     `taxes_included`, else on top.
+             */
+            tax_total: components["schemas"]["Money"];
+            /** @description Whether line prices include tax (the market decided, at checkout). */
+            taxes_included: boolean;
+            total: components["schemas"]["Money"];
+            /** @description When it last changed, RFC 3339 in UTC. */
+            updated_at: string;
+        };
         /**
          * @description A product as a storefront sees it: active products only, without admin fields. A draft
          *     or archived product is `404 product_not_found`, the same as one that doesn't exist, so a
@@ -1827,6 +1816,18 @@ export interface components {
             variants: components["schemas"]["StorefrontVariantResponse"][];
             vendor?: string | null;
         };
+        StorefrontShippingLineResponse: {
+            amount: components["schemas"]["Money"];
+            code: string;
+            estimate?: components["schemas"]["DeliveryEstimateDto"] | null;
+            group: components["schemas"]["ShippingGroupId"];
+            /** @description The order lines this ships. */
+            lines: components["schemas"]["OrderLineId"][];
+            name: string;
+            option: components["schemas"]["ShippingOptionId"];
+            service?: string | null;
+            tax?: components["schemas"]["StorefrontTaxResponse"] | null;
+        };
         /**
          * @description What a storefront sees of the store: what a header, footer or contact page shows. Legal
          *     details stay in the admin until a storefront needs them.
@@ -1846,6 +1847,11 @@ export interface components {
          * @enum {string}
          */
         StorefrontTarget: string;
+        StorefrontTaxResponse: {
+            amount: components["schemas"]["Money"];
+            /** @description Parts per million: 250000 = 25%. */
+            rate_ppm: components["schemas"]["TaxRate"];
+        };
         StorefrontVariantResponse: {
             /**
              * @description Whether one can be bought now (in stock, or stock isn't tracked); `null` where
@@ -1859,13 +1865,23 @@ export interface components {
              *     there's no price.
              */
             available_quantity?: number | null;
+            compare_at_price?: components["schemas"]["Money"] | null;
             /** @description The variant's own custom field values storefronts are shown. */
             custom_fields: {
                 [key: string]: unknown;
             };
             id: components["schemas"]["VariantId"];
             media_asset_id?: components["schemas"]["AssetId"] | null;
+            /** @description Whether a compare-at price is shown: the variant is on sale. */
+            on_sale: boolean;
             price?: components["schemas"]["Money"] | null;
+            /**
+             * @description What larger cart lines cost each ("8.00 each from 10"), whichever price list wins
+             *     them: by quantity, each below `price` and the one before it. The cart prices each
+             *     line at its quantity, so a line of `min_quantity` pays that break's `price`. Empty
+             *     when buying more costs no less.
+             */
+            price_breaks: components["schemas"]["PriceBreakDto"][];
             /** @description One value per option, in the order of `options`. */
             selections: components["schemas"]["OptionValueId"][];
             /** @description Its option values ("M / Blue"); `null` for a product without options. */
@@ -5435,9 +5451,10 @@ export interface operations {
                 q?: string;
                 /**
                  * @description Repeatable `key:value`, key `option.<name>` (any case), `vendor`,
-                 *     `product_type`, `tag` or `field.<namespace>.<key>` (a custom field the merchant
-                 *     made a facet; a choice field's value is its key): values of one key match any,
-                 *     different keys all.
+                 *     `product_type`, `tag`, `on_sale` (`true`: only what's shown with a compare-at
+                 *     price) or `field.<namespace>.<key>` (a custom field the merchant made a facet; a
+                 *     choice field's value is its key): values of one key match any, different keys
+                 *     all.
                  */
                 filter?: string[];
                 /** @description Inclusive, in the market currency's minor units. */

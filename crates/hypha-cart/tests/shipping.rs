@@ -144,7 +144,12 @@ impl World {
         );
         block_on(p.catalogs.insert(&mut catalog)).unwrap();
         block_on(p.catalogs.add_products(catalog_id, &[pid(1100), pid(1101)])).unwrap();
-        let mut list = PriceList::new(list_id, Currency::EUR, BasisPoints::new(0).unwrap());
+        let mut list = PriceList::new(
+            list_id,
+            hypha_markets::PriceListDraft::new("Euro", Currency::EUR)
+                .adjusted(BasisPoints::new(0).unwrap()),
+        )
+        .unwrap();
         block_on(p.price_lists.insert(&mut list)).unwrap();
 
         let mut zone = ShippingZone::new(zone_id(), "Croatia", vec![hr()]).unwrap();

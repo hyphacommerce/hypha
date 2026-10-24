@@ -69,6 +69,7 @@ export function Listing({
   base,
   productBase,
   category,
+  onSale = false,
   initial,
   initialQuery,
 }: {
@@ -80,6 +81,8 @@ export function Listing({
   /** Product pages' URL prefix (`/hr/p`). */
   productBase: string;
   category?: string;
+  /** Only what's on sale, always (the sale page): no on-sale toggle then. */
+  onSale?: boolean;
   /** The page the server rendered, for `initialQuery`. */
   initial: ListingPage;
   initialQuery: string;
@@ -107,7 +110,7 @@ export function Listing({
   useEffect(() => {
     if (query === shown.query || query === initialQuery) return;
     startLoading(async () => {
-      const page = await listingPage({ country, category, query });
+      const page = await listingPage({ country, category, onSale, query });
       // New cards fade in with their picture, not empty then popping: the first images
       // are fetched and decoded first, waiting no more than a moment for them.
       await imagesReady(page.items, 12, 400);
@@ -118,7 +121,7 @@ export function Listing({
         setShown({ query, page });
       });
     });
-  }, [query, shown.query, initialQuery, country, category]);
+  }, [query, shown.query, initialQuery, country, category, onSale]);
 
   // Paging starts the shopper at the top of the results, as a new page would.
   const top = useRef<HTMLDivElement>(null);
@@ -142,7 +145,15 @@ export function Listing({
       </>
     );
   }
-  const controls = { base, state, facets: page.facets, currency, priceHint: page.priceHint };
+  const controls = {
+    base,
+    state,
+    facets: page.facets,
+    currency,
+    priceHint: page.priceHint,
+    onSaleCount: page.onSaleCount,
+    saleOnly: onSale,
+  };
   const previous = previousPage(state);
   const next = page.nextCursor;
   const narrowed = state.filters.length > 0 || state.min !== undefined || state.max !== undefined;

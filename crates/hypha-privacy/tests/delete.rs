@@ -87,6 +87,8 @@ fn order_for(ana: CustomerId, n: u128) -> Order {
             total: eur(500),
             tax: None,
             fulfilled_quantity: 0,
+            compare_at_price: None,
+            price_list: None,
         }],
         shipping_address: None,
         shipping_lines: vec![],

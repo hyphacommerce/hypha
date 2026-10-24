@@ -3,11 +3,11 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use hypha_core::{AssetId, Keyset, Page, PageRequest, Recorded, RepoError, Timestamp};
+use hypha_core::{AssetId, Keyset, Page, PageRequest, Recorded, RepoError, Timestamp, UploadId};
 use hypha_media::{
     Asset, AssetFilter, AssetRepo, AssetSort, AssetStatus, AssetUsage, AssetUsageRepo, BlobError,
-    BlobHead, BlobKey, BlobStore, HasAssetUsages, HasAssets, PresignedUpload, UploadTerms,
-    UsageOwner, UsageRole, repo::keys,
+    BlobHead, BlobKey, BlobStore, HasAssetUsages, HasAssets, PresignedUpload, TemporaryUpload,
+    TemporaryUploadRepo, UploadTerms, UsageOwner, UsageRole, repo::keys,
 };
 use sha2::{Digest, Sha256};
 
@@ -323,5 +323,42 @@ impl BlobStore for InMemoryBlobStore {
     ) -> Result<String, BlobError> {
         let expires = now.plus_secs(i64::from(expires_in_secs)).unix_micros();
         Ok(format!("memory://download/{key}?expires={expires}"))
+    }
+}
+
+/// Temporary uploads' records, in memory.
+#[derive(Default)]
+pub struct InMemoryTemporaryUploadRepo {
+    uploads: Mutex<BTreeMap<UploadId, TemporaryUpload>>,
+}
+
+impl TemporaryUploadRepo for InMemoryTemporaryUploadRepo {
+    async fn get(&self, id: UploadId) -> Result<Option<TemporaryUpload>, RepoError> {
+        Ok(self.uploads.lock().unwrap().get(&id).cloned())
+    }
+
+    async fn insert(&self, upload: &TemporaryUpload) -> Result<(), RepoError> {
+        let mut uploads = self.uploads.lock().unwrap();
+        if uploads.contains_key(&upload.id()) {
+            return Err(RepoError::Duplicate(keys::TEMPORARY_UPLOAD_ID));
+        }
+        uploads.insert(upload.id(), upload.clone());
+        Ok(())
+    }
+
+    async fn delete(&self, id: UploadId) -> Result<bool, RepoError> {
+        Ok(self.uploads.lock().unwrap().remove(&id).is_some())
+    }
+
+    async fn expired(&self, at: Timestamp, limit: u32) -> Result<Vec<TemporaryUpload>, RepoError> {
+        Ok(self
+            .uploads
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|u| u.expires_at() <= at)
+            .take(limit as usize)
+            .cloned()
+            .collect())
     }
 }

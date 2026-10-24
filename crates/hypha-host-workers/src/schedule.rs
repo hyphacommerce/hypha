@@ -18,9 +18,44 @@ pub fn due(at_millis: u64, interval: Duration) -> bool {
     interval <= tick || at_millis / interval != at_millis.saturating_sub(tick) / interval
 }
 
+/// Whether a request may have moved a price list's window boundary (a list or a catalog
+/// written, or a write an agent or a proposal's approval made): its after-write run then
+/// writes the `due` mark again, which counts the next boundary. Other writes leave the mark
+/// as the last tick found it; one that slips past (a spore's route) waits at most for the
+/// safety net's tick.
+pub fn may_move_boundaries(method: &str, path: &str) -> bool {
+    !matches!(method, "GET" | "HEAD" | "OPTIONS")
+        && [
+            "/admin/price-lists",
+            "/admin/catalogs",
+            "/admin/markets",
+            "/admin/agent-proposals",
+            "/mcp",
+        ]
+        .iter()
+        .any(|prefix| {
+            path.strip_prefix(prefix)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writes_to_price_lists_and_catalogs_may_move_boundaries() {
+        assert!(may_move_boundaries("PATCH", "/admin/price-lists/pl_1"));
+        assert!(may_move_boundaries("POST", "/admin/price-lists"));
+        assert!(may_move_boundaries(
+            "PUT",
+            "/admin/catalogs/cat_1/price-lists"
+        ));
+        assert!(may_move_boundaries("POST", "/mcp"));
+        assert!(!may_move_boundaries("GET", "/admin/price-lists"));
+        assert!(!may_move_boundaries("POST", "/admin/products"));
+        assert!(!may_move_boundaries("POST", "/admin/price-listsx"));
+    }
 
     const MINUTE: u64 = 60_000;
     const HOUR: Duration = Duration::from_secs(3600);

@@ -452,3 +452,454 @@ html[data-theme="dark"] .hypha-wordmark-dark {
 .tile-amounts > span {
   white-space: nowrap;
 }
+
+/* The price editor (app/(editor)/…/prices, components/price-grid): the whole window,
+   outside the admin's frame. Two bars, the grid scrolling inside with its header row
+   and names column held in place, a status line. Editable cells sit raised on the card
+   colour like inputs and outline under the pointer; read-only ones stay flat and muted. */
+.pe {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  background: var(--color-background-body);
+  color: var(--color-text-primary);
+}
+
+.pe-bar,
+.pe-tools,
+.pe-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+}
+
+.pe-bar {
+  min-height: 48px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-background-card);
+}
+
+.pe-title {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pe-name {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Facts about the list, or the page: short runs split by hairlines. */
+.pe-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.pe-title .pe-meta {
+  margin-inline-start: 4px;
+}
+
+.pe-meta > span + span {
+  padding-inline-start: 10px;
+  border-inline-start: 1px solid var(--color-border);
+}
+
+.pe-save {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pe-count {
+  margin-inline-end: 4px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.pe-count[data-state="error"] {
+  color: var(--color-error);
+}
+
+.pe-tools {
+  min-height: 44px;
+  padding-block: 6px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.pe-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pe-group + .pe-group {
+  padding-inline-start: 12px;
+  border-inline-start: 1px solid var(--color-border);
+}
+
+.pe-spacer {
+  flex: 1;
+}
+
+.pe-banners {
+  display: grid;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.pe-foot {
+  justify-content: space-between;
+  min-height: 40px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-background-card);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.pe-status {
+  flex: 1;
+  min-width: 0;
+}
+
+.pe-status-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-error);
+}
+
+.pe-hint .astryx-kbd {
+  vertical-align: middle;
+}
+
+.pe-pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pe-empty {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 64px 16px;
+  text-align: center;
+}
+
+.pe-skeleton {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 12px;
+}
+
+.pg-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  /* Keys move the focus into view below the header row and beside the names. */
+  scroll-padding-block-start: 29px;
+  scroll-padding-inline-start: 300px;
+}
+
+.pg-table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+/* Sized to their content; the names take what's left. */
+.pg-table col[data-col="sku"] {
+  width: 132px;
+}
+.pg-table col[data-col="base_price"] {
+  width: 104px;
+}
+.pg-table col[data-col="compare_at_price"],
+.pg-table col[data-col="list_price"] {
+  width: 128px;
+}
+.pg-table col[data-col="fixed_price"] {
+  width: 136px;
+}
+.pg-table col[data-col="fixed_compare_at"] {
+  width: 184px;
+}
+.pg-table col[data-col="breaks"] {
+  width: 104px;
+}
+
+.pg-cell {
+  height: 28px;
+  padding: 0 10px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--color-border);
+  border-inline-end: 1px solid var(--color-border);
+  background: var(--color-background-body);
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+  outline: none;
+}
+
+.pg-head .pg-cell {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--color-background-muted);
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  text-align: start;
+}
+
+/* An editable column's header reads as one: brighter, with a pencil. */
+.pg-head .pg-cell[data-editable] {
+  color: var(--color-text-primary);
+}
+
+.pg-head-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pg-head-icon {
+  color: var(--color-icon-accent);
+}
+
+.pg-head-currency {
+  color: var(--color-text-disabled);
+  font-weight: 400;
+}
+
+.pg-table [data-numeric] {
+  text-align: end;
+}
+
+/* The names stay in view while the prices scroll sideways. */
+.pg-row > .pg-cell:first-child {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  border-inline-end-color: var(--color-border-emphasized);
+}
+
+.pg-head .pg-cell:first-child {
+  z-index: 3;
+}
+
+.pg-body .pg-cell {
+  cursor: cell;
+}
+
+.pg-body .pg-cell[data-readonly]:not(:first-child) {
+  color: var(--color-text-secondary);
+}
+
+/* A product's header row: one quiet line above its variants. */
+.pg-row[data-kind="product"] > .pg-cell {
+  height: 26px;
+  background: var(--color-background-muted);
+}
+
+/* An editable cell holds a small field, drawn behind its text: it reads as an input
+   at a glance, and its border brightens under the pointer. */
+.pg-body .pg-cell[data-editable] {
+  position: relative;
+  isolation: isolate;
+  color: var(--color-text-primary);
+  cursor: text;
+}
+
+.pg-body .pg-cell[data-editable]::before {
+  position: absolute;
+  z-index: -1;
+  inset: 3px 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-background-card);
+  content: "";
+}
+
+.pg-body .pg-cell[data-editable][data-col="breaks"] {
+  cursor: pointer;
+}
+
+.pg-body .pg-cell[data-editable]:hover::before {
+  border-color: var(--color-border-emphasized);
+}
+
+/* Changed and not saved yet. */
+.pg-body .pg-cell[data-dirty]::before {
+  border-color: var(--color-warning);
+  background: var(--color-warning-muted);
+}
+
+.pg-body .pg-cell[aria-invalid="true"] {
+  color: var(--color-error);
+}
+
+.pg-body .pg-cell[aria-invalid="true"]::before {
+  border-color: var(--color-error);
+  background: var(--color-error-muted);
+}
+
+.pg-table[data-multi] .pg-cell[aria-selected="true"] {
+  background: var(--color-accent-muted);
+}
+
+.pg-table[data-multi] .pg-cell[aria-selected="true"]::before {
+  background: var(--color-accent-muted);
+}
+
+/* The cell the keyboard is on. */
+.pg-cell:focus,
+.pg-cell[data-editing] {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.pg-cell[data-editing] {
+  padding: 0;
+}
+
+.pg-input {
+  width: 100%;
+  height: 100%;
+  padding: 0 10px;
+  border: none;
+  border-radius: 0;
+  background: var(--color-background-card);
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: end;
+  outline: none;
+  user-select: text;
+}
+
+.pg-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pg-flag {
+  flex: none;
+}
+
+/* An empty editable cell: blank at rest, a pencil under the pointer or the keyboard. */
+.pg-empty-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-icon-secondary);
+  opacity: 0;
+}
+
+.pg-cell:hover .pg-empty-cell,
+.pg-cell:focus .pg-empty-cell {
+  opacity: 1;
+}
+
+.pg-none {
+  color: var(--color-text-disabled);
+}
+
+/* A list price the adjustment works out, not one typed in. */
+.pg-derived {
+  color: var(--color-text-disabled);
+  font-style: italic;
+}
+
+.pg-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pg-name-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pg-row[data-kind="product"] .pg-name-title {
+  font-weight: 500;
+}
+
+.pg-muted {
+  flex: none;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.pg-variant {
+  padding-inline-start: 22px;
+}
+
+.pg-toggle {
+  display: inline-flex;
+  flex: none;
+  padding: 1px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--color-icon-secondary);
+  cursor: pointer;
+}
+
+.pg-toggle:hover {
+  background: var(--color-overlay-hover);
+}
+
+/* A variant the save refused: a red edge on its name. */
+.pg-row[data-row-error] > .pg-cell:first-child {
+  box-shadow: inset 2px 0 0 var(--color-error);
+}
+
+.pg-row-error {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-error);
+}
+
+.pg-empty {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+}
+
+@media (max-width: 720px) {
+  .pe-title .pe-meta {
+    display: none;
+  }
+}
+
+/* The new price list page's templates: as many columns as fit, one on a phone. */
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+  gap: 12px;
+}

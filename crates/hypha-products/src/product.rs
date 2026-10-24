@@ -426,6 +426,7 @@ pub struct VariantSnapshot {
     pub id: VariantId,
     pub sku: Option<String>,
     pub base_price: Money,
+    pub compare_at_price: Option<Money>,
     /// One value per option, in option order.
     pub selections: Vec<OptionValueId>,
     /// One of the product's `media`.
@@ -471,6 +472,7 @@ impl Product {
                     id: v.id(),
                     sku: v.sku().map(str::to_string),
                     base_price: v.base_price().money(),
+                    compare_at_price: v.compare_at_price().map(|p| p.money()),
                     selections: v.selections().to_vec(),
                     media: v.media(),
                     weight: v.weight(),
@@ -525,6 +527,11 @@ impl Product {
         // SKUs; with no options it allows exactly one variant (the simple-product shape).
         for v in s.variants {
             let price = Price::new(v.base_price).map_err(ProductError::InvalidPrice)?;
+            let compare_at_price = v
+                .compare_at_price
+                .map(Price::new)
+                .transpose()
+                .map_err(ProductError::InvalidPrice)?;
             product.add_variant(NewVariant {
                 id: v.id,
                 sku: v.sku,
@@ -535,6 +542,7 @@ impl Product {
             product.update_variant(
                 v.id,
                 VariantPatch {
+                    compare_at_price: Some(compare_at_price),
                     weight: Some(v.weight),
                     requires_shipping: Some(v.requires_shipping),
                     ..VariantPatch::default()
@@ -997,6 +1005,7 @@ mod tests {
             media: None,
             weight: None,
             requires_shipping: true,
+            compare_at_price: None,
         });
         assert_eq!(Product::restore(s), Err(ProductError::DuplicateCombination));
     }

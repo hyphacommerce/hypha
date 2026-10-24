@@ -33,6 +33,9 @@ pub enum CommandError {
     GroupHandleTaken(Handle),
     #[error("a customer group named {0:?} exists")]
     GroupNameTaken(String),
+    /// Something points at the group (a price list's audience): change that first.
+    #[error("customer group {0} is in use")]
+    GroupInUse(CustomerGroupId),
 }
 
 impl ErrorCode for CommandError {
@@ -48,6 +51,7 @@ impl ErrorCode for CommandError {
             CommandError::GroupNotFound(_) => "customer_group_not_found",
             CommandError::GroupHandleTaken(_) => "customer_group_handle_taken",
             CommandError::GroupNameTaken(_) => "customer_group_name_taken",
+            CommandError::GroupInUse(_) => "customer_group_in_use",
         }
     }
 }
