@@ -10,7 +10,9 @@
 //! option (`POST`/`PATCH /admin/shipping-zones/{id}/options…`). An unknown one is stored and
 //! simply never matches. Checking them belongs in a composing layer (like `hypha-cart`),
 //! not in these crates. Likewise a payment method's markets and channels
-//! (`POST`/`PATCH /admin/payment-methods…`).
+//! (`POST`/`PATCH /admin/payment-methods…`), and a discount's products, variants,
+//! categories, customers, customer groups and channels (`POST`/`PATCH /admin/discounts…`;
+//! its markets are checked, since its amounts are priced in their currencies).
 
 use axum::{
     Json,
