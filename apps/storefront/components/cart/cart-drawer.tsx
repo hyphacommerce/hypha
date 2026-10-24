@@ -1,8 +1,9 @@
 "use client";
 
 // The cart in a drawer: a dialog against the page's end edge, opened from the header
-// and after adding to the cart, with the lines, the subtotal and the way on to the cart
-// page and checkout.
+// and after adding to the cart, with the lines, the discount code field, the subtotal
+// (after discounts, with what they took off above it) and the way on to the cart page
+// and checkout.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -13,14 +14,19 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 
+import { discountedTotals, minus, readCartDiscounts } from "@/lib/discounts";
 import { formatMoney } from "@/lib/money";
 
 import { CartLines } from "./cart-lines";
 import { useCart } from "./cart-provider";
+import { DiscountCodeField } from "./discount-code-field";
 
 export function CartDrawer() {
   const { cart, count, digits, base, isOpen, close, error } = useCart();
   const isEmpty = !cart || cart.lines.length === 0;
+  const discounts = readCartDiscounts(cart);
+  // What came off the goods, above the subtotal they're already taken from.
+  const goods = cart ? discountedTotals(cart.subtotal, discounts).goods : null;
   return (
     <Dialog
       isOpen={isOpen}
@@ -51,6 +57,13 @@ export function CartDrawer() {
             </div>
             <Divider />
             <VStack gap={3}>
+              <DiscountCodeField discounts={discounts} />
+              {goods && (
+                <HStack hAlign="between">
+                  <Text color="secondary">Discounts</Text>
+                  <Text hasTabularNumbers>{minus(goods, digits)}</Text>
+                </HStack>
+              )}
               <HStack hAlign="between">
                 <Text weight="medium">Subtotal</Text>
                 <Text weight="semibold" hasTabularNumbers>

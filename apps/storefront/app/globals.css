@@ -142,8 +142,10 @@ body {
   background: var(--color-background-muted);
 }
 
-/* A product's quantity prices: a plain list, no bullets. */
-.shop-breaks {
+/* A product's quantity prices, a cart's discount codes and the discounts applied: plain
+   lists, no bullets. */
+.shop-breaks,
+.shop-plain-list {
   list-style: none;
   margin: 0;
   padding: 0;

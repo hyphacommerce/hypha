@@ -1,7 +1,7 @@
 "use client";
 
-// The cart page's body: the same lines as the drawer, with the totals and the way to
-// checkout beside them.
+// The cart page's body: the same lines as the drawer, with the discount code field,
+// the totals and the way to checkout beside them.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -12,9 +12,11 @@ import { Skeleton } from "@/components/skeletons";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 
 import { Totals } from "@/components/totals";
+import { readCartDiscounts } from "@/lib/discounts";
 
 import { CartLines } from "./cart-lines";
 import { useCart } from "./cart-provider";
+import { DiscountCodeField } from "./discount-code-field";
 
 export function CartView() {
   const { cart, isLoading, digits, base, error } = useCart();
@@ -36,6 +38,7 @@ export function CartView() {
       />
     );
   }
+  const discounts = readCartDiscounts(cart);
   return (
     <HStack gap={6} vAlign="start" wrap="wrap">
       <StackItem size="fill">
@@ -50,6 +53,7 @@ export function CartView() {
         <Card padding={5}>
           <VStack gap={4}>
             <Heading level={2}>Summary</Heading>
+            <DiscountCodeField discounts={discounts} />
             <Totals
               subtotal={cart.subtotal}
               shipping={cart.shipping_total}
@@ -57,6 +61,7 @@ export function CartView() {
               total={cart.total}
               taxesIncluded={cart.taxes_included}
               digits={digits}
+              discounts={discounts}
             />
             {cart.fully_available ? (
               <Button

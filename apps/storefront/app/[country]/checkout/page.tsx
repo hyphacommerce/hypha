@@ -8,13 +8,14 @@ import { Text } from "@astryxdesign/core/Text";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
+import { CodeStates } from "@/components/discounts";
 import { lineImage } from "@/components/line-image";
 import { SummaryLine, Totals } from "@/components/totals";
 import { loadAccount } from "@/lib/account";
 import { api, countryOf } from "@/lib/api";
 import { Price } from "@/components/price";
+import { linePrice, readCartDiscounts, readOfferAfter, shippingPrice } from "@/lib/discounts";
 import { formatMoney } from "@/lib/money";
-import { lineCompareAt } from "@/lib/prices";
 import { cartId, link } from "@/lib/site";
 
 import {
@@ -63,6 +64,7 @@ export default async function CheckoutPage({
   ]);
   if (!cart || cart.order || cart.lines.length === 0) redirect(link(code, "/cart"));
 
+  const discounts = readCartDiscounts(cart);
   const address = cart.shipping_address;
   // Their shipping address in this country, or the first one here.
   const here = account?.addresses.filter((a) => a.country === code) ?? [];
@@ -147,13 +149,22 @@ export default async function CheckoutPage({
                         heading={offers.length > 1 ? `Shipment ${index + 1}` : undefined}
                         selected={chosen?.selected?.option}
                         problem={Boolean(chosen?.problem)}
-                        offers={group.offers.map((offer) => ({
-                          option: offer.option,
-                          label: offer.estimate
-                            ? `${offer.name} (${offer.estimate.min_days}–${offer.estimate.max_days} days)`
-                            : offer.name,
-                          price: formatMoney(offer.amount, digits),
-                        }))}
+                        offers={group.offers.map((offer) => {
+                          // "Free" when a shipping discount takes all of it.
+                          const price = shippingPrice(
+                            readOfferAfter(offer) ?? offer.amount,
+                            offer.amount,
+                            digits,
+                          );
+                          return {
+                            option: offer.option,
+                            label: offer.estimate
+                              ? `${offer.name} (${offer.estimate.min_days}–${offer.estimate.max_days} days)`
+                              : offer.name,
+                            price: price.text,
+                            was: price.was,
+                          };
+                        })}
                       />
                     );
                   })
@@ -206,30 +217,39 @@ export default async function CheckoutPage({
             <Card padding={5}>
               <VStack gap={4}>
                 <Heading level={2}>Order summary</Heading>
-                {cart.lines.map((line) => (
-                  <SummaryLine
-                    key={line.variant}
-                    quantity={line.quantity}
-                    title={line.product_title ?? "A product no longer sold"}
-                    image={lineImage(line.image)}
-                    variant={line.variant_title}
-                    total={
-                      line.status === "priced" ? (
-                        <Price
-                          price={line.total}
-                          compareAt={lineCompareAt(
-                            line.compare_at_price,
-                            line.quantity,
-                            line.total,
-                          )}
-                          digits={digits}
-                        />
-                      ) : (
-                        "—"
-                      )
-                    }
-                  />
-                ))}
+                {cart.lines.map((line) => {
+                  const shown =
+                    line.status === "priced"
+                      ? linePrice(
+                          line,
+                          discounts.lines[line.variant],
+                          discounts.applications,
+                          digits,
+                        )
+                      : null;
+                  return (
+                    <SummaryLine
+                      key={line.variant}
+                      quantity={line.quantity}
+                      title={line.product_title ?? "A product no longer sold"}
+                      image={lineImage(line.image)}
+                      variant={line.variant_title}
+                      notes={shown?.notes}
+                      total={
+                        shown ? (
+                          <Price price={shown.price} compareAt={shown.compareAt} digits={digits} />
+                        ) : (
+                          "—"
+                        )
+                      }
+                    />
+                  );
+                })}
+                <CodeStates
+                  codes={discounts.codes}
+                  applications={discounts.applications}
+                  digits={digits}
+                />
                 <Divider />
                 <Totals
                   subtotal={cart.subtotal}
@@ -238,6 +258,7 @@ export default async function CheckoutPage({
                   total={cart.total}
                   taxesIncluded={cart.taxes_included}
                   digits={digits}
+                  discounts={discounts}
                 />
                 {returnError && <Banner status="error" title={returnError} />}
                 {closed ? (

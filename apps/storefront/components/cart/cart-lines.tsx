@@ -1,8 +1,9 @@
 "use client";
 
 // A cart's lines, shared by the drawer and the cart page: the picture, the product
-// (linked), its variant, the quantity, Remove, and the line's total (its compare-at
-// total struck through beside it when it's on sale). An unavailable line
+// (linked), its variant, the quantity, Remove, and the line's total (after discounts,
+// with what each took off under the variant and the total before them struck through
+// beside it; else its compare-at total, when it's on sale). An unavailable line
 // says why; it's left out of the totals.
 
 import { Banner } from "@astryxdesign/core/Banner";
@@ -16,8 +17,9 @@ import { useEffect, useRef } from "react";
 
 import type { Cart } from "@/app/[country]/actions";
 import { LineImage, lineImage } from "@/components/line-image";
+import { DiscountNotes } from "@/components/discounts";
 import { Price } from "@/components/price";
-import { lineCompareAt } from "@/lib/prices";
+import { type Application, type LineDiscount, linePrice, readCartDiscounts } from "@/lib/discounts";
 
 import { useCart } from "./cart-provider";
 
@@ -26,6 +28,7 @@ type Line = Cart["lines"][number];
 export function CartLines({ size = "md" }: { size?: "sm" | "md" }) {
   const { cart, digits, base, change, isPending } = useCart();
   if (!cart) return null;
+  const discounts = readCartDiscounts(cart);
   return (
     <VStack gap={0}>
       {cart.lines.map((line, i) => (
@@ -33,6 +36,8 @@ export function CartLines({ size = "md" }: { size?: "sm" | "md" }) {
           {i > 0 && <Divider />}
           <CartLineRow
             line={line}
+            discount={discounts.lines[line.variant]}
+            applications={discounts.applications}
             digits={digits}
             href={line.handle ? `${base}/p/${line.handle}` : null}
             size={size}
@@ -47,6 +52,8 @@ export function CartLines({ size = "md" }: { size?: "sm" | "md" }) {
 
 function CartLineRow({
   line,
+  discount,
+  applications,
   digits,
   href,
   size,
@@ -54,6 +61,8 @@ function CartLineRow({
   onChange,
 }: {
   line: Line;
+  discount: LineDiscount | undefined;
+  applications: Application[];
   digits: number;
   href: string | null;
   size: "sm" | "md";
@@ -74,6 +83,7 @@ function CartLineRow({
     asked.current = quantity;
     onChange(quantity);
   };
+  const shown = line.status === "priced" ? linePrice(line, discount, applications, digits) : null;
   return (
     <VStack gap={2} paddingBlock={size === "sm" ? 3 : 4}>
       <HStack gap={3} vAlign="start">
@@ -90,10 +100,10 @@ function CartLineRow({
                   title
                 )}
               </Text>
-              {line.status === "priced" ? (
+              {shown ? (
                 <Price
-                  price={line.total}
-                  compareAt={lineCompareAt(line.compare_at_price, line.quantity, line.total)}
+                  price={shown.price}
+                  compareAt={shown.compareAt}
                   digits={digits}
                   weight="medium"
                 />
@@ -104,6 +114,7 @@ function CartLineRow({
               )}
             </HStack>
             {line.variant_title && <Text type="supporting">{line.variant_title}</Text>}
+            {shown && <DiscountNotes notes={shown.notes} />}
             <HStack gap={2} vAlign="center">
               <div style={{ width: 104 }}>
                 <NumberInput
