@@ -392,22 +392,29 @@ export function PriceGrid({
 
   const save = () =>
     startTransition(async () => {
+      // Typing goes on while the save runs. Drafts are replaced, never mutated, so a draft
+      // that's still the one sent is what was saved; any other was typed meanwhile.
+      const sent = drafts;
       const result = await onSave(checked.diff);
       const failed = result.rowErrors ?? {};
       const failedIds = Object.keys(failed);
       setRowErrors(failed);
-      if (failedIds.length > 0) {
-        setDrafts((before) => new Map([...before].filter(([id]) => failedIds.includes(id))));
-        setSaveError(
-          result.error ??
-            `${failedIds.length} ${failedIds.length === 1 ? "variant wasn't" : "variants weren't"} saved: see the rows marked.`,
-        );
-      } else if (result.error) {
+      if (result.error && failedIds.length === 0) {
         setSaveError(result.error);
-      } else {
-        setDrafts(new Map());
-        setSaveError(undefined);
+        return;
       }
+      setDrafts(
+        (before) =>
+          new Map(
+            [...before].filter(([id, d]) => d !== sent.get(id) || failedIds.includes(id)),
+          ),
+      );
+      setSaveError(
+        failedIds.length > 0
+          ? (result.error ??
+              `${failedIds.length} ${failedIds.length === 1 ? "variant wasn't" : "variants weren't"} saved: see the rows marked.`)
+          : undefined,
+      );
     });
 
   const discard = () => {
