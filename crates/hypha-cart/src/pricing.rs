@@ -6,7 +6,7 @@ use hypha_core::{
     Timestamp, VariantId,
 };
 use hypha_discounts::{
-    Application, Buyer, CodeOutcome, DiscountContext, DiscountInput, Line, Names, Share,
+    Application, Buyer, Class, CodeOutcome, DiscountContext, DiscountInput, Line, Names, Share,
     ShippingGroup, apply,
 };
 use hypha_inventory::{Availability, StockContext};
@@ -297,7 +297,16 @@ pub fn price_cart_with_shipping(
     };
     let input_lines: Vec<Line> = available
         .iter()
-        .map(|(_, line, resolved)| discount_line(line, resolved, discounts))
+        .map(|(_, line, resolved)| {
+            engine_line(
+                line.product(),
+                line.variant(),
+                resolved.price.money(),
+                line.quantity().value(),
+                resolved.on_sale(),
+                discounts,
+            )
+        })
         .collect();
     let groups = match &basis {
         Some(b) => vec![ShippingGroup {
@@ -408,19 +417,28 @@ pub fn price_cart_with_shipping(
     }
 }
 
-/// A priced line as the discounts engine sees it.
-fn discount_line(line: &CartLine, resolved: &ResolvedPrice, discounts: &DiscountReading) -> Line {
+/// A priced line as the discounts engine sees it: the cart's pricing and the shipping
+/// offers' must build it alike, or an offer's amount after discounts disagrees with the
+/// cart.
+fn engine_line(
+    product: ProductId,
+    variant: VariantId,
+    unit_price: Money,
+    quantity: u32,
+    on_sale: bool,
+    discounts: &DiscountReading,
+) -> Line {
     Line {
-        product: line.product(),
-        variant: line.variant(),
+        product,
+        variant,
         categories: discounts
             .categories
-            .get(&line.product())
+            .get(&product)
             .cloned()
             .unwrap_or_default(),
-        unit_price: resolved.price.money(),
-        quantity: line.quantity().value(),
-        on_sale: resolved.on_sale(),
+        unit_price,
+        quantity,
+        on_sale,
     }
 }
 
@@ -464,6 +482,14 @@ pub fn shipping_after_discounts(
     discounts: &DiscountReading,
     amount: Money,
 ) -> Money {
+    // Without a shipping discount among the candidates nothing comes off: skip the engine.
+    let candidates = discounts.context.candidates();
+    if !candidates
+        .iter()
+        .any(|c| c.discount.classes().contains(Class::Shipping))
+    {
+        return amount;
+    }
     let mut indexes = Vec::new();
     let mut input_lines = Vec::new();
     let shipped: Vec<VariantId> = priced
@@ -483,18 +509,14 @@ pub fn shipping_after_discounts(
         if shipped.contains(&line.variant) {
             indexes.push(input_lines.len());
         }
-        input_lines.push(Line {
-            product: line.product,
-            variant: line.variant,
-            categories: discounts
-                .categories
-                .get(&line.product)
-                .cloned()
-                .unwrap_or_default(),
-            unit_price: unit_price.money(),
-            quantity: line.quantity.value(),
-            on_sale: compare_at.is_some(),
-        });
+        input_lines.push(engine_line(
+            line.product,
+            line.variant,
+            unit_price.money(),
+            line.quantity.value(),
+            compare_at.is_some(),
+            discounts,
+        ));
     }
     let rate = |_: Money| Some(amount);
     let input = DiscountInput {
@@ -511,7 +533,7 @@ pub fn shipping_after_discounts(
         codes: cart.discount_codes().to_vec(),
         names: &discounts.names,
     };
-    let outcome = apply(&input, &discounts.context.candidates());
+    let outcome = apply(&input, &candidates);
     let off = outcome
         .shipping
         .first()
