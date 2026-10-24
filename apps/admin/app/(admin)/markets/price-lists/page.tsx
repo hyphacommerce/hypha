@@ -1,121 +1,73 @@
-import { Badge } from "@astryxdesign/core/Badge";
-import { Card } from "@astryxdesign/core/Card";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
-import { Link } from "@astryxdesign/core/Link";
+import { Button } from "@astryxdesign/core/Button";
+import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableHeaderCell,
-  TableRow,
-} from "@astryxdesign/core/Table";
-import { Text } from "@astryxdesign/core/Text";
 import { Suspense } from "react";
 
 import { PageHeader } from "@/components/page-header";
-import { TableSkeleton } from "@/components/skeletons";
-import { loaded, sessionClient } from "@/lib/hypha";
+import { type SearchParams, one, oneOf } from "@/components/resource-table/params";
+import { listPage, pageQuery } from "@/components/resource-table/server";
+import { requireStaff, sessionClient } from "@/lib/hypha";
+import { hasScope } from "@/lib/navigation";
 
-const PERCENT = new Intl.NumberFormat("en-IE", {
-  maximumFractionDigits: 2,
-  signDisplay: "always",
-});
+import { PriceListsTable } from "./price-lists-table";
 
-/** "−10%" from basis points (−1000); "No adjustment" for 0. */
-function adjustment(bps: number): string {
-  if (bps === 0) return "No adjustment";
-  return `${PERCENT.format(bps / 100)}%`;
-}
+const KINDS = ["sale", "override"] as const;
+const PHASES = ["draft", "scheduled", "active", "expired"] as const;
+const SORTS = ["newest", "oldest", "name_asc", "name_desc"] as const;
 
 /**
- * Every price list, with the markets whose catalog uses it: a list is edited on its
- * market's page, so each row links there. The header renders at once; the lists stream in.
+ * Every price list: its kind, where it stands now, its window, the markets using it and
+ * how many fixed prices it has. The header and the table's toolbar render at once; the
+ * lists stream in.
  */
-export default function PriceListsPage() {
+export default async function PriceListsPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  const [params, me] = await Promise.all([searchParams, requireStaff()]);
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader
           title="Price lists"
-          description="How each market's prices differ from the base prices: an adjustment, and fixed prices for some variants. Edit one on its market's page."
+          description="Prices that differ from the base prices: a market's own, a sale, wholesale. A market can use several; shoppers get the lowest live price among them."
           back={{ label: "Markets", href: "/markets" }}
+          actions={
+            hasScope(me.scopes, "pricing:write") && (
+              <Button label="New price list" variant="primary" href="/markets/price-lists/new" />
+            )
+          }
         />
-        <Suspense fallback={<TableSkeleton rows={4} />}>
-          <PriceListRows />
+        <Suspense fallback={<PriceListsTable />}>
+          <PriceListRows params={params} />
         </Suspense>
       </VStack>
     </Section>
   );
 }
 
-async function PriceListRows() {
+async function PriceListRows({ params }: { params: SearchParams }) {
   const client = await sessionClient();
-  const [lists, markets] = await Promise.all([
-    client.GET("/admin/price-lists").then(loaded),
-    client.GET("/admin/markets").then(loaded),
+  const [result, markets] = await Promise.all([
+    client.GET("/admin/price-lists", {
+      params: {
+        query: {
+          ...pageQuery(params),
+          kind: oneOf(params, "kind", KINDS),
+          status: oneOf(params, "status", PHASES),
+          market: one(params, "market"),
+          sort: oneOf(params, "sort", SORTS),
+        },
+      },
+    }),
+    // Without `markets:read` the lists show their markets by ID.
+    client.GET("/admin/markets"),
   ]);
-  // A store has a handful of markets, so reading each catalog is cheap.
-  const catalogs = await Promise.all(
-    markets.items
-      .filter((m) => m.catalog)
-      .map((m) =>
-        client
-          .GET("/admin/catalogs/{id}", { params: { path: { id: m.catalog ?? "" } } })
-          .then((r) => ({ market: m, lists: r.data?.price_lists ?? [] })),
-      ),
-  );
-  const usedBy = (list: string) =>
-    catalogs.filter((c) => c.lists.includes(list)).map((c) => c.market);
-
   return (
-    <Card padding={0}>
-      <Table hasHover>
-        <TableHeader>
-          <TableRow>
-            <TableHeaderCell>Used by</TableHeaderCell>
-            <TableHeaderCell>Currency</TableHeaderCell>
-            <TableHeaderCell>Adjustment</TableHeaderCell>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {lists.items.map((list) => {
-            const users = usedBy(list.id);
-            return (
-              <TableRow key={list.id}>
-                <TableCell>
-                  {users.length > 0 ? (
-                    <HStack gap={2} wrap="wrap">
-                      {users.map((m) => (
-                        <Link key={m.id} href={`/markets/${m.id}`} weight="medium">
-                          {m.name}
-                        </Link>
-                      ))}
-                    </HStack>
-                  ) : (
-                    <HStack gap={2} vAlign="center">
-                      <Badge label="Not used" variant="neutral" />
-                      <Text type="supporting" color="secondary">
-                        {list.id}
-                      </Text>
-                    </HStack>
-                  )}
-                </TableCell>
-                <TableCell>{list.currency}</TableCell>
-                <TableCell>{adjustment(list.adjustment?.percent_bps ?? 0)}</TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-      {lists.items.length === 0 && (
-        <div style={{ padding: 16 }}>
-          <Text color="secondary">
-            No price lists yet. A market gets one when you set its prices.
-          </Text>
-        </div>
-      )}
-    </Card>
+    <PriceListsTable
+      page={listPage(result, "/markets/price-lists", params)}
+      markets={Object.fromEntries((markets.data?.items ?? []).map((m) => [m.id, m.name]))}
+    />
   );
 }

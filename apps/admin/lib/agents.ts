@@ -384,6 +384,22 @@ export function eventSentence(type: string, data: Data): Part[] | null {
         " from catalog ",
         id(data.catalog),
       ];
+    case "price_list.deleted":
+      return ["Deletes price list ", id(data.price_list)];
+    case "catalog.price_lists_added":
+      return [
+        "Adds ",
+        count(data.price_lists, "price list", "price lists"),
+        " to catalog ",
+        id(data.catalog),
+      ];
+    case "catalog.price_lists_removed":
+      return [
+        "Removes ",
+        count(data.price_lists, "price list", "price lists"),
+        " from catalog ",
+        id(data.catalog),
+      ];
     case "order.cancelled":
       return [
         "Cancels order ",

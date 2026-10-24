@@ -484,6 +484,30 @@ export function describe(error: ApiError): string {
       return "A fixed price must be in the price list's currency.";
     case "duplicate_fixed_price":
       return "A variant is listed twice.";
+    case "price_list_name_taken":
+      return "Another price list has that name. Names are unique, ignoring case.";
+    case "price_list_not_found":
+      return "That price list no longer exists. Reload the page.";
+    case "price_list_in_use":
+      return "Markets still use this price list. Take it off their catalogs first.";
+    case "ends_not_after_start":
+      return "The end must be after the start.";
+    case "too_many_prices":
+      return "At most 1,000 fixed prices can be saved at once.";
+    case "fixed_prices_invalid":
+      return "Some fixed prices aren't valid: see the rows marked.";
+    case "duplicate_price_list":
+      return "The market already uses that price list.";
+    case "too_many_price_lists":
+      return "A market's catalog holds at most 50 price lists.";
+    case "price_list_not_in_catalog":
+      return "The market doesn't use that price list any more. Reload the page.";
+    case "too_many_adjustment_targets":
+      return "An adjustment names at most 1,000 products or categories.";
+    case "duplicate_adjustment_target":
+      return "A product or category is named twice.";
+    case "compare_at_not_above_price":
+      return "A compare-at price must be above the price.";
     case "invalid_basis_points":
       return "A discount can't be more than 100%.";
     case "store_name_empty":

@@ -645,3 +645,10 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
 }
+
+/* The new price list page's templates: as many columns as fit, one on a phone. */
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+  gap: 12px;
+}
