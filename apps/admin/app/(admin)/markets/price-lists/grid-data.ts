@@ -34,15 +34,13 @@ export type GridFilters = {
  * the product's header again, above the rest of its variants.
  */
 export const GRID_PAGE = 100;
-/** The most IDs `GET /admin/products?ids=` and `GET /admin/variants?ids=` take. */
+/**
+ * The most IDs `GET /admin/products?ids=`, `GET /admin/variants?ids=` and
+ * `GET /admin/price-lists/{id}/fixed-prices?variants=` take.
+ */
 const IDS_PER_READ = 250;
 /** The most items a page of any list holds. */
 const MAX_LIMIT = 100;
-/**
- * Up to this many fixed prices, a page reads all of the list's at once; above it, those
- * of the page's products, one read each.
- */
-const READ_ALL_FIXED = 500;
 /** Reads at once: enough to be quick, few enough not to flood the API. */
 const PARALLEL = 8;
 
@@ -80,7 +78,7 @@ async function everyPage<T>(
 function allFixed(
   client: Client,
   list: string,
-  query: { product?: string; category?: string; q?: string },
+  query: { variants?: string[]; category?: string; q?: string },
 ): Promise<FixedItem[]> {
   return everyPage(async (cursor) => {
     const { data, error } = await client.GET("/admin/price-lists/{id}/fixed-prices", {
@@ -142,20 +140,21 @@ async function categoriesOf(
   return new Map(products.map((p) => [p.id, p.categories]));
 }
 
-/** The list's fixed prices for `items`, by variant. */
+/**
+ * The list's fixed prices for `items`, by variant: read by their IDs, 250 per read, so a
+ * grid page of 100 variants is one read whatever the list's size.
+ */
 async function fixedOf(
   client: Client,
   list: PriceList,
   items: readonly VariantItem[],
 ): Promise<Map<string, FixedItem>> {
   if (list.fixed_price_count === 0 || items.length === 0) return new Map();
-  const fixed =
-    list.fixed_price_count <= READ_ALL_FIXED
-      ? await allFixed(client, list.id, {})
-      : (
-          await each(productIdsOf(items), (product) => allFixed(client, list.id, { product }))
-        ).flat();
-  return new Map(fixed.map((f) => [f.variant, f]));
+  const ids = [...new Set(items.map((i) => i.id))];
+  const runs = await each(chunk(ids, IDS_PER_READ), (variants) =>
+    allFixed(client, list.id, { variants }),
+  );
+  return new Map(runs.flat().map((f) => [f.variant, f]));
 }
 
 async function grouped(
