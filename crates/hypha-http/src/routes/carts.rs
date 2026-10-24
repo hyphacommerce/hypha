@@ -395,7 +395,8 @@ pub struct CartDiscountCodeResponse {
     code: String,
     /// `applied`; `not_eligible` (see `condition`); `minimum_not_met` (see `needed`);
     /// `no_matching_items`; `blocked_by_other` (a better combination left it out, see
-    /// `discount`); `limit_reached`; `not_available_in_market`; `expired` (its end date
+    /// `discount`); `no_saving` (with it the cart would cost no less, say by falling under
+    /// free shipping); `limit_reached`; `not_available_in_market`; `expired` (its end date
     /// passed); `invalid` (the code or its discount is gone, deactivated, a draft or not
     /// started). More may be added: treat an unknown one as not applied.
     state: &'static str,
@@ -454,6 +455,7 @@ impl From<&hypha_cart::discounts::CodeOutcome> for CartDiscountCodeResponse {
             CodeState::BlockedByOther { discount } => response.discount = Some(discount),
             CodeState::Applied
             | CodeState::NoMatchingItems
+            | CodeState::NoSaving
             | CodeState::LimitReached
             | CodeState::NotAvailableInMarket
             | CodeState::Expired

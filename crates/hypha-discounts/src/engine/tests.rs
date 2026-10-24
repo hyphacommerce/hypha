@@ -570,12 +570,52 @@ fn a_shipping_cap_limits_what_comes_off() {
 
 #[test]
 fn a_rate_sees_the_subtotal_after_discounts() {
-    // Free over 50.00: a 10% order discount takes 50.00 under it.
+    // Free over 50.00: a 20% order discount takes 60.00 under it (and still saves:
+    // 48.00 + 5.00).
     let rate = |subtotal: Money| Some(eur(if subtotal.amount() >= 5000 { 0 } else { 500 }));
-    let d = discount(1, subtotal(Value::Percent(bp(1000))), ClassSet::NONE);
-    let outcome = apply(&shipped(vec![line(1, 5000, 1)], &rate), &[auto(&d)]);
-    assert_eq!(outcome.shipping[0].subtotal, eur(4500));
+    let d = discount(1, subtotal(Value::Percent(bp(2000))), ClassSet::NONE);
+    let outcome = apply(&shipped(vec![line(1, 6000, 1)], &rate), &[auto(&d)]);
+    assert_eq!(outcome.shipping[0].subtotal, eur(4800));
     assert_eq!(outcome.shipping[0].amount, Some(eur(500)));
+}
+
+/// Free shipping from 50.00, else 5.00.
+fn free_over_fifty(subtotal: Money) -> Option<Money> {
+    Some(eur(if subtotal.amount() >= 5000 { 0 } else { 500 }))
+}
+
+#[test]
+fn no_discount_applies_when_it_would_make_the_cart_cost_more() {
+    // 5% off 52.00 takes the cart under free shipping: 49.40 + 5.00 is more than 52.00.
+    let d = discount(1, subtotal(Value::Percent(bp(500))), ClassSet::NONE);
+    let outcome = apply(
+        &shipped(vec![line(1, 5200, 1)], &free_over_fifty),
+        &[auto(&d)],
+    );
+    assert_eq!(applied(&outcome), vec![]);
+    assert_eq!(outcome.shipping[0].amount, Some(eur(0)));
+    assert_eq!(outcome.shipping[0].subtotal, eur(5200));
+}
+
+#[test]
+fn a_code_that_would_make_the_cart_cost_more_says_it_saves_nothing() {
+    let d = coded(1, subtotal(Value::Percent(bp(500))));
+    let mut i = shipped(vec![line(1, 5200, 1)], &free_over_fifty);
+    i.codes = vec!["CODE".to_string()];
+    let outcome = apply(&i, &[by_code(&d, "CODE")]);
+    assert_eq!(states(&outcome), vec![CodeState::NoSaving]);
+    assert_eq!(outcome.total, eur(0));
+}
+
+#[test]
+fn a_discount_that_keeps_free_shipping_still_applies() {
+    // 5% off 60.00 leaves 57.00: still free shipping.
+    let d = discount(1, subtotal(Value::Percent(bp(500))), ClassSet::NONE);
+    let outcome = apply(
+        &shipped(vec![line(1, 6000, 1)], &free_over_fifty),
+        &[auto(&d)],
+    );
+    assert_eq!(applied(&outcome), vec![(did(1), 300)]);
 }
 
 #[test]
@@ -1161,7 +1201,7 @@ fn an_amount_off_each_unit_got_stops_at_its_price() {
 }
 
 #[test]
-fn units_another_discount_reduces_dont_count_as_bought() {
+fn a_discount_alone_beats_a_combination_it_saves_less_in() {
     let only = |n: u128| ItemSet {
         items: Items::Products(vec![pid(n)]),
         exclude_on_sale: false,
@@ -1179,12 +1219,14 @@ fn units_another_discount_reduces_dont_count_as_bought() {
         },
         ClassSet::ALL,
     );
-    // The sale reduces line 1, so only line 2 counts as bought, leaving nothing to get.
+    // A 10.00 shirt on sale and a 5.00 sock got free for buying anything. Together the
+    // sale reduces the shirt, so only the sock counts as bought and nothing is left to
+    // get: 1.00 off. The deal alone takes 5.00 off, so it wins.
     let outcome = apply(
         &input(vec![line(1, 1000, 1), line(2, 500, 1)]),
         &[auto(&sale), auto(&deal)],
     );
-    assert_eq!(applied(&outcome), vec![(did(1), 100)]);
+    assert_eq!(applied(&outcome), vec![(did(2), 500)]);
 }
 
 #[test]

@@ -11,7 +11,10 @@
 //!
 //! Which discounts apply together is chosen by a stated rule: each candidate seeds a set
 //! the others join greedily (largest standalone saving first) when compatible with every
-//! member; the set that saves most wins, ties going to fewer discounts, then lower IDs.
+//! member. Those sets, each candidate alone and no discount at all are compared by what
+//! the buyer pays (lines and shipping after discounts), so a discount never makes the
+//! cart cost more (a shipping rate it takes the cart under); the lowest total wins, ties
+//! going to fewer discounts, then lower IDs.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -123,6 +126,9 @@ pub enum CodeState {
     NoMatchingItems,
     /// A combination that saves more leaves it out; `discount` is one that excludes it.
     BlockedByOther { discount: DiscountId },
+    /// Applying it wouldn't lower what the buyer pays (it would take the cart under a
+    /// shipping rate's threshold, say), so it's left out.
+    NoSaving,
     /// Its uses are taken (in all, the code's own, or once per customer).
     LimitReached,
     /// It has no amount for the cart's market.
@@ -141,6 +147,7 @@ impl CodeState {
             CodeState::MinimumNotMet { .. } => "minimum_not_met",
             CodeState::NoMatchingItems => "no_matching_items",
             CodeState::BlockedByOther { .. } => "blocked_by_other",
+            CodeState::NoSaving => "no_saving",
             CodeState::LimitReached => "limit_reached",
             CodeState::NotAvailableInMarket => "not_available_in_market",
             CodeState::Expired => "expired",
@@ -251,20 +258,29 @@ pub fn apply(input: &DiscountInput<'_>, candidates: &[Live<'_>]) -> Outcome {
         product_only(da) && product_only(db) && touched(a).is_disjoint(&touched(b))
     };
 
-    let mut best: Option<Evaluation> = None;
+    // No discount, each seed alone and each seed's greedy set: a seed alone can beat a
+    // combination where another discount spoils it (buy X get Y counting fewer units as
+    // bought), and no discount beats one that takes the cart under a free shipping rate.
+    let mut best = evaluate(input, &unique, &[]);
     for seed in &viable {
+        if let Some(alone) = &standalone[*seed]
+            && better(alone, &best, &unique)
+        {
+            best = alone.clone();
+        }
         let mut set = vec![*seed];
         for other in &viable {
             if other != seed && set.iter().all(|m| compatible(*m, *other)) {
                 set.push(*other);
             }
         }
-        let evaluation = evaluate(input, &unique, &set);
-        if better(&evaluation, best.as_ref(), &unique) {
-            best = Some(evaluation);
+        if set.len() > 1 {
+            let evaluation = evaluate(input, &unique, &set);
+            if better(&evaluation, &best, &unique) {
+                best = evaluation;
+            }
         }
     }
-    let best = best.unwrap_or_else(|| evaluate(input, &unique, &[]));
 
     let codes = input
         .codes
@@ -289,20 +305,16 @@ fn saving(standalone: &[Option<Evaluation>], i: usize) -> i64 {
     standalone[i].as_ref().map_or(0, |e| e.saving)
 }
 
-/// Whether `candidate` beats `best`: saves more, or as much with fewer discounts, or as
-/// many with lower IDs.
-fn better(candidate: &Evaluation, best: Option<&Evaluation>, unique: &[Live<'_>]) -> bool {
-    let Some(best) = best else {
-        return true;
-    };
+/// Whether `candidate` beats `best`: the buyer pays less, or as much with fewer
+/// discounts, or as many with lower IDs.
+fn better(candidate: &Evaluation, best: &Evaluation, unique: &[Live<'_>]) -> bool {
     let ids = |e: &Evaluation| {
         let mut ids: Vec<DiscountId> = e.members.iter().map(|m| unique[*m].discount.id()).collect();
         ids.sort();
         ids
     };
-    candidate
-        .saving
-        .cmp(&best.saving)
+    best.pays
+        .cmp(&candidate.pays)
         .then_with(|| best.members.len().cmp(&candidate.members.len()))
         .then_with(|| ids(best).cmp(&ids(candidate)))
         .is_gt()
@@ -350,14 +362,13 @@ fn code_state(
     }
     let mut winners: Vec<usize> = best.members.clone();
     winners.sort_by_key(|m| unique[*m].discount.id());
-    let blocker = winners
-        .iter()
-        .find(|w| !compatible(**w, i))
-        .or(winners.first())
-        .map(|w| unique[*w].discount.id());
-    match blocker {
-        Some(discount) => CodeState::BlockedByOther { discount },
-        None => CodeState::NoMatchingItems,
+    // Left out though it saves on its own: by a discount it can't combine with, else
+    // because the buyer pays no less with it.
+    match winners.iter().find(|w| !compatible(**w, i)) {
+        Some(w) => CodeState::BlockedByOther {
+            discount: unique[*w].discount.id(),
+        },
+        None => CodeState::NoSaving,
     }
 }
 
@@ -469,6 +480,8 @@ struct Evaluation {
     lines: Vec<Vec<(usize, i64, Option<u32>)>>,
     shipping: Vec<GroupShares>,
     saving: i64,
+    /// What the buyer pays for the lines and shipping after the set's discounts.
+    pays: i64,
     /// Why a member took nothing, when it's a minimum.
     reasons: BTreeMap<usize, CodeState>,
 }
@@ -1028,6 +1041,13 @@ fn evaluate(input: &DiscountInput<'_>, candidates: &[Live<'_>], set: &[usize]) -
         .map(|(_, raw)| raw.candidate)
         .collect();
     members.retain(|m| contributed.contains(m));
+    let shipping_paid: i64 = shipping
+        .iter()
+        .map(|(_, price, shares)| {
+            price.unwrap_or(0) - shares.iter().map(|(_, amount)| amount).sum::<i64>()
+        })
+        .sum();
+    let pays = left.iter().sum::<i64>() + shipping_paid;
     Evaluation {
         members,
         applications,
@@ -1035,6 +1055,7 @@ fn evaluate(input: &DiscountInput<'_>, candidates: &[Live<'_>], set: &[usize]) -
         lines: line_shares,
         shipping,
         saving,
+        pays,
         reasons,
     }
 }

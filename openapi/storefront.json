@@ -384,7 +384,7 @@
             ]
           },
           "state": {
-            "description": "`applied`; `not_eligible` (see `condition`); `minimum_not_met` (see `needed`);\n`no_matching_items`; `blocked_by_other` (a better combination left it out, see\n`discount`); `limit_reached`; `not_available_in_market`; `expired` (its end date\npassed); `invalid` (the code or its discount is gone, deactivated, a draft or not\nstarted). More may be added: treat an unknown one as not applied.",
+            "description": "`applied`; `not_eligible` (see `condition`); `minimum_not_met` (see `needed`);\n`no_matching_items`; `blocked_by_other` (a better combination left it out, see\n`discount`); `no_saving` (with it the cart would cost no less, say by falling under\nfree shipping); `limit_reached`; `not_available_in_market`; `expired` (its end date\npassed); `invalid` (the code or its discount is gone, deactivated, a draft or not\nstarted). More may be added: treat an unknown one as not applied.",
             "type": "string"
           }
         },
