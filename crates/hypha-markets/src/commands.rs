@@ -617,6 +617,10 @@ pub async fn update_price_list<P: PriceListRepo>(
     if let Some(groups) = input.groups {
         list.set_audience(Audience::of_groups(groups)?);
     }
+    // Nothing to write: no event, and its `updated_at` stays when it was last changed.
+    if !list.is_changed() {
+        return Ok(list);
+    }
     if input.name.is_some()
         && let Some(taken) = name_taken(lists, &list).await?
     {

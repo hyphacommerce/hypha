@@ -4,8 +4,8 @@
 //! here by the schedule job.
 
 use hypha_core::{
-    CatalogId, Clock, HasBatch, PendingEvent, PriceListId, RepoError, StageEvents, Stamped,
-    Subject, Timestamp,
+    CatalogId, Clock, HasBatch, PendingEvent, PriceListId, RepoError, StageEvents, Subject,
+    Timestamp,
 };
 
 use crate::{
@@ -23,8 +23,9 @@ pub enum Boundary {
 
 /// The window boundaries of `lists` that passed in `(after, until]`, oldest first (then by
 /// list, a start before an end). Only an active list's count: a draft prices nothing either
-/// side. A boundary at or before the list's last write isn't one to announce: that write
-/// recorded its own event, after which the list already priced as it does now.
+/// side. Each is announced even when the list was written after it: that write's own
+/// `price_list.changed` may have said nothing about pricing (a rename), and a second
+/// announcement of the same change is harmless.
 pub fn boundaries(
     lists: &[PriceList],
     after: Timestamp,
@@ -35,14 +36,13 @@ pub fn boundaries(
         if list.status() != PriceListStatus::Active {
             continue;
         }
-        let written = list.stamps().map(|s| s.updated_at);
         let window = list.window();
         for (boundary, at) in [
             (Boundary::Started, window.starts_at()),
             (Boundary::Ended, window.ends_at()),
         ] {
             let Some(at) = at else { continue };
-            if at > after && at <= until && written.is_none_or(|w| w < at) {
+            if at > after && at <= until {
                 found.push((list.id(), boundary, at));
             }
         }
@@ -149,7 +149,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use hypha_core::{Currency, Stamps};
+    use hypha_core::{Currency, Stamped, Stamps};
     use uuid::Uuid;
 
     use super::*;
@@ -215,9 +215,13 @@ mod tests {
     }
 
     #[test]
-    fn a_list_written_after_its_boundary_announced_it_itself() {
+    fn a_list_written_after_its_boundary_still_announces_it() {
+        // Renamed after it started: the rename's event says nothing about prices.
         let lists = [list(1, Some(120), None, 130)];
-        assert_eq!(boundaries(&lists, at(100), at(150)), vec![]);
+        assert_eq!(
+            boundaries(&lists, at(100), at(150)),
+            vec![(id(1), Boundary::Started, at(120))]
+        );
     }
 
     #[test]

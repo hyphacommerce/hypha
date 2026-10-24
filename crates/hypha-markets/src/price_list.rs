@@ -436,6 +436,12 @@ impl PriceList {
         self.changes.fields.insert(field);
     }
 
+    /// Whether anything changed since it was loaded (or it's new or deleted): an
+    /// unchanged list has nothing to write.
+    pub fn is_changed(&self) -> bool {
+        self.changes.created || self.changes.deleted || !self.changes.fields.is_empty()
+    }
+
     /// Validates fixed prices before they are stored for this list: each variant at most
     /// once, and every price in the list's currency. Reports every entry's problem at
     /// once, with its index in `prices`, so a caller can fix them all in one go.

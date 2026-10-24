@@ -325,6 +325,39 @@ fn update_price_list_changes_what_it_is_given() {
 }
 
 #[test]
+fn update_price_list_writes_nothing_when_nothing_changes() {
+    let lists = InMemoryPriceListRepo::default();
+    let ids = SequentialIds::default();
+    let list = stored_list(&lists, &ids);
+    let before = block_on(lists.get(list)).unwrap().unwrap();
+    let events = lists.outbox().events().len();
+    let same = block_on(update_price_list(
+        &Ctx::system(),
+        &lists,
+        list,
+        UpdatePriceList {
+            name: Some(before.name().to_string()),
+            kind: Some(before.kind()),
+            ..UpdatePriceList::default()
+        },
+    ))
+    .unwrap();
+    assert_eq!(same, before);
+    let stored = block_on(lists.get(list)).unwrap().unwrap();
+    assert_eq!(
+        (
+            hypha_core::Versioned::version(&stored),
+            hypha_core::Stamped::stamps(&stored)
+        ),
+        (
+            hypha_core::Versioned::version(&before),
+            hypha_core::Stamped::stamps(&before)
+        )
+    );
+    assert_eq!(lists.outbox().events().len(), events);
+}
+
+#[test]
 fn update_price_list_checks_the_window_as_it_ends_up() {
     let lists = InMemoryPriceListRepo::default();
     let ids = SequentialIds::default();

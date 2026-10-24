@@ -680,14 +680,15 @@ async fn a_sales_start_is_announced_once_and_search_follows() {
         "{found}"
     );
 
-    // Time passes: the window opened an hour ago, after the job last looked and after the
-    // list was last written (a write records its own event).
+    // Time passes: the window opened an hour ago, after the job last looked; the list was
+    // last written after that (a rename's event says nothing of prices), and the start is
+    // still announced.
     let list: hypha_core::PriceListId = lists[0].parse().unwrap();
     sql(
         &app,
         &format!(
             "UPDATE price_lists SET starts_at = now() - interval '1 hour',
-                 updated_at = now() - interval '2 hours'
+                 updated_at = now() - interval '30 minutes'
              WHERE id = '{}';
              INSERT INTO price_list_schedule (ran_until) VALUES (now() - interval '90 minutes');",
             list.as_uuid()
