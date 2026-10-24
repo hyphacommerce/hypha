@@ -1508,7 +1508,6 @@ pub async fn product_prices_handler<S: Storage>(
     let markets = explain_product_prices(&ctx, &ports, &product, params.market, quantity, &groups)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("market_not_found"))?;
-    let now = state.clock.now();
     let markets = markets
         .iter()
         .map(|m| MarketPricesResponse {
@@ -1546,7 +1545,12 @@ pub async fn product_prices_handler<S: Storage>(
                                     price_list: c.price_list,
                                     name: list.name().to_string(),
                                     kind: list.kind().into(),
-                                    phase: list.phase(now).into(),
+                                    // The phase at the moment priced, as the result says.
+                                    phase: match c.result {
+                                        CandidateResult::NotLive(phase) => phase,
+                                        _ => list.phase(m.at),
+                                    }
+                                    .into(),
                                     price: c.price.map(|p| p.money()),
                                     result: match c.result {
                                         CandidateResult::Won => CandidateResultDto::Won,

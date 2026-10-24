@@ -14,6 +14,7 @@ hypha-inventory = { path = "../hypha-inventory" }
 hypha-customers = { path = "../hypha-customers" }
 hypha-shipping = { path = "../hypha-shipping" }
 hypha-channels = { path = "../hypha-channels" }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 thiserror.workspace = true
 
 [dev-dependencies]

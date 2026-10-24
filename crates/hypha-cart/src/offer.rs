@@ -2,8 +2,9 @@
 //! anything is in a cart. Priced with the cart's loaders and rules (`load_pricing`,
 //! `price_line`, `StockContext::load`), so the page, search and the cart can't disagree.
 
+use futures_util::future::try_join_all;
 use hypha_core::{
-    CountryCode, Ctx, CustomerGroupId, HasClock, MarketId, Quantity, Scope, VariantId,
+    CountryCode, Ctx, CustomerGroupId, HasClock, MarketId, Quantity, Scope, Timestamp, VariantId,
 };
 use hypha_customers::HasCustomerGroups;
 use hypha_inventory::{Availability, HasInventoryItems, HasLocations, StockContext};
@@ -127,6 +128,8 @@ pub struct MarketPrices {
     pub market: Market,
     /// The market's catalog's lists, live or not, as `explanations` name them.
     pub price_lists: Vec<PriceList>,
+    /// The moment the prices are for: what each list's phase is read at.
+    pub at: Timestamp,
     /// In the product's variant order.
     pub variants: Vec<(VariantId, PriceExplanation)>,
 }
@@ -158,28 +161,32 @@ where
         None => ports.markets().list_all().await?,
     };
     let variants: Vec<VariantId> = product.variants().iter().map(|v| v.id()).collect();
-    let mut found = Vec::with_capacity(markets.len());
-    for market in markets {
-        let pricing =
-            load_pricing_for(ports, market.clone(), &[product.id()], &variants, groups).await?;
-        let explained = product
-            .variants()
-            .iter()
-            .map(|v| {
-                let prices = VariantPrices {
-                    product: product.id(),
-                    variant: v.id(),
-                    base: v.base_price(),
-                    compare_at: v.compare_at_price(),
-                };
-                (v.id(), explain_price(&pricing, prices, quantity))
+    let found = try_join_all(markets.into_iter().map(|market| {
+        let variants = &variants;
+        async move {
+            let pricing =
+                load_pricing_for(ports, market.clone(), &[product.id()], variants, groups).await?;
+            let explained = product
+                .variants()
+                .iter()
+                .map(|v| {
+                    let prices = VariantPrices {
+                        product: product.id(),
+                        variant: v.id(),
+                        base: v.base_price(),
+                        compare_at: v.compare_at_price(),
+                    };
+                    (v.id(), explain_price(&pricing, prices, quantity))
+                })
+                .collect();
+            Ok::<_, CommandError>(MarketPrices {
+                market,
+                at: pricing.at,
+                price_lists: pricing.price_lists,
+                variants: explained,
             })
-            .collect();
-        found.push(MarketPrices {
-            market,
-            price_lists: pricing.price_lists,
-            variants: explained,
-        });
-    }
+        }
+    }))
+    .await?;
     Ok(found)
 }
