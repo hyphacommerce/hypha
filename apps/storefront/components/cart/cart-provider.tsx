@@ -17,7 +17,15 @@ import {
   useTransition,
 } from "react";
 
-import { type Cart, addToCart, loadCart, setQuantity } from "@/app/[country]/actions";
+import {
+  type Cart,
+  type CartResult,
+  addToCart,
+  applyDiscountCode,
+  loadCart,
+  removeDiscountCode,
+  setQuantity,
+} from "@/app/[country]/actions";
 import { CloseOnNavigate } from "@/components/close-on-navigate";
 import { WITHIN_PAGE, addTransitionType } from "@/components/view-transition";
 import { hasCartFlag } from "@/lib/cart-flag";
@@ -41,6 +49,11 @@ type CartContext = {
   add: (variant: string, quantity: number) => Promise<string | undefined>;
   /** Sets a line's quantity; 0 removes it. */
   change: (variant: string, quantity: number) => void;
+  /** Adds a discount code; answers with the refusal (an invalid code), if any, for the
+   * code field to show by itself rather than as the cart's error. */
+  applyCode: (code: string) => Promise<string | undefined>;
+  /** Takes a discount code off the cart. */
+  removeCode: (code: string) => void;
   /** Reads the cart again from the cookies: after something outside the provider
    * changed it (placing the order forgets the cart, `ReloadCart`). */
   reload: () => Promise<void>;
@@ -114,20 +127,37 @@ export function CartProvider({
   );
 
   // Changes go one at a time: each writes the cart, so two at once would race.
+  // Each answers with the cart, shown as it comes; the error is the caller's to place.
   const queue = useRef(SETTLED);
+  const write = useCallback(async (send: () => Promise<CartResult>) => {
+    const run = queue.current.then(send);
+    queue.current = run.catch(() => undefined);
+    const result = await run;
+    startTransition(() => {
+      addTransitionType(WITHIN_PAGE);
+      setCart(result.cart);
+    });
+    return result.error;
+  }, []);
   const change = useCallback(
     (variant: string, quantity: number) =>
       startTransition(async () => {
-        const run = queue.current.then(() => setQuantity({ country, variant, quantity }));
-        queue.current = run.catch(() => undefined);
-        const result = await run;
-        startTransition(() => {
-          addTransitionType(WITHIN_PAGE);
-          setCart(result.cart);
-          setError(result.error);
-        });
+        const failed = await write(() => setQuantity({ country, variant, quantity }));
+        startTransition(() => setError(failed));
       }),
-    [country],
+    [country, write],
+  );
+  const applyCode = useCallback(
+    (code: string) => write(() => applyDiscountCode({ country, code })),
+    [country, write],
+  );
+  const removeCode = useCallback(
+    (code: string) =>
+      startTransition(async () => {
+        const failed = await write(() => removeDiscountCode({ country, code }));
+        startTransition(() => setError(failed));
+      }),
+    [country, write],
   );
 
   const value = useMemo<CartContext>(
@@ -145,9 +175,25 @@ export function CartProvider({
       close: () => setIsOpen(false),
       add,
       change,
+      applyCode,
+      removeCode,
       reload,
     }),
-    [country, digits, base, cart, isLoading, isPending, error, isOpen, add, change, reload],
+    [
+      country,
+      digits,
+      base,
+      cart,
+      isLoading,
+      isPending,
+      error,
+      isOpen,
+      add,
+      change,
+      applyCode,
+      removeCode,
+      reload,
+    ],
   );
 
   return (

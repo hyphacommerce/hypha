@@ -132,3 +132,13 @@ simple = { limit = 240, period = 60 }
 name = "RL_AGENT_WRITE"
 namespace_id = "1017"
 simple = { limit = 40, period = 60 }
+
+[[ratelimits]]
+name = "RL_DISCOUNT_CODE_IP"
+namespace_id = "1018"
+simple = { limit = 20, period = 60 }
+
+[[ratelimits]]
+name = "RL_DISCOUNT_CODE_CART"
+namespace_id = "1019"
+simple = { limit = 10, period = 60 }

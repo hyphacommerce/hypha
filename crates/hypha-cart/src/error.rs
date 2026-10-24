@@ -27,6 +27,10 @@ pub enum CartError {
     },
     #[error("set a shipping address first")]
     ShippingAddressRequired,
+    #[error("a cart holds at most {max} discount codes")]
+    TooManyDiscountCodes { max: usize },
+    #[error("the cart doesn't hold the code {0:?}")]
+    DiscountCodeNotOnCart(String),
 }
 
 /// Why a line can't be priced. Returned as an error by `price_line` (and so by `add_line`),
@@ -68,6 +72,8 @@ pub enum RestoreError {
     DuplicateLine(VariantId),
     #[error(transparent)]
     Address(#[from] AddressError),
+    #[error("the discount code {0:?} is held twice")]
+    DuplicateDiscountCode(String),
 }
 
 impl ErrorCode for CartError {
@@ -80,6 +86,8 @@ impl ErrorCode for CartError {
             CartError::Completed { .. } => "cart_completed",
             CartError::AddressCountryMismatch { .. } => "address_country_mismatch",
             CartError::ShippingAddressRequired => "shipping_address_required",
+            CartError::TooManyDiscountCodes { .. } => "too_many_discount_codes",
+            CartError::DiscountCodeNotOnCart(_) => "discount_code_not_on_cart",
         }
     }
 }

@@ -7,6 +7,9 @@ use hypha_shipping::ProviderKey;
 
 use crate::error::{CartError, RestoreError};
 
+/// Most codes one cart holds.
+pub const MAX_CODES_PER_CART: usize = 5;
+
 /// A variant and how many of it. Prices are not stored: they are resolved on read,
 /// so a cart always reflects current prices. Snapshotting belongs to orders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +100,10 @@ pub struct Cart {
     /// "Email me with news and offers": checkout records the consent when it's ticked;
     /// unticked never unsubscribes anyone.
     marketing_opt_in: bool,
+    /// Discount codes entered, normalised, in the order entered: at most
+    /// `MAX_CODES_PER_CART`. A code stays while it doesn't apply, so it applies once the
+    /// cart qualifies; pricing says where each stands.
+    discount_codes: Vec<String>,
 }
 
 impl Versioned for Cart {
@@ -136,6 +143,7 @@ impl Cart {
             shipping: None,
             payment_method: None,
             marketing_opt_in: false,
+            discount_codes: Vec::new(),
         }
     }
 
@@ -154,6 +162,38 @@ impl Cart {
             changed = true;
         }
         changed
+    }
+
+    /// Holds `code` (normalised; commands check it's a live code first). Returns whether
+    /// it's new: a code held already stays where it is.
+    pub fn add_discount_code(&mut self, code: String) -> Result<bool, CartError> {
+        self.ensure_open()?;
+        if self.discount_codes.contains(&code) {
+            return Ok(false);
+        }
+        if self.discount_codes.len() >= MAX_CODES_PER_CART {
+            return Err(CartError::TooManyDiscountCodes {
+                max: MAX_CODES_PER_CART,
+            });
+        }
+        self.discount_codes.push(code);
+        Ok(true)
+    }
+
+    /// Lets go of `code` (normalised).
+    pub fn remove_discount_code(&mut self, code: &str) -> Result<(), CartError> {
+        self.ensure_open()?;
+        let before = self.discount_codes.len();
+        self.discount_codes.retain(|c| c != code);
+        if self.discount_codes.len() == before {
+            return Err(CartError::DiscountCodeNotOnCart(code.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Normalised, in the order entered.
+    pub fn discount_codes(&self) -> &[String] {
+        &self.discount_codes
     }
 
     /// Ticks or unticks the marketing box.
@@ -396,6 +436,8 @@ pub struct CartSnapshot {
     pub shipping: Option<SelectedShipping>,
     pub payment_method: Option<PaymentMethodId>,
     pub marketing_opt_in: bool,
+    /// Normalised; at most `MAX_CODES_PER_CART`, each once.
+    pub discount_codes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -433,6 +475,7 @@ impl Cart {
             shipping: self.shipping.clone(),
             payment_method: self.payment_method,
             marketing_opt_in: self.marketing_opt_in,
+            discount_codes: self.discount_codes.clone(),
         }
     }
 
@@ -467,6 +510,16 @@ impl Cart {
         if s.shipping.is_some() && shipping_address.is_none() {
             return Err(CartError::ShippingAddressRequired.into());
         }
+        if s.discount_codes.len() > MAX_CODES_PER_CART {
+            return Err(CartError::TooManyDiscountCodes {
+                max: MAX_CODES_PER_CART,
+            }
+            .into());
+        }
+        let mut seen = std::collections::HashSet::new();
+        if let Some(twice) = s.discount_codes.iter().find(|c| !seen.insert(*c)) {
+            return Err(RestoreError::DuplicateDiscountCode(twice.clone()));
+        }
         Ok(Cart {
             id: s.id,
             version: s.version,
@@ -485,6 +538,7 @@ impl Cart {
             shipping: s.shipping,
             payment_method: s.payment_method,
             marketing_opt_in: s.marketing_opt_in,
+            discount_codes: s.discount_codes,
         })
     }
 }

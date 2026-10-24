@@ -316,6 +316,16 @@ fn search_settings_repo() {
 }
 
 #[test]
+fn discount_repo() {
+    block_on(contract::discount_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn discount_names() {
+    block_on(contract::discount_names(async || InMemoryPorts::default()));
+}
+
+#[test]
 fn channel_repo() {
     block_on(contract::channel_repo(async || InMemoryPorts::default()));
 }

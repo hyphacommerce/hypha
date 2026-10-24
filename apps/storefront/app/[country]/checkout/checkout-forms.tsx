@@ -10,9 +10,10 @@ import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Grid } from "@astryxdesign/core/Grid";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
-import { VStack } from "@astryxdesign/core/Stack";
+import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
+import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { type ElementEvent, HyphaElement } from "@hyphacommerce/storefront-elements/react";
 import { createContext, useContext, useEffect, useMemo, useState, useTransition } from "react";
 
@@ -26,6 +27,7 @@ import {
   startCartPayment,
 } from "@/app/[country]/actions";
 import { Skeleton } from "@/components/skeletons";
+import { saleLabel } from "@/lib/prices";
 
 /** The fields the form won't save without (marked required below). */
 const REQUIRED: (keyof Details)[] = ["email", "last_name", "line1", "city"];
@@ -143,7 +145,9 @@ export function DetailsForm({
   );
 }
 
-export type Offer = { option: string; label: string; price: string };
+/** A shipping offer as shown: `price` ("€5.00", or "Free" when a discount takes all of
+ * it), with the price before a discount struck through beside it (`was`). */
+export type Offer = { option: string; label: string; price: string; was?: string | null };
 
 /** One group's shipping options; choosing one saves it. */
 export function ShippingChoice({
@@ -193,9 +197,23 @@ export function ShippingChoice({
             value={o.option}
             label={o.label}
             endContent={
-              <Text type="body" weight="medium" hasTabularNumbers>
-                {o.price}
-              </Text>
+              o.was ? (
+                <span>
+                  <VisuallyHidden>{saleLabel(o.was, o.price)}</VisuallyHidden>
+                  <HStack as="span" gap={2} vAlign="center" aria-hidden="true">
+                    <Text type="body" color="secondary" hasStrikethrough hasTabularNumbers>
+                      {o.was}
+                    </Text>
+                    <Text type="body" weight="medium" hasTabularNumbers>
+                      {o.price}
+                    </Text>
+                  </HStack>
+                </span>
+              ) : (
+                <Text type="body" weight="medium" hasTabularNumbers>
+                  {o.price}
+                </Text>
+              )
             }
           />
         ))}

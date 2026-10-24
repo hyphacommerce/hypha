@@ -19,6 +19,7 @@ pub mod channels;
 pub mod custom_fields;
 pub mod customer_groups;
 pub mod customers;
+pub mod discounts;
 pub mod fulfillments;
 pub mod health;
 pub mod inventory;
@@ -216,6 +217,20 @@ macro_rules! route_table {
             [admin, POST, "/admin/customers/{id}/sessions/revoke", customers::revoke_sessions],
             [admin, PUT, "/admin/customers/{id}/marketing/{channel}", customers::set_consent],
             [admin, PUT, "/admin/customers/{id}/groups", customers::set_groups],
+            // discounts and their codes
+            [admin, GET, "/admin/discounts", discounts::list],
+            [admin, POST, "/admin/discounts", discounts::create],
+            [admin, POST, "/admin/discounts/summary", discounts::summarize_handler],
+            [admin, GET, "/admin/discounts/{id}", discounts::fetch],
+            [admin, PATCH, "/admin/discounts/{id}", discounts::update],
+            [admin, DELETE, "/admin/discounts/{id}", discounts::remove],
+            [admin, GET, "/admin/discounts/{id}/codes", discounts::codes],
+            [admin, POST, "/admin/discounts/{id}/codes", discounts::add],
+            [admin, PATCH, "/admin/discounts/{id}/codes", discounts::update_codes],
+            [admin, DELETE, "/admin/discounts/{id}/codes", discounts::remove_codes_handler],
+            [admin, POST, "/admin/discounts/{id}/codes/generate", discounts::generate],
+            [admin, GET, "/admin/discounts/{id}/codes/export", discounts::export],
+            [admin, GET, "/admin/discounts/{id}/usage", discounts::usage],
             [admin, GET, "/admin/customer-groups", customer_groups::list],
             [admin, POST, "/admin/customer-groups", customer_groups::create],
             [admin, GET, "/admin/customer-groups/{id}", customer_groups::fetch],
@@ -407,6 +422,8 @@ macro_rules! route_table {
             [storefront, DELETE, "/storefront/carts/{id}/lines/{variant}", carts::remove_line],
             [storefront, PUT, "/storefront/carts/{id}/email", carts::set_email],
             [storefront, PUT, "/storefront/carts/{id}/marketing", carts::set_marketing],
+            [storefront, POST, "/storefront/carts/{id}/discount-codes", carts::add_code],
+            [storefront, DELETE, "/storefront/carts/{id}/discount-codes/{code}", carts::remove_code],
             [storefront, PUT, "/storefront/carts/{id}/shipping-address", carts::set_address],
             [storefront, GET, "/storefront/carts/{id}/shipping-options", carts::shipping_options],
             [storefront, PUT, "/storefront/carts/{id}/shipping/{group_id}", carts::select],

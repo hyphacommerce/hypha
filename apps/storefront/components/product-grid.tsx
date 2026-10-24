@@ -4,8 +4,10 @@ import { Grid } from "@astryxdesign/core/Grid";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
+import { readPromotions } from "@/lib/discounts";
 import { formatRange } from "@/lib/money";
 
+import { PromotionBadges } from "./discounts";
 import { Price, SaleBadge } from "./price";
 import { SiteLink as Link } from "./site-link";
 import { ViewTransition } from "./view-transition";
@@ -20,7 +22,8 @@ export function productImageName(handle: string): string {
 /**
  * Search results as product cards (the `product-gallery` template): image, title, the
  * vendor, the price in the country's digits (the variant shown's compare-at struck
- * through beside it, with a Sale badge, when it's on sale). Each card is one `next/link` anchor
+ * through beside it, with a Sale badge, when it's on sale), and its promotions as badges
+ * ("Buy 2, get 1 free"). Each card is one `next/link` anchor
  * (`.shop-product-card`, globals.css), so Next prefetches it as it scrolls into view
  * and on hover, and the product page is there when it's clicked. (Astryx's ClickableCard
  * hides its link in a 1px element, which the viewport prefetch never sees.) Each card is
@@ -55,6 +58,8 @@ export function ProductGrid({
         const image =
           hit.image?.kind === "image" ? (hit.image.thumbnail_url ?? hit.image.url) : null;
         const first = i < eager;
+        // The hit's live automatic discounts, once search sends them.
+        const promotions = readPromotions(hit);
         return (
           <ViewTransition
             key={hit.listing}
@@ -108,9 +113,10 @@ export function ProductGrid({
                     digits={digits}
                     color="secondary"
                   />
-                  {(!hit.available || hit.on_sale) && (
-                    <HStack gap={1}>
+                  {(!hit.available || hit.on_sale || promotions.length > 0) && (
+                    <HStack gap={1} wrap="wrap">
                       {hit.on_sale && <SaleBadge />}
+                      <PromotionBadges promotions={promotions} />
                       {!hit.available && <Badge label="Sold out" variant="neutral" />}
                     </HStack>
                   )}

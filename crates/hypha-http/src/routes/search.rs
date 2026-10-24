@@ -155,6 +155,9 @@ pub struct SearchHitResponse {
     image: Option<ProductMediaResponse>,
     /// How many of the group's variants matched.
     matched_variants: u32,
+    /// Live automatic discounts that may reach the product in this market and channel:
+    /// badges, never prices (the cart applies them).
+    promotions: Vec<super::discounts::PromotionResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -263,6 +266,18 @@ pub async fn storefront_search<S: Storage>(
         images.insert(item.asset_id(), item);
     }
 
+    let mut products: Vec<hypha_core::ProductId> =
+        results.hits.iter().map(|h| h.document.product).collect();
+    products.sort();
+    products.dedup();
+    let promotions = super::discounts::promotions_of(
+        &ports,
+        &products,
+        found.market.id(),
+        ctx.channel(),
+        hypha_core::Clock::now(&state.clock),
+    )
+    .await?;
     let range = |r: hypha_search_index::PriceRange| SearchPriceRange {
         min: r.min,
         max: r.max,
@@ -298,6 +313,7 @@ pub async fn storefront_search<S: Storage>(
                 listing_price: range(d.listing_price),
                 available: d.available,
                 matched_variants: hit.matched,
+                promotions: promotions.get(&d.product).cloned().unwrap_or_default(),
             }
         })
         .collect();

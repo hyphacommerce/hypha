@@ -558,6 +558,64 @@ contains "alphabetically first" '"name":"Eurozone prices"'
 step "the market's" 200 - "$BASE/admin/price-lists?market=$MARKET"
 contains "on its catalog" "\"markets\":[\"$MARKET\"]"
 step "delete the paused sale" 204 - -X DELETE "$BASE/admin/price-lists/$SCHEDULED_LIST"
+
+# Discounts: typed rules, codes in their own rows. Only codes apply here, so the carts
+# below are untouched until one is entered.
+step "a 10% welcome code in one call" 201 - -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Welcome","method":"codes","kind":{"type":"standard","rewards":[{"target":{"type":"subtotal"},"value":{"type":"percent","basis_points":1000}}]},"codes":["welcome10"],"limits":{"once_per_customer":true}}'
+WELCOME=$(id)
+contains "summarised from its data" '"summary":"10% off the order · once per customer"'
+contains "an order discount" '"classes":["order"]'
+step "every broken rule at once" 422 invalid_discount -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":" ","method":"codes","kind":{"type":"standard","rewards":[]},"limits":{"total":0}}'
+contains "with its path" '"path":"kind.rewards"'
+step "an amount in another currency than the market's" 422 discount_currency_mismatch -X POST "$BASE/admin/discounts" \
+    -H "$JSON" -d "{\"title\":\"Off\",\"method\":\"codes\",\"kind\":{\"type\":\"standard\",\"rewards\":[{\"target\":{\"type\":\"subtotal\"},\"value\":{\"type\":\"amount\",\"amounts\":{\"$MARKET\":{\"amount\":500,\"currency\":\"USD\"}}}}]}}"
+step "a code another discount has" 409 discount_code_taken -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Again","method":"codes","kind":{"type":"standard","rewards":[{"target":{"type":"subtotal"},"value":{"type":"percent","basis_points":500}}]},"codes":["WELCOME10"]}'
+step "an automatic discount has no codes" 409 discount_automatic -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Auto","method":"automatic","kind":{"type":"standard","rewards":[{"target":{"type":"subtotal"},"value":{"type":"percent","basis_points":500}}]},"codes":["X"]}'
+step "a prefix must leave eight random characters" 422 invalid_code_length -X POST \
+    "$BASE/admin/discounts/$WELCOME/codes/generate" -H "$JSON" -d '{"count":3,"prefix":"nl-","length":10}'
+step "generate single-use codes" 201 - -X POST "$BASE/admin/discounts/$WELCOME/codes/generate" -H "$JSON" \
+    -d '{"count":3,"prefix":"nl-","length":11,"batch":"Newsletter"}'
+contains "single use, with the prefix" '"code":"NL-'
+step "the codes, by code" 200 - "$BASE/admin/discounts/$WELCOME/codes"
+contains "as typed and normalised" '"code":"welcome10","normalized":"WELCOME10"'
+step "export a batch as CSV" 200 - "$BASE/admin/discounts/$WELCOME/codes/export?batch=Newsletter"
+contains "with its header" 'code,normalized,usage_limit,used,active,batch,created_at'
+step "deactivate the batch" 200 - -X PATCH "$BASE/admin/discounts/$WELCOME/codes" -H "$JSON" \
+    -d '{"batch":"Newsletter","active":false}'
+contains "three changed" '"updated":3'
+step "the inactive codes" 200 - "$BASE/admin/discounts/$WELCOME/codes?active=false"
+contains "the batch's" '"normalized":"NL-'
+lacks "not the welcome code" '"normalized":"WELCOME10"'
+step "reactivating a code that's active changes nothing" 200 - -X PATCH "$BASE/admin/discounts/$WELCOME/codes" \
+    -H "$JSON" -d '{"codes":["welcome10"],"active":true}'
+contains "none changed" '"updated":0'
+step "remove the batch" 200 - -X DELETE "$BASE/admin/discounts/$WELCOME/codes" -H "$JSON" -d '{"batch":"Newsletter"}'
+contains "three went" '"removed":3'
+step "a summary worked out without saving" 200 - -X POST "$BASE/admin/discounts/summary" -H "$JSON" \
+    -d '{"title":"Try","method":"codes","kind":{"type":"standard","rewards":[{"target":{"type":"subtotal"},"value":{"type":"percent","basis_points":1500}}]}}'
+contains "its sentence" '"summary":"15% off the order","problems":[]'
+step "a broken one lists its problems" 200 - -X POST "$BASE/admin/discounts/summary" -H "$JSON" \
+    -d '{"title":"Try","method":"codes","kind":{"type":"standard","rewards":[]}}'
+contains "with no sentence" '"summary":null,"problems":[{"path":"kind.rewards"'
+step "changes over a saved one" 200 - -X POST "$BASE/admin/discounts/summary" -H "$JSON" \
+    -d "{\"id\":\"$WELCOME\",\"limits\":{\"total\":5}}"
+contains "as PATCH would make it" '"summary":"10% off the order · 5 uses"'
+step "found by its code" 200 - "$BASE/admin/discounts?code=Welcome10"
+contains "the welcome offer" "\"id\":\"$WELCOME\""
+step "no uses yet" 200 - "$BASE/admin/discounts/$WELCOME/usage"
+contains "an empty page" '"items":[]'
+step "a draft automatic discount" 201 - -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Later","method":"automatic","status":"draft","kind":{"type":"standard","rewards":[{"target":{"type":"shipping"},"value":{"type":"percent","basis_points":10000}}]}}'
+DRAFT_DISCOUNT=$(id)
+step "only the drafts" 200 - "$BASE/admin/discounts?status=draft"
+contains "the draft" "\"id\":\"$DRAFT_DISCOUNT\""
+step "its method is fixed" 422 invalid_body -X PATCH "$BASE/admin/discounts/$DRAFT_DISCOUNT" -H "$JSON" -d '{"method":"codes"}'
+step "delete it" 204 - -X DELETE "$BASE/admin/discounts/$DRAFT_DISCOUNT"
+step "gone" 404 discount_not_found "$BASE/admin/discounts/$DRAFT_DISCOUNT"
 step "it is gone" 404 price_list_not_found "$BASE/admin/price-lists/$SCHEDULED_LIST"
 step "deleting it again" 404 price_list_not_found -X DELETE "$BASE/admin/price-lists/$SCHEDULED_LIST"
 step "fetch the price list" 200 - "$BASE/admin/price-lists/$LIST"
@@ -648,6 +706,18 @@ contains "mug line is named, with its handle" '"product_title":"Mug","variant_ti
 step "add 3 cups" 200 - -X POST "$BASE/storefront/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$CUP_VAR\",\"quantity\":3}"
 contains "cart total is 2400" '"total":{"amount":2400,"currency":"EUR"},"fully_available":true'
+step "a code that isn't one" 422 discount_code_invalid -X POST "$BASE/storefront/carts/$CART/discount-codes" \
+    -H "$JSON" -d '{"code":"NOPE"}'
+step "enter the welcome code as typed" 200 - -X POST "$BASE/storefront/carts/$CART/discount-codes" \
+    -H "$JSON" -d '{"code":" welcome10"}'
+contains "10% off 24.00" '"discount_total":{"amount":240,"currency":"EUR"}'
+contains "the code applies" '"discount_codes":[{"code":"WELCOME10","state":"applied"}]'
+contains "the mugs' share" '"total":{"amount":1620,"currency":"EUR"},"tax":null,"compare_at_price":null,"subtotal":{"amount":1800,"currency":"EUR"},"discounts":[{"application":0,"amount":{"amount":180,"currency":"EUR"}}]'
+contains "the cart total after it" '"total":{"amount":2160,"currency":"EUR"},"fully_available":true'
+step "let go of it" 200 - -X DELETE "$BASE/storefront/carts/$CART/discount-codes/welcome10"
+contains "back to 24.00" '"total":{"amount":2400,"currency":"EUR"},"fully_available":true'
+step "a code the cart doesn't hold" 404 discount_code_not_on_cart -X DELETE \
+    "$BASE/storefront/carts/$CART/discount-codes/WELCOME10"
 
 echo "## idempotency keys"
 fresh "a first request isn't marked replayed" -X POST "$BASE/storefront/carts" -H "$JSON" \
@@ -904,14 +974,23 @@ step "an order ID of the wrong kind" 400 invalid_path "$BASE/admin/orders/$CART"
 step "a new cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 contains "an open cart has no order" '"order":null'
 step "checkout an empty cart" 409 cart_empty -X POST "$BASE/storefront/carts/$(id)/checkout" -H "$JSON" -d '{}'
+step "the welcome code on the shipping cart" 200 - -X POST "$SHIP/discount-codes" -H "$JSON" -d '{"code":"WELCOME10"}'
+contains "0.90 off the mug, shipping as it was" '"total":{"amount":1300,"currency":"EUR"},"fully_available":true'
 step "pay the shipping cart on delivery" 200 - -X PUT "$SHIP/payment-method" -H "$JSON" \
     -d "{\"payment_method\":\"$COD\"}"
-step "checkout the shipping cart" 201 - -X POST "$SHIP/checkout" -H "$JSON" -d '{}'
+step "checkout the shipping cart" 201 - -X POST "$SHIP/checkout" -H "$JSON" -d '{"expected_total":{"amount":1300,"currency":"EUR"}}'
 contains "told to pay the courier" '"next_action":{"type":"instructions","instructions":"Pay the courier."}'
-contains "the order charges shipping" '"shipping_total":{"amount":490,"currency":"EUR"},"tax_total":{"amount":0,"currency":"EUR"},"total":{"amount":1390'
+contains "the order charges shipping" '"shipping_total":{"amount":490,"currency":"EUR"},"tax_total":{"amount":0,"currency":"EUR"},"total":{"amount":1300'
+contains "the order keeps the discount" '"discount_total":{"amount":90,"currency":"EUR"}'
+contains "with its code and value" '"code":"WELCOME10","title":"Welcome","summary":"10% off the order · once per customer","class":"order","value":{"basis_points":1000,"type":"percent"}'
 contains "it copies the address" '"shipping_address":{"first_name":"Ana","last_name":"Horvat"'
 contains "and the shipping line" '"code":"standard","name":"Standard","service":null,"amount":{"amount":490,"currency":"EUR"},"estimate":{"min_days":2,"max_days":4}'
 lacks "but not its provider, which is for staff" '"provider"'
+step "the welcome code was used once" 200 - "$BASE/admin/discounts/$WELCOME/usage"
+contains "on the shipping cart's order" '"code":"WELCOME10","amount":{"amount":90,"currency":"EUR"}'
+contains "with the order's number" '"order_number":'
+step "what it took off in all" 200 - "$BASE/admin/discounts/$WELCOME"
+contains "per currency" '"discounted_total":[{"amount":90,"currency":"EUR"}]'
 
 echo "## payment and search apps"
 step "a payment app that isn't installed" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \
@@ -1187,6 +1266,8 @@ step "rename customer" 200 - -X PATCH "$BASE/admin/customers/$CUSTOMER" -H "$JSO
 contains "null clears, others change" '"first_name":null,"last_name":"Horvat"'
 step "customers by text, by name" 200 - "$BASE/admin/customers?q=horvat&sort=name_asc"
 contains "finds her" "\"items\":[{\"id\":\"$CUSTOMER\""
+step "customers by their IDs" 200 - "$BASE/admin/customers?ids=$CUSTOMER,cus_00000000000000000000000000000063"
+contains "only her" "\"items\":[{\"id\":\"$CUSTOMER\""
 step "add shipping address" 201 - -X POST "$BASE/admin/customers/$CUSTOMER/addresses" -H "$JSON" \
     -d '{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR","default_shipping":true}'
 ADDRESS=$(address)
@@ -2448,6 +2529,38 @@ AUTH=(-H "authorization: Bearer $MCP_KEY")
 mcp_tool "the agent learns it was applied" get_proposal "{\"proposal\":\"$PROPOSAL\"}"
 contains "applied" '\"status\":\"applied\"'
 AUTH=("${SAVED_AUTH[@]}")
+
+echo
+echo "## buy X get Y, tiers and promotions"
+step "a cup for the deal" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
+    -d '{"handle":"deal-cup","title":"Deal cup","price":{"amount":300,"currency":"EUR"}}'
+DEAL_CUP=$(id)
+DEAL_CUP_VAR=$(variant)
+step "on sale" 200 - -X PATCH "$BASE/admin/products/$DEAL_CUP/status" -H "$JSON" -d '{"status":"active"}'
+step "in the market's catalog" 204 - -X POST "$BASE/admin/catalogs/$CATALOG/products" -H "$JSON" \
+    -d "{\"products\":[\"$DEAL_CUP\"]}"
+step "in the Online Store" 204 - -X POST "$BASE/admin/channels/$ONLINE_STORE/products" -H "$JSON" \
+    -d "{\"products\":[\"$DEAL_CUP\"]}"
+step "buy 2 cups, get 1 free" 201 - -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d "{\"title\":\"3 for 2\",\"method\":\"automatic\",\"kind\":{\"type\":\"buy_x_get_y\",\"buys\":{\"items\":{\"type\":\"products\",\"ids\":[\"$DEAL_CUP\"]}},\"buy\":{\"type\":\"quantity\",\"quantity\":2},\"gets\":{\"items\":{\"type\":\"products\",\"ids\":[\"$DEAL_CUP\"]}},\"get_quantity\":1,\"value\":{\"type\":\"percent\",\"basis_points\":10000},\"uses_per_order\":1}}"
+DEAL=$(id)
+contains "a product discount" '"classes":["product"]'
+contains "said as a deal, naming the cup" '"summary":"Buy 2 Deal cup, get 1 Deal cup free (once per order)"'
+step "the cup shows it" 200 - "$BASE/storefront/products/by-handle/deal-cup?country=HR"
+contains "as a promotion" "\"promotions\":[{\"discount\":\"$DEAL\",\"title\":\"3 for 2\",\"summary\":\"Buy 2 Deal cup, get 1 Deal cup free (once per order)\""
+step "a cart for the deal" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
+DEAL_CART=$(id)
+step "three cups" 200 - -X POST "$BASE/storefront/carts/$DEAL_CART/lines" -H "$JSON" \
+    -d "{\"variant\":\"$DEAL_CUP_VAR\",\"quantity\":3}"
+contains "the deal applies" "\"discounts\":[{\"discount\":\"$DEAL\""
+contains "on one unit" '"units":1'
+step "the deal goes" 204 - -X DELETE "$BASE/admin/discounts/$DEAL"
+step "tiers must rise" 422 invalid_discount -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Volume","method":"automatic","kind":{"type":"tiered","items":{"items":{"type":"all"}},"measure":"quantity","tiers":[{"threshold":{"type":"quantity","quantity":5},"value":{"type":"percent","basis_points":1500}},{"threshold":{"type":"quantity","quantity":3},"value":{"type":"percent","basis_points":1000}}]}}'
+contains "naming the tier" '"path":"kind.tiers[1].threshold"'
+step "a volume discount, kept as a draft" 201 - -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Volume","method":"automatic","status":"draft","kind":{"type":"tiered","items":{"items":{"type":"all"},"exclude_on_sale":true},"measure":"quantity","tiers":[{"threshold":{"type":"quantity","quantity":3},"value":{"type":"percent","basis_points":1000}},{"threshold":{"type":"quantity","quantity":5},"value":{"type":"percent","basis_points":1500}}]}}'
+contains "its steps" '"summary":"10% off 3+ items, 15% off 5+ items not on sale"'
 
 echo
 echo "## rate limits"

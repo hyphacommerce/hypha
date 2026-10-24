@@ -21,6 +21,8 @@ pub async fn cart_repo<R: CartRepo>(make: impl AsyncFn() -> R) {
     of_customer(&make().await).await;
     scenario("cart: the marketing opt-in round trips");
     marketing_round_trips(&make().await).await;
+    scenario("cart: discount codes round trip in the order entered");
+    discount_codes_round_trip(&make().await).await;
     scenario("cart: shipping address, choice and quote round trip, and clear");
     shipping_round_trips(&make().await).await;
     scenario("cart: the payment method round trips on insert and update, and clears");
@@ -163,6 +165,21 @@ async fn marketing_round_trips<R: CartRepo>(repo: &R) {
     c.set_marketing_opt_in(false).unwrap();
     repo.update(&mut c).await.unwrap();
     assert!(!repo.get(c.id()).await.unwrap().unwrap().marketing_opt_in());
+}
+
+async fn discount_codes_round_trip<R: CartRepo>(repo: &R) {
+    let mut c = cart(1);
+    c.add_discount_code("WELCOME10".to_string()).unwrap();
+    c.add_discount_code("SHIP".to_string()).unwrap();
+    repo.insert(&mut c).await.unwrap();
+    let stored = repo.get(c.id()).await.unwrap().unwrap();
+    assert_eq!(stored.discount_codes(), ["WELCOME10", "SHIP"]);
+    c.remove_discount_code("WELCOME10").unwrap();
+    repo.update(&mut c).await.unwrap();
+    assert_eq!(
+        repo.get(c.id()).await.unwrap().unwrap().discount_codes(),
+        ["SHIP"]
+    );
 }
 
 async fn of_customer<R: CartRepo>(repo: &R) {

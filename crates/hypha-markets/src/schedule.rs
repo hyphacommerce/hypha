@@ -14,12 +14,7 @@ use crate::{
     events::{PRICE_LIST, PriceListEnded, PriceListStarted},
 };
 
-/// Which end of a window passed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Boundary {
-    Started,
-    Ended,
-}
+pub use hypha_core::schedule::{Announced, Boundary};
 
 /// The window boundaries of `lists` that passed in `(after, until]`, oldest first (then by
 /// list, a start before an end). Only an active list's count: a draft prices nothing either
@@ -31,45 +26,26 @@ pub fn boundaries(
     after: Timestamp,
     until: Timestamp,
 ) -> Vec<(PriceListId, Boundary, Timestamp)> {
-    let mut found = Vec::new();
-    for list in lists {
-        if list.status() != PriceListStatus::Active {
-            continue;
-        }
-        let window = list.window();
-        for (boundary, at) in [
-            (Boundary::Started, window.starts_at()),
-            (Boundary::Ended, window.ends_at()),
-        ] {
-            let Some(at) = at else { continue };
-            if at > after && at <= until {
-                found.push((list.id(), boundary, at));
-            }
-        }
-    }
-    found.sort_by_key(|(list, boundary, at)| (*at, *list, *boundary));
-    found
+    hypha_core::schedule::passed(
+        active(lists).map(|l| (l.id(), l.window().starts_at(), l.window().ends_at())),
+        after,
+        until,
+    )
 }
 
 /// The first window boundary of an active list after `after`: when the job next has
 /// something to announce, unless a list changes before then.
 pub fn next_boundary(lists: &[PriceList], after: Timestamp) -> Option<Timestamp> {
+    hypha_core::schedule::next(
+        active(lists).map(|l| (l.window().starts_at(), l.window().ends_at())),
+        after,
+    )
+}
+
+fn active(lists: &[PriceList]) -> impl Iterator<Item = &PriceList> {
     lists
         .iter()
         .filter(|l| l.status() == PriceListStatus::Active)
-        .flat_map(|l| [l.window().starts_at(), l.window().ends_at()])
-        .flatten()
-        .filter(|at| *at > after)
-        .min()
-}
-
-/// What a run of the schedule job did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Announced {
-    /// Events recorded.
-    pub events: u32,
-    /// The next boundary after now, for a host that runs jobs only when they're due.
-    pub next: Option<Timestamp>,
 }
 
 /// Records `price_list.started` / `price_list.ended` for every boundary that passed since
@@ -175,36 +151,6 @@ mod tests {
 
     fn id(n: u128) -> PriceListId {
         PriceListId::from_uuid(Uuid::from_u128(n))
-    }
-
-    #[test]
-    fn a_start_inside_the_stretch_is_announced() {
-        let lists = [list(1, Some(100), None, 0)];
-        assert_eq!(
-            boundaries(&lists, at(50), at(150)),
-            vec![(id(1), Boundary::Started, at(100))]
-        );
-    }
-
-    #[test]
-    fn a_boundary_at_the_stretchs_start_was_the_last_runs() {
-        let lists = [list(1, Some(100), None, 0)];
-        assert_eq!(boundaries(&lists, at(100), at(150)), vec![]);
-    }
-
-    #[test]
-    fn a_boundary_at_the_stretchs_end_counts() {
-        let lists = [list(1, None, Some(150), 0)];
-        assert_eq!(
-            boundaries(&lists, at(100), at(150)),
-            vec![(id(1), Boundary::Ended, at(150))]
-        );
-    }
-
-    #[test]
-    fn a_boundary_still_ahead_waits() {
-        let lists = [list(1, Some(151), None, 0)];
-        assert_eq!(boundaries(&lists, at(100), at(150)), vec![]);
     }
 
     #[test]

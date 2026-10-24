@@ -1767,6 +1767,11 @@ async function main() {
         "category.*",
         "market.*",
         "custom_field_definition.*",
+        "discount.created",
+        "discount.updated",
+        "discount.deleted",
+        "discount.started",
+        "discount.ended",
       ],
       webhook: { url: `${STOREFRONT_URL}/api/revalidate` },
     });
@@ -2057,10 +2062,94 @@ async function main() {
     price_list: tradePrices.id,
   });
 
+  // After the orders, so they were placed at the prices they show. Each one combines with
+  // the other classes: the welcome code still gets free shipping, and the grow kit's free
+  // syringe still counts toward the minimum.
+  console.log("Discounts");
+  const discounts = [
+    {
+      title: "Welcome offer",
+      method: "codes",
+      codes: ["WELCOME10"],
+      kind: {
+        type: "standard",
+        rewards: [{ target: { type: "subtotal" }, value: { type: "percent", basis_points: 1000 } }],
+      },
+      combines_with: ["product", "shipping"],
+      limits: { once_per_customer: true },
+    },
+    // Free shipping above a minimum in each market's own currency, so each says its own
+    // amount.
+    ...[
+      ["Europe", "€50", 5000],
+      ["United Kingdom", "£45", 4500],
+      ["United States", "$60", 6000],
+      ["Serbia", "6,000 RSD", 600000],
+    ].map(([name, over, amount]) => {
+      const market = MARKETS.find((m) => m.name === name);
+      return {
+        title: `Free shipping over ${over}`,
+        method: "automatic",
+        conditions: [
+          { type: "markets", markets: [market.id] },
+          {
+            type: "min_subtotal",
+            amounts: { [market.id]: { amount, currency: market.currency } },
+          },
+        ],
+        kind: {
+          type: "standard",
+          rewards: [
+            { target: { type: "shipping" }, value: { type: "percent", basis_points: 10000 } },
+          ],
+        },
+        combines_with: ["product", "order"],
+      };
+    }),
+    {
+      title: "Buy a grow kit, get a syringe free",
+      method: "automatic",
+      kind: {
+        type: "buy_x_get_y",
+        buys: { items: { type: "categories", ids: [categoryIds["grow-kits"]] } },
+        buy: { type: "quantity", quantity: 1 },
+        gets: { items: { type: "products", ids: [forSale["liquid-culture-syringe"].id] } },
+        get_quantity: 1,
+        value: { type: "percent", basis_points: 10000 },
+        uses_per_order: 1,
+      },
+      combines_with: ["order", "shipping"],
+    },
+    {
+      title: "Culture volume discount",
+      method: "automatic",
+      kind: {
+        type: "tiered",
+        items: { items: { type: "categories", ids: [categoryIds.cultures] } },
+        measure: "quantity",
+        tiers: [
+          {
+            threshold: { type: "quantity", quantity: 3 },
+            value: { type: "percent", basis_points: 1000 },
+          },
+          {
+            threshold: { type: "quantity", quantity: 6 },
+            value: { type: "percent", basis_points: 1500 },
+          },
+        ],
+      },
+      combines_with: ["order", "shipping"],
+    },
+  ];
+  for (const discount of discounts) {
+    await admin.post("/admin/discounts", discount);
+    console.log(`  ${discount.title}${discount.codes ? ` (${discount.codes.join(", ")})` : ""}`);
+  }
+
   const variantCount = sellable.reduce((n, p) => n + p.variants.length, 0);
   console.log("\nDone: Mycelium Works is set up.");
   console.log(
-    `  ${sellable.length} products for sale (${variantCount} variants), 1 draft · ${FIELDS.length} custom fields · ${MARKETS.length} markets · ${orders.length} orders`,
+    `  ${sellable.length} products for sale (${variantCount} variants), 1 draft · ${FIELDS.length} custom fields · ${MARKETS.length} markets · ${orders.length} orders · ${discounts.length} discounts`,
   );
   console.log("\nFor the storefront (apps/storefront/.dev.vars):");
   console.log(`  STOREFRONT_KEY=${key.token}`);

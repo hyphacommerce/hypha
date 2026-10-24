@@ -1869,3 +1869,229 @@ fn viewing_a_cart_needs_carts_read() {
     let viewed = block_on(view_cart(&ctx, &world.ports, cart));
     assert_eq!(viewed.map(|_| ()), missing(Scope::CartsRead));
 }
+
+// ---- discounts ----
+
+/// 10% off the order, automatically, with `limits`.
+fn ten_percent_off(world: &World, limits: hypha_discounts::Limits) -> hypha_core::DiscountId {
+    use hypha_discounts::{
+        Discount, DiscountDraft, DiscountRepo, Kind, Method, Reward, Target, Value,
+    };
+    let kind = Kind::Standard {
+        rewards: vec![Reward {
+            target: Target::Subtotal,
+            value: Value::Percent(hypha_core::BasisPoints::new(1000).unwrap()),
+        }],
+    };
+    let mut draft = DiscountDraft::new("Welcome", Method::Automatic, kind);
+    draft.limits = limits;
+    let id = hypha_core::DiscountId::from_uuid(Uuid::from_u128(9000));
+    let mut discount = Discount::new(id, draft).unwrap();
+    block_on(world.discounts.insert(&mut discount)).unwrap();
+    id
+}
+
+/// A use of `discount` by `customer` on another order.
+fn used_elsewhere(world: &World, discount: hypha_core::DiscountId, customer: CustomerId) {
+    use hypha_core::HasBatch;
+    use hypha_discounts::{StageDiscounts, UsageClaim};
+    let mut batch = world.ports.batch();
+    batch.claim_discount_usage(UsageClaim {
+        discount,
+        code: None,
+        order: hypha_core::OrderId::from_uuid(Uuid::from_u128(9100)),
+        customer,
+        once_per_customer: true,
+        amount: eur(100),
+        at: world.clock.now(),
+    });
+    block_on(world.ports.commit(batch)).unwrap();
+}
+
+#[test]
+fn a_discount_reaches_the_order_with_its_shares_and_counts_a_use() {
+    use hypha_discounts::DiscountRepo;
+    let world = World::new();
+    let discount = ten_percent_off(
+        &world,
+        hypha_discounts::Limits {
+            total: Some(5),
+            once_per_customer: false,
+        },
+    );
+    let order = world.checkout(world.cart()).unwrap();
+    // 24.00 less 10%: 2.00 off the mugs, 0.40 off the cup; VAT on what's left.
+    assert_eq!(
+        (
+            order.discount_total(),
+            order.subtotal(),
+            order.tax_total(),
+            order.total()
+        ),
+        (eur(240), eur(2160), eur(540), eur(2700))
+    );
+    assert_eq!(
+        order
+            .lines()
+            .iter()
+            .map(|l| (l.subtotal, l.total))
+            .collect::<Vec<_>>(),
+        vec![(eur(2000), eur(1800)), (eur(400), eur(360))]
+    );
+    assert_eq!(order.discounts()[0].discount, discount);
+    assert_eq!(order.discounts()[0].amount, eur(240));
+    assert_eq!(
+        block_on(world.discounts.usage_counts(&[discount])),
+        Ok([(discount, 1)].into())
+    );
+    let usage = block_on(world.discounts.usage_page(
+        discount,
+        hypha_core::PageRequest {
+            after: None,
+            limit: hypha_core::PageLimit::DEFAULT,
+        },
+    ))
+    .unwrap();
+    assert_eq!(
+        (
+            usage.items[0].order,
+            usage.items[0].customer,
+            usage.items[0].amount
+        ),
+        (order.id(), order.customer(), eur(240))
+    );
+}
+
+#[test]
+fn losing_the_last_use_is_discounts_changed_and_places_nothing() {
+    let world = World::new();
+    let discount = ten_percent_off(
+        &world,
+        hypha_discounts::Limits {
+            total: Some(1),
+            once_per_customer: false,
+        },
+    );
+    let cart = world.cart();
+    used_elsewhere(
+        &world,
+        discount,
+        CustomerId::from_uuid(Uuid::from_u128(9200)),
+    );
+    // Checkout reads the cart before the other use shows.
+    world.discounts.hide_next_usage_counts(1);
+    assert_eq!(
+        world.checkout(cart),
+        Err(CommandError::DiscountsChanged {
+            total: eur(3000),
+            codes: vec![],
+        })
+    );
+    let stored = block_on(world.carts.get(cart)).unwrap().unwrap();
+    assert_eq!(stored.status(), CartStatus::Open);
+    assert_eq!(world.mug_reserved(), 0);
+}
+
+/// A cart paying 27.00 by card (10% off, its last use) whose payment the provider
+/// authorized, then the last use taken by another order before checkout reads it.
+fn paid_then_last_use_taken(world: &World, app: &CardApp) -> (CartId, hypha_payments::Payment) {
+    let discount = ten_percent_off(
+        world,
+        hypha_discounts::Limits {
+            total: Some(1),
+            once_per_customer: false,
+        },
+    );
+    let (cart, payment) = started_cart(world, app);
+    assert_eq!(payment.amount(), eur(2700));
+    app.state.set(ProviderState::Authorized);
+    let mut held = block_on(world.payments.get(payment.id())).unwrap().unwrap();
+    held.authorize(None).unwrap();
+    block_on(world.payments.update(&mut held)).unwrap();
+    used_elsewhere(
+        world,
+        discount,
+        CustomerId::from_uuid(Uuid::from_u128(9200)),
+    );
+    // Checkout reads the cart before the other use shows, so only the claim catches it.
+    world.discounts.hide_next_usage_counts(1);
+    (cart, payment)
+}
+
+#[test]
+fn a_paid_cart_losing_its_discounts_last_use_gets_its_money_back() {
+    let world = World::new();
+    let app = CardApp::default();
+    let (cart, payment) = paid_then_last_use_taken(&world, &app);
+    assert_eq!(
+        check_out_by(&world, cart, &app).map(|_| ()),
+        Err(CommandError::DiscountsChanged {
+            total: eur(3000),
+            codes: vec![],
+        })
+    );
+    assert_eq!(
+        app.acted.borrow().as_slice(),
+        [(payment.id(), PaymentAction::Void)]
+    );
+    let stored = block_on(world.payments.get(payment.id())).unwrap().unwrap();
+    assert_eq!(stored.status(), PaymentStatus::Voided);
+    assert_eq!(world.mug_reserved(), 0);
+}
+
+#[test]
+fn a_report_completing_a_cart_that_lost_its_discounts_last_use_gives_the_money_back() {
+    let world = World::new();
+    let app = CardApp::default();
+    let (_, payment) = paid_then_last_use_taken(&world, &app);
+    let reporter = Ctx::new(Actor::System, vec![Scope::PaymentsWrite]);
+    assert_eq!(
+        block_on(complete_paid_checkout(
+            &reporter,
+            &world.ports,
+            &world.ids,
+            &world.clock,
+            &NoRateProviders,
+            &(ManualProvider, &app),
+            payment.id(),
+        ))
+        .map(|_| ()),
+        Err(CommandError::DiscountsChanged {
+            total: eur(3000),
+            codes: vec![],
+        })
+    );
+    let stored = block_on(world.payments.get(payment.id())).unwrap().unwrap();
+    assert_eq!(stored.status(), PaymentStatus::Voided);
+}
+
+#[test]
+fn a_guest_who_used_a_once_per_customer_discount_doesnt_get_it_again() {
+    let world = World::new();
+    let discount = ten_percent_off(
+        &world,
+        hypha_discounts::Limits {
+            total: None,
+            once_per_customer: true,
+        },
+    );
+    let mut ana_customer = Customer::new(CustomerId::from_uuid(Uuid::from_u128(9300)), ana());
+    block_on(world.customers.insert(&mut ana_customer)).unwrap();
+    used_elsewhere(&world, discount, ana_customer.id());
+    let order = world.checkout(world.cart()).unwrap();
+    assert_eq!((order.discount_total(), order.total()), (eur(0), eur(3000)));
+}
+
+#[test]
+fn a_checked_out_cart_reads_with_its_orders_discounts() {
+    let world = World::new();
+    ten_percent_off(&world, hypha_discounts::Limits::default());
+    let cart = world.cart();
+    world.checkout(cart).unwrap();
+    let viewed = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    assert_eq!(
+        (viewed.discount_total, viewed.discounts.len(), viewed.total),
+        (eur(240), 1, eur(2700))
+    );
+    assert_eq!(viewed.discounts[0].title, "Welcome");
+}

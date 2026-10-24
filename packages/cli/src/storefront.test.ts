@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { Deployment } from "./deployment.ts";
-import { connectStorefront, linkOrders, orderUrl } from "./storefront.ts";
+import { connectStorefront, linkOrders, orderUrl, syncWebhook } from "./storefront.ts";
 
 function deployment(target: Deployment["target"] = "vps"): Deployment {
   return {
@@ -104,4 +104,62 @@ test("on this machine there's no webhook app, and the store's links stay", async
   });
   assert.ok(!calls.some((c) => c.path === "/admin/apps"));
   assert.ok(!calls.some((c) => c.method === "PATCH"));
+});
+
+const HOOK = "https://shop.example.com/api/revalidate";
+const ALL_EVENTS = [
+  "product.*",
+  "inventory_item.*",
+  "price_list.*",
+  "catalog.*",
+  "channel.*",
+  "category.*",
+  "market.*",
+  "custom_field_definition.*",
+  "discount.created",
+  "discount.updated",
+  "discount.deleted",
+  "discount.started",
+  "discount.ended",
+];
+
+test("an older storefront app gets the events it now needs, keeping the merchant's", async () => {
+  const { staff, calls } = fakeStaff({
+    "GET /admin/apps/app_storefront": {
+      webhook: { url: HOOK },
+      subscriptions: ["product.*", "order.*"],
+    },
+  });
+  assert.equal(await syncWebhook(deployment(), staff), null);
+  assert.deepEqual(calls.at(-1), {
+    method: "PATCH",
+    path: "/admin/apps/app_storefront",
+    body: { subscriptions: ["product.*", "order.*", ...ALL_EVENTS.slice(1)] },
+  });
+});
+
+test("a webhook that moved is pointed at the storefront's domain", async () => {
+  const { staff, calls } = fakeStaff({
+    "GET /admin/apps/app_storefront": {
+      webhook: { url: "https://old.example.com/api/revalidate" },
+      subscriptions: ALL_EVENTS,
+    },
+  });
+  assert.equal(await syncWebhook(deployment(), staff), HOOK);
+  assert.deepEqual(calls.at(-1), {
+    method: "PATCH",
+    path: "/admin/apps/app_storefront",
+    body: { webhook: { url: HOOK } },
+  });
+});
+
+test("a storefront app already right isn't written", async () => {
+  const { staff, calls } = fakeStaff({
+    "GET /admin/apps/app_storefront": { webhook: { url: HOOK }, subscriptions: ALL_EVENTS },
+  });
+  assert.equal(await syncWebhook(deployment(), staff), null);
+  assert.deepEqual(
+    calls.map((c) => c.method),
+    ["GET"],
+  );
 });

@@ -74,6 +74,11 @@ export function OrderLines() {
           </Column>
           <Column style={{ ...cell, width: "110px" }} align="right">
             <Text style={amount}>{v("line.total.formatted")}</Text>
+            <If test="line.discount">
+              <Text style={{ ...muted, margin: 0, textDecoration: "line-through" }}>
+                {v("line.original_total.formatted")}
+              </Text>
+            </If>
           </Column>
         </Row>
       </For>
@@ -102,7 +107,7 @@ export function ShippedLines() {
   );
 }
 
-function TotalRow(props: { label: string; value: string; strong?: boolean }) {
+function TotalRow(props: { label: ReactNode; value: string; strong?: boolean }) {
   const style = props.strong
     ? { ...paragraph, margin: 0, fontWeight: 700 }
     : { ...paragraph, margin: 0, color: colours.muted };
@@ -118,7 +123,11 @@ function TotalRow(props: { label: string; value: string; strong?: boolean }) {
   );
 }
 
-/** Subtotal, shipping, tax (a line of its own, or included in the total) and total. */
+/**
+ * Subtotal (the lines' totals, after discounts), shipping (after discounts), tax (a line
+ * of its own, or included in the total) and total, which add up; then the discounts they
+ * already include, so none is taken off twice.
+ */
 export function Totals() {
   return (
     <Section style={{ marginTop: "12px" }}>
@@ -132,6 +141,23 @@ export function Totals() {
         <Text style={{ ...muted, textAlign: "right" }}>
           Including {v("order.tax.formatted")} in taxes
         </Text>
+      </If>
+      <If test="order.discounts">
+        <Text style={{ ...muted, margin: "12px 0 0" }}>Discounts included above</Text>
+        <For each="discount in order.discounts">
+          <TotalRow
+            label={
+              <>
+                {v("discount.title")}
+                <If test="discount.code" inline>
+                  {" "}
+                  ({v("discount.code")})
+                </If>
+              </>
+            }
+            value={v("discount.amount.formatted")}
+          />
+        </For>
       </If>
     </Section>
   );

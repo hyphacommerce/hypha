@@ -27,6 +27,7 @@ import { type VariantPrices, customerPrices } from "@/app/[country]/actions";
 
 import { useCart } from "@/components/cart/cart-provider";
 import { CustomFields } from "@/components/custom-fields";
+import { PromotionBadges } from "@/components/discounts";
 import { Price, SaleBadge } from "@/components/price";
 import { productImageName } from "@/components/product-grid";
 import {
@@ -36,6 +37,7 @@ import {
   addTransitionType,
 } from "@/components/view-transition";
 import { type FieldEntry, withVariant } from "@/lib/custom-fields";
+import { readPromotions } from "@/lib/discounts";
 import { breakLabel, sortedBreaks, unitPriceFor } from "@/lib/prices";
 import { hasSessionFlag } from "@/lib/session-flag";
 
@@ -120,6 +122,9 @@ export function ProductForm({
   // The line's quantity once these are in: the cart prices the whole line by its breaks.
   const lineQuantity = inCart + quantity;
   const breaks = sortedBreaks(variant?.price_breaks ?? []);
+  // Its live automatic discounts, as badges: never a price, so the static page is right
+  // for every shopper.
+  const promotions = readPromotions(product);
   const unit = variant?.price ? unitPriceFor(variant.price, breaks, lineQuantity) : null;
   // A break's price is shown against the regular one, unless a sale already has a "was".
   const unitCompareAt =
@@ -261,8 +266,16 @@ export function ProductForm({
               {unit && breaks.length > 0 && <Text type="supporting">each</Text>}
               {product.prices_include_tax === false && <Text type="supporting">plus tax</Text>}
               {variant?.on_sale && <SaleBadge />}
+              <PromotionBadges promotions={promotions} />
               {variant && !variant.available && <Badge label="Sold out" variant="neutral" />}
             </HStack>
+            {promotions
+              .filter((p) => p.summary)
+              .map((p) => (
+                <Text key={p.title} type="supporting" color="secondary">
+                  {p.summary}
+                </Text>
+              ))}
             {variant?.price && breaks.length > 0 && (
               <VStack as="ul" gap={1} aria-label="Quantity prices" className="shop-breaks">
                 {breaks.map((b) => (

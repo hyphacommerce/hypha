@@ -7,9 +7,9 @@ use hypha_core::{
     VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_orders::{
-    Cancellation, Order, OrderFilter, OrderLine, OrderNumber, OrderRepo, OrderShippingLine,
-    OrderSnapshot, OrderSort, OrderStats, OrderSummary, OrderTax, OrderTaxSource, SalesFigures,
-    SalesQuery,
+    Cancellation, DiscountClass, DiscountShare, Order, OrderDiscount, OrderFilter, OrderLine,
+    OrderNumber, OrderRepo, OrderShippingLine, OrderSnapshot, OrderSort, OrderStats, OrderSummary,
+    OrderTax, OrderTaxSource, SalesFigures, SalesQuery,
 };
 use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
@@ -228,6 +228,30 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
         })
     }
 
+    async fn numbers(
+        &self,
+        ids: &[OrderId],
+    ) -> Result<std::collections::HashMap<OrderId, OrderNumber>, RepoError> {
+        if ids.is_empty() {
+            return Ok(Default::default());
+        }
+        let ids: Vec<Uuid> = ids.iter().map(|o| o.as_uuid()).collect();
+        let mut conn = self.conn().await;
+        conn.db()
+            .query_typed(
+                "SELECT id, number FROM orders WHERE id = ANY($1)",
+                &[(&ids, Type::UUID_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(|row| {
+                let number = OrderNumber::new(col(row, "number")?).map_err(corrupt)?;
+                Ok((OrderId::from_uuid(col(row, "id")?), number))
+            })
+            .collect()
+    }
+
     async fn insert(&self, order: &mut Order) -> Result<(), RepoError> {
         stamp_insert(order, self.now());
         let s = order.snapshot();
@@ -286,7 +310,8 @@ pub(crate) async fn update_order(
                  cart_id = $5, market_id = $6, currency = $7, country = $8,
                  taxes_included = $9, customer_id = $10, email = $11, subtotal = $12,
                  tax_total = $13, total = $14, financial_status = $15,
-                 fulfillment_status = $16, cancelled_at = {}, cancel_reason = $18
+                 fulfillment_status = $16, cancelled_at = {}, cancel_reason = $18,
+                 discounts = $19::text::jsonb, discount_total = $20
              WHERE id = $1 AND version = $2 RETURNING version",
                 ts(4),
                 ts(17),
@@ -310,6 +335,8 @@ pub(crate) async fn update_order(
                 (&s.fulfillment_status.as_str(), Type::TEXT),
                 (&opt_micros(s.cancelled.map(|c| c.at)), Type::INT8),
                 (&s.cancelled.map(|c| c.reason.as_str()), Type::TEXT),
+                (&discounts_out(&s.discounts), Type::TEXT),
+                (&s.discount_total.amount(), Type::INT8),
             ],
         )
         .await
@@ -341,9 +368,10 @@ pub(crate) async fn insert_order(tx: &impl Queries, s: &OrderSnapshot) -> Result
         &format!(
             "INSERT INTO orders (id, version, number, placed_at, cart_id, market_id, currency,
              country, taxes_included, customer_id, email, subtotal, tax_total, total,
-             financial_status, fulfillment_status, cancelled_at, cancel_reason, channel_id)
+             financial_status, fulfillment_status, cancelled_at, cancel_reason, channel_id,
+             discounts, discount_total)
          VALUES ($1, 1, $2, {}, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, {}, $17,
-                 $18)",
+                 $18, $19::text::jsonb, $20)",
             ts(3),
             ts(16),
         ),
@@ -366,6 +394,8 @@ pub(crate) async fn insert_order(tx: &impl Queries, s: &OrderSnapshot) -> Result
             (&opt_micros(s.cancelled.map(|c| c.at)), Type::INT8),
             (&s.cancelled.map(|c| c.reason.as_str()), Type::TEXT),
             (&s.channel.as_uuid(), Type::UUID),
+            (&discounts_out(&s.discounts), Type::TEXT),
+            (&s.discount_total.amount(), Type::INT8),
         ],
     )
     .await
@@ -401,8 +431,9 @@ async fn write_shipping(tx: &impl Queries, s: &OrderSnapshot) -> Result<(), Repo
             "INSERT INTO order_shipping_lines (order_id, position, group_id, line_ids,
                  option_id, code, name, provider, service, reference, amount,
                  estimate_min_days, estimate_max_days, tax_rate_ppm, tax_class_id,
-                 tax_amount, tax_region_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
+                 tax_amount, tax_region_id, total, discounts)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+                 $18, $19::text::jsonb)",
             &[
                 (&s.id.as_uuid(), Type::UUID),
                 (&position, Type::INT4),
@@ -435,6 +466,8 @@ async fn write_shipping(tx: &impl Queries, s: &OrderSnapshot) -> Result<(), Repo
                     }),
                     Type::UUID,
                 ),
+                (&line.total.amount(), Type::INT8),
+                (&shares_out(&line.discounts), Type::TEXT),
             ],
         )
         .await
@@ -466,6 +499,8 @@ async fn insert_lines(
         .map(|l| l.unit_price.money().amount())
         .collect();
     let totals: Vec<i64> = lines.iter().map(|l| l.total.amount()).collect();
+    let subtotals: Vec<i64> = lines.iter().map(|l| l.subtotal.amount()).collect();
+    let shares: Vec<String> = lines.iter().map(|l| shares_out(&l.discounts)).collect();
     let compare_at: Vec<Option<i64>> = lines
         .iter()
         .map(|l| l.compare_at_price.map(|p| p.money().amount()))
@@ -501,16 +536,20 @@ async fn insert_lines(
     tx.query_typed(
         "INSERT INTO order_lines (order_id, position, id, product_id, variant_id, quantity,
              product_title, variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id,
-             tax_amount, tax_region_id, fulfilled_quantity, compare_at_amount, price_list_id)
+             tax_amount, tax_region_id, fulfilled_quantity, compare_at_amount, price_list_id,
+             subtotal, discounts)
          SELECT $1, (n - 1)::integer, id, product_id, variant_id, quantity, product_title,
              variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id, tax_amount,
-             tax_region_id, fulfilled_quantity, compare_at, price_list
+             tax_region_id, fulfilled_quantity, compare_at, price_list, subtotal,
+             discounts::jsonb
          FROM unnest($2::uuid[], $3::uuid[], $4::uuid[], $5::bigint[], $6::text[], $7::text[],
                      $8::text[], $9::bigint[], $10::bigint[], $11::integer[], $12::uuid[],
-                     $13::bigint[], $14::uuid[], $15::bigint[], $16::bigint[], $17::uuid[])
+                     $13::bigint[], $14::uuid[], $15::bigint[], $16::bigint[], $17::uuid[],
+                     $18::bigint[], $19::text[])
               WITH ORDINALITY AS t (id, product_id, variant_id, quantity, product_title,
                   variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id,
-                  tax_amount, tax_region_id, fulfilled_quantity, compare_at, price_list, n)",
+                  tax_amount, tax_region_id, fulfilled_quantity, compare_at, price_list,
+                  subtotal, discounts, n)",
         &[
             (&order.as_uuid(), Type::UUID),
             (&ids, Type::UUID_ARRAY),
@@ -529,6 +568,8 @@ async fn insert_lines(
             (&fulfilled, Type::INT8_ARRAY),
             (&compare_at, Type::INT8_ARRAY),
             (&price_lists, Type::UUID_ARRAY),
+            (&subtotals, Type::INT8_ARRAY),
+            (&shares, Type::TEXT_ARRAY),
         ],
     )
     .await
@@ -554,7 +595,7 @@ async fn load(client: &impl Queries, ids: &[Uuid]) -> Result<Vec<Order>, RepoErr
                 "SELECT id, version, number, {}, cart_id, channel_id, market_id, currency, country,
                      taxes_included, customer_id, email, subtotal, tax_total, total,
                      financial_status, fulfillment_status, {}, cancel_reason, {},
-                     shipping_total, {}
+                     shipping_total, discounts::text AS discounts, discount_total, {}
                  FROM orders WHERE id = ANY($1)",
                 micros("placed_at"),
                 micros("cancelled_at"),
@@ -574,7 +615,8 @@ async fn load(client: &impl Queries, ids: &[Uuid]) -> Result<Vec<Order>, RepoErr
         .query_typed(
             "SELECT id, product_id, variant_id, quantity, product_title, variant_title, sku,
                  unit_price, total, tax_rate_ppm, tax_class_id, tax_amount, tax_region_id,
-                 fulfilled_quantity, order_id, compare_at_amount, price_list_id
+                 fulfilled_quantity, order_id, compare_at_amount, price_list_id, subtotal,
+                 discounts::text AS discounts
              FROM order_lines WHERE order_id = ANY($1) ORDER BY order_id, position",
             &param,
         )
@@ -589,7 +631,7 @@ async fn load(client: &impl Queries, ids: &[Uuid]) -> Result<Vec<Order>, RepoErr
         .query_typed(
             "SELECT group_id, line_ids, option_id, code, name, provider, service, reference,
                  amount, estimate_min_days, estimate_max_days, tax_rate_ppm, tax_class_id,
-                 tax_amount, tax_region_id, order_id
+                 tax_amount, tax_region_id, order_id, total, discounts::text AS discounts
              FROM order_shipping_lines WHERE order_id = ANY($1) ORDER BY order_id, position",
             &param,
         )
@@ -668,6 +710,8 @@ fn order_from_db(
         lines,
         shipping_address,
         shipping_lines,
+        discounts: discounts_in(&col::<String>(row, "discounts")?, &money)?,
+        discount_total: money(col(row, "discount_total")?)?,
         subtotal: money(col(row, "subtotal")?)?,
         shipping_total: money(col(row, "shipping_total")?)?,
         tax_total: money(col(row, "tax_total")?)?,
@@ -740,6 +784,8 @@ fn shipping_line_from_db(
         service: col(line, "service")?,
         reference: col(line, "reference")?,
         amount: Price::new(money(col(line, "amount")?)?).map_err(corrupt)?,
+        discounts: shares_in(&col::<String>(line, "discounts")?, money)?,
+        total: money(col(line, "total")?)?,
         estimate_days: days("estimate_min_days")?.zip(days("estimate_max_days")?),
         tax,
     })
@@ -782,6 +828,8 @@ fn line_from_db(
         variant_title: col(line, "variant_title")?,
         sku: col(line, "sku")?,
         unit_price: Price::new(money(col(line, "unit_price")?)?).map_err(corrupt)?,
+        subtotal: money(col(line, "subtotal")?)?,
+        discounts: shares_in(&col::<String>(line, "discounts")?, money)?,
         total: money(col(line, "total")?)?,
         tax,
         fulfilled_quantity,
@@ -790,4 +838,95 @@ fn line_from_db(
             .transpose()?,
         price_list: col::<Option<Uuid>>(line, "price_list_id")?.map(PriceListId::from_uuid),
     })
+}
+
+/// A discount share as stored: amounts in the order's currency.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ShareJson {
+    application: u16,
+    amount: i64,
+    units: Option<u32>,
+}
+
+/// An order's discount as stored; `value` and `target` are the discounts domain's JSON.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct OrderDiscountJson {
+    discount: hypha_core::DiscountId,
+    code: Option<String>,
+    title: String,
+    summary: String,
+    class: String,
+    value: serde_json::Value,
+    target: serde_json::Value,
+    amount: i64,
+}
+
+fn shares_out(shares: &[DiscountShare]) -> String {
+    let json: Vec<ShareJson> = shares
+        .iter()
+        .map(|s| ShareJson {
+            application: s.application,
+            amount: s.amount.amount(),
+            units: s.units,
+        })
+        .collect();
+    // Numbers only: serializing can't fail.
+    serde_json::to_string(&json).unwrap_or_else(|_| "[]".to_string())
+}
+
+fn shares_in(
+    text: &str,
+    money: &impl Fn(i64) -> Result<Money, RepoError>,
+) -> Result<Vec<DiscountShare>, RepoError> {
+    let json: Vec<ShareJson> =
+        serde_json::from_str(text).map_err(|e| corrupt(format!("discount shares: {e}")))?;
+    json.into_iter()
+        .map(|s| {
+            Ok(DiscountShare {
+                application: s.application,
+                amount: money(s.amount)?,
+                units: s.units,
+            })
+        })
+        .collect()
+}
+
+fn discounts_out(discounts: &[OrderDiscount]) -> String {
+    let json: Vec<OrderDiscountJson> = discounts
+        .iter()
+        .map(|d| OrderDiscountJson {
+            discount: d.discount,
+            code: d.code.clone(),
+            title: d.title.clone(),
+            summary: d.summary.clone(),
+            class: d.class.as_str().to_string(),
+            value: d.value.clone(),
+            target: d.target.clone(),
+            amount: d.amount.amount(),
+        })
+        .collect();
+    serde_json::to_string(&json).unwrap_or_else(|_| "[]".to_string())
+}
+
+fn discounts_in(
+    text: &str,
+    money: &impl Fn(i64) -> Result<Money, RepoError>,
+) -> Result<Vec<OrderDiscount>, RepoError> {
+    let json: Vec<OrderDiscountJson> =
+        serde_json::from_str(text).map_err(|e| corrupt(format!("order discounts: {e}")))?;
+    json.into_iter()
+        .map(|d| {
+            Ok(OrderDiscount {
+                discount: d.discount,
+                code: d.code,
+                title: d.title,
+                summary: d.summary,
+                class: DiscountClass::parse(&d.class)
+                    .ok_or_else(|| corrupt(format!("discount class {:?}", d.class)))?,
+                value: d.value,
+                target: d.target,
+                amount: money(d.amount)?,
+            })
+        })
+        .collect()
 }

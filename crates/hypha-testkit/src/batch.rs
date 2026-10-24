@@ -20,6 +20,9 @@ use hypha_custom_fields::{
 use hypha_customers::{
     Customer, CustomerGroup, StageCustomerGroups, StageCustomers, repo::keys as customer_keys,
 };
+use hypha_discounts::{
+    CodeSelection, Discount, DiscountCode, StageDiscounts, UsageClaim, keys as discount_keys,
+};
 use hypha_fulfillment::{Fulfillment, StageFulfillments, keys as fulfillment_keys};
 use hypha_inventory::{InventoryItem, StageInventoryItems};
 use hypha_markets::{FixedPrice, StageCatalogProducts, StageFixedPrices, StagePriceListSchedule};
@@ -137,6 +140,48 @@ enum Staged {
     ),
     Events(Vec<PendingEvent>, Option<Version>),
     NewAgent(Agent),
+    NewDiscount(Discount),
+    DiscountCodes(Vec<DiscountCode>),
+    RemovedDiscountCodes(hypha_core::DiscountId, CodeSelection),
+    DiscountUsage(UsageClaim),
+    DiscountCodesActive(hypha_core::DiscountId, CodeSelection, bool),
+    /// The discount schedule job's progress moved from the first to the second.
+    DiscountSchedule(Option<Timestamp>, Timestamp),
+}
+
+impl StageDiscounts for InMemoryBatch {
+    fn insert_discount(&mut self, discount: &mut Discount) {
+        stamp_insert(discount, self.now);
+        let events = discount.take_events();
+        self.stage(Staged::NewDiscount(discount.clone()));
+        self.stage(Staged::Events(events, Some(Version::NEW.next())));
+        discount.set_version(Version::NEW.next());
+    }
+
+    fn add_discount_codes(&mut self, codes: &[DiscountCode]) {
+        self.stage(Staged::DiscountCodes(codes.to_vec()));
+    }
+
+    fn remove_discount_codes(&mut self, discount: hypha_core::DiscountId, codes: CodeSelection) {
+        self.stage(Staged::RemovedDiscountCodes(discount, codes));
+    }
+
+    fn set_discount_codes_active(
+        &mut self,
+        discount: hypha_core::DiscountId,
+        codes: CodeSelection,
+        active: bool,
+    ) {
+        self.stage(Staged::DiscountCodesActive(discount, codes, active));
+    }
+
+    fn claim_discount_usage(&mut self, claim: UsageClaim) {
+        self.stage(Staged::DiscountUsage(claim));
+    }
+
+    fn advance_discount_schedule(&mut self, from: Option<Timestamp>, to: Timestamp) {
+        self.stage(Staged::DiscountSchedule(from, to));
+    }
 }
 
 impl StageApps for InMemoryBatch {
@@ -570,6 +615,10 @@ impl HasBatch for InMemoryPorts {
         let agents_before = agents.clone();
         let mut proposals = self.agents.proposals.lock();
         let proposals_before = proposals.clone();
+        let mut discounts = self.discounts.discounts.lock();
+        let discounts_before = discounts.clone();
+        let mut discount_rows = self.discounts.lock_rows();
+        let discount_rows_before = discount_rows.clone();
         let now = self.outbox.now();
         // Single writes first, the set-based revocation after them (as Postgres sorts).
         let mut revocations = Vec::new();
@@ -1031,6 +1080,39 @@ impl HasBatch for InMemoryPorts {
                         hypha_agents::keys::AGENT_ID,
                         &no_unique_keys,
                     )?,
+                    Staged::NewDiscount(mut discount) => {
+                        insert_row(
+                            &mut discounts,
+                            discount.id(),
+                            &mut discount,
+                            discount_keys::DISCOUNT_ID,
+                            &no_unique_keys,
+                        )?;
+                        discount_rows.counts.insert(discount.id(), 0);
+                    }
+                    Staged::DiscountCodes(codes) => {
+                        if let Some(orphan) =
+                            codes.iter().find(|c| !discounts.contains_key(&c.discount))
+                        {
+                            return Err(missing("discount", orphan.discount));
+                        }
+                        discount_rows.add_codes(&codes, now)?;
+                    }
+                    Staged::RemovedDiscountCodes(discount, selection) => {
+                        discount_rows.remove_codes(discount, &selection)
+                    }
+                    Staged::DiscountUsage(claim) => {
+                        discount_rows.claim(&claim, discounts.get(&claim.discount))?
+                    }
+                    Staged::DiscountCodesActive(discount, selection, active) => {
+                        discount_rows.set_active(discount, &selection, active)
+                    }
+                    Staged::DiscountSchedule(from, to) => {
+                        if discount_rows.schedule != from {
+                            return Err(RepoError::StaleVersion);
+                        }
+                        discount_rows.schedule = Some(to);
+                    }
                 }
             }
             for (app, at) in revocations {
@@ -1065,6 +1147,8 @@ impl HasBatch for InMemoryPorts {
             *field_values = field_values_before;
             *agents = agents_before;
             *proposals = proposals_before;
+            *discounts = discounts_before;
+            *discount_rows = discount_rows_before;
             (*identities, *sessions, *resets, *roles, *users, *invites) = before_staff;
         }
         written

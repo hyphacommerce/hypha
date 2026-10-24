@@ -25,7 +25,7 @@ use hypha_orders::{HasOrders, OrderStats, customer_order_stats};
 
 use super::{
     custom_fields::{self, CustomFieldValues, FieldParams},
-    page::{ListQuery, PageParams, PageResponse, SortedFilters},
+    page::{ListQuery, PageParams, PageResponse, SortedFilters, id_list},
 };
 use crate::{
     error::ApiError,
@@ -562,6 +562,12 @@ pub struct CustomerFilters {
     /// Only customers in this group.
     #[param(value_type = Option<CustomerGroupId>)]
     group: Option<CustomerGroupId>,
+    /// Only these customers: repeat it (`ids=cus_…&ids=cus_…`) or separate them with
+    /// commas, up to 250 (`422 too_many_filter_ids`). IDs that name no customer match
+    /// nothing.
+    #[serde(default)]
+    #[param(value_type = Vec<CustomerId>)]
+    ids: Vec<String>,
     #[param(inline)]
     sort: Option<CustomerSortDto>,
 }
@@ -639,16 +645,15 @@ pub async fn list<S: Storage>(
         }
         CustomerSort::Newest | CustomerSort::Oldest => {}
     }
-    let page = list_customers(
-        &ctx,
-        ports.customers(),
-        filters.q,
-        fields.filters,
-        filters.group,
-        sort,
-        page,
-    )
-    .await?;
+    let ids = id_list("ids", filters.ids)?;
+    let filter = hypha_customers::CustomerFilter::new(filters.q)
+        .and_then(|f| {
+            f.with_fields(fields.filters)
+                .in_group(filters.group)
+                .only(ids)
+        })
+        .map_err(hypha_customers::CommandError::from)?;
+    let page = list_customers(&ctx, ports.customers(), filter, sort, page).await?;
     let values = match &fields.keys {
         Some(keys) => {
             let owners: Vec<uuid::Uuid> = page.items.iter().map(|c| c.id.as_uuid()).collect();

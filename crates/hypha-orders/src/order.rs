@@ -1,10 +1,10 @@
 use std::{collections::HashSet, fmt, str::FromStr};
 
 use hypha_core::{
-    Address, CartId, ChannelId, CountryCode, Currency, CustomerId, Email, MarketId, Money, OrderId,
-    OrderLineId, PendingEvent, Price, PriceListId, ProductId, Quantity, Recorded, Recorder,
-    ShippingGroupId, ShippingOptionId, Stamped, Stamps, Subject, TaxClassId, TaxRate, TaxRegionId,
-    Timestamp, VariantId, Version, Versioned, required_text,
+    Address, CartId, ChannelId, CountryCode, Currency, CustomerId, DiscountId, Email, MarketId,
+    Money, OrderId, OrderLineId, PendingEvent, Price, PriceListId, ProductId, Quantity, Recorded,
+    Recorder, ShippingGroupId, ShippingOptionId, Stamped, Stamps, Subject, TaxClassId, TaxRate,
+    TaxRegionId, Timestamp, VariantId, Version, Versioned, required_text,
 };
 
 use crate::{
@@ -169,6 +169,62 @@ pub struct OrderTax {
     pub source: OrderTaxSource,
 }
 
+/// What a discount's reward reduced, for combining: item lines, the order's subtotal, or
+/// shipping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DiscountClass {
+    Product,
+    Order,
+    Shipping,
+}
+
+impl DiscountClass {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DiscountClass::Product => "product",
+            DiscountClass::Order => "order",
+            DiscountClass::Shipping => "shipping",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "product" => Some(DiscountClass::Product),
+            "order" => Some(DiscountClass::Order),
+            "shipping" => Some(DiscountClass::Shipping),
+            _ => None,
+        }
+    }
+}
+
+/// A discount as it applied to the order: copies, kept after the discount changes or is
+/// deleted. One per reward.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderDiscount {
+    pub discount: DiscountId,
+    /// The code it came by, normalised; `None` for an automatic discount.
+    pub code: Option<String>,
+    pub title: String,
+    pub summary: String,
+    pub class: DiscountClass,
+    /// The reward's value and target as the discounts domain writes them (its JSON form):
+    /// orders keep them without reading them.
+    pub value: serde_json::Value,
+    pub target: serde_json::Value,
+    /// What it took off in all: the sum of its shares on lines and shipping.
+    pub amount: Money,
+}
+
+/// Part of an order discount on one line or shipping line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiscountShare {
+    /// The discount's index in `Order::discounts`.
+    pub application: u16,
+    pub amount: Money,
+    /// The units it covered, for a buy X get Y discount.
+    pub units: Option<u32>,
+}
+
 /// One line as it was bought: names, prices and tax are copies, so the order reads the
 /// same after the product, its prices or the tax rates change. A plain value; `Order`
 /// checks its lines when it is placed or restored.
@@ -184,7 +240,12 @@ pub struct OrderLine {
     pub variant_title: Option<String>,
     pub sku: Option<String>,
     pub unit_price: Price,
-    /// `unit_price` × `quantity`.
+    /// `unit_price` × `quantity`: before discounts.
+    pub subtotal: Money,
+    /// What discounts took off it.
+    pub discounts: Vec<DiscountShare>,
+    /// `subtotal` less the discounts: what the buyer was charged for it, and what its tax
+    /// is on. A refund of part of the line refunds that part of this.
     pub total: Money,
     /// `None` when the cart's country had no tax rates.
     pub tax: Option<OrderTax>,
@@ -200,6 +261,15 @@ pub struct OrderLine {
 }
 
 impl OrderLine {
+    /// What its discounts took off.
+    pub fn discount_total(&self) -> Result<Money, OrderError> {
+        let mut sum = Money::zero(self.subtotal.currency());
+        for share in &self.discounts {
+            sum = sum.checked_add(share.amount)?;
+        }
+        Ok(sum)
+    }
+
     /// How many are still to ship.
     pub fn unfulfilled_quantity(&self) -> u32 {
         self.quantity
@@ -225,7 +295,12 @@ pub struct OrderShippingLine {
     pub service: Option<String>,
     /// The provider's quote ID: what fulfilment buys the label with.
     pub reference: Option<String>,
+    /// The option's price, before shipping discounts.
     pub amount: Price,
+    /// What shipping discounts took off it.
+    pub discounts: Vec<DiscountShare>,
+    /// `amount` less the discounts: what the buyer was charged, and what its tax is on.
+    pub total: Money,
     /// Delivery in days, `min` to `max`, as estimated at checkout.
     pub estimate_days: Option<(u16, u16)>,
     /// `None` when the country had no tax rates.
@@ -253,9 +328,13 @@ pub struct NewOrder {
     /// Where it ships; required with shipping lines.
     pub shipping_address: Option<Address>,
     pub shipping_lines: Vec<OrderShippingLine>,
-    /// Sum of the line totals.
+    /// The discounts applied, one per reward; lines and shipping lines name them by index.
+    pub discounts: Vec<OrderDiscount>,
+    /// Sum of the discounts.
+    pub discount_total: Money,
+    /// Sum of the line totals (after discounts).
     pub subtotal: Money,
-    /// Sum of the shipping lines' amounts.
+    /// Sum of the shipping lines' totals (after discounts).
     pub shipping_total: Money,
     /// Tax on the lines and on shipping: part of `subtotal` and `shipping_total` if
     /// `taxes_included`, otherwise on top.
@@ -268,9 +347,12 @@ pub struct NewOrder {
 /// cancellation.
 ///
 /// Invariants, checked by `place` and `restore`: at least one line, line IDs unique,
-/// every amount in `currency`, each line's total is its unit price times its quantity,
-/// the totals add up from the lines, no line fulfilled past its quantity, and the
-/// fulfillment status is the lines'.
+/// every amount in `currency`, each line's subtotal is its unit price times its quantity
+/// and its total that less its discount shares (never below zero), each shipping line's
+/// total its amount less its shares, each discount the sum of its shares and the
+/// discount total theirs, the totals add up from the lines, no line fulfilled past its
+/// quantity, and the fulfillment status is the lines'. An order from before discounts
+/// has none, and the same rules hold with zero.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Order {
     id: OrderId,
@@ -291,6 +373,8 @@ pub struct Order {
     lines: Vec<OrderLine>,
     shipping_address: Option<Address>,
     shipping_lines: Vec<OrderShippingLine>,
+    discounts: Vec<OrderDiscount>,
+    discount_total: Money,
     subtotal: Money,
     shipping_total: Money,
     tax_total: Money,
@@ -347,6 +431,8 @@ impl Order {
             lines: new.lines,
             shipping_address: new.shipping_address,
             shipping_lines: new.shipping_lines,
+            discounts: new.discounts,
+            discount_total: new.discount_total,
             subtotal: new.subtotal,
             shipping_total: new.shipping_total,
             tax_total: new.tax_total,
@@ -356,12 +442,23 @@ impl Order {
             fulfillment_status: FulfillmentStatus::Unfulfilled,
             cancelled: None,
         })?;
+        // Each code once, in the order applied: a discount with two rewards comes twice,
+        // perhaps with another discount between.
+        let mut seen = HashSet::new();
+        let codes: Vec<String> = order
+            .discounts
+            .iter()
+            .filter_map(|d| d.code.clone())
+            .filter(|c| seen.insert(c.clone()))
+            .collect();
         let placed = OrderPlaced {
             order: order.id,
             number: order.number.value(),
             customer: order.customer,
             channel: order.channel,
             total: order.total,
+            discount_codes: codes,
+            discount_total: order.discount_total,
         };
         order.events.record(order.subject(), &placed);
         Ok(order)
@@ -567,6 +664,15 @@ impl Order {
         self.shipping_total
     }
 
+    /// The discounts applied, one per reward.
+    pub fn discounts(&self) -> &[OrderDiscount] {
+        &self.discounts
+    }
+
+    pub fn discount_total(&self) -> Money {
+        self.discount_total
+    }
+
     pub fn tax_total(&self) -> Money {
         self.tax_total
     }
@@ -610,6 +716,8 @@ pub struct OrderSnapshot {
     pub lines: Vec<OrderLine>,
     pub shipping_address: Option<Address>,
     pub shipping_lines: Vec<OrderShippingLine>,
+    pub discounts: Vec<OrderDiscount>,
+    pub discount_total: Money,
     pub subtotal: Money,
     pub shipping_total: Money,
     pub tax_total: Money,
@@ -638,6 +746,8 @@ impl Order {
             lines: self.lines.clone(),
             shipping_address: self.shipping_address.clone(),
             shipping_lines: self.shipping_lines.clone(),
+            discounts: self.discounts.clone(),
+            discount_total: self.discount_total,
             subtotal: self.subtotal,
             shipping_total: self.shipping_total,
             tax_total: self.tax_total,
@@ -666,6 +776,8 @@ impl Order {
             }
         };
 
+        // What each discount's shares add up to, by its index.
+        let mut applied: Vec<Money> = vec![Money::zero(currency); s.discounts.len()];
         let mut seen = HashSet::new();
         let mut subtotal = Money::zero(currency);
         let mut tax_total = Money::zero(currency);
@@ -681,8 +793,15 @@ impl Order {
                 return Err(OrderError::FulfilledPastQuantity(line.id));
             }
             in_currency(line.unit_price.money())?;
+            in_currency(line.subtotal)?;
             in_currency(line.total)?;
-            if line.unit_price.money().checked_mul(line.quantity.value())? != line.total {
+            if line.unit_price.money().checked_mul(line.quantity.value())? != line.subtotal {
+                return Err(OrderError::LineTotalMismatch(line.id));
+            }
+            let charged =
+                line.subtotal
+                    .checked_sub(shared(&line.discounts, &mut applied, currency)?)?;
+            if charged != line.total || charged.amount() < 0 {
                 return Err(OrderError::LineTotalMismatch(line.id));
             }
             subtotal = subtotal.checked_add(line.total)?;
@@ -705,13 +824,35 @@ impl Order {
             }
             line.name = required_text("shipping name", &line.name)?;
             in_currency(line.amount.money())?;
-            shipping_total = shipping_total.checked_add(line.amount.money())?;
+            in_currency(line.total)?;
+            let charged = line.amount.money().checked_sub(shared(
+                &line.discounts,
+                &mut applied,
+                currency,
+            )?)?;
+            if charged != line.total || charged.amount() < 0 {
+                return Err(OrderError::DiscountsMismatch);
+            }
+            shipping_total = shipping_total.checked_add(line.total)?;
             if let Some(tax) = &line.tax {
                 in_currency(tax.amount)?;
                 tax_total = tax_total.checked_add(tax.amount)?;
             }
         }
 
+        let mut discount_total = Money::zero(currency);
+        for (discount, shares) in s.discounts.iter_mut().zip(&applied) {
+            in_currency(discount.amount)?;
+            if discount.amount != *shares {
+                return Err(OrderError::DiscountsMismatch);
+            }
+            discount.title = required_text("discount title", &discount.title)?;
+            discount_total = discount_total.checked_add(discount.amount)?;
+        }
+        in_currency(s.discount_total)?;
+        if discount_total != s.discount_total {
+            return Err(OrderError::DiscountsMismatch);
+        }
         for amount in [s.subtotal, s.shipping_total, s.tax_total, s.total] {
             in_currency(amount)?;
         }
@@ -748,6 +889,8 @@ impl Order {
             lines: s.lines,
             shipping_address: s.shipping_address,
             shipping_lines: s.shipping_lines,
+            discounts: s.discounts,
+            discount_total: s.discount_total,
             subtotal: s.subtotal,
             shipping_total: s.shipping_total,
             tax_total: s.tax_total,
@@ -758,6 +901,27 @@ impl Order {
             events: Recorder::default(),
         })
     }
+}
+
+/// What `shares` take off, each added to its discount's sum in `applied`; a share naming
+/// a discount the order doesn't list breaks the order.
+fn shared(
+    shares: &[DiscountShare],
+    applied: &mut [Money],
+    currency: Currency,
+) -> Result<Money, OrderError> {
+    let mut off = Money::zero(currency);
+    for share in shares {
+        let slot = applied
+            .get_mut(usize::from(share.application))
+            .ok_or(OrderError::DiscountsMismatch)?;
+        if share.amount.amount() < 0 {
+            return Err(OrderError::DiscountsMismatch);
+        }
+        *slot = slot.checked_add(share.amount)?;
+        off = off.checked_add(share.amount)?;
+    }
+    Ok(off)
 }
 
 fn line_in(lines: &mut [OrderLine], id: OrderLineId) -> Result<&mut OrderLine, OrderError> {
@@ -802,6 +966,8 @@ mod tests {
             variant_title: None,
             sku: None,
             unit_price: Price::new(eur(unit)).unwrap(),
+            subtotal: eur(unit * i64::from(quantity)),
+            discounts: Vec::new(),
             total: eur(unit * i64::from(quantity)),
             tax: tax.map(|amount| OrderTax {
                 rate: TaxRate::new(250_000).unwrap(),
@@ -829,6 +995,8 @@ mod tests {
             service: None,
             reference: None,
             amount: Price::new(eur(amount)).unwrap(),
+            discounts: Vec::new(),
+            total: eur(amount),
             estimate_days: Some((1, 3)),
             tax: tax.map(|amount| OrderTax {
                 rate: TaxRate::new(250_000).unwrap(),
@@ -924,6 +1092,8 @@ mod tests {
             lines: vec![line(1, 1000, 2, Some(500)), line(2, 400, 1, None)],
             shipping_address: None,
             shipping_lines: vec![],
+            discounts: vec![],
+            discount_total: eur(0),
             subtotal: eur(2400),
             shipping_total: eur(0),
             tax_total: eur(500),
@@ -1306,5 +1476,140 @@ mod tests {
         assert_eq!(OrderNumber::new(0), Err(OrderError::InvalidNumber(0)));
         assert_eq!(OrderNumber::new(1).map(OrderNumber::value), Ok(1));
         assert_eq!(OrderNumber::new(1001).unwrap().to_string(), "#1001");
+    }
+
+    // ---- discounts ----
+
+    fn ten_off(amount: i64) -> OrderDiscount {
+        OrderDiscount {
+            discount: DiscountId::from_uuid(Uuid::from_u128(70)),
+            code: Some("WELCOME10".to_string()),
+            title: "Welcome".to_string(),
+            summary: "10% off the order".to_string(),
+            class: DiscountClass::Order,
+            value: serde_json::json!({"type": "percent", "basis_points": 1000}),
+            target: serde_json::json!({"type": "subtotal"}),
+            amount: eur(amount),
+        }
+    }
+
+    fn share(amount: i64) -> DiscountShare {
+        DiscountShare {
+            application: 0,
+            amount: eur(amount),
+            units: None,
+        }
+    }
+
+    /// `new_order` with 10% off: 2.00 off the first line, 0.40 off the second.
+    fn discounted() -> NewOrder {
+        let mut new = new_order();
+        new.lines[0].discounts = vec![share(200)];
+        new.lines[0].total = eur(1800);
+        new.lines[1].discounts = vec![share(40)];
+        new.lines[1].total = eur(360);
+        new.discounts = vec![ten_off(240)];
+        new.discount_total = eur(240);
+        new.subtotal = eur(2160);
+        new.total = eur(2660);
+        new
+    }
+
+    #[test]
+    fn a_discounted_line_charges_its_subtotal_less_its_shares() {
+        let order = Order::place(discounted()).unwrap();
+        assert_eq!(
+            (order.discount_total(), order.subtotal(), order.total()),
+            (eur(240), eur(2160), eur(2660))
+        );
+        assert_eq!(order.lines()[0].discount_total(), Ok(eur(200)));
+        assert_eq!(Order::restore(order.snapshot()), Ok(order));
+    }
+
+    #[test]
+    fn a_line_total_that_isnt_its_subtotal_less_its_shares_is_refused() {
+        let mut new = discounted();
+        new.lines[0].total = eur(1900);
+        assert_eq!(
+            Order::place(new),
+            Err(OrderError::LineTotalMismatch(line_id(1)))
+        );
+    }
+
+    #[test]
+    fn a_share_naming_no_discount_is_refused() {
+        let mut new = discounted();
+        new.lines[0].discounts[0].application = 1;
+        assert_eq!(Order::place(new), Err(OrderError::DiscountsMismatch));
+    }
+
+    #[test]
+    fn a_discount_that_isnt_the_sum_of_its_shares_is_refused() {
+        let mut new = discounted();
+        new.discounts[0].amount = eur(250);
+        new.discount_total = eur(250);
+        assert_eq!(Order::place(new), Err(OrderError::DiscountsMismatch));
+    }
+
+    #[test]
+    fn the_discount_total_is_the_sum_of_the_discounts() {
+        let mut new = discounted();
+        new.discount_total = eur(0);
+        assert_eq!(Order::place(new), Err(OrderError::DiscountsMismatch));
+    }
+
+    #[test]
+    fn a_shipping_discount_lowers_the_shipping_total() {
+        let mut new = new_order();
+        let mut shipping = shipping_line(400, None);
+        shipping.discounts = vec![share(400)];
+        shipping.total = eur(0);
+        new.shipping_lines = vec![shipping];
+        new.shipping_address = Some(zagreb());
+        new.discounts = vec![OrderDiscount {
+            class: DiscountClass::Shipping,
+            ..ten_off(400)
+        }];
+        new.discount_total = eur(400);
+        let order = Order::place(new).unwrap();
+        assert_eq!((order.shipping_total(), order.total()), (eur(0), eur(2900)));
+    }
+
+    #[test]
+    fn placing_records_the_codes_and_what_came_off() {
+        let mut order = Order::place(discounted()).unwrap();
+        let events = order.take_events();
+        assert_eq!(
+            events[0].data["discount_codes"],
+            serde_json::json!(["WELCOME10"])
+        );
+        assert_eq!(
+            events[0].data["discount_total"],
+            serde_json::json!({"amount": 240, "currency": "EUR"})
+        );
+    }
+
+    #[test]
+    fn placing_names_each_code_once_in_the_order_applied() {
+        let mut new = discounted();
+        let a = |amount: i64| ten_off(amount);
+        let b = OrderDiscount {
+            discount: DiscountId::from_uuid(Uuid::from_u128(71)),
+            code: Some("SPRING".to_string()),
+            ..ten_off(80)
+        };
+        new.discounts = vec![a(80), b, a(80)];
+        let part = |application: u16, amount: i64| DiscountShare {
+            application,
+            amount: eur(amount),
+            units: None,
+        };
+        new.lines[0].discounts = vec![part(0, 80), part(1, 80), part(2, 40)];
+        new.lines[1].discounts = vec![part(2, 40)];
+        let mut order = Order::place(new).unwrap();
+        assert_eq!(
+            order.take_events()[0].data["discount_codes"],
+            serde_json::json!(["WELCOME10", "SPRING"])
+        );
     }
 }

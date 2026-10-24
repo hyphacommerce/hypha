@@ -477,6 +477,11 @@ pub struct Jobs {
     /// `.ended`), so search and storefront caches follow. Prices themselves follow the
     /// clock without it. A Workers host runs it on the minute's ticks that have work.
     pub price_list_schedule: Job,
+    /// Announcing discounts' windows opening and closing (`discount.started` /
+    /// `.ended`), so storefront caches and promotion badges follow. Carts themselves
+    /// follow the clock without it. A Workers host runs it on the minute's ticks that have
+    /// work.
+    pub discount_schedule: Job,
 }
 
 impl Default for Jobs {
@@ -494,6 +499,10 @@ impl Default for Jobs {
                 interval: hour,
             },
             price_list_schedule: Job {
+                enabled: true,
+                interval: Dur(Duration::from_secs(60)),
+            },
+            discount_schedule: Job {
                 enabled: true,
                 interval: Dur(Duration::from_secs(60)),
             },
@@ -694,6 +703,11 @@ pub struct RateLimits {
     /// An agent's writes and proposals, per agent: few, since each changes the store or
     /// asks a person to look.
     pub agent_write: Quota,
+    /// Entering a discount code on a cart, per client address: single-use codes are
+    /// guessable.
+    pub discount_code_ip: Quota,
+    /// Entering a discount code, per cart.
+    pub discount_code_cart: Quota,
 }
 
 /// The starting quotas.
@@ -732,13 +746,16 @@ impl Default for RateLimits {
             },
             // About a write every 3 seconds, after a burst of 20.
             agent_write: quota(20, 3),
+            // A shopper tries a code or two, and maybe a typo.
+            discount_code_ip: quota(10, 6),
+            discount_code_cart: quota(5, 12),
         }
     }
 }
 
 impl RateLimits {
     /// Every limit with its key, for the checks.
-    pub(crate) fn all(&self) -> [(&'static str, Quota); 18] {
+    pub(crate) fn all(&self) -> [(&'static str, Quota); 20] {
         [
             ("login_ip", self.login_ip),
             ("login_email_from_ip", self.login_email_from_ip),
@@ -761,6 +778,8 @@ impl RateLimits {
             ),
             ("agent_call", self.agent_call),
             ("agent_write", self.agent_write),
+            ("discount_code_ip", self.discount_code_ip),
+            ("discount_code_cart", self.discount_code_cart),
         ]
     }
 }

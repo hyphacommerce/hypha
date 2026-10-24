@@ -8,7 +8,7 @@ View the order: {{ admin_url }}
 
 Items:
 {%- for line in order.lines %}
-- {{ line.quantity }} × {{ line.title }}{% if line.variant %} ({{ line.variant }}){% endif %}: {{ line.total.formatted }}
+- {{ line.quantity }} × {{ line.title }}{% if line.variant %} ({{ line.variant }}){% endif %}: {{ line.total.formatted }}{% if line.discount %} (was {{ line.original_total.formatted }}){% endif %}
 {%- endfor %}
 
 Subtotal: {{ order.subtotal.formatted }}
@@ -19,6 +19,13 @@ Tax: {{ order.tax.formatted }}
 Total: {{ order.total.formatted }}
 {%- if order.taxes_included %}
 Including {{ order.tax.formatted }} in taxes
+{%- endif %}
+{%- if order.discounts %}
+
+Discounts included above:
+{%- for discount in order.discounts %}
+- {{ discount.title }}{% if discount.code %} ({{ discount.code }}){% endif %}: {{ discount.amount.formatted }}
+{%- endfor %}
 {%- endif %}
 {%- if order.shipping_address %}
 

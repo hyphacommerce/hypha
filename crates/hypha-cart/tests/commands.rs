@@ -1,7 +1,7 @@
 use hypha_cart::{
     AddLine, CartError, CartRepo, CommandError, CreateCart, LineError, LineStatus, PricedCart,
-    SetLineQuantity, add_line, create_cart, get_cart, remove_cart_line, set_cart_customer,
-    set_cart_email, set_line_quantity,
+    SetLineQuantity, add_discount_code, add_line, create_cart, get_cart, remove_cart_line,
+    remove_discount_code, set_cart_customer, set_cart_email, set_line_quantity,
 };
 use hypha_channels::ChannelRepo;
 use hypha_core::{
@@ -322,6 +322,9 @@ fn empty_in_croatia(id: CartId, taxes_included: bool) -> PricedCart {
         shipping_address: None,
         shipping_groups: vec![],
         shipping_total: eur(0),
+        discounts: vec![],
+        discount_total: eur(0),
+        discount_codes: vec![],
         tax_total: eur(0),
         total: eur(0),
         payment_method: None,
@@ -389,6 +392,8 @@ fn add_line_returns_priced_cart() {
             unit_price: Price::new(eur(1000)).unwrap(),
             compare_at: None,
             price_list: Some(list_id()),
+            subtotal: eur(2000),
+            discounts: vec![],
             total: eur(2000),
             tax: None,
         }
@@ -1441,6 +1446,147 @@ fn a_product_outside_the_catalog_or_country_is_not_sold_there() {
         )),
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::ProductsRead
+        )))
+    );
+}
+
+// ---- discount codes ----
+
+/// A live 10%-off-the-order discount by code `code`.
+fn code_discount(world: &World, n: u128, code: &str, status: hypha_discounts::Status) {
+    use hypha_discounts::{
+        Discount, DiscountCode, DiscountDraft, DiscountRepo, Kind, Method, Reward, Target, Value,
+    };
+    let kind = Kind::Standard {
+        rewards: vec![Reward {
+            target: Target::Subtotal,
+            value: Value::Percent(BasisPoints::new(1000).unwrap()),
+        }],
+    };
+    let mut draft = DiscountDraft::new("Welcome", Method::Codes, kind);
+    draft.status = status;
+    let id = hypha_core::DiscountId::from_uuid(Uuid::from_u128(5000 + n));
+    let mut discount = Discount::new(id, draft).unwrap();
+    block_on(world.discounts.insert(&mut discount)).unwrap();
+    block_on(
+        world
+            .discounts
+            .add_codes(&[DiscountCode::new(id, code, None, None).unwrap()]),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_live_code_is_held_and_applies() {
+    let world = World::new();
+    code_discount(&world, 1, "WELCOME10", hypha_discounts::Status::Active);
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 2).unwrap();
+    let priced = block_on(add_discount_code(
+        &Ctx::system(),
+        &world.ports,
+        cart,
+        " welcome10",
+    ))
+    .unwrap();
+    assert_eq!((priced.discount_total, priced.total), (eur(200), eur(1800)));
+    assert_eq!(
+        priced.discount_codes[0].state,
+        hypha_cart::promotions::CodeState::Applied
+    );
+    // Stored normalised, so a read applies it too.
+    assert_eq!(world.get(cart).unwrap().total, eur(1800));
+}
+
+#[test]
+fn an_unknown_or_draft_code_is_refused_alike_and_not_kept() {
+    let world = World::new();
+    code_discount(&world, 1, "LATER", hypha_discounts::Status::Draft);
+    let cart = world.create_cart();
+    for code in ["NOPE", "later", "two words"] {
+        assert_eq!(
+            block_on(add_discount_code(&Ctx::system(), &world.ports, cart, code)),
+            Err(CommandError::DiscountCodeInvalid)
+        );
+    }
+    assert!(world.get(cart).unwrap().discount_codes.is_empty());
+}
+
+#[test]
+fn a_code_held_by_an_empty_cart_waits_for_items() {
+    let world = World::new();
+    code_discount(&world, 1, "WELCOME10", hypha_discounts::Status::Active);
+    let cart = world.create_cart();
+    let priced = block_on(add_discount_code(
+        &Ctx::system(),
+        &world.ports,
+        cart,
+        "WELCOME10",
+    ))
+    .unwrap();
+    assert_eq!(
+        priced.discount_codes[0].state,
+        hypha_cart::promotions::CodeState::NoMatchingItems
+    );
+}
+
+#[test]
+fn at_most_five_codes_are_held() {
+    let world = World::new();
+    let cart = world.create_cart();
+    for n in 0..6u128 {
+        code_discount(&world, n, &format!("C{n}"), hypha_discounts::Status::Active);
+    }
+    for n in 0..5 {
+        block_on(add_discount_code(
+            &Ctx::system(),
+            &world.ports,
+            cart,
+            &format!("C{n}"),
+        ))
+        .unwrap();
+    }
+    assert_eq!(
+        block_on(add_discount_code(&Ctx::system(), &world.ports, cart, "C5")),
+        Err(CommandError::Cart(CartError::TooManyDiscountCodes {
+            max: 5
+        }))
+    );
+}
+
+#[test]
+fn a_code_is_let_go_by_its_text_however_typed() {
+    let world = World::new();
+    code_discount(&world, 1, "WELCOME10", hypha_discounts::Status::Active);
+    let cart = world.create_cart();
+    world.add(&Ctx::system(), cart, "mug", 1).unwrap();
+    block_on(add_discount_code(
+        &Ctx::system(),
+        &world.ports,
+        cart,
+        "WELCOME10",
+    ))
+    .unwrap();
+    let priced = block_on(remove_discount_code(
+        &Ctx::system(),
+        &world.ports,
+        cart,
+        "welcome10",
+    ))
+    .unwrap();
+    assert_eq!(
+        (priced.discount_total, priced.discount_codes.len()),
+        (eur(0), 0)
+    );
+    assert_eq!(
+        block_on(remove_discount_code(
+            &Ctx::system(),
+            &world.ports,
+            cart,
+            "WELCOME10"
+        )),
+        Err(CommandError::Cart(CartError::DiscountCodeNotOnCart(
+            "WELCOME10".to_string()
         )))
     );
 }

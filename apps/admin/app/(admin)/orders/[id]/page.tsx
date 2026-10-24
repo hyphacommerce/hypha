@@ -130,6 +130,82 @@ async function priceListNames(
   return new Map(read.filter((e) => e !== null));
 }
 
+type DiscountShare = AdminSchemas["DiscountShareResponse"];
+type OrderDiscount = AdminSchemas["OrderDiscountResponse"];
+
+/**
+ * What a line or a shipping line was charged: its amount before discounts struck through
+ * above it when discounts took something off, and each discount's part under it
+ * ("−€2.40 Welcome offer").
+ */
+function Charged({
+  before,
+  total,
+  shares,
+  discounts,
+  currencies,
+}: {
+  before: AdminSchemas["Money"];
+  total: AdminSchemas["Money"];
+  shares: readonly DiscountShare[];
+  /** The order's discounts, which `shares` name by index. */
+  discounts: readonly OrderDiscount[];
+  currencies: Currencies;
+}) {
+  if (shares.length === 0) return <>{formatMoney(total, currencies)}</>;
+  return (
+    <VStack gap={0.5}>
+      <Text type="supporting" color="secondary" hasStrikethrough hasTabularNumbers>
+        {formatMoney(before, currencies)}
+      </Text>
+      <Text type="body" hasTabularNumbers>
+        {formatMoney(total, currencies)}
+      </Text>
+      {shares.map((share) => (
+        <Text key={share.application} type="supporting" color="secondary">
+          −{formatMoney(share.amount, currencies)}{" "}
+          {discounts[share.application]?.title ?? "Discount"}
+          {share.units ? ` (${items(share.units)})` : ""}
+        </Text>
+      ))}
+    </VStack>
+  );
+}
+
+/** The discounts an order got, one row per reward, with what each took off. */
+function DiscountsList({ order, currencies }: { order: Order; currencies: Currencies }) {
+  if (order.discounts.length === 0) return null;
+  return (
+    <VStack gap={2}>
+      <HStack gap={2} hAlign="between" vAlign="center">
+        <Text weight="semibold">Discounts</Text>
+        <Text weight="semibold" hasTabularNumbers>
+          −{formatMoney(order.discount_total, currencies)}
+        </Text>
+      </HStack>
+      {order.discounts.map((d) => (
+        // A discount gives at most one reward per class.
+        <HStack key={`${d.discount}-${d.class}`} gap={2} hAlign="between" vAlign="start">
+          <VStack gap={0}>
+            <Link href={`/discounts/${d.discount}`}>
+              <Text type="body" weight="medium">
+                {d.title}
+              </Text>
+            </Link>
+            <Text type="supporting" color="secondary">
+              {[d.code ? `Code ${d.code}` : "Automatic", d.summary].join(" · ")}
+            </Text>
+          </VStack>
+          <Text hasTabularNumbers>−{formatMoney(d.amount, currencies)}</Text>
+        </HStack>
+      ))}
+      <Text type="supporting" color="secondary">
+        Already taken off the lines and shipping above.
+      </Text>
+    </VStack>
+  );
+}
+
 /** A footer row of the items table: its label, and the amount in the last column. */
 function TotalRow({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
@@ -294,7 +370,15 @@ async function Order({ id }: { id: string }) {
                           ? `${formatMoney(line.tax.amount, currencies)} (${percent(line.tax.rate_ppm)})`
                           : "—"}
                       </TableCell>
-                      <TableCell>{formatMoney(line.total, currencies)}</TableCell>
+                      <TableCell>
+                        <Charged
+                          before={line.subtotal}
+                          total={line.total}
+                          shares={line.discounts}
+                          discounts={order.discounts}
+                          currencies={currencies}
+                        />
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -322,7 +406,15 @@ async function Order({ id }: { id: string }) {
                           ? `${formatMoney(shipping.tax.amount, currencies)} (${percent(shipping.tax.rate_ppm)})`
                           : "—"}
                       </TableCell>
-                      <TableCell>{formatMoney(shipping.amount, currencies)}</TableCell>
+                      <TableCell>
+                        <Charged
+                          before={shipping.amount}
+                          total={shipping.total}
+                          shares={shipping.discounts}
+                          discounts={order.discounts}
+                          currencies={currencies}
+                        />
+                      </TableCell>
                     </TableRow>
                   ))}
                   <TotalRow label={order.taxes_included ? "Tax (included)" : "Tax"}>
@@ -341,6 +433,7 @@ async function Order({ id }: { id: string }) {
                   </TotalRow>
                 </TableFooter>
               </Table>
+              <DiscountsList order={order} currencies={currencies} />
             </VStack>
           </Card>
 

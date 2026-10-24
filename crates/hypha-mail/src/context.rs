@@ -65,7 +65,24 @@ pub struct LineContext {
     pub sku: Option<String>,
     pub quantity: u32,
     pub unit_price: MoneyValue,
+    /// What the buyer pays for the line, after its discounts.
     pub total: MoneyValue,
+    /// Unit price times quantity: before discounts.
+    pub original_total: MoneyValue,
+    /// What discounts took off the line; `null` when nothing did.
+    pub discount: Option<MoneyValue>,
+}
+
+/// `order.discounts[]`: one per reward the order got.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DiscountContext {
+    pub title: String,
+    /// The code it came by; `null` for an automatic discount.
+    pub code: Option<String>,
+    /// "10% off the order".
+    pub summary: String,
+    /// What it took off.
+    pub amount: MoneyValue,
 }
 
 /// `order.shipping_address`.
@@ -148,6 +165,7 @@ pub struct OrderContext {
     pub email: String,
     pub placed_at: TimeValue,
     pub lines: Vec<LineContext>,
+    /// The lines' totals, after their discounts.
     pub subtotal: MoneyValue,
     pub shipping: MoneyValue,
     pub tax: MoneyValue,
@@ -158,6 +176,11 @@ pub struct OrderContext {
     /// The shipping lines' names, joined with ", ".
     pub shipping_method: Option<String>,
     pub payment: Option<PaymentContext>,
+    /// The discounts the order got; empty without any. Their amounts are already out of
+    /// the lines and shipping.
+    pub discounts: Vec<DiscountContext>,
+    /// What they took off in all.
+    pub discount_total: MoneyValue,
 }
 
 impl OrderContext {
@@ -189,6 +212,12 @@ impl OrderContext {
                     quantity: line.quantity.value(),
                     unit_price: MoneyValue::of(line.unit_price.money()),
                     total: MoneyValue::of(line.total),
+                    original_total: MoneyValue::of(line.subtotal),
+                    discount: line
+                        .discount_total()
+                        .ok()
+                        .filter(|d| d.amount() > 0)
+                        .map(MoneyValue::of),
                 })
                 .collect(),
             subtotal: MoneyValue::of(order.subtotal()),
@@ -199,6 +228,17 @@ impl OrderContext {
             shipping_address: order.shipping_address().map(AddressContext::of),
             shipping_method: (!names.is_empty()).then(|| names.join(", ")),
             payment: payment.map(PaymentContext::of),
+            discounts: order
+                .discounts()
+                .iter()
+                .map(|d| DiscountContext {
+                    title: d.title.clone(),
+                    code: d.code.clone(),
+                    summary: d.summary.clone(),
+                    amount: MoneyValue::of(d.amount),
+                })
+                .collect(),
+            discount_total: MoneyValue::of(order.discount_total()),
         }
     }
 }
@@ -484,7 +524,9 @@ impl MailContext {
             for line in &mut order.lines {
                 line.variant = None;
                 line.sku = None;
+                line.discount = None;
             }
+            order.discounts.clear();
             order.taxes_included = false;
             order.shipping_address = None;
             order.shipping_method = None;
@@ -531,6 +573,9 @@ impl MailContext {
             }
             if let Some(payment) = &mut mail.order.payment {
                 payment.instructions = None;
+            }
+            for discount in &mut mail.order.discounts {
+                discount.code = None;
             }
         };
         match &mut context {
@@ -654,7 +699,9 @@ fn sample_order_mail() -> OrderMail {
                     sku: Some("LS-M-BLU".to_string()),
                     quantity: 2,
                     unit_price: eur(4500),
-                    total: eur(9000),
+                    total: eur(8100),
+                    original_total: eur(9000),
+                    discount: Some(eur(900)),
                 },
                 LineContext {
                     title: "Ceramic mug".to_string(),
@@ -662,13 +709,15 @@ fn sample_order_mail() -> OrderMail {
                     sku: None,
                     quantity: 1,
                     unit_price: eur(1800),
-                    total: eur(1800),
+                    total: eur(1620),
+                    original_total: eur(1800),
+                    discount: Some(eur(180)),
                 },
             ],
-            subtotal: eur(10800),
+            subtotal: eur(9720),
             shipping: eur(490),
-            tax: eur(2258),
-            total: eur(11290),
+            tax: eur(2042),
+            total: eur(10210),
             taxes_included: true,
             shipping_address: Some(AddressContext {
                 name: "Ana Horvat".to_string(),
@@ -690,6 +739,13 @@ fn sample_order_mail() -> OrderMail {
                         .to_string(),
                 ),
             }),
+            discounts: vec![DiscountContext {
+                title: "Welcome offer".to_string(),
+                code: Some("WELCOME10".to_string()),
+                summary: "10% off the order".to_string(),
+                amount: eur(1080),
+            }],
+            discount_total: eur(1080),
         },
         customer: CustomerContext {
             name: Some("Ana Horvat".to_string()),

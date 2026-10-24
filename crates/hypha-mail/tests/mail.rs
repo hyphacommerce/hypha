@@ -174,6 +174,8 @@ fn line(n: u128, title: &str, variant: Option<&str>, quantity: u32, unit: i64) -
         variant_title: variant.map(str::to_string),
         sku: Some(format!("SKU-{n}")),
         unit_price: Price::new(eur(unit)).unwrap(),
+        subtotal: eur(unit * i64::from(quantity)),
+        discounts: Vec::new(),
         total: eur(unit * i64::from(quantity)),
         tax: None,
         fulfilled_quantity: 0,
@@ -216,6 +218,8 @@ fn world() -> InMemoryPorts {
         channel: ChannelId::from_uuid(uuid(3100)),
         market: MarketId::from_uuid(uuid(3200)),
         currency: Currency::EUR,
+        discounts: Vec::new(),
+        discount_total: Money::zero(Currency::EUR),
         country: CountryCode::new("HR").unwrap(),
         taxes_included: true,
         customer: CustomerId::from_uuid(uuid(3300)),
@@ -229,6 +233,8 @@ fn world() -> InMemoryPorts {
             provider: None,
             service: None,
             reference: None,
+            discounts: Vec::new(),
+            total: (Price::new(eur(490)).unwrap()).money(),
             amount: Price::new(eur(490)).unwrap(),
             estimate_days: None,
             tax: None,
@@ -395,6 +401,34 @@ fn every_default_renders_against_its_sample() {
         assert!(!rendered.subject.is_empty(), "{key}");
         assert!(rendered.html.contains("Fern &amp; Field"), "{key}");
         assert!(!rendered.text.contains("none"), "{key}: {}", rendered.text);
+    }
+}
+
+#[test]
+fn order_totals_add_up_and_list_the_discounts_they_include() {
+    // The sample's subtotal and shipping are after its 10.80 discount: listing it as
+    // "−10.80" under them would take it off twice.
+    let layout = default_template(TemplateKey::Layout).html;
+    for key in [
+        TemplateKey::OrderConfirmation,
+        TemplateKey::OrderCancelled,
+        TemplateKey::StaffNewOrder,
+    ] {
+        let rendered = render(
+            layout,
+            &default_template(key).sources(),
+            &MailContext::sample(key),
+        )
+        .unwrap();
+        assert!(!rendered.text.contains('−'), "{key}: {}", rendered.text);
+        assert!(!rendered.html.contains('−'), "{key}");
+        assert!(
+            rendered
+                .text
+                .contains("Discounts included above:\n- Welcome offer (WELCOME10): €10.80"),
+            "{key}: {}",
+            rendered.text
+        );
     }
 }
 

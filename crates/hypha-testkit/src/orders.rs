@@ -109,6 +109,16 @@ impl OrderRepo for InMemoryOrderRepo {
         Ok(self.orders.find(|o| o.number() == number))
     }
 
+    async fn numbers(
+        &self,
+        ids: &[OrderId],
+    ) -> Result<std::collections::HashMap<OrderId, OrderNumber>, RepoError> {
+        Ok(ids
+            .iter()
+            .filter_map(|id| self.orders.get(id).map(|o| (*id, o.number())))
+            .collect())
+    }
+
     async fn list(
         &self,
         filter: &OrderFilter,

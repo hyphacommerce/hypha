@@ -711,6 +711,7 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
         "carts:write",
         "notifications:write",
         "apps:read",
+        "discounts:read",
         "customer_data:email",
     ])
     .await;
@@ -719,7 +720,7 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
         &base,
         Some(
             "orders:write customers:write customers:erase carts:write notifications:write \
-             apps:read",
+             apps:read discounts:read",
         ),
     )
     .await;
@@ -728,7 +729,7 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
         &app,
         json!({"kind": "secret", "name": "dashboard", "scopes":
             ["orders:write", "customers:write", "customers:erase", "carts:write",
-             "notifications:write", "apps:read"]}),
+             "notifications:write", "apps:read", "discounts:read"]}),
     )
     .await;
 
@@ -751,6 +752,26 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
         "country": "HR", "phone": "+385 PII 1"})
     .to_string();
     let consent = json!({"state": "subscribed"}).to_string();
+    // A discount the customer used on the order.
+    let body = json!({"title": "Welcome", "method": "codes", "kind": {"type": "standard",
+        "rewards": [{"target": {"type": "subtotal"},
+            "value": {"type": "percent", "basis_points": 1000}}]}});
+    let (status, discount) = send(&app, "POST", "/admin/discounts", Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::CREATED, "{discount}");
+    let discount = discount["id"].as_str().unwrap().to_string();
+    let uuid_of = |id: &str| id.rsplit('_').next().unwrap().to_string();
+    sql(
+        &app,
+        &format!(
+            "INSERT INTO discount_usages (discount_id, order_id, customer_id, code, amount,
+                 currency, once_per_customer, used_at)
+             VALUES ('{}', '{}', '{}', NULL, 100, 'EUR', false, now())",
+            uuid_of(&discount),
+            uuid_of(&order),
+            uuid_of(&customer)
+        ),
+    )
+    .await;
 
     let link = json!({"customer": customer}).to_string();
     let routes: Vec<(&str, String, Option<String>)> = vec![
@@ -809,6 +830,7 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
             None,
         ),
         ("GET", format!("/admin/notifications/{notification}"), None),
+        ("GET", format!("/admin/discounts/{discount}/usage"), None),
         (
             "POST",
             format!("/admin/notifications/{notification}/resend"),

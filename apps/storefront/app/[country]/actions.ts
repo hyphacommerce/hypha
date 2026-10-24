@@ -167,6 +167,42 @@ export async function setQuantity(input: {
   return { cart: data ?? (await loadCart(input.country)) };
 }
 
+/** Adds a discount code to the cart, and answers with the cart. A code that's known but
+ * doesn't apply yet is kept, with its state on the cart; an unknown one is refused
+ * (`discount_code_invalid`) and the form shows why. */
+export async function applyDiscountCode(input: {
+  country: string;
+  code: string;
+}): Promise<CartResult> {
+  const id = await cartId(input.country);
+  if (!id) return { cart: null };
+  const code = input.code.trim();
+  if (code === "") return { cart: await loadCart(input.country), error: "Enter a code." };
+  // The shopper's address goes on: the API limits code entry per client.
+  const client = await shopperApi();
+  const { data, error } = await client.POST("/storefront/carts/{id}/discount-codes", {
+    params: { path: { id } },
+    body: { code },
+  });
+  if (error) return { cart: await loadCart(input.country), error: describe(error) };
+  return { cart: data ?? (await loadCart(input.country)) };
+}
+
+/** Takes a code off the cart, and answers with the cart. */
+export async function removeDiscountCode(input: {
+  country: string;
+  code: string;
+}): Promise<CartResult> {
+  const id = await cartId(input.country);
+  if (!id) return { cart: null };
+  const client = await shopperApi();
+  const { data, error } = await client.DELETE("/storefront/carts/{id}/discount-codes/{code}", {
+    params: { path: { id, code: input.code } },
+  });
+  if (error) return { cart: await loadCart(input.country), error: describe(error) };
+  return { cart: data ?? (await loadCart(input.country)) };
+}
+
 export type Details = {
   email: string;
   first_name: string;
@@ -283,6 +319,9 @@ export async function placeOrder(input: {
       return { error: result.error, step: "payment" };
     }
     if (result.code === "payment_pending") return { error: result.error, pending: true };
+    // A code's last use went to another order meanwhile: the summary re-renders with
+    // the code's new state and total, which is what the shopper confirms next.
+    if (result.code === "discounts_changed") refresh();
     if (result.code === "payment_failed" || result.code === "payment_required") {
       return { error: result.error, step: "payment" };
     }

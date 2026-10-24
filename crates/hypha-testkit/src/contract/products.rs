@@ -218,7 +218,7 @@ pub(crate) fn simple(n: u128, handle: &str) -> Product {
 
 /// Configurable product `n` with Size (S, M) and Color (Red, Blue) and two variants:
 /// `n*100+1` S/Red with a SKU, `n*100+2` M/Blue without one.
-fn shirt(n: u128, handle: &str) -> Product {
+pub(crate) fn shirt(n: u128, handle: &str) -> Product {
     let b = n * 100;
     let size = ProductOption::new(
         oid(b + 10),

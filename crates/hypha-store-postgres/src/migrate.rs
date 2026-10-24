@@ -434,6 +434,31 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "temporary_uploads",
             sql: include_str!("../migrations/0082_temporary_uploads.sql"),
         },
+        Migration {
+            version: 83,
+            name: "discounts",
+            sql: include_str!("../migrations/0083_discounts.sql"),
+        },
+        Migration {
+            version: 84,
+            name: "cart_discount_codes",
+            sql: include_str!("../migrations/0084_cart_discount_codes.sql"),
+        },
+        Migration {
+            version: 85,
+            name: "order_discounts",
+            sql: include_str!("../migrations/0085_order_discounts.sql"),
+        },
+        Migration {
+            version: 86,
+            name: "discount_schedule",
+            sql: include_str!("../migrations/0086_discount_schedule.sql"),
+        },
+        Migration {
+            version: 87,
+            name: "discount_usages_by_code",
+            sql: include_str!("../migrations/0087_discount_usages_by_code.sql"),
+        },
     ],
 };
 

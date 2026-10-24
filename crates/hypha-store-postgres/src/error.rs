@@ -9,6 +9,7 @@ use hypha_channels::keys as channel_keys;
 use hypha_core::{RepoError, idempotency::keys as idempotency_keys};
 use hypha_custom_fields::keys as custom_field_keys;
 use hypha_customers::repo::keys as customer_keys;
+use hypha_discounts::keys as discount_keys;
 use hypha_extensions::keys as extension_keys;
 use hypha_fulfillment::keys as fulfillment_keys;
 use hypha_inventory::repo::keys as inventory_keys;
@@ -138,6 +139,12 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
         custom_field_keys::CUSTOM_FIELD_UNIQUE_VALUE,
     ),
     ("agents_pkey", agent_keys::AGENT_ID),
+    ("discounts_pkey", discount_keys::DISCOUNT_ID),
+    ("discount_code", discount_keys::DISCOUNT_CODE),
+    (
+        "discount_per_customer",
+        discount_keys::DISCOUNT_PER_CUSTOMER,
+    ),
     ("agent_proposals_pkey", agent_keys::PROPOSAL_ID),
     ("agent_proposal_key", agent_keys::PROPOSAL_KEY),
     ("agent_calls_pkey", agent_keys::AGENT_CALL_ID),

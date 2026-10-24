@@ -181,6 +181,27 @@ pub fn start<D: Deployment>(
         ));
     }
 
+    // Discounts' windows likewise.
+    if jobs.discount_schedule.enabled {
+        let s = Arc::clone(&state);
+        let dispatch = Arc::clone(&wake.dispatch);
+        tasks.push(every(
+            &stopped,
+            Timer::fixed("discount_schedule", jobs.discount_schedule.interval),
+            move || {
+                let s = Arc::clone(&s);
+                let dispatch = Arc::clone(&dispatch);
+                async move {
+                    let ran = jobs::discount_schedule(&s).await;
+                    if matches!(ran, Ok(r) if !r.idle) {
+                        dispatch.notify_one();
+                    }
+                    ran
+                }
+            },
+        ));
+    }
+
     if jobs.media_sweep.enabled && state.media.is_some() {
         let s = Arc::clone(&state);
         tasks.push(every(

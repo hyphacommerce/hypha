@@ -408,6 +408,9 @@ pub fn apply(input: &DiscountInput, discounts: &[Live<'_>]) -> Outcome
   O(n² · m) arithmetic at the outside, microseconds for the caps above. Loading is one
   query for live automatic discounts in the market and channel, plus one for the
   cart's codes, pipelined with pricing's loads.
+  *As built:* the live automatic discounts and the codes (then their discounts) are sent
+  together; then the usage counts, the buyer's past uses (after the email's customer,
+  when one is needed), the products' categories and the summaries' names together.
 
 ## 6. Codes and the cart (DS7)
 
@@ -656,3 +659,137 @@ state.
 6. **The storefront:** code field, states, strikethroughs, totals row, "Free" shipping,
    promotion badges, the seed's discounts.
 7. **Next note:** gift cards and store credit (§12), with split tender.
+
+## As built
+
+Steps 1 to 4 (the leaf and its engine, carts, checkout and orders, buy X get Y and tiers)
+and the storefront's promotions. Where they differ from the sections above, or settle
+what they left open:
+
+- **The model** (§2, §3). Classes are derived from the kind, never given: a standard
+  discount's are its rewards' targets'; buy X get Y and tiers are `product` (they reduce
+  item lines). Each condition type appears at most once. Every rule broken is reported at
+  once as `invalid_discount` with `details.problems: [{path, code, message}]` (`code`:
+  `empty`, `too_many`, `duplicate`, `too_small`, `out_of_range`, `duplicate_class`,
+  `allocation_not_allowed`, `value_not_allowed`, `threshold_mismatch`, `not_ascending`,
+  `markets_differ`, `ends_not_after_start`, `invalid_text`). An amount for a market that
+  doesn't exist is `422 market_not_found`, one in another currency `422
+  discount_currency_mismatch` (both with `{path, market}`). The subtotal and shipping take
+  only `across` amounts (the default when `allocation` is left out); a fixed price is for
+  items only, and 0 makes them free. A tier's amount is across its items; spend tiers name
+  the same markets, each rising. The method is fixed: `PATCH` refuses `method` as an
+  unknown field (`422 invalid_body`); the domain's `discount_method_fixed` guards it too.
+  A discount's products, variants, categories, customers, customer groups and channels are
+  stored unchecked, like a payment method's markets (listed at the top of `hypha-http`'s
+  `error.rs`): an unknown one never matches. Its markets are checked, since its amounts
+  are priced in their currencies.
+- **Storage.** A discount's conditions and kind are one JSON column (`rules`), `classes`
+  beside it for the list's filter. A code's own use count is a column of its row
+  (`discount_codes.used`), moved by the same conditional `UPDATE … WHERE used < limit` as
+  the discount's counter row; neither has a version. Usage rows keep what the discount took
+  off the order (`amount`) and aren't foreign keys to orders or customers (orders aren't
+  deleted, nor customers with orders). Migrations 0083 (discounts), 0084 (carts' codes),
+  0085 (orders' discounts), 0087 (usages by code).
+  - **A claim is judged at the commit** (§7): the discount must still be live at the
+    claim's moment, its row held `FOR SHARE` (concurrent claims don't wait on each other;
+    an edit waits for them) so its limit can't change under the claim, and the code still
+    active. A code deactivated mid-checkout is a lost claim: `409 discounts_changed`. The
+    claim carries no limit of the discount's: storage uses the one the discount has then.
+  - **Unlimited counters don't move.** Without a limit, neither the discount's counter row
+    nor the code's `used` is written, so a popular unlimited discount or code is no row
+    every checkout queues on. Their uses are counted from the usage rows instead (what
+    `usage_counts` and a code's `used` answer; migration 0087 indexes them by code), and a
+    discount given a limit later has its counter set from them in the same write (the
+    write waits for claims in flight, so they're counted). A code's limit is fixed when
+    it's made, so its claim's is the stored one.
+- **The engine** (§4, §5).
+  - A discount's minimum is measured on the qualifying items' prices before discounts when
+    it reduces items, else on their amounts after product discounts.
+  - Product discounts that don't combine still apply together when the lines each one
+    reduces on its own don't overlap.
+  - Several order rewards are each computed on the same subtotal, clipped as stated, then
+    spread one after another over what each line has left (by largest remainder), so no
+    line goes below zero.
+  - Shipping is priced inside the engine, by a function the cart passes: the rate is for
+    the shipped lines' subtotal after product and order discounts, and the shipping reward
+    applies to that price. One pass, so "free over €50" and a 10% order discount agree.
+  - Buy X get Y counts as bought the most expensive units still at full price (on lines no
+    other discount in the set reduces), then gets the cheapest units left of `gets`; a
+    round whose units aren't in the cart gets none. Shares on lines carry `units`.
+  - Each set's members that took nothing are dropped before sets are compared.
+  - **The lowest total wins** (the owner's decision, 2026-10-24; §4 step 4 said "saves
+    most"). Sets are ranked by what the buyer pays, the lines and the shipping after
+    discounts, not by what the discounts take off: a discount that takes the cart under a
+    "free over €50" rate can make it cost more (5% off €52 is €49.40 plus €5 shipping).
+    Compared are no discount at all, each candidate alone, and each seed's greedy set, so
+    a discount never makes the cart cost more and a seed alone beats a combination that
+    spoils it (a 10% shirt sale leaving a "buy anything, get the €5 sock free" deal
+    nothing to count as bought: the deal alone saves €5, the two together €1). Ties go to
+    fewer discounts, then lower IDs, so a discount that saves exactly what it adds to
+    shipping isn't applied.
+  - **Codes are taken in the order the cart entered them.** Two codes of one discount: the
+    first entered applies, unless its own uses are taken and the other's aren't; the other
+    reads its own state when it couldn't apply anyway (`limit_reached`), else
+    `blocked_by_other` naming the discount.
+- **Code states** (§6, §14). Unknown, inactive, draft and not-started codes are refused at
+  entry as `422 discount_code_invalid`, alike. A kept code whose discount ended reads
+  `expired`; one whose code or discount went (deleted, deactivated, made a draft) reads
+  `invalid`. In the cart they're flat: `{code, state, condition?, needed?: {subtotal? |
+  quantity?}, discount?}`. A second code of a discount already applied reads
+  `blocked_by_other` naming that discount. A code left out though it saves on its own,
+  by no discount it can't combine with, reads `no_saving`: with it the buyer would pay no
+  less (the shipping case above). Generated codes are 8 to 24 characters with the prefix,
+  at least 8 of them random after it (about 40 bits), so a prefix can't leave them
+  guessable.
+- **The buyer.** Signed in means the cart has a customer (a session's, or linked by staff).
+  A guest with an email is counted by their email's customer for once-per-customer, as
+  checkout will be (looked up only when a discount the cart weighs is once per customer);
+  groups come only from a linked customer, as for prices, and so does being a listed
+  customer: a guest typing a listed customer's email isn't them.
+- **Carts** (§6). `subtotal` and `shipping_total` are after discounts; a line has
+  `subtotal` (before), `discounts` and `total` (after, taxed); the chosen shipping
+  `amount`, `discounts`, `total`; the cart `discounts`, `discount_total`,
+  `discount_codes`. Shipping offers carry `amount_after_discounts`. An empty cart holding
+  codes is read in full, so its codes get states. The routes answer the whole cart; rate
+  limits `discount_code_ip` (10, then one every 6 s) and `discount_code_cart` (5, then one
+  every 12 s).
+- **Orders** (§7, §8). A lost claim is `409 discounts_changed` with `{total,
+  discount_codes}` (the cart now) and isn't retried; money a payment committed goes back as
+  on `total_changed`. An order's discounts keep their value and target as the leaf's JSON
+  (`hypha_discounts::json`); Postgres's `jsonb` doesn't keep the keys' order.
+  `order.placed`'s `discount_codes` names each code once, in the order applied. The
+  emails' totals add up: the subtotal and shipping are after discounts, and the discounts
+  are listed under the total as what they include ("Discounts included above"), never
+  taken off again.
+- **The admin's reads.** A discount's usage (`GET /admin/discounts/{id}/usage`) names
+  orders and their customers, so it needs `customers:read` and `orders:read` besides
+  `discounts:read`. The codes' CSV export checks the discount once and reads the codes
+  5,000 at a time (`export_codes`, `DiscountRepo::codes_after`).
+- **Summaries** (§10) name what they apply to ("Buy 1 from Grow kits, get 1 Liquid
+  Culture Syringe free (once per order)", "Free shipping in Serbia on orders from 6,000
+  RSD"; more than two names read "Grow kits and 2 more"), from `Names` the caller reads in
+  one query (`DiscountRepo::names` over a `NameRequest`), counting whatever has no name
+  ("2 categories"). Amounts are formatted as emails do (€, $ and £ before, other codes
+  after, thousands grouped) without a fraction of zeros ("€50", "€12.50"), in the market
+  asked for (else every market's, "€5 / 600 JPY"), and dates as UTC days; an end at
+  midnight reads as the day before. Shoppers' summaries (carts, so orders, and
+  promotions: `Audience::Shoppers`, `NameRequest::for_shoppers`) name only active
+  products and never customers or groups ("for members", "for selected customers"); the
+  admin's name customers only to a caller holding `customers:read` who may see names.
+  Orders keep the sentence checkout rendered.
+- **Promotions** (§9) are on storefront product reads with `country` and on search hits,
+  `[{discount, title, summary}]`, read at request time: live automatic discounts that may
+  reach the product (a variant list may reach any product), with no condition about the
+  buyer. Static pages that show them follow discounts through `discount.created`,
+  `discount.updated` and `discount.deleted`, which the storefront's webhook app should
+  subscribe to.
+- **Layering** (§13). The cart doesn't depend on discounts: it defines a port
+  (`hypha_cart::promotions`: `HasPromotions`, `Promotions`, `PromotionReading`, in and out
+  types of its own, value and target as the leaf's JSON) that the workflow
+  `hypha-promotions` implements on the leaf (`CartPromotions`, `DiscountReading`); the
+  storage adapters and the test world name it. Codes stay plain normalised strings on the
+  cart, normalised and checked through the port; `MAX_CODES_PER_CART` is the cart's.
+  Checkout stages usage with the leaf's `StageDiscounts` directly, from what each
+  application carries (`once_per_customer`, the code's limit).
+- **Agents.** `POST /admin/discounts` is a curated MCP tool (`admin__discounts__create`);
+  every discount route is an operation.
