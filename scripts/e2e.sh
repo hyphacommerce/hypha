@@ -75,6 +75,16 @@ contains() {
     fi
 }
 
+# lacks NAME TEXT: asserts the last response body doesn't contain TEXT.
+lacks() {
+    if [[ $BODY != *"$2"* ]]; then
+        echo "ok   $1"
+    else
+        echo "FAIL $1: expected body not to contain $2: $BODY"
+        FAILED=$((FAILED + 1))
+    fi
+}
+
 # replayed NAME CURL_ARGS...: sends the request again and asserts the response carries
 # `Idempotent-Replayed: true`.
 replayed() {
@@ -804,7 +814,8 @@ contains "and the next action shows them" '"next_action":{"type":"instructions",
 contains "the order is #1001" '"number":1001'
 contains "it is pending and unfulfilled" '"financial_status":"pending","fulfillment_status":"unfulfilled"'
 contains "it copies the line" '"product_title":"Mug","variant_title":null,"sku":null,"unit_price":{"amount":900,"currency":"EUR"}'
-contains "and the price list that priced it" "\"unit_price\":{\"amount\":900,\"currency\":\"EUR\"},\"compare_at_price\":null,\"price_list\":\"$LIST\""
+contains "and its compare-at" '"unit_price":{"amount":900,"currency":"EUR"},"compare_at_price":null,"total"'
+lacks "but not the price list that priced it" '"price_list"'
 contains "its total is 1800" '"total":{"amount":1800,"currency":"EUR"},"lines"'
 ORDER_TOKEN=$(sed -E 's/.*"access_token":"(hypha_ord_[0-9a-f]+)".*/\1/' <<<"$BODY")
 step "the buyer reads the order with its token" 200 - "$BASE/storefront/orders/$ORDER?token=$ORDER_TOKEN"
@@ -831,6 +842,7 @@ step "a completed cart takes no lines" 409 cart_completed -X POST "$BASE/storefr
     -H "$JSON" -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
 step "get the order" 200 - "$BASE/admin/orders/$ORDER"
 contains "it has a placed_at" '"placed_at":"20'
+contains "the admin sees the price list that priced it" "\"compare_at_price\":null,\"price_list\":\"$LIST\""
 step "list orders" 200 - "$BASE/admin/orders?limit=1"
 contains "the order is listed first" "\"items\":[{\"id\":\"$ORDER\""
 step "orders by status and total" 200 - "$BASE/admin/orders?financial_status=pending&currency=EUR&sort=total_desc"
@@ -873,7 +885,8 @@ step "checkout the shipping cart" 201 - -X POST "$SHIP/checkout" -H "$JSON" -d '
 contains "told to pay the courier" '"next_action":{"type":"instructions","instructions":"Pay the courier."}'
 contains "the order charges shipping" '"shipping_total":{"amount":490,"currency":"EUR"},"tax_total":{"amount":0,"currency":"EUR"},"total":{"amount":1390'
 contains "it copies the address" '"shipping_address":{"first_name":"Ana","last_name":"Horvat"'
-contains "and the shipping line" '"code":"standard","name":"Standard","provider":null,"service":null,"reference":null,"amount":{"amount":490,"currency":"EUR"},"estimate":{"min_days":2,"max_days":4}'
+contains "and the shipping line" '"code":"standard","name":"Standard","service":null,"amount":{"amount":490,"currency":"EUR"},"estimate":{"min_days":2,"max_days":4}'
+lacks "but not its provider, which is for staff" '"provider"'
 
 echo "## payment and search apps"
 step "a payment app that isn't installed" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \
@@ -1241,7 +1254,7 @@ step "cash on delivery" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/payment-
 step "checkout" 201 - -X POST "$BASE/storefront/carts/$SHOP_CART/checkout" -H "$JSON" -d '{}'
 SHOP_ORDER=$(id)
 GUEST=$(customer)
-contains "the order copies the tax line" '"tax":{"rate_ppm":130000,"amount":{"amount":117,"currency":"EUR"},"tax_class":null}'
+contains "the order copies the tax line" '"tax":{"rate_ppm":130000,"amount":{"amount":117,"currency":"EUR"}}'
 contains "and adds tax on top" '"subtotal":{"amount":2700,"currency":"EUR"},"shipping_total":{"amount":0,"currency":"EUR"},"tax_total":{"amount":351,"currency":"EUR"},"total":{"amount":3051'
 step "the guest became a customer" 200 - "$BASE/admin/customers/$GUEST"
 contains "with the cart's email" '"email":"guest@example.hr"'

@@ -3779,9 +3779,17 @@ async fn a_cart_ships_by_an_app_providers_signed_quote() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{order}");
     let shipped = &order["shipping_lines"][0];
+    assert_eq!(shipped["amount"], json!({"amount": 700, "currency": "EUR"}));
+    // The provider and its quote are for staff.
+    assert_eq!(
+        (shipped.get("provider"), shipped.get("reference")),
+        (None, None)
+    );
+    let admin = format!("/admin/orders/{}", order["id"].as_str().unwrap());
+    let (_, admin) = send(&app, "GET", &admin, None).await;
+    let shipped = &admin["shipping_lines"][0];
     assert_eq!(shipped["provider"], "app_courier");
     assert_eq!(shipped["reference"], "quote-42");
-    assert_eq!(shipped["amount"], json!({"amount": 700, "currency": "EUR"}));
     assert_eq!(
         order["shipping_total"],
         json!({"amount": 700, "currency": "EUR"})

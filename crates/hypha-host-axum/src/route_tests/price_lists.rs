@@ -911,17 +911,31 @@ async fn an_order_line_keeps_its_compare_at_price_and_price_list() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{order}");
-    let expected = (&eur(800), &eur(1000), &sale["id"]);
     let line = &order["lines"][0];
+    // Which list priced it is the merchant's business.
     assert_eq!(
         (
             &line["unit_price"],
             &line["compare_at_price"],
-            &line["price_list"]
+            line.get("price_list")
         ),
-        expected,
+        (&eur(800), &eur(1000), None),
         "the storefront's"
     );
+    let token = order["access_token"].as_str().unwrap();
+    let (_, placed) = send_as(
+        &app,
+        &pk,
+        "GET",
+        &format!(
+            "/storefront/orders/{}?token={token}",
+            order["id"].as_str().unwrap()
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(placed["lines"][0].get("price_list"), None, "{placed}");
+    let expected = (&eur(800), &eur(1000), &sale["id"]);
     let id = order["id"].as_str().unwrap();
     let (_, admin) = send(&app, "GET", &format!("/admin/orders/{id}"), None).await;
     let line = &admin["lines"][0];
