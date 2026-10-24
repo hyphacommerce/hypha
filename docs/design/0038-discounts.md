@@ -783,5 +783,13 @@ what they left open:
   buyer. Static pages that show them follow discounts through `discount.created`,
   `discount.updated` and `discount.deleted`, which the storefront's webhook app should
   subscribe to.
+- **Layering** (§13). The cart doesn't depend on discounts: it defines a port
+  (`hypha_cart::promotions`: `HasPromotions`, `Promotions`, `PromotionReading`, in and out
+  types of its own, value and target as the leaf's JSON) that the workflow
+  `hypha-promotions` implements on the leaf (`CartPromotions`, `DiscountReading`); the
+  storage adapters and the test world name it. Codes stay plain normalised strings on the
+  cart, normalised and checked through the port; `MAX_CODES_PER_CART` is the cart's.
+  Checkout stages usage with the leaf's `StageDiscounts` directly, from what each
+  application carries (`once_per_customer`, the code's limit).
 - **Agents.** `POST /admin/discounts` is a curated MCP tool (`admin__discounts__create`);
   every discount route is an operation.
