@@ -3552,6 +3552,37 @@
         ],
         "type": "object"
       },
+      "CreateUploadRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "byte_size": {
+            "description": "Exactly the file's size: storage refuses another.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "checksum": {
+            "description": "SHA-256 as 64 hex characters: storage then refuses other contents.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "filename": {
+            "description": "The file's name, kept for people; up to 255 characters.",
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/UploadPurposeDto"
+          }
+        },
+        "required": [
+          "purpose",
+          "filename",
+          "byte_size"
+        ],
+        "type": "object"
+      },
       "CreateZoneRequest": {
         "additionalProperties": false,
         "properties": {
@@ -11765,6 +11796,22 @@
         },
         "type": "object"
       },
+      "UploadId": {
+        "description": "A UploadId: `upl_` and 32 hex digits.",
+        "examples": [
+          "upl_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^upl_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "UploadPurposeDto": {
+        "description": "What an upload is for, which decides who may make and read it, its file's type and its\nlargest size: `price_import` (`pricing:write`, `text/csv`, up to 20 MB).\n\nKnown values: `price_import`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "price_import"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "UploadRequestResponse": {
         "description": "A request for the client to send itself, with the file as its body.",
         "properties": {
@@ -11792,6 +11839,41 @@
           "url",
           "headers",
           "expires_at"
+        ],
+        "type": "object"
+      },
+      "UploadResponse": {
+        "properties": {
+          "byte_size": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expires_at": {
+            "description": "RFC 3339, UTC: the upload and its file are deleted after then.",
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/UploadId"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/UploadPurposeDto"
+          },
+          "upload": {
+            "$ref": "#/components/schemas/UploadRequestResponse",
+            "description": "The request that sends the file straight to storage, with the file as its body\n(the purpose's type as `Content-Type`)."
+          }
+        },
+        "required": [
+          "id",
+          "purpose",
+          "filename",
+          "byte_size",
+          "expires_at",
+          "upload"
         ],
         "type": "object"
       },
@@ -11944,7 +12026,7 @@
             ]
           },
           "price_breaks": {
-            "description": "The winning fixed price's quantity prices.",
+            "description": "What lines larger than `quantity` cost each, across every list: by quantity, each\nbelow `price` and the one before it, a line of `min_quantity` paying its `price`.",
             "items": {
               "$ref": "#/components/schemas/PriceBreakDto"
             },
@@ -35296,6 +35378,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Only these variants (a grid's page of them): repeat it (`variants=var_…&variants=var_…`)\nor separate them with commas, up to 250 (`422 too_many_filter_ids`). Those without\na fixed price are left out.",
+            "in": "query",
+            "name": "variants",
+            "required": false,
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/VariantId"
+              },
+              "type": "array"
+            }
           }
         ],
         "responses": {
@@ -42053,6 +42147,336 @@
         },
         "x-hypha-scopes": [
           "taxes:write"
+        ]
+      }
+    },
+    "/admin/uploads": {
+      "post": {
+        "operationId": "admin.uploads.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Starts a temporary upload: the request that sends a file straight to storage, to read\nback with `GET /admin/uploads/{id}/content` until `expires_at`. The scope is the\npurpose's: `pricing:write` for `price_import`.",
+        "tags": [
+          "uploads"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "pricing:write"
+        ]
+      }
+    },
+    "/admin/uploads/{id}": {
+      "delete": {
+        "operationId": "admin.uploads.remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/UploadId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Deletes the upload and its file before it expires. The scope is the purpose's.",
+        "tags": [
+          "uploads"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "pricing:write"
+        ]
+      }
+    },
+    "/admin/uploads/{id}/content": {
+      "get": {
+        "operationId": "admin.uploads.content",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/UploadId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The file"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The uploaded file's bytes, with the purpose's type. `404 upload_not_found` once it\nexpired, `409 upload_missing` until the file has been uploaded. The scope is the\npurpose's.",
+        "tags": [
+          "uploads"
+        ],
+        "x-hypha-scopes": [
+          "pricing:write"
         ]
       }
     },

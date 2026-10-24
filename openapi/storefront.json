@@ -37,7 +37,7 @@
           },
           "orders": {
             "items": {
-              "$ref": "#/components/schemas/OrderResponse"
+              "$ref": "#/components/schemas/StorefrontOrderResponse"
             },
             "type": "array"
           },
@@ -1525,312 +1525,6 @@
         "pattern": "^ordl_[0-9a-f]{32}$",
         "type": "string"
       },
-      "OrderLineResponse": {
-        "properties": {
-          "compare_at_price": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/Money",
-                "description": "What `unit_price` was shown against at checkout, struck through (\"you saved\");\nnever part of the totals. `null` without one, and for lines placed before it was\nkept."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "fulfilled_quantity": {
-            "description": "How many of `quantity` standing fulfilments shipped.",
-            "format": "int32",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "id": {
-            "$ref": "#/components/schemas/OrderLineId"
-          },
-          "image": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ProductMediaResponse",
-                "description": "The line's picture as its product is now (an order keeps none): the variant's\nimage, else the product's first media item; `null` for a product gone or without\nmedia, or without file storage."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "price_list": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/PriceListId",
-                "description": "The price list `unit_price` came from; `null` for the variant's base price."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "product": {
-            "$ref": "#/components/schemas/ProductId"
-          },
-          "product_title": {
-            "type": "string"
-          },
-          "quantity": {
-            "format": "int32",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "sku": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "tax": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/OrderTaxResponse",
-                "description": "`null` when the country had no tax rates."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "$ref": "#/components/schemas/Money"
-          },
-          "unit_price": {
-            "$ref": "#/components/schemas/Money"
-          },
-          "variant": {
-            "$ref": "#/components/schemas/VariantId"
-          },
-          "variant_title": {
-            "description": "The variant's option values (\"M / Blue\"); `null` for a product without options.",
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "product",
-          "variant",
-          "quantity",
-          "product_title",
-          "unit_price",
-          "total",
-          "fulfilled_quantity"
-        ],
-        "type": "object"
-      },
-      "OrderResponse": {
-        "properties": {
-          "cart": {
-            "$ref": "#/components/schemas/CartId"
-          },
-          "channel": {
-            "$ref": "#/components/schemas/ChannelId",
-            "description": "The sales channel it was placed through."
-          },
-          "country": {
-            "$ref": "#/components/schemas/CountryCode"
-          },
-          "created_at": {
-            "description": "When it was created, RFC 3339 in UTC.",
-            "type": "string"
-          },
-          "currency": {
-            "$ref": "#/components/schemas/Currency"
-          },
-          "customer": {
-            "$ref": "#/components/schemas/CustomerId"
-          },
-          "email": {
-            "$ref": "#/components/schemas/Email"
-          },
-          "financial_status": {
-            "$ref": "#/components/schemas/FinancialStatusDto"
-          },
-          "fulfillment_status": {
-            "$ref": "#/components/schemas/FulfillmentStatusDto"
-          },
-          "id": {
-            "$ref": "#/components/schemas/OrderId"
-          },
-          "lines": {
-            "items": {
-              "$ref": "#/components/schemas/OrderLineResponse"
-            },
-            "type": "array"
-          },
-          "market": {
-            "$ref": "#/components/schemas/MarketId"
-          },
-          "number": {
-            "description": "The human number, shown as \"#1001\".",
-            "format": "int64",
-            "type": "integer"
-          },
-          "placed_at": {
-            "description": "RFC 3339, UTC.",
-            "type": "string"
-          },
-          "redacted": {
-            "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          },
-          "shipping_address": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/PostalAddressResponse",
-                "description": "`null` when nothing in the order ships."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "shipping_lines": {
-            "description": "How each group of lines ships, as charged.",
-            "items": {
-              "$ref": "#/components/schemas/OrderShippingLineResponse"
-            },
-            "type": "array"
-          },
-          "shipping_total": {
-            "$ref": "#/components/schemas/Money",
-            "description": "What shipping was charged, as part of `total`."
-          },
-          "subtotal": {
-            "$ref": "#/components/schemas/Money"
-          },
-          "tax_total": {
-            "$ref": "#/components/schemas/Money",
-            "description": "Tax on lines and shipping: part of `subtotal` and `shipping_total` if\n`taxes_included`, else on top."
-          },
-          "taxes_included": {
-            "description": "Whether line prices include tax (the market decided, at checkout).",
-            "type": "boolean"
-          },
-          "total": {
-            "$ref": "#/components/schemas/Money"
-          },
-          "updated_at": {
-            "description": "When it last changed, RFC 3339 in UTC.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "number",
-          "placed_at",
-          "cart",
-          "market",
-          "channel",
-          "currency",
-          "country",
-          "customer",
-          "email",
-          "financial_status",
-          "fulfillment_status",
-          "taxes_included",
-          "subtotal",
-          "shipping_total",
-          "tax_total",
-          "total",
-          "lines",
-          "shipping_lines",
-          "created_at",
-          "updated_at"
-        ],
-        "type": "object"
-      },
-      "OrderShippingLineResponse": {
-        "properties": {
-          "amount": {
-            "$ref": "#/components/schemas/Money"
-          },
-          "code": {
-            "type": "string"
-          },
-          "estimate": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/DeliveryEstimateDto",
-                "description": "As estimated at checkout."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "group": {
-            "$ref": "#/components/schemas/ShippingGroupId"
-          },
-          "lines": {
-            "description": "The order lines this ships.",
-            "items": {
-              "$ref": "#/components/schemas/OrderLineId"
-            },
-            "type": "array"
-          },
-          "name": {
-            "type": "string"
-          },
-          "option": {
-            "$ref": "#/components/schemas/ShippingOptionId"
-          },
-          "provider": {
-            "description": "`app_…` or `spore_…`; `null` for a built-in rate.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "reference": {
-            "description": "The provider's quote ID.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "service": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "tax": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/OrderTaxResponse",
-                "description": "`null` when the country had no tax rates."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "group",
-          "lines",
-          "option",
-          "code",
-          "name",
-          "amount"
-        ],
-        "type": "object"
-      },
       "OrderSummaryPage": {
         "description": "A page of a list, newest first.",
         "properties": {
@@ -1942,33 +1636,6 @@
           "fulfillment_status",
           "total",
           "item_count"
-        ],
-        "type": "object"
-      },
-      "OrderTaxResponse": {
-        "properties": {
-          "amount": {
-            "$ref": "#/components/schemas/Money"
-          },
-          "rate_ppm": {
-            "$ref": "#/components/schemas/TaxRate",
-            "description": "Parts per million: 250000 = 25%."
-          },
-          "tax_class": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/TaxClassId",
-                "description": "The class whose rate applied; `null` for the country's default rate."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "rate_ppm",
-          "amount"
         ],
         "type": "object"
       },
@@ -2133,7 +1800,7 @@
       "PlacedOrderResponse": {
         "allOf": [
           {
-            "$ref": "#/components/schemas/OrderResponse"
+            "$ref": "#/components/schemas/StorefrontOrderResponse"
           },
           {
             "properties": {
@@ -2340,14 +2007,6 @@
           "price"
         ],
         "type": "object"
-      },
-      "PriceListId": {
-        "description": "A PriceListId: `pl_` and 32 hex digits.",
-        "examples": [
-          "pl_0190f1a2b3c47d8e9f00112233445566"
-        ],
-        "pattern": "^pl_[0-9a-f]{32}$",
-        "type": "string"
       },
       "ProductId": {
         "description": "A ProductId: `prod_` and 32 hex digits.",
@@ -3108,6 +2767,215 @@
         ],
         "type": "object"
       },
+      "StorefrontOrderLineResponse": {
+        "properties": {
+          "compare_at_price": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "What `unit_price` was shown against at checkout, struck through (\"you saved\");\nnever part of the totals. `null` without one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fulfilled_quantity": {
+            "description": "How many of `quantity` standing fulfilments shipped.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "$ref": "#/components/schemas/OrderLineId"
+          },
+          "image": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProductMediaResponse",
+                "description": "The line's picture as its product is now: the variant's image, else the product's\nfirst media item; `null` for a product gone or without media."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "product": {
+            "$ref": "#/components/schemas/ProductId"
+          },
+          "product_title": {
+            "type": "string"
+          },
+          "quantity": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sku": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tax": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StorefrontTaxResponse",
+                "description": "`null` when the country had no tax rates."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "unit_price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/VariantId"
+          },
+          "variant_title": {
+            "description": "The variant's option values (\"M / Blue\"); `null` for a product without options.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "product",
+          "variant",
+          "quantity",
+          "product_title",
+          "unit_price",
+          "total",
+          "fulfilled_quantity"
+        ],
+        "type": "object"
+      },
+      "StorefrontOrderResponse": {
+        "description": "An order as its buyer sees it (a storefront's confirmation, the account's orders):\nwhat `OrderResponse` holds but what only staff read: the price list a line was priced\nfrom, a shipping rate's provider and quote, tax classes and `redacted`.",
+        "properties": {
+          "cart": {
+            "$ref": "#/components/schemas/CartId"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/ChannelId",
+            "description": "The sales channel it was placed through."
+          },
+          "country": {
+            "$ref": "#/components/schemas/CountryCode"
+          },
+          "created_at": {
+            "description": "When it was created, RFC 3339 in UTC.",
+            "type": "string"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "customer": {
+            "$ref": "#/components/schemas/CustomerId"
+          },
+          "email": {
+            "$ref": "#/components/schemas/Email"
+          },
+          "financial_status": {
+            "$ref": "#/components/schemas/FinancialStatusDto"
+          },
+          "fulfillment_status": {
+            "$ref": "#/components/schemas/FulfillmentStatusDto"
+          },
+          "id": {
+            "$ref": "#/components/schemas/OrderId"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/StorefrontOrderLineResponse"
+            },
+            "type": "array"
+          },
+          "market": {
+            "$ref": "#/components/schemas/MarketId"
+          },
+          "number": {
+            "description": "The human number, shown as \"#1001\".",
+            "format": "int64",
+            "type": "integer"
+          },
+          "placed_at": {
+            "description": "RFC 3339, UTC.",
+            "type": "string"
+          },
+          "shipping_address": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PostalAddressResponse",
+                "description": "`null` when nothing in the order ships."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shipping_lines": {
+            "description": "How each group of lines ships, as charged.",
+            "items": {
+              "$ref": "#/components/schemas/StorefrontShippingLineResponse"
+            },
+            "type": "array"
+          },
+          "shipping_total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What shipping was charged, as part of `total`."
+          },
+          "subtotal": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "tax_total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Tax on lines and shipping: part of `subtotal` and `shipping_total` if\n`taxes_included`, else on top."
+          },
+          "taxes_included": {
+            "description": "Whether line prices include tax (the market decided, at checkout).",
+            "type": "boolean"
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "updated_at": {
+            "description": "When it last changed, RFC 3339 in UTC.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "placed_at",
+          "cart",
+          "market",
+          "channel",
+          "currency",
+          "country",
+          "customer",
+          "email",
+          "financial_status",
+          "fulfillment_status",
+          "taxes_included",
+          "subtotal",
+          "shipping_total",
+          "tax_total",
+          "total",
+          "lines",
+          "shipping_lines",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "StorefrontProductResponse": {
         "description": "A product as a storefront sees it: active products only, without admin fields. A draft\nor archived product is `404 product_not_found`, the same as one that doesn't exist, so a\nstorefront can't tell them apart.\n\nPrices and stock are the shopper's: with `country`, each variant carries its price in\nthat country's market and whether it can be bought now, priced as a cart prices it.\nWithout `country`, there are none: a product's base price isn't what any shopper pays.",
         "properties": {
@@ -3212,6 +3080,69 @@
         ],
         "type": "object"
       },
+      "StorefrontShippingLineResponse": {
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "code": {
+            "type": "string"
+          },
+          "estimate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryEstimateDto",
+                "description": "As estimated at checkout."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group": {
+            "$ref": "#/components/schemas/ShippingGroupId"
+          },
+          "lines": {
+            "description": "The order lines this ships.",
+            "items": {
+              "$ref": "#/components/schemas/OrderLineId"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "option": {
+            "$ref": "#/components/schemas/ShippingOptionId"
+          },
+          "service": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tax": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StorefrontTaxResponse",
+                "description": "`null` when the country had no tax rates."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "group",
+          "lines",
+          "option",
+          "code",
+          "name",
+          "amount"
+        ],
+        "type": "object"
+      },
       "StorefrontStoreResponse": {
         "description": "What a storefront sees of the store: what a header, footer or contact page shows. Legal\ndetails stay in the admin until a storefront needs them.",
         "properties": {
@@ -3256,6 +3187,22 @@
         ],
         "type": "string",
         "x-hypha-open-enum": true
+      },
+      "StorefrontTaxResponse": {
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "rate_ppm": {
+            "$ref": "#/components/schemas/TaxRate",
+            "description": "Parts per million: 250000 = 25%."
+          }
+        },
+        "required": [
+          "rate_ppm",
+          "amount"
+        ],
+        "type": "object"
       },
       "StorefrontVariantResponse": {
         "properties": {
@@ -3324,7 +3271,7 @@
             ]
           },
           "price_breaks": {
-            "description": "Cheaper prices from a quantity in one cart line (\"8.00 each from 10\"); the cart\nprices each line at its quantity.",
+            "description": "What larger cart lines cost each (\"8.00 each from 10\"), whichever price list wins\nthem: by quantity, each below `price` and the one before it. The cart prices each\nline at its quantity, so a line of `min_quantity` pays that break's `price`. Empty\nwhen buying more costs no less.",
             "items": {
               "$ref": "#/components/schemas/PriceBreakDto"
             },
