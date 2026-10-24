@@ -86,8 +86,8 @@ function SettingsFields({
 }) {
   const currencies = useCurrencies();
   const timeZone = useTimeZone();
-  const percent = parsePercent(form.percent);
-  const bps = percent.ok ? percent.value : null;
+  const typed = parsePercent(form.percent);
+  const bps = typed.ok ? typed.value : null;
   // A group the list names that isn't among those read (no `customers:read`) shows by ID.
   const groupOptions = [
     ...groups,

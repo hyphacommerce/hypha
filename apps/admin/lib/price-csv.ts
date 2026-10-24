@@ -246,7 +246,7 @@ export function previewPriceImport(
         return match ? [Number(match[1])] : [];
       }),
     ),
-  ].sort((a, b) => a - b);
+  ].toSorted((a, b) => a - b);
 
   const byId = new Map<string, PriceGridVariant>();
   const bySku = new Map<string, PriceGridVariant[]>();

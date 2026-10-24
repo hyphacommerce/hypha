@@ -49,7 +49,7 @@ function symbolsOf(currency: string): string[] {
       // A code the runtime doesn't know has no symbol to strip.
     }
   }
-  return [...symbols].sort((a, b) => b.length - a.length);
+  return [...symbols].toSorted((a, b) => b.length - a.length);
 }
 
 /**

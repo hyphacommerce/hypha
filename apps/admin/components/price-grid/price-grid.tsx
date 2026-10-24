@@ -405,9 +405,7 @@ export function PriceGrid({
       }
       setDrafts(
         (before) =>
-          new Map(
-            [...before].filter(([id, d]) => d !== sent.get(id) || failedIds.includes(id)),
-          ),
+          new Map([...before].filter(([id, d]) => d !== sent.get(id) || failedIds.includes(id))),
       );
       setSaveError(
         failedIds.length > 0

@@ -141,9 +141,7 @@ export function PriceListsCard({
                                 size="sm"
                                 variant="ghost"
                                 isDisabled={isPending}
-                                onClick={() =>
-                                  run(() => removeFromCatalog(list.id, catalog.id))
-                                }
+                                onClick={() => run(() => removeFromCatalog(list.id, catalog.id))}
                               />
                             </HStack>
                           )}
@@ -172,9 +170,7 @@ export function PriceListsCard({
                 <Button
                   label="Add"
                   isDisabled={!adding || isPending}
-                  onClick={() =>
-                    adding && run(() => addToCatalog(adding, catalog.id))
-                  }
+                  onClick={() => adding && run(() => addToCatalog(adding, catalog.id))}
                 />
               </HStack>
             )}

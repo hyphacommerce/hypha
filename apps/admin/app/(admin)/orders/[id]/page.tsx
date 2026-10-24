@@ -283,11 +283,7 @@ async function Order({ id }: { id: string }) {
                         </VStack>
                       </TableCell>
                       <TableCell>
-                        <UnitPrice
-                          line={line}
-                          currencies={currencies}
-                          listNames={listNames}
-                        />
+                        <UnitPrice line={line} currencies={currencies} listNames={listNames} />
                       </TableCell>
                       <TableCell>{line.quantity}</TableCell>
                       <TableCell>

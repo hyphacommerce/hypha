@@ -17,11 +17,7 @@ export function formatBreaks(breaks: readonly BreakAmount[], digits: number): st
  * a price joined by `=`, `:` or `@` ("10 @ 8,00" works too). Their rules are checked
  * apart, by `breakProblems`.
  */
-export function parseBreaks(
-  text: string,
-  digits: number,
-  currency: string,
-): Parsed<BreakAmount[]> {
+export function parseBreaks(text: string, digits: number, currency: string): Parsed<BreakAmount[]> {
   const parts = text
     .split(/[;\n]/)
     .map((part) => part.trim())
