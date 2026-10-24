@@ -2,7 +2,7 @@
 title: Sales channels
 description: Where products are sold, apart from who buys them.
 sidebar:
-  order: 3
+  order: 5
 ---
 
 Markets decide *who* buys and at what price; **sales channels** decide *where* products are

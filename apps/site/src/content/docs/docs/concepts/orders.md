@@ -2,12 +2,17 @@
 title: Orders and fulfilment
 description: From a checked-out cart to shipped parcels, cancellations and refunds.
 sidebar:
-  order: 6
+  order: 8
 ---
 
 A cart becomes an **order** at checkout. The order copies everything that mattered at that
 moment (prices, taxes, shipping, addresses), so later changes to products or prices never
 rewrite it.
+
+Each line keeps its unit price, the compare-at price shown with it and the price list that
+set it. When [discounts](/docs/concepts/discounts/) applied, the order keeps a copy of each
+one, and every line and shipping line has its `subtotal` (before discounts), its share of
+each discount and its `total` (after them). Tax and refunds go by the total.
 
 ## Fulfilment
 
