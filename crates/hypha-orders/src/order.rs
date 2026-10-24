@@ -442,12 +442,15 @@ impl Order {
             fulfillment_status: FulfillmentStatus::Unfulfilled,
             cancelled: None,
         })?;
-        let mut codes: Vec<String> = order
+        // Each code once, in the order applied: a discount with two rewards comes twice,
+        // perhaps with another discount between.
+        let mut seen = HashSet::new();
+        let codes: Vec<String> = order
             .discounts
             .iter()
             .filter_map(|d| d.code.clone())
+            .filter(|c| seen.insert(c.clone()))
             .collect();
-        codes.dedup();
         let placed = OrderPlaced {
             order: order.id,
             number: order.number.value(),
@@ -1583,6 +1586,30 @@ mod tests {
         assert_eq!(
             events[0].data["discount_total"],
             serde_json::json!({"amount": 240, "currency": "EUR"})
+        );
+    }
+
+    #[test]
+    fn placing_names_each_code_once_in_the_order_applied() {
+        let mut new = discounted();
+        let a = |amount: i64| ten_off(amount);
+        let b = OrderDiscount {
+            discount: DiscountId::from_uuid(Uuid::from_u128(71)),
+            code: Some("SPRING".to_string()),
+            ..ten_off(80)
+        };
+        new.discounts = vec![a(80), b, a(80)];
+        let part = |application: u16, amount: i64| DiscountShare {
+            application,
+            amount: eur(amount),
+            units: None,
+        };
+        new.lines[0].discounts = vec![part(0, 80), part(1, 80), part(2, 40)];
+        new.lines[1].discounts = vec![part(2, 40)];
+        let mut order = Order::place(new).unwrap();
+        assert_eq!(
+            order.take_events()[0].data["discount_codes"],
+            serde_json::json!(["WELCOME10", "SPRING"])
         );
     }
 }
