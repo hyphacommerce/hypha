@@ -9,11 +9,15 @@ import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { ArrowRightIcon } from "@heroicons/react/20/solid";
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
+import type { Metadata } from "next";
 
+import { JsonLd } from "@/components/json-ld";
 import { ProductGrid } from "@/components/product-grid";
 import { countryOf, loadCategories, loadCategory, loadStore } from "@/lib/api";
 import { search } from "@/lib/listing-data";
-import { link } from "@/lib/site";
+import { pageMetadata } from "@/lib/metadata";
+import { storeLd } from "@/lib/seo";
+import { absolute, link } from "@/lib/site";
 
 type Hit = StorefrontSchemas["SearchHitResponse"];
 
@@ -26,6 +30,30 @@ async function shelf(query: {
 }): Promise<Hit[]> {
   const { data } = await search(query);
   return data?.items ?? [];
+}
+
+/** The hero's photo: the first category's (a scene, not one product), else the newest
+ * product's. */
+function heroOf(lead: StorefrontSchemas["StorefrontCategoryResponse"] | null, newest: Hit[]) {
+  return (
+    (lead?.image?.kind === "image" ? lead.image : undefined) ??
+    newest.find((hit) => hit.image?.kind === "image")?.image
+  );
+}
+
+/** The link preview shows the hero's photo; the reads are the page's, cached. */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ country: string }>;
+}): Promise<Metadata> {
+  const code = (await params).country.toUpperCase();
+  const [categories, newest] = await Promise.all([
+    loadCategories(),
+    shelf({ country: code, sort: "newest", limit: 8 }),
+  ]);
+  const lead = categories[0] ? await loadCategory(categories[0].handle) : null;
+  return pageMetadata({ country: code, path: "/", image: heroOf(lead, newest) });
 }
 
 /** A row of products under a heading, with a link to all of them. */
@@ -91,12 +119,9 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
   const featured = categories.slice(0, 3);
   const digits = country.minor_units;
   const productBase = link(code, "/p");
-  // The first category's photo (a scene, not one product), else the newest product's.
-  // Either sits in a portrait frame, the shape product photos are shot in.
+  // In a portrait frame, the shape product photos are shot in.
   const lead = featured[0] ? await loadCategory(featured[0].handle) : null;
-  const hero =
-    (lead?.image?.kind === "image" ? lead.image : undefined) ??
-    newest.find((hit) => hit.image?.kind === "image")?.image;
+  const hero = heroOf(lead, newest);
 
   if (newest.length === 0) {
     return (
@@ -109,6 +134,7 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
 
   return (
     <VStack gap={10} paddingBlockEnd={10}>
+      <JsonLd data={storeLd(store, absolute(link(code, "/")))} />
       <div className="shop-hero">
         <VStack gap={6} vAlign="center">
           <VStack gap={4}>
