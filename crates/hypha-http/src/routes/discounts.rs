@@ -1791,12 +1791,15 @@ pub(crate) async fn promotions_of<
     at: hypha_core::Timestamp,
 ) -> Result<HashMap<ProductId, Vec<PromotionResponse>>, ApiError> {
     use hypha_markets::PriceListRepo;
+    if products.is_empty() {
+        return Ok(HashMap::new());
+    }
     let automatic = ports
         .discounts()
         .live_automatic(at)
         .await
         .map_err(hypha_discounts::CommandError::from)?;
-    if automatic.is_empty() || products.is_empty() {
+    if automatic.is_empty() {
         return Ok(HashMap::new());
     }
     let context = hypha_discounts::DiscountContext {
