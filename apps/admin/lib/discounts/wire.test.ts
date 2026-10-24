@@ -569,6 +569,53 @@ test("conditions are found by their place in the request", () => {
   );
 });
 
+test("every condition's problem lands on its field, in the order the request sends them", () => {
+  const d = draft({
+    kind: standard({ order: { value: percent("10") } }),
+    conditions: {
+      ...emptyConditions(),
+      markets: ["mkt_ie"],
+      channels: ["chan_1"],
+      customerGroups: ["cgrp_1"],
+      customers: ["cus_1"],
+      signedIn: true,
+      minSubtotal: { enabled: true, amounts: { mkt_ie: "10" } },
+      minQuantity: { enabled: true, quantity: "2" },
+    },
+  });
+  const field: Record<string, string> = {
+    markets: "conditions.markets",
+    channels: "conditions.channels",
+    customer_groups: "conditions.customerGroups",
+    customers: "conditions.customers",
+    signed_in: "conditions.signedIn",
+    min_subtotal: "conditions.minSubtotal.amounts",
+    min_quantity: "conditions.minQuantity.quantity",
+  };
+  const sent = body(d).conditions ?? [];
+  assert.equal(sent.length, Object.keys(field).length);
+  const map = apiPathMapper(d);
+  sent.forEach((c, i) => assert.equal(map(`conditions[${i}]`), field[c.type], c.type));
+});
+
+test("every reward's problem lands on its class, in the order the request sends them", () => {
+  const d = draft({
+    kind: standard({
+      product: { items: emptyItems(), value: percent("10") },
+      order: { value: percent("5") },
+      shipping: { value: percent("100"), maxAmount: {} },
+    }),
+  });
+  const kind = body(d).kind;
+  assert.equal(kind.type, "standard");
+  if (kind.type !== "standard") return;
+  const cls = { items: "product", subtotal: "order", shipping: "shipping" } as const;
+  const map = apiPathMapper(d);
+  kind.rewards.forEach((r, i) =>
+    assert.equal(map(`kind.rewards[${i}].value.basis_points`), `kind.${cls[r.target.type]}.value.percent`),
+  );
+});
+
 test("buy X get Y paths", () => {
   const map = apiPathMapper(
     draft({

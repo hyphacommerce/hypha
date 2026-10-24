@@ -7,7 +7,7 @@
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { formatAmount } from "../price-grid/money.ts";
-import { fromLocalInput, toLocalInput } from "../price-lists.ts";
+import { fromLocalInput, percentInput, toLocalInput } from "../price-lists.ts";
 import {
   type Allocation,
   type ConditionsDraft,
@@ -139,16 +139,6 @@ function thresholdOf(
     : { type: "amount", amounts: moneyOf(threshold.amounts, markets, ctx) };
 }
 
-/** The rewards' classes in the order `kindOf` sends them: products, the order, shipping. */
-function rewardClasses(kind: KindDraft): DiscountClass[] {
-  if (kind.type !== "standard") return [];
-  const classes: DiscountClass[] = [];
-  if (kind.product) classes.push("product");
-  if (kind.order) classes.push("order");
-  if (kind.shipping) classes.push("shipping");
-  return classes;
-}
-
 function kindOf(kind: KindDraft, markets: readonly MarketOption[], ctx: CheckContext): Kind {
   switch (kind.type) {
     case "standard": {
@@ -229,18 +219,6 @@ function conditionsOf(
     out.push({ type: "min_quantity", quantity: countOf(c.minQuantity.quantity) });
   }
   return out;
-}
-
-function conditionTypes(c: ConditionsDraft): ConditionType[] {
-  const types: ConditionType[] = [];
-  if (c.markets.length > 0) types.push("markets");
-  if (c.channels.length > 0) types.push("channels");
-  if (c.customerGroups.length > 0) types.push("customer_groups");
-  if (c.customers.length > 0) types.push("customers");
-  if (c.signedIn) types.push("signed_in");
-  if (c.minSubtotal.enabled) types.push("min_subtotal");
-  if (c.minQuantity.enabled) types.push("min_quantity");
-  return types;
 }
 
 /** Every field of a discount a draft sets, as the create request names them. */
@@ -360,11 +338,6 @@ function textOf(amounts: Amounts | null | undefined, currencies: CheckContext["c
   return out;
 }
 
-/** "10" for 1000 basis points, "12.5" for 1250. */
-export function percentText(basisPoints: number): string {
-  return String(basisPoints / 100);
-}
-
 function allocationOf(value: Extract<Value, { type: "amount" }>): {
   allocation: Allocation;
   cheapestUnits: string;
@@ -379,7 +352,7 @@ function allocationOf(value: Extract<Value, { type: "amount" }>): {
 function valueDraft(value: Value, currencies: CheckContext["currencies"]): ValueDraft {
   switch (value.type) {
     case "percent":
-      return { ...emptyValue("percent"), percent: percentText(value.basis_points) };
+      return { ...emptyValue("percent"), percent: percentInput(value.basis_points) };
     case "fixed_price":
       return { ...emptyValue("fixed_price"), amounts: textOf(value.amounts, currencies) };
     case "amount":
@@ -624,6 +597,27 @@ function kindPath(kind: KindDraft, rest: Rest): string {
   }
 }
 
+// What a request's shape needs of the context: with no markets to type amounts for,
+// nothing reads the currencies or the time zone.
+const SHAPE_ONLY: CheckContext = { markets: [], currencies: {}, timeZone: "UTC" };
+
+/** The condition types `draft` sends, in the order `conditionsOf` sends them. */
+function conditionTypes(draft: DiscountDraft): ConditionType[] {
+  return conditionsOf(draft.conditions, [], SHAPE_ONLY).map((c) => c.type);
+}
+
+const REWARD_CLASSES: Record<Reward["target"]["type"], DiscountClass> = {
+  items: "product",
+  subtotal: "order",
+  shipping: "shipping",
+};
+
+/** The rewards' classes in the order `kindOf` sends them. */
+function rewardClasses(kind: KindDraft): DiscountClass[] {
+  const sent = kindOf(kind, [], SHAPE_ONLY);
+  return sent.type === "standard" ? sent.rewards.map((r) => REWARD_CLASSES[r.target.type]) : [];
+}
+
 const CONDITION_FIELDS: Record<ConditionType, string> = {
   markets: "conditions.markets",
   channels: "conditions.channels",
@@ -640,7 +634,7 @@ const CONDITION_FIELDS: Record<ConditionType, string> = {
  * `patchBody` order them. A path the form has no field for is null.
  */
 export function apiPathMapper(draft: DiscountDraft): PathMapper {
-  const conditions = conditionTypes(draft.conditions);
+  const conditions = conditionTypes(draft);
   return (apiPath) => {
     const [head, ...rest] = segments(apiPath);
     switch (head) {
