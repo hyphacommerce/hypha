@@ -1,11 +1,12 @@
-# Every check CLAUDE.md lists before work counts as done, on each push to main and each
-# pull request. The services come from compose.yaml, as in local development.
+# Every check CLAUDE.md lists before work counts as done, on each push to dev and each
+# pull request but a release (dev into main): main only takes dev, whose pushes ran this.
+# The services come from compose.yaml, as in local development.
 name: CI
 
 # Markdown alone (the README, guides, design notes) changes nothing CI checks.
 on:
   push:
-    branches: [main, dev]
+    branches: [dev]
     paths-ignore: ["**/*.md"]
   pull_request:
     paths-ignore: ["**/*.md"]
@@ -22,6 +23,7 @@ env:
 
 jobs:
   rust:
+    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -78,6 +80,7 @@ jobs:
         run: cat host.log || true
 
   typescript:
+    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
