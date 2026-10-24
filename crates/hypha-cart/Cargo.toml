@@ -14,11 +14,12 @@ hypha-inventory = { path = "../hypha-inventory" }
 hypha-customers = { path = "../hypha-customers" }
 hypha-shipping = { path = "../hypha-shipping" }
 hypha-channels = { path = "../hypha-channels" }
-hypha-discounts = { path = "../hypha-discounts" }
+serde_json.workspace = true
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 thiserror.workspace = true
 
 [dev-dependencies]
+hypha-discounts = { path = "../hypha-discounts" }
 uuid.workspace = true
 hypha-testkit = { path = "../hypha-testkit" }
 pollster = "1.0"

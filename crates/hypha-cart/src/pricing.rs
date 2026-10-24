@@ -1,13 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use hypha_core::{
-    Address, AssetId, CartId, CategoryId, CountryCode, Currency, CustomerId, Email, MarketId,
-    Money, MoneyError, OrderId, PaymentMethodId, Price, PriceListId, ProductId, Quantity,
-    Timestamp, VariantId,
-};
-use hypha_discounts::{
-    Application, Buyer, Class, CodeOutcome, DiscountContext, DiscountInput, Line, Names, Share,
-    ShippingGroup, apply,
+    Address, AssetId, CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money,
+    MoneyError, OrderId, PaymentMethodId, Price, PriceListId, ProductId, Quantity, VariantId,
 };
 use hypha_inventory::{Availability, StockContext};
 use hypha_pricing::{PricingContext, ResolvedPrice, VariantPrices, resolve_price};
@@ -17,6 +12,10 @@ use hypha_tax::{TaxContext, TaxLine, TaxableKind, TaxableLine, tax_line};
 use crate::{
     cart::{Cart, CartLine, CartStatus},
     error::LineError,
+    promotions::{
+        Application, CodeOutcome, PromotionInput, PromotionLine, PromotionReading,
+        PromotionShipping, Share,
+    },
     shipping::{
         PricedShippingGroup, ShippingContext, ShippingProblem, group_basis, price_group, rate_for,
     },
@@ -198,36 +197,10 @@ pub fn price_line(
     Ok(resolve_price(pricing, prices, quantity)?)
 }
 
-/// What a cart's discounts are weighed with: the discounts that may apply, the buyer,
-/// each product's categories (with their ancestors) and the moment.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DiscountReading {
-    pub context: DiscountContext,
-    pub buyer: Buyer,
-    /// Loaded only when a discount names categories.
-    pub categories: HashMap<ProductId, HashSet<CategoryId>>,
-    pub at: Timestamp,
-    /// What the discounts' summaries call what they name, as shoppers may see it.
-    pub names: Names,
-}
-
-/// Nothing to weigh: no discount applies.
-impl Default for DiscountReading {
-    fn default() -> Self {
-        Self {
-            context: DiscountContext::default(),
-            buyer: Buyer::default(),
-            categories: HashMap::new(),
-            at: Timestamp::UNIX_EPOCH,
-            names: Names::new(),
-        }
-    }
-}
-
 /// Prices and taxes every line at current prices and rates, and checks its stock. Lines
 /// that can't be priced or supplied are marked unavailable and left out of the totals.
-/// Then discounts apply (`hypha_discounts::apply`) to the available lines and the chosen
-/// shipping, and tax is on what's left.
+/// Then discounts apply (`discounts`, the cart's promotions) to the available lines and the
+/// chosen shipping, and tax is on what's left.
 ///
 /// Never fails: a line that would push a cart total past `Money::MAX_AMOUNT` (lines
 /// that each fit can stop fitting together after a price change) is marked
@@ -250,7 +223,7 @@ pub fn price_cart_with_shipping(
     stock: &StockContext,
     shipping: &ShippingContext,
     published: &Publication,
-    discounts: &DiscountReading,
+    discounts: &impl PromotionReading,
 ) -> PricedCart {
     let currency = pricing.market.currency();
 
@@ -295,21 +268,18 @@ pub fn price_cart_with_shipping(
             .as_ref()
             .and_then(|b| rate_for(cart, b, subtotal, tax, shipping))
     };
-    let input_lines: Vec<Line> = available
+    let input_lines: Vec<PromotionLine> = available
         .iter()
-        .map(|(_, line, resolved)| {
-            engine_line(
-                line.product(),
-                line.variant(),
-                resolved.price.money(),
-                line.quantity().value(),
-                resolved.on_sale(),
-                discounts,
-            )
+        .map(|(_, line, resolved)| PromotionLine {
+            product: line.product(),
+            variant: line.variant(),
+            unit_price: resolved.price.money(),
+            quantity: line.quantity().value(),
+            on_sale: resolved.on_sale(),
         })
         .collect();
     let groups = match &basis {
-        Some(b) => vec![ShippingGroup {
+        Some(b) => vec![PromotionShipping {
             lines: available
                 .iter()
                 .enumerate()
@@ -320,18 +290,15 @@ pub fn price_cart_with_shipping(
         }],
         None => Vec::new(),
     };
-    let input = DiscountInput {
-        at: discounts.at,
+    let input = PromotionInput {
         market: pricing.market.id(),
         channel: cart.channel(),
         currency,
-        buyer: discounts.buyer.clone(),
         lines: input_lines,
         shipping: groups,
-        codes: cart.discount_codes().to_vec(),
-        names: &discounts.names,
+        codes: cart.discount_codes(),
     };
-    let outcome = apply(&input, &discounts.context.candidates());
+    let outcome = discounts.apply(&input);
 
     let mut totals = Totals::zero(currency);
     let mut lines = Vec::with_capacity(cart.lines().len());
@@ -417,31 +384,6 @@ pub fn price_cart_with_shipping(
     }
 }
 
-/// A priced line as the discounts engine sees it: the cart's pricing and the shipping
-/// offers' must build it alike, or an offer's amount after discounts disagrees with the
-/// cart.
-fn engine_line(
-    product: ProductId,
-    variant: VariantId,
-    unit_price: Money,
-    quantity: u32,
-    on_sale: bool,
-    discounts: &DiscountReading,
-) -> Line {
-    Line {
-        product,
-        variant,
-        categories: discounts
-            .categories
-            .get(&product)
-            .cloned()
-            .unwrap_or_default(),
-        unit_price,
-        quantity,
-        on_sale,
-    }
-}
-
 /// An available line after its discounts, taxed on what's left, and added to `totals`.
 fn discounted_line(
     line: &CartLine,
@@ -479,15 +421,11 @@ fn discounted_line(
 pub fn shipping_after_discounts(
     cart: &Cart,
     priced: &PricedCart,
-    discounts: &DiscountReading,
+    discounts: &impl PromotionReading,
     amount: Money,
 ) -> Money {
-    // Without a shipping discount among the candidates nothing comes off: skip the engine.
-    let candidates = discounts.context.candidates();
-    if !candidates
-        .iter()
-        .any(|c| c.discount.classes().contains(Class::Shipping))
-    {
+    // Without a shipping discount among those weighed nothing comes off: skip applying.
+    if !discounts.reduces_shipping() {
         return amount;
     }
     let mut indexes = Vec::new();
@@ -509,31 +447,29 @@ pub fn shipping_after_discounts(
         if shipped.contains(&line.variant) {
             indexes.push(input_lines.len());
         }
-        input_lines.push(engine_line(
-            line.product,
-            line.variant,
-            unit_price.money(),
-            line.quantity.value(),
-            compare_at.is_some(),
-            discounts,
-        ));
+        // Built as the cart's pricing builds it, or an offer's amount after discounts
+        // disagrees with the cart.
+        input_lines.push(PromotionLine {
+            product: line.product,
+            variant: line.variant,
+            unit_price: unit_price.money(),
+            quantity: line.quantity.value(),
+            on_sale: compare_at.is_some(),
+        });
     }
     let rate = |_: Money| Some(amount);
-    let input = DiscountInput {
-        at: discounts.at,
+    let input = PromotionInput {
         market: priced.market,
         channel: cart.channel(),
         currency: priced.currency,
-        buyer: discounts.buyer.clone(),
         lines: input_lines,
-        shipping: vec![ShippingGroup {
+        shipping: vec![PromotionShipping {
             lines: indexes,
             rate: &rate,
         }],
-        codes: cart.discount_codes().to_vec(),
-        names: &discounts.names,
+        codes: cart.discount_codes(),
     };
-    let outcome = apply(&input, &candidates);
+    let outcome = discounts.apply(&input);
     let off = outcome
         .shipping
         .first()
@@ -695,8 +631,40 @@ mod tests {
             stock,
             &ShippingContext::default(),
             &published,
-            &DiscountReading::default(),
+            &NoDiscounts,
         )
+    }
+
+    /// Nothing comes off: each shipping group is priced for its lines' subtotal.
+    struct NoDiscounts;
+
+    impl PromotionReading for NoDiscounts {
+        fn apply(&self, input: &PromotionInput<'_>) -> crate::promotions::PromotionOutcome {
+            let zero = Money::zero(input.currency);
+            let base = |k: &usize| {
+                let l = &input.lines[*k];
+                l.unit_price.amount() * i64::from(l.quantity)
+            };
+            crate::promotions::PromotionOutcome {
+                applications: Vec::new(),
+                lines: vec![Vec::new(); input.lines.len()],
+                shipping: input
+                    .shipping
+                    .iter()
+                    .map(|g| crate::promotions::ShippingShares {
+                        subtotal: Money::new(g.lines.iter().map(base).sum(), input.currency)
+                            .unwrap(),
+                        shares: Vec::new(),
+                    })
+                    .collect(),
+                codes: Vec::new(),
+                total: zero,
+            }
+        }
+
+        fn reduces_shipping(&self) -> bool {
+            false
+        }
     }
 
     fn mid() -> MarketId {
@@ -1310,146 +1278,5 @@ mod tests {
             &result.lines[0].status,
             LineStatus::Unavailable(LineError::Pricing(_))
         ));
-    }
-
-    // ---- discounts ----
-
-    fn discounted(discount: hypha_discounts::Discount) -> DiscountReading {
-        DiscountReading {
-            context: DiscountContext {
-                automatic: vec![discount],
-                ..DiscountContext::default()
-            },
-            ..DiscountReading::default()
-        }
-    }
-
-    fn percent_off(target: hypha_discounts::Target, bp: i32) -> hypha_discounts::Discount {
-        use hypha_discounts::{Discount, DiscountDraft, Kind, Method, Reward, Value};
-        let kind = Kind::Standard {
-            rewards: vec![Reward {
-                target,
-                value: Value::Percent(BasisPoints::new(bp).unwrap()),
-            }],
-        };
-        Discount::new(
-            hypha_core::DiscountId::from_uuid(Uuid::from_u128(700)),
-            DiscountDraft::new("Offer", Method::Automatic, kind),
-        )
-        .unwrap()
-    }
-
-    fn priced_with(
-        cart: &Cart,
-        products: &[Product],
-        tax: &TaxContext,
-        discounts: &DiscountReading,
-    ) -> PricedCart {
-        let published = Publication::new(products.iter().map(|p| p.id()).collect());
-        price_cart_with_shipping(
-            cart,
-            products,
-            &pricing(&[1, 2]),
-            tax,
-            &no_stock(),
-            &ShippingContext::default(),
-            &published,
-            discounts,
-        )
-    }
-
-    #[test]
-    fn an_order_discount_lowers_each_lines_total_and_tax_is_on_whats_left() {
-        let products = [product(1, eur(1000)), product(2, eur(250))];
-        let result = priced_with(
-            &cart(&[(1, 2), (2, 3)]),
-            &products,
-            &croatia(false),
-            &discounted(percent_off(hypha_discounts::Target::Subtotal, 1000)),
-        );
-        // 10% of 27.50 is 2.75, spread 20.00 : 7.50 as 2.00 and 0.75.
-        let totals: Vec<(Money, Money, Option<Money>)> = result
-            .lines
-            .iter()
-            .map(|l| match &l.status {
-                LineStatus::Priced {
-                    subtotal,
-                    total,
-                    tax,
-                    ..
-                } => (*subtotal, *total, tax.map(|t| t.amount)),
-                LineStatus::Unavailable(_) => panic!("unavailable"),
-            })
-            .collect();
-        // 25% of 18.00 is 4.50; of 6.75, 1.6875 → 1.69.
-        assert_eq!(
-            totals,
-            vec![
-                (money(2000), money(1800), Some(money(450))),
-                (money(750), money(675), Some(money(169)))
-            ]
-        );
-        assert_eq!(
-            (
-                result.discount_total,
-                result.subtotal,
-                result.tax_total,
-                result.total
-            ),
-            (money(275), money(2475), money(619), money(3094))
-        );
-        assert_eq!(result.discounts.len(), 1);
-    }
-
-    #[test]
-    fn included_tax_is_backed_out_of_the_discounted_amount() {
-        let result = priced_with(
-            &cart(&[(1, 2)]),
-            &[product(1, eur(1000))],
-            &croatia(true),
-            &discounted(percent_off(
-                hypha_discounts::Target::Items(hypha_discounts::ItemSet::all()),
-                1000,
-            )),
-        );
-        // 20.00 less 10% is 18.00, of which 25% included tax is 3.60.
-        assert_eq!(
-            (result.subtotal, result.tax_total, result.total),
-            (money(1800), money(360), money(1800))
-        );
-    }
-
-    #[test]
-    fn an_unavailable_line_takes_no_discount() {
-        let mut archived = product(2, eur(250));
-        archived.set_status(ProductStatus::Archived).unwrap();
-        let result = priced_with(
-            &cart(&[(1, 1), (2, 1)]),
-            &[product(1, eur(1000)), archived],
-            &no_tax(),
-            &discounted(percent_off(hypha_discounts::Target::Subtotal, 1000)),
-        );
-        assert_eq!(result.discount_total, money(100));
-        assert_eq!(result.total, money(900));
-    }
-
-    #[test]
-    fn a_code_nothing_knows_reads_as_invalid() {
-        let mut c = cart(&[(1, 1)]);
-        c.add_discount_code("GONE".to_string()).unwrap();
-        let result = priced_with(
-            &c,
-            &[product(1, eur(1000))],
-            &no_tax(),
-            &DiscountReading::default(),
-        );
-        assert_eq!(
-            result.discount_codes,
-            vec![CodeOutcome {
-                code: "GONE".to_string(),
-                state: hypha_discounts::CodeState::Invalid
-            }]
-        );
-        assert_eq!(result.total, money(1000));
     }
 }

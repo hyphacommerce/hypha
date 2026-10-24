@@ -989,6 +989,7 @@ dependencies = [
  "hypha-tax",
  "hypha-testkit",
  "pollster",
+ "serde_json",
  "thiserror",
  "uuid",
 ]
@@ -1026,6 +1027,7 @@ dependencies = [
  "hypha-cart",
  "hypha-core",
  "hypha-customers",
+ "hypha-discounts",
  "hypha-inventory",
  "hypha-markets",
  "hypha-orders",
@@ -1548,6 +1550,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-promotions"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "hypha-cart",
+ "hypha-core",
+ "hypha-customers",
+ "hypha-discounts",
+ "hypha-inventory",
+ "hypha-markets",
+ "hypha-pricing",
+ "hypha-products",
+ "hypha-tax",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-search"
 version = "0.1.0"
 dependencies = [
@@ -1657,6 +1676,7 @@ dependencies = [
  "hypha-orders",
  "hypha-payments",
  "hypha-products",
+ "hypha-promotions",
  "hypha-search-index",
  "hypha-shipping",
  "hypha-store-postgres",
@@ -1735,6 +1755,7 @@ dependencies = [
  "hypha-orders",
  "hypha-payments",
  "hypha-products",
+ "hypha-promotions",
  "hypha-search-index",
  "hypha-shipping",
  "hypha-stores",

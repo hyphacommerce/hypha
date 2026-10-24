@@ -340,16 +340,30 @@ pub struct CartDiscountResponse {
     amount: Money,
 }
 
-impl From<&hypha_cart::discounts::Application> for CartDiscountResponse {
-    fn from(a: &hypha_cart::discounts::Application) -> Self {
+impl From<&hypha_cart::promotions::Application> for CartDiscountResponse {
+    /// Value and target come as the discounts' JSON; JSON in another shape reads as
+    /// nothing off the subtotal (it can't be, short of a bug), so the cart still reads.
+    fn from(a: &hypha_cart::promotions::Application) -> Self {
+        use hypha_cart::promotions::Class;
+        use hypha_discounts::{
+            Target, Value,
+            json::{target_from_json, value_from_json},
+        };
+        let value =
+            value_from_json(&a.value).unwrap_or(Value::Percent(hypha_core::BasisPoints::ZERO));
+        let target = target_from_json(&a.target).unwrap_or(Target::Subtotal);
         Self {
             discount: a.discount,
             code: a.code.clone(),
             title: a.title.clone(),
             summary: a.summary.clone(),
-            class: a.class.into(),
-            value: (&a.value).into(),
-            target: (&a.target).into(),
+            class: match a.class {
+                Class::Product => DiscountClassDto::Product,
+                Class::Order => DiscountClassDto::Order,
+                Class::Shipping => DiscountClassDto::Shipping,
+            },
+            value: (&value).into(),
+            target: (&target).into(),
             amount: a.amount,
         }
     }
@@ -367,8 +381,8 @@ pub struct DiscountShareResponse {
     units: Option<u32>,
 }
 
-impl From<&hypha_cart::discounts::Share> for DiscountShareResponse {
-    fn from(s: &hypha_cart::discounts::Share) -> Self {
+impl From<&hypha_cart::promotions::Share> for DiscountShareResponse {
+    fn from(s: &hypha_cart::promotions::Share) -> Self {
         Self {
             application: s.application,
             amount: s.amount,
@@ -428,9 +442,9 @@ pub struct NeededResponse {
     quantity: Option<u32>,
 }
 
-impl From<&hypha_cart::discounts::CodeOutcome> for CartDiscountCodeResponse {
-    fn from(c: &hypha_cart::discounts::CodeOutcome) -> Self {
-        use hypha_cart::discounts::{CodeState, Needed};
+impl From<&hypha_cart::promotions::CodeOutcome> for CartDiscountCodeResponse {
+    fn from(c: &hypha_cart::promotions::CodeOutcome) -> Self {
+        use hypha_cart::promotions::{CodeState, Needed};
         let mut response = Self {
             code: c.code.clone(),
             state: c.state.name(),

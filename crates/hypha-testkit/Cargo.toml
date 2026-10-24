@@ -31,6 +31,7 @@ hypha-notifications = { path = "../hypha-notifications" }
 hypha-extensions = { path = "../hypha-extensions" }
 hypha-agents = { path = "../hypha-agents" }
 hypha-discounts = { path = "../hypha-discounts" }
+hypha-promotions = { path = "../hypha-promotions" }
 sha2 = "0.11"
 uuid.workspace = true
 # The contract's outbox scenarios stage events of their own and read their payloads.

@@ -3,10 +3,12 @@ use hypha_core::{
     PaymentMethodId, Price, ProductId, Quantity, ShippingGroupId, ShippingOptionId, Stamped,
     Stamps, Timestamp, VariantId, Version, Versioned,
 };
-use hypha_discounts::MAX_CODES_PER_CART;
 use hypha_shipping::ProviderKey;
 
 use crate::error::{CartError, RestoreError};
+
+/// Most codes one cart holds.
+pub const MAX_CODES_PER_CART: usize = 5;
 
 /// A variant and how many of it. Prices are not stored: they are resolved on read,
 /// so a cart always reflects current prices. Snapshotting belongs to orders.

@@ -1492,7 +1492,7 @@ fn a_live_code_is_held_and_applies() {
     assert_eq!((priced.discount_total, priced.total), (eur(200), eur(1800)));
     assert_eq!(
         priced.discount_codes[0].state,
-        hypha_discounts::CodeState::Applied
+        hypha_cart::promotions::CodeState::Applied
     );
     // Stored normalised, so a read applies it too.
     assert_eq!(world.get(cart).unwrap().total, eur(1800));
@@ -1526,7 +1526,7 @@ fn a_code_held_by_an_empty_cart_waits_for_items() {
     .unwrap();
     assert_eq!(
         priced.discount_codes[0].state,
-        hypha_discounts::CodeState::NoMatchingItems
+        hypha_cart::promotions::CodeState::NoMatchingItems
     );
 }
 

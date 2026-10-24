@@ -3,6 +3,7 @@ pub mod commands;
 pub mod error;
 pub mod offer;
 pub mod pricing;
+pub mod promotions;
 pub mod repo;
 pub mod shipping;
 
@@ -19,11 +20,9 @@ pub use commands::{
 pub use error::{CartError, LineError, RestoreError};
 pub use offer::{MarketPrices, ProductOffer, VariantOffer, explain_product_prices, price_product};
 pub use pricing::{
-    DiscountReading, LineDetails, LineStatus, PricedCart, PricedLine, Publication, check_stock,
+    LineDetails, LineStatus, PricedCart, PricedLine, Publication, check_stock,
     price_cart_with_shipping, price_line, shipping_after_discounts,
 };
+pub use promotions::{HasPromotions, PromotionReading, Promotions, ReadingOf};
 pub use repo::{CartRepo, HasCarts, StageCarts};
 pub use shipping::{PricedShipping, PricedShippingGroup, ShippingContext, ShippingProblem};
-
-/// The discounts crate, as carts and checkout weigh it.
-pub use hypha_discounts as discounts;

@@ -139,23 +139,6 @@ pub enum CodeState {
     Invalid,
 }
 
-impl CodeState {
-    pub fn name(self) -> &'static str {
-        match self {
-            CodeState::Applied => "applied",
-            CodeState::NotEligible { .. } => "not_eligible",
-            CodeState::MinimumNotMet { .. } => "minimum_not_met",
-            CodeState::NoMatchingItems => "no_matching_items",
-            CodeState::BlockedByOther { .. } => "blocked_by_other",
-            CodeState::NoSaving => "no_saving",
-            CodeState::LimitReached => "limit_reached",
-            CodeState::NotAvailableInMarket => "not_available_in_market",
-            CodeState::Expired => "expired",
-            CodeState::Invalid => "invalid",
-        }
-    }
-}
-
 /// One reward applied: what it was and how much it took in all.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Application {

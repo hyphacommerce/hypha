@@ -1,12 +1,9 @@
 use hypha_cart::{
-    Cart, CartError, CartPorts, CartReading, CartRepo, CartStatus, DiscountReading, LineStatus,
-    PricedCart, PricedLine, SelectedShipping, ShippingProblem, StageCarts, StoredQuote,
-    discounts::{
-        Application, Class, Share, StageDiscounts, UsageClaim,
-        json::{target_json, value_json},
-        keys as discount_keys,
-    },
-    group_offers, read_cart,
+    Cart, CartError, CartPorts, CartReading, CartRepo, CartStatus, LineStatus, PricedCart,
+    PricedLine, PromotionReading, ReadingOf, SelectedShipping, ShippingProblem, StageCarts,
+    StoredQuote, group_offers,
+    promotions::{Application, Class, CodeOutcome, Share},
+    read_cart,
 };
 use hypha_core::{
     Attempts, AuthError, CartId, Clock, Ctx, CustomerId, ErrorCode, HasBatch, HasIdempotency,
@@ -18,6 +15,7 @@ use hypha_customers::{
     Channel, ConsentChange, ConsentSource, ConsentState, Customer, CustomerRepo, OptInLevel,
     StageCustomers, repo::keys as customer_keys,
 };
+use hypha_discounts::{StageDiscounts, UsageClaim, keys as discount_keys};
 use hypha_inventory::{
     InventoryItem, ReservationRef, StageInventoryItems, StockContext, reserve_lines,
 };
@@ -117,7 +115,7 @@ pub enum CommandError {
     #[error("the cart's discounts changed: its total is now {} {}", .total.amount(), .total.currency())]
     DiscountsChanged {
         total: Money,
-        codes: Vec<hypha_cart::discounts::CodeOutcome>,
+        codes: Vec<CodeOutcome>,
     },
     /// The cart's payment was declined or released: start paying again.
     #[error("cart {cart}'s payment {payment} is {status}: start paying again")]
@@ -523,9 +521,9 @@ fn payer_of(order: &Order) -> Payer {
 
 /// A cart ready to be checked out: every check passed, priced now, with the method that
 /// pays for it (`None`: nothing to pay).
-pub(crate) struct Ready {
+pub(crate) struct Ready<R> {
     pub cart: Cart,
-    pub reading: CartReading,
+    pub reading: CartReading<R>,
     pub method: Option<PaymentMethod>,
 }
 
@@ -543,7 +541,7 @@ pub(crate) async fn ready<S: CheckoutPorts, C: Clock, P: RateProvider, Q: Paymen
     id: CartId,
     expected_total: Option<Money>,
     renewed: &mut Option<Renewal>,
-) -> Result<Ready, CommandError> {
+) -> Result<Ready<ReadingOf<S>>, CommandError> {
     let mut cart = ports
         .carts()
         .get(id)
@@ -683,12 +681,7 @@ async fn attempt<
         renewed,
     )
     .await?;
-    let CartReading {
-        priced,
-        stock,
-        discounts,
-        ..
-    } = reading;
+    let CartReading { priced, stock, .. } = reading;
     let email = priced
         .email
         .clone()
@@ -897,7 +890,7 @@ async fn attempt<
         batch.record_idempotency(record);
     }
 
-    for claim in usage_claims(&priced, &discounts, order.id(), customer, now) {
+    for claim in usage_claims(&priced, order.id(), customer, now) {
         batch.claim_discount_usage(claim);
     }
 
@@ -968,10 +961,10 @@ async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
     rates: &P,
     clock: &C,
     cart: &mut Cart,
-    reading: CartReading,
+    reading: CartReading<ReadingOf<S>>,
     expected_total: Option<Money>,
     carried: &mut Option<Renewal>,
-) -> Result<CartReading, CommandError> {
+) -> Result<CartReading<ReadingOf<S>>, CommandError> {
     let now = clock.now();
     let Some(choice) = cart.shipping().cloned() else {
         return Ok(reading);
@@ -1015,9 +1008,9 @@ async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
 /// The chosen option's new quote, or `None` when it's built-in now. Only reasons the
 /// option can't be offered become `shipping_option_unavailable` (the buyer picks again);
 /// anything else (storage, money overflow) is reported as itself.
-async fn ask_again<P: RateProvider>(
+async fn ask_again<P: RateProvider, R: PromotionReading>(
     cart: &Cart,
-    reading: &CartReading,
+    reading: &CartReading<R>,
     rates: &P,
     choice: &SelectedShipping,
     now: hypha_core::Timestamp,
@@ -1111,8 +1104,8 @@ fn order_discount(a: &Application) -> OrderDiscount {
             Class::Order => DiscountClass::Order,
             Class::Shipping => DiscountClass::Shipping,
         },
-        value: value_json(&a.value),
-        target: target_json(&a.target),
+        value: a.value.clone(),
+        target: a.target.clone(),
         amount: a.amount,
     }
 }
@@ -1134,7 +1127,6 @@ fn order_shares(shares: &[Share]) -> Vec<DiscountShare> {
 /// rewards' amounts.
 fn usage_claims(
     priced: &PricedCart,
-    discounts: &DiscountReading,
     order: OrderId,
     customer: CustomerId,
     at: hypha_core::Timestamp,
@@ -1145,19 +1137,13 @@ fn usage_claims(
             claim.amount = claim.amount.checked_add(a.amount).unwrap_or(claim.amount);
             continue;
         }
-        let Some(discount) = discounts.context.find(a.discount) else {
-            continue;
-        };
-        let code = a.code.as_ref().map(|c| {
-            let limit = discounts.context.code(c).and_then(|row| row.usage_limit);
-            (c.clone(), limit)
-        });
+        let code = a.code.as_ref().map(|c| (c.clone(), a.code_limit));
         claims.push(UsageClaim {
             discount: a.discount,
             code,
             order,
             customer,
-            once_per_customer: discount.limits().once_per_customer,
+            once_per_customer: a.once_per_customer,
             amount: a.amount,
             at,
         });

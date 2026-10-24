@@ -6,12 +6,11 @@ use hypha_core::{
     Money, MoneyError, ProductId, Quantity, ShippingGroupId, ShippingOptionId, TotalWeight,
     VariantId,
 };
-use hypha_discounts::Share;
 use hypha_products::Product;
 use hypha_shipping::{DeliveryEstimate, OptionRate, ShippingZone, Unpriced};
 use hypha_tax::{TaxContext, TaxLine, TaxableKind, TaxableLine, tax_line};
 
-use crate::{Cart, SelectedShipping, StoredQuote};
+use crate::{Cart, SelectedShipping, StoredQuote, promotions::Share};
 
 /// What pricing needs to price a cart's shipping: the zone of its country, if any.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

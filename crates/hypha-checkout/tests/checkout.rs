@@ -1873,8 +1873,8 @@ fn viewing_a_cart_needs_carts_read() {
 // ---- discounts ----
 
 /// 10% off the order, automatically, with `limits`.
-fn ten_percent_off(world: &World, limits: hypha_cart::discounts::Limits) -> hypha_core::DiscountId {
-    use hypha_cart::discounts::{
+fn ten_percent_off(world: &World, limits: hypha_discounts::Limits) -> hypha_core::DiscountId {
+    use hypha_discounts::{
         Discount, DiscountDraft, DiscountRepo, Kind, Method, Reward, Target, Value,
     };
     let kind = Kind::Standard {
@@ -1893,8 +1893,8 @@ fn ten_percent_off(world: &World, limits: hypha_cart::discounts::Limits) -> hyph
 
 /// A use of `discount` by `customer` on another order.
 fn used_elsewhere(world: &World, discount: hypha_core::DiscountId, customer: CustomerId) {
-    use hypha_cart::discounts::{StageDiscounts, UsageClaim};
     use hypha_core::HasBatch;
+    use hypha_discounts::{StageDiscounts, UsageClaim};
     let mut batch = world.ports.batch();
     batch.claim_discount_usage(UsageClaim {
         discount,
@@ -1910,11 +1910,11 @@ fn used_elsewhere(world: &World, discount: hypha_core::DiscountId, customer: Cus
 
 #[test]
 fn a_discount_reaches_the_order_with_its_shares_and_counts_a_use() {
-    use hypha_cart::discounts::DiscountRepo;
+    use hypha_discounts::DiscountRepo;
     let world = World::new();
     let discount = ten_percent_off(
         &world,
-        hypha_cart::discounts::Limits {
+        hypha_discounts::Limits {
             total: Some(5),
             once_per_customer: false,
         },
@@ -1967,7 +1967,7 @@ fn losing_the_last_use_is_discounts_changed_and_places_nothing() {
     let world = World::new();
     let discount = ten_percent_off(
         &world,
-        hypha_cart::discounts::Limits {
+        hypha_discounts::Limits {
             total: Some(1),
             once_per_customer: false,
         },
@@ -1997,7 +1997,7 @@ fn losing_the_last_use_is_discounts_changed_and_places_nothing() {
 fn paid_then_last_use_taken(world: &World, app: &CardApp) -> (CartId, hypha_payments::Payment) {
     let discount = ten_percent_off(
         world,
-        hypha_cart::discounts::Limits {
+        hypha_discounts::Limits {
             total: Some(1),
             once_per_customer: false,
         },
@@ -2070,7 +2070,7 @@ fn a_guest_who_used_a_once_per_customer_discount_doesnt_get_it_again() {
     let world = World::new();
     let discount = ten_percent_off(
         &world,
-        hypha_cart::discounts::Limits {
+        hypha_discounts::Limits {
             total: None,
             once_per_customer: true,
         },
@@ -2085,7 +2085,7 @@ fn a_guest_who_used_a_once_per_customer_discount_doesnt_get_it_again() {
 #[test]
 fn a_checked_out_cart_reads_with_its_orders_discounts() {
     let world = World::new();
-    ten_percent_off(&world, hypha_cart::discounts::Limits::default());
+    ten_percent_off(&world, hypha_discounts::Limits::default());
     let cart = world.cart();
     world.checkout(cart).unwrap();
     let viewed = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();

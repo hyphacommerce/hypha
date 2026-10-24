@@ -669,6 +669,10 @@ macro_rules! accessors {
     )*};
 }
 
+impl<C: PgConnection> hypha_cart::HasPromotions for PgStore<C> {
+    type Promotions = hypha_promotions::CartPromotions;
+}
+
 impl<C: PgConnection> hypha_core::HasClock for PgStore<C> {
     fn now(&self) -> Timestamp {
         self.clock.now()

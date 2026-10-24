@@ -27,8 +27,8 @@ pub use commands::{
 pub use context::{DiscountContext, Promotion, promotions};
 pub use discount::{
     Allocation, Class, ClassSet, Condition, Discount, DiscountDraft, DiscountSnapshot, ItemSet,
-    Items, Kind, Limits, MAX_CODES_PER_CART, MAX_IDS, MAX_LIVE_AUTOMATIC, MAX_REWARDS, MAX_TIERS,
-    Measure, Method, PerMarket, Phase, Reward, Status, Target, Threshold, Tier, Value,
+    Items, Kind, Limits, MAX_IDS, MAX_LIVE_AUTOMATIC, MAX_REWARDS, MAX_TIERS, Measure, Method,
+    PerMarket, Phase, Reward, Status, Target, Threshold, Tier, Value,
 };
 pub use engine::{
     Application, Buyer, CodeOutcome, CodeState, DiscountInput, Line, Live, Needed, Outcome, Share,

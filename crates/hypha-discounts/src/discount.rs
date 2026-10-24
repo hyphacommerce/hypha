@@ -26,8 +26,6 @@ pub const MAX_TIERS: usize = 10;
 /// Most automatic discounts that are active and not expired at once. Every cart read
 /// weighs each of them, so this is a performance bound, not a product limit.
 pub const MAX_LIVE_AUTOMATIC: usize = 100;
-/// Most codes one cart holds.
-pub const MAX_CODES_PER_CART: usize = 5;
 
 /// How a discount reaches a cart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

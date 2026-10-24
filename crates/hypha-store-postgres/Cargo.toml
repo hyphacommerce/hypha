@@ -30,6 +30,7 @@ hypha-extensions = { path = "../hypha-extensions" }
 hypha-custom-fields = { path = "../hypha-custom-fields" }
 hypha-agents = { path = "../hypha-agents" }
 hypha-discounts = { path = "../hypha-discounts" }
+hypha-promotions = { path = "../hypha-promotions" }
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true

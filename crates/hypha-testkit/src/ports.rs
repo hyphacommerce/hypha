@@ -182,6 +182,10 @@ impl hypha_core::HasPreviewTokens for InMemoryPorts {
     }
 }
 
+impl hypha_cart::HasPromotions for InMemoryPorts {
+    type Promotions = hypha_promotions::CartPromotions;
+}
+
 impl hypha_discounts::HasDiscounts for InMemoryPorts {
     type Discounts = crate::InMemoryDiscounts;
     fn discounts(&self) -> &crate::InMemoryDiscounts {

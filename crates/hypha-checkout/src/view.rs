@@ -2,14 +2,9 @@
 
 use hypha_cart::{
     Cart, CartRepo, CartStatus, HasCarts, LineDetails, LineStatus, PricedCart, PricedLine,
-    PricedShipping, PricedShippingGroup, PricingPorts,
-    discounts::{
-        Application, Class, Share, Target, Value,
-        json::{target_from_json, value_from_json},
-    },
-    price_for_checkout,
+    PricedShipping, PricedShippingGroup, PricingPorts, price_for_checkout,
+    promotions::{Application, Class, Share},
 };
-use hypha_core::BasisPoints;
 use hypha_core::{CartId, Ctx, RepoError, Scope};
 use hypha_orders::{
     DiscountClass, DiscountShare, HasOrders, Order, OrderDiscount, OrderRepo, OrderTax,
@@ -146,8 +141,7 @@ fn shares(shares: &[DiscountShare]) -> Vec<Share> {
 }
 
 /// An order's discount as the cart showed it. Its value and target are the discounts
-/// domain's JSON, written by checkout; JSON in another shape reads as nothing off the
-/// subtotal (it can't be, short of a bug), so the cart still reads.
+/// domain's JSON, copied as checkout wrote them.
 fn application(d: &OrderDiscount) -> Application {
     Application {
         discount: d.discount,
@@ -159,9 +153,12 @@ fn application(d: &OrderDiscount) -> Application {
             DiscountClass::Order => Class::Order,
             DiscountClass::Shipping => Class::Shipping,
         },
-        value: value_from_json(&d.value).unwrap_or(Value::Percent(BasisPoints::ZERO)),
-        target: target_from_json(&d.target).unwrap_or(Target::Subtotal),
+        value: d.value.clone(),
+        target: d.target.clone(),
         amount: d.amount,
+        // Claimed when the order was placed: nothing left to claim.
+        once_per_customer: false,
+        code_limit: None,
     }
 }
 
