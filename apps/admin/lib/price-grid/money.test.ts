@@ -3,8 +3,8 @@ import { test } from "node:test";
 
 import { MAX_AMOUNT, adjustAmount, formatAmount, parseAmount, parsePercent } from "./money.ts";
 
-const amount = (input: string, digits = 2) => {
-  const parsed = parseAmount(input, digits);
+const amount = (input: string, digits = 2, currency = "EUR") => {
+  const parsed = parseAmount(input, digits, currency);
   return parsed.ok ? parsed.value : parsed.error;
 };
 
@@ -44,10 +44,26 @@ test("a leading zero never groups", () => {
   assert.equal(amount("0,500", 3), 500);
 });
 
-test("a currency's code or sign at either end is dropped", () => {
+test("the list's own code or sign at either end is dropped", () => {
   assert.equal(amount("EUR 12.50"), 1250);
+  assert.equal(amount("12.50eur"), 1250);
   assert.equal(amount("12,50 €"), 1250);
-  assert.equal(amount("$12"), 1200);
+  assert.equal(amount("€ 12,50 EUR"), 1250);
+  assert.equal(amount("$12", 2, "USD"), 1200);
+  assert.equal(amount("CA$12", 2, "CAD"), 1200);
+  assert.equal(amount("$12", 2, "CAD"), 1200);
+});
+
+test("another currency's code or sign is refused", () => {
+  assert.equal(amount("USD 12.50"), "That's in USD; this list is in EUR.");
+  assert.equal(amount("12 gbp"), "That's in GBP; this list is in EUR.");
+  assert.equal(amount("$12"), "That's in $; this list is in EUR.");
+  assert.equal(amount("12 €", 2, "USD"), "That's in €; this list is in USD.");
+});
+
+test("letters that aren't a currency are no amount", () => {
+  assert.equal(amount("abc12"), '"abc12" isn\'t an amount.');
+  assert.equal(amount("12xyz"), '"12xyz" isn\'t an amount.');
 });
 
 test("more decimals than the currency has are refused, not rounded", () => {

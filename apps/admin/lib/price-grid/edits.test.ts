@@ -48,6 +48,7 @@ test("a typed price is an upsert; the same price typed differently is nothing", 
     variants,
     [{ variant: "var_b", column: "fixed_price", text: "22,5" }],
     2,
+    "EUR",
   );
   assert.deepEqual(review(variants, drafts, "EUR", 2).diff, {
     upserts: [{ variant: "var_b", price: eur(2250), compare_at: null, breaks: [] }],
@@ -58,6 +59,7 @@ test("a typed price is an upsert; the same price typed differently is nothing", 
     variants,
     [{ variant: "var_a", column: "fixed_price", text: "18" }],
     2,
+    "EUR",
   );
   assert.equal(same.size, 0);
 });
@@ -68,6 +70,7 @@ test("emptying a stored fixed price clears it", () => {
     variants,
     clearCells([{ variant: "var_a", column: "fixed_price" }]),
     2,
+    "EUR",
   );
   const { diff, changedVariants, dirty } = review(variants, drafts, "EUR", 2);
   assert.deepEqual(diff, { upserts: [], clears: [{ variant: "var_a" }] });
@@ -81,12 +84,14 @@ test("typing then emptying a cell that had nothing leaves nothing to save", () =
     variants,
     [{ variant: "var_b", column: "fixed_price", text: "9" }],
     2,
+    "EUR",
   );
   drafts = applyChanges(
     drafts,
     variants,
     [{ variant: "var_b", column: "fixed_price", text: "" }],
     2,
+    "EUR",
   );
   assert.equal(drafts.size, 0);
 });
@@ -100,6 +105,7 @@ test("errors stay on their cells and keep the variant out of the diff", () => {
       { variant: "var_b", column: "fixed_compare_at", text: "30" },
     ],
     2,
+    "EUR",
   );
   const { diff, errors, changedVariants } = review(variants, drafts, "EUR", 2);
   assert.deepEqual(diff, { upserts: [], clears: [] });
@@ -145,9 +151,9 @@ test("breaks are checked against the fixed price in the same draft", () => {
 });
 
 test("cells normalize so equal prices compare equal", () => {
-  assert.equal(normalizeCell("fixed_price", " 12,5 ", 2), "12.50");
-  assert.equal(normalizeCell("breaks", "10:8", 2), "10=8.00");
-  assert.equal(normalizeCell("fixed_price", "abc", 2), "abc");
+  assert.equal(normalizeCell("fixed_price", " 12,5 ", 2, "EUR"), "12.50");
+  assert.equal(normalizeCell("breaks", "10:8", 2, "EUR"), "10=8.00");
+  assert.equal(normalizeCell("fixed_price", "abc", 2, "EUR"), "abc");
 });
 
 // A grid of two columns (fixed price, compare-at) over rows: 0 product, 1 var_a, 2 var_b.

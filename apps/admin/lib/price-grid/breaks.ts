@@ -17,7 +17,11 @@ export function formatBreaks(breaks: readonly BreakAmount[], digits: number): st
  * a price joined by `=`, `:` or `@` ("10 @ 8,00" works too). Their rules are checked
  * apart, by `breakProblems`.
  */
-export function parseBreaks(text: string, digits: number): Parsed<BreakAmount[]> {
+export function parseBreaks(
+  text: string,
+  digits: number,
+  currency: string,
+): Parsed<BreakAmount[]> {
   const parts = text
     .split(/[;\n]/)
     .map((part) => part.trim())
@@ -29,7 +33,7 @@ export function parseBreaks(text: string, digits: number): Parsed<BreakAmount[]>
       return { ok: false, error: `${JSON.stringify(part)} isn't a break, like 10=8.00.` };
     }
     const [, quantity = "", price = ""] = match;
-    const amount = parseAmount(price, digits);
+    const amount = parseAmount(price, digits, currency);
     if (!amount.ok) return { ok: false, error: `Break ${quantity}: ${amount.error}` };
     breaks.push({ min_quantity: Number(quantity), amount: amount.value });
   }

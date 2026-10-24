@@ -16,18 +16,82 @@ const fail = <T>(error: string): Parsed<T> => ({ ok: false, error });
 // Spaces (incl. no-break and narrow no-break ones) and apostrophes ("1'234.50", Swiss)
 // only ever group thousands.
 const GROUPING = /[\s  ']/g;
-// A currency's code or sign at either end ("EUR 12.50", "12,50 €", "$12").
-const CURRENCY_EDGE = /^(?:[A-Za-z]{3}|\p{Sc})\s*|\s*(?:[A-Za-z]{3}|\p{Sc})$/gu;
+// A code or a currency sign at either end ("EUR 12.50", "12,50 €", "$12").
+const LEADING = /^([A-Za-z]{3}|\p{Sc})\s*/u;
+const TRAILING = /\s*([A-Za-z]{3}|\p{Sc})$/u;
+
+let knownCodes: ReadonlySet<string> | undefined;
+
+/** ISO 4217 codes the runtime knows, so "USD" is a currency and "abc" isn't. */
+function isCurrencyCode(code: string): boolean {
+  if (!knownCodes) {
+    try {
+      knownCodes = new Set(Intl.supportedValuesOf("currency"));
+    } catch {
+      knownCodes = new Set();
+    }
+  }
+  return knownCodes.has(code);
+}
+
+/** How `currency` is written in English ("€", "$", "CA$"), longest first. */
+function symbolsOf(currency: string): string[] {
+  const symbols = new Set<string>();
+  for (const currencyDisplay of ["symbol", "narrowSymbol"] as const) {
+    try {
+      const part = new Intl.NumberFormat("en", { style: "currency", currency, currencyDisplay })
+        .formatToParts(0)
+        .find((p) => p.type === "currency");
+      if (part && part.value !== currency) symbols.add(part.value);
+    } catch {
+      // A code the runtime doesn't know has no symbol to strip.
+    }
+  }
+  return [...symbols].sort((a, b) => b.length - a.length);
+}
+
+/**
+ * `text` without `currency`'s code or symbol at its ends. Another currency's code or any
+ * other currency sign is an error: "$12" in a EUR list is a mistake, not 12 euros.
+ */
+function stripCurrency(text: string, currency: string): Parsed<string> {
+  const symbols = symbolsOf(currency);
+  const foreign = (written: string) =>
+    fail<string>(`That's in ${written}; this list is in ${currency}.`);
+  let rest = text;
+  for (const end of ["start", "end"] as const) {
+    const own = symbols.find((s) => (end === "start" ? rest.startsWith(s) : rest.endsWith(s)));
+    if (own) {
+      rest = (end === "start" ? rest.slice(own.length) : rest.slice(0, -own.length)).trim();
+      continue;
+    }
+    const match = (end === "start" ? LEADING : TRAILING).exec(rest);
+    const written = match?.[1];
+    if (!match || written === undefined) continue;
+    const code = written.toUpperCase();
+    if (/^\p{Sc}$/u.test(written)) return foreign(written);
+    if (code !== currency) {
+      if (isCurrencyCode(code)) return foreign(code);
+      // Three letters that aren't a currency are left for the amount check to refuse.
+      continue;
+    }
+    rest = end === "start" ? rest.slice(match[0].length) : rest.slice(0, match.index);
+  }
+  return ok(rest);
+}
 
 /**
  * Minor units from an amount as people type or spreadsheets export it: "12.5", "12,50",
  * "1 234,50", "1,234.50", "1.234,50", "1,234,567", "€12.50". A lone separator is the
  * decimal point, except that "1,234" (three digits the currency doesn't have) is refused
  * as ambiguous; in KWD, with three digits, it's 1.234. Negative amounts and more decimals
- * than the currency has are refused, never rounded.
+ * than the currency has are refused, never rounded. `currency`'s code or symbol may stand
+ * at either end; another currency's is refused.
  */
-export function parseAmount(input: string, digits: number): Parsed<number> {
-  const text = input.trim().replaceAll(CURRENCY_EDGE, "").replaceAll(GROUPING, "");
+export function parseAmount(input: string, digits: number, currency: string): Parsed<number> {
+  const stripped = stripCurrency(input.trim(), currency);
+  if (!stripped.ok) return stripped;
+  const text = stripped.value.replaceAll(GROUPING, "");
   if (text === "") return input.trim() === "" ? fail("Enter an amount.") : garbage(input);
   if (/^[-−]/.test(text)) return fail("Can't be negative.");
   if (!/^\+?[\d.,]+$/.test(text) || !/\d/.test(text)) return garbage(input);

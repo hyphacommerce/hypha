@@ -24,8 +24,8 @@ import { MAX_BREAKS } from "@/lib/price-grid/types";
 
 type Row = { key: number; quantity: string; price: string };
 
-function rowsOf(text: string, digits: number): Row[] {
-  const parsed = parseBreaks(text, digits);
+function rowsOf(text: string, digits: number, currency: string): Row[] {
+  const parsed = parseBreaks(text, digits, currency);
   if (!parsed.ok) return [];
   return parsed.value.map((b, key) => ({
     key,
@@ -54,13 +54,13 @@ export function BreaksDialog({
   onSave: (text: string) => void;
   onClose: () => void;
 }) {
-  const [rows, setRows] = useState(() => rowsOf(value, digits));
+  const [rows, setRows] = useState(() => rowsOf(value, digits, currency));
 
-  const fixed = parseAmount(fixedPrice, digits);
+  const fixed = parseAmount(fixedPrice, digits, currency);
   const fixedAmount = fixed.ok ? fixed.value : null;
   const parsed = rows.map((row) => ({
     quantity: /^\d+$/.test(row.quantity.trim()) ? Number(row.quantity.trim()) : null,
-    price: parseAmount(row.price, digits),
+    price: parseAmount(row.price, digits, currency),
   }));
   const complete: BreakAmount[] = parsed.flatMap((p) =>
     p.quantity !== null && p.price.ok ? [{ min_quantity: p.quantity, amount: p.price.value }] : [],

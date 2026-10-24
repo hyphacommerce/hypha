@@ -30,7 +30,7 @@ export function BulkDialog({
   onClose: () => void;
 }) {
   const [text, setText] = useState("");
-  const parsed = action === "amount" ? parseAmount(text, digits) : parsePercent(text);
+  const parsed = action === "amount" ? parseAmount(text, digits, currency) : parsePercent(text);
   const apply = () => {
     if (!parsed.ok) return;
     onApply(parsed.value);

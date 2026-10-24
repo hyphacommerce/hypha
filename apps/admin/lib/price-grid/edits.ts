@@ -55,21 +55,27 @@ export function currentDraft(drafts: Drafts, variant: PriceGridVariant, digits: 
  * A cell's text in its canonical form ("12.5" → "12.50", "10:8" → "10=8.00"), or as
  * typed when it doesn't parse. Two texts that normalize alike mean the same price.
  */
-export function normalizeCell(column: EditableColumn, text: string, digits: number): string {
+export function normalizeCell(
+  column: EditableColumn,
+  text: string,
+  digits: number,
+  currency: string,
+): string {
   const trimmed = text.trim();
   if (trimmed === "") return "";
   if (column === "breaks") {
-    const breaks = parseBreaks(trimmed, digits);
+    const breaks = parseBreaks(trimmed, digits, currency);
     return breaks.ok ? formatBreaks(breaks.value, digits) : trimmed;
   }
-  const amount = parseAmount(trimmed, digits);
+  const amount = parseAmount(trimmed, digits, currency);
   return amount.ok ? formatAmount(amount.value, digits) : trimmed;
 }
 
-function sameDraft(a: Draft, b: Draft, digits: number): boolean {
+function sameDraft(a: Draft, b: Draft, digits: number, currency: string): boolean {
   return (["fixed_price", "fixed_compare_at", "breaks"] as const).every(
     (column) =>
-      normalizeCell(column, a[column], digits) === normalizeCell(column, b[column], digits),
+      normalizeCell(column, a[column], digits, currency) ===
+      normalizeCell(column, b[column], digits, currency),
   );
 }
 
@@ -83,6 +89,7 @@ export function applyChanges(
   variants: ReadonlyMap<string, PriceGridVariant>,
   changes: readonly CellChange[],
   digits: number,
+  currency: string,
 ): Drafts {
   if (changes.length === 0) return drafts;
   const next = new Map(drafts);
@@ -90,8 +97,11 @@ export function applyChanges(
     const variant = variants.get(change.variant);
     if (!variant) continue;
     const draft = { ...currentDraft(next, variant, digits), [change.column]: change.text };
-    if (sameDraft(draft, originalDraft(variant, digits), digits)) next.delete(change.variant);
-    else next.set(change.variant, draft);
+    if (sameDraft(draft, originalDraft(variant, digits), digits, currency)) {
+      next.delete(change.variant);
+    } else {
+      next.set(change.variant, draft);
+    }
   }
   return next;
 }
@@ -114,14 +124,14 @@ export function checkDraft(draft: Draft, currency: string, digits: number): Chec
   if (priceText === "") {
     errors.fixed_price = "Needs a fixed price, or clear the row.";
   } else {
-    const parsed = parseAmount(priceText, digits);
+    const parsed = parseAmount(priceText, digits, currency);
     if (parsed.ok) price = parsed.value;
     else errors.fixed_price = parsed.error;
   }
 
   let compareAt: number | null = null;
   if (compareText !== "") {
-    const parsed = parseAmount(compareText, digits);
+    const parsed = parseAmount(compareText, digits, currency);
     if (!parsed.ok) errors.fixed_compare_at = parsed.error;
     else if (price !== null && parsed.value <= price) {
       errors.fixed_compare_at = "Must be above the fixed price.";
@@ -130,7 +140,7 @@ export function checkDraft(draft: Draft, currency: string, digits: number): Chec
 
   let breaks: BreakAmount[] = [];
   if (breaksText !== "") {
-    const parsed = parseBreaks(breaksText, digits);
+    const parsed = parseBreaks(breaksText, digits, currency);
     if (!parsed.ok) errors.breaks = parsed.error;
     else {
       const [problem] = breakProblems(parsed.value, price);
@@ -200,7 +210,7 @@ export function review(
     if (!variant) continue;
     const original = originalDraft(variant, digits);
     for (const column of ["fixed_price", "fixed_compare_at", "breaks"] as const) {
-      if (normalizeCell(column, draft[column], digits) !== original[column]) {
+      if (normalizeCell(column, draft[column], digits, currency) !== original[column]) {
         dirty.add(cellKey(id, column));
       }
     }

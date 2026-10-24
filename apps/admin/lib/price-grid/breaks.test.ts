@@ -10,26 +10,26 @@ test("breaks round-trip through their cell text", () => {
   ];
   const text = formatBreaks(breaks, 2);
   assert.equal(text, "10=8.00; 20=7.50");
-  assert.deepEqual(parseBreaks(text, 2), { ok: true, value: breaks });
+  assert.deepEqual(parseBreaks(text, 2, "EUR"), { ok: true, value: breaks });
 });
 
 test("breaks parse leniently: other joiners, new lines, decimal commas", () => {
-  assert.deepEqual(parseBreaks("10 @ 8,00\n20: 7.5;", 2), {
+  assert.deepEqual(parseBreaks("10 @ 8,00\n20: 7.5;", 2, "EUR"), {
     ok: true,
     value: [
       { min_quantity: 10, amount: 800 },
       { min_quantity: 20, amount: 750 },
     ],
   });
-  assert.deepEqual(parseBreaks("  ", 2), { ok: true, value: [] });
+  assert.deepEqual(parseBreaks("  ", 2, "EUR"), { ok: true, value: [] });
 });
 
 test("a part that isn't a break, or a bad price, is refused with the part", () => {
-  assert.deepEqual(parseBreaks("ten=8", 2), {
+  assert.deepEqual(parseBreaks("ten=8", 2, "EUR"), {
     ok: false,
     error: '"ten=8" isn\'t a break, like 10=8.00.',
   });
-  assert.deepEqual(parseBreaks("10=8.0001", 2), {
+  assert.deepEqual(parseBreaks("10=8.0001", 2, "EUR"), {
     ok: false,
     error: "Break 10: At most 2 decimal places.",
   });

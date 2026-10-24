@@ -227,7 +227,7 @@ export function PriceGrid({
   };
 
   const apply = (changes: readonly CellChange[], skipped = 0) => {
-    setDrafts((before) => applyChanges(before, variants, changes, digits));
+    setDrafts((before) => applyChanges(before, variants, changes, digits, currency));
     setNotice(
       skipped > 0
         ? `${skipped} ${skipped === 1 ? "cell" : "cells"} couldn't take a value and kept theirs.`
@@ -271,7 +271,7 @@ export function PriceGrid({
     if (text.trim() === "") {
       return variant.adjusted_price ? { money: variant.adjusted_price, isAdjusted: true } : null;
     }
-    const amount = parseAmount(text, digits);
+    const amount = parseAmount(text, digits, currency);
     return amount.ok ? { money: { amount: amount.value, currency }, isAdjusted: false } : null;
   };
 
@@ -702,13 +702,13 @@ export function PriceGrid({
       case "breaks": {
         const text = currentDraft(drafts, variant, digits).breaks;
         if (text.trim() === "") return <span className="pg-none">—</span>;
-        const parsed = parseBreaks(text, digits);
+        const parsed = parseBreaks(text, digits, currency);
         return parsed.ok ? breaksLabel(parsed.value.length) : text;
       }
       default: {
         const text = currentDraft(drafts, variant, digits)[column];
         if (text.trim() === "") return <span className="pg-none">—</span>;
-        return normalizeCell(column, text, digits);
+        return normalizeCell(column, text, digits, currency);
       }
     }
   }
