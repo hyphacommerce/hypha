@@ -47,7 +47,12 @@ impl World {
         block_on(world.markets.insert(&mut market)).unwrap();
         block_on(world.catalogs.insert(&mut catalog)).unwrap();
         for (n, currency) in [(10, Currency::EUR), (11, Currency::RSD)] {
-            let mut list = PriceList::new(list_id(n), currency, BasisPoints::ZERO);
+            let mut list = PriceList::new(
+                list_id(n),
+                hypha_markets::PriceListDraft::new(&format!("List {n}"), currency)
+                    .adjusted(BasisPoints::ZERO),
+            )
+            .unwrap();
             block_on(world.price_lists.insert(&mut list)).unwrap();
         }
         world

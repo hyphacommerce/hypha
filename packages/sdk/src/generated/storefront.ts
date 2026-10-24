@@ -1118,6 +1118,7 @@ export interface components {
             variant_title?: string | null;
         };
         LineState: {
+            compare_at_price?: components["schemas"]["Money"] | null;
             /** @enum {string} */
             status: "priced";
             tax?: components["schemas"]["TaxLineResponse"] | null;
@@ -1859,12 +1860,15 @@ export interface components {
              *     there's no price.
              */
             available_quantity?: number | null;
+            compare_at_price?: components["schemas"]["Money"] | null;
             /** @description The variant's own custom field values storefronts are shown. */
             custom_fields: {
                 [key: string]: unknown;
             };
             id: components["schemas"]["VariantId"];
             media_asset_id?: components["schemas"]["AssetId"] | null;
+            /** @description Whether a compare-at price is shown: the variant is on sale. */
+            on_sale: boolean;
             price?: components["schemas"]["Money"] | null;
             /** @description One value per option, in the order of `options`. */
             selections: components["schemas"]["OptionValueId"][];

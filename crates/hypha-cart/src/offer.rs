@@ -2,10 +2,10 @@
 //! anything is in a cart. Priced with the cart's loaders and rules (`load_pricing`,
 //! `price_line`, `StockContext::load`), so the page, search and the cart can't disagree.
 
-use hypha_core::{CountryCode, Ctx, Price, Quantity, Scope, VariantId};
+use hypha_core::{CountryCode, Ctx, HasClock, Quantity, Scope, VariantId};
 use hypha_inventory::{Availability, HasInventoryItems, HasLocations, StockContext};
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo};
-use hypha_pricing::load_pricing_for;
+use hypha_pricing::{ResolvedPrice, load_pricing_for};
 use hypha_products::Product;
 
 use crate::{CommandError, price_line};
@@ -14,9 +14,9 @@ use crate::{CommandError, price_line};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VariantOffer {
     pub variant: VariantId,
-    /// `None` when the variant can't be priced there (its product isn't in the
-    /// market's catalog, or isn't active).
-    pub price: Option<Price>,
+    /// The price of one, with what it's compared against; `None` when the variant can't
+    /// be priced there (its product isn't in the market's catalog, or isn't active).
+    pub price: Option<ResolvedPrice>,
     /// Whether one can be bought now: in stock at a location serving the market, or not
     /// tracked. `false` whenever there's no price.
     pub available: bool,
@@ -52,7 +52,7 @@ pub async fn price_product<S>(
     country: &str,
 ) -> Result<ProductOffer, CommandError>
 where
-    S: HasMarkets + HasCatalogs + HasPriceLists + HasInventoryItems + HasLocations,
+    S: HasMarkets + HasCatalogs + HasPriceLists + HasInventoryItems + HasLocations + HasClock,
 {
     ctx.require(Scope::ProductsRead)?;
     let country = CountryCode::new(country)?;
@@ -79,7 +79,7 @@ where
     let variants = variants
         .into_iter()
         .map(|variant| {
-            let price = price_line(product, variant, &pricing).ok();
+            let price = price_line(product, variant, Quantity::ONE, &pricing).ok();
             let in_stock = !matches!(
                 stock.availability(variant, Quantity::ONE),
                 Availability::OutOfStock { .. }

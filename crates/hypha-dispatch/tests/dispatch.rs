@@ -76,12 +76,17 @@ fn world() -> InMemoryPorts {
     shirt.add_variant(variant(large(), 22)).unwrap();
     block_on(ports.products.insert(&mut shirt)).unwrap();
     for n in [1, 2] {
-        let mut prices = PriceList::new(list(n), Currency::EUR, BasisPoints::new(0).unwrap());
+        let mut prices = PriceList::new(
+            list(n),
+            hypha_markets::PriceListDraft::new(&format!("List {n}"), Currency::EUR)
+                .adjusted(BasisPoints::new(0).unwrap()),
+        )
+        .unwrap();
         block_on(ports.price_lists.insert(&mut prices)).unwrap();
         block_on(
             ports
                 .price_lists
-                .set_fixed_prices(list(n), &[(small(), eur(900)), (large(), eur(1100))]),
+                .set_fixed_prices(list(n), &[(small(), fixed(900)), (large(), fixed(1100))]),
         )
         .unwrap();
     }
@@ -720,4 +725,8 @@ fn a_handler_from_another_crate_gets_the_events_it_wants() {
             ("handler:variant_cleanup".to_string(), "succeeded"),
         ]
     );
+}
+
+fn fixed(amount: i64) -> hypha_markets::FixedPrice {
+    hypha_markets::FixedPrice::plain(eur(amount))
 }

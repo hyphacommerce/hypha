@@ -162,12 +162,17 @@ impl World {
         }
 
         let list = PriceListId::from_uuid(id(1500));
-        let mut prices = PriceList::new(list, Currency::EUR, BasisPoints::new(-1000).unwrap());
-        block_on(p.price_lists.insert(&mut prices)).unwrap();
-        block_on(
-            p.price_lists
-                .set_fixed_prices(list, &[(blue_s(), price(1000))]),
+        let mut prices = PriceList::new(
+            list,
+            hypha_markets::PriceListDraft::new("Croatia", Currency::EUR)
+                .adjusted(BasisPoints::new(-1000).unwrap()),
         )
+        .unwrap();
+        block_on(p.price_lists.insert(&mut prices)).unwrap();
+        block_on(p.price_lists.set_fixed_prices(
+            list,
+            &[(blue_s(), hypha_markets::FixedPrice::plain(price(1000)))],
+        ))
         .unwrap();
         for (n, market, price_list, products) in [
             (1600, hr_market(), Some(list), vec![shirt(), mug(), draft()]),
@@ -853,6 +858,25 @@ fn a_market_rebuilds_for_what_prices_depend_on_and_not_for_its_name() {
     // Written before `fields` existed: rebuilt, to be safe.
     assert_eq!(
         marks(serde_json::json!({"market": market})),
+        Ok(vec![Target::All])
+    );
+}
+
+#[test]
+fn a_price_list_rebuilds_for_what_prices_depend_on_and_not_for_its_name() {
+    use hypha_search::handler::targets;
+    let marks = |data| targets(&event("price_list.changed", data));
+    assert_eq!(
+        marks(serde_json::json!({"price_list": "pl_x", "fields": ["name", "description"]})),
+        Ok(vec![])
+    );
+    assert_eq!(
+        marks(serde_json::json!({"price_list": "pl_x", "fields": ["name", "ends_at"]})),
+        Ok(vec![Target::All])
+    );
+    // Written before `fields` existed (a creation or a new adjustment): rebuilt.
+    assert_eq!(
+        marks(serde_json::json!({"price_list": "pl_x"})),
         Ok(vec![Target::All])
     );
 }

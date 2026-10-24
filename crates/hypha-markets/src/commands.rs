@@ -1,7 +1,8 @@
 use hypha_core::{
     AuthError, BasisPoints, CatalogId, CountryCode, CountryError, Ctx, Currency, ErrorCode,
     HasBatch, IdGenerator, MarketId, Money, MoneyError, Page, PageRequest, PendingEvent, Price,
-    PriceListId, ProductId, RepoError, Scope, StageEvents, Subject, VariantId, report_duplicate,
+    PriceListId, ProductId, RepoError, Scope, StageEvents, Subject, Timestamp, VariantId,
+    report_duplicate,
 };
 use thiserror::Error;
 
@@ -9,8 +10,13 @@ use crate::{
     Catalog, CatalogContext, CatalogRepo, HasCatalogs, HasMarkets, HasPriceLists, Market,
     MarketError, MarketRepo, PriceList, PriceListError, PriceListRepo, StageCatalogProducts,
     StageFixedPrices,
+    error::FixedPriceProblem,
     events::{
         CATALOG, CatalogProductsAdded, CatalogProductsRemoved, PRICE_LIST, PricesRemoved, PricesSet,
+    },
+    price_list::{
+        Adjustment, CompareAtMode, EntryProblem, FixedPrice, PriceListDraft, PriceListKind,
+        PriceListStatus, Window,
     },
     repo::keys,
 };
@@ -48,6 +54,13 @@ pub enum CommandError {
         market: MarketId,
         catalog: CatalogId,
     },
+    #[error("price list {price_list} is already named {name:?}")]
+    PriceListNameTaken {
+        name: String,
+        price_list: PriceListId,
+    },
+    #[error("at most {max} fixed prices can be set at once")]
+    TooManyPrices { max: usize },
 }
 
 impl ErrorCode for CommandError {
@@ -65,6 +78,8 @@ impl ErrorCode for CommandError {
             CommandError::CurrencyMismatch { .. } => "price_list_currency_mismatch",
             CommandError::CountryInOtherMarket { .. } => "country_in_other_market",
             CommandError::CatalogExists { .. } => "catalog_exists",
+            CommandError::PriceListNameTaken { .. } => "price_list_name_taken",
+            CommandError::TooManyPrices { .. } => "too_many_prices",
         }
     }
 }
@@ -248,12 +263,21 @@ async fn country_conflict<M: MarketRepo>(
 }
 
 pub struct CreatePriceList {
+    pub name: String,
+    pub description: Option<String>,
     pub currency: Currency,
-    /// Basis points: -1000 = 10% off, 500 = 5% markup.
-    pub adjustment: i32,
+    pub kind: PriceListKind,
+    pub status: PriceListStatus,
+    pub starts_at: Option<Timestamp>,
+    pub ends_at: Option<Timestamp>,
+    pub compare_at: CompareAtMode,
+    /// Basis points: -1000 = 10% off, 500 = 5% markup; `None` adjusts nothing, so the list
+    /// prices only the variants it has fixed prices for.
+    pub adjustment: Option<i32>,
 }
 
-/// Creates an empty price list. Fixed prices are added with `set_fixed_prices`.
+/// Creates a price list without fixed prices (add them with `set_fixed_prices`). Its
+/// name is unique, ignoring case.
 pub async fn create_price_list<P: PriceListRepo, I: IdGenerator>(
     ctx: &Ctx,
     price_lists: &P,
@@ -262,56 +286,137 @@ pub async fn create_price_list<P: PriceListRepo, I: IdGenerator>(
 ) -> Result<PriceList, CommandError> {
     ctx.require(Scope::PricingWrite)?;
 
-    let adjustment = BasisPoints::new(input.adjustment)?;
+    let adjustment = input
+        .adjustment
+        .map(|bp| BasisPoints::new(bp).map(Adjustment::new))
+        .transpose()?;
     let mut list = PriceList::new(
         PriceListId::from_uuid(ids.new_uuid()),
-        input.currency,
-        adjustment,
-    );
-    price_lists.insert(&mut list).await?;
+        PriceListDraft {
+            name: input.name,
+            description: input.description,
+            currency: input.currency,
+            kind: input.kind,
+            status: input.status,
+            starts_at: input.starts_at,
+            ends_at: input.ends_at,
+            compare_at: input.compare_at,
+            adjustment,
+        },
+    )?;
+    // Precise error in the normal case; the repo's unique key catches a concurrent insert.
+    if let Some(taken) = name_taken(price_lists, &list).await? {
+        return Err(taken);
+    }
+    let written = price_lists.insert(&mut list).await;
+    report_duplicate(
+        written,
+        keys::PRICE_LIST_NAME,
+        name_taken(price_lists, &list),
+    )
+    .await?;
     Ok(list)
 }
 
-pub struct FixedPrice {
+/// `PriceListNameTaken` when another list has `list`'s name, ignoring case.
+async fn name_taken<P: PriceListRepo>(
+    price_lists: &P,
+    list: &PriceList,
+) -> Result<Option<CommandError>, CommandError> {
+    let name = list.name().to_lowercase();
+    Ok(price_lists
+        .list_all()
+        .await?
+        .into_iter()
+        .find(|other| other.id() != list.id() && other.name().to_lowercase() == name)
+        .map(|other| CommandError::PriceListNameTaken {
+            name: other.name().to_string(),
+            price_list: other.id(),
+        }))
+}
+
+/// How many fixed prices one `set_fixed_prices` takes: bulk callers page through.
+pub const MAX_FIXED_PRICES_PER_WRITE: usize = 1000;
+
+/// One fixed price as a caller sends it.
+pub struct SetFixedPrice {
     pub variant: VariantId,
     pub price: Money,
+    /// Shown struck through beside the price; above it, in its currency.
+    pub compare_at: Option<Money>,
 }
 
 /// Inserts or replaces fixed prices on a price list.
 ///
 /// All prices are validated before anything is stored: non-negative, in the list's
-/// currency, each variant once. Variant IDs are not checked against the products crate
-/// (markets is a leaf domain); a price for an unknown variant is simply never used.
+/// currency, a compare-at above its price, each variant once. Every entry's problem is
+/// reported at once (`InvalidFixedPrices`). Variant IDs are not checked against the
+/// products crate (markets is a leaf domain); a price for an unknown variant is simply
+/// never used.
 pub async fn set_fixed_prices<S>(
     ctx: &Ctx,
     ports: &S,
     list_id: PriceListId,
-    prices: Vec<FixedPrice>,
+    prices: Vec<SetFixedPrice>,
 ) -> Result<(), CommandError>
 where
     S: HasPriceLists + HasBatch<Batch: StageFixedPrices + StageEvents>,
 {
     ctx.require(Scope::PricingWrite)?;
+    if prices.len() > MAX_FIXED_PRICES_PER_WRITE {
+        return Err(CommandError::TooManyPrices {
+            max: MAX_FIXED_PRICES_PER_WRITE,
+        });
+    }
 
     let list = ports
         .price_lists()
         .get(list_id)
         .await?
         .ok_or(CommandError::PriceListNotFound(list_id))?;
-    let prices = prices
-        .into_iter()
-        .map(|p| Ok((p.variant, Price::new(p.price)?)))
-        .collect::<Result<Vec<_>, MoneyError>>()?;
-    list.check_fixed_prices(&prices)?;
+    let mut problems = Vec::new();
+    let mut parsed = Vec::with_capacity(prices.len());
+    // Each parsed entry's index in the request, so the list's own checks report it.
+    let mut indexes = Vec::with_capacity(prices.len());
+    for (index, entry) in prices.into_iter().enumerate() {
+        match fixed_price(&entry) {
+            Ok(fixed) => {
+                indexes.push(index);
+                parsed.push((entry.variant, fixed));
+            }
+            Err(problem) => problems.push(EntryProblem {
+                index,
+                variant: Some(entry.variant),
+                problem,
+            }),
+        }
+    }
+    if let Err(PriceListError::InvalidFixedPrices(found)) = list.check_fixed_prices(&parsed) {
+        problems.extend(found.into_iter().map(|p| EntryProblem {
+            index: indexes[p.index],
+            ..p
+        }));
+    }
+    if !problems.is_empty() {
+        problems.sort_by_key(|p| p.index);
+        return Err(PriceListError::InvalidFixedPrices(problems).into());
+    }
 
     let event = PricesSet {
         price_list: list_id,
-        variants: prices.iter().map(|(v, _)| *v).collect(),
+        variants: parsed.iter().map(|(v, _)| *v).collect(),
     };
     let mut batch = ports.batch();
-    batch.set_fixed_prices(list_id, &prices);
+    batch.set_fixed_prices(list_id, &parsed);
     batch.record_events(vec![PendingEvent::new(price_list_subject(list_id), &event)]);
     Ok(ports.commit(batch).await?)
+}
+
+/// One entry's own rules: amounts that are prices, a compare-at above the price.
+fn fixed_price(entry: &SetFixedPrice) -> Result<FixedPrice, FixedPriceProblem> {
+    let price = Price::new(entry.price)?;
+    let compare_at = entry.compare_at.map(Price::new).transpose()?;
+    FixedPrice::new(price, compare_at)
 }
 
 fn price_list_subject(list: PriceListId) -> Subject {
@@ -347,15 +452,24 @@ where
     Ok(ports.commit(batch).await?)
 }
 
-/// A price list's changes; `None` keeps a field.
+/// A price list's changes; `None` keeps a field, and `Some(None)` clears one that may be
+/// empty.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UpdatePriceList {
+    pub name: Option<String>,
+    pub description: Option<Option<String>>,
+    pub kind: Option<PriceListKind>,
+    pub status: Option<PriceListStatus>,
+    pub starts_at: Option<Option<Timestamp>>,
+    pub ends_at: Option<Option<Timestamp>>,
+    pub compare_at: Option<CompareAtMode>,
     /// Basis points (-1000 = 10% off).
-    pub adjustment: Option<i32>,
+    pub adjustment: Option<Option<i32>>,
 }
 
-/// Changes a price list's adjustment. Its currency is fixed: catalogs and fixed prices
-/// depend on it.
+/// Changes a price list. Its currency is fixed: catalogs and fixed prices depend on it.
+/// The window is checked as it ends up, so moving both ends at once works in either
+/// order.
 pub async fn update_price_list<P: PriceListRepo>(
     ctx: &Ctx,
     lists: &P,
@@ -367,10 +481,40 @@ pub async fn update_price_list<P: PriceListRepo>(
         .get(id)
         .await?
         .ok_or(CommandError::PriceListNotFound(id))?;
-    if let Some(adjustment) = input.adjustment {
-        list.set_adjustment(BasisPoints::new(adjustment)?);
+    if let Some(name) = &input.name {
+        list.rename(name)?;
     }
-    lists.update(&mut list).await?;
+    if let Some(description) = input.description {
+        list.set_description(description)?;
+    }
+    if let Some(kind) = input.kind {
+        list.set_kind(kind);
+    }
+    if let Some(status) = input.status {
+        list.set_status(status);
+    }
+    if input.starts_at.is_some() || input.ends_at.is_some() {
+        let window = list.window();
+        let starts_at = input.starts_at.unwrap_or(window.starts_at());
+        let ends_at = input.ends_at.unwrap_or(window.ends_at());
+        list.set_window(Window::new(starts_at, ends_at)?);
+    }
+    if let Some(mode) = input.compare_at {
+        list.set_compare_at(mode);
+    }
+    if let Some(adjustment) = input.adjustment {
+        let adjustment = adjustment
+            .map(|bp| BasisPoints::new(bp).map(Adjustment::new))
+            .transpose()?;
+        list.set_adjustment(adjustment);
+    }
+    if input.name.is_some()
+        && let Some(taken) = name_taken(lists, &list).await?
+    {
+        return Err(taken);
+    }
+    let written = lists.update(&mut list).await;
+    report_duplicate(written, keys::PRICE_LIST_NAME, name_taken(lists, &list)).await?;
     Ok(list)
 }
 
@@ -588,7 +732,7 @@ pub async fn list_fixed_prices<P: PriceListRepo>(
     lists: &P,
     id: PriceListId,
     page: PageRequest<VariantId>,
-) -> Result<Page<(VariantId, Price)>, CommandError> {
+) -> Result<Page<(VariantId, FixedPrice)>, CommandError> {
     ctx.require(Scope::PricingRead)?;
     if lists.get(id).await?.is_none() {
         return Err(CommandError::PriceListNotFound(id));

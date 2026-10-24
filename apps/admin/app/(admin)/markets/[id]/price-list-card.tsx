@@ -246,7 +246,14 @@ function AttachForm({
           variant="primary"
           isLoading={isPending}
           isDisabled={bps === null}
-          onClick={() => bps !== null && attach({ currency: market.currency, adjustmentBps: bps })}
+          onClick={() =>
+            bps !== null &&
+            attach({
+              name: `${market.name} prices`,
+              currency: market.currency,
+              adjustmentBps: bps,
+            })
+          }
         />
       </HStack>
       {lists.length > 0 && (
@@ -255,7 +262,7 @@ function AttachForm({
             label={`Or use an existing ${market.currency} list`}
             options={lists.map((l) => ({
               value: l.id,
-              label: `${percentOf(l.adjustment_bps)}% · ${l.id}`,
+              label: `${l.name} · ${percentOf(l.adjustment?.percent_bps ?? 0)}%`,
             }))}
             value={existing}
             onChange={setExisting}
@@ -273,11 +280,11 @@ function AttachForm({
 }
 
 function AdjustmentForm({ market, list }: { market: Market; list: PriceList }) {
-  const [percent, setPercent] = useState(() => percentOf(list.adjustment_bps));
+  const [percent, setPercent] = useState(() => percentOf(list.adjustment?.percent_bps ?? 0));
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   const bps = parsePercent(percent);
-  const isChanged = bps !== null && bps !== list.adjustment_bps;
+  const isChanged = bps !== null && bps !== (list.adjustment?.percent_bps ?? 0);
 
   return (
     <VStack gap={2}>

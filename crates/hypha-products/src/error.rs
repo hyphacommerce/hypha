@@ -69,6 +69,10 @@ pub enum ProductError {
     DescriptionTooLong { max: usize },
     #[error("a product has at most {max} tags")]
     TooManyTags { max: usize },
+    #[error("variant {0}'s compare-at price must be above its price")]
+    CompareAtNotAbovePrice(VariantId),
+    #[error("variant {0}'s compare-at price is in another currency than its price")]
+    CompareAtCurrencyMismatch(VariantId),
 }
 
 fn join(ids: &[VariantId]) -> String {
@@ -84,6 +88,8 @@ impl ErrorCode for ProductError {
             ProductError::InvalidHandle(e) => e.code(),
             ProductError::Text(e) => e.code(),
             ProductError::DuplicateVariantId(_) => "duplicate_variant",
+            ProductError::CompareAtNotAbovePrice(_) => "compare_at_not_above_price",
+            ProductError::CompareAtCurrencyMismatch(_) => "compare_at_currency_mismatch",
             ProductError::SelectionCountMismatch { .. } => "selection_count_mismatch",
             ProductError::UnknownOptionValue(_) => "unknown_option_value",
             ProductError::DuplicateCombination => "duplicate_option_combination",

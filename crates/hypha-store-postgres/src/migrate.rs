@@ -394,6 +394,16 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "proposal_applying",
             sql: include_str!("../migrations/0074_proposal_applying.sql"),
         },
+        Migration {
+            version: 75,
+            name: "price_list_names",
+            sql: include_str!("../migrations/0075_price_list_names.sql"),
+        },
+        Migration {
+            version: 76,
+            name: "compare_at_prices",
+            sql: include_str!("../migrations/0076_compare_at_prices.sql"),
+        },
     ],
 };
 

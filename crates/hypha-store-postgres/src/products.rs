@@ -471,17 +471,23 @@ async fn write_children(tx: &impl Queries, s: &ProductSnapshot) -> Result<(), Re
         .map(|v| v.weight.map(|w| i64::from(w.grams())))
         .collect();
     let requires_shipping: Vec<bool> = s.variants.iter().map(|v| v.requires_shipping).collect();
+    // In the base price's currency, which `Product` checks.
+    let compare_at: Vec<Option<i64>> = s
+        .variants
+        .iter()
+        .map(|v| v.compare_at_price.map(|p| p.amount()))
+        .collect();
     tx.query_typed(
         "INSERT INTO variants
             (id, product_id, position, sku, price_amount, price_currency, selections,
-             media_asset_id, weight_grams, requires_shipping)
+             media_asset_id, weight_grams, requires_shipping, compare_at_amount)
          SELECT v.id, $1, v.ord - 1, v.sku, v.amount, v.currency,
                 ($7::uuid[])[(v.ord - 1) * $6 + 1 : v.ord * $6], v.media, v.weight,
-                v.requires_shipping
+                v.requires_shipping, v.compare_at
          FROM unnest($2::uuid[], $3::text[], $4::int8[], $5::text[], $8::uuid[], $9::int8[],
-                     $10::bool[])
+                     $10::bool[], $11::int8[])
               WITH ORDINALITY AS v(id, sku, amount, currency, media, weight,
-                                   requires_shipping, ord)",
+                                   requires_shipping, compare_at, ord)",
         &[
             (&product_id, Type::UUID),
             (&variant_ids, Type::UUID_ARRAY),
@@ -493,6 +499,7 @@ async fn write_children(tx: &impl Queries, s: &ProductSnapshot) -> Result<(), Re
             (&media, Type::UUID_ARRAY),
             (&weights, Type::INT8_ARRAY),
             (&requires_shipping, Type::BOOL_ARRAY),
+            (&compare_at, Type::INT8_ARRAY),
         ],
     )
     .await
@@ -560,7 +567,7 @@ async fn load(client: &impl Queries, which: Products<'_>) -> Result<Vec<Product>
     );
     let variants_sql = format!(
         "SELECT v.product_id, v.id, v.sku, v.price_amount, v.price_currency, v.selections,
-                v.media_asset_id, v.weight_grams, v.requires_shipping
+                v.media_asset_id, v.weight_grams, v.requires_shipping, v.compare_at_amount
          FROM variants v JOIN products p ON p.id = v.product_id
          WHERE {f} ORDER BY v.product_id, v.position"
     );
@@ -610,6 +617,10 @@ async fn load(client: &impl Queries, which: Products<'_>) -> Result<Vec<Product>
     for row in variant_rows {
         let currency = currency_from_db(col(&row, "price_currency")?)?;
         let base_price = Money::new(col(&row, "price_amount")?, currency).map_err(corrupt)?;
+        let compare_at_price = col::<Option<i64>>(&row, "compare_at_amount")?
+            .map(|amount| Money::new(amount, currency))
+            .transpose()
+            .map_err(corrupt)?;
         let selections: Vec<Uuid> = col(&row, "selections")?;
         variants
             .entry(col(&row, "product_id")?)
@@ -618,6 +629,7 @@ async fn load(client: &impl Queries, which: Products<'_>) -> Result<Vec<Product>
                 id: VariantId::from_uuid(col(&row, "id")?),
                 sku: col(&row, "sku")?,
                 base_price,
+                compare_at_price,
                 selections: selections
                     .into_iter()
                     .map(OptionValueId::from_uuid)

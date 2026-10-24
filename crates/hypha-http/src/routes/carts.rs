@@ -162,6 +162,9 @@ pub enum LineState {
         total: Money,
         /// `null` when the cart's country has no tax rates.
         tax: Option<TaxLineResponse>,
+        /// What `unit_price` is shown against, struck through: only ever above it; `null`
+        /// for none.
+        compare_at_price: Option<Money>,
     },
     Unavailable {
         /// Stable `ErrorCode`, e.g. "product_not_active".
@@ -254,10 +257,13 @@ impl From<&PricedCart> for CartResponse {
                     state: match &l.status {
                         LineStatus::Priced {
                             unit_price,
+                            compare_at,
                             total,
                             tax,
+                            ..
                         } => LineState::Priced {
                             unit_price: unit_price.money(),
+                            compare_at_price: compare_at.map(|p| p.money()),
                             total: *total,
                             tax: tax.as_ref().map(TaxLineResponse::from),
                         },

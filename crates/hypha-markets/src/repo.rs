@@ -1,14 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    CatalogId, CountryCode, MarketId, Page, PageRequest, Price, PriceListId, ProductId, RepoError,
+    CatalogId, CountryCode, MarketId, Page, PageRequest, PriceListId, ProductId, RepoError,
     VariantId,
 };
 
 use crate::{
     catalog::{Catalog, CatalogContext},
     market::Market,
-    price_list::PriceList,
+    price_list::{FixedPrice, PriceList},
 };
 
 /// Uniqueness rules the markets repos enforce, reported as `RepoError::Duplicate(key)`.
@@ -21,6 +21,8 @@ pub mod keys {
     /// At most one catalog per context.
     pub const CATALOG_CONTEXT: &str = "catalog_context";
     pub const PRICE_LIST_ID: &str = "price_list_id";
+    /// A price list's name, ignoring case.
+    pub const PRICE_LIST_NAME: &str = "price_list_name";
 }
 
 #[allow(async_fn_in_trait)]
@@ -94,9 +96,10 @@ pub trait PriceListRepo {
     async fn get(&self, id: PriceListId) -> Result<Option<PriceList>, RepoError>;
     /// Every price list, oldest first (by ID). A store has a handful.
     async fn list_all(&self) -> Result<Vec<PriceList>, RepoError>;
-    /// Stores a new price list (version 1). Enforces `PRICE_LIST_ID`.
+    /// Stores a new price list (version 1). Enforces `PRICE_LIST_ID` and `PRICE_LIST_NAME`.
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError>;
-    /// Stores changes and bumps the version, or fails with `StaleVersion`.
+    /// Stores changes and bumps the version, or fails with `StaleVersion`. Enforces
+    /// `PRICE_LIST_NAME`.
     async fn update(&self, price_list: &mut PriceList) -> Result<(), RepoError>;
 
     /// Inserts or replaces fixed prices for the given variants. Records no event:
@@ -109,7 +112,7 @@ pub trait PriceListRepo {
     async fn set_fixed_prices(
         &self,
         list: PriceListId,
-        prices: &[(VariantId, Price)],
+        prices: &[(VariantId, FixedPrice)],
     ) -> Result<(), RepoError>;
     /// Removes fixed prices. Variants without one are ignored. Records no event, like
     /// `set_fixed_prices`.
@@ -127,13 +130,13 @@ pub trait PriceListRepo {
         &self,
         list: PriceListId,
         page: PageRequest<VariantId>,
-    ) -> Result<Page<(VariantId, Price)>, RepoError>;
+    ) -> Result<Page<(VariantId, FixedPrice)>, RepoError>;
     /// The fixed prices of those of `variants` that have one.
     async fn fixed_prices(
         &self,
         list: PriceListId,
         variants: &[VariantId],
-    ) -> Result<HashMap<VariantId, Price>, RepoError>;
+    ) -> Result<HashMap<VariantId, FixedPrice>, RepoError>;
 }
 
 /// Whatever holds the `MarketRepo`: a host's per-request ports, a test world. Commands
@@ -194,6 +197,6 @@ pub trait StageCatalogProducts {
 /// Fixed prices as a batch writes them. Same preconditions as
 /// `PriceListRepo::set_fixed_prices` and `remove_fixed_prices`.
 pub trait StageFixedPrices {
-    fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, Price)]);
+    fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, FixedPrice)]);
     fn remove_fixed_prices(&mut self, list: PriceListId, variants: &[VariantId]);
 }

@@ -286,6 +286,16 @@ CUP_VAR=$(variant)
 step "activate mug" 200 - -X PATCH "$BASE/admin/products/$MUG/status" -H "$JSON" -d '{"status":"active"}'
 contains "mug is active" '"status":"active"'
 step "activate cup" 200 - -X PATCH "$BASE/admin/products/$CUP/status" -H "$JSON" -d '{"status":"active"}'
+step "a compare-at price for the mug" 200 - -X PATCH "$BASE/admin/products/$MUG/variants/$MUG_VAR" -H "$JSON" \
+    -d '{"compare_at_price":{"amount":1500,"currency":"EUR"}}'
+contains "the was price is kept" '"compare_at_price":{"amount":1500,"currency":"EUR"}'
+step "a compare-at price at the price" 422 compare_at_not_above_price -X PATCH \
+    "$BASE/admin/products/$MUG/variants/$MUG_VAR" -H "$JSON" -d '{"compare_at_price":{"amount":1000,"currency":"EUR"}}'
+step "a price raised past the compare-at" 422 compare_at_not_above_price -X PATCH \
+    "$BASE/admin/products/$MUG/variants/$MUG_VAR" -H "$JSON" -d '{"price":{"amount":1600,"currency":"EUR"}}'
+step "clear the compare-at price" 200 - -X PATCH "$BASE/admin/products/$MUG/variants/$MUG_VAR" -H "$JSON" \
+    -d '{"compare_at_price":null}'
+contains "it is gone" '"compare_at_price":null'
 step "list products, one per page" 200 - "$BASE/admin/products?limit=1"
 contains "newest first, with more after it" "\"items\":[{\"id\":\"$CUP\""
 contains "with a cursor for the next page" '"has_more":true,"next_cursor":"'
@@ -435,8 +445,21 @@ contains "Slovenia added" '"countries":["HR","DE","SI"]'
 step "stop selling to Slovenia" 200 - -X DELETE "$BASE/admin/markets/$MARKET/countries/SI"
 contains "Slovenia removed" '"countries":["HR","DE"]'
 step "create price list (-10%)" 201 - -X POST "$BASE/admin/price-lists" -H "$JSON" \
-    -d '{"currency":"EUR","adjustment_bps":-1000}'
+    -d '{"name":"Eurozone prices","currency":"EUR","adjustment":{"percent_bps":-1000}}'
 LIST=$(id)
+contains "an active override list by default" '"kind":"override","status":"active","phase":"active"'
+step "a list's name is unique, ignoring case" 409 price_list_name_taken -X POST "$BASE/admin/price-lists" \
+    -H "$JSON" -d '{"name":"EUROZONE PRICES","currency":"EUR"}'
+step "a window ending before it starts" 422 ends_not_after_start -X POST "$BASE/admin/price-lists" -H "$JSON" \
+    -d '{"name":"Never","currency":"EUR","starts_at":"2026-02-01T00:00:00Z","ends_at":"2026-01-01T00:00:00Z"}'
+step "a scheduled sale" 201 - -X POST "$BASE/admin/price-lists" -H "$JSON" \
+    -d '{"name":"Next year sale","currency":"EUR","kind":"sale","starts_at":"2999-01-01T00:00:00Z"}'
+contains "not started yet" '"phase":"scheduled"'
+SCHEDULED_LIST=$(id)
+step "pause it" 200 - -X PATCH "$BASE/admin/price-lists/$SCHEDULED_LIST" -H "$JSON" \
+    -d '{"status":"draft","description":"Planned"}'
+contains "a draft" '"phase":"draft"'
+
 step "fix cup price at 200" 204 - -X PUT "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
     -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"}}]}"
 step "create catalog" 201 - -X POST "$BASE/admin/catalogs" -H "$JSON" -d "{\"market\":\"$MARKET\"}"
@@ -456,16 +479,18 @@ contains "there are more" '"has_more":true'
 step "an unknown catalog's products" 404 catalog_not_found \
     "$BASE/admin/catalogs/cat_00000000000000000000000000000063/products"
 step "list price lists" 200 - "$BASE/admin/price-lists"
-contains "with its adjustment" '"adjustment_bps":-1000'
+contains "with its adjustment" '"adjustment":{"percent_bps":-1000}'
 step "fetch the price list" 200 - "$BASE/admin/price-lists/$LIST"
 step "its fixed prices" 200 - "$BASE/admin/price-lists/$LIST/fixed-prices"
 contains "the cup at 200" "{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"}"
 step "rename the market" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"name":"Euro area"}'
 contains "renamed" '"name":"Euro area"'
 step "and back" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"name":"Eurozone"}'
-step "deepen the discount" 200 - -X PATCH "$BASE/admin/price-lists/$LIST" -H "$JSON" -d '{"adjustment_bps":-2000}'
-contains "-20%" '"adjustment_bps":-2000'
-step "back to -10%" 200 - -X PATCH "$BASE/admin/price-lists/$LIST" -H "$JSON" -d '{"adjustment_bps":-1000}'
+step "deepen the discount" 200 - -X PATCH "$BASE/admin/price-lists/$LIST" -H "$JSON" \
+    -d '{"adjustment":{"percent_bps":-2000}}'
+contains "-20%" '"adjustment":{"percent_bps":-2000}'
+step "back to -10%" 200 - -X PATCH "$BASE/admin/price-lists/$LIST" -H "$JSON" \
+    -d '{"adjustment":{"percent_bps":-1000}}'
 step "fixed prices name their product" 200 - "$BASE/admin/price-lists/$LIST/fixed-prices"
 contains "the cup" '"product":{"id":'
 step "list API keys" 200 - "$BASE/admin/api-keys"
@@ -1900,15 +1925,21 @@ step "remove a country the market lacks" 404 country_not_in_market -X DELETE \
     "$BASE/admin/markets/$MARKET/countries/FR"
 step "second catalog for market" 409 catalog_exists -X POST "$BASE/admin/catalogs" -H "$JSON" \
     -d "{\"market\":\"$MARKET\"}"
-step "create RSD price list" 201 - -X POST "$BASE/admin/price-lists" -H "$JSON" -d '{"currency":"RSD"}'
+step "create RSD price list" 201 - -X POST "$BASE/admin/price-lists" -H "$JSON" \
+    -d '{"name":"Dinar prices","currency":"RSD"}'
 RSD_LIST=$(id)
 step "assign RSD list to EUR market" 422 price_list_currency_mismatch -X PUT \
     "$BASE/admin/catalogs/$CATALOG/price-list" -H "$JSON" -d "{\"price_list\":\"$RSD_LIST\"}"
 step "fixed prices on unknown list" 404 price_list_not_found -X PUT \
     "$BASE/admin/price-lists/pl_00000000000000000000000000000063/fixed-prices" -H "$JSON" -d '{"fixed_prices":[]}'
-step "fixed price in other currency" 422 fixed_price_currency_mismatch -X PUT \
+step "fixed price in other currency" 422 fixed_prices_invalid -X PUT \
     "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
     -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"RSD\"}}]}"
+contains "the entry's own code" '"code":"fixed_price_currency_mismatch"'
+step "a compare-at price at or below the fixed price" 422 fixed_prices_invalid -X PUT \
+    "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
+    -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"},\"compare_at\":{\"amount\":200,\"currency\":\"EUR\"}}]}"
+contains "named by index" '"code":"compare_at_not_above_price","index":0'
 step "misspelled PATCH field" 422 invalid_body -X PATCH "$BASE/admin/customers/$CUSTOMER" -H "$JSON" \
     -d '{"frist_name":"Ana"}'
 step "null for a field that can't be cleared" 422 invalid_body -X PATCH \
@@ -1978,10 +2009,11 @@ step "market without countries" 422 no_countries -X POST "$BASE/admin/markets" -
 step "market listing a country twice" 422 duplicate_country -X POST "$BASE/admin/markets" -H "$JSON" \
     -d '{"name":"France","countries":["FR","FR"],"currency":"EUR"}'
 step "discount beyond 100%" 422 invalid_basis_points -X POST "$BASE/admin/price-lists" -H "$JSON" \
-    -d '{"currency":"EUR","adjustment_bps":-10001}'
-step "the same variant twice in fixed prices" 422 duplicate_fixed_price -X PUT \
+    -d '{"name":"Too much","currency":"EUR","adjustment":{"percent_bps":-10001}}'
+step "the same variant twice in fixed prices" 422 fixed_prices_invalid -X PUT \
     "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
     -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":1,\"currency\":\"EUR\"}},{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":2,\"currency\":\"EUR\"}}]}"
+contains "the duplicate named" '"code":"duplicate_fixed_price"'
 step "unknown price list in a body" 422 price_list_not_found -X PUT "$BASE/admin/catalogs/$CATALOG/price-list" \
     -H "$JSON" -d '{"price_list":"pl_00000000000000000000000000000063"}'
 step "unknown market in a body" 422 market_not_found -X POST "$BASE/admin/catalogs" -H "$JSON" \

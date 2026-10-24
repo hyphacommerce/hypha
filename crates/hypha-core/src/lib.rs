@@ -67,7 +67,7 @@ pub use money::{BasisPoints, Currency, CurrencyError, Money, MoneyError, Price, 
 pub use operation_id::{OperationId, OperationIdError};
 pub use page::{Direction, Keyset, Page, PageError, PageLimit, PageRequest, SortKey};
 pub use ports::{
-    Clock, HasBatch, IdGenerator, Notifier, NotifyError, Progress, Random, RepoError,
+    Clock, HasBatch, HasClock, IdGenerator, Notifier, NotifyError, Progress, Random, RepoError,
     report_duplicate,
 };
 pub use preview_token::{

@@ -49,6 +49,9 @@ pub struct CreateProductRequest {
     handle: String,
     title: String,
     price: Money,
+    /// The "was" price shown struck through beside `price`: above it, in its currency.
+    #[serde(default)]
+    compare_at_price: Option<Money>,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -227,6 +230,8 @@ pub struct VariantResponse {
     weight_grams: Option<u32>,
     /// `false` for what is never shipped (downloads, gift cards).
     requires_shipping: bool,
+    /// The "was" price shown struck through beside the base price; `null` for none.
+    compare_at_price: Option<Money>,
     /// Its own custom field values the caller may read (variant fields); `PATCH
     /// /admin/variants/{id}/custom-fields` writes them.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
@@ -267,6 +272,7 @@ impl ProductResponse {
                     media_asset_id: v.media(),
                     weight_grams: v.weight().map(Weight::grams),
                     requires_shipping: v.requires_shipping(),
+                    compare_at_price: v.compare_at_price().map(|p| p.money()),
                     custom_fields: fields.json_of(v.id().as_uuid()),
                 })
                 .collect(),
@@ -572,6 +578,7 @@ pub async fn create<S: Storage>(
         handle: req.handle,
         title: req.title,
         price: req.price,
+        compare_at_price: req.compare_at_price,
     };
     let product = create_simple_product(&ctx, ports.products(), &state.ids, input).await?;
     Ok((
@@ -652,6 +659,11 @@ pub struct StorefrontVariantResponse {
     /// when there's no limit (stock isn't tracked, or it sells past zero). `0` where
     /// there's no price.
     available_quantity: Option<u64>,
+    /// What `price` is shown against, struck through: only ever above it; `null` for
+    /// none.
+    compare_at_price: Option<Money>,
+    /// Whether a compare-at price is shown: the variant is on sale.
+    on_sale: bool,
     /// The variant's own custom field values storefronts are shown.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     custom_fields: CustomFieldValues,
@@ -683,12 +695,17 @@ impl StorefrontProductResponse {
                     let priced = market
                         .and(offer)
                         .and_then(|o| o.variants.iter().find(|offered| offered.variant == v.id()));
+                    let resolved = priced.and_then(|o| o.price.as_ref());
                     StorefrontVariantResponse {
                         id: v.id(),
                         title: p.variant_title(v.id()),
                         selections: v.selections().to_vec(),
                         media_asset_id: v.media(),
-                        price: priced.and_then(|o| o.price).map(|price| price.money()),
+                        price: resolved.map(|r| r.price.money()),
+                        compare_at_price: resolved
+                            .and_then(|r| r.compare_at)
+                            .map(|price| price.money()),
+                        on_sale: resolved.is_some_and(|r| r.on_sale()),
                         available: priced.filter(|o| o.price.is_some()).map(|o| o.available),
                         available_quantity: match priced {
                             Some(o) => o.sellable,
@@ -727,6 +744,7 @@ async fn storefront_product<P>(
 ) -> Result<Json<StorefrontProductResponse>, ApiError>
 where
     P: HasChannels
+        + hypha_core::HasClock
         + HasMarkets
         + HasCatalogs
         + HasPriceLists
@@ -965,6 +983,9 @@ pub struct AddVariantRequest {
     sku: Option<String>,
     /// The base price, before markets and price lists.
     price: Money,
+    /// The "was" price shown struck through: above `price`, in its currency.
+    #[serde(default)]
+    compare_at_price: Option<Money>,
     /// One value per option, in the order of the product's `options`; empty for a
     /// product without options.
     #[serde(default)]
@@ -1000,6 +1021,7 @@ pub async fn add_variant<S: Storage>(
     let input = AddVariant {
         sku: req.sku,
         price: req.price,
+        compare_at_price: req.compare_at_price,
         selections: req.selections,
         weight: req.weight_grams.map(Weight::from_grams),
         requires_shipping: req.requires_shipping,
@@ -1026,6 +1048,11 @@ pub struct SetVariantRequest {
     sku: Option<String>,
     /// The base price, before markets and price lists.
     price: Money,
+    /// The "was" price shown struck through: above `price`, in its currency; `null` for
+    /// none.
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[schema(required = true)]
+    compare_at_price: Option<Money>,
     /// One value per option, in the order of the product's `options`; empty for a
     /// product without options.
     selections: Vec<OptionValueId>,
@@ -1070,6 +1097,7 @@ pub async fn set_variants<S: Storage>(
             id: v.id,
             sku: v.sku,
             price: v.price,
+            compare_at_price: v.compare_at_price,
             selections: v.selections,
             weight: v.weight_grams.map(Weight::from_grams),
             requires_shipping: v.requires_shipping,
@@ -1090,6 +1118,11 @@ pub struct UpdateVariantRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = Money, required = false)]
     price: Option<Money>,
+    /// The "was" price shown struck through: above the price, in its currency; `null`
+    /// clears it. Checked against the price as it ends up, so lowering both at once works.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    #[schema(value_type = Option<Money>, required = false)]
+    compare_at_price: Option<Option<Money>>,
     /// One value per option, in option order; another variant can't have them.
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = Vec<OptionValueId>, required = false)]
@@ -1123,6 +1156,7 @@ pub async fn update_variant<S: Storage>(
     let input = UpdateVariant {
         sku: req.sku,
         price: req.price,
+        compare_at_price: req.compare_at_price,
         selections: req.selections,
         weight: req.weight_grams.map(|w| w.map(Weight::from_grams)),
         requires_shipping: req.requires_shipping,

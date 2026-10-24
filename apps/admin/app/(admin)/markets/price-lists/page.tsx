@@ -102,7 +102,7 @@ async function PriceListRows() {
                   )}
                 </TableCell>
                 <TableCell>{list.currency}</TableCell>
-                <TableCell>{adjustment(list.adjustment_bps)}</TableCell>
+                <TableCell>{adjustment(list.adjustment?.percent_bps ?? 0)}</TableCell>
               </TableRow>
             );
           })}

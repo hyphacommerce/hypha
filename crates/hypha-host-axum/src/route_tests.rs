@@ -48,6 +48,8 @@ mod oauth;
 mod mcp;
 // Previews of admin writes (`Hypha-Preview`).
 mod previews;
+// Price lists: names, kinds, windows and compare-at prices.
+mod price_lists;
 // A host built with a spore.
 mod spores;
 
@@ -523,11 +525,14 @@ async fn the_admin_reads_its_whole_setup() {
         json!({"id": "prod_00000000000000000000000000000063", "title": null, "handle": null, "status": null})
     );
 
-    let body = r#"{"currency":"EUR","adjustment_bps":-1000}"#;
+    let body = r#"{"name":"Euro","currency":"EUR","adjustment":{"percent_bps":-1000}}"#;
     let (_, list) = send(&app, "POST", "/admin/price-lists", Some(body)).await;
     let list_id = list["id"].as_str().unwrap();
     let (_, lists) = send(&app, "GET", "/admin/price-lists", None).await;
-    assert_eq!(lists["items"][0]["adjustment_bps"], json!(-1000));
+    assert_eq!(
+        lists["items"][0]["adjustment"],
+        json!({"percent_bps": -1000})
+    );
     let (status, _) = send(&app, "GET", &format!("/admin/price-lists/{list_id}"), None).await;
     assert_eq!(status, StatusCode::OK);
     let url = format!("/admin/price-lists/{list_id}/fixed-prices");
@@ -879,13 +884,24 @@ async fn the_dispatcher_cleans_up_after_a_removed_variant() {
         ProductRepo::insert(ports.products(), &mut shirt)
             .await
             .unwrap();
-        let mut prices = PriceList::new(list, Currency::EUR, BasisPoints::new(0).unwrap());
+        let mut prices = PriceList::new(
+            list,
+            hypha_markets::PriceListDraft::new("Shirts", Currency::EUR)
+                .adjusted(BasisPoints::new(0).unwrap()),
+        )
+        .unwrap();
         PriceListRepo::insert(ports.price_lists(), &mut prices)
             .await
             .unwrap();
         ports
             .price_lists()
-            .set_fixed_prices(list, &[(s, eur(900)), (l, eur(1100))])
+            .set_fixed_prices(
+                list,
+                &[
+                    (s, hypha_markets::FixedPrice::plain(eur(900))),
+                    (l, hypha_markets::FixedPrice::plain(eur(1100))),
+                ],
+            )
             .await
             .unwrap();
     }
@@ -5127,14 +5143,15 @@ async fn markets_are_renamed_price_lists_adjusted_and_keys_listed() {
         &app,
         "POST",
         "/admin/price-lists",
-        Some(r#"{"currency":"EUR"}"#),
+        Some(r#"{"name":"Euro","currency":"EUR"}"#),
     )
     .await;
     let url = format!("/admin/price-lists/{}", list["id"].as_str().unwrap());
-    let (status, list) = send(&app, "PATCH", &url, Some(r#"{"adjustment_bps":-1500}"#)).await;
+    let patch = r#"{"adjustment":{"percent_bps":-1500}}"#;
+    let (status, list) = send(&app, "PATCH", &url, Some(patch)).await;
     assert_eq!(
-        (status, &list["adjustment_bps"]),
-        (StatusCode::OK, &json!(-1500))
+        (status, &list["adjustment"]),
+        (StatusCode::OK, &json!({"percent_bps": -1500}))
     );
     let body = json!({"fixed_prices": [{"variant": mug_variant, "price": {"amount": 750, "currency": "EUR"}}]});
     send(
@@ -5176,8 +5193,8 @@ async fn a_products_whole_variant_list_is_set_in_one_put() {
 
     // "Create all variants": the admin sends every combination as an explicit list.
     let body = json!({"variants": [
-        {"id": first, "sku": "TEE-S", "price": {"amount": 1000, "currency": "EUR"}, "selections": [small], "weight_grams": 180, "requires_shipping": true},
-        {"id": null, "sku": "TEE-M", "price": {"amount": 1100, "currency": "EUR"}, "selections": [medium], "weight_grams": null, "requires_shipping": true}
+        {"id": first, "sku": "TEE-S", "price": {"amount": 1000, "currency": "EUR"}, "compare_at_price": null, "selections": [small], "weight_grams": 180, "requires_shipping": true},
+        {"id": null, "sku": "TEE-M", "price": {"amount": 1100, "currency": "EUR"}, "compare_at_price": {"amount": 1500, "currency": "EUR"}, "selections": [medium], "weight_grams": null, "requires_shipping": true}
     ]});
     let url = format!("/admin/products/{product}/variants");
     let (status, tee) = send(&app, "PUT", &url, Some(&body.to_string())).await;
@@ -5190,17 +5207,21 @@ async fn a_products_whole_variant_list_is_set_in_one_put() {
         .collect();
     assert_eq!(skus, [&json!("TEE-S"), &json!("TEE-M")]);
     assert_eq!(tee["variants"][0]["weight_grams"], json!(180));
+    assert_eq!(
+        tee["variants"][1]["compare_at_price"],
+        json!({"amount": 1500, "currency": "EUR"})
+    );
 
     // Every key is required, so nothing is cleared by leaving it out.
-    let body = json!({"variants": [{"id": first, "price": {"amount": 1000, "currency": "EUR"}, "selections": [small], "weight_grams": null, "requires_shipping": true}]});
+    let body = json!({"variants": [{"id": first, "price": {"amount": 1000, "currency": "EUR"}, "compare_at_price": null, "selections": [small], "weight_grams": null, "requires_shipping": true}]});
     let (status, error) = send(&app, "PUT", &url, Some(&body.to_string())).await;
     assert_eq!(
         (status, code(&error)),
         (StatusCode::UNPROCESSABLE_ENTITY, "invalid_body")
     );
     let body = json!({"variants": [
-        {"id": null, "sku": null, "price": {"amount": 1, "currency": "EUR"}, "selections": [small], "weight_grams": null, "requires_shipping": true},
-        {"id": null, "sku": null, "price": {"amount": 1, "currency": "EUR"}, "selections": [small], "weight_grams": null, "requires_shipping": true}
+        {"id": null, "sku": null, "price": {"amount": 1, "currency": "EUR"}, "compare_at_price": null, "selections": [small], "weight_grams": null, "requires_shipping": true},
+        {"id": null, "sku": null, "price": {"amount": 1, "currency": "EUR"}, "compare_at_price": null, "selections": [small], "weight_grams": null, "requires_shipping": true}
     ]});
     let (status, error) = send(&app, "PUT", &url, Some(&body.to_string())).await;
     assert_eq!(

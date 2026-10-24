@@ -6,8 +6,9 @@ use hypha_core::{
     ProductId, Recorded, RepoError, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_markets::{
-    Catalog, CatalogContext, CatalogRepo, CatalogSnapshot, Market, MarketRepo, MarketSnapshot,
-    PriceList, PriceListRepo, PriceListSnapshot,
+    Catalog, CatalogContext, CatalogRepo, CatalogSnapshot, CompareAtMode, FixedPrice, Market,
+    MarketRepo, MarketSnapshot, PriceList, PriceListKind, PriceListRepo, PriceListSnapshot,
+    PriceListStatus,
 };
 use tokio_postgres::{
     Row,
@@ -17,8 +18,8 @@ use uuid::Uuid;
 
 use crate::{
     columns::{
-        col, currency_from_db, stamp_columns, stamps_from_row, version_from_db, version_to_db,
-        write_stamps,
+        col, currency_from_db, micros, opt_micros, opt_ts, stamp_columns, stamps_from_row, ts,
+        version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
@@ -462,6 +463,17 @@ pub(crate) async fn remove_catalog_products(
 
 // ---------- price lists ----------
 
+/// `price_lists`' columns, as `price_list_from_row` reads them.
+fn price_list_columns(prefix: &str) -> String {
+    format!(
+        "{prefix}id, {prefix}version, {prefix}name, {prefix}description, {prefix}currency,
+         {prefix}kind, {prefix}status, {}, {}, {prefix}compare_at, {prefix}adjustment, {}",
+        micros(&format!("{prefix}starts_at")),
+        micros(&format!("{prefix}ends_at")),
+        stamp_columns(prefix),
+    )
+}
+
 impl<C: PgConnection> PriceListRepo for PgStore<C> {
     async fn get(&self, id: PriceListId) -> Result<Option<PriceList>, RepoError> {
         let mut conn = self.conn().await;
@@ -469,8 +481,8 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
             .db()
             .query_typed_opt(
                 &format!(
-                    "SELECT id, version, currency, adjustment, {} FROM price_lists WHERE id = $1",
-                    stamp_columns(""),
+                    "SELECT {} FROM price_lists WHERE id = $1",
+                    price_list_columns("")
                 ),
                 &[(&id.as_uuid(), Type::UUID)],
             )
@@ -485,8 +497,8 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
             .db()
             .query_typed(
                 &format!(
-                    "SELECT id, version, currency, adjustment, {} FROM price_lists ORDER BY id",
-                    stamp_columns(""),
+                    "SELECT {} FROM price_lists ORDER BY id",
+                    price_list_columns("")
                 ),
                 &[],
             )
@@ -499,14 +511,14 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         &self,
         list: PriceListId,
         page: PageRequest<VariantId>,
-    ) -> Result<Page<(VariantId, Price)>, RepoError> {
+    ) -> Result<Page<(VariantId, FixedPrice)>, RepoError> {
         let after = page.after.map(|id| id.as_uuid());
         let fetch = i64::from(page.limit.get()) + 1;
         let mut conn = self.conn().await;
         let rows = conn
             .db()
             .query_typed(
-                "SELECT variant_id, amount, currency FROM price_list_prices
+                "SELECT variant_id, amount, currency, compare_at FROM price_list_prices
                  WHERE price_list_id = $1 AND ($2::uuid IS NULL OR variant_id < $2)
                  ORDER BY variant_id DESC LIMIT $3",
                 &[
@@ -555,7 +567,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
     async fn set_fixed_prices(
         &self,
         list: PriceListId,
-        prices: &[(VariantId, Price)],
+        prices: &[(VariantId, FixedPrice)],
     ) -> Result<(), RepoError> {
         in_transaction!(self, |tx| set_fixed_prices(tx, list, prices).await)
     }
@@ -587,7 +599,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         &self,
         list: PriceListId,
         variants: &[VariantId],
-    ) -> Result<HashMap<VariantId, Price>, RepoError> {
+    ) -> Result<HashMap<VariantId, FixedPrice>, RepoError> {
         if variants.is_empty() {
             return Ok(HashMap::new());
         }
@@ -596,7 +608,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         let rows = conn
             .db()
             .query_typed(
-                "SELECT variant_id, amount, currency FROM price_list_prices
+                "SELECT variant_id, amount, currency, compare_at FROM price_list_prices
                  WHERE price_list_id = $1 AND variant_id = ANY($2)",
                 &[(&list.as_uuid(), Type::UUID), (&ids, Type::UUID_ARRAY)],
             )
@@ -612,16 +624,28 @@ pub(crate) async fn insert_price_list(
     s: &PriceListSnapshot,
 ) -> Result<(), RepoError> {
     tx.query_typed(
-        "INSERT INTO price_lists (id, version, currency, adjustment) VALUES ($1, 1, $2, $3)",
+        &format!(
+            "INSERT INTO price_lists (id, version, name, description, currency, kind, status,
+                 starts_at, ends_at, compare_at, adjustment)
+             VALUES ($1, 1, $2, $3, $4, $5, $6, {}, {}, $9, $10)",
+            ts(7),
+            ts(8),
+        ),
         &[
             (&s.id.as_uuid(), Type::UUID),
+            (&s.name, Type::TEXT),
+            (&s.description, Type::TEXT),
             (&s.currency.as_str(), Type::TEXT),
-            (&s.adjustment.value(), Type::INT4),
+            (&s.kind.as_str(), Type::TEXT),
+            (&s.status.as_str(), Type::TEXT),
+            (&opt_micros(s.starts_at), Type::INT8),
+            (&opt_micros(s.ends_at), Type::INT8),
+            (&s.compare_at.as_str(), Type::TEXT),
+            (&s.adjustment.map(|a| a.value()), Type::INT4),
         ],
     )
     .await
     .map_err(repo_error)?;
-    let written = ();
     write_stamps(
         tx,
         "price_lists",
@@ -631,7 +655,7 @@ pub(crate) async fn insert_price_list(
         s.stamps,
     )
     .await?;
-    Ok(written)
+    Ok(())
 }
 
 /// `PriceListRepo::update` inside the caller's transaction; the new version.
@@ -641,13 +665,26 @@ pub(crate) async fn update_price_list(
 ) -> Result<Version, RepoError> {
     let bumped = tx
         .query_typed_opt(
-            "UPDATE price_lists SET version = version + 1, currency = $3, adjustment = $4
-             WHERE id = $1 AND version = $2 RETURNING version",
+            &format!(
+                "UPDATE price_lists SET version = version + 1, name = $3, description = $4,
+                     currency = $5, kind = $6, status = $7, starts_at = {}, ends_at = {},
+                     compare_at = $10, adjustment = $11
+                 WHERE id = $1 AND version = $2 RETURNING version",
+                ts(8),
+                ts(9),
+            ),
             &[
                 (&s.id.as_uuid(), Type::UUID),
                 (&version_to_db(s.version)?, Type::INT8),
+                (&s.name, Type::TEXT),
+                (&s.description, Type::TEXT),
                 (&s.currency.as_str(), Type::TEXT),
-                (&s.adjustment.value(), Type::INT4),
+                (&s.kind.as_str(), Type::TEXT),
+                (&s.status.as_str(), Type::TEXT),
+                (&opt_micros(s.starts_at), Type::INT8),
+                (&opt_micros(s.ends_at), Type::INT8),
+                (&s.compare_at.as_str(), Type::TEXT),
+                (&s.adjustment.map(|a| a.value()), Type::INT4),
             ],
         )
         .await
@@ -670,24 +707,34 @@ pub(crate) async fn update_price_list(
 pub(crate) async fn set_fixed_prices(
     tx: &impl Queries,
     list: PriceListId,
-    prices: &[(VariantId, Price)],
+    prices: &[(VariantId, FixedPrice)],
 ) -> Result<(), RepoError> {
     let variants: Vec<Uuid> = prices.iter().map(|(v, _)| v.as_uuid()).collect();
-    let amounts: Vec<i64> = prices.iter().map(|(_, p)| p.money().amount()).collect();
+    let amounts: Vec<i64> = prices
+        .iter()
+        .map(|(_, p)| p.price().money().amount())
+        .collect();
     let currencies: Vec<&str> = prices
         .iter()
-        .map(|(_, p)| p.money().currency().as_str())
+        .map(|(_, p)| p.price().money().currency().as_str())
+        .collect();
+    let compare_at: Vec<Option<i64>> = prices
+        .iter()
+        .map(|(_, p)| p.compare_at().map(|c| c.money().amount()))
         .collect();
     tx.query_typed(
-        "INSERT INTO price_list_prices (price_list_id, variant_id, amount, currency)
-         SELECT $1, v, a, c FROM unnest($2::uuid[], $3::bigint[], $4::text[]) AS t (v, a, c)
+        "INSERT INTO price_list_prices (price_list_id, variant_id, amount, currency, compare_at)
+         SELECT $1, v, a, c, w
+         FROM unnest($2::uuid[], $3::bigint[], $4::text[], $5::bigint[]) AS t (v, a, c, w)
          ON CONFLICT (price_list_id, variant_id)
-         DO UPDATE SET amount = EXCLUDED.amount, currency = EXCLUDED.currency",
+         DO UPDATE SET amount = EXCLUDED.amount, currency = EXCLUDED.currency,
+             compare_at = EXCLUDED.compare_at",
         &[
             (&list.as_uuid(), Type::UUID),
             (&variants, Type::UUID_ARRAY),
             (&amounts, Type::INT8_ARRAY),
             (&currencies, Type::TEXT_ARRAY),
+            (&compare_at, Type::INT8_ARRAY),
         ],
     )
     .await
@@ -712,23 +759,47 @@ pub(crate) async fn remove_fixed_prices(
 }
 
 fn price_list_from_row(row: &Row) -> Result<PriceList, RepoError> {
-    let adjustment: i32 = col(row, "adjustment")?;
-    Ok(PriceList::restore(PriceListSnapshot {
-        id: PriceListId::from_uuid(col(row, "id")?),
+    let id: Uuid = col(row, "id")?;
+    let adjustment: Option<i32> = col(row, "adjustment")?;
+    let kind: String = col(row, "kind")?;
+    let status: String = col(row, "status")?;
+    let compare_at: String = col(row, "compare_at")?;
+    PriceList::restore(PriceListSnapshot {
+        id: PriceListId::from_uuid(id),
         version: version_from_db(col(row, "version")?)?,
         stamps: stamps_from_row(row)?,
+        name: col(row, "name")?,
+        description: col(row, "description")?,
         currency: currency_from_db(col(row, "currency")?)?,
-        adjustment: BasisPoints::new(adjustment).map_err(corrupt)?,
-    }))
+        kind: PriceListKind::parse(&kind)
+            .ok_or_else(|| corrupt(format!("price list kind {kind:?}")))?,
+        status: PriceListStatus::parse(&status)
+            .ok_or_else(|| corrupt(format!("price list status {status:?}")))?,
+        starts_at: opt_ts(col(row, "starts_at")?),
+        ends_at: opt_ts(col(row, "ends_at")?),
+        compare_at: CompareAtMode::parse(&compare_at)
+            .ok_or_else(|| corrupt(format!("price list compare-at mode {compare_at:?}")))?,
+        adjustment: adjustment
+            .map(BasisPoints::new)
+            .transpose()
+            .map_err(corrupt)?,
+    })
+    .map_err(|e| corrupt(format!("price list {id}: {e}")))
 }
 
-/// A `price_list_prices` row (`variant_id, amount, currency`).
-fn fixed_price_from_row(row: &Row) -> Result<(VariantId, Price), RepoError> {
-    let money = hypha_core::Money::new(
-        col(row, "amount")?,
-        currency_from_db(col(row, "currency")?)?,
+/// A `price_list_prices` row (`variant_id, amount, currency, compare_at`).
+fn fixed_price_from_row(row: &Row) -> Result<(VariantId, FixedPrice), RepoError> {
+    let currency = currency_from_db(col(row, "currency")?)?;
+    let price = |amount: i64| {
+        hypha_core::Money::new(amount, currency)
+            .and_then(Price::new)
+            .map_err(corrupt)
+    };
+    let compare_at: Option<i64> = col(row, "compare_at")?;
+    let fixed = FixedPrice::new(
+        price(col(row, "amount")?)?,
+        compare_at.map(price).transpose()?,
     )
     .map_err(corrupt)?;
-    let price = Price::new(money).map_err(corrupt)?;
-    Ok((VariantId::from_uuid(col(row, "variant_id")?), price))
+    Ok((VariantId::from_uuid(col(row, "variant_id")?), fixed))
 }

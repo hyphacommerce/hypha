@@ -366,8 +366,10 @@ export function eventSentence(type: string, data: Data): Part[] | null {
         " from price list ",
         id(data.price_list),
       ];
+    case "price_list.created":
+      return ["Creates price list ", id(data.price_list)];
     case "price_list.changed":
-      return ["Changes price list ", id(data.price_list), "'s adjustment"];
+      return ["Changes price list ", id(data.price_list), `: ${fields(data)}`];
     case "catalog.products_added":
       return [
         "Adds ",

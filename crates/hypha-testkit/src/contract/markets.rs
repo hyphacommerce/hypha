@@ -2,10 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
     BasisPoints, CatalogId, CountryCode, Currency, MarketId, Money, Page, PageLimit, PageRequest,
-    Price, PriceListId, ProductId, RepoError, VariantId, Version, Versioned,
+    Price, PriceListId, ProductId, RepoError, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_markets::{
-    Catalog, CatalogContext, CatalogRepo, Market, MarketRepo, PriceList, PriceListRepo, repo::keys,
+    Adjustment, Catalog, CatalogContext, CatalogRepo, CompareAtMode, FixedPrice, Market,
+    MarketRepo, PriceList, PriceListDraft, PriceListKind, PriceListRepo, PriceListStatus,
+    repo::keys,
 };
 use uuid::Uuid;
 
@@ -52,7 +54,20 @@ fn catalog(n: u128, market: u128, price_list: Option<PriceListId>) -> Catalog {
 }
 
 fn price_list(n: u128, currency: Currency, bp: i32) -> PriceList {
-    PriceList::new(plid(n), currency, BasisPoints::new(bp).unwrap())
+    PriceList::new(
+        plid(n),
+        PriceListDraft::new(&format!("List {n}"), currency).adjusted(BasisPoints::new(bp).unwrap()),
+    )
+    .unwrap()
+}
+
+/// A list holding nothing but `name`: no adjustment.
+fn named_list(n: u128, name: &str) -> PriceList {
+    PriceList::new(plid(n), PriceListDraft::new(name, Currency::EUR)).unwrap()
+}
+
+fn fp(amount: i64) -> FixedPrice {
+    FixedPrice::plain(eur(amount))
 }
 
 fn eur(amount: i64) -> Price {
@@ -393,6 +408,10 @@ pub async fn price_list_repo<R: PriceListRepo>(make: impl AsyncFn() -> R) {
     price_list_update(&make().await).await;
     scenario("price list: unique ID, stale and missing updates");
     price_list_keys_and_stale(&make().await).await;
+    scenario("price list: names are unique, ignoring case");
+    price_list_names(&make().await).await;
+    scenario("price list: a fixed price keeps its compare-at price");
+    fixed_price_compare_at(&make().await).await;
     scenario("price list: fixed prices are set, removed and queried in batches");
     price_list_fixed_prices(&make().await).await;
     scenario("price list: fixed prices need the list and each variant once");
@@ -426,25 +445,25 @@ async fn fixed_price_pages<R: PriceListRepo>(repo: &R) {
     }
     repo.set_fixed_prices(
         plid(1),
-        &[(vid(1), eur(100)), (vid(3), eur(300)), (vid(2), eur(200))],
+        &[(vid(1), fp(100)), (vid(3), fp(300)), (vid(2), fp(200))],
     )
     .await
     .unwrap();
-    repo.set_fixed_prices(plid(2), &[(vid(4), eur(400))])
+    repo.set_fixed_prices(plid(2), &[(vid(4), fp(400))])
         .await
         .unwrap();
 
     assert_eq!(
         repo.fixed_price_page(plid(1), page(None, 2)).await,
         Ok(Page {
-            items: vec![(vid(3), eur(300)), (vid(2), eur(200))],
+            items: vec![(vid(3), fp(300)), (vid(2), fp(200))],
             has_more: true
         })
     );
     assert_eq!(
         repo.fixed_price_page(plid(1), page(Some(vid(2)), 2)).await,
         Ok(Page {
-            items: vec![(vid(1), eur(100))],
+            items: vec![(vid(1), fp(100))],
             has_more: false
         })
     );
@@ -463,10 +482,10 @@ async fn lists_pricing<R: PriceListRepo>(repo: &R) {
             .await
             .unwrap();
     }
-    repo.set_fixed_prices(plid(2), &[(vid(1), eur(100))])
+    repo.set_fixed_prices(plid(2), &[(vid(1), fp(100))])
         .await
         .unwrap();
-    repo.set_fixed_prices(plid(1), &[(vid(1), eur(90)), (vid(2), eur(80))])
+    repo.set_fixed_prices(plid(1), &[(vid(1), fp(90)), (vid(2), fp(80))])
         .await
         .unwrap();
     assert_eq!(repo.lists_pricing(vid(1)).await, Ok(vec![plid(1), plid(2)]));
@@ -484,14 +503,85 @@ async fn price_list_round_trips<R: PriceListRepo>(repo: &R) {
         assert_eq!(list.version(), Version::new(1));
         assert_eq!(repo.get(list.id()).await, Ok(Some(list)));
     }
+    // Every field set, and none.
+    let mut full = PriceList::new(
+        plid(4),
+        PriceListDraft {
+            name: "Black Friday".to_string(),
+            description: Some("Everything 20% off".to_string()),
+            currency: Currency::EUR,
+            kind: PriceListKind::Sale,
+            status: PriceListStatus::Draft,
+            starts_at: Some(Timestamp::from_unix_micros(1_000_000)),
+            ends_at: Some(Timestamp::from_unix_micros(2_000_000)),
+            compare_at: CompareAtMode::Hidden,
+            adjustment: Some(Adjustment::new(BasisPoints::new(-2000).unwrap())),
+        },
+    )
+    .unwrap();
+    repo.insert(&mut full).await.unwrap();
+    assert_eq!(repo.get(full.id()).await, Ok(Some(full)));
+    let mut bare = named_list(5, "Fixed only");
+    repo.insert(&mut bare).await.unwrap();
+    assert_eq!(repo.get(bare.id()).await, Ok(Some(bare)));
     assert_eq!(repo.get(plid(99)).await, Ok(None));
+}
+
+async fn price_list_names<R: PriceListRepo>(repo: &R) {
+    repo.insert(&mut named_list(1, "Wholesale")).await.unwrap();
+    assert_eq!(
+        repo.insert(&mut named_list(2, "WHOLESALE")).await,
+        Err(RepoError::Duplicate(keys::PRICE_LIST_NAME))
+    );
+    let mut other = named_list(2, "Retail");
+    repo.insert(&mut other).await.unwrap();
+    other.rename("wholesale").unwrap();
+    assert_eq!(
+        repo.update(&mut other).await,
+        Err(RepoError::Duplicate(keys::PRICE_LIST_NAME))
+    );
+    // Its own name in another case is fine.
+    let mut own = repo.get(plid(1)).await.unwrap().unwrap();
+    own.rename("WholeSale").unwrap();
+    repo.update(&mut own).await.unwrap();
+    assert_eq!(
+        repo.get(plid(1)).await.unwrap().unwrap().name(),
+        "WholeSale"
+    );
+}
+
+async fn fixed_price_compare_at<R: PriceListRepo>(repo: &R) {
+    repo.insert(&mut named_list(1, "Sale")).await.unwrap();
+    let was = FixedPrice::new(eur(800), Some(eur(1000))).unwrap();
+    repo.set_fixed_prices(plid(1), &[(vid(1), was.clone()), (vid(2), fp(500))])
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.fixed_prices(plid(1), &[vid(1), vid(2)]).await,
+        Ok(HashMap::from([(vid(1), was.clone()), (vid(2), fp(500))]))
+    );
+    // Setting it again without one clears it.
+    repo.set_fixed_prices(plid(1), &[(vid(1), fp(800))])
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.fixed_prices(plid(1), &[vid(1)]).await,
+        Ok(HashMap::from([(vid(1), fp(800))]))
+    );
+    assert_eq!(
+        repo.fixed_price_page(plid(1), page(None, 10))
+            .await
+            .unwrap()
+            .items,
+        vec![(vid(2), fp(500)), (vid(1), fp(800))]
+    );
 }
 
 async fn price_list_update<R: PriceListRepo>(repo: &R) {
     let mut list = price_list(1, Currency::EUR, 0);
     repo.insert(&mut list).await.unwrap();
 
-    list.set_adjustment(BasisPoints::new(2500).unwrap());
+    list.set_adjustment(Some(Adjustment::new(BasisPoints::new(2500).unwrap())));
     repo.update(&mut list).await.unwrap();
 
     assert_eq!(list.version(), Version::new(2));
@@ -507,7 +597,7 @@ async fn price_list_keys_and_stale<R: PriceListRepo>(repo: &R) {
     );
 
     let mut stale = list.clone();
-    list.set_adjustment(BasisPoints::new(-500).unwrap());
+    list.set_adjustment(Some(Adjustment::new(BasisPoints::new(-500).unwrap())));
     repo.update(&mut list).await.unwrap();
     assert_eq!(repo.update(&mut stale).await, Err(RepoError::StaleVersion));
     assert_eq!(repo.get(list.id()).await, Ok(Some(list)));
@@ -531,39 +621,39 @@ async fn price_list_fixed_prices<R: PriceListRepo>(repo: &R) {
 
     repo.set_fixed_prices(
         a.id(),
-        &[(vid(1), eur(100)), (vid(2), eur(200)), (vid(3), eur(0))],
+        &[(vid(1), fp(100)), (vid(2), fp(200)), (vid(3), fp(0))],
     )
     .await
     .unwrap();
     // Setting again replaces.
-    repo.set_fixed_prices(a.id(), &[(vid(1), eur(150))])
+    repo.set_fixed_prices(a.id(), &[(vid(1), fp(150))])
         .await
         .unwrap();
     // Removing a price that isn't there is not an error.
     repo.remove_fixed_prices(a.id(), &[vid(2), vid(9)])
         .await
         .unwrap();
-    repo.set_fixed_prices(b.id(), &[(vid(1), eur(999))])
+    repo.set_fixed_prices(b.id(), &[(vid(1), fp(999))])
         .await
         .unwrap();
 
     assert_eq!(
         repo.fixed_prices(a.id(), &[vid(1), vid(2), vid(3), vid(4)])
             .await,
-        Ok(HashMap::from([(vid(1), eur(150)), (vid(3), eur(0))]))
+        Ok(HashMap::from([(vid(1), fp(150)), (vid(3), fp(0))]))
     );
     assert_eq!(repo.fixed_prices(a.id(), &[]).await, Ok(HashMap::new()));
     // Prices are per list.
     assert_eq!(
         repo.fixed_prices(b.id(), &[vid(1)]).await,
-        Ok(HashMap::from([(vid(1), eur(999))]))
+        Ok(HashMap::from([(vid(1), fp(999))]))
     );
     // Fixed prices are not part of the list row: updating the list keeps them.
-    a.set_adjustment(BasisPoints::new(-1000).unwrap());
+    a.set_adjustment(Some(Adjustment::new(BasisPoints::new(-1000).unwrap())));
     repo.update(&mut a).await.unwrap();
     assert_eq!(
         repo.fixed_prices(a.id(), &[vid(1)]).await,
-        Ok(HashMap::from([(vid(1), eur(150))]))
+        Ok(HashMap::from([(vid(1), fp(150))]))
     );
 }
 
@@ -577,7 +667,7 @@ async fn catalog_products_need_the_catalog<R: CatalogRepo>(repo: &R) {
 /// and each variant appears once. Breaking either fails and stores nothing.
 async fn fixed_prices_preconditions<R: PriceListRepo>(repo: &R) {
     assert!(
-        repo.set_fixed_prices(plid(99), &[(vid(1), eur(100))])
+        repo.set_fixed_prices(plid(99), &[(vid(1), fp(100))])
             .await
             .is_err()
     );
@@ -585,7 +675,7 @@ async fn fixed_prices_preconditions<R: PriceListRepo>(repo: &R) {
     let mut list = price_list(1, Currency::EUR, 0);
     repo.insert(&mut list).await.unwrap();
     assert!(
-        repo.set_fixed_prices(list.id(), &[(vid(1), eur(100)), (vid(1), eur(200))])
+        repo.set_fixed_prices(list.id(), &[(vid(1), fp(100)), (vid(1), fp(200))])
             .await
             .is_err()
     );

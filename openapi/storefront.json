@@ -1074,6 +1074,17 @@
         "oneOf": [
           {
             "properties": {
+              "compare_at_price": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Money",
+                    "description": "What `unit_price` is shown against, struck through: only ever above it; `null`\nfor none."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "status": {
                 "enum": [
                   "priced"
@@ -3199,6 +3210,17 @@
               "null"
             ]
           },
+          "compare_at_price": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "What `price` is shown against, struck through: only ever above it; `null` for\nnone."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "custom_fields": {
             "additionalProperties": {},
             "description": "The variant's own custom field values storefronts are shown.",
@@ -3220,6 +3242,10 @@
                 "type": "null"
               }
             ]
+          },
+          "on_sale": {
+            "description": "Whether a compare-at price is shown: the variant is on sale.",
+            "type": "boolean"
           },
           "price": {
             "oneOf": [
@@ -3250,6 +3276,7 @@
         "required": [
           "id",
           "selections",
+          "on_sale",
           "custom_fields"
         ],
         "type": "object"

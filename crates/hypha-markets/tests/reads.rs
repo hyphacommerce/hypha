@@ -38,8 +38,10 @@ fn vid(n: u128) -> VariantId {
     VariantId::from_uuid(Uuid::from_u128(n))
 }
 
-fn eur(amount: i64) -> Price {
-    Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap()
+fn eur(amount: i64) -> hypha_markets::FixedPrice {
+    hypha_markets::FixedPrice::plain(
+        Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap(),
+    )
 }
 
 fn first(limit: u32) -> PageRequest<ProductId> {
@@ -65,7 +67,12 @@ fn world() -> InMemoryPorts {
     let mut catalog = Catalog::new(cid(10), CatalogContext::Market(mid(1)), Some(plid(20)));
     block_on(ports.catalogs().insert(&mut catalog)).unwrap();
     block_on(ports.catalogs().add_products(cid(10), &[pid(1), pid(2)])).unwrap();
-    let mut list = PriceList::new(plid(20), Currency::EUR, BasisPoints::new(-1000).unwrap());
+    let mut list = PriceList::new(
+        plid(20),
+        hypha_markets::PriceListDraft::new("Sale", Currency::EUR)
+            .adjusted(BasisPoints::new(-1000).unwrap()),
+    )
+    .unwrap();
     block_on(ports.price_lists().insert(&mut list)).unwrap();
     block_on(
         ports

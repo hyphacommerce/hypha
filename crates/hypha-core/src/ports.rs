@@ -13,6 +13,20 @@ pub trait Clock {
     fn now(&self) -> Timestamp;
 }
 
+/// The time a request's ports work at: what their writes are stamped with, and what
+/// rules that depend on the time are judged at (whether a price list's window is open).
+/// Each call reads the clock again.
+pub trait HasClock {
+    fn now(&self) -> Timestamp;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasClock + ?Sized> HasClock for &T {
+    fn now(&self) -> Timestamp {
+        (**self).now()
+    }
+}
+
 /// How much a job step did, and whether it stopped at its limit with more to do: a runner
 /// repeats the step while there's more and waits its interval when there isn't. Every
 /// crate's jobs (dispatching, pruning, search sync) answer with it, so a Workers Cron

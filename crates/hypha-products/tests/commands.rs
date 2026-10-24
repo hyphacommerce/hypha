@@ -16,6 +16,7 @@ fn mug() -> CreateSimpleProduct {
         handle: "mug".to_string(),
         title: "Mug".to_string(),
         price: Money::new(1000, Currency::EUR).unwrap(),
+        compare_at_price: None,
     }
 }
 fn handle(s: &str) -> Handle {

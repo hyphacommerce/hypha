@@ -34,6 +34,8 @@ export type VariantDraft = {
   weight: string;
   ships: boolean;
   selections: Record<string, string>;
+  /** The stored compare-at price, sent back unchanged: the editor doesn't edit it yet. */
+  compareAt?: AdminSchemas["Money"] | null;
 };
 
 export type Draft = {
@@ -76,6 +78,7 @@ export function fromProduct(product: Product, currencies: Currencies): Draft {
       price: moneyInput(v.price, currencies),
       weight: v.weight_grams == null ? "" : String(v.weight_grams),
       ships: v.requires_shipping,
+      compareAt: v.compare_at_price ?? null,
       selections: Object.fromEntries(
         product.options.map((o, i) => [o.id, v.selections[i]] as const),
       ),
@@ -154,6 +157,7 @@ export type VariantPlan = {
   id: string | null;
   sku: string | null;
   price: AdminSchemas["Money"];
+  compare_at_price: AdminSchemas["Money"] | null;
   weight_grams: number | null;
   requires_shipping: boolean;
   selections: SelectionRef[];
@@ -269,6 +273,7 @@ export function plan(
         id: v.id ?? null,
         sku: v.sku.trim() === "" ? null : v.sku,
         price: { amount, currency },
+        compare_at_price: v.compareAt ?? null,
         weight_grams: grams,
         requires_shipping: v.ships,
         selections: draft.options.map((option, i) => {

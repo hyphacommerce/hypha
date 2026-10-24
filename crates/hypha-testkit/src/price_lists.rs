@@ -4,21 +4,26 @@ use std::{
 };
 
 use hypha_core::{
-    Page, PageRequest, Price, PriceListId, Recorded, RepoError, VariantId, Versioned, stamp_insert,
+    Page, PageRequest, PriceListId, Recorded, RepoError, VariantId, Versioned, stamp_insert,
     stamp_update,
 };
-use hypha_markets::{PriceList, PriceListRepo, repo::keys};
+use hypha_markets::{FixedPrice, PriceList, PriceListRepo, repo::keys};
 
 use crate::{
     InMemoryOutbox,
-    table::{Table, missing, no_unique_keys, page_of},
+    table::{Table, missing, page_of},
 };
+
+/// A name belongs to one list, ignoring case.
+fn unique(new: &PriceList, other: &PriceList) -> Option<&'static str> {
+    (new.name().to_lowercase() == other.name().to_lowercase()).then_some(keys::PRICE_LIST_NAME)
+}
 
 #[derive(Default)]
 pub struct InMemoryPriceListRepo {
     price_lists: Table<PriceListId, PriceList>,
     /// Fixed prices, stored apart from the list like a separate table would be.
-    fixed_prices: Mutex<HashMap<PriceListId, HashMap<VariantId, Price>>>,
+    fixed_prices: Mutex<HashMap<PriceListId, HashMap<VariantId, FixedPrice>>>,
     pub(crate) outbox: InMemoryOutbox,
 }
 
@@ -41,12 +46,19 @@ impl InMemoryPriceListRepo {
         self.fixed_prices.lock().unwrap()
     }
 
+    /// The next `n` lookups by a unique key (`list_all`, which name checks read) find
+    /// nothing, as if another request inserted the row right after: for testing a command
+    /// that loses the race between its pre-check and its write.
+    pub fn hide_next_lookups(&self, n: usize) {
+        self.price_lists.hide_next_lookups(n);
+    }
+
     pub(crate) fn exists(&self, id: PriceListId) -> bool {
         self.price_lists.get(&id).is_some()
     }
 }
 
-pub(crate) type FixedPrices = HashMap<PriceListId, HashMap<VariantId, Price>>;
+pub(crate) type FixedPrices = HashMap<PriceListId, HashMap<VariantId, FixedPrice>>;
 
 impl PriceListRepo for InMemoryPriceListRepo {
     async fn get(&self, id: PriceListId) -> Result<Option<PriceList>, RepoError> {
@@ -61,21 +73,21 @@ impl PriceListRepo for InMemoryPriceListRepo {
         &self,
         list: PriceListId,
         page: PageRequest<VariantId>,
-    ) -> Result<Page<(VariantId, Price)>, RepoError> {
+    ) -> Result<Page<(VariantId, FixedPrice)>, RepoError> {
         let all = self.fixed_prices.lock().unwrap();
-        let prices = all.get(&list).into_iter().flatten().map(|(v, p)| (*v, *p));
+        let prices = all
+            .get(&list)
+            .into_iter()
+            .flatten()
+            .map(|(v, p)| (*v, p.clone()));
         Ok(page_of(prices, page))
     }
 
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
         stamp_insert(price_list, self.outbox.now());
         let events = price_list.take_events();
-        self.price_lists.insert(
-            price_list.id(),
-            price_list,
-            keys::PRICE_LIST_ID,
-            &no_unique_keys,
-        )?;
+        self.price_lists
+            .insert(price_list.id(), price_list, keys::PRICE_LIST_ID, &unique)?;
         self.outbox.write(events, Some(price_list.version()));
         Ok(())
     }
@@ -84,7 +96,7 @@ impl PriceListRepo for InMemoryPriceListRepo {
         stamp_update(price_list, self.outbox.now());
         let events = price_list.take_events();
         self.price_lists
-            .update(price_list.id(), price_list, &no_unique_keys)?;
+            .update(price_list.id(), price_list, &unique)?;
         self.outbox.write(events, Some(price_list.version()));
         Ok(())
     }
@@ -92,7 +104,7 @@ impl PriceListRepo for InMemoryPriceListRepo {
     async fn set_fixed_prices(
         &self,
         list: PriceListId,
-        prices: &[(VariantId, Price)],
+        prices: &[(VariantId, FixedPrice)],
     ) -> Result<(), RepoError> {
         if self.price_lists.get(&list).is_none() {
             return Err(missing("price list", list));
@@ -105,7 +117,7 @@ impl PriceListRepo for InMemoryPriceListRepo {
             )));
         }
         let mut all = self.fixed_prices.lock().unwrap();
-        all.entry(list).or_default().extend(prices.iter().copied());
+        all.entry(list).or_default().extend(prices.iter().cloned());
         Ok(())
     }
 
@@ -138,21 +150,22 @@ impl PriceListRepo for InMemoryPriceListRepo {
         &self,
         list: PriceListId,
         variants: &[VariantId],
-    ) -> Result<HashMap<VariantId, Price>, RepoError> {
+    ) -> Result<HashMap<VariantId, FixedPrice>, RepoError> {
         let all = self.fixed_prices.lock().unwrap();
         let Some(prices) = all.get(&list) else {
             return Ok(HashMap::new());
         };
         Ok(variants
             .iter()
-            .filter_map(|v| prices.get(v).map(|p| (*v, *p)))
+            .filter_map(|v| prices.get(v).map(|p| (*v, p.clone())))
             .collect())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use hypha_core::{BasisPoints, Currency, Money};
+    use hypha_core::{Currency, Money, Price};
+    use hypha_markets::PriceListDraft;
     use pollster::block_on;
     use uuid::Uuid;
 
@@ -166,14 +179,18 @@ mod tests {
         VariantId::from_uuid(Uuid::from_u128(n))
     }
 
-    fn eur(amount: i64) -> Price {
-        Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap()
+    fn eur(amount: i64) -> FixedPrice {
+        FixedPrice::plain(Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap())
+    }
+
+    fn new_list() -> PriceList {
+        PriceList::new(list_id(), PriceListDraft::new("Euro", Currency::EUR)).unwrap()
     }
 
     /// A repo holding the price list `list_id()`.
     fn with_list() -> InMemoryPriceListRepo {
         let repo = InMemoryPriceListRepo::default();
-        let mut list = PriceList::new(list_id(), Currency::EUR, BasisPoints::ZERO);
+        let mut list = new_list();
         block_on(repo.insert(&mut list)).unwrap();
         repo
     }
@@ -181,7 +198,7 @@ mod tests {
     #[test]
     fn saves_and_loads_price_lists() {
         let repo = InMemoryPriceListRepo::default();
-        let mut list = PriceList::new(list_id(), Currency::EUR, BasisPoints::ZERO);
+        let mut list = new_list();
         block_on(repo.insert(&mut list)).unwrap();
         assert_eq!(block_on(repo.get(list.id())), Ok(Some(list)));
     }

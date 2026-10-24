@@ -64,6 +64,8 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
             sellable: Some(0),
             status: LineStatus::Priced {
                 unit_price: line.unit_price,
+                compare_at: line.compare_at_price,
+                price_list: line.price_list,
                 total: line.total,
                 tax: line.tax.map(tax_line),
             },

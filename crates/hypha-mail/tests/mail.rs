@@ -177,6 +177,8 @@ fn line(n: u128, title: &str, variant: Option<&str>, quantity: u32, unit: i64) -
         total: eur(unit * i64::from(quantity)),
         tax: None,
         fulfilled_quantity: 0,
+        compare_at_price: None,
+        price_list: None,
     }
 }
 

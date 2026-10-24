@@ -1,9 +1,9 @@
 use hypha_core::{
     AddressError, AddressParts, AuthError, CartId, Clock, CountryCode, CountryError, Ctx,
-    CustomerId, Email, EmailError, ErrorCode, HasBatch, HasIdempotency, IdGenerator,
+    CustomerId, Email, EmailError, ErrorCode, HasBatch, HasClock, HasIdempotency, IdGenerator,
     IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, MarketId, MoneyError,
     ProductId, Quantity, QuantityError, RepoError, Scope, ShippingGroupId, ShippingOptionId,
-    StageIdempotency, VariantId, earlier_id,
+    StageIdempotency, Timestamp, VariantId, earlier_id,
 };
 use hypha_customers::{CustomerRepo, HasCustomers};
 use hypha_inventory::{HasInventoryItems, HasLocations, StockContext};
@@ -165,7 +165,8 @@ impl<T> IdempotentCartPorts for T where
 
 /// What pricing a cart reads: everything but the carts and customers themselves.
 pub trait PricingPorts:
-    HasChannels
+    HasClock
+    + HasChannels
     + HasProducts
     + HasMarkets
     + HasCatalogs
@@ -179,7 +180,8 @@ pub trait PricingPorts:
 }
 
 impl<T> PricingPorts for T where
-    T: HasChannels
+    T: HasClock
+        + HasChannels
         + HasProducts
         + HasMarkets
         + HasCatalogs
@@ -523,7 +525,7 @@ async fn reprice_grown_line<S: PricingPorts>(
         return Err(LineError::ProductNotPublished(product.id()).into());
     }
     let pricing = load_pricing(ports, cart).await?;
-    price_line(&product, variant, &pricing)?;
+    price_line(&product, variant, cart.line(variant)?.quantity(), &pricing)?;
 
     // The whole line counts: adding 1 to a line of 2 needs 3 in stock. Nothing is
     // reserved; stock is only taken at checkout.
@@ -687,13 +689,8 @@ pub async fn read_cart<S: PricingPorts>(
 /// `read_cart`.
 fn empty_reading(cart: &Cart, market: Market) -> CartReading {
     debug_assert!(cart.lines().is_empty());
-    let pricing = PricingContext {
-        catalog: None,
-        price_list: None,
-        included_products: Default::default(),
-        fixed_prices: Default::default(),
-        market,
-    };
+    // No line is priced, so the time doesn't matter.
+    let pricing = PricingContext::empty(market, Timestamp::UNIX_EPOCH);
     let tax = TaxContext {
         region: None,
         prices_include_tax: pricing.market.prices_include_tax(),
@@ -733,7 +730,7 @@ async fn load_publication<S: HasChannels>(
 /// number of round trips for 1 line or 100 (on Postgres about 20, counting the
 /// BEGIN/COMMIT of each multi-query load); an empty cart reads only its market
 /// (`empty_reading`).
-async fn load_pricing<S: HasMarkets + HasCatalogs + HasPriceLists>(
+async fn load_pricing<S: HasMarkets + HasCatalogs + HasPriceLists + HasClock>(
     ports: &S,
     cart: &Cart,
 ) -> Result<PricingContext, CommandError> {

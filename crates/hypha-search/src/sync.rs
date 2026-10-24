@@ -38,7 +38,8 @@ use crate::{
 /// Everything the sync job reads: the queue and settings, and what documents are made
 /// of. Anything with all of them is `SyncPorts` (the blanket impl below).
 pub trait SyncPorts:
-    HasSearchQueue
+    hypha_core::HasClock
+    + HasSearchQueue
     + HasSearchSettings
     + HasProducts
     + HasChannels
@@ -54,7 +55,8 @@ pub trait SyncPorts:
 }
 
 impl<T> SyncPorts for T where
-    T: HasSearchQueue
+    T: hypha_core::HasClock
+        + HasSearchQueue
         + HasSearchSettings
         + HasProducts
         + HasChannels

@@ -42,13 +42,15 @@ const CATEGORY_PRODUCTS: &[&str] = &[
 const VARIANT_PRICES: &[&str] = &["price_list.prices_set", "price_list.prices_removed"];
 const STOCK: &[&str] = &["inventory_item.changed", "inventory_item.deleted"];
 /// Rare and wide: which products a market sells, at what price, from where.
-const EVERYTHING: &[&str] = &["catalog.changed", "price_list.changed"];
+const EVERYTHING: &[&str] = &["catalog.changed"];
 /// What to rebuild when one of the fields named changed (the event's `fields`):
 /// - a location's `markets` decide where its stock counts, the settings' `split_by`
 ///   changes every listing key, and a market's countries, currency and tax rule decide
 ///   every price there: everything;
 /// - a category's `parent` or `visible` change which categories the products below it are
-///   listed under: that subtree.
+///   listed under: that subtree;
+/// - a price list's adjustment, kind, status, window and compare-at mode change what it
+///   prices and how: everything (its name and description don't).
 ///
 /// Names and the like aren't in documents and rebuild nothing.
 const WHEN_FIELD: &[(&str, &[&str], Rebuild)] = &[
@@ -63,6 +65,18 @@ const WHEN_FIELD: &[(&str, &[&str], Rebuild)] = &[
         "category.changed",
         &["parent", "visible"],
         Rebuild::Category,
+    ),
+    (
+        "price_list.changed",
+        &[
+            "adjustment",
+            "kind",
+            "status",
+            "starts_at",
+            "ends_at",
+            "compare_at",
+        ],
+        Rebuild::All,
     ),
 ];
 

@@ -133,7 +133,7 @@ export async function removeCatalogProduct(
 export async function attachPriceList(
   market: string,
   catalog: string,
-  input: { existing: string } | { currency: string; adjustmentBps: number },
+  input: { existing: string } | { name: string; currency: string; adjustmentBps: number },
 ): Promise<Result> {
   const client = await sessionClient();
   let list: string;
@@ -141,7 +141,11 @@ export async function attachPriceList(
     list = input.existing;
   } else {
     const { data, error } = await client.POST("/admin/price-lists", {
-      body: { currency: input.currency, adjustment_bps: input.adjustmentBps },
+      body: {
+        name: input.name,
+        currency: input.currency,
+        adjustment: { percent_bps: input.adjustmentBps },
+      },
     });
     if (error) return { error: describe(error) };
     list = data.id;
@@ -174,7 +178,7 @@ export async function setAdjustment(
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/price-lists/{id}", {
     params: { path: { id: list } },
-    body: { adjustment_bps: adjustmentBps },
+    body: { adjustment: { percent_bps: adjustmentBps } },
   });
   if (error) return { error: describe(error) };
   refresh(market);

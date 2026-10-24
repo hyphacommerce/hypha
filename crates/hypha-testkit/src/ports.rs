@@ -285,6 +285,12 @@ impl HasCatalogs for InMemoryPorts {
     }
 }
 
+impl hypha_core::HasClock for InMemoryPorts {
+    fn now(&self) -> hypha_core::Timestamp {
+        self.outbox.now()
+    }
+}
+
 impl HasPriceLists for InMemoryPorts {
     type PriceLists = InMemoryPriceListRepo;
     fn price_lists(&self) -> &InMemoryPriceListRepo {

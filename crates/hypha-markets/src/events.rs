@@ -58,11 +58,35 @@ impl Event for CatalogProductsRemoved {
     const VERSION: u16 = 1;
 }
 
-/// `price_list.changed`: created, or its adjustment changed (every price that follows
-/// it changes).
+/// `price_list.created`: a new list, on no catalog yet.
+#[derive(Debug, Serialize)]
+pub struct PriceListCreated {
+    pub price_list: PriceListId,
+}
+
+impl Event for PriceListCreated {
+    const TYPE: &'static str = "price_list.created";
+    const VERSION: u16 = 1;
+}
+
+/// `price_list.deleted`: gone with its fixed prices; no catalog held it.
+#[derive(Debug, Serialize)]
+pub struct PriceListDeleted {
+    pub price_list: PriceListId,
+}
+
+impl Event for PriceListDeleted {
+    const TYPE: &'static str = "price_list.deleted";
+    const VERSION: u16 = 1;
+}
+
+/// `price_list.changed`: what changed, among `name`, `description`, `kind`, `status`,
+/// `starts_at`, `ends_at`, `compare_at` and `adjustment`. Events written before `fields`
+/// existed were for a creation or a new adjustment.
 #[derive(Debug, Serialize)]
 pub struct PriceListChanged {
     pub price_list: PriceListId,
+    pub fields: Vec<&'static str>,
 }
 
 impl Event for PriceListChanged {

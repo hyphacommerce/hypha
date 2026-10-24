@@ -70,6 +70,8 @@ fn plain_line(id: u128) -> OrderLine {
         total: eur(500),
         tax: None,
         fulfilled_quantity: 0,
+        compare_at_price: None,
+        price_list: None,
     }
 }
 
@@ -95,6 +97,8 @@ fn full_line(id: u128) -> OrderLine {
             },
         }),
         fulfilled_quantity: 0,
+        compare_at_price: Some(Price::new(eur(3)).unwrap()),
+        price_list: Some(hypha_core::PriceListId::from_uuid(Uuid::from_u128(id + 5))),
     }
 }
 
@@ -778,6 +782,8 @@ fn sale(s: Sale) -> Order {
                 },
             }),
             fulfilled_quantity: 0,
+            compare_at_price: None,
+            price_list: None,
         })
         .collect();
     let subtotal: i64 = lines.iter().map(|l| l.total.amount()).sum();

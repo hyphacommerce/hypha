@@ -10,7 +10,7 @@ use hypha_cart::{Cart, CartSnapshot, StageCarts};
 use hypha_categories::{Category, CategorySnapshot, StageCategories};
 use hypha_core::{
     CartId, CatalogId, CategoryId, ChannelId, CustomFieldDefinitionId, CustomerGroupId, CustomerId,
-    HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price, PriceListId, ProductId, Recorded,
+    HasBatch, IdempotencyRecord, IdentityId, PendingEvent, PriceListId, ProductId, Recorded,
     RepoError, SessionId, StageEvents, StageIdempotency, TaxClassId, Timestamp, VariantId, Version,
     Versioned, stamp_insert, stamp_update,
 };
@@ -24,7 +24,7 @@ use hypha_customers::{
 };
 use hypha_fulfillment::{Fulfillment, FulfillmentSnapshot, StageFulfillments};
 use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
-use hypha_markets::{StageCatalogProducts, StageFixedPrices};
+use hypha_markets::{FixedPrice, StageCatalogProducts, StageFixedPrices};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_notifications::{
     NotificationSettings, NotificationSettingsSnapshot, StageNotificationSettings,
@@ -138,7 +138,7 @@ enum Staged {
     /// Category membership: added (`true`) or removed.
     CategoryProducts(CategoryId, Vec<ProductId>, bool),
     /// Fixed prices set (`Some` price) or removed (`None`), per variant.
-    FixedPrices(PriceListId, Vec<(VariantId, Option<Price>)>),
+    FixedPrices(PriceListId, Vec<(VariantId, Option<FixedPrice>)>),
     NewNotificationSettings(NotificationSettingsSnapshot),
     NotificationSettings(NotificationSettingsSnapshot),
     NewApp(AppSnapshot),
@@ -762,9 +762,9 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                         remove_group_members(&db, group, &customers).await?
                     }
                     Staged::FixedPrices(list, changes) => {
-                        let set: Vec<(VariantId, Price)> = changes
+                        let set: Vec<(VariantId, FixedPrice)> = changes
                             .iter()
-                            .filter_map(|(v, p)| p.map(|p| (*v, p)))
+                            .filter_map(|(v, p)| p.clone().map(|p| (*v, p)))
                             .collect();
                         let removed: Vec<VariantId> = changes
                             .iter()
@@ -899,8 +899,8 @@ impl StageCatalogProducts for PgBatch {
 }
 
 impl StageFixedPrices for PgBatch {
-    fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, Price)]) {
-        let changes = prices.iter().map(|(v, p)| (*v, Some(*p))).collect();
+    fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, FixedPrice)]) {
+        let changes = prices.iter().map(|(v, p)| (*v, Some(p.clone()))).collect();
         self.stage(Staged::FixedPrices(list, changes));
     }
 

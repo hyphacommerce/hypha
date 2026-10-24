@@ -48,6 +48,7 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("catalogs_pkey", market_keys::CATALOG_ID),
     ("catalog_context", market_keys::CATALOG_CONTEXT),
     ("price_lists_pkey", market_keys::PRICE_LIST_ID),
+    ("price_list_name", market_keys::PRICE_LIST_NAME),
     ("carts_pkey", cart_keys::CART_ID),
     ("tax_classes_pkey", tax_keys::TAX_CLASS_ID),
     ("tax_regions_pkey", tax_keys::TAX_REGION_ID),

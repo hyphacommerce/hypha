@@ -9,7 +9,7 @@ use hypha_categories::{Category, StageCategories, keys as category_keys};
 use hypha_channels::StagePublications;
 use hypha_core::AppKey;
 use hypha_core::{
-    CatalogId, CategoryId, ChannelId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price,
+    CatalogId, CategoryId, ChannelId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent,
     PriceListId, ProductId, Recorded, RepoError, SessionId, StageEvents, StageIdempotency,
     TaxClassId, Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
@@ -22,7 +22,7 @@ use hypha_customers::{
 };
 use hypha_fulfillment::{Fulfillment, StageFulfillments, keys as fulfillment_keys};
 use hypha_inventory::{InventoryItem, StageInventoryItems};
-use hypha_markets::{StageCatalogProducts, StageFixedPrices};
+use hypha_markets::{FixedPrice, StageCatalogProducts, StageFixedPrices};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_notifications::{
     NotificationSettings, StageNotificationSettings, keys as notification_keys,
@@ -111,7 +111,7 @@ enum Staged {
     DeletedCategory(CategoryId),
     CategoryProducts(CategoryId, Vec<ProductId>, bool),
     TaxAssignment(Vec<ProductId>, Option<TaxClassId>),
-    FixedPrices(PriceListId, Vec<(VariantId, Option<Price>)>),
+    FixedPrices(PriceListId, Vec<(VariantId, Option<FixedPrice>)>),
     NewNotificationSettings(NotificationSettings),
     NotificationSettings(NotificationSettings),
     NewApp(App),
@@ -1121,8 +1121,8 @@ impl StageCatalogProducts for InMemoryBatch {
 }
 
 impl StageFixedPrices for InMemoryBatch {
-    fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, Price)]) {
-        let changes = prices.iter().map(|(v, p)| (*v, Some(*p))).collect();
+    fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, FixedPrice)]) {
+        let changes = prices.iter().map(|(v, p)| (*v, Some(p.clone()))).collect();
         self.stage(Staged::FixedPrices(list, changes));
     }
 

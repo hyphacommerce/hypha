@@ -2619,7 +2619,7 @@ export interface paths {
         /** Every price list, oldest first. */
         get: operations["admin.markets.list_price_lists"];
         put?: never;
-        /** Creates a price list. */
+        /** Creates a price list. Its name is unique, ignoring case (`409 price_list_name_taken`). */
         post: operations["admin.markets.create_price_list"];
         delete?: never;
         options?: never;
@@ -2641,7 +2641,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Changes a price list's adjustment; its currency is fixed. */
+        /** Changes a price list; its currency is fixed. */
         patch: operations["admin.markets.update_price_list"];
         trace?: never;
     };
@@ -2654,7 +2654,10 @@ export interface paths {
         };
         /** A price list's fixed prices, newest variant first. */
         get: operations["admin.markets.list_fixed_prices"];
-        /** Sets fixed prices for variants in a price list. */
+        /**
+         * Sets fixed prices for variants in a price list: up to 1,000 at once, every entry's
+         *     problem answered together (`422 fixed_prices_invalid`, `details.entries`).
+         */
         put: operations["admin.markets.set_fixed_prices"];
         post?: never;
         /** Removes fixed prices from a price list. */
@@ -3432,6 +3435,7 @@ export interface components {
             tax_class?: components["schemas"]["TaxClassId"] | null;
         };
         AddVariantRequest: {
+            compare_at_price?: components["schemas"]["Money"] | null;
             /** @description The base price, before markets and price lists. */
             price: components["schemas"]["Money"];
             /** @description Defaults to `true`. */
@@ -3494,6 +3498,14 @@ export interface components {
              * @description Negative to remove stock.
              */
             delta: number;
+        };
+        /** @description A percentage applied to base prices. */
+        AdjustmentDto: {
+            /**
+             * Format: int32
+             * @description Basis points: -1000 = 10% off, 500 = 5% markup. At least -10000.
+             */
+            percent_bps: number;
         };
         /** @description Every installed app's admin contributions to a target. */
         AdminExtensionsResponse: {
@@ -4173,6 +4185,14 @@ export interface components {
             /** @description From the authenticator app, or (to disable or regenerate) a recovery code. */
             code: string;
         };
+        /**
+         * @description How an `override` list shows a variant's own compare-at price when its fixed price
+         *     has none: `adjusted` by the list's adjustment, or `hidden`.
+         *
+         *     Known values: `adjusted`, `hidden`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        CompareAtModeDto: string;
         ConfirmResetRequest: {
             password: string;
             token: string;
@@ -4496,14 +4516,29 @@ export interface components {
             settings?: Record<string, never> | null;
         };
         CreatePriceListRequest: {
-            /**
-             * Format: int32
-             * @description Basis points: -1000 = 10% off. Defaults to 0.
-             */
-            adjustment_bps?: number;
+            adjustment?: components["schemas"]["AdjustmentDto"] | null;
+            compare_at?: components["schemas"]["CompareAtModeDto"] | null;
+            /** @description Fixed for good: catalogs and fixed prices depend on it. */
             currency: components["schemas"]["Currency"];
+            /** @description Up to 255 characters; for staff. */
+            description?: string | null;
+            /**
+             * Format: date-time
+             * @description When it stops (exclusive); `null` for never. After `starts_at`.
+             */
+            ends_at?: string | null;
+            kind?: components["schemas"]["PriceListKindDto"] | null;
+            /** @description Unique, ignoring case; 1 to 255 characters, trimmed. */
+            name: string;
+            /**
+             * Format: date-time
+             * @description When it starts pricing (inclusive); `null` for at once.
+             */
+            starts_at?: string | null;
+            status?: components["schemas"]["PriceListStatusDto"] | null;
         };
         CreateProductRequest: {
+            compare_at_price?: components["schemas"]["Money"] | null;
             handle: string;
             price: components["schemas"]["Money"];
             title: string;
@@ -5084,6 +5119,8 @@ export interface components {
             code: string;
         };
         FixedPriceDto: {
+            compare_at?: components["schemas"]["Money"] | null;
+            /** @description In the list's currency. */
             price: components["schemas"]["Money"];
             variant: components["schemas"]["VariantId"];
         };
@@ -5102,6 +5139,7 @@ export interface components {
             variant_title?: string | null;
         };
         FixedPriceResponse: {
+            compare_at?: components["schemas"]["Money"] | null;
             price: components["schemas"]["Money"];
             product?: components["schemas"]["FixedPriceProduct"] | null;
             variant: components["schemas"]["VariantId"];
@@ -5343,6 +5381,7 @@ export interface components {
             variant_title?: string | null;
         };
         LineState: {
+            compare_at_price?: components["schemas"]["Money"] | null;
             /** @enum {string} */
             status: "priced";
             tax?: components["schemas"]["TaxLineResponse"] | null;
@@ -6176,16 +6215,51 @@ export interface components {
          * @example pl_0190f1a2b3c47d8e9f00112233445566
          */
         PriceListId: string;
+        /**
+         * @description What a list's prices mean: a `sale` is struck through against the regular price, an
+         *     `override` is the regular price. Either kind competes the same way: the lowest live
+         *     price wins.
+         *
+         *     Known values: `sale`, `override`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        PriceListKindDto: string;
         PriceListListResponse: {
             /** @description Oldest first. A store has a handful, so they come in one list. */
             items: components["schemas"]["PriceListResponse"][];
         };
+        /**
+         * @description Where a list stands now, from its status and window: only `active` prices anything.
+         *
+         *     Known values: `draft`, `scheduled`, `active`, `expired`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        PriceListPhaseDto: string;
         PriceListResponse: {
-            /** Format: int32 */
-            adjustment_bps: number;
+            adjustment?: components["schemas"]["AdjustmentDto"] | null;
+            compare_at: components["schemas"]["CompareAtModeDto"];
+            created_at: string;
             currency: components["schemas"]["Currency"];
+            description?: string | null;
+            /** @description RFC 3339; `null` for no end. */
+            ends_at?: string | null;
             id: components["schemas"]["PriceListId"];
+            kind: components["schemas"]["PriceListKindDto"];
+            name: string;
+            /** @description Where it stands now, from `status` and the window. */
+            phase: components["schemas"]["PriceListPhaseDto"];
+            /** @description RFC 3339; `null` for no start. */
+            starts_at?: string | null;
+            status: components["schemas"]["PriceListStatusDto"];
+            updated_at: string;
         };
+        /**
+         * @description `draft` never prices anything, whatever its window says.
+         *
+         *     Known values: `draft`, `active`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        PriceListStatusDto: string;
         PriceRangeResponse: {
             /** @description Equal to `min` when every variant in this currency costs the same. */
             max: components["schemas"]["Money"];
@@ -6777,6 +6851,7 @@ export interface components {
             values: components["schemas"]["OwnerValueRequest"][];
         };
         SetFixedPricesRequest: {
+            /** @description Up to 1,000 per request; bulk callers page through. */
             fixed_prices: components["schemas"]["FixedPriceDto"][];
         };
         SetMediaRequest: {
@@ -6820,6 +6895,7 @@ export interface components {
          *     replaces the list, so a missing key would silently clear what's stored.
          */
         SetVariantRequest: {
+            compare_at_price: components["schemas"]["Money"] | null;
             id: components["schemas"]["VariantId"] | null;
             /** @description The base price, before markets and price lists. */
             price: components["schemas"]["Money"];
@@ -7299,12 +7375,26 @@ export interface components {
             /** @description Replaces the provider's settings, checked by it. */
             settings?: Record<string, never>;
         };
+        /** @description A price list's changes (JSON Merge Patch). Its currency is fixed. */
         UpdatePriceListRequest: {
+            adjustment?: components["schemas"]["AdjustmentDto"] | null;
+            compare_at?: components["schemas"]["CompareAtModeDto"];
+            /** @description `null` clears it. */
+            description?: string | null;
             /**
-             * Format: int32
-             * @description Basis points: -1000 = 10% off.
+             * Format: date-time
+             * @description RFC 3339; `null` clears it.
              */
-            adjustment_bps?: number;
+            ends_at?: string | null;
+            kind?: components["schemas"]["PriceListKindDto"];
+            /** @description Unique, ignoring case. */
+            name?: string;
+            /**
+             * Format: date-time
+             * @description RFC 3339; `null` clears it. The window is checked as it ends up.
+             */
+            starts_at?: string | null;
+            status?: components["schemas"]["PriceListStatusDto"];
         };
         /** @description Title and handle (JSON Merge Patch; neither can be `null`). */
         UpdateProductRequest: {
@@ -7384,6 +7474,7 @@ export interface components {
         };
         /** @description A variant's SKU, price and option values (JSON Merge Patch). */
         UpdateVariantRequest: {
+            compare_at_price?: components["schemas"]["Money"] | null;
             price?: components["schemas"]["Money"];
             requires_shipping?: boolean;
             /** @description One value per option, in option order; another variant can't have them. */
@@ -7458,6 +7549,7 @@ export interface components {
          */
         VariantId: string;
         VariantResponse: {
+            compare_at_price?: components["schemas"]["Money"] | null;
             /**
              * @description Its own custom field values the caller may read (variant fields); `PATCH
              *     /admin/variants/{id}/custom-fields` writes them.

@@ -46,6 +46,8 @@ pub struct CreateSimpleProduct {
     pub handle: String,
     pub title: String,
     pub price: Money,
+    /// Above `price`, in its currency.
+    pub compare_at_price: Option<Money>,
 }
 
 pub async fn create_simple_product<R: ProductRepo, I: IdGenerator>(
@@ -58,15 +60,21 @@ pub async fn create_simple_product<R: ProductRepo, I: IdGenerator>(
 
     let handle = Handle::new(&input.handle).map_err(ProductError::from)?;
     let price = Price::new(input.price)?;
+    let compare_at_price = input.compare_at_price.map(Price::new).transpose()?;
 
     // All input is checked before anything is read.
-    let mut product = Product::new_simple(
-        ProductId::from_uuid(ids.new_uuid()),
-        handle,
-        input.title,
-        VariantId::from_uuid(ids.new_uuid()),
-        price,
-    )?;
+    let id = ProductId::from_uuid(ids.new_uuid());
+    let variant = VariantId::from_uuid(ids.new_uuid());
+    let mut product = Product::new_simple(id, handle, input.title, variant, price)?;
+    if compare_at_price.is_some() {
+        product.update_variant(
+            variant,
+            VariantPatch {
+                compare_at_price: Some(compare_at_price),
+                ..VariantPatch::default()
+            },
+        )?;
+    }
 
     // Precise error in the normal case; the repo's unique key catches a concurrent insert.
     if let Some(taken) = handle_taken(repo, product.handle()).await? {
@@ -257,6 +265,8 @@ pub async fn set_product_options<R: ProductRepo, I: IdGenerator>(
 pub struct AddVariant {
     pub sku: Option<String>,
     pub price: Money,
+    /// Above `price`, in its currency.
+    pub compare_at_price: Option<Money>,
     /// One value per option, in option order.
     pub selections: Vec<OptionValueId>,
     pub weight: Option<Weight>,
@@ -274,6 +284,7 @@ pub async fn add_product_variant<R: ProductRepo, I: IdGenerator>(
 ) -> Result<Product, CommandError> {
     ctx.require(Scope::ProductsWrite)?;
     let price = Price::new(input.price)?;
+    let compare_at_price = input.compare_at_price.map(Price::new).transpose()?;
     let mut product = load(repo, id).await?;
     let variant = VariantId::from_uuid(ids.new_uuid());
     product.add_variant(NewVariant {
@@ -285,6 +296,7 @@ pub async fn add_product_variant<R: ProductRepo, I: IdGenerator>(
     product.update_variant(
         variant,
         VariantPatch {
+            compare_at_price: Some(compare_at_price),
             weight: Some(input.weight),
             requires_shipping: Some(input.requires_shipping),
             ..VariantPatch::default()
@@ -303,6 +315,8 @@ pub async fn add_product_variant<R: ProductRepo, I: IdGenerator>(
 pub struct UpdateVariant {
     pub sku: Option<Option<String>>,
     pub price: Option<Money>,
+    /// `Some(None)` clears the compare-at price.
+    pub compare_at_price: Option<Option<Money>>,
     pub selections: Option<Vec<OptionValueId>>,
     /// `Some(None)` clears the weight.
     pub weight: Option<Option<Weight>>,
@@ -318,6 +332,10 @@ pub async fn update_product_variant<R: ProductRepo>(
 ) -> Result<Product, CommandError> {
     ctx.require(Scope::ProductsWrite)?;
     let price = input.price.map(Price::new).transpose()?;
+    let compare_at_price = input
+        .compare_at_price
+        .map(|c| c.map(Price::new).transpose())
+        .transpose()?;
     let mut product = load(repo, id).await?;
     let sku_before = product
         .variant(variant)
@@ -328,6 +346,7 @@ pub async fn update_product_variant<R: ProductRepo>(
         VariantPatch {
             sku: input.sku,
             price,
+            compare_at_price,
             selections: input.selections,
             weight: input.weight,
             requires_shipping: input.requires_shipping,
@@ -353,6 +372,7 @@ pub struct SetVariant {
     pub id: Option<VariantId>,
     pub sku: Option<String>,
     pub price: Money,
+    pub compare_at_price: Option<Money>,
     pub selections: Vec<OptionValueId>,
     pub weight: Option<Weight>,
     pub requires_shipping: bool,
@@ -377,6 +397,7 @@ pub async fn set_product_variants<R: ProductRepo, I: IdGenerator>(
                 id: v.id,
                 sku: v.sku,
                 price: Price::new(v.price)?,
+                compare_at_price: v.compare_at_price.map(Price::new).transpose()?,
                 selections: v.selections,
                 weight: v.weight,
                 requires_shipping: v.requires_shipping,

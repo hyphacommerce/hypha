@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use hypha_core::{
     Address, CartId, ChannelId, CountryCode, CustomerId, Direction, Email, Keyset, MarketId, Money,
-    OrderId, OrderLineId, Page, PageRequest, Price, ProductId, Quantity, Recorded, RepoError,
-    ShippingGroupId, ShippingOptionId, SortKey, TaxClassId, TaxRegionId, Timestamp, VariantId,
-    Version, Versioned, stamp_insert, stamp_update,
+    OrderId, OrderLineId, Page, PageRequest, Price, PriceListId, ProductId, Quantity, Recorded,
+    RepoError, ShippingGroupId, ShippingOptionId, SortKey, TaxClassId, TaxRegionId, Timestamp,
+    VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_orders::{
     Cancellation, Order, OrderFilter, OrderLine, OrderNumber, OrderRepo, OrderShippingLine,
@@ -466,6 +466,14 @@ async fn insert_lines(
         .map(|l| l.unit_price.money().amount())
         .collect();
     let totals: Vec<i64> = lines.iter().map(|l| l.total.amount()).collect();
+    let compare_at: Vec<Option<i64>> = lines
+        .iter()
+        .map(|l| l.compare_at_price.map(|p| p.money().amount()))
+        .collect();
+    let price_lists: Vec<Option<Uuid>> = lines
+        .iter()
+        .map(|l| l.price_list.map(|p| p.as_uuid()))
+        .collect();
     let fulfilled: Vec<i64> = lines
         .iter()
         .map(|l| i64::from(l.fulfilled_quantity))
@@ -493,16 +501,16 @@ async fn insert_lines(
     tx.query_typed(
         "INSERT INTO order_lines (order_id, position, id, product_id, variant_id, quantity,
              product_title, variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id,
-             tax_amount, tax_region_id, fulfilled_quantity)
+             tax_amount, tax_region_id, fulfilled_quantity, compare_at_amount, price_list_id)
          SELECT $1, (n - 1)::integer, id, product_id, variant_id, quantity, product_title,
              variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id, tax_amount,
-             tax_region_id, fulfilled_quantity
+             tax_region_id, fulfilled_quantity, compare_at, price_list
          FROM unnest($2::uuid[], $3::uuid[], $4::uuid[], $5::bigint[], $6::text[], $7::text[],
                      $8::text[], $9::bigint[], $10::bigint[], $11::integer[], $12::uuid[],
-                     $13::bigint[], $14::uuid[], $15::bigint[])
+                     $13::bigint[], $14::uuid[], $15::bigint[], $16::bigint[], $17::uuid[])
               WITH ORDINALITY AS t (id, product_id, variant_id, quantity, product_title,
                   variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id,
-                  tax_amount, tax_region_id, fulfilled_quantity, n)",
+                  tax_amount, tax_region_id, fulfilled_quantity, compare_at, price_list, n)",
         &[
             (&order.as_uuid(), Type::UUID),
             (&ids, Type::UUID_ARRAY),
@@ -519,6 +527,8 @@ async fn insert_lines(
             (&tax_amounts, Type::INT8_ARRAY),
             (&tax_regions, Type::UUID_ARRAY),
             (&fulfilled, Type::INT8_ARRAY),
+            (&compare_at, Type::INT8_ARRAY),
+            (&price_lists, Type::UUID_ARRAY),
         ],
     )
     .await
@@ -564,7 +574,7 @@ async fn load(client: &impl Queries, ids: &[Uuid]) -> Result<Vec<Order>, RepoErr
         .query_typed(
             "SELECT id, product_id, variant_id, quantity, product_title, variant_title, sku,
                  unit_price, total, tax_rate_ppm, tax_class_id, tax_amount, tax_region_id,
-                 fulfilled_quantity, order_id
+                 fulfilled_quantity, order_id, compare_at_amount, price_list_id
              FROM order_lines WHERE order_id = ANY($1) ORDER BY order_id, position",
             &param,
         )
@@ -775,5 +785,9 @@ fn line_from_db(
         total: money(col(line, "total")?)?,
         tax,
         fulfilled_quantity,
+        compare_at_price: col::<Option<i64>>(line, "compare_at_amount")?
+            .map(|amount| money(amount).and_then(|m| Price::new(m).map_err(corrupt)))
+            .transpose()?,
+        price_list: col::<Option<Uuid>>(line, "price_list_id")?.map(PriceListId::from_uuid),
     })
 }

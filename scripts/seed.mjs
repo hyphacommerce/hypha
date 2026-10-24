@@ -1449,7 +1449,12 @@ async function main() {
     market.catalog =
       created.catalog ?? (await admin.post("/admin/catalogs", { market: created.id })).id;
     if (market.currency !== "EUR") {
-      market.priceList = (await admin.post("/admin/price-lists", { currency: market.currency })).id;
+      market.priceList = (
+        await admin.post("/admin/price-lists", {
+          name: `${market.name} prices`,
+          currency: market.currency,
+        })
+      ).id;
       await admin.put(`/admin/catalogs/${market.catalog}/price-list`, {
         price_list: market.priceList,
       });

@@ -2,14 +2,15 @@ use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
     Actor, AuthError, CatalogId, CountryCode, CountryError, Ctx, Currency, MarketId, Money,
-    MoneyError, Price, PriceListId, ProductId, Scope, UserId, VariantId,
+    MoneyError, Price, PriceListId, ProductId, Scope, Timestamp, UserId, VariantId,
 };
 use hypha_markets::{
-    CatalogContext, CatalogRepo, CommandError, CreateCatalog, CreateMarket, CreatePriceList,
-    FixedPrice, Market, MarketError, MarketRepo, MismatchedPrice, PriceListError, PriceListRepo,
-    UpdateMarket, add_catalog_products, add_market_country, create_catalog, create_market,
+    CatalogContext, CatalogRepo, CommandError, CompareAtMode, CreateCatalog, CreateMarket,
+    CreatePriceList, EntryProblem, FixedPrice, FixedPriceProblem, Market, MarketError, MarketRepo,
+    PriceListError, PriceListKind, PriceListRepo, PriceListStatus, SetFixedPrice, UpdateMarket,
+    UpdatePriceList, add_catalog_products, add_market_country, create_catalog, create_market,
     create_price_list, remove_catalog_products, remove_fixed_prices, remove_market_country,
-    set_fixed_prices, update_market,
+    set_fixed_prices, update_market, update_price_list,
 };
 use hypha_testkit::{
     InMemoryCatalogRepo, InMemoryMarketRepo, InMemoryPorts, InMemoryPriceListRepo, SequentialIds,
@@ -140,21 +141,33 @@ fn create_market_requires_markets_write() {
 // ---- price lists and fixed prices ----
 
 fn eur_list(adjustment: i32) -> CreatePriceList {
+    named_list("Euro prices", Some(adjustment))
+}
+
+fn named_list(name: &str, adjustment: Option<i32>) -> CreatePriceList {
     CreatePriceList {
+        name: name.to_string(),
+        description: None,
         currency: Currency::EUR,
+        kind: PriceListKind::Override,
+        status: PriceListStatus::Active,
+        starts_at: None,
+        ends_at: None,
+        compare_at: CompareAtMode::Adjusted,
         adjustment,
     }
 }
 
-fn fixed(variant: u128, amount: i64, currency: Currency) -> FixedPrice {
-    FixedPrice {
+fn fixed(variant: u128, amount: i64, currency: Currency) -> SetFixedPrice {
+    SetFixedPrice {
         variant: vid(variant),
         price: Money::new(amount, currency).unwrap(),
+        compare_at: None,
     }
 }
 
-fn eur(amount: i64) -> Price {
-    Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap()
+fn eur(amount: i64) -> FixedPrice {
+    FixedPrice::plain(Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap())
 }
 
 /// A stored EUR price list with no adjustment.
@@ -162,6 +175,14 @@ fn stored_list(lists: &InMemoryPriceListRepo, ids: &SequentialIds) -> PriceListI
     block_on(create_price_list(&Ctx::system(), lists, ids, eur_list(0)))
         .unwrap()
         .id()
+}
+
+fn problem(index: usize, variant: u128, problem: FixedPriceProblem) -> EntryProblem {
+    EntryProblem {
+        index,
+        variant: Some(vid(variant)),
+        problem,
+    }
 }
 
 #[test]
@@ -177,8 +198,186 @@ fn create_price_list_stores_list() {
     ))
     .unwrap();
 
-    assert_eq!(list.adjustment().value(), -1000);
+    assert_eq!(list.adjustment().map(|a| a.percent().value()), Some(-1000));
+    assert_eq!(list.name(), "Euro prices");
     assert_eq!(block_on(lists.get(list.id())), Ok(Some(list)));
+}
+
+#[test]
+fn create_price_list_without_adjustment_has_none() {
+    let lists = InMemoryPriceListRepo::default();
+    let ids = SequentialIds::default();
+    let list = block_on(create_price_list(
+        &Ctx::system(),
+        &lists,
+        &ids,
+        named_list("Sale", None),
+    ))
+    .unwrap();
+    assert_eq!(list.adjustment(), None);
+}
+
+#[test]
+fn create_price_list_rejects_a_window_ending_before_it_starts() {
+    let lists = InMemoryPriceListRepo::default();
+    let ids = SequentialIds::default();
+    let at = Timestamp::from_unix_micros;
+    let input = CreatePriceList {
+        starts_at: Some(at(10)),
+        ends_at: Some(at(10)),
+        ..named_list("Sale", None)
+    };
+    assert_eq!(
+        block_on(create_price_list(&Ctx::system(), &lists, &ids, input)).map(|l| l.id()),
+        Err(CommandError::PriceList(PriceListError::EndsNotAfterStart))
+    );
+}
+
+#[test]
+fn create_price_list_rejects_a_name_taken_ignoring_case() {
+    let lists = InMemoryPriceListRepo::default();
+    let ids = SequentialIds::default();
+    let first = block_on(create_price_list(
+        &Ctx::system(),
+        &lists,
+        &ids,
+        named_list("Wholesale", None),
+    ))
+    .unwrap();
+    assert_eq!(
+        block_on(create_price_list(
+            &Ctx::system(),
+            &lists,
+            &ids,
+            named_list(" WHOLESALE ", None)
+        ))
+        .map(|l| l.id()),
+        Err(CommandError::PriceListNameTaken {
+            name: "Wholesale".to_string(),
+            price_list: first.id(),
+        })
+    );
+}
+
+#[test]
+fn a_name_taken_by_a_concurrent_insert_names_the_owner() {
+    let lists = InMemoryPriceListRepo::default();
+    let ids = SequentialIds::default();
+    let first = block_on(create_price_list(
+        &Ctx::system(),
+        &lists,
+        &ids,
+        named_list("Wholesale", None),
+    ))
+    .unwrap();
+    // The pre-check misses it, as if the other insert came right after.
+    lists.hide_next_lookups(1);
+    assert_eq!(
+        block_on(create_price_list(
+            &Ctx::system(),
+            &lists,
+            &ids,
+            named_list("wholesale", None)
+        ))
+        .map(|l| l.id()),
+        Err(CommandError::PriceListNameTaken {
+            name: "Wholesale".to_string(),
+            price_list: first.id(),
+        })
+    );
+}
+
+#[test]
+fn update_price_list_changes_what_it_is_given() {
+    let lists = InMemoryPriceListRepo::default();
+    let ids = SequentialIds::default();
+    let list = stored_list(&lists, &ids);
+    let at = Timestamp::from_unix_micros;
+
+    let updated = block_on(update_price_list(
+        &Ctx::system(),
+        &lists,
+        list,
+        UpdatePriceList {
+            name: Some("Black Friday".to_string()),
+            kind: Some(PriceListKind::Sale),
+            starts_at: Some(Some(at(5))),
+            ends_at: Some(Some(at(9))),
+            adjustment: Some(None),
+            ..UpdatePriceList::default()
+        },
+    ))
+    .unwrap();
+
+    assert_eq!(updated.name(), "Black Friday");
+    assert_eq!(updated.kind(), PriceListKind::Sale);
+    assert_eq!(
+        (updated.window().starts_at(), updated.window().ends_at()),
+        (Some(at(5)), Some(at(9)))
+    );
+    assert_eq!(updated.adjustment(), None);
+    assert_eq!(block_on(lists.get(list)), Ok(Some(updated)));
+}
+
+#[test]
+fn update_price_list_checks_the_window_as_it_ends_up() {
+    let lists = InMemoryPriceListRepo::default();
+    let ids = SequentialIds::default();
+    let list = stored_list(&lists, &ids);
+    let at = Timestamp::from_unix_micros;
+    block_on(update_price_list(
+        &Ctx::system(),
+        &lists,
+        list,
+        UpdatePriceList {
+            ends_at: Some(Some(at(9))),
+            ..UpdatePriceList::default()
+        },
+    ))
+    .unwrap();
+    assert_eq!(
+        block_on(update_price_list(
+            &Ctx::system(),
+            &lists,
+            list,
+            UpdatePriceList {
+                starts_at: Some(Some(at(9))),
+                ..UpdatePriceList::default()
+            },
+        ))
+        .map(|l| l.id()),
+        Err(CommandError::PriceList(PriceListError::EndsNotAfterStart))
+    );
+}
+
+#[test]
+fn update_price_list_rejects_another_lists_name() {
+    let lists = InMemoryPriceListRepo::default();
+    let ids = SequentialIds::default();
+    let taken = stored_list(&lists, &ids);
+    let other = block_on(create_price_list(
+        &Ctx::system(),
+        &lists,
+        &ids,
+        named_list("Retail", None),
+    ))
+    .unwrap();
+    assert_eq!(
+        block_on(update_price_list(
+            &Ctx::system(),
+            &lists,
+            other.id(),
+            UpdatePriceList {
+                name: Some("euro PRICES".to_string()),
+                ..UpdatePriceList::default()
+            },
+        ))
+        .map(|l| l.id()),
+        Err(CommandError::PriceListNameTaken {
+            name: "Euro prices".to_string(),
+            price_list: taken,
+        })
+    );
 }
 
 #[test]
@@ -237,20 +436,63 @@ fn set_fixed_prices_stores_them() {
 }
 
 #[test]
-fn set_fixed_prices_rejects_negative_price_and_stores_nothing() {
+fn set_fixed_prices_keeps_a_compare_at_price() {
     let ports = InMemoryPorts::default();
     let lists = &ports.price_lists;
     let ids = SequentialIds::default();
     let list = stored_list(lists, &ids);
+    let mut entry = fixed(1, 900, Currency::EUR);
+    entry.compare_at = Some(Money::new(1200, Currency::EUR).unwrap());
+
+    block_on(set_fixed_prices(&Ctx::system(), &ports, list, vec![entry])).unwrap();
+
+    let price = |a| Price::new(Money::new(a, Currency::EUR).unwrap()).unwrap();
+    assert_eq!(
+        block_on(lists.fixed_prices(list, &[vid(1)])),
+        Ok(HashMap::from([(
+            vid(1),
+            FixedPrice::new(price(900), Some(price(1200))).unwrap()
+        )]))
+    );
+}
+
+#[test]
+fn set_fixed_prices_reports_every_entrys_problem_and_stores_nothing() {
+    let ports = InMemoryPorts::default();
+    let lists = &ports.price_lists;
+    let ids = SequentialIds::default();
+    let list = stored_list(lists, &ids);
+    let mut low_compare_at = fixed(4, 900, Currency::EUR);
+    low_compare_at.compare_at = Some(Money::new(900, Currency::EUR).unwrap());
 
     assert_eq!(
         block_on(set_fixed_prices(
             &Ctx::system(),
             &ports,
             list,
-            vec![fixed(1, 900, Currency::EUR), fixed(2, -1, Currency::EUR)]
+            vec![
+                fixed(1, 900, Currency::EUR),
+                fixed(2, -1, Currency::EUR),
+                fixed(3, 900, Currency::USD),
+                low_compare_at,
+                fixed(1, 800, Currency::EUR),
+            ]
         )),
-        Err(CommandError::Money(MoneyError::Negative))
+        Err(CommandError::PriceList(PriceListError::InvalidFixedPrices(
+            vec![
+                problem(1, 2, FixedPriceProblem::Money(MoneyError::Negative)),
+                problem(
+                    2,
+                    3,
+                    FixedPriceProblem::CurrencyMismatch {
+                        expected: Currency::EUR,
+                        found: Currency::USD,
+                    }
+                ),
+                problem(3, 4, FixedPriceProblem::CompareAtNotAbovePrice),
+                problem(4, 1, FixedPriceProblem::Duplicate),
+            ]
+        )))
     );
     assert_eq!(
         block_on(lists.fixed_prices(list, &[vid(1)])),
@@ -259,50 +501,18 @@ fn set_fixed_prices_rejects_negative_price_and_stores_nothing() {
 }
 
 #[test]
-fn set_fixed_prices_rejects_duplicate_variant() {
+fn set_fixed_prices_takes_at_most_a_thousand() {
     let ports = InMemoryPorts::default();
     let lists = &ports.price_lists;
     let ids = SequentialIds::default();
     let list = stored_list(lists, &ids);
+    let at_most = (1..=1000).map(|n| fixed(n, 100, Currency::EUR)).collect();
+    block_on(set_fixed_prices(&Ctx::system(), &ports, list, at_most)).unwrap();
 
+    let too_many = (1..=1001).map(|n| fixed(n, 100, Currency::EUR)).collect();
     assert_eq!(
-        block_on(set_fixed_prices(
-            &Ctx::system(),
-            &ports,
-            list,
-            vec![fixed(1, 900, Currency::EUR), fixed(1, 800, Currency::EUR)]
-        )),
-        Err(CommandError::PriceList(
-            PriceListError::DuplicateFixedPrice(vid(1))
-        ))
-    );
-}
-
-#[test]
-fn set_fixed_prices_rejects_other_currency_and_stores_nothing() {
-    let ports = InMemoryPorts::default();
-    let lists = &ports.price_lists;
-    let ids = SequentialIds::default();
-    let list = stored_list(lists, &ids);
-
-    assert_eq!(
-        block_on(set_fixed_prices(
-            &Ctx::system(),
-            &ports,
-            list,
-            vec![fixed(1, 900, Currency::EUR), fixed(2, 900, Currency::USD)]
-        )),
-        Err(CommandError::PriceList(PriceListError::CurrencyMismatch {
-            expected: Currency::EUR,
-            prices: vec![MismatchedPrice {
-                variant: vid(2),
-                found: Currency::USD,
-            }],
-        }))
-    );
-    assert_eq!(
-        block_on(lists.fixed_prices(list, &[vid(1)])),
-        Ok(HashMap::new())
+        block_on(set_fixed_prices(&Ctx::system(), &ports, list, too_many)),
+        Err(CommandError::TooManyPrices { max: 1000 })
     );
 }
 
@@ -366,7 +576,7 @@ fn remove_fixed_prices_deletes_them() {
     assert_eq!(
         ports.outbox.types(),
         [
-            "price_list.changed",
+            "price_list.created",
             "price_list.prices_set",
             "price_list.prices_removed"
         ]

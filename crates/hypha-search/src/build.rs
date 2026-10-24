@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use hypha_core::{CategoryId, ChannelId, ProductId, Quantity, Stamped, Timestamp};
 use hypha_inventory::{Availability, StockContext};
-use hypha_pricing::{PricingContext, resolve_price};
+use hypha_pricing::{PricingContext, VariantPrices, resolve_price};
 use hypha_products::{Product, ProductStatus};
 use hypha_search_index::{PriceRange, SearchDocument, SearchSettings};
 
@@ -44,8 +44,14 @@ pub fn build_documents(
 
     let mut docs: Vec<SearchDocument> = Vec::new();
     for (position, variant) in product.variants().iter().enumerate() {
-        let Ok(price) = resolve_price(pricing, product.id(), variant.id(), variant.base_price())
-        else {
+        let prices = VariantPrices {
+            product: product.id(),
+            variant: variant.id(),
+            base: variant.base_price(),
+            compare_at: variant.compare_at_price(),
+        };
+        // Listings show the price of one.
+        let Ok(price) = resolve_price(pricing, prices, Quantity::ONE).map(|r| r.price) else {
             continue;
         };
         let options: Vec<(String, String)> = product
