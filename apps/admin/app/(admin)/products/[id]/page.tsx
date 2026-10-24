@@ -1,3 +1,4 @@
+import { Banner } from "@astryxdesign/core/Banner";
 import { Card } from "@astryxdesign/core/Card";
 import { VStack } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
@@ -9,15 +10,23 @@ import { Suspense } from "react";
 import { AppSlot } from "@/components/app-extensions/app-slot";
 import { DateTime } from "@/components/date-time";
 import { type Crumb, PageHeader } from "@/components/page-header";
-import { DetailSkeleton } from "@/components/skeletons";
+import { CardSkeleton, DetailSkeleton } from "@/components/skeletons";
 import { ProductStatusBadge } from "@/components/status";
 import { type Currencies, formatMoney } from "@/lib/format";
 import { loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
-import { loadCurrencies, loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import {
+  describe,
+  isMissingScope,
+  loadCurrencies,
+  loaded,
+  requireStaff,
+  sessionClient,
+} from "@/lib/hypha";
 
 import type { Stock } from "../actions";
 import { MediaSection } from "./media-section";
+import { PricesCard } from "./prices-card";
 import { ProductEditor } from "./product-editor";
 import { StatusActions } from "./status-actions";
 
@@ -134,12 +143,47 @@ async function ProductDetail({ id }: { id: string }) {
         }
       />
 
+      <Suspense fallback={<CardSkeleton lines={5} />}>
+        <ProductPrices product={product} />
+      </Suspense>
+
       <AppSlot
         extensions={extensions}
         target="product.details"
         context={{ product_id: product.id }}
       />
     </>
+  );
+}
+
+/**
+ * The Prices card: each variant's price in each market, read after the product so the
+ * editor doesn't wait for it. Without `pricing:read` or `markets:read`, no card.
+ */
+async function ProductPrices({ product }: { product: Product }) {
+  const client = await sessionClient();
+  const [prices, markets] = await Promise.all([
+    client.GET("/admin/products/{id}/prices", { params: { path: { id: product.id } } }),
+    client.GET("/admin/markets"),
+  ]);
+  if (!prices.data) {
+    if (isMissingScope(prices)) return null;
+    return (
+      <Banner
+        status="error"
+        title="The product's prices couldn't be read"
+        description={prices.error ? describe(prices.error) : undefined}
+      />
+    );
+  }
+  return (
+    <PricesCard
+      key={product.updated_at}
+      productId={product.id}
+      initial={prices.data}
+      markets={Object.fromEntries((markets.data?.items ?? []).map((m) => [m.id, m.name]))}
+      variantTitles={Object.fromEntries(product.variants.map((v) => [v.id, v.title ?? null]))}
+    />
   );
 }
 
