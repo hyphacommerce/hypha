@@ -2,7 +2,7 @@
 title: Products, variants and custom fields
 description: Options, sparse variants, categories, media and the custom fields around them.
 sidebar:
-  order: 4
+  order: 6
 ---
 
 Hypha's catalog is built for products that aren't simple: options that combine only in

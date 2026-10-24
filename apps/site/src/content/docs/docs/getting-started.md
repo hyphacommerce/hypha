@@ -51,8 +51,9 @@ pnpm seed
 
 The seed works through the admin and storefront APIs the way a merchant and their shoppers
 would: store details, markets with taxes and prices, warehouses, shipping zones,
-categories, products with options and stock, a publishable key, payment methods, and a few
-orders. It stops if the store already has products.
+categories, products with options and stock, a sale, a clearance and wholesale prices,
+discounts (the `WELCOME10` code, free shipping, buy a grow kit get a syringe free, a
+volume tier), a publishable key, payment methods, and a few orders. It stops if the store already has products.
 
 It prints a `STOREFRONT_KEY` and a `HYPHA_WEBHOOK_SECRET`. Put both in
 `apps/storefront/.dev.vars`, then restart `pnpm dev`: the storefront can now show the
@@ -68,4 +69,5 @@ and fulfil it.
 
 - [Deploy it](/docs/deploy/) to a server or to Cloudflare Workers.
 - Read how [markets, catalogs and price lists](/docs/concepts/markets/) decide what a
-  shopper sees and pays.
+  shopper sees and pays, then [prices and sales](/docs/concepts/pricing/) and
+  [discounts](/docs/concepts/discounts/).

@@ -2,7 +2,7 @@
 title: Payments
 description: Payment methods, providers, and payments taken before the order exists.
 sidebar:
-  order: 7
+  order: 9
 ---
 
 ## Payment methods

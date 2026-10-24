@@ -2,7 +2,7 @@
 title: Inventory and locations
 description: Stock per variant and location, and how checkout reserves it.
 sidebar:
-  order: 5
+  order: 7
 ---
 
 Stock is counted per variant, per **location**: a warehouse, a shop, a supplier who ships
