@@ -20,7 +20,13 @@ import { useState, useTransition } from "react";
 
 import { DateTime } from "@/components/date-time";
 import { type FilterDef, ResourceTable } from "@/components/resource-table/resource-table";
-import { codesFrom } from "@/lib/discounts/codes";
+import {
+  MAX_GENERATED_LENGTH,
+  MIN_GENERATED_LENGTH,
+  MIN_RANDOM_CHARACTERS,
+  codesFrom,
+  generationProblem,
+} from "@/lib/discounts/codes";
 import { parseCount } from "@/lib/discounts/validate";
 
 import { addCodes, generateCodes, removeCodes, setCodesActive } from "../actions";
@@ -186,10 +192,8 @@ function GenerateDialog({ id, onClose }: { id: string; onClose: () => void }) {
     if (n === null || n > MAX_GENERATED) {
       return setError(`How many: 1 to ${MAX_GENERATED.toLocaleString("en")}.`);
     }
-    if (size === null || size < 8 || size > 24) return setError("Length: 8 to 24 characters.");
-    if (prefix.trim().length > size - 4) {
-      return setError("The prefix leaves room for at least 4 random characters.");
-    }
+    const problem = generationProblem(size ?? 0, prefix);
+    if (size === null || problem) return setError(problem ?? undefined);
     if (usageLimit === "invalid") return setError("Uses per code: a whole number, or blank.");
     startTransition(async () => {
       const result = await generateCodes(id, {
@@ -217,7 +221,7 @@ function GenerateDialog({ id, onClose }: { id: string; onClose: () => void }) {
           <TextInput label="How many" value={count} onChange={setCount} width={140} />
           <TextInput
             label="Length"
-            description="8 to 24, the prefix included."
+            description={`${MIN_GENERATED_LENGTH} to ${MAX_GENERATED_LENGTH}, the prefix included, with at least ${MIN_RANDOM_CHARACTERS} random characters.`}
             value={length}
             onChange={setLength}
             width={140}
