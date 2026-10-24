@@ -286,6 +286,25 @@ export function discountedTotals(
   };
 }
 
+/** The cart drawer's rows, reading as the cart page's totals do: "Subtotal" is before
+ * discounts, then "Discounts" and "Subtotal after discounts" when something came off the
+ * goods. `subtotal` is after discounts, as the API sends it. */
+export function subtotalRows(
+  subtotal: Money,
+  discounts: Pick<Discounts, "total" | "shipping">,
+  digits: number,
+): { label: string; value: string; strong: boolean }[] {
+  const shown = discountedTotals(subtotal, discounts);
+  if (!shown.goods) {
+    return [{ label: "Subtotal", value: formatMoney(subtotal, digits), strong: true }];
+  }
+  return [
+    { label: "Subtotal", value: formatMoney(shown.subtotal, digits), strong: false },
+    { label: "Discounts", value: minus(shown.goods, digits), strong: false },
+    { label: "Subtotal after discounts", value: formatMoney(subtotal, digits), strong: true },
+  ];
+}
+
 /** A shipping price: "Free" when a discount took all of it, else the amount, with the
  * price before a discount struck through. A rate that's free anyway stays "€0.00". */
 export function shippingPrice(

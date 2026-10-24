@@ -17,6 +17,7 @@ import {
   readOrderDiscounts,
   readPromotions,
   shippingPrice,
+  subtotalRows,
   typedCode,
 } from "./discounts.ts";
 
@@ -240,6 +241,20 @@ test("without discounts on goods there's no Discounts row", () => {
     subtotal: eur(2400),
     goods: null,
   });
+});
+
+test("the drawer's subtotal is before discounts, as the cart page's", () => {
+  assert.deepEqual(subtotalRows(eur(2160), { total: eur(740), shipping: eur(500) }, 2), [
+    { label: "Subtotal", value: "€24.00", strong: false },
+    { label: "Discounts", value: "−€2.40", strong: false },
+    { label: "Subtotal after discounts", value: "€21.60", strong: true },
+  ]);
+});
+
+test("without discounts on goods the drawer shows one subtotal", () => {
+  assert.deepEqual(subtotalRows(eur(2400), { total: eur(500), shipping: eur(500) }, 2), [
+    { label: "Subtotal", value: "€24.00", strong: true },
+  ]);
 });
 
 test("shipping a discount took all of is Free, the price struck", () => {
