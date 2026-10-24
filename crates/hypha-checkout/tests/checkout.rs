@@ -1992,6 +1992,79 @@ fn losing_the_last_use_is_discounts_changed_and_places_nothing() {
     assert_eq!(world.mug_reserved(), 0);
 }
 
+/// A cart paying 27.00 by card (10% off, its last use) whose payment the provider
+/// authorized, then the last use taken by another order before checkout reads it.
+fn paid_then_last_use_taken(world: &World, app: &CardApp) -> (CartId, hypha_payments::Payment) {
+    let discount = ten_percent_off(
+        world,
+        hypha_cart::discounts::Limits {
+            total: Some(1),
+            once_per_customer: false,
+        },
+    );
+    let (cart, payment) = started_cart(world, app);
+    assert_eq!(payment.amount(), eur(2700));
+    app.state.set(ProviderState::Authorized);
+    let mut held = block_on(world.payments.get(payment.id())).unwrap().unwrap();
+    held.authorize(None).unwrap();
+    block_on(world.payments.update(&mut held)).unwrap();
+    used_elsewhere(
+        world,
+        discount,
+        CustomerId::from_uuid(Uuid::from_u128(9200)),
+    );
+    // Checkout reads the cart before the other use shows, so only the claim catches it.
+    world.discounts.hide_next_usage_counts(1);
+    (cart, payment)
+}
+
+#[test]
+fn a_paid_cart_losing_its_discounts_last_use_gets_its_money_back() {
+    let world = World::new();
+    let app = CardApp::default();
+    let (cart, payment) = paid_then_last_use_taken(&world, &app);
+    assert_eq!(
+        check_out_by(&world, cart, &app).map(|_| ()),
+        Err(CommandError::DiscountsChanged {
+            total: eur(3000),
+            codes: vec![],
+        })
+    );
+    assert_eq!(
+        app.acted.borrow().as_slice(),
+        [(payment.id(), PaymentAction::Void)]
+    );
+    let stored = block_on(world.payments.get(payment.id())).unwrap().unwrap();
+    assert_eq!(stored.status(), PaymentStatus::Voided);
+    assert_eq!(world.mug_reserved(), 0);
+}
+
+#[test]
+fn a_report_completing_a_cart_that_lost_its_discounts_last_use_gives_the_money_back() {
+    let world = World::new();
+    let app = CardApp::default();
+    let (_, payment) = paid_then_last_use_taken(&world, &app);
+    let reporter = Ctx::new(Actor::System, vec![Scope::PaymentsWrite]);
+    assert_eq!(
+        block_on(complete_paid_checkout(
+            &reporter,
+            &world.ports,
+            &world.ids,
+            &world.clock,
+            &NoRateProviders,
+            &(ManualProvider, &app),
+            payment.id(),
+        ))
+        .map(|_| ()),
+        Err(CommandError::DiscountsChanged {
+            total: eur(3000),
+            codes: vec![],
+        })
+    );
+    let stored = block_on(world.payments.get(payment.id())).unwrap().unwrap();
+    assert_eq!(stored.status(), PaymentStatus::Voided);
+}
+
 #[test]
 fn a_guest_who_used_a_once_per_customer_discount_doesnt_get_it_again() {
     let world = World::new();
