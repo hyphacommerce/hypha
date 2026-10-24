@@ -317,15 +317,17 @@ export type ProductPrices = AdminSchemas["ProductPricesResponse"];
 
 /**
  * What each variant costs in each market at `quantity`, with every price list that
- * competed (`GET /admin/products/{id}/prices`): the product page's Prices card.
+ * competed (`GET /admin/products/{id}/prices`): the product page's Prices card. With
+ * `group`, for a signed-in customer in that customer group; without, for a guest.
  */
 export async function productPrices(
   id: string,
   quantity: number,
+  group?: string,
 ): Promise<{ prices?: ProductPrices; error?: string }> {
   const client = await sessionClient();
   const { data, error } = await client.GET("/admin/products/{id}/prices", {
-    params: { path: { id }, query: { quantity } },
+    params: { path: { id }, query: { quantity, group } },
   });
   if (data) return { prices: data };
   return { error: error ? describe(error) : "The prices couldn't be read." };

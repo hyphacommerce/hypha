@@ -44,9 +44,11 @@ export default async function NewPriceListPage({
 
 async function Form({ market }: { market: string | undefined }) {
   const client = await sessionClient();
-  const [markets, categories] = await Promise.all([
+  const [markets, categories, groups] = await Promise.all([
     client.GET("/admin/markets"),
     client.GET("/admin/categories"),
+    // Without `customers:read`, none: the list prices for everyone.
+    client.GET("/admin/customer-groups"),
   ]);
   const options: MarketOption[] = (markets.data?.items ?? []).flatMap((m) =>
     m.catalog ? [{ id: m.id, name: m.name, currency: m.currency, catalog: m.catalog }] : [],
@@ -61,6 +63,7 @@ async function Form({ market }: { market: string | undefined }) {
         value: row.id,
         label: row.path,
       }))}
+      groups={(groups.data?.items ?? []).map((g) => ({ value: g.id, label: g.name }))}
     />
   );
 }

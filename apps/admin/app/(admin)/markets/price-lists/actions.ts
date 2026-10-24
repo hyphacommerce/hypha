@@ -36,6 +36,24 @@ function refresh() {
   revalidatePath("/products", "layout");
 }
 
+/** A refused create or edit: on the field it's about, when it's about one. */
+function refusedSettings(error: { code: string; error: string }): Result & {
+  fieldErrors?: FormErrors;
+} {
+  switch (error.code) {
+    case "price_list_name_taken":
+      return { fieldErrors: { name: describe(error) } };
+    case "ends_not_after_start":
+      return { fieldErrors: { endsAt: describe(error) } };
+    case "customer_group_not_found":
+    case "too_many_audience_groups":
+    case "duplicate_audience_group":
+      return { fieldErrors: { groups: describe(error) } };
+    default:
+      return { error: describe(error) };
+  }
+}
+
 /**
  * Creates the list and puts it on `catalogs` (the markets chosen on the form), then
  * opens it. A catalog that refuses it leaves the list created, and its page says so.
@@ -49,11 +67,7 @@ export async function createPriceList(
   const client = await sessionClient();
   const { data: list, error } = await client.POST("/admin/price-lists", { body: request.body });
   if (error) {
-    return error.code === "price_list_name_taken"
-      ? { fieldErrors: { name: describe(error) } }
-      : error.code === "ends_not_after_start"
-        ? { fieldErrors: { endsAt: describe(error) } }
-        : { error: describe(error) };
+    return refusedSettings(error);
   }
   const attached = await Promise.all(
     catalogs.map((catalog) =>
@@ -89,11 +103,7 @@ export async function updatePriceList(
     body: request.body,
   });
   if (error) {
-    return error.code === "price_list_name_taken"
-      ? { fieldErrors: { name: describe(error) } }
-      : error.code === "ends_not_after_start"
-        ? { fieldErrors: { endsAt: describe(error) } }
-        : { error: describe(error) };
+    return refusedSettings(error);
   }
   refresh();
   return {};

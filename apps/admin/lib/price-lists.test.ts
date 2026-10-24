@@ -8,6 +8,7 @@ import {
   adjustAmount,
   adjustedPrice,
   adjustmentLabel,
+  audienceLabel,
   candidateReason,
   catalogsInUse,
   checkForm,
@@ -44,6 +45,7 @@ function list(overrides: Partial<PriceList> = {}): PriceList {
     ends_at: null,
     compare_at: "adjusted",
     adjustment: null,
+    audience: { groups: [] },
     markets: [],
     fixed_price_count: 0,
     created_at: "2026-10-01T00:00:00Z",
@@ -265,6 +267,39 @@ test("updateRequest sends the whole adjustment when its scope changes", () => {
   assert.deepEqual(updateRequest(edited, saved, "UTC"), {
     body: { adjustment: { percent_bps: -2000, applies_to: { type: "products", products: ["p"] } } },
   });
+});
+
+test("createRequest names the audience only when it isn't everyone", () => {
+  const everyone = createRequest(form(), "UTC");
+  assert.ok("body" in everyone && everyone.body.audience === undefined);
+  const group = createRequest(form({ groups: ["cgrp_1"] }), "UTC");
+  assert.ok("body" in group && group.body.audience?.groups[0] === "cgrp_1");
+});
+
+test("updateRequest sends the audience only when its groups change", () => {
+  const saved = list({ audience: { groups: ["cgrp_a", "cgrp_b"] } });
+  const reordered = { ...formFromList(saved, "UTC"), groups: ["cgrp_b", "cgrp_a"] };
+  assert.deepEqual(updateRequest(reordered, saved, "UTC"), { body: {} });
+  const everyone = { ...formFromList(saved, "UTC"), groups: [] };
+  assert.deepEqual(updateRequest(everyone, saved, "UTC"), {
+    body: { audience: { groups: [] } },
+  });
+});
+
+test("audienceLabel names up to two groups, else counts them", () => {
+  const names = { cgrp_a: "Wholesale", cgrp_b: "VIP" };
+  assert.equal(audienceLabel({ groups: [] }, names), "Everyone");
+  assert.equal(audienceLabel(undefined, names), "Everyone");
+  assert.equal(audienceLabel({ groups: ["cgrp_a", "cgrp_b"] }, names), "Wholesale and VIP");
+  assert.equal(audienceLabel({ groups: ["cgrp_x"] }, names), "cgrp_x");
+  assert.equal(audienceLabel({ groups: ["a", "b", "c"] }, names), "3 customer groups");
+});
+
+test("candidateReason says a list for other groups doesn't price for this buyer", () => {
+  assert.equal(
+    candidateReason("not_in_audience", "active"),
+    "Not for this buyer: it prices only for other customer groups.",
+  );
 });
 
 // ---- errors ----

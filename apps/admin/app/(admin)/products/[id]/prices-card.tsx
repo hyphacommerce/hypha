@@ -2,13 +2,15 @@
 
 // What the product costs where it's sold: per market, each variant's price, the price
 // struck through beside it, the list that set it, its quantity breaks, and (on demand)
-// every list that competed and why it lost. A quantity previews the breaks.
+// every list that competed and why it lost. A quantity previews the breaks, and a
+// customer group what its signed-in customers pay.
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Card } from "@astryxdesign/core/Card";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
+import { Selector } from "@astryxdesign/core/Selector";
 import { Switch } from "@astryxdesign/core/Switch";
 import {
   Table,
@@ -30,6 +32,9 @@ import { type ProductPrices, productPrices } from "../actions";
 
 type MarketPrices = ProductPrices["markets"][number];
 
+/** The group selector's value for a shopper who isn't signed in. */
+const GUEST = "guest";
+
 /** A whole number from 1 up, or null. */
 function parseQuantity(text: string): number | null {
   const n = Number(text.trim());
@@ -40,6 +45,7 @@ export function PricesCard({
   productId,
   initial,
   markets,
+  groups,
   variantTitles,
 }: {
   productId: string;
@@ -47,28 +53,36 @@ export function PricesCard({
   initial: ProductPrices;
   /** Market names by ID. */
   markets: Record<string, string>;
+  /** The customer groups to price for; none without `customers:read` (no selector). */
+  groups: { value: string; label: string }[];
   /** "M / Blue" by variant ID; null for a product without options. */
   variantTitles: Record<string, string | null>;
 }) {
   const [prices, setPrices] = useState(initial);
   const [quantity, setQuantity] = useState("1");
+  const [group, setGroup] = useState(GUEST);
+  // What the prices shown were last asked for (an answer that failed included, so it
+  // isn't asked again until something changes).
+  const [asked, setAsked] = useState({ quantity: initial.quantity, group: GUEST });
   const [isWhyShown, setIsWhyShown] = useState(false);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   const wanted = parseQuantity(quantity);
 
-  const read = useEffectEvent((n: number) =>
+  const read = useEffectEvent((n: number, g: string) =>
     startTransition(async () => {
-      const result = await productPrices(productId, n);
+      const result = await productPrices(productId, n, g === GUEST ? undefined : g);
       if (result.prices) setPrices(result.prices);
+      setAsked({ quantity: n, group: g });
       setError(result.error);
     }),
   );
   useEffect(() => {
-    if (wanted === null || wanted === prices.quantity) return;
-    const timer = setTimeout(() => read(wanted), 350);
+    if (wanted === null || (wanted === asked.quantity && group === asked.group)) return;
+    // A typed quantity waits for the typing to stop; a group is read at once.
+    const timer = setTimeout(() => read(wanted, group), group === asked.group ? 350 : 0);
     return () => clearTimeout(timer);
-  }, [wanted, prices.quantity]);
+  }, [wanted, group, asked]);
 
   return (
     <Card>
@@ -84,6 +98,16 @@ export function PricesCard({
             </Text>
           </VStack>
           <HStack gap={3} vAlign="end" wrap="wrap">
+            {groups.length > 0 && (
+              <Selector
+                label="Customer"
+                description="Price lists for a group count once its customers sign in."
+                options={[{ value: GUEST, label: "Not signed in" }, ...groups]}
+                value={group}
+                onChange={setGroup}
+                width={220}
+              />
+            )}
             <TextInput
               label="Quantity"
               description="Of each variant, for quantity breaks."

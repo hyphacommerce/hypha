@@ -162,9 +162,11 @@ async function ProductDetail({ id }: { id: string }) {
  */
 async function ProductPrices({ product }: { product: Product }) {
   const client = await sessionClient();
-  const [prices, markets] = await Promise.all([
+  const [prices, markets, groups] = await Promise.all([
     client.GET("/admin/products/{id}/prices", { params: { path: { id: product.id } } }),
     client.GET("/admin/markets"),
+    // Without `customers:read`, none: the card prices for guests only.
+    client.GET("/admin/customer-groups"),
   ]);
   if (!prices.data) {
     if (isMissingScope(prices)) return null;
@@ -182,6 +184,7 @@ async function ProductPrices({ product }: { product: Product }) {
       productId={product.id}
       initial={prices.data}
       markets={Object.fromEntries((markets.data?.items ?? []).map((m) => [m.id, m.name]))}
+      groups={(groups.data?.items ?? []).map((g) => ({ value: g.id, label: g.name }))}
       variantTitles={Object.fromEntries(product.variants.map((v) => [v.id, v.title ?? null]))}
     />
   );

@@ -24,6 +24,8 @@ export type Scope = "all" | "products" | "categories";
 export const MAX_TARGETS = 1000;
 /** The most price lists a catalog holds. */
 export const MAX_LISTS_PER_CATALOG = 50;
+/** The most customer groups an audience names. */
+export const MAX_AUDIENCE_GROUPS = 100;
 
 export const KINDS: { value: Kind; label: string; description: string }[] = [
   {
@@ -264,6 +266,8 @@ export type ListForm = {
   scope: Scope;
   products: string[];
   categories: string[];
+  /** The customer groups it prices for; none is everyone. */
+  groups: string[];
 };
 
 export type FormField =
@@ -274,7 +278,8 @@ export type FormField =
   | "endsAt"
   | "percent"
   | "products"
-  | "categories";
+  | "categories"
+  | "groups";
 
 export type FormErrors = Partial<Record<FormField, string>>;
 
@@ -287,6 +292,7 @@ const FORM_FIELDS: readonly FormField[] = [
   "percent",
   "products",
   "categories",
+  "groups",
 ];
 
 /** `errors` without those of the fields `change` sets: they're being fixed. */
@@ -312,6 +318,7 @@ export function emptyForm(currency: string): ListForm {
     scope: "all",
     products: [],
     categories: [],
+    groups: [],
   };
 }
 
@@ -331,7 +338,20 @@ export function formFromList(list: PriceList, timeZone: string): ListForm {
     scope: to.type,
     products: to.type === "products" ? to.products : [],
     categories: to.type === "categories" ? to.categories : [],
+    groups: list.audience?.groups ?? [],
   };
+}
+
+/** "Everyone", "Wholesale", "Wholesale and VIP", "3 customer groups": who a list prices
+ * for, by the groups' names (an ID where the name isn't known). */
+export function audienceLabel(
+  audience: { groups: readonly string[] } | null | undefined,
+  names: Record<string, string>,
+): string {
+  const groups = audience?.groups ?? [];
+  if (groups.length === 0) return "Everyone";
+  if (groups.length > 2) return `${groups.length} customer groups`;
+  return groups.map((g) => names[g] ?? g).join(" and ");
 }
 
 export type TemplateKey = "sale" | "clearance" | "market" | "wholesale";
@@ -389,7 +409,8 @@ export const TEMPLATES: {
   {
     key: "wholesale",
     label: "Wholesale",
-    description: "Fixed prices for the variants you sell in bulk, with quantity breaks.",
+    description:
+      "Fixed prices and quantity breaks for a customer group: pick the group under Audience.",
     apply: (form) => ({
       ...form,
       kind: "override",
@@ -415,6 +436,9 @@ export function checkForm(form: ListForm, timeZone: string): FormErrors {
   if (form.endsAt && !ends) errors.endsAt = "Enter a date and a time.";
   if (starts && ends && Date.parse(ends) <= Date.parse(starts)) {
     errors.endsAt = "The end must be after the start.";
+  }
+  if (form.groups.length > MAX_AUDIENCE_GROUPS) {
+    errors.groups = `At most ${MAX_AUDIENCE_GROUPS} customer groups.`;
   }
   if (form.hasAdjustment) {
     if (parsePercent(form.percent) === null) {
@@ -481,6 +505,7 @@ export function createRequest(
   if (form.kind === "override") body.compare_at = form.compareAt;
   const adjustment = adjustmentOf(form);
   if (adjustment) body.adjustment = adjustment;
+  if (form.groups.length > 0) body.audience = { groups: form.groups };
   return { body };
 }
 
@@ -514,6 +539,11 @@ export function updateRequest(
   }
   const adjustment = adjustmentOf(form);
   if (!sameAdjustment(list.adjustment, adjustment)) body.adjustment = adjustment;
+  // Replaced as a whole; `[]` is everyone again.
+  const groups = form.groups.toSorted();
+  if (JSON.stringify(groups) !== JSON.stringify(saved.groups.toSorted())) {
+    body.audience = { groups };
+  }
   return { body };
 }
 
@@ -603,6 +633,8 @@ export function candidateReason(result: string, phase: string): string {
           : "Not live: it's a draft.";
     case "not_pricing":
       return "Doesn't price it: no fixed price, and its adjustment doesn't cover the product.";
+    case "not_in_audience":
+      return "Not for this buyer: it prices only for other customer groups.";
     default:
       return result;
   }

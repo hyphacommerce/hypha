@@ -1,7 +1,7 @@
 "use client";
 
-// The price lists table: kind, phase, window, markets and fixed prices, filtered and
-// sorted by the API.
+// The price lists table: kind, phase, window, audience, markets and fixed prices,
+// filtered and sorted by the API.
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
@@ -19,7 +19,14 @@ import {
   type SortOption,
   type View,
 } from "@/components/resource-table/resource-table";
-import { type PriceList, PHASES, adjustmentLabel, kindLabel, phaseBadge } from "@/lib/price-lists";
+import {
+  type PriceList,
+  PHASES,
+  adjustmentLabel,
+  audienceLabel,
+  kindLabel,
+  phaseBadge,
+} from "@/lib/price-lists";
 
 const NO_NAMES: Record<string, string> = {};
 
@@ -61,11 +68,14 @@ export function ListWindow({ list }: { list: Pick<PriceList, "starts_at" | "ends
 export function PriceListsTable({
   page,
   markets = NO_NAMES,
+  groups = NO_NAMES,
 }: {
   /** The page of lists; absent while it loads (the table shows its toolbar meanwhile). */
   page?: { items: PriceList[]; next_cursor: string | null; error?: string };
   /** Market names by ID. */
   markets?: Record<string, string>;
+  /** Customer group names by ID (none without `customers:read`). */
+  groups?: Record<string, string>;
 }) {
   const filters: FilterDef[] = [
     {
@@ -88,6 +98,14 @@ export function PriceListsTable({
       param: "market",
       label: "Market",
       options: Object.entries(markets)
+        .map(([value, label]) => ({ value, label }))
+        .toSorted((a, b) => a.label.localeCompare(b.label)),
+    },
+    {
+      kind: "select",
+      param: "group",
+      label: "Customer group",
+      options: Object.entries(groups)
         .map(([value, label]) => ({ value, label }))
         .toSorted((a, b) => a.label.localeCompare(b.label)),
     },
@@ -130,6 +148,16 @@ export function PriceListsTable({
       header: "When",
       width: pixel(170),
       renderCell: (list) => <ListWindow list={list} />,
+    },
+    {
+      key: "audience",
+      header: "For",
+      width: proportional(1, { minWidth: 120 }),
+      renderCell: (list) => (
+        <Text color={list.audience.groups.length === 0 ? "secondary" : undefined}>
+          {audienceLabel(list.audience, groups)}
+        </Text>
+      ),
     },
     {
       key: "markets",

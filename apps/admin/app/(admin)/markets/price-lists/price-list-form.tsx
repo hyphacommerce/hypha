@@ -1,11 +1,13 @@
 "use client";
 
 // A price list's settings: what it's called, what kind of price it holds, when it's
-// live, how it adjusts the base prices and, for a new list, the markets it goes on. The
+// live, who it prices for, how it adjusts the base prices and, for a new list, the
+// markets it goes on. The
 // new list page starts from a template; a list's page edits the same form.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { Link } from "@astryxdesign/core/Link";
 import { Card } from "@astryxdesign/core/Card";
 import { DateTimeInput, type ISODateTimeString } from "@astryxdesign/core/DateTimeInput";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
@@ -67,6 +69,7 @@ function SettingsFields({
   isNew,
   isReadOnly,
   categories,
+  groups,
   productNames,
   onPickProducts,
 }: {
@@ -76,12 +79,21 @@ function SettingsFields({
   isNew: boolean;
   isReadOnly: boolean;
   categories: { value: string; label: string }[];
+  /** The store's customer groups; none without `customers:read`. */
+  groups: { value: string; label: string }[];
   productNames: Record<string, string>;
   onPickProducts: () => void;
 }) {
   const currencies = useCurrencies();
   const timeZone = useTimeZone();
   const bps = parsePercent(form.percent);
+  // A group the list names that isn't among those read (no `customers:read`) shows by ID.
+  const groupOptions = [
+    ...groups,
+    ...form.groups
+      .filter((id) => !groups.some((g) => g.value === id))
+      .map((id) => ({ value: id, label: id })),
+  ];
 
   return (
     <>
@@ -220,6 +232,39 @@ function SettingsFields({
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
+              Audience
+            </Text>
+            <Text type="supporting" color="secondary">
+              Who it prices for. Without a group, every shopper. With groups, only signed-in
+              customers in one of them: in their carts and on product pages once they sign in.
+              Listings and search show everyone&apos;s prices.
+            </Text>
+          </VStack>
+          {groupOptions.length === 0 ? (
+            <Text color="secondary">
+              Everyone. To price for some customers, make a{" "}
+              <Link href="/customers/groups">customer group</Link> first.
+            </Text>
+          ) : (
+            <MultiSelector
+              label="Customer groups"
+              placeholder="Everyone"
+              options={groupOptions}
+              value={form.groups}
+              onChange={(chosen) => set({ groups: chosen })}
+              hasSearch
+              isDisabled={isReadOnly}
+              status={status(errors.groups)}
+              width="100%"
+            />
+          )}
+        </VStack>
+      </Card>
+
+      <Card>
+        <VStack gap={4}>
+          <VStack gap={1}>
+            <Text type="display-3" as="h2">
               Adjustment
             </Text>
             <Text type="supporting" color="secondary">
@@ -349,6 +394,7 @@ export function NewPriceListForm({
   markets,
   preselected,
   categories,
+  groups,
 }: {
   defaultCurrency: string;
   /** Markets with a catalog, to put the list on. */
@@ -356,6 +402,7 @@ export function NewPriceListForm({
   /** A market to put it on from the start (`?market=`). */
   preselected?: string;
   categories: { value: string; label: string }[];
+  groups: { value: string; label: string }[];
 }) {
   const timeZone = useTimeZone();
   const [form, setForm] = useState<ListForm>(() => emptyForm(defaultCurrency));
@@ -439,6 +486,7 @@ export function NewPriceListForm({
         isNew
         isReadOnly={false}
         categories={categories}
+        groups={groups}
         productNames={names}
         onPickProducts={() => setIsPicking(true)}
       />
@@ -504,11 +552,13 @@ export function NewPriceListForm({
 export function EditPriceListForm({
   list,
   categories,
+  groups,
   productNames,
   isReadOnly,
 }: {
   list: PriceList;
   categories: { value: string; label: string }[];
+  groups: { value: string; label: string }[];
   /** Titles of the products its adjustment names, those that could be read. */
   productNames: Record<string, string>;
   isReadOnly: boolean;
@@ -567,6 +617,7 @@ export function EditPriceListForm({
         isNew={false}
         isReadOnly={isReadOnly}
         categories={categories}
+        groups={groups}
         productNames={names}
         onPickProducts={() => setIsPicking(true)}
       />

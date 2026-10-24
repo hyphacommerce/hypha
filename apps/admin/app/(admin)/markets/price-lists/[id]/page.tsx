@@ -119,11 +119,13 @@ async function ListHeader({ id, attachFailed }: { id: string; attachFailed: bool
 
 async function Settings({ id }: { id: string }) {
   const client = await sessionClient();
-  const [list, me, markets, categories] = await Promise.all([
+  const [list, me, markets, categories, groups] = await Promise.all([
     loadList(id),
     requireStaff(),
     client.GET("/admin/markets"),
     client.GET("/admin/categories"),
+    // Without `customers:read`, none: the audience shows by ID.
+    client.GET("/admin/customer-groups"),
   ]);
   const to = list.adjustment?.applies_to;
   // The adjustment names products by ID: read the first ones' titles for the chips.
@@ -147,6 +149,7 @@ async function Settings({ id }: { id: string }) {
             value: row.id,
             label: row.path,
           }))}
+          groups={(groups.data?.items ?? []).map((g) => ({ value: g.id, label: g.name }))}
           productNames={Object.fromEntries(titles)}
           isReadOnly={!canWrite}
         />
