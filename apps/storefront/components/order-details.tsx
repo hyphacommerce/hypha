@@ -14,10 +14,12 @@ import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
 import { AppElements } from "@/components/app-element";
 import { lineImage } from "@/components/line-image";
+import { Price } from "@/components/price";
 import { SummaryLine, Totals } from "@/components/totals";
 import { type Country } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
 import { elementsFor } from "@/lib/app-elements";
+import { lineCompareAt } from "@/lib/prices";
 
 export type PlacedOrder = StorefrontSchemas["PlacedOrderResponse"];
 type PaymentStatus = StorefrontSchemas["PaymentStatusDto"];
@@ -83,7 +85,13 @@ export async function OrderDetails({
                 title={line.product_title}
                 image={lineImage(line.image)}
                 variant={line.variant_title}
-                total={formatMoney(line.total, digits)}
+                total={
+                  <Price
+                    price={line.total}
+                    compareAt={lineCompareAt(line.compare_at_price, line.quantity, line.total)}
+                    digits={digits}
+                  />
+                }
               />
             ))}
             <Divider />

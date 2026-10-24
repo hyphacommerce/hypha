@@ -37,7 +37,7 @@ export function saleLabel(was: string, now: string): string {
   return `Was ${was}, now ${now}`;
 }
 
-/** A cart line's compare-at total: the unit compare-at times the quantity, shown only
+/** A cart or order line's compare-at total: the unit compare-at times the quantity, shown only
  * when it's above what the line costs. */
 export function lineCompareAt(
   compareAt: Money | null | undefined,
