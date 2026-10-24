@@ -22,9 +22,9 @@ pub use commands::{
 };
 pub use error::{FixedPriceProblem, MarketError, PriceListError};
 pub use events::{
-    CatalogChanged, CatalogPriceListsAdded, CatalogPriceListsRemoved, CatalogProductsAdded,
-    CatalogProductsRemoved, MarketChanged, PriceListChanged, PriceListCreated, PriceListDeleted,
-    PriceListEnded, PriceListStarted, PricesRemoved, PricesSet,
+    AppliesToPayload, CatalogChanged, CatalogPriceListsAdded, CatalogPriceListsRemoved,
+    CatalogProductsAdded, CatalogProductsRemoved, MarketChanged, PriceListChanged,
+    PriceListCreated, PriceListDeleted, PriceListEnded, PriceListStarted, PricesRemoved, PricesSet,
 };
 pub use filter::{FixedPriceFilter, PriceListFilter, PriceListSort};
 pub use market::{Market, MarketSnapshot};

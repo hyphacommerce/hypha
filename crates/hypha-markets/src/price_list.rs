@@ -8,7 +8,7 @@ use hypha_core::{
 
 use crate::{
     error::{FixedPriceProblem, PriceListError},
-    events::{PRICE_LIST, PriceListChanged, PriceListCreated, PriceListDeleted},
+    events::{AppliesToPayload, PRICE_LIST, PriceListChanged, PriceListCreated, PriceListDeleted},
 };
 
 /// What a list's prices mean to a shopper. Either kind competes the same way (the lowest
@@ -309,6 +309,9 @@ struct Changes {
     created: bool,
     deleted: bool,
     fields: BTreeSet<&'static str>,
+    /// What the adjustment reached when the list was loaded (`None` inside: no
+    /// adjustment), noted at its first change.
+    reached: Option<Option<AppliesTo>>,
 }
 
 impl PartialEq for Changes {
@@ -338,9 +341,16 @@ impl Recorded for PriceList {
         if changes.fields.is_empty() {
             return Vec::new();
         }
+        let now = self.adjustment.as_ref().map(Adjustment::applies_to);
+        let previous_applies_to = changes
+            .reached
+            .flatten()
+            .filter(|before| Some(before) != now)
+            .map(|before| AppliesToPayload::from(&before));
         let event = PriceListChanged {
             price_list: self.id,
             fields: changes.fields.into_iter().collect(),
+            previous_applies_to,
         };
         vec![PendingEvent::new(subject, &event)]
     }
@@ -530,6 +540,10 @@ impl PriceList {
 
     pub fn set_adjustment(&mut self, adjustment: Option<Adjustment>) {
         if self.adjustment != adjustment {
+            if self.changes.reached.is_none() {
+                self.changes.reached =
+                    Some(self.adjustment.as_ref().map(|a| a.applies_to().clone()));
+            }
             self.adjustment = adjustment;
             self.changed("adjustment");
         }
@@ -921,6 +935,39 @@ mod tests {
             events[0].data["fields"],
             serde_json::json!(["kind", "starts_at"])
         );
+    }
+
+    #[test]
+    fn a_changed_reach_carries_what_it_reached_before() {
+        let cat = |n| CategoryId::from_uuid(Uuid::from_u128(n));
+        let by = |c| {
+            Adjustment::new(
+                BasisPoints::new(-1000).unwrap(),
+                AppliesTo::Categories(vec![c]),
+            )
+            .unwrap()
+        };
+        let mut list = eur_list();
+        list.set_adjustment(Some(by(cat(1))));
+        list.take_events();
+        list.set_adjustment(Some(by(cat(2))));
+        list.set_adjustment(Some(by(cat(3))));
+        let events = list.take_events();
+        assert_eq!(
+            events[0].data["previous_applies_to"],
+            serde_json::json!({"type": "categories", "categories": [cat(1)]})
+        );
+        // The same reach at another percent carries none.
+        list.set_adjustment(Some(
+            Adjustment::new(
+                BasisPoints::new(-500).unwrap(),
+                AppliesTo::Categories(vec![cat(3)]),
+            )
+            .unwrap(),
+        ));
+        let events = list.take_events();
+        assert_eq!(events[0].data["fields"], serde_json::json!(["adjustment"]));
+        assert!(events[0].data.get("previous_applies_to").is_none());
     }
 
     #[test]

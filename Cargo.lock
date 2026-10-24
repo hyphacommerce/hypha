@@ -1538,6 +1538,7 @@ dependencies = [
  "hypha-channels",
  "hypha-core",
  "hypha-custom-fields",
+ "hypha-customers",
  "hypha-inventory",
  "hypha-markets",
  "hypha-pricing",

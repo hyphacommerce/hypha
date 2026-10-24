@@ -2,7 +2,7 @@
 //! them: which products a market sells, and at what price. Contract types: a reshaped field
 //! is a new `VERSION`, never an edit.
 
-use hypha_core::{CatalogId, Event, MarketId, PriceListId, ProductId, VariantId};
+use hypha_core::{CatalogId, CategoryId, Event, MarketId, PriceListId, ProductId, VariantId};
 use serde::Serialize;
 
 pub const MARKET: &str = "market";
@@ -108,10 +108,40 @@ impl Event for PriceListDeleted {
 /// `price_list.changed`: what changed, among `name`, `description`, `kind`, `status`,
 /// `starts_at`, `ends_at`, `compare_at`, `adjustment` and `audience`. Events written before `fields`
 /// existed were for a creation or a new adjustment.
+///
+/// When the adjustment's reach changed, `previous_applies_to` is what it reached before
+/// (absent when it reached the same, or there was no adjustment): what was priced by it
+/// and may not be any more.
 #[derive(Debug, Serialize)]
 pub struct PriceListChanged {
     pub price_list: PriceListId,
     pub fields: Vec<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_applies_to: Option<AppliesToPayload>,
+}
+
+/// What an adjustment reaches, as events carry it: `{"type": "all"}`,
+/// `{"type": "products", "products": [...]}` or `{"type": "categories", "categories": [...]}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AppliesToPayload {
+    All,
+    Products { products: Vec<ProductId> },
+    Categories { categories: Vec<CategoryId> },
+}
+
+impl From<&crate::AppliesTo> for AppliesToPayload {
+    fn from(a: &crate::AppliesTo) -> Self {
+        match a {
+            crate::AppliesTo::All => AppliesToPayload::All,
+            crate::AppliesTo::Products(products) => AppliesToPayload::Products {
+                products: products.clone(),
+            },
+            crate::AppliesTo::Categories(categories) => AppliesToPayload::Categories {
+                categories: categories.clone(),
+            },
+        }
+    }
 }
 
 impl Event for PriceListChanged {
