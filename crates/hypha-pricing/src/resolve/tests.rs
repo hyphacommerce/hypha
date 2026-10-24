@@ -628,6 +628,84 @@ fn each_list_is_priced_at_the_quantity_before_the_lowest_wins() {
 }
 
 #[test]
+fn the_ladder_spans_every_list() {
+    // A flat sale at 9 wins at 1, but from 10 the override's break at 7 is charged.
+    let ctx = {
+        let mut ctx = with_lists(vec![list(1, Currency::EUR, None), sale(2, None)]);
+        fix(&mut ctx, plid(1), tiered(10, &[(10, 7)]));
+        fix(&mut ctx, plid(2), FixedPrice::plain(eur(9)));
+        ctx
+    };
+    let resolved = resolve_price(&ctx, variant(eur(12)), one()).unwrap();
+    assert_eq!(
+        (resolved.price, resolved.breaks),
+        (
+            eur(9),
+            vec![hypha_markets::PriceBreak {
+                min_quantity: 10,
+                price: eur(7)
+            }]
+        )
+    );
+}
+
+#[test]
+fn the_ladder_drops_breaks_another_list_undercuts() {
+    let mut ctx = with_lists(vec![list(1, Currency::EUR, None), sale(2, None)]);
+    fix(&mut ctx, plid(1), tiered(1000, &[(5, 900), (10, 600)]));
+    fix(&mut ctx, plid(2), FixedPrice::plain(eur(850)));
+    let resolved = resolve_price(&ctx, variant(eur(1000)), one()).unwrap();
+    assert_eq!(
+        resolved.breaks,
+        vec![hypha_markets::PriceBreak {
+            min_quantity: 10,
+            price: eur(600)
+        }]
+    );
+}
+
+#[test]
+fn the_ladder_starts_above_the_quantity_priced() {
+    let mut ctx = with_lists(vec![list(1, Currency::EUR, None)]);
+    fix(&mut ctx, plid(1), tiered(1000, &[(5, 900), (10, 800)]));
+    assert_eq!(
+        resolve_price(&ctx, variant(eur(1000)), qty(5)).map(|r| r.breaks),
+        Ok(vec![hypha_markets::PriceBreak {
+            min_quantity: 10,
+            price: eur(800)
+        }])
+    );
+}
+
+#[test]
+fn an_adjustment_that_cannot_price_leaves_the_other_lists() {
+    // The base price is in EUR, so the 20% list can't price in the RSD market; the fixed
+    // RSD price still does.
+    let fixed_list = list(1, Currency::RSD, None);
+    let mut ctx = context(Currency::RSD, None);
+    ctx.catalog = Some(Catalog::new(
+        CatalogId::from_uuid(Uuid::from_u128(5)),
+        CatalogContext::Market(mid()),
+        [plid(1), plid(2)],
+    ));
+    ctx.price_lists = vec![fixed_list, list(2, Currency::RSD, Some(-2000))];
+    fix(&mut ctx, plid(1), FixedPrice::plain(rsd(90_000)));
+    let explained = explain_price(&ctx, variant(eur(1000)), one());
+    assert_eq!(
+        explained.resolved.map(|r| (r.price, r.price_list)),
+        Ok((rsd(90_000), Some(plid(1))))
+    );
+    assert_eq!(explained.candidates[1].result, CandidateResult::NotPricing);
+}
+
+#[test]
+fn an_adjustment_that_overflows_does_not_price() {
+    let max = Price::new(Money::new(Money::MAX_AMOUNT, Currency::EUR).unwrap()).unwrap();
+    let ctx = with_lists(vec![list(1, Currency::EUR, Some(1000))]);
+    assert_eq!(price_of(&ctx, variant(max)), Ok(max));
+}
+
+#[test]
 fn the_winners_breaks_are_shown() {
     let mut ctx = with_lists(vec![list(1, Currency::EUR, None)]);
     let fixed = tiered(1000, &[(5, 900), (10, 800)]);

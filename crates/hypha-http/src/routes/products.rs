@@ -769,8 +769,10 @@ pub struct StorefrontVariantResponse {
     compare_at_price: Option<Money>,
     /// Whether a compare-at price is shown: the variant is on sale.
     on_sale: bool,
-    /// Cheaper prices from a quantity in one cart line ("8.00 each from 10"); the cart
-    /// prices each line at its quantity.
+    /// What larger cart lines cost each ("8.00 each from 10"), whichever price list wins
+    /// them: by quantity, each below `price` and the one before it. The cart prices each
+    /// line at its quantity, so a line of `min_quantity` pays that break's `price`. Empty
+    /// when buying more costs no less.
     price_breaks: Vec<super::markets::PriceBreakDto>,
     /// The variant's own custom field values storefronts are shown.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]

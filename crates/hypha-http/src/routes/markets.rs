@@ -1415,7 +1415,8 @@ pub struct VariantPricesResponse {
     on_sale: bool,
     /// The list whose price won; `null` for the base price.
     price_list: Option<PriceListId>,
-    /// The winning fixed price's quantity prices.
+    /// What lines larger than `quantity` cost each, across every list: by quantity, each
+    /// below `price` and the one before it, a line of `min_quantity` paying its `price`.
     price_breaks: Vec<PriceBreakDto>,
     problem: Option<PriceProblemResponse>,
     /// Every list of the market's catalog, in ID order (oldest first).

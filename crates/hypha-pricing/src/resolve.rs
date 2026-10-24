@@ -67,8 +67,9 @@ pub struct ResolvedPrice {
     pub compare_at: Option<Price>,
     /// The list whose price won; `None` for the base price.
     pub price_list: Option<PriceListId>,
-    /// The winning fixed price's quantity prices, for showing ("€8 each from 10"); empty
-    /// without.
+    /// What larger lines cost each, for showing ("€8 each from 10"): every quantity above
+    /// the one priced where the lowest offer of any list drops below the price before it.
+    /// Empty when buying more costs no less.
     pub breaks: Vec<PriceBreak>,
 }
 
@@ -231,12 +232,12 @@ fn evaluate(
             .filter(|a| a.covers(variant.product, categories));
         let price = match (fixed, adjustment) {
             (Some(fixed), _) => Some(fixed.price_at(quantity.value())),
-            (None, Some(adjustment)) => {
-                ensure_currency(market.currency(), variant.base)?;
-                Some(Price::new(
-                    variant.base.money().adjust(adjustment.percent())?,
-                )?)
-            }
+            // A base price in another currency, or one the adjustment takes out of range,
+            // is something this list can't price: the others (or the base price) still can.
+            (None, Some(adjustment)) => (variant.base.money().currency() == market.currency())
+                .then(|| variant.base.money().adjust(adjustment.percent()).ok())
+                .flatten()
+                .and_then(|m| Price::new(m).ok()),
             (None, None) => None,
         };
         let Some(price) = price else {
@@ -308,12 +309,43 @@ fn evaluate(
         price: winner.price,
         compare_at: compare_at.and_then(|c| shown(Some(c), winner.price)),
         price_list: Some(winner.list.id()),
-        breaks: winner
-            .fixed
-            .map(|f| f.breaks().to_vec())
-            .unwrap_or_default(),
+        breaks: ladder(&offers, quantity.value(), winner.price),
     };
     Ok((resolved, candidates))
+}
+
+/// The unit prices a buyer of more than `quantity` would pay, across every offer: at each
+/// quantity some offer's break starts, the lowest offer there, kept where it's below the
+/// price before it. What's shown is then what a larger line is charged, whichever list
+/// wins it.
+fn ladder(offers: &[Offer], quantity: u32, price: Price) -> Vec<PriceBreak> {
+    let mut quantities: Vec<u32> = offers
+        .iter()
+        .filter_map(|o| o.fixed)
+        .flat_map(|f| f.breaks().iter().map(|b| b.min_quantity))
+        .filter(|&q| q > quantity)
+        .collect();
+    quantities.sort_unstable();
+    quantities.dedup();
+    let mut last = price;
+    let mut ladder = Vec::new();
+    for q in quantities {
+        let Some(lowest) = offers
+            .iter()
+            .map(|o| o.fixed.map_or(o.price, |f| f.price_at(q)))
+            .min_by_key(|p| p.money().amount())
+        else {
+            continue;
+        };
+        if lowest.money().amount() < last.money().amount() {
+            ladder.push(PriceBreak {
+                min_quantity: q,
+                price: lowest,
+            });
+            last = lowest;
+        }
+    }
+    ladder
 }
 
 /// What a sale is measured against: the lowest `override` offer, else the base price
