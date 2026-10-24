@@ -228,6 +228,21 @@ export async function gridPage(
 }
 
 /**
+ * These variants (those that still exist) with the list's prices, grouped by product: what
+ * an import naming every row's variant ID is matched against, without reading the rest
+ * of the catalog. A product shows only the variants asked for.
+ */
+export async function gridProductsByIds(
+  client: Client,
+  list: PriceList,
+  tree: CategoryNode[],
+  ids: readonly string[],
+): Promise<PriceGridProduct[]> {
+  const items = await variantsByIds(client, [...new Set(ids)]);
+  return grouped(client, list, tree, items, null);
+}
+
+/**
  * Every product matching `filters` (all of them without), with every variant and the
  * list's prices (only those with a fixed price with `fixedOnly`): what an export writes
  * and an import is matched against. Each product is one, its variants together.

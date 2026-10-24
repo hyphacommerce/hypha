@@ -26,7 +26,7 @@ import { chunk } from "@/lib/price-csv";
 import type { PriceGridDiff } from "@/lib/price-grid/types";
 import type { PriceList } from "@/lib/price-lists";
 
-import { type ImportPreviewResult, applyImportChunk, previewImport } from "../actions";
+import { type ImportPreviewResult, previewImport, saveFixedPrices } from "../actions";
 
 const STATUS_BADGES = {
   changed: { label: "Changes", variant: "info" },
@@ -87,7 +87,7 @@ export function ImportDialog({
     for (const step of steps) {
       let result;
       try {
-        result = await applyImportChunk(list.id, step);
+        result = await saveFixedPrices(list.id, step);
       } catch {
         result = { error: "The step couldn't be sent." };
       }

@@ -6,6 +6,7 @@ import {
   detectDelimiter,
   diffRequests,
   exportPriceCsv,
+  importVariantIds,
   parseCsv,
   previewPriceImport,
   toCsv,
@@ -271,6 +272,16 @@ test("break columns may skip numbers", () => {
     { min_quantity: 5, price: eur(900) },
     { min_quantity: 10, price: eur(800) },
   ]);
+});
+
+test("a file naming every variant by ID needs only those read", () => {
+  assert.deepEqual(importVariantIds("Variant_ID,fixed_price\nvar_a,1\nvar_b,2\nvar_a,3"), [
+    "var_a",
+    "var_b",
+  ]);
+  assert.equal(importVariantIds("variant_id,sku,fixed_price\nvar_a,,1\n,GK-S,2"), null);
+  assert.equal(importVariantIds("sku,fixed_price\nGK-S,2"), null);
+  assert.deepEqual(importVariantIds(""), []);
 });
 
 test("a file it can't read says why", () => {

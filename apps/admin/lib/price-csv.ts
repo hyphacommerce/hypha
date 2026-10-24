@@ -375,6 +375,25 @@ export function previewPriceImport(
   return { rows, counts, diff };
 }
 
+/**
+ * The variant IDs a file names, when every data row names one: then only those variants
+ * need reading. Null when some row finds its variant another way (by SKU, or handle and
+ * options), which takes the whole catalog.
+ */
+export function importVariantIds(text: string): string[] | null {
+  const [header, ...data] = parseCsv(text);
+  if (!header) return [];
+  const field = fieldReader(header);
+  if (!field.has("variant_id")) return null;
+  const ids = new Set<string>();
+  for (const row of data) {
+    const id = field.get(row, "variant_id");
+    if (id === "") return null;
+    ids.add(id);
+  }
+  return [...ids];
+}
+
 /** `items` in runs of at most `size`. */
 export function chunk<T>(items: readonly T[], size = MAX_PRICES_PER_REQUEST): T[][] {
   const chunks: T[][] = [];
