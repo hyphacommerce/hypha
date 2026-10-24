@@ -408,6 +408,9 @@ pub fn apply(input: &DiscountInput, discounts: &[Live<'_>]) -> Outcome
   O(n² · m) arithmetic at the outside, microseconds for the caps above. Loading is one
   query for live automatic discounts in the market and channel, plus one for the
   cart's codes, pipelined with pricing's loads.
+  *As built:* the live automatic discounts and the codes (then their discounts) are sent
+  together; then the usage counts, the buyer's past uses (after the email's customer,
+  when one is needed), the products' categories and the summaries' names together.
 
 ## 6. Codes and the cart (DS7)
 
@@ -676,13 +679,29 @@ what they left open:
   items only, and 0 makes them free. A tier's amount is across its items; spend tiers name
   the same markets, each rising. The method is fixed: `PATCH` refuses `method` as an
   unknown field (`422 invalid_body`); the domain's `discount_method_fixed` guards it too.
+  A discount's products, variants, categories, customers, customer groups and channels are
+  stored unchecked, like a payment method's markets (listed at the top of `hypha-http`'s
+  `error.rs`): an unknown one never matches. Its markets are checked, since its amounts
+  are priced in their currencies.
 - **Storage.** A discount's conditions and kind are one JSON column (`rules`), `classes`
   beside it for the list's filter. A code's own use count is a column of its row
   (`discount_codes.used`), moved by the same conditional `UPDATE … WHERE used < limit` as
   the discount's counter row; neither has a version. Usage rows keep what the discount took
   off the order (`amount`) and aren't foreign keys to orders or customers (orders aren't
   deleted, nor customers with orders). Migrations 0083 (discounts), 0084 (carts' codes),
-  0085 (orders' discounts).
+  0085 (orders' discounts), 0087 (usages by code).
+  - **A claim is judged at the commit** (§7): the discount must still be live at the
+    claim's moment, its row held `FOR SHARE` (concurrent claims don't wait on each other;
+    an edit waits for them) so its limit can't change under the claim, and the code still
+    active. A code deactivated mid-checkout is a lost claim: `409 discounts_changed`. The
+    claim carries no limit of the discount's: storage uses the one the discount has then.
+  - **Unlimited counters don't move.** Without a limit, neither the discount's counter row
+    nor the code's `used` is written, so a popular unlimited discount or code is no row
+    every checkout queues on. Their uses are counted from the usage rows instead (what
+    `usage_counts` and a code's `used` answer; migration 0087 indexes them by code), and a
+    discount given a limit later has its counter set from them in the same write (the
+    write waits for claims in flight, so they're counted). A code's limit is fixed when
+    it's made, so its claim's is the stored one.
 - **The engine** (§4, §5).
   - A discount's minimum is measured on the qualifying items' prices before discounts when
     it reduces items, else on their amounts after product discounts.
@@ -698,15 +717,35 @@ what they left open:
     other discount in the set reduces), then gets the cheapest units left of `gets`; a
     round whose units aren't in the cart gets none. Shares on lines carry `units`.
   - Each set's members that took nothing are dropped before sets are compared.
+  - **The lowest total wins** (the owner's decision, 2026-10-24; §4 step 4 said "saves
+    most"). Sets are ranked by what the buyer pays, the lines and the shipping after
+    discounts, not by what the discounts take off: a discount that takes the cart under a
+    "free over €50" rate can make it cost more (5% off €52 is €49.40 plus €5 shipping).
+    Compared are no discount at all, each candidate alone, and each seed's greedy set, so
+    a discount never makes the cart cost more and a seed alone beats a combination that
+    spoils it (a 10% shirt sale leaving a "buy anything, get the €5 sock free" deal
+    nothing to count as bought: the deal alone saves €5, the two together €1). Ties go to
+    fewer discounts, then lower IDs, so a discount that saves exactly what it adds to
+    shipping isn't applied.
+  - **Codes are taken in the order the cart entered them.** Two codes of one discount: the
+    first entered applies, unless its own uses are taken and the other's aren't; the other
+    reads its own state when it couldn't apply anyway (`limit_reached`), else
+    `blocked_by_other` naming the discount.
 - **Code states** (§6, §14). Unknown, inactive, draft and not-started codes are refused at
   entry as `422 discount_code_invalid`, alike. A kept code whose discount ended reads
   `expired`; one whose code or discount went (deleted, deactivated, made a draft) reads
   `invalid`. In the cart they're flat: `{code, state, condition?, needed?: {subtotal? |
   quantity?}, discount?}`. A second code of a discount already applied reads
-  `blocked_by_other` naming that discount.
+  `blocked_by_other` naming that discount. A code left out though it saves on its own,
+  by no discount it can't combine with, reads `no_saving`: with it the buyer would pay no
+  less (the shipping case above). Generated codes are 8 to 24 characters with the prefix,
+  at least 8 of them random after it (about 40 bits), so a prefix can't leave them
+  guessable.
 - **The buyer.** Signed in means the cart has a customer (a session's, or linked by staff).
   A guest with an email is counted by their email's customer for once-per-customer, as
-  checkout will be; groups come only from a linked customer, as for prices.
+  checkout will be (looked up only when a discount the cart weighs is once per customer);
+  groups come only from a linked customer, as for prices, and so does being a listed
+  customer: a guest typing a listed customer's email isn't them.
 - **Carts** (§6). `subtotal` and `shipping_total` are after discounts; a line has
   `subtotal` (before), `discounts` and `total` (after, taxed); the chosen shipping
   `amount`, `discounts`, `total`; the cart `discounts`, `discount_total`,
@@ -718,8 +757,14 @@ what they left open:
   discount_codes}` (the cart now) and isn't retried; money a payment committed goes back as
   on `total_changed`. An order's discounts keep their value and target as the leaf's JSON
   (`hypha_discounts::json`); Postgres's `jsonb` doesn't keep the keys' order.
-  `OrderLine::refund_of(refunded, units)` is the per-line refund rule for when refunds by
-  line come.
+  `order.placed`'s `discount_codes` names each code once, in the order applied. The
+  emails' totals add up: the subtotal and shipping are after discounts, and the discounts
+  are listed under the total as what they include ("Discounts included above"), never
+  taken off again.
+- **The admin's reads.** A discount's usage (`GET /admin/discounts/{id}/usage`) names
+  orders and their customers, so it needs `customers:read` and `orders:read` besides
+  `discounts:read`. The codes' CSV export checks the discount once and reads the codes
+  5,000 at a time (`export_codes`, `DiscountRepo::codes_after`).
 - **Summaries** (§10) name what they apply to ("Buy 1 from Grow kits, get 1 Liquid
   Culture Syringe free (once per order)", "Free shipping in Serbia on orders from 6,000
   RSD"; more than two names read "Grow kits and 2 more"), from `Names` the caller reads in
