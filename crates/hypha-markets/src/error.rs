@@ -37,7 +37,10 @@ pub enum FixedPriceProblem {
     CompareAtNotAbovePrice,
     #[error("a fixed price has at most {max} quantity prices")]
     TooManyBreaks { max: usize },
-    #[error("quantity prices start from 2, each for more than the one before")]
+    #[error(
+        "quantity prices start from 2, each for more than the one before, up to {}",
+        crate::PriceBreak::MAX_QUANTITY
+    )]
     BreakQuantityInvalid,
     #[error("a quantity price is in another currency than the price")]
     BreakCurrencyMismatch,

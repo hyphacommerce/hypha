@@ -623,6 +623,12 @@ pub struct PriceBreak {
     pub price: Price,
 }
 
+impl PriceBreak {
+    /// The largest quantity a break may start at: far above any line, and well inside
+    /// what storage keeps.
+    pub const MAX_QUANTITY: u32 = 1_000_000;
+}
+
 /// A list's price for one variant: what it pays, what the shopper sees it compared
 /// against, and cheaper prices for larger quantities.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -664,8 +670,8 @@ impl FixedPrice {
         }
     }
 
-    /// The same price with quantity `breaks`: at most `MAX_BREAKS`, from 2 up with
-    /// quantities strictly increasing, in the price's currency, and each price below the
+    /// The same price with quantity `breaks`: at most `MAX_BREAKS`, from 2 up to
+    /// `PriceBreak::MAX_QUANTITY` with quantities strictly increasing, in the price's currency, and each price below the
     /// one before it (the first below the fixed price), so buying more never costs more
     /// each.
     pub fn with_breaks(self, breaks: Vec<PriceBreak>) -> Result<Self, FixedPriceProblem> {
@@ -677,7 +683,7 @@ impl FixedPrice {
         let mut quantity = 1;
         let mut price = self.price;
         for b in &breaks {
-            if b.min_quantity <= quantity {
+            if b.min_quantity <= quantity || b.min_quantity > PriceBreak::MAX_QUANTITY {
                 return Err(FixedPriceProblem::BreakQuantityInvalid);
             }
             if b.price.money().currency() != self.price.money().currency() {
@@ -997,6 +1003,15 @@ mod tests {
             Err(FixedPriceProblem::BreakQuantityInvalid)
         );
         assert!(breaks(vec![at_least(2, 900)]).is_ok());
+    }
+
+    #[test]
+    fn breaks_stop_at_a_million() {
+        assert!(breaks(vec![at_least(PriceBreak::MAX_QUANTITY, 900)]).is_ok());
+        assert_eq!(
+            breaks(vec![at_least(PriceBreak::MAX_QUANTITY + 1, 900)]),
+            Err(FixedPriceProblem::BreakQuantityInvalid)
+        );
     }
 
     #[test]

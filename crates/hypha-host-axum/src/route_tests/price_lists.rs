@@ -605,6 +605,17 @@ async fn quantity_prices_show_on_the_product_and_price_the_cart_line() {
             &json!("price_breaks_not_descending")
         )
     );
+    // Past what storage keeps (a Postgres integer): refused, not a storage error.
+    let huge = json!({"fixed_prices": [{"variant": mug, "price": eur(1000),
+        "breaks": [{"min_quantity": 3_000_000_000u64, "price": eur(900)}]}]});
+    let (status, error) = send(&app, "PUT", &url, Some(&huge.to_string())).await;
+    assert_eq!(
+        (status, &error["details"]["entries"][0]["code"]),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &json!("price_break_quantity_invalid")
+        )
+    );
 
     let product = mug_product(&app).await;
     let pk = publishable(&app).await;

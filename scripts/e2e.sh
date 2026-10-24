@@ -486,6 +486,9 @@ contains "breaks must descend" '"code":"price_breaks_not_descending"'
 step "a quantity price from 1" 422 fixed_prices_invalid -X PUT "$BASE/admin/price-lists/$LIST/fixed-prices" \
     -H "$JSON" -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"},\"breaks\":[{\"min_quantity\":1,\"price\":{\"amount\":150,\"currency\":\"EUR\"}}]}]}"
 contains "from 2 up" '"code":"price_break_quantity_invalid"'
+step "a quantity price past a million" 422 fixed_prices_invalid -X PUT "$BASE/admin/price-lists/$LIST/fixed-prices" \
+    -H "$JSON" -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"},\"breaks\":[{\"min_quantity\":3000000000,\"price\":{\"amount\":150,\"currency\":\"EUR\"}}]}]}"
+contains "up to a million" '"code":"price_break_quantity_invalid"'
 step "create catalog" 201 - -X POST "$BASE/admin/catalogs" -H "$JSON" -d "{\"market\":\"$MARKET\"}"
 CATALOG=$(id)
 step "add mug and cup to catalog" 204 - -X POST "$BASE/admin/catalogs/$CATALOG/products" -H "$JSON" \
