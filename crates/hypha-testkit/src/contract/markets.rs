@@ -1,14 +1,18 @@
 use std::collections::{HashMap, HashSet};
 
+use hypha_categories::{Category, CategoryRepo, HasCategories, NewCategory};
 use hypha_core::{
-    BasisPoints, CatalogId, CountryCode, Currency, MarketId, Money, Page, PageLimit, PageRequest,
-    Price, PriceListId, ProductId, RepoError, Timestamp, VariantId, Version, Versioned,
+    BasisPoints, CatalogId, CategoryId, CountryCode, Currency, Handle, Keyset, MarketId, Money,
+    Page, PageLimit, PageRequest, Price, PriceListId, ProductId, RepoError, Timestamp, VariantId,
+    Version, Versioned,
 };
 use hypha_markets::{
-    Adjustment, Catalog, CatalogContext, CatalogRepo, CompareAtMode, FixedPrice, Market,
-    MarketRepo, PriceList, PriceListDraft, PriceListKind, PriceListRepo, PriceListStatus,
+    Adjustment, AppliesTo, Catalog, CatalogContext, CatalogRepo, CompareAtMode, FixedPrice,
+    FixedPriceFilter, HasCatalogs, HasPriceLists, Market, MarketRepo, PriceList, PriceListDraft,
+    PriceListFilter, PriceListKind, PriceListPhase, PriceListRepo, PriceListSort, PriceListStatus,
     repo::keys,
 };
+use hypha_products::{HasProducts, Product, ProductRepo, VariantPatch};
 use uuid::Uuid;
 
 use super::scenario;
@@ -49,8 +53,8 @@ fn market(n: u128, countries: &[&str]) -> Market {
     .unwrap()
 }
 
-fn catalog(n: u128, market: u128, price_list: Option<PriceListId>) -> Catalog {
-    Catalog::new(cid(n), CatalogContext::Market(mid(market)), price_list)
+fn catalog(n: u128, market: u128, price_lists: impl IntoIterator<Item = PriceListId>) -> Catalog {
+    Catalog::new(cid(n), CatalogContext::Market(mid(market)), price_lists)
 }
 
 fn price_list(n: u128, currency: Currency, bp: i32) -> PriceList {
@@ -207,7 +211,8 @@ async fn market_stale<R: MarketRepo>(repo: &R) {
 // ---------- catalogs ----------
 
 /// Runs every `CatalogRepo` scenario, each on a fresh repo from `make`.
-pub async fn catalog_repo<R: CatalogRepo>(make: impl AsyncFn() -> R) {
+/// The ports hold price lists too: a catalog's lists must exist.
+pub async fn catalog_repo<S: HasCatalogs + HasPriceLists>(make: impl AsyncFn() -> S) {
     scenario("catalog: insert stores every field at version 1");
     catalog_round_trips(&make().await).await;
     scenario("catalog: update stores changes and bumps the version");
@@ -224,9 +229,71 @@ pub async fn catalog_repo<R: CatalogRepo>(make: impl AsyncFn() -> R) {
     catalog_list_all(&make().await).await;
     scenario("catalog: a catalog's products come in pages, newest first");
     catalog_product_pages(&make().await).await;
+    scenario("catalog: its price lists are a set, replaced by an update");
+    catalog_price_lists(&make().await).await;
+    scenario("catalog: a price list a catalog holds can't be deleted");
+    catalog_holds_its_lists(&make().await).await;
 }
 
-async fn catalog_list_all<R: CatalogRepo>(repo: &R) {
+/// Stores lists 5 and 6, for catalogs to hold.
+async fn seed_lists<S: HasPriceLists>(ports: &S) {
+    for n in [5, 6] {
+        ports
+            .price_lists()
+            .insert(&mut price_list(n, Currency::EUR, 0))
+            .await
+            .unwrap();
+    }
+}
+
+async fn catalog_price_lists<S: HasCatalogs + HasPriceLists>(ports: &S) {
+    seed_lists(ports).await;
+    let repo = ports.catalogs();
+    let mut c = catalog(1, 10, [plid(6), plid(5)]);
+    repo.insert(&mut c).await.unwrap();
+    assert_eq!(c.price_lists(), [plid(5), plid(6)]);
+    assert_eq!(repo.get(c.id()).await, Ok(Some(c.clone())));
+    c.set_price_lists(vec![plid(6)]).unwrap();
+    repo.update(&mut c).await.unwrap();
+    assert_eq!(
+        repo.get_by_context(c.context())
+            .await
+            .unwrap()
+            .unwrap()
+            .price_lists(),
+        [plid(6)]
+    );
+    // A list may sit on several catalogs.
+    let mut other = catalog(2, 20, [plid(6)]);
+    repo.insert(&mut other).await.unwrap();
+    let all = repo.list_all().await.unwrap();
+    assert_eq!(all[0].price_lists(), [plid(6)]);
+    assert_eq!(all[1].price_lists(), [plid(6)]);
+}
+
+async fn catalog_holds_its_lists<S: HasCatalogs + HasPriceLists>(ports: &S) {
+    seed_lists(ports).await;
+    let mut c = catalog(1, 10, [plid(5)]);
+    ports.catalogs().insert(&mut c).await.unwrap();
+    let mut held = ports.price_lists().get(plid(5)).await.unwrap().unwrap();
+    held.delete();
+    assert_eq!(
+        ports.price_lists().delete(&mut held).await,
+        Err(RepoError::Reference(keys::CATALOG_PRICE_LIST))
+    );
+    assert!(ports.price_lists().get(plid(5)).await.unwrap().is_some());
+
+    c.set_price_lists(vec![]).unwrap();
+    ports.catalogs().update(&mut c).await.unwrap();
+    let mut free = ports.price_lists().get(plid(5)).await.unwrap().unwrap();
+    free.delete();
+    ports.price_lists().delete(&mut free).await.unwrap();
+    assert_eq!(ports.price_lists().get(plid(5)).await, Ok(None));
+}
+
+async fn catalog_list_all<S: HasCatalogs + HasPriceLists>(ports: &S) {
+    seed_lists(ports).await;
+    let repo = ports.catalogs();
     assert_eq!(repo.list_all().await, Ok(vec![]));
     for (n, market) in [(2, 20), (1, 10)] {
         repo.insert(&mut catalog(n, market, None)).await.unwrap();
@@ -244,7 +311,9 @@ fn page<Id>(after: Option<Id>, limit: u32) -> PageRequest<Id> {
     }
 }
 
-async fn catalog_product_pages<R: CatalogRepo>(repo: &R) {
+async fn catalog_product_pages<S: HasCatalogs + HasPriceLists>(ports: &S) {
+    seed_lists(ports).await;
+    let repo = ports.catalogs();
     let mut a = catalog(1, 10, None);
     let mut b = catalog(2, 20, None);
     repo.insert(&mut a).await.unwrap();
@@ -292,7 +361,9 @@ async fn catalog_product_pages<R: CatalogRepo>(repo: &R) {
     );
 }
 
-async fn catalog_round_trips<R: CatalogRepo>(repo: &R) {
+async fn catalog_round_trips<S: HasCatalogs + HasPriceLists>(ports: &S) {
+    seed_lists(ports).await;
+    let repo = ports.catalogs();
     for mut c in [catalog(1, 10, Some(plid(5))), catalog(2, 20, None)] {
         repo.insert(&mut c).await.unwrap();
         assert_eq!(c.version(), Version::new(1));
@@ -306,21 +377,25 @@ async fn catalog_round_trips<R: CatalogRepo>(repo: &R) {
     );
 }
 
-async fn catalog_update<R: CatalogRepo>(repo: &R) {
+async fn catalog_update<S: HasCatalogs + HasPriceLists>(ports: &S) {
+    seed_lists(ports).await;
+    let repo = ports.catalogs();
     let mut c = catalog(1, 10, None);
     repo.insert(&mut c).await.unwrap();
 
-    c.set_price_list(Some(plid(5)));
+    c.set_price_lists(vec![plid(5)]).unwrap();
     repo.update(&mut c).await.unwrap();
     assert_eq!(c.version(), Version::new(2));
     assert_eq!(repo.get(c.id()).await, Ok(Some(c.clone())));
 
-    c.set_price_list(None);
+    c.set_price_lists(vec![]).unwrap();
     repo.update(&mut c).await.unwrap();
     assert_eq!(repo.get(c.id()).await, Ok(Some(c)));
 }
 
-async fn catalog_keys<R: CatalogRepo>(repo: &R) {
+async fn catalog_keys<S: HasCatalogs + HasPriceLists>(ports: &S) {
+    seed_lists(ports).await;
+    let repo = ports.catalogs();
     repo.insert(&mut catalog(1, 10, None)).await.unwrap();
 
     assert_eq!(
@@ -338,11 +413,13 @@ async fn catalog_keys<R: CatalogRepo>(repo: &R) {
     );
 }
 
-async fn catalog_stale<R: CatalogRepo>(repo: &R) {
+async fn catalog_stale<S: HasCatalogs + HasPriceLists>(ports: &S) {
+    seed_lists(ports).await;
+    let repo = ports.catalogs();
     let mut c = catalog(1, 10, None);
     repo.insert(&mut c).await.unwrap();
     let mut stale = c.clone();
-    c.set_price_list(Some(plid(5)));
+    c.set_price_lists(vec![plid(5)]).unwrap();
     repo.update(&mut c).await.unwrap();
 
     assert_eq!(repo.update(&mut stale).await, Err(RepoError::StaleVersion));
@@ -353,7 +430,9 @@ async fn catalog_stale<R: CatalogRepo>(repo: &R) {
     );
 }
 
-async fn catalog_products<R: CatalogRepo>(repo: &R) {
+async fn catalog_products<S: HasCatalogs + HasPriceLists>(ports: &S) {
+    seed_lists(ports).await;
+    let repo = ports.catalogs();
     let mut a = catalog(1, 10, None);
     let mut b = catalog(2, 20, None);
     repo.insert(&mut a).await.unwrap();
@@ -390,7 +469,7 @@ async fn catalog_products<R: CatalogRepo>(repo: &R) {
         Ok(HashSet::from([pid(1)]))
     );
     // Membership is not part of the catalog row: updating the catalog keeps it.
-    a.set_price_list(Some(plid(5)));
+    a.set_price_lists(vec![plid(5)]).unwrap();
     repo.update(&mut a).await.unwrap();
     assert_eq!(
         repo.included_products(a.id(), &[pid(2)]).await,
@@ -412,6 +491,16 @@ pub async fn price_list_repo<R: PriceListRepo>(make: impl AsyncFn() -> R) {
     price_list_names(&make().await).await;
     scenario("price list: a fixed price keeps its compare-at price");
     fixed_price_compare_at(&make().await).await;
+    scenario("price list: an adjustment keeps what it applies to");
+    price_list_applies_to(&make().await).await;
+    scenario("price list: get_many returns those that exist, oldest first");
+    price_list_get_many(&make().await).await;
+    scenario("price list: lists are filtered by kind, phase and ID, and sorted");
+    price_list_list(&make().await).await;
+    scenario("price list: fixed prices of several lists come in one read, with counts");
+    fixed_prices_of_several_lists(&make().await).await;
+    scenario("price list: deleting one takes its fixed prices");
+    price_list_delete(&make().await).await;
     scenario("price list: fixed prices are set, removed and queried in batches");
     price_list_fixed_prices(&make().await).await;
     scenario("price list: fixed prices need the list and each variant once");
@@ -454,21 +543,23 @@ async fn fixed_price_pages<R: PriceListRepo>(repo: &R) {
         .unwrap();
 
     assert_eq!(
-        repo.fixed_price_page(plid(1), page(None, 2)).await,
+        repo.fixed_price_page(plid(1), &FixedPriceFilter::default(), page(None, 2))
+            .await,
         Ok(Page {
             items: vec![(vid(3), fp(300)), (vid(2), fp(200))],
             has_more: true
         })
     );
     assert_eq!(
-        repo.fixed_price_page(plid(1), page(Some(vid(2)), 2)).await,
+        repo.fixed_price_page(plid(1), &FixedPriceFilter::default(), page(Some(vid(2)), 2))
+            .await,
         Ok(Page {
             items: vec![(vid(1), fp(100))],
             has_more: false
         })
     );
     assert_eq!(
-        repo.fixed_price_page(plid(99), page(None, 10))
+        repo.fixed_price_page(plid(99), &FixedPriceFilter::default(), page(None, 10))
             .await
             .unwrap()
             .items,
@@ -515,7 +606,7 @@ async fn price_list_round_trips<R: PriceListRepo>(repo: &R) {
             starts_at: Some(Timestamp::from_unix_micros(1_000_000)),
             ends_at: Some(Timestamp::from_unix_micros(2_000_000)),
             compare_at: CompareAtMode::Hidden,
-            adjustment: Some(Adjustment::new(BasisPoints::new(-2000).unwrap())),
+            adjustment: Some(Adjustment::all(BasisPoints::new(-2000).unwrap())),
         },
     )
     .unwrap();
@@ -569,7 +660,7 @@ async fn fixed_price_compare_at<R: PriceListRepo>(repo: &R) {
         Ok(HashMap::from([(vid(1), fp(800))]))
     );
     assert_eq!(
-        repo.fixed_price_page(plid(1), page(None, 10))
+        repo.fixed_price_page(plid(1), &FixedPriceFilter::default(), page(None, 10))
             .await
             .unwrap()
             .items,
@@ -577,11 +668,315 @@ async fn fixed_price_compare_at<R: PriceListRepo>(repo: &R) {
     );
 }
 
+async fn price_list_applies_to<R: PriceListRepo>(repo: &R) {
+    let bp = BasisPoints::new(-2000).unwrap();
+    let cat = |n| CategoryId::from_uuid(Uuid::from_u128(n));
+    for (n, applies_to) in [
+        (1, AppliesTo::Products(vec![pid(2), pid(1)])),
+        (2, AppliesTo::Categories(vec![cat(7)])),
+        (3, AppliesTo::All),
+    ] {
+        let mut list = named_list(n, &format!("Scoped {n}"));
+        list.set_adjustment(Some(Adjustment::new(bp, applies_to).unwrap()));
+        repo.insert(&mut list).await.unwrap();
+        assert_eq!(repo.get(list.id()).await, Ok(Some(list)));
+    }
+}
+
+async fn price_list_get_many<R: PriceListRepo>(repo: &R) {
+    for n in [3, 1, 2] {
+        repo.insert(&mut price_list(n, Currency::EUR, 0))
+            .await
+            .unwrap();
+    }
+    let found = repo.get_many(&[plid(3), plid(9), plid(1)]).await.unwrap();
+    let ids: Vec<PriceListId> = found.iter().map(|l| l.id()).collect();
+    assert_eq!(ids, [plid(1), plid(3)]);
+    assert_eq!(repo.get_many(&[]).await, Ok(vec![]));
+}
+
+async fn price_list_list<R: PriceListRepo>(repo: &R) {
+    let at = |s: i64| Timestamp::from_unix_micros(s * 1_000_000);
+    let mut sale = named_list(1, "b sale");
+    sale.set_kind(PriceListKind::Sale);
+    let mut draft = named_list(2, "C draft");
+    draft.set_status(PriceListStatus::Draft);
+    let mut scheduled = named_list(3, "a later");
+    scheduled.set_window(hypha_markets::Window::new(Some(at(100)), None).unwrap());
+    let mut expired = named_list(4, "D over");
+    expired.set_window(hypha_markets::Window::new(None, Some(at(10))).unwrap());
+    for mut l in [sale, draft, scheduled, expired] {
+        repo.insert(&mut l).await.unwrap();
+    }
+    let ids = |page: Page<PriceList>| page.items.iter().map(|l| l.id()).collect::<Vec<_>>();
+    let keyset = |after: Option<Keyset<PriceListId>>, limit| PageRequest {
+        after,
+        limit: PageLimit::new(limit).unwrap(),
+    };
+    let everything = PriceListFilter::everything(at(50));
+    let list = async |filter: &PriceListFilter, sort| {
+        repo.list(filter, sort, keyset(None, 10)).await.unwrap()
+    };
+    assert_eq!(
+        ids(list(&everything, PriceListSort::Newest).await),
+        [plid(4), plid(3), plid(2), plid(1)]
+    );
+    assert_eq!(
+        ids(list(&everything, PriceListSort::NameAsc).await),
+        [plid(3), plid(1), plid(2), plid(4)]
+    );
+    for (phase, expected) in [
+        (PriceListPhase::Active, plid(1)),
+        (PriceListPhase::Draft, plid(2)),
+        (PriceListPhase::Scheduled, plid(3)),
+        (PriceListPhase::Expired, plid(4)),
+    ] {
+        let filter = PriceListFilter {
+            phase: Some(phase),
+            ..everything.clone()
+        };
+        assert_eq!(ids(list(&filter, PriceListSort::Newest).await), [expected]);
+    }
+    let sales = PriceListFilter {
+        kind: Some(PriceListKind::Sale),
+        ..everything.clone()
+    };
+    assert_eq!(ids(list(&sales, PriceListSort::Newest).await), [plid(1)]);
+    let some = PriceListFilter {
+        ids: Some(vec![plid(2), plid(4)]),
+        ..everything.clone()
+    };
+    assert_eq!(
+        ids(list(&some, PriceListSort::Oldest).await),
+        [plid(2), plid(4)]
+    );
+    let none = PriceListFilter {
+        ids: Some(vec![]),
+        ..everything.clone()
+    };
+    assert_eq!(ids(list(&none, PriceListSort::Oldest).await), []);
+
+    // Pages continue after the last item's key and ID.
+    let first = repo
+        .list(&everything, PriceListSort::NameDesc, keyset(None, 2))
+        .await
+        .unwrap();
+    assert_eq!(
+        (ids(first.clone()), first.has_more),
+        (vec![plid(4), plid(2)], true)
+    );
+    let after = Keyset {
+        key: PriceListSort::NameDesc.key(&first.items[1]),
+        id: plid(2),
+    };
+    let rest = repo
+        .list(&everything, PriceListSort::NameDesc, keyset(Some(after), 2))
+        .await
+        .unwrap();
+    assert_eq!(
+        (ids(rest.clone()), rest.has_more),
+        (vec![plid(1), plid(3)], false)
+    );
+}
+
+async fn fixed_prices_of_several_lists<R: PriceListRepo>(repo: &R) {
+    for n in [1, 2, 3] {
+        repo.insert(&mut price_list(n, Currency::EUR, 0))
+            .await
+            .unwrap();
+    }
+    repo.set_fixed_prices(plid(1), &[(vid(1), fp(100)), (vid(2), fp(200))])
+        .await
+        .unwrap();
+    repo.set_fixed_prices(plid(2), &[(vid(1), fp(90))])
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.fixed_prices_in(&[plid(1), plid(2), plid(3)], &[vid(1), vid(9)])
+            .await,
+        Ok(HashMap::from([
+            (plid(1), HashMap::from([(vid(1), fp(100))])),
+            (plid(2), HashMap::from([(vid(1), fp(90))])),
+        ]))
+    );
+    assert_eq!(
+        repo.fixed_prices_in(&[], &[vid(1)]).await,
+        Ok(HashMap::new())
+    );
+    assert_eq!(
+        repo.fixed_price_counts(&[plid(1), plid(2), plid(3)]).await,
+        Ok(HashMap::from([(plid(1), 2), (plid(2), 1)]))
+    );
+}
+
+async fn price_list_delete<R: PriceListRepo>(repo: &R) {
+    let mut list = price_list(1, Currency::EUR, 0);
+    repo.insert(&mut list).await.unwrap();
+    repo.set_fixed_prices(plid(1), &[(vid(1), fp(100))])
+        .await
+        .unwrap();
+    list.delete();
+    repo.delete(&mut list).await.unwrap();
+    assert_eq!(repo.get(plid(1)).await, Ok(None));
+    assert_eq!(
+        repo.fixed_prices(plid(1), &[vid(1)]).await,
+        Ok(HashMap::new())
+    );
+    // Its name is free again, and a list gone already is fine.
+    repo.insert(&mut price_list(2, Currency::EUR, 0))
+        .await
+        .unwrap();
+    repo.delete(&mut list).await.unwrap();
+}
+
+/// Runs the scenarios that read other domains' records, as the adapter stores them: the
+/// products and categories fixed prices are filtered by, and the category tree.
+pub async fn price_list_joins<S>(make: impl AsyncFn() -> S)
+where
+    S: HasProducts + HasCategories + HasPriceLists,
+{
+    scenario("price list: fixed prices filtered by product, category and text");
+    fixed_price_filters(&make().await).await;
+    scenario("price list: a product's categories come with their ancestors");
+    product_categories(&make().await).await;
+}
+
+fn product_with_sku(n: u128, title: &str, sku: &str) -> Product {
+    let mut p = Product::new_simple(
+        pid(n),
+        Handle::new(&format!("p-{n}")).unwrap(),
+        title.to_string(),
+        vid(n * 10),
+        eur(1000),
+    )
+    .unwrap();
+    p.update_variant(
+        vid(n * 10),
+        VariantPatch {
+            sku: Some(Some(sku.to_string())),
+            ..VariantPatch::default()
+        },
+    )
+    .unwrap();
+    p
+}
+
+fn category(n: u128, parent: Option<u128>) -> Category {
+    let id = |n| CategoryId::from_uuid(Uuid::from_u128(n));
+    Category::new(NewCategory {
+        id: id(n),
+        name: format!("Category {n}"),
+        handle: Handle::new(&format!("category-{n}")).unwrap(),
+        description: None,
+        parent: parent.map(id),
+        position: 0,
+        visible: true,
+    })
+    .unwrap()
+}
+
+async fn fixed_price_filters<S: HasProducts + HasCategories + HasPriceLists>(ports: &S) {
+    for mut p in [
+        product_with_sku(1, "Blue mug", "MUG-B"),
+        product_with_sku(2, "Cup", "CUP-1"),
+        product_with_sku(3, "Plate", "PL-MUG"),
+    ] {
+        ports.products().insert(&mut p).await.unwrap();
+    }
+    let mut kitchen = category(50, None);
+    ports.categories().insert(&mut kitchen).await.unwrap();
+    ports
+        .categories()
+        .add_products(kitchen.id(), &[pid(2)])
+        .await
+        .unwrap();
+    let repo = ports.price_lists();
+    repo.insert(&mut price_list(1, Currency::EUR, 0))
+        .await
+        .unwrap();
+    // A variant no product has, too.
+    repo.set_fixed_prices(
+        plid(1),
+        &[
+            (vid(10), fp(1)),
+            (vid(20), fp(2)),
+            (vid(30), fp(3)),
+            (vid(99), fp(9)),
+        ],
+    )
+    .await
+    .unwrap();
+    let variants = async |filter: FixedPriceFilter| {
+        repo.fixed_price_page(plid(1), &filter, page(None, 10))
+            .await
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|(v, _)| v)
+            .collect::<Vec<_>>()
+    };
+    let filter = |product, category, q: Option<&str>| {
+        FixedPriceFilter::new(product, category, q.map(str::to_string)).unwrap()
+    };
+    assert_eq!(
+        variants(filter(None, None, None)).await,
+        [vid(99), vid(30), vid(20), vid(10)]
+    );
+    assert_eq!(variants(filter(Some(pid(1)), None, None)).await, [vid(10)]);
+    assert_eq!(
+        variants(filter(None, Some(kitchen.id()), None)).await,
+        [vid(20)]
+    );
+    // By title or SKU, ignoring case.
+    assert_eq!(
+        variants(filter(None, None, Some("mug"))).await,
+        [vid(30), vid(10)]
+    );
+    assert_eq!(variants(filter(Some(pid(2)), None, Some("mug"))).await, []);
+}
+
+async fn product_categories<S: HasProducts + HasCategories + HasPriceLists>(ports: &S) {
+    let id = |n| CategoryId::from_uuid(Uuid::from_u128(n));
+    // 1 Kitchen › 2 Mugs › 3 Espresso; 4 Gifts.
+    for mut c in [
+        category(1, None),
+        category(2, Some(1)),
+        category(3, Some(2)),
+        category(4, None),
+    ] {
+        ports.categories().insert(&mut c).await.unwrap();
+    }
+    ports
+        .categories()
+        .add_products(id(3), &[pid(1)])
+        .await
+        .unwrap();
+    ports
+        .categories()
+        .add_products(id(4), &[pid(1), pid(2)])
+        .await
+        .unwrap();
+    assert_eq!(
+        ports
+            .price_lists()
+            .product_categories(&[pid(1), pid(2), pid(9)])
+            .await,
+        Ok(HashMap::from([
+            (pid(1), HashSet::from([id(1), id(2), id(3), id(4)])),
+            (pid(2), HashSet::from([id(4)])),
+        ]))
+    );
+    assert_eq!(
+        ports.price_lists().product_categories(&[]).await,
+        Ok(HashMap::new())
+    );
+}
+
 async fn price_list_update<R: PriceListRepo>(repo: &R) {
     let mut list = price_list(1, Currency::EUR, 0);
     repo.insert(&mut list).await.unwrap();
 
-    list.set_adjustment(Some(Adjustment::new(BasisPoints::new(2500).unwrap())));
+    list.set_adjustment(Some(Adjustment::all(BasisPoints::new(2500).unwrap())));
     repo.update(&mut list).await.unwrap();
 
     assert_eq!(list.version(), Version::new(2));
@@ -597,7 +992,7 @@ async fn price_list_keys_and_stale<R: PriceListRepo>(repo: &R) {
     );
 
     let mut stale = list.clone();
-    list.set_adjustment(Some(Adjustment::new(BasisPoints::new(-500).unwrap())));
+    list.set_adjustment(Some(Adjustment::all(BasisPoints::new(-500).unwrap())));
     repo.update(&mut list).await.unwrap();
     assert_eq!(repo.update(&mut stale).await, Err(RepoError::StaleVersion));
     assert_eq!(repo.get(list.id()).await, Ok(Some(list)));
@@ -649,7 +1044,7 @@ async fn price_list_fixed_prices<R: PriceListRepo>(repo: &R) {
         Ok(HashMap::from([(vid(1), fp(999))]))
     );
     // Fixed prices are not part of the list row: updating the list keeps them.
-    a.set_adjustment(Some(Adjustment::new(BasisPoints::new(-1000).unwrap())));
+    a.set_adjustment(Some(Adjustment::all(BasisPoints::new(-1000).unwrap())));
     repo.update(&mut a).await.unwrap();
     assert_eq!(
         repo.fixed_prices(a.id(), &[vid(1)]).await,
@@ -659,7 +1054,8 @@ async fn price_list_fixed_prices<R: PriceListRepo>(repo: &R) {
 
 /// Caller precondition (the command loads the catalog first): adapters fail rather
 /// than store membership of a catalog that doesn't exist.
-async fn catalog_products_need_the_catalog<R: CatalogRepo>(repo: &R) {
+async fn catalog_products_need_the_catalog<S: HasCatalogs>(ports: &S) {
+    let repo = ports.catalogs();
     assert!(repo.add_products(cid(99), &[pid(1)]).await.is_err());
 }
 

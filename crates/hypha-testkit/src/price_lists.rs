@@ -1,23 +1,25 @@
 use std::{
-    collections::HashMap,
-    sync::{Mutex, MutexGuard},
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
+use hypha_categories::Category;
 use hypha_core::{
-    Page, PageRequest, PriceListId, Recorded, RepoError, VariantId, Versioned, stamp_insert,
-    stamp_update,
+    CategoryId, Keyset, Page, PageRequest, PriceListId, ProductId, Recorded, RepoError, VariantId,
+    Versioned, stamp_insert, stamp_update,
 };
-use hypha_markets::{FixedPrice, PriceList, PriceListRepo, repo::keys};
+use hypha_markets::{
+    FixedPrice, FixedPriceFilter, PriceList, PriceListFilter, PriceListRepo, PriceListSort,
+    repo::keys,
+};
+use hypha_products::Product;
 
 use crate::{
-    InMemoryOutbox,
+    InMemoryCatalogRepo, InMemoryCategoryRepo, InMemoryOutbox, InMemoryProductRepo,
+    catalogs::PriceListRefs,
+    categories::Members,
     table::{Table, missing, page_of},
 };
-
-/// A name belongs to one list, ignoring case.
-fn unique(new: &PriceList, other: &PriceList) -> Option<&'static str> {
-    (new.name().to_lowercase() == other.name().to_lowercase()).then_some(keys::PRICE_LIST_NAME)
-}
 
 #[derive(Default)]
 pub struct InMemoryPriceListRepo {
@@ -25,6 +27,13 @@ pub struct InMemoryPriceListRepo {
     /// Fixed prices, stored apart from the list like a separate table would be.
     fixed_prices: Mutex<HashMap<PriceListId, HashMap<VariantId, FixedPrice>>>,
     pub(crate) outbox: InMemoryOutbox,
+    /// What a database would join: the catalogs' price lists (which refuse a delete), the
+    /// products and categories fixed prices are filtered by, and the categories' tree.
+    /// Empty unless shared (`InMemoryPorts` shares its repos').
+    catalog_refs: Arc<Mutex<PriceListRefs>>,
+    products: Arc<Table<ProductId, Product>>,
+    categories: Arc<Table<CategoryId, Category>>,
+    members: Arc<Mutex<Members>>,
 }
 
 impl InMemoryPriceListRepo {
@@ -33,6 +42,23 @@ impl InMemoryPriceListRepo {
         Self {
             outbox: outbox.clone(),
             ..Self::default()
+        }
+    }
+
+    /// The same repo, reading the catalogs' price lists, the products and the categories
+    /// from these repos, as a database joins them.
+    pub fn joining(
+        self,
+        catalogs: &InMemoryCatalogRepo,
+        products: &InMemoryProductRepo,
+        categories: &InMemoryCategoryRepo,
+    ) -> Self {
+        Self {
+            catalog_refs: catalogs.price_list_refs.clone(),
+            products: products.products.clone(),
+            categories: categories.categories.clone(),
+            members: categories.members.clone(),
+            ..self
         }
     }
 
@@ -56,31 +82,109 @@ impl InMemoryPriceListRepo {
     pub(crate) fn exists(&self, id: PriceListId) -> bool {
         self.price_lists.get(&id).is_some()
     }
+
+    /// Whether the fixed price of `variant` passes `filter`, judged by the product owning
+    /// the variant, as a database's join would.
+    fn passes(&self, filter: &FixedPriceFilter, variant: VariantId) -> bool {
+        if filter.is_empty() {
+            return true;
+        }
+        let Some(product) = self.products.find(|p| p.variant(variant).is_some()) else {
+            return false;
+        };
+        let in_category = filter.category().is_some_and(|c| {
+            self.members
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&c)
+                .is_some_and(|m| m.contains(&product.id()))
+        });
+        let sku = product.variant(variant).and_then(|v| v.sku());
+        let texts = [product.title(), product.handle().as_str()]
+            .into_iter()
+            .chain(sku);
+        filter.matches(product.id(), in_category, texts)
+    }
 }
 
 pub(crate) type FixedPrices = HashMap<PriceListId, HashMap<VariantId, FixedPrice>>;
+
+/// A name belongs to one list, ignoring case.
+fn unique(new: &PriceList, other: &PriceList) -> Option<&'static str> {
+    (new.name().to_lowercase() == other.name().to_lowercase()).then_some(keys::PRICE_LIST_NAME)
+}
 
 impl PriceListRepo for InMemoryPriceListRepo {
     async fn get(&self, id: PriceListId) -> Result<Option<PriceList>, RepoError> {
         Ok(self.price_lists.get(&id))
     }
 
+    async fn get_many(&self, ids: &[PriceListId]) -> Result<Vec<PriceList>, RepoError> {
+        let mut found = self.price_lists.get_many(ids);
+        found.sort_by_key(|l| l.id());
+        found.dedup_by_key(|l| l.id());
+        Ok(found)
+    }
+
     async fn list_all(&self) -> Result<Vec<PriceList>, RepoError> {
         Ok(self.price_lists.all_oldest_first())
+    }
+
+    async fn list(
+        &self,
+        filter: &PriceListFilter,
+        sort: PriceListSort,
+        page: PageRequest<Keyset<PriceListId>>,
+    ) -> Result<Page<PriceList>, RepoError> {
+        if let Some(after) = &page.after
+            && !sort.fits(&after.key)
+        {
+            return Err(RepoError::Backend(format!(
+                "a {:?} position for a {sort:?} list",
+                after.key
+            )));
+        }
+        Ok(self.price_lists.page_sorted(
+            |l| filter.matches(l),
+            &page,
+            sort.direction(),
+            PriceList::clone,
+            |l| sort.key(l),
+        ))
     }
 
     async fn fixed_price_page(
         &self,
         list: PriceListId,
+        filter: &FixedPriceFilter,
         page: PageRequest<VariantId>,
     ) -> Result<Page<(VariantId, FixedPrice)>, RepoError> {
+        // Copied first, so no other lock is held while the products' is.
+        let prices: Vec<(VariantId, FixedPrice)> = {
+            let all = self.fixed_prices.lock().unwrap();
+            all.get(&list)
+                .into_iter()
+                .flatten()
+                .map(|(v, p)| (*v, p.clone()))
+                .collect()
+        };
+        let kept = prices.into_iter().filter(|(v, _)| self.passes(filter, *v));
+        Ok(page_of(kept, page))
+    }
+
+    async fn fixed_price_counts(
+        &self,
+        lists: &[PriceListId],
+    ) -> Result<HashMap<PriceListId, u64>, RepoError> {
         let all = self.fixed_prices.lock().unwrap();
-        let prices = all
-            .get(&list)
-            .into_iter()
-            .flatten()
-            .map(|(v, p)| (*v, p.clone()));
-        Ok(page_of(prices, page))
+        Ok(lists
+            .iter()
+            .filter_map(|l| {
+                all.get(l)
+                    .filter(|prices| !prices.is_empty())
+                    .map(|prices| (*l, prices.len() as u64))
+            })
+            .collect())
     }
 
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
@@ -98,6 +202,23 @@ impl PriceListRepo for InMemoryPriceListRepo {
         self.price_lists
             .update(price_list.id(), price_list, &unique)?;
         self.outbox.write(events, Some(price_list.version()));
+        Ok(())
+    }
+
+    async fn delete(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
+        let held = self
+            .catalog_refs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .any(|lists| lists.contains(&price_list.id()));
+        if held {
+            return Err(RepoError::Reference(keys::CATALOG_PRICE_LIST));
+        }
+        let events = price_list.take_events();
+        self.price_lists.remove(&price_list.id());
+        self.fixed_prices.lock().unwrap().remove(&price_list.id());
+        self.outbox.write(events, None);
         Ok(())
     }
 
@@ -159,6 +280,49 @@ impl PriceListRepo for InMemoryPriceListRepo {
             .iter()
             .filter_map(|v| prices.get(v).map(|p| (*v, p.clone())))
             .collect())
+    }
+
+    async fn fixed_prices_in(
+        &self,
+        lists: &[PriceListId],
+        variants: &[VariantId],
+    ) -> Result<HashMap<PriceListId, HashMap<VariantId, FixedPrice>>, RepoError> {
+        let mut found = HashMap::new();
+        for list in lists {
+            let prices = self.fixed_prices(*list, variants).await?;
+            if !prices.is_empty() {
+                found.insert(*list, prices);
+            }
+        }
+        Ok(found)
+    }
+
+    async fn product_categories(
+        &self,
+        products: &[ProductId],
+    ) -> Result<HashMap<ProductId, HashSet<CategoryId>>, RepoError> {
+        let direct: Vec<(CategoryId, ProductId)> = {
+            let members = self.members.lock().unwrap_or_else(|e| e.into_inner());
+            members
+                .iter()
+                .flat_map(|(c, ps)| {
+                    products
+                        .iter()
+                        .filter(|p| ps.contains(p))
+                        .map(move |p| (*c, *p))
+                })
+                .collect()
+        };
+        let mut found: HashMap<ProductId, HashSet<CategoryId>> = HashMap::new();
+        for (category, product) in direct {
+            let set = found.entry(product).or_default();
+            let mut next = Some(category);
+            // Up the parent pointers; a cycle (which the domain refuses) stops it.
+            while let Some(c) = next.filter(|c| set.insert(*c)) {
+                next = self.categories.get(&c).and_then(|cat| cat.parent());
+            }
+        }
+        Ok(found)
     }
 }
 

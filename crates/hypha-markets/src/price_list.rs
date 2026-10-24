@@ -1,8 +1,9 @@
 use std::collections::{BTreeSet, HashSet};
 
 use hypha_core::{
-    BasisPoints, Currency, PendingEvent, Price, PriceListId, Recorded, Stamped, Stamps, Subject,
-    Timestamp, VariantId, Version, Versioned, optional_text, required_text,
+    BasisPoints, CategoryId, Currency, PendingEvent, Price, PriceListId, ProductId, Recorded,
+    Stamped, Stamps, Subject, Timestamp, VariantId, Version, Versioned, optional_text,
+    required_text,
 };
 
 use crate::{
@@ -112,20 +113,88 @@ impl CompareAtMode {
     }
 }
 
-/// A percentage applied to base prices. A list without one prices only the variants it
-/// holds fixed prices for.
+/// Which products an adjustment reaches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppliesTo {
+    /// Every product of the catalog.
+    All,
+    Products(Vec<ProductId>),
+    /// The products in these categories or any category below them.
+    Categories(Vec<CategoryId>),
+}
+
+impl AppliesTo {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AppliesTo::All => "all",
+            AppliesTo::Products(_) => "products",
+            AppliesTo::Categories(_) => "categories",
+        }
+    }
+}
+
+/// A percentage applied to base prices, for the products it applies to. A list without
+/// one prices only the variants it holds fixed prices for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Adjustment {
     percent: BasisPoints,
+    applies_to: AppliesTo,
 }
 
 impl Adjustment {
-    pub fn new(percent: BasisPoints) -> Self {
-        Self { percent }
+    /// Most products or categories one adjustment lists.
+    pub const MAX_TARGETS: usize = 1000;
+
+    /// An adjustment of every product.
+    pub fn all(percent: BasisPoints) -> Self {
+        Self {
+            percent,
+            applies_to: AppliesTo::All,
+        }
+    }
+
+    /// Listed products or categories: each once, at most `MAX_TARGETS`.
+    pub fn new(percent: BasisPoints, applies_to: AppliesTo) -> Result<Self, PriceListError> {
+        fn check<T: Copy + Eq + std::hash::Hash + std::fmt::Display>(
+            ids: &[T],
+        ) -> Result<(), PriceListError> {
+            if ids.len() > Adjustment::MAX_TARGETS {
+                return Err(PriceListError::TooManyTargets {
+                    max: Adjustment::MAX_TARGETS,
+                });
+            }
+            let mut seen = HashSet::with_capacity(ids.len());
+            match ids.iter().find(|id| !seen.insert(**id)) {
+                Some(twice) => Err(PriceListError::DuplicateTarget(twice.to_string())),
+                None => Ok(()),
+            }
+        }
+        match &applies_to {
+            AppliesTo::All => {}
+            AppliesTo::Products(products) => check(products)?,
+            AppliesTo::Categories(categories) => check(categories)?,
+        }
+        Ok(Self {
+            percent,
+            applies_to,
+        })
     }
 
     pub fn percent(&self) -> BasisPoints {
         self.percent
+    }
+
+    pub fn applies_to(&self) -> &AppliesTo {
+        &self.applies_to
+    }
+
+    /// Whether it reaches `product`, which is in `categories` (with their ancestors).
+    pub fn covers(&self, product: ProductId, categories: &HashSet<CategoryId>) -> bool {
+        match &self.applies_to {
+            AppliesTo::All => true,
+            AppliesTo::Products(products) => products.contains(&product),
+            AppliesTo::Categories(listed) => listed.iter().any(|c| categories.contains(c)),
+        }
     }
 }
 
@@ -282,7 +351,7 @@ impl PriceListDraft {
     /// The same draft, adjusting base prices by `percent`.
     pub fn adjusted(self, percent: BasisPoints) -> Self {
         Self {
-            adjustment: Some(Adjustment::new(percent)),
+            adjustment: Some(Adjustment::all(percent)),
             ..self
         }
     }
@@ -533,8 +602,7 @@ pub struct PriceListSnapshot {
     pub starts_at: Option<Timestamp>,
     pub ends_at: Option<Timestamp>,
     pub compare_at: CompareAtMode,
-    /// The adjustment's percentage; `None` without one.
-    pub adjustment: Option<BasisPoints>,
+    pub adjustment: Option<Adjustment>,
 }
 
 impl PriceList {
@@ -551,7 +619,7 @@ impl PriceList {
             starts_at: self.window.starts_at,
             ends_at: self.window.ends_at,
             compare_at: self.compare_at,
-            adjustment: self.adjustment.as_ref().map(|a| a.percent),
+            adjustment: self.adjustment.clone(),
         }
     }
 
@@ -568,7 +636,10 @@ impl PriceList {
             status: s.status,
             window: Window::new(s.starts_at, s.ends_at)?,
             compare_at: s.compare_at,
-            adjustment: s.adjustment.map(Adjustment::new),
+            adjustment: s
+                .adjustment
+                .map(|a| Adjustment::new(a.percent, a.applies_to))
+                .transpose()?,
             changes: Changes::default(),
         })
     }
@@ -780,12 +851,52 @@ mod tests {
     #[test]
     fn restore_round_trips() {
         let mut list = eur_list();
-        list.set_adjustment(Some(Adjustment::new(BasisPoints::new(-1500).unwrap())));
+        list.set_adjustment(Some(Adjustment::all(BasisPoints::new(-1500).unwrap())));
         list.set_description(Some("For the euro markets".to_string()))
             .unwrap();
         list.set_window(Window::new(Some(at(1)), Some(at(2))).unwrap());
         list.set_version(Version::new(2));
         assert_eq!(PriceList::restore(list.snapshot()), Ok(list));
+    }
+
+    fn pid(n: u128) -> ProductId {
+        ProductId::from_uuid(Uuid::from_u128(n))
+    }
+
+    fn cat(n: u128) -> CategoryId {
+        CategoryId::from_uuid(Uuid::from_u128(n))
+    }
+
+    #[test]
+    fn an_adjustment_lists_each_target_once() {
+        assert_eq!(
+            Adjustment::new(BasisPoints::ZERO, AppliesTo::Products(vec![pid(1), pid(1)])),
+            Err(PriceListError::DuplicateTarget(pid(1).to_string()))
+        );
+    }
+
+    #[test]
+    fn an_adjustment_lists_at_most_a_thousand_targets() {
+        let many = |n: u128| AppliesTo::Categories((1..=n).map(cat).collect());
+        assert!(Adjustment::new(BasisPoints::ZERO, many(1000)).is_ok());
+        assert_eq!(
+            Adjustment::new(BasisPoints::ZERO, many(1001)),
+            Err(PriceListError::TooManyTargets { max: 1000 })
+        );
+    }
+
+    #[test]
+    fn an_adjustment_covers_what_it_applies_to() {
+        let none = HashSet::new();
+        let shirts = HashSet::from([cat(2), cat(1)]);
+        let listed = Adjustment::new(BasisPoints::ZERO, AppliesTo::Products(vec![pid(1)])).unwrap();
+        assert!(listed.covers(pid(1), &none));
+        assert!(!listed.covers(pid(2), &none));
+        let category =
+            Adjustment::new(BasisPoints::ZERO, AppliesTo::Categories(vec![cat(1)])).unwrap();
+        assert!(category.covers(pid(9), &shirts));
+        assert!(!category.covers(pid(9), &none));
+        assert!(Adjustment::all(BasisPoints::ZERO).covers(pid(9), &none));
     }
 
     #[test]

@@ -68,6 +68,12 @@ async fn catalog_repo() {
 }
 
 #[tokio::test]
+async fn price_list_joins() {
+    let Some(url) = database_url() else { return };
+    contract::price_list_joins(async || fresh_store(&url, "contract_price_list_joins").await).await;
+}
+
+#[tokio::test]
 async fn price_list_repo() {
     let Some(url) = database_url() else { return };
     contract::price_list_repo(async || fresh_store(&url, "contract_price_lists").await).await;

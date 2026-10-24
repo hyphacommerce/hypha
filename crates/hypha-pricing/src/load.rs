@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 use hypha_core::{HasClock, MarketId, PriceListId, ProductId, RepoError, VariantId};
 use hypha_markets::{
-    CatalogContext, CatalogRepo, HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo,
-    PriceListRepo,
+    AppliesTo, CatalogContext, CatalogRepo, HasCatalogs, HasMarkets, HasPriceLists, Market,
+    MarketRepo, PriceList, PriceListRepo,
 };
 
 use crate::PricingContext;
@@ -46,10 +46,12 @@ pub async fn load_pricing_for<S: HasCatalogs + HasPriceLists + HasClock>(
         .catalogs()
         .get_by_context(CatalogContext::Market(market.id()))
         .await?;
-    let mut price_lists = Vec::new();
-    if let Some(id) = catalog.as_ref().and_then(|c| c.price_list()) {
-        price_lists.extend(ports.price_lists().get(id).await?);
-    }
+    let price_lists = match &catalog {
+        Some(c) if !c.price_lists().is_empty() => {
+            ports.price_lists().get_many(c.price_lists()).await?
+        }
+        _ => Vec::new(),
+    };
     let included_products = match &catalog {
         Some(c) if !products.is_empty() => {
             ports.catalogs().included_products(c.id(), products).await?
@@ -57,24 +59,32 @@ pub async fn load_pricing_for<S: HasCatalogs + HasPriceLists + HasClock>(
         _ => HashSet::new(),
     };
     // Only a live list's fixed prices can count.
-    let live: Vec<PriceListId> = price_lists
-        .iter()
-        .filter(|l| l.is_live(at))
-        .map(|l| l.id())
-        .collect();
-    let mut fixed_prices = HashMap::new();
-    if !variants.is_empty() {
-        for list in live {
-            let prices = ports.price_lists().fixed_prices(list, variants).await?;
-            fixed_prices.insert(list, prices);
-        }
-    }
+    let live: Vec<&PriceList> = price_lists.iter().filter(|l| l.is_live(at)).collect();
+    let live_ids: Vec<PriceListId> = live.iter().map(|l| l.id()).collect();
+    let fixed_prices = if live_ids.is_empty() || variants.is_empty() {
+        HashMap::new()
+    } else {
+        ports
+            .price_lists()
+            .fixed_prices_in(&live_ids, variants)
+            .await?
+    };
+    let by_category = live.iter().any(|l| {
+        l.adjustment()
+            .is_some_and(|a| matches!(a.applies_to(), AppliesTo::Categories(_)))
+    });
+    let product_categories = if by_category && !products.is_empty() {
+        ports.price_lists().product_categories(products).await?
+    } else {
+        HashMap::new()
+    };
     Ok(PricingContext {
         market,
         catalog,
         price_lists,
         included_products,
         fixed_prices,
+        product_categories,
         at,
     })
 }

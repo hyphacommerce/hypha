@@ -1282,6 +1282,7 @@ dependencies = [
  "hypha-order-actions",
  "hypha-orders",
  "hypha-payments",
+ "hypha-pricing",
  "hypha-privacy",
  "hypha-products",
  "hypha-search",

@@ -80,6 +80,7 @@ pub struct ApiErrorBody {
 ///   `duplicate_fixed_price`, `fixed_price_currency_mismatch`, `negative_amount`,
 ///   `compare_at_not_above_price`, `compare_at_currency_mismatch`, …)
 /// - `too_many_prices`: `{"max"}`, the most one request may set
+/// - `price_list_in_use`: `{"catalogs": ["cat_…"]}`, the catalogs holding it
 /// - `price_list_name_taken`: `{"price_list": "pl_…"}`, the list that has the name
 /// - `compare_at_not_above_price` / `compare_at_currency_mismatch` (variants):
 ///   `{"variant": "var_…"}`
@@ -712,7 +713,8 @@ impl From<hypha_markets::CommandError> for ApiError {
             E::CatalogNotFound(_) => StatusCode::NOT_FOUND,
             E::CountryInOtherMarket { .. }
             | E::CatalogExists { .. }
-            | E::PriceListNameTaken { .. } => StatusCode::CONFLICT,
+            | E::PriceListNameTaken { .. }
+            | E::PriceListInUse { .. } => StatusCode::CONFLICT,
             E::Country(_)
             | E::Market(_)
             | E::Money(_)
@@ -743,6 +745,7 @@ impl From<hypha_markets::CommandError> for ApiError {
             }
             E::PriceListNameTaken { price_list, .. } => Some(json!({ "price_list": price_list })),
             E::TooManyPrices { max } => Some(json!({ "max": max })),
+            E::PriceListInUse { catalogs, .. } => Some(json!({ "catalogs": catalogs })),
             _ => None,
         };
         Self::domain(status, e).with_details(details)

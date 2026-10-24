@@ -1455,8 +1455,8 @@ async function main() {
           currency: market.currency,
         })
       ).id;
-      await admin.put(`/admin/catalogs/${market.catalog}/price-list`, {
-        price_list: market.priceList,
+      await admin.put(`/admin/catalogs/${market.catalog}/price-lists`, {
+        price_lists: [market.priceList],
       });
     }
   }

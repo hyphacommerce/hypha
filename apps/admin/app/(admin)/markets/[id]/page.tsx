@@ -72,7 +72,8 @@ async function Market({
   // An old or foreign cursor (a hand-edited URL): start the lists again.
   if (products?.response.status === 400) redirect(`/markets/${id}`);
 
-  const listId = catalog?.price_list ?? undefined;
+  // The card shows the catalog's first list; the price list pages show them all.
+  const listId = catalog?.price_lists[0];
   const [list, prices] = await Promise.all([
     listId
       ? client.GET("/admin/price-lists/{id}", { params: { path: { id: listId } } })

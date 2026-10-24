@@ -466,20 +466,37 @@ step "create catalog" 201 - -X POST "$BASE/admin/catalogs" -H "$JSON" -d "{\"mar
 CATALOG=$(id)
 step "add mug and cup to catalog" 204 - -X POST "$BASE/admin/catalogs/$CATALOG/products" -H "$JSON" \
     -d "{\"products\":[\"$MUG\",\"$CUP\"]}"
-step "assign price list" 200 - -X PUT "$BASE/admin/catalogs/$CATALOG/price-list" -H "$JSON" \
-    -d "{\"price_list\":\"$LIST\"}"
+step "give the catalog its price list" 200 - -X PUT "$BASE/admin/catalogs/$CATALOG/price-lists" -H "$JSON" \
+    -d "{\"price_lists\":[\"$LIST\"]}"
+contains "the catalog's lists" "\"price_lists\":[\"$LIST\"]"
+step "add the scheduled sale too" 200 - -X POST "$BASE/admin/catalogs/$CATALOG/price-lists" -H "$JSON" \
+    -d "{\"price_list\":\"$SCHEDULED_LIST\"}"
+step "a list on a catalog isn't deleted" 409 price_list_in_use -X DELETE "$BASE/admin/price-lists/$SCHEDULED_LIST"
+contains "naming the catalog" "\"catalogs\":[\"$CATALOG\"]"
+step "take it off the catalog" 200 - -X DELETE "$BASE/admin/catalogs/$CATALOG/price-lists/$SCHEDULED_LIST"
+contains "only the first list left" "\"price_lists\":[\"$LIST\"]"
+step "a list the catalog doesn't hold" 404 price_list_not_in_catalog -X DELETE \
+    "$BASE/admin/catalogs/$CATALOG/price-lists/$SCHEDULED_LIST"
 step "list markets" 200 - "$BASE/admin/markets"
 contains "a market names its catalog" "\"catalog\":\"$CATALOG\""
 step "fetch the market" 200 - "$BASE/admin/markets/$MARKET"
 step "an unknown market" 404 market_not_found "$BASE/admin/markets/mkt_00000000000000000000000000000063"
 step "fetch the catalog" 200 - "$BASE/admin/catalogs/$CATALOG"
-contains "with its price list" "\"price_list\":\"$LIST\""
+contains "with its price lists" "\"price_lists\":[\"$LIST\"]"
 step "the catalog's products, a page of one" 200 - "$BASE/admin/catalogs/$CATALOG/products?limit=1"
 contains "there are more" '"has_more":true'
 step "an unknown catalog's products" 404 catalog_not_found \
     "$BASE/admin/catalogs/cat_00000000000000000000000000000063/products"
 step "list price lists" 200 - "$BASE/admin/price-lists"
-contains "with its adjustment" '"adjustment":{"percent_bps":-1000}'
+contains "with its adjustment" '"adjustment":{"percent_bps":-1000,"applies_to":{"type":"all"}}'
+step "only the drafts" 200 - "$BASE/admin/price-lists?status=draft"
+contains "the paused sale" '"name":"Next year sale"'
+step "by name" 200 - "$BASE/admin/price-lists?sort=name_asc&limit=1"
+contains "alphabetically first" '"name":"Eurozone prices"'
+step "the market's" 200 - "$BASE/admin/price-lists?market=$MARKET"
+contains "on its catalog" "\"markets\":[\"$MARKET\"]"
+step "delete the paused sale" 204 - -X DELETE "$BASE/admin/price-lists/$SCHEDULED_LIST"
+step "it is gone" 404 price_list_not_found "$BASE/admin/price-lists/$SCHEDULED_LIST"
 step "fetch the price list" 200 - "$BASE/admin/price-lists/$LIST"
 step "its fixed prices" 200 - "$BASE/admin/price-lists/$LIST/fixed-prices"
 contains "the cup at 200" "{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"}"
@@ -488,7 +505,13 @@ contains "renamed" '"name":"Euro area"'
 step "and back" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"name":"Eurozone"}'
 step "deepen the discount" 200 - -X PATCH "$BASE/admin/price-lists/$LIST" -H "$JSON" \
     -d '{"adjustment":{"percent_bps":-2000}}'
-contains "-20%" '"adjustment":{"percent_bps":-2000}'
+contains "-20%" '"adjustment":{"percent_bps":-2000,'
+step "the mug's prices, explained" 200 - "$BASE/admin/products/$MUG/prices?market=$MARKET"
+contains "priced by the list" "\"price\":{\"amount\":800,\"currency\":\"EUR\"},\"compare_at_price\":null,\"on_sale\":false,\"price_list\":\"$LIST\""
+contains "which won" '"result":"won"'
+step "for no quantity" 422 invalid_quantity "$BASE/admin/products/$MUG/prices?quantity=0"
+step "in an unknown market" 404 market_not_found \
+    "$BASE/admin/products/$MUG/prices?market=mkt_00000000000000000000000000000063"
 step "back to -10%" 200 - -X PATCH "$BASE/admin/price-lists/$LIST" -H "$JSON" \
     -d '{"adjustment":{"percent_bps":-1000}}'
 step "fixed prices name their product" 200 - "$BASE/admin/price-lists/$LIST/fixed-prices"
@@ -1929,7 +1952,9 @@ step "create RSD price list" 201 - -X POST "$BASE/admin/price-lists" -H "$JSON" 
     -d '{"name":"Dinar prices","currency":"RSD"}'
 RSD_LIST=$(id)
 step "assign RSD list to EUR market" 422 price_list_currency_mismatch -X PUT \
-    "$BASE/admin/catalogs/$CATALOG/price-list" -H "$JSON" -d "{\"price_list\":\"$RSD_LIST\"}"
+    "$BASE/admin/catalogs/$CATALOG/price-lists" -H "$JSON" -d "{\"price_lists\":[\"$LIST\",\"$RSD_LIST\"]}"
+step "a list on a catalog twice" 422 duplicate_price_list -X PUT \
+    "$BASE/admin/catalogs/$CATALOG/price-lists" -H "$JSON" -d "{\"price_lists\":[\"$LIST\",\"$LIST\"]}"
 step "fixed prices on unknown list" 404 price_list_not_found -X PUT \
     "$BASE/admin/price-lists/pl_00000000000000000000000000000063/fixed-prices" -H "$JSON" -d '{"fixed_prices":[]}'
 step "fixed price in other currency" 422 fixed_prices_invalid -X PUT \
@@ -2014,8 +2039,8 @@ step "the same variant twice in fixed prices" 422 fixed_prices_invalid -X PUT \
     "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
     -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":1,\"currency\":\"EUR\"}},{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":2,\"currency\":\"EUR\"}}]}"
 contains "the duplicate named" '"code":"duplicate_fixed_price"'
-step "unknown price list in a body" 422 price_list_not_found -X PUT "$BASE/admin/catalogs/$CATALOG/price-list" \
-    -H "$JSON" -d '{"price_list":"pl_00000000000000000000000000000063"}'
+step "unknown price list in a body" 422 price_list_not_found -X PUT "$BASE/admin/catalogs/$CATALOG/price-lists" \
+    -H "$JSON" -d '{"price_lists":["pl_00000000000000000000000000000063"]}'
 step "unknown market in a body" 422 market_not_found -X POST "$BASE/admin/catalogs" -H "$JSON" \
     -d '{"market":"mkt_00000000000000000000000000000063"}'
 step "unknown variant in a cart line" 422 variant_not_found -X POST "$BASE/storefront/carts/$CART/lines" \

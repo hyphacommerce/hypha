@@ -160,7 +160,7 @@ impl World {
         let bp = BasisPoints::new(bp).unwrap();
         match block_on(self.price_lists.get(list_id())).unwrap() {
             Some(mut list) => {
-                list.set_adjustment(Some(hypha_markets::Adjustment::new(bp)));
+                list.set_adjustment(Some(hypha_markets::Adjustment::all(bp)));
                 block_on(self.price_lists.update(&mut list)).unwrap();
             }
             None => {

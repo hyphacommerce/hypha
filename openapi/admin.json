@@ -159,6 +159,19 @@
         ],
         "type": "object"
       },
+      "AddCatalogPriceListRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "price_list": {
+            "$ref": "#/components/schemas/PriceListId",
+            "description": "In the market's currency."
+          }
+        },
+        "required": [
+          "price_list"
+        ],
+        "type": "object"
+      },
       "AddCountryRequest": {
         "additionalProperties": false,
         "properties": {
@@ -432,8 +445,12 @@
       },
       "AdjustmentDto": {
         "additionalProperties": false,
-        "description": "A percentage applied to base prices.",
+        "description": "A percentage applied to base prices, for the products it applies to.",
         "properties": {
+          "applies_to": {
+            "$ref": "#/components/schemas/AppliesToDto",
+            "description": "Defaults to every product of the catalog."
+          },
           "percent_bps": {
             "description": "Basis points: -1000 = 10% off, 500 = 5% markup. At least -10000.",
             "format": "int32",
@@ -1250,6 +1267,67 @@
         ],
         "type": "object"
       },
+      "AppliesToDto": {
+        "description": "Which products an adjustment reaches: `all` of the catalog's, listed `products`, or\nthe products in listed `categories` and the categories below them. Up to 1,000 IDs,\neach once; they aren't checked (one that names nothing reaches nothing).",
+        "oneOf": [
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "all"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "products": {
+                "items": {
+                  "$ref": "#/components/schemas/ProductId"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "products"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "products",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "categories": {
+                "items": {
+                  "$ref": "#/components/schemas/CategoryId"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "categories"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "categories",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "ApproveConnectionRequest": {
         "additionalProperties": false,
         "description": "The staff member's answer: a name for the agent and its grant.",
@@ -1480,23 +1558,6 @@
         ],
         "type": "object"
       },
-      "AssignPriceListRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "price_list": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/PriceListId",
-                "description": "`null` detaches the current price list."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object"
-      },
       "AssignTaxClassRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1696,6 +1757,18 @@
           "declined",
           "staff",
           "other"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "CandidateResultDto": {
+        "description": "What became of one price list for a variant.\n\nKnown values: `won`, `higher`, `tied_with_older`, `not_live`, `not_pricing`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "won",
+          "higher",
+          "tied_with_older",
+          "not_live",
+          "not_pricing"
         ],
         "type": "string",
         "x-hypha-open-enum": true
@@ -1944,20 +2017,18 @@
           "market": {
             "$ref": "#/components/schemas/MarketId"
           },
-          "price_list": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/PriceListId"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "price_lists": {
+            "description": "Its price lists, by ID: the lowest live price among them wins.",
+            "items": {
+              "$ref": "#/components/schemas/PriceListId"
+            },
+            "type": "array"
           }
         },
         "required": [
           "id",
-          "market"
+          "market",
+          "price_lists"
         ],
         "type": "object"
       },
@@ -5891,6 +5962,33 @@
         ],
         "type": "object"
       },
+      "MarketPricesResponse": {
+        "properties": {
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "market": {
+            "$ref": "#/components/schemas/MarketId"
+          },
+          "prices_include_tax": {
+            "type": "boolean"
+          },
+          "variants": {
+            "description": "In the product's variant order.",
+            "items": {
+              "$ref": "#/components/schemas/VariantPricesResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "market",
+          "currency",
+          "prices_include_tax",
+          "variants"
+        ],
+        "type": "object"
+      },
       "MarketResponse": {
         "properties": {
           "catalog": {
@@ -5919,6 +6017,13 @@
           "name": {
             "type": "string"
           },
+          "price_lists": {
+            "description": "The catalog's price lists, by ID: the lowest live price among them wins.",
+            "items": {
+              "$ref": "#/components/schemas/PriceListId"
+            },
+            "type": "array"
+          },
           "prices_include_tax": {
             "type": "boolean"
           }
@@ -5928,7 +6033,8 @@
           "name",
           "countries",
           "currency",
-          "prices_include_tax"
+          "prices_include_tax",
+          "price_lists"
         ],
         "type": "object"
       },
@@ -7952,6 +8058,44 @@
         ],
         "type": "object"
       },
+      "PriceCandidateResponse": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/PriceListKindDto"
+          },
+          "name": {
+            "type": "string"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/PriceListPhaseDto"
+          },
+          "price": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "What it would charge; `null` unless it's live and prices the variant."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price_list": {
+            "$ref": "#/components/schemas/PriceListId"
+          },
+          "result": {
+            "$ref": "#/components/schemas/CandidateResultDto"
+          }
+        },
+        "required": [
+          "price_list",
+          "name",
+          "kind",
+          "phase",
+          "result"
+        ],
+        "type": "object"
+      },
       "PriceListId": {
         "description": "A PriceListId: `pl_` and 32 hex digits.",
         "examples": [
@@ -7969,18 +8113,30 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
-      "PriceListListResponse": {
+      "PriceListPage": {
+        "description": "A page of a list, newest first.",
         "properties": {
+          "has_more": {
+            "description": "Whether there are more after these.",
+            "type": "boolean"
+          },
           "items": {
-            "description": "Oldest first. A store has a handful, so they come in one list.",
             "items": {
               "$ref": "#/components/schemas/PriceListResponse"
             },
             "type": "array"
+          },
+          "next_cursor": {
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
-          "items"
+          "items",
+          "has_more"
         ],
         "type": "object"
       },
@@ -8030,11 +8186,24 @@
               "null"
             ]
           },
+          "fixed_price_count": {
+            "description": "How many fixed prices it has.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "id": {
             "$ref": "#/components/schemas/PriceListId"
           },
           "kind": {
             "$ref": "#/components/schemas/PriceListKindDto"
+          },
+          "markets": {
+            "description": "The markets whose catalogs hold it.",
+            "items": {
+              "$ref": "#/components/schemas/MarketId"
+            },
+            "type": "array"
           },
           "name": {
             "type": "string"
@@ -8065,6 +8234,8 @@
           "status",
           "phase",
           "compare_at",
+          "markets",
+          "fixed_price_count",
           "created_at",
           "updated_at"
         ],
@@ -8078,6 +8249,22 @@
         ],
         "type": "string",
         "x-hypha-open-enum": true
+      },
+      "PriceProblemResponse": {
+        "properties": {
+          "code": {
+            "description": "Stable `ErrorCode`, e.g. `not_available_in_market`.",
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
       },
       "PriceRangeResponse": {
         "properties": {
@@ -8322,6 +8509,31 @@
           "kind",
           "mime_type",
           "url"
+        ],
+        "type": "object"
+      },
+      "ProductPricesResponse": {
+        "properties": {
+          "markets": {
+            "description": "Oldest market first.",
+            "items": {
+              "$ref": "#/components/schemas/MarketPricesResponse"
+            },
+            "type": "array"
+          },
+          "product": {
+            "$ref": "#/components/schemas/ProductId"
+          },
+          "quantity": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "product",
+          "quantity",
+          "markets"
         ],
         "type": "object"
       },
@@ -9579,6 +9791,22 @@
         "required": [
           "token",
           "expires_at"
+        ],
+        "type": "object"
+      },
+      "SetCatalogPriceListsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "price_lists": {
+            "description": "The catalog's lists after the change, each once, at most 50, all in the market's\ncurrency; `[]` takes them all off.",
+            "items": {
+              "$ref": "#/components/schemas/PriceListId"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "price_lists"
         ],
         "type": "object"
       },
@@ -11586,6 +11814,73 @@
         ],
         "pattern": "^var_[0-9a-f]{32}$",
         "type": "string"
+      },
+      "VariantPricesResponse": {
+        "properties": {
+          "candidates": {
+            "description": "Every list of the market's catalog, in ID order (oldest first).",
+            "items": {
+              "$ref": "#/components/schemas/PriceCandidateResponse"
+            },
+            "type": "array"
+          },
+          "compare_at_price": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "Shown struck through beside `price`; only ever above it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "on_sale": {
+            "description": "Whether a compare-at price is shown.",
+            "type": "boolean"
+          },
+          "price": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "What a shopper pays for one at `quantity`; `null` when it can't be priced there\n(`problem` says why)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price_list": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PriceListId",
+                "description": "The list whose price won; `null` for the base price."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problem": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PriceProblemResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "variant": {
+            "$ref": "#/components/schemas/VariantId"
+          }
+        },
+        "required": [
+          "variant",
+          "on_sale",
+          "candidates"
+        ],
+        "type": "object"
       },
       "VariantResponse": {
         "properties": {
@@ -18707,9 +19002,9 @@
         ]
       }
     },
-    "/admin/catalogs/{id}/price-list": {
-      "put": {
-        "operationId": "admin.markets.assign_price_list",
+    "/admin/catalogs/{id}/price-lists": {
+      "post": {
+        "operationId": "admin.markets.add_catalog_price_list",
         "parameters": [
           {
             "in": "path",
@@ -18730,7 +19025,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AssignPriceListRequest"
+                "$ref": "#/components/schemas/AddCatalogPriceListRequest"
               }
             }
           },
@@ -18843,7 +19138,279 @@
             "bearer": []
           }
         ],
-        "summary": "Sets or clears a catalog's price list.",
+        "summary": "Adds a price list to a catalog's; one already there changes nothing.",
+        "tags": [
+          "markets"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "pricing:write"
+        ]
+      },
+      "put": {
+        "operationId": "admin.markets.set_catalog_price_lists",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CatalogId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCatalogPriceListsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sets a catalog's price lists, which compete to price its products: the lowest live\nprice wins, a tie going to the oldest list. Every list is in the market's currency\n(`422 price_list_currency_mismatch`).",
+        "tags": [
+          "markets"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "pricing:write"
+        ]
+      }
+    },
+    "/admin/catalogs/{id}/price-lists/{price_list}": {
+      "delete": {
+        "operationId": "admin.markets.remove_catalog_price_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CatalogId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "price_list",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PriceListId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Takes a price list off a catalog.",
         "tags": [
           "markets"
         ],
@@ -33702,16 +34269,105 @@
     "/admin/price-lists": {
       "get": {
         "operationId": "admin.markets.list_price_lists",
+        "parameters": [
+          {
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 100 (default 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "description": "What a list's prices mean: a `sale` is struck through against the regular price, an\n`override` is the regular price. Either kind competes the same way: the lowest live\nprice wins.\n\nKnown values: `sale`, `override`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "sale",
+                "override"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          },
+          {
+            "description": "Where they stand now: `draft`, `scheduled` (active, not started), `active`, or\n`expired` (active, ended).",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "description": "Where a list stands now, from its status and window: only `active` prices anything.\n\nKnown values: `draft`, `scheduled`, `active`, `expired`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "draft",
+                "scheduled",
+                "active",
+                "expired"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          },
+          {
+            "description": "Only those on this market's catalog.",
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MarketId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "description": "The order of the list. Default `newest`. Names compare lowercased, character by\ncharacter; ties go by creation, in the same direction.\n\nKnown values: `newest`, `oldest`, `name_asc`, `name_desc`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "newest",
+                "oldest",
+                "name_asc",
+                "name_desc"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PriceListListResponse"
+                  "$ref": "#/components/schemas/PriceListPage"
                 }
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`)."
           },
           "401": {
             "content": {
@@ -33733,6 +34389,16 @@
             },
             "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
           },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`)."
+          },
           "500": {
             "content": {
               "application/json": {
@@ -33749,7 +34415,7 @@
             "bearer": []
           }
         ],
-        "summary": "Every price list, oldest first.",
+        "summary": "Price lists, newest first or in `sort`'s order, narrowed by kind, status and market.",
         "tags": [
           "markets"
         ],
@@ -33887,6 +34553,115 @@
       }
     },
     "/admin/price-lists/{id}": {
+      "delete": {
+        "operationId": "admin.markets.delete_price_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PriceListId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Deletes a price list with its fixed prices. One a catalog holds is refused\n(`409 price_list_in_use`, `details.catalogs`): take it off them first.",
+        "tags": [
+          "markets"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "pricing:write"
+        ]
+      },
       "get": {
         "operationId": "admin.markets.fetch_price_list",
         "parameters": [
@@ -34292,6 +35067,33 @@
               "minimum": 1,
               "type": "integer"
             }
+          },
+          {
+            "description": "Only this product's variants.",
+            "in": "query",
+            "name": "product",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          },
+          {
+            "description": "Only variants of products directly in this category.",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CategoryId"
+            }
+          },
+          {
+            "description": "Only variants whose product's title or handle, or whose SKU, contains this text,\nignoring case. Up to 255 characters; blank filters nothing.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -34371,7 +35173,7 @@
             "bearer": []
           }
         ],
-        "summary": "A price list's fixed prices, newest variant first.",
+        "summary": "A price list's fixed prices, newest variant first, narrowed by product, category or\ntext: what a price grid pages through.",
         "tags": [
           "markets"
         ],
@@ -36143,6 +36945,116 @@
         },
         "x-hypha-scopes": [
           "products:write"
+        ]
+      }
+    },
+    "/admin/products/{id}/prices": {
+      "get": {
+        "operationId": "admin.markets.product_prices",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProductId"
+            }
+          },
+          {
+            "description": "Only this market; every market without it.",
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MarketId"
+            }
+          },
+          {
+            "description": "How many of each variant, for quantity prices; 1 without it.",
+            "in": "query",
+            "name": "quantity",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductPricesResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A product's prices in each market (or one), each variant's with every price list of\nthe market's catalog and why it won or lost: the lowest live price wins, a tie going\nto the oldest list, and the base price only when no live list prices the variant. A\nproduct that isn't active is priced too.",
+        "tags": [
+          "markets"
+        ],
+        "x-hypha-scopes": [
+          "pricing:read",
+          "products:read"
         ]
       }
     },

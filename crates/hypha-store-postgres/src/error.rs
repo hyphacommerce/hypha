@@ -31,6 +31,7 @@ use tokio_postgres::error::SqlState;
 const REFERENCE_KEYS: &[(&str, &str)] = &[
     ("asset_usage_asset", media_keys::USAGE_ASSET),
     ("shipping_provider_app", shipping_keys::PROVIDER_APP),
+    ("catalog_price_list", market_keys::CATALOG_PRICE_LIST),
 ];
 
 /// Unique constraint names (see `migrations/`) and the repo key each one reports.

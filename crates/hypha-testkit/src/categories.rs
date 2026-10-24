@@ -20,7 +20,8 @@ pub(crate) type Members = HashMap<CategoryId, HashSet<ProductId>>;
 
 #[derive(Default)]
 pub struct InMemoryCategoryRepo {
-    pub(crate) categories: Table<CategoryId, Category>,
+    /// Shared with the price list repo, which reads ancestors as a database joins them.
+    pub(crate) categories: Arc<Table<CategoryId, Category>>,
     /// Stored apart from the categories, like a separate table would be; shared with the
     /// product repo, whose list filters by category.
     pub(crate) members: Arc<Mutex<Members>>,

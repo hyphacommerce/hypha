@@ -531,7 +531,7 @@ async fn the_admin_reads_its_whole_setup() {
     let (_, lists) = send(&app, "GET", "/admin/price-lists", None).await;
     assert_eq!(
         lists["items"][0]["adjustment"],
-        json!({"percent_bps": -1000})
+        json!({"percent_bps": -1000, "applies_to": {"type": "all"}})
     );
     let (status, _) = send(&app, "GET", &format!("/admin/price-lists/{list_id}"), None).await;
     assert_eq!(status, StatusCode::OK);
@@ -5151,7 +5151,10 @@ async fn markets_are_renamed_price_lists_adjusted_and_keys_listed() {
     let (status, list) = send(&app, "PATCH", &url, Some(patch)).await;
     assert_eq!(
         (status, &list["adjustment"]),
-        (StatusCode::OK, &json!({"percent_bps": -1500}))
+        (
+            StatusCode::OK,
+            &json!({"percent_bps": -1500, "applies_to": {"type": "all"}})
+        )
     );
     let body = json!({"fixed_prices": [{"variant": mug_variant, "price": {"amount": 750, "currency": "EUR"}}]});
     send(

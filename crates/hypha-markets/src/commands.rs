@@ -1,7 +1,7 @@
 use hypha_core::{
     AuthError, BasisPoints, CatalogId, CountryCode, CountryError, Ctx, Currency, ErrorCode,
-    HasBatch, IdGenerator, MarketId, Money, MoneyError, Page, PageRequest, PendingEvent, Price,
-    PriceListId, ProductId, RepoError, Scope, StageEvents, Subject, Timestamp, VariantId,
+    HasBatch, IdGenerator, Keyset, MarketId, Money, MoneyError, Page, PageRequest, PendingEvent,
+    Price, PriceListId, ProductId, RepoError, Scope, StageEvents, Subject, Timestamp, VariantId,
     report_duplicate,
 };
 use thiserror::Error;
@@ -14,9 +14,10 @@ use crate::{
     events::{
         CATALOG, CatalogProductsAdded, CatalogProductsRemoved, PRICE_LIST, PricesRemoved, PricesSet,
     },
+    filter::{FixedPriceFilter, PriceListFilter, PriceListSort},
     price_list::{
-        Adjustment, CompareAtMode, EntryProblem, FixedPrice, PriceListDraft, PriceListKind,
-        PriceListStatus, Window,
+        Adjustment, AppliesTo, CompareAtMode, EntryProblem, FixedPrice, PriceListDraft,
+        PriceListKind, PriceListPhase, PriceListStatus, Window,
     },
     repo::keys,
 };
@@ -61,6 +62,12 @@ pub enum CommandError {
     },
     #[error("at most {max} fixed prices can be set at once")]
     TooManyPrices { max: usize },
+    /// The catalogs holding it, by ID.
+    #[error("price list {price_list} is on a catalog")]
+    PriceListInUse {
+        price_list: PriceListId,
+        catalogs: Vec<CatalogId>,
+    },
 }
 
 impl ErrorCode for CommandError {
@@ -80,55 +87,111 @@ impl ErrorCode for CommandError {
             CommandError::CatalogExists { .. } => "catalog_exists",
             CommandError::PriceListNameTaken { .. } => "price_list_name_taken",
             CommandError::TooManyPrices { .. } => "too_many_prices",
+            CommandError::PriceListInUse { .. } => "price_list_in_use",
         }
     }
 }
 
-/// Attach a price list to a catalog, or detach it with `None`.
+/// Replaces a catalog's price lists with `lists`, which compete to price its products (the
+/// lowest live price wins).
 ///
-/// Rejects a price list in another currency than the catalog's market up front,
-/// so the mistake surfaces here instead of at checkout. Price resolution still
-/// checks too, because stored data can predate this rule.
-pub async fn assign_price_list<M: MarketRepo, C: CatalogRepo, P: PriceListRepo>(
+/// Every list must exist and be in the market's currency: the mistake surfaces here
+/// instead of at checkout. Price resolution still checks too, because stored data can
+/// predate this rule.
+pub async fn set_catalog_price_lists<S: HasMarkets + HasCatalogs + HasPriceLists>(
     ctx: &Ctx,
-    markets: &M,
-    catalogs: &C,
-    price_lists: &P,
+    ports: &S,
     catalog_id: CatalogId,
-    price_list_id: Option<PriceListId>,
+    lists: Vec<PriceListId>,
 ) -> Result<Catalog, CommandError> {
     ctx.require(Scope::PricingWrite)?;
-
-    let mut catalog = catalogs
-        .get(catalog_id)
-        .await?
-        .ok_or(CommandError::CatalogNotFound(catalog_id))?;
-
-    if let Some(list_id) = price_list_id {
-        let list = price_lists
-            .get(list_id)
-            .await?
-            .ok_or(CommandError::PriceListNotFound(list_id))?;
-
-        let expected = match catalog.context() {
-            CatalogContext::Market(market_id) => markets
-                .get(market_id)
-                .await?
-                .ok_or(CommandError::MarketNotFound(market_id))?
-                .currency(),
-        };
-
-        if list.currency() != expected {
-            return Err(CommandError::CurrencyMismatch {
-                expected,
-                found: list.currency(),
-            });
-        }
-    }
-
-    catalog.set_price_list(price_list_id);
-    catalogs.update(&mut catalog).await?;
+    let mut catalog = load_catalog(ports.catalogs(), catalog_id).await?;
+    catalog.set_price_lists(lists)?;
+    save_catalog_lists(ports, &mut catalog).await?;
     Ok(catalog)
+}
+
+/// Adds one list to a catalog's; one already there changes nothing.
+pub async fn add_catalog_price_list<S: HasMarkets + HasCatalogs + HasPriceLists>(
+    ctx: &Ctx,
+    ports: &S,
+    catalog_id: CatalogId,
+    list: PriceListId,
+) -> Result<Catalog, CommandError> {
+    ctx.require(Scope::PricingWrite)?;
+    let mut catalog = load_catalog(ports.catalogs(), catalog_id).await?;
+    catalog.add_price_list(list)?;
+    save_catalog_lists(ports, &mut catalog).await?;
+    Ok(catalog)
+}
+
+/// Takes one list off a catalog (`PriceListNotInCatalog` when it isn't on it).
+pub async fn remove_catalog_price_list<S: HasCatalogs>(
+    ctx: &Ctx,
+    ports: &S,
+    catalog_id: CatalogId,
+    list: PriceListId,
+) -> Result<Catalog, CommandError> {
+    ctx.require(Scope::PricingWrite)?;
+    let mut catalog = load_catalog(ports.catalogs(), catalog_id).await?;
+    catalog.remove_price_list(list)?;
+    ports.catalogs().update(&mut catalog).await?;
+    Ok(catalog)
+}
+
+async fn load_catalog<C: CatalogRepo>(
+    catalogs: &C,
+    id: CatalogId,
+) -> Result<Catalog, CommandError> {
+    catalogs
+        .get(id)
+        .await?
+        .ok_or(CommandError::CatalogNotFound(id))
+}
+
+/// Checks the catalog's lists exist and are in its market's currency, then stores it. A
+/// list deleted after the check is the storage rule's (`Reference`), read as missing.
+async fn save_catalog_lists<S: HasMarkets + HasCatalogs + HasPriceLists>(
+    ports: &S,
+    catalog: &mut Catalog,
+) -> Result<(), CommandError> {
+    let found = ports.price_lists().get_many(catalog.price_lists()).await?;
+    if let Some(missing) = catalog
+        .price_lists()
+        .iter()
+        .find(|id| !found.iter().any(|l| l.id() == **id))
+    {
+        return Err(CommandError::PriceListNotFound(*missing));
+    }
+    let expected = match catalog.context() {
+        CatalogContext::Market(market_id) => ports
+            .markets()
+            .get(market_id)
+            .await?
+            .ok_or(CommandError::MarketNotFound(market_id))?
+            .currency(),
+    };
+    if let Some(other) = found.iter().find(|l| l.currency() != expected) {
+        return Err(CommandError::CurrencyMismatch {
+            expected,
+            found: other.currency(),
+        });
+    }
+    match ports.catalogs().update(catalog).await {
+        Err(RepoError::Reference(keys::CATALOG_PRICE_LIST)) => {
+            let found = ports.price_lists().get_many(catalog.price_lists()).await?;
+            let missing = catalog
+                .price_lists()
+                .iter()
+                .copied()
+                .find(|id| !found.iter().any(|l| l.id() == *id));
+            Err(match missing {
+                Some(id) => CommandError::PriceListNotFound(id),
+                None => RepoError::Reference(keys::CATALOG_PRICE_LIST).into(),
+            })
+        }
+        done => Ok(done?),
+    }
 }
 
 pub struct CreateMarket {
@@ -271,9 +334,24 @@ pub struct CreatePriceList {
     pub starts_at: Option<Timestamp>,
     pub ends_at: Option<Timestamp>,
     pub compare_at: CompareAtMode,
-    /// Basis points: -1000 = 10% off, 500 = 5% markup; `None` adjusts nothing, so the list
-    /// prices only the variants it has fixed prices for.
-    pub adjustment: Option<i32>,
+    /// `None` adjusts nothing, so the list prices only the variants it has fixed prices
+    /// for.
+    pub adjustment: Option<AdjustmentInput>,
+}
+
+/// An adjustment as a caller sends it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdjustmentInput {
+    /// Basis points: -1000 = 10% off, 500 = 5% markup.
+    pub percent: i32,
+    pub applies_to: AppliesTo,
+}
+
+fn adjustment(input: AdjustmentInput) -> Result<Adjustment, CommandError> {
+    Ok(Adjustment::new(
+        BasisPoints::new(input.percent)?,
+        input.applies_to,
+    )?)
 }
 
 /// Creates a price list without fixed prices (add them with `set_fixed_prices`). Its
@@ -286,10 +364,7 @@ pub async fn create_price_list<P: PriceListRepo, I: IdGenerator>(
 ) -> Result<PriceList, CommandError> {
     ctx.require(Scope::PricingWrite)?;
 
-    let adjustment = input
-        .adjustment
-        .map(|bp| BasisPoints::new(bp).map(Adjustment::new))
-        .transpose()?;
+    let adjustment = input.adjustment.map(adjustment).transpose()?;
     let mut list = PriceList::new(
         PriceListId::from_uuid(ids.new_uuid()),
         PriceListDraft {
@@ -463,8 +538,7 @@ pub struct UpdatePriceList {
     pub starts_at: Option<Option<Timestamp>>,
     pub ends_at: Option<Option<Timestamp>>,
     pub compare_at: Option<CompareAtMode>,
-    /// Basis points (-1000 = 10% off).
-    pub adjustment: Option<Option<i32>>,
+    pub adjustment: Option<Option<AdjustmentInput>>,
 }
 
 /// Changes a price list. Its currency is fixed: catalogs and fixed prices depend on it.
@@ -502,11 +576,8 @@ pub async fn update_price_list<P: PriceListRepo>(
     if let Some(mode) = input.compare_at {
         list.set_compare_at(mode);
     }
-    if let Some(adjustment) = input.adjustment {
-        let adjustment = adjustment
-            .map(|bp| BasisPoints::new(bp).map(Adjustment::new))
-            .transpose()?;
-        list.set_adjustment(adjustment);
+    if let Some(new) = input.adjustment {
+        list.set_adjustment(new.map(adjustment).transpose()?);
     }
     if input.name.is_some()
         && let Some(taken) = name_taken(lists, &list).await?
@@ -518,12 +589,59 @@ pub async fn update_price_list<P: PriceListRepo>(
     Ok(list)
 }
 
+/// Deletes a price list with its fixed prices. Refused while a catalog holds it
+/// (`PriceListInUse`): take it off them first.
+pub async fn delete_price_list<S: HasCatalogs + HasPriceLists>(
+    ctx: &Ctx,
+    ports: &S,
+    id: PriceListId,
+) -> Result<(), CommandError> {
+    ctx.require(Scope::PricingWrite)?;
+    let mut list = ports
+        .price_lists()
+        .get(id)
+        .await?
+        .ok_or(CommandError::PriceListNotFound(id))?;
+    if let Some(in_use) = in_use(ports, id).await? {
+        return Err(in_use);
+    }
+    list.delete();
+    match ports.price_lists().delete(&mut list).await {
+        // A catalog took it on after the check.
+        Err(RepoError::Reference(keys::CATALOG_PRICE_LIST)) => Err(in_use(ports, id)
+            .await?
+            .unwrap_or(RepoError::Reference(keys::CATALOG_PRICE_LIST).into())),
+        done => Ok(done?),
+    }
+}
+
+/// `PriceListInUse` naming the catalogs that hold `list`, if any do.
+async fn in_use<S: HasCatalogs>(
+    ports: &S,
+    list: PriceListId,
+) -> Result<Option<CommandError>, CommandError> {
+    let catalogs: Vec<CatalogId> = ports
+        .catalogs()
+        .list_all()
+        .await?
+        .iter()
+        .filter(|c| c.price_lists().contains(&list))
+        .map(|c| c.id())
+        .collect();
+    Ok(
+        (!catalogs.is_empty()).then_some(CommandError::PriceListInUse {
+            price_list: list,
+            catalogs,
+        }),
+    )
+}
+
 pub struct CreateCatalog {
     pub market: MarketId,
 }
 
-/// Creates an empty catalog for a market, without a price list.
-/// Add products with `add_catalog_products` and a price list with `assign_price_list`.
+/// Creates an empty catalog for a market, without price lists. Add products with
+/// `add_catalog_products` and price lists with `set_catalog_price_lists`.
 pub async fn create_catalog<M: MarketRepo, C: CatalogRepo, I: IdGenerator>(
     ctx: &Ctx,
     markets: &M,
@@ -542,7 +660,7 @@ pub async fn create_catalog<M: MarketRepo, C: CatalogRepo, I: IdGenerator>(
     if let Some(exists) = catalog_exists(catalogs, input.market).await? {
         return Err(exists);
     }
-    let mut catalog = Catalog::new(CatalogId::from_uuid(ids.new_uuid()), context, None);
+    let mut catalog = Catalog::new(CatalogId::from_uuid(ids.new_uuid()), context, []);
     let written = catalogs.insert(&mut catalog).await;
     report_duplicate(
         written,
@@ -622,11 +740,13 @@ where
 
 // ---------- reads ----------
 
-/// A market as the admin reads it: the market and the ID of its catalog, if it has one.
+/// A market as the admin reads it: the market, the ID of its catalog if it has one, and
+/// the catalog's price lists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketView {
     pub market: Market,
     pub catalog: Option<CatalogId>,
+    pub price_lists: Vec<PriceListId>,
 }
 
 /// Every market, oldest first, without their catalogs: what a storefront's country list
@@ -652,9 +772,14 @@ pub async fn list_markets<S: HasMarkets + HasCatalogs>(
         .map(|market| {
             let catalog = catalogs
                 .iter()
-                .find(|c| c.context() == CatalogContext::Market(market.id()))
-                .map(|c| c.id());
-            MarketView { market, catalog }
+                .find(|c| c.context() == CatalogContext::Market(market.id()));
+            MarketView {
+                market,
+                catalog: catalog.map(|c| c.id()),
+                price_lists: catalog
+                    .map(|c| c.price_lists().to_vec())
+                    .unwrap_or_default(),
+            }
         })
         .collect())
 }
@@ -673,9 +798,14 @@ pub async fn get_market<S: HasMarkets + HasCatalogs>(
     let catalog = ports
         .catalogs()
         .get_by_context(CatalogContext::Market(id))
-        .await?
-        .map(|c| c.id());
-    Ok(MarketView { market, catalog })
+        .await?;
+    Ok(MarketView {
+        market,
+        catalog: catalog.as_ref().map(|c| c.id()),
+        price_lists: catalog
+            .map(|c| c.price_lists().to_vec())
+            .unwrap_or_default(),
+    })
 }
 
 pub async fn get_catalog<C: CatalogRepo>(
@@ -705,13 +835,49 @@ pub async fn list_catalog_products<C: CatalogRepo>(
     Ok(catalogs.product_page(id, page).await?)
 }
 
-/// Every price list, oldest first.
-pub async fn list_price_lists<P: PriceListRepo>(
+/// What a list of price lists is narrowed to, as a request gives it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ListPriceLists {
+    pub kind: Option<PriceListKind>,
+    /// The phase lists are in now (`at`).
+    pub phase: Option<PriceListPhase>,
+    /// Only the lists on this market's catalog; a market without one has none.
+    pub market: Option<MarketId>,
+    pub sort: PriceListSort,
+}
+
+/// A page of price lists in `input.sort`'s order. `at` is now: what phases are judged at.
+pub async fn list_price_lists<S: HasMarkets + HasCatalogs + HasPriceLists>(
     ctx: &Ctx,
-    lists: &P,
-) -> Result<Vec<PriceList>, CommandError> {
+    ports: &S,
+    input: ListPriceLists,
+    at: Timestamp,
+    page: PageRequest<Keyset<PriceListId>>,
+) -> Result<Page<PriceList>, CommandError> {
     ctx.require(Scope::PricingRead)?;
-    Ok(lists.list_all().await?)
+    let ids = match input.market {
+        Some(market) => {
+            if ports.markets().get(market).await?.is_none() {
+                return Err(CommandError::MarketNotFound(market));
+            }
+            Some(
+                ports
+                    .catalogs()
+                    .get_by_context(CatalogContext::Market(market))
+                    .await?
+                    .map(|c| c.price_lists().to_vec())
+                    .unwrap_or_default(),
+            )
+        }
+        None => None,
+    };
+    let filter = PriceListFilter {
+        kind: input.kind,
+        phase: input.phase,
+        at,
+        ids,
+    };
+    Ok(ports.price_lists().list(&filter, input.sort, page).await?)
 }
 
 pub async fn get_price_list<P: PriceListRepo>(
@@ -726,16 +892,17 @@ pub async fn get_price_list<P: PriceListRepo>(
         .ok_or(CommandError::PriceListNotFound(id))
 }
 
-/// A page of the list's fixed prices, newest variant first.
+/// A page of the list's fixed prices, newest variant first, narrowed by `filter`.
 pub async fn list_fixed_prices<P: PriceListRepo>(
     ctx: &Ctx,
     lists: &P,
     id: PriceListId,
+    filter: &FixedPriceFilter,
     page: PageRequest<VariantId>,
 ) -> Result<Page<(VariantId, FixedPrice)>, CommandError> {
     ctx.require(Scope::PricingRead)?;
     if lists.get(id).await?.is_none() {
         return Err(CommandError::PriceListNotFound(id));
     }
-    Ok(lists.fixed_price_page(id, page).await?)
+    Ok(lists.fixed_price_page(id, filter, page).await?)
 }

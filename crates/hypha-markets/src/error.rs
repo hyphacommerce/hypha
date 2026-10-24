@@ -1,4 +1,4 @@
-use hypha_core::{CountryCode, Currency, ErrorCode, MoneyError, TextError};
+use hypha_core::{CountryCode, Currency, ErrorCode, MoneyError, PriceListId, TextError};
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum MarketError {
@@ -12,6 +12,12 @@ pub enum MarketError {
     CountryNotInMarket(CountryCode),
     #[error("can't remove the last country of a market")]
     LastCountry,
+    #[error("price list {0} is listed twice")]
+    DuplicatePriceList(PriceListId),
+    #[error("a catalog holds at most {max} price lists")]
+    TooManyPriceLists { max: usize },
+    #[error("price list {0} isn't on this catalog")]
+    PriceListNotInCatalog(PriceListId),
 }
 
 /// What's wrong with one entry of a list of fixed prices.
@@ -35,6 +41,10 @@ pub enum PriceListError {
     Text(#[from] TextError),
     #[error("a price list's window must end after it starts")]
     EndsNotAfterStart,
+    #[error("an adjustment applies to at most {max} products or categories")]
+    TooManyTargets { max: usize },
+    #[error("{0} is listed twice in the adjustment")]
+    DuplicateTarget(String),
     /// Every entry's problem, by its position in the request.
     #[error("{} fixed price(s) are invalid", .0.len())]
     InvalidFixedPrices(Vec<crate::price_list::EntryProblem>),
@@ -48,6 +58,9 @@ impl ErrorCode for MarketError {
             MarketError::DuplicateCountry(_) => "duplicate_country",
             MarketError::CountryNotInMarket(_) => "country_not_in_market",
             MarketError::LastCountry => "last_country",
+            MarketError::DuplicatePriceList(_) => "duplicate_price_list",
+            MarketError::TooManyPriceLists { .. } => "too_many_price_lists",
+            MarketError::PriceListNotInCatalog(_) => "price_list_not_in_catalog",
         }
     }
 }
@@ -69,6 +82,8 @@ impl ErrorCode for PriceListError {
         match self {
             PriceListError::Text(e) => e.code(),
             PriceListError::EndsNotAfterStart => "ends_not_after_start",
+            PriceListError::TooManyTargets { .. } => "too_many_adjustment_targets",
+            PriceListError::DuplicateTarget(_) => "duplicate_adjustment_target",
             PriceListError::InvalidFixedPrices(_) => "fixed_prices_invalid",
         }
     }

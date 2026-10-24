@@ -101,14 +101,18 @@ impl Default for InMemoryPorts {
         let custom_fields = crate::InMemoryCustomFields::sharing(&outbox);
         let categories = InMemoryCategoryRepo::sharing(&outbox).joining_fields(&custom_fields);
         let customer_groups = crate::InMemoryCustomerGroupRepo::sharing(&outbox);
+        let products = InMemoryProductRepo::sharing(&outbox)
+            .joining(&categories, &channels)
+            .joining_fields(&custom_fields);
+        let catalogs = InMemoryCatalogRepo::sharing(&outbox);
+        let price_lists =
+            InMemoryPriceListRepo::sharing(&outbox).joining(&catalogs, &products, &categories);
         Self {
             carts: InMemoryCartRepo::sharing(&outbox),
-            products: InMemoryProductRepo::sharing(&outbox)
-                .joining(&categories, &channels)
-                .joining_fields(&custom_fields),
+            products,
             markets: InMemoryMarketRepo::sharing(&outbox),
-            catalogs: InMemoryCatalogRepo::sharing(&outbox),
-            price_lists: InMemoryPriceListRepo::sharing(&outbox),
+            catalogs,
+            price_lists,
             tax_classes: InMemoryTaxClassRepo::sharing(&outbox),
             tax_regions: InMemoryTaxRegionRepo::sharing(&outbox),
             inventory_items: InMemoryInventoryItemRepo::sharing(&outbox),

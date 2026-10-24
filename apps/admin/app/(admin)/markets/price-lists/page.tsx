@@ -63,10 +63,11 @@ async function PriceListRows() {
       .map((m) =>
         client
           .GET("/admin/catalogs/{id}", { params: { path: { id: m.catalog ?? "" } } })
-          .then((r) => ({ market: m, list: r.data?.price_list ?? null })),
+          .then((r) => ({ market: m, lists: r.data?.price_lists ?? [] })),
       ),
   );
-  const usedBy = (list: string) => catalogs.filter((c) => c.list === list).map((c) => c.market);
+  const usedBy = (list: string) =>
+    catalogs.filter((c) => c.lists.includes(list)).map((c) => c.market);
 
   return (
     <Card padding={0}>

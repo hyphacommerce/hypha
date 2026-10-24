@@ -481,6 +481,7 @@ mod tests {
             price_lists: Vec::new(),
             included_products: products.iter().map(|n| pid(*n)).collect::<HashSet<_>>(),
             fixed_prices: HashMap::new(),
+            product_categories: HashMap::new(),
             at: hypha_core::Timestamp::UNIX_EPOCH,
         }
     }
@@ -586,7 +587,11 @@ mod tests {
         )
         .unwrap();
         let mut ctx = pricing(&[1, 2]);
-        ctx.catalog.as_mut().unwrap().set_price_list(Some(list_id));
+        ctx.catalog
+            .as_mut()
+            .unwrap()
+            .set_price_lists(vec![list_id])
+            .unwrap();
         ctx.price_lists = vec![list];
         ctx.fixed_prices.insert(
             list_id,

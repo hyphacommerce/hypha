@@ -1,5 +1,5 @@
-use hypha_core::{BasisPoints, CatalogId, CountryCode, MarketId, Money};
-use hypha_markets::{CatalogContext, PriceListDraft, PriceListStatus};
+use hypha_core::{BasisPoints, CatalogId, CategoryId, CountryCode, MarketId, Money};
+use hypha_markets::{AppliesTo, CatalogContext, PriceListDraft, PriceListStatus};
 use uuid::Uuid;
 
 use super::*;
@@ -70,8 +70,33 @@ fn context(market_currency: Currency, price_list: Option<PriceList>) -> PricingC
         price_lists: price_list.into_iter().collect(),
         included_products: HashSet::from([pid()]),
         fixed_prices: HashMap::new(),
+        product_categories: HashMap::new(),
         at: at(1_000),
     }
+}
+
+/// `context` with every list of `lists` on the catalog.
+fn with_lists(lists: Vec<PriceList>) -> PricingContext {
+    let mut ctx = context(Currency::EUR, None);
+    ctx.catalog = Some(Catalog::new(
+        CatalogId::from_uuid(Uuid::from_u128(5)),
+        CatalogContext::Market(mid()),
+        lists.iter().map(|l| l.id()),
+    ));
+    ctx.price_lists = lists;
+    ctx
+}
+
+fn scoped(n: u128, bp: i32, applies_to: AppliesTo) -> PriceList {
+    let mut l = list(n, Currency::EUR, None);
+    l.set_adjustment(Some(
+        Adjustment::new(BasisPoints::new(bp).unwrap(), applies_to).unwrap(),
+    ));
+    l
+}
+
+fn cat(n: u128) -> CategoryId {
+    CategoryId::from_uuid(Uuid::from_u128(200 + n))
 }
 
 fn fix(ctx: &mut PricingContext, list: PriceListId, fixed: FixedPrice) {
@@ -410,5 +435,149 @@ fn explains_a_list_that_is_not_live() {
             price: None,
             result: CandidateResult::NotLive(PriceListPhase::Draft),
         }]
+    );
+}
+
+// ---------- several lists ----------
+
+#[test]
+fn the_lowest_live_price_wins() {
+    let ctx = with_lists(vec![
+        list(1, Currency::EUR, Some(-1000)),
+        list(2, Currency::EUR, Some(-3000)),
+        list(3, Currency::EUR, Some(500)),
+    ]);
+    assert_eq!(
+        resolve_price(&ctx, variant(eur(1000)), one()).map(|r| (r.price, r.price_list)),
+        Ok((eur(700), Some(plid(2))))
+    );
+}
+
+#[test]
+fn the_base_price_competes_only_without_a_list_pricing_the_variant() {
+    // A markup list is the only one pricing it: the shopper pays more than the base price.
+    let ctx = with_lists(vec![
+        list(1, Currency::EUR, Some(2000)),
+        list(2, Currency::EUR, None),
+    ]);
+    assert_eq!(price_of(&ctx, variant(eur(1000))), Ok(eur(1200)));
+}
+
+#[test]
+fn a_tie_goes_to_the_oldest_list() {
+    let mut ctx = with_lists(vec![
+        list(2, Currency::EUR, None),
+        list(1, Currency::EUR, Some(-1000)),
+    ]);
+    fix(&mut ctx, plid(2), FixedPrice::plain(eur(900)));
+    assert_eq!(
+        resolve_price(&ctx, variant(eur(1000)), one()).map(|r| r.price_list),
+        Ok(Some(plid(1)))
+    );
+    assert_eq!(
+        explain_price(&ctx, variant(eur(1000)), one()).candidates,
+        [
+            Candidate {
+                price_list: plid(1),
+                price: Some(eur(900)),
+                result: CandidateResult::Won,
+            },
+            Candidate {
+                price_list: plid(2),
+                price: Some(eur(900)),
+                result: CandidateResult::TiedWithOlder,
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_higher_list_loses() {
+    let ctx = with_lists(vec![
+        list(1, Currency::EUR, Some(-1000)),
+        list(2, Currency::EUR, Some(-500)),
+    ]);
+    let candidates = explain_price(&ctx, variant(eur(1000)), one()).candidates;
+    assert_eq!(candidates[1].result, CandidateResult::Higher);
+}
+
+#[test]
+fn a_sale_is_measured_against_the_lowest_override_price() {
+    let ctx = with_lists(vec![
+        list(1, Currency::EUR, Some(-1000)),
+        list(2, Currency::EUR, Some(-500)),
+        sale(3, Some(-3000)),
+    ]);
+    let resolved = resolve_price(&ctx, variant(eur(1000)), one()).unwrap();
+    assert_eq!(
+        (resolved.price, resolved.compare_at),
+        (eur(700), Some(eur(900)))
+    );
+}
+
+#[test]
+fn a_sale_above_an_override_price_loses_to_it() {
+    let ctx = with_lists(vec![
+        list(1, Currency::EUR, Some(-3000)),
+        sale(2, Some(-1000)),
+    ]);
+    let resolved = resolve_price(&ctx, was(eur(1000), eur(1200)), one()).unwrap();
+    assert_eq!(
+        (resolved.price, resolved.price_list, resolved.compare_at),
+        (eur(700), Some(plid(1)), Some(eur(840)))
+    );
+}
+
+#[test]
+fn an_adjustment_for_listed_products_prices_only_them() {
+    let ctx = with_lists(vec![scoped(1, -2000, AppliesTo::Products(vec![pid()]))]);
+    assert_eq!(price_of(&ctx, variant(eur(1000))), Ok(eur(800)));
+    let other = ProductId::from_uuid(Uuid::from_u128(9));
+    let ctx = with_lists(vec![scoped(1, -2000, AppliesTo::Products(vec![other]))]);
+    assert_eq!(price_of(&ctx, variant(eur(1000))), Ok(eur(1000)));
+}
+
+#[test]
+fn an_adjustment_for_a_category_reaches_its_descendants_products() {
+    // The product is in category 2, below category 1: the loader gives both.
+    let mut ctx = with_lists(vec![scoped(1, -2000, AppliesTo::Categories(vec![cat(1)]))]);
+    ctx.product_categories
+        .insert(pid(), HashSet::from([cat(2), cat(1)]));
+    assert_eq!(price_of(&ctx, variant(eur(1000))), Ok(eur(800)));
+    ctx.product_categories.clear();
+    assert_eq!(
+        explain_price(&ctx, variant(eur(1000)), one()).candidates[0].result,
+        CandidateResult::NotPricing
+    );
+}
+
+#[test]
+fn a_fixed_price_counts_whatever_the_adjustment_applies_to() {
+    let other = ProductId::from_uuid(Uuid::from_u128(9));
+    let mut ctx = with_lists(vec![scoped(1, -2000, AppliesTo::Products(vec![other]))]);
+    fix(&mut ctx, plid(1), FixedPrice::plain(eur(950)));
+    assert_eq!(price_of(&ctx, variant(eur(1000))), Ok(eur(950)));
+}
+
+#[test]
+fn an_override_adjusts_the_compare_at_only_where_its_adjustment_reaches() {
+    let other = ProductId::from_uuid(Uuid::from_u128(9));
+    let mut ctx = with_lists(vec![scoped(1, 1000, AppliesTo::Products(vec![other]))]);
+    fix(&mut ctx, plid(1), FixedPrice::plain(eur(900)));
+    assert_eq!(
+        compare_at_of(&ctx, was(eur(1000), eur(1500))),
+        Some(eur(1500))
+    );
+}
+
+#[test]
+fn a_list_not_live_is_skipped_among_others() {
+    let mut ended = list(2, Currency::EUR, Some(-5000));
+    ended.set_window(hypha_markets::Window::new(None, Some(at(1_000))).unwrap());
+    let ctx = with_lists(vec![list(1, Currency::EUR, Some(-1000)), ended]);
+    assert_eq!(price_of(&ctx, variant(eur(1000))), Ok(eur(900)));
+    assert_eq!(
+        explain_price(&ctx, variant(eur(1000)), one()).candidates[1].result,
+        CandidateResult::NotLive(PriceListPhase::Expired)
     );
 }

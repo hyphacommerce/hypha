@@ -22,7 +22,8 @@ use crate::{
 
 #[derive(Default)]
 pub struct InMemoryProductRepo {
-    pub(crate) products: Table<ProductId, Product>,
+    /// Shared with the price list repo, whose fixed price filter joins products.
+    pub(crate) products: Arc<Table<ProductId, Product>>,
     pub(crate) outbox: InMemoryOutbox,
     /// The categories' membership and the channels' publications, which the list filters
     /// by, as a database joins them. Empty unless shared (`InMemoryPorts` shares its

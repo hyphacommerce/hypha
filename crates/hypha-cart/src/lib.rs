@@ -17,7 +17,7 @@ pub use commands::{
     shipping_offers,
 };
 pub use error::{CartError, LineError, RestoreError};
-pub use offer::{ProductOffer, VariantOffer, price_product};
+pub use offer::{MarketPrices, ProductOffer, VariantOffer, explain_product_prices, price_product};
 pub use pricing::{
     LineDetails, LineStatus, PricedCart, PricedLine, Publication, check_stock,
     price_cart_with_shipping, price_line,

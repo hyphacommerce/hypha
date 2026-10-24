@@ -5,12 +5,12 @@ use hypha_core::{
     MoneyError, Price, PriceListId, ProductId, Scope, Timestamp, UserId, VariantId,
 };
 use hypha_markets::{
-    CatalogContext, CatalogRepo, CommandError, CompareAtMode, CreateCatalog, CreateMarket,
-    CreatePriceList, EntryProblem, FixedPrice, FixedPriceProblem, Market, MarketError, MarketRepo,
-    PriceListError, PriceListKind, PriceListRepo, PriceListStatus, SetFixedPrice, UpdateMarket,
-    UpdatePriceList, add_catalog_products, add_market_country, create_catalog, create_market,
-    create_price_list, remove_catalog_products, remove_fixed_prices, remove_market_country,
-    set_fixed_prices, update_market, update_price_list,
+    AdjustmentInput, AppliesTo, CatalogContext, CatalogRepo, CommandError, CompareAtMode,
+    CreateCatalog, CreateMarket, CreatePriceList, EntryProblem, FixedPrice, FixedPriceProblem,
+    Market, MarketError, MarketRepo, PriceListError, PriceListKind, PriceListRepo, PriceListStatus,
+    SetFixedPrice, UpdateMarket, UpdatePriceList, add_catalog_products, add_market_country,
+    create_catalog, create_market, create_price_list, remove_catalog_products, remove_fixed_prices,
+    remove_market_country, set_fixed_prices, update_market, update_price_list,
 };
 use hypha_testkit::{
     InMemoryCatalogRepo, InMemoryMarketRepo, InMemoryPorts, InMemoryPriceListRepo, SequentialIds,
@@ -154,7 +154,10 @@ fn named_list(name: &str, adjustment: Option<i32>) -> CreatePriceList {
         starts_at: None,
         ends_at: None,
         compare_at: CompareAtMode::Adjusted,
-        adjustment,
+        adjustment: adjustment.map(|percent| AdjustmentInput {
+            percent,
+            applies_to: AppliesTo::All,
+        }),
     }
 }
 
@@ -730,7 +733,7 @@ fn create_catalog_stores_empty_catalog_for_market() {
     ))
     .unwrap();
 
-    assert_eq!(catalog.price_list(), None);
+    assert_eq!(catalog.price_lists(), []);
     assert_eq!(
         block_on(catalogs.get_by_context(CatalogContext::Market(market.id()))),
         Ok(Some(catalog))

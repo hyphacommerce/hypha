@@ -1,8 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
-use hypha_core::{Currency, Price, PriceListId, ProductId, Quantity, Timestamp, VariantId};
+use hypha_core::{
+    CategoryId, Currency, Price, PriceListId, ProductId, Quantity, Timestamp, VariantId,
+};
 use hypha_markets::{
-    Catalog, CompareAtMode, FixedPrice, Market, PriceList, PriceListKind, PriceListPhase,
+    Adjustment, Catalog, CompareAtMode, FixedPrice, Market, PriceList, PriceListKind,
+    PriceListPhase,
 };
 
 use crate::error::PricingError;
@@ -26,6 +29,9 @@ pub struct PricingContext {
     pub included_products: HashSet<ProductId>,
     /// Each live list's fixed prices for the requested variants that have one.
     pub fixed_prices: HashMap<PriceListId, HashMap<VariantId, FixedPrice>>,
+    /// Each requested product's categories with all their ancestors: what an adjustment
+    /// applying to categories reaches. Loaded only when a live list adjusts by category.
+    pub product_categories: HashMap<ProductId, HashSet<CategoryId>>,
     /// The moment prices are for: a list prices only while its window is open then.
     pub at: Timestamp,
 }
@@ -40,6 +46,7 @@ impl PricingContext {
             price_lists: Vec::new(),
             included_products: HashSet::new(),
             fixed_prices: HashMap::new(),
+            product_categories: HashMap::new(),
             at,
         }
     }
@@ -111,6 +118,8 @@ struct Offer<'a> {
     list: &'a PriceList,
     price: Price,
     fixed: Option<&'a FixedPrice>,
+    /// The list's adjustment, when it reaches the variant's product.
+    adjustment: Option<&'a Adjustment>,
 }
 
 /// Price of a variant at `quantity` in the context's market, at the context's time.
@@ -171,8 +180,12 @@ fn evaluate(
 
     let mut candidates = Vec::new();
     let mut offers: Vec<Offer> = Vec::new();
-    let list_ids: Vec<PriceListId> = catalog.price_list().into_iter().collect();
-    for list_id in list_ids {
+    let no_categories = HashSet::new();
+    let categories = pricing
+        .product_categories
+        .get(&variant.product)
+        .unwrap_or(&no_categories);
+    for &list_id in catalog.price_lists() {
         let list = pricing
             .price_lists
             .iter()
@@ -191,7 +204,10 @@ fn evaluate(
             .fixed_prices
             .get(&list_id)
             .and_then(|prices| prices.get(&variant.variant));
-        let price = match (fixed, list.adjustment()) {
+        let adjustment = list
+            .adjustment()
+            .filter(|a| a.covers(variant.product, categories));
+        let price = match (fixed, adjustment) {
             (Some(fixed), _) => Some(fixed.price()),
             (None, Some(adjustment)) => {
                 ensure_currency(market.currency(), variant.base)?;
@@ -223,7 +239,12 @@ fn evaluate(
             // Settled once the winner is known.
             result: CandidateResult::Higher,
         });
-        offers.push(Offer { list, price, fixed });
+        offers.push(Offer {
+            list,
+            price,
+            fixed,
+            adjustment,
+        });
     }
 
     let Some(winner) = offers
@@ -256,7 +277,7 @@ fn evaluate(
                 CompareAtMode::Adjusted => variant
                     .compare_at
                     .filter(|c| c.money().currency() == market.currency())
-                    .and_then(|c| adjusted(c, winner.list)),
+                    .and_then(|c| adjusted(c, winner.adjustment)),
             },
         },
     };
@@ -279,10 +300,11 @@ fn regular_price(offers: &[Offer], base: Price, currency: Currency) -> Option<Pr
         .or_else(|| (base.money().currency() == currency).then_some(base))
 }
 
-/// The variant's compare-at with the list's adjustment applied; as it is without one.
-/// `None` when adjusting overflows, rather than failing the price.
-fn adjusted(compare_at: Price, list: &PriceList) -> Option<Price> {
-    match list.adjustment() {
+/// The variant's compare-at with the list's adjustment applied, when it reaches the
+/// product; as it is otherwise. `None` when adjusting overflows, rather than failing the
+/// price.
+fn adjusted(compare_at: Price, adjustment: Option<&Adjustment>) -> Option<Price> {
+    match adjustment {
         Some(adjustment) => compare_at
             .money()
             .adjust(adjustment.percent())

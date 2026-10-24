@@ -150,7 +150,7 @@ export async function attachPriceList(
     if (error) return { error: describe(error) };
     list = data.id;
   }
-  const { error } = await client.PUT("/admin/catalogs/{id}/price-list", {
+  const { error } = await client.POST("/admin/catalogs/{id}/price-lists", {
     params: { path: { id: catalog } },
     body: { price_list: list },
   });
@@ -161,9 +161,9 @@ export async function attachPriceList(
 
 export async function detachPriceList(market: string, catalog: string): Promise<Result> {
   const client = await sessionClient();
-  const { error } = await client.PUT("/admin/catalogs/{id}/price-list", {
+  const { error } = await client.PUT("/admin/catalogs/{id}/price-lists", {
     params: { path: { id: catalog } },
-    body: { price_list: null },
+    body: { price_lists: [] },
   });
   if (error) return { error: describe(error) };
   refresh(market);

@@ -23,7 +23,8 @@ impl Event for MarketChanged {
     const VERSION: u16 = 1;
 }
 
-/// `catalog.changed`: created, or its price list assigned.
+/// `catalog.changed`: created, or its price lists changed (with
+/// `catalog.price_lists_added` / `_removed`, which name them).
 #[derive(Debug, Serialize)]
 pub struct CatalogChanged {
     pub catalog: CatalogId,
@@ -31,6 +32,30 @@ pub struct CatalogChanged {
 
 impl Event for CatalogChanged {
     const TYPE: &'static str = "catalog.changed";
+    const VERSION: u16 = 1;
+}
+
+/// `catalog.price_lists_added`: these lists now compete to price the catalog's products.
+#[derive(Debug, Serialize)]
+pub struct CatalogPriceListsAdded {
+    pub catalog: CatalogId,
+    pub price_lists: Vec<PriceListId>,
+}
+
+impl Event for CatalogPriceListsAdded {
+    const TYPE: &'static str = "catalog.price_lists_added";
+    const VERSION: u16 = 1;
+}
+
+/// `catalog.price_lists_removed`.
+#[derive(Debug, Serialize)]
+pub struct CatalogPriceListsRemoved {
+    pub catalog: CatalogId,
+    pub price_lists: Vec<PriceListId>,
+}
+
+impl Event for CatalogPriceListsRemoved {
+    const TYPE: &'static str = "catalog.price_lists_removed";
     const VERSION: u16 = 1;
 }
 

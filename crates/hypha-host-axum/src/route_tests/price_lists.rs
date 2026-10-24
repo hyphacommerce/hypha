@@ -48,7 +48,7 @@ async fn a_price_list_has_a_name_a_kind_a_status_and_a_window() {
             &json!("draft"),
             &json!("2026-11-27T00:00:00Z"),
             &json!("hidden"),
-            &json!({"percent_bps": -2000}),
+            &json!({"percent_bps": -2000, "applies_to": {"type": "all"}}),
         )
     );
 
@@ -255,8 +255,8 @@ async fn shoppers_see_compare_at_prices_on_products_and_cart_lines() {
     .await;
     let (_, market) = send(&app, "GET", &format!("/admin/markets/{market}"), None).await;
     let catalog = market["catalog"].as_str().unwrap();
-    let body = json!({ "price_list": sale["id"] }).to_string();
-    let path = format!("/admin/catalogs/{catalog}/price-list");
+    let body = json!({ "price_lists": [sale["id"]] }).to_string();
+    let path = format!("/admin/catalogs/{catalog}/price-lists");
     let (status, json) = send(&app, "PUT", &path, Some(&body)).await;
     assert_eq!(status, StatusCode::OK, "{json}");
     let (_, page) = send_as(&app, &pk, "GET", &read, None).await;
@@ -291,4 +291,290 @@ async fn shoppers_see_compare_at_prices_on_products_and_cart_lines() {
     send(&app, "PATCH", &url, Some(r#"{"status":"draft"}"#)).await;
     let (_, page) = send_as(&app, &pk, "GET", &read, None).await;
     assert_eq!(page["variants"][0]["price"], eur(1000));
+}
+
+/// A market, its catalog and the mug, with lists made from `bodies` on the catalog.
+async fn lists_on_the_catalog(app: &TestApp, bodies: Vec<Value>) -> (String, String, Vec<String>) {
+    let (market, mug) = market_selling_a_mug(app).await;
+    let (_, read) = send(app, "GET", &format!("/admin/markets/{market}"), None).await;
+    let catalog = read["catalog"].as_str().unwrap().to_string();
+    let mut ids = Vec::new();
+    for body in bodies {
+        ids.push(
+            create_list(app, body).await["id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+    let body = json!({ "price_lists": ids }).to_string();
+    let (status, json) = send(
+        app,
+        "PUT",
+        &format!("/admin/catalogs/{catalog}/price-lists"),
+        Some(&body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    (market, mug, ids)
+}
+
+#[tokio::test]
+async fn a_catalogs_lists_compete_and_the_lowest_price_wins() {
+    let app = app().await;
+    let (market, mug, lists) = lists_on_the_catalog(
+        &app,
+        vec![
+            json!({"name": "Retail", "currency": "EUR", "adjustment": {"percent_bps": -1000}}),
+            json!({"name": "Sale", "currency": "EUR", "kind": "sale",
+                "adjustment": {"percent_bps": -3000}}),
+        ],
+    )
+    .await;
+    let product = mug_product(&app).await;
+    let pk = publishable(&app).await;
+    let (_, page) = send_as(
+        &app,
+        &pk,
+        "GET",
+        &format!("/storefront/products/{product}?country=HR"),
+        None,
+    )
+    .await;
+    // The sale wins at 700, measured against the retail list's 900.
+    assert_eq!(
+        (
+            &page["variants"][0]["price"],
+            &page["variants"][0]["compare_at_price"]
+        ),
+        (&eur(700), &eur(900))
+    );
+
+    let (status, prices) = send(
+        &app,
+        "GET",
+        &format!("/admin/products/{product}/prices?market={market}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prices}");
+    let variant = &prices["markets"][0]["variants"][0];
+    assert_eq!(
+        (
+            &variant["variant"],
+            &variant["price"],
+            &variant["price_list"]
+        ),
+        (&json!(mug), &eur(700), &json!(lists[1]))
+    );
+    let results: Vec<(&Value, &Value, &Value)> = variant["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| (&c["name"], &c["price"], &c["result"]))
+        .collect();
+    assert_eq!(
+        results,
+        [
+            (&json!("Retail"), &eur(900), &json!("higher")),
+            (&json!("Sale"), &eur(700), &json!("won")),
+        ]
+    );
+    let (status, error) = send(
+        &app,
+        "GET",
+        &format!("/admin/products/{product}/prices?quantity=0"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_quantity")
+    );
+
+    // The market and the catalog name their lists; one taken off stops competing.
+    let (_, read) = send(&app, "GET", &format!("/admin/markets/{market}"), None).await;
+    assert_eq!(read["price_lists"], json!(lists));
+    let catalog = read["catalog"].as_str().unwrap();
+    let path = format!("/admin/catalogs/{catalog}/price-lists/{}", lists[1]);
+    let (status, json) = send(&app, "DELETE", &path, None).await;
+    assert_eq!(
+        (status, &json["price_lists"]),
+        (StatusCode::OK, &json!([lists[0]]))
+    );
+    let (status, error) = send(&app, "DELETE", &path, None).await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::NOT_FOUND, "price_list_not_in_catalog")
+    );
+    let add = format!("/admin/catalogs/{catalog}/price-lists");
+    let body = json!({ "price_list": lists[1] }).to_string();
+    let (status, json) = send(&app, "POST", &add, Some(&body)).await;
+    assert_eq!(
+        (status, json["price_lists"].as_array().unwrap().len()),
+        (StatusCode::OK, 2)
+    );
+    let rsd = create_list(&app, json!({"name": "Dinars", "currency": "RSD"})).await;
+    let body = json!({ "price_list": rsd["id"] }).to_string();
+    let (status, error) = send(&app, "POST", &add, Some(&body)).await;
+    assert_eq!(
+        (status, code(&error)),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "price_list_currency_mismatch"
+        )
+    );
+}
+
+#[tokio::test]
+async fn an_adjustment_reaches_only_what_it_applies_to() {
+    let app = app().await;
+    let (_, category) = send(
+        &app,
+        "POST",
+        "/admin/categories",
+        Some(r#"{"name":"Kitchen","handle":"kitchen","visible":true}"#),
+    )
+    .await;
+    let (_, below) = send(
+        &app,
+        "POST",
+        "/admin/categories",
+        Some(
+            &json!({"name": "Mugs", "handle": "mugs", "parent": category["id"], "visible": true})
+                .to_string(),
+        ),
+    )
+    .await;
+    let (_, _, _) = lists_on_the_catalog(
+        &app,
+        vec![
+            json!({"name": "Kitchen sale", "currency": "EUR", "kind": "sale",
+            "adjustment": {"percent_bps": -2000,
+                "applies_to": {"type": "categories", "categories": [category["id"]]}}}),
+        ],
+    )
+    .await;
+    let product = mug_product(&app).await;
+    let pk = publishable(&app).await;
+    let read = format!("/storefront/products/{product}?country=HR");
+    let (_, page) = send_as(&app, &pk, "GET", &read, None).await;
+    assert_eq!(
+        page["variants"][0]["price"],
+        eur(1000),
+        "not in the category"
+    );
+
+    // In a category below it: reached.
+    let body = json!({ "categories": [below["id"]] }).to_string();
+    let (status, json) = send(
+        &app,
+        "PUT",
+        &format!("/admin/products/{product}/categories"),
+        Some(&body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let (_, page) = send_as(&app, &pk, "GET", &read, None).await;
+    assert_eq!(page["variants"][0]["price"], eur(800));
+}
+
+#[tokio::test]
+async fn price_lists_are_listed_filtered_and_deleted_when_free() {
+    let app = app().await;
+    let (market, mug, lists) =
+        lists_on_the_catalog(&app, vec![json!({"name": "Retail", "currency": "EUR"})]).await;
+    create_list(
+        &app,
+        json!({"name": "a sale", "currency": "EUR", "kind": "sale"}),
+    )
+    .await;
+    create_list(
+        &app,
+        json!({"name": "Later", "currency": "EUR", "starts_at": "2999-01-01T00:00:00Z"}),
+    )
+    .await;
+    let names = async |query: &str| {
+        let (status, page) = send(&app, "GET", &format!("/admin/price-lists{query}"), None).await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l["name"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names("").await, ["Later", "a sale", "Retail"]);
+    assert_eq!(names("?sort=name_asc").await, ["a sale", "Later", "Retail"]);
+    assert_eq!(names("?kind=sale").await, ["a sale"]);
+    assert_eq!(names("?status=scheduled").await, ["Later"]);
+    assert_eq!(names(&format!("?market={market}")).await, ["Retail"]);
+    let (_, page) = send(
+        &app,
+        "GET",
+        "/admin/price-lists?sort=name_asc&limit=1",
+        None,
+    )
+    .await;
+    let cursor = page["next_cursor"].as_str().unwrap();
+    assert_eq!(
+        names(&format!("?sort=name_asc&limit=1&cursor={cursor}")).await,
+        ["Later"]
+    );
+    let (status, error) = send(
+        &app,
+        "GET",
+        &format!("/admin/price-lists?sort=name_desc&cursor={cursor}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::BAD_REQUEST, "invalid_cursor")
+    );
+
+    // The list names its markets and counts its prices.
+    let url = format!("/admin/price-lists/{}", lists[0]);
+    let body = json!({"fixed_prices": [{"variant": mug, "price": eur(950)}]}).to_string();
+    send(&app, "PUT", &format!("{url}/fixed-prices"), Some(&body)).await;
+    let (_, list) = send(&app, "GET", &url, None).await;
+    assert_eq!(
+        (&list["markets"], &list["fixed_price_count"]),
+        (&json!([market]), &json!(1))
+    );
+    let product = mug_product(&app).await;
+    for (query, count) in [
+        (format!("?product={product}"), 1),
+        ("?q=MUG".to_string(), 1),
+        ("?q=cup".to_string(), 0),
+    ] {
+        let (_, prices) = send(&app, "GET", &format!("{url}/fixed-prices{query}"), None).await;
+        assert_eq!(prices["items"].as_array().unwrap().len(), count, "{query}");
+    }
+
+    let (status, error) = send(&app, "DELETE", &url, None).await;
+    assert_eq!(
+        (
+            status,
+            code(&error),
+            error["details"]["catalogs"].as_array().map(Vec::len)
+        ),
+        (StatusCode::CONFLICT, "price_list_in_use", Some(1))
+    );
+    let (_, read) = send(&app, "GET", &format!("/admin/markets/{market}"), None).await;
+    let catalog = read["catalog"].as_str().unwrap();
+    send(
+        &app,
+        "PUT",
+        &format!("/admin/catalogs/{catalog}/price-lists"),
+        Some(r#"{"price_lists":[]}"#),
+    )
+    .await;
+    let (status, _) = send(&app, "DELETE", &url, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, error) = send(&app, "GET", &url, None).await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::NOT_FOUND, "price_list_not_found")
+    );
 }
