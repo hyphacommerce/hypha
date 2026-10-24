@@ -3,8 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { parseMoney } from "@/lib/format";
-import { describe, loadCurrencies, sessionClient } from "@/lib/hypha";
+import { describe, sessionClient } from "@/lib/hypha";
 
 /** The outcome of an edit: a message to show, if it failed. */
 export type Result = { error?: string };
@@ -126,96 +125,35 @@ export async function removeCatalogProduct(
   return {};
 }
 
-/**
- * Gives the catalog a price list: `existing`, or a new one in `currency` with
- * `adjustmentBps`.
- */
-export async function attachPriceList(
+/** Puts `list` on the market's catalog, beside the lists already there. */
+export async function addCatalogPriceList(
   market: string,
   catalog: string,
-  input: { existing: string } | { name: string; currency: string; adjustmentBps: number },
+  list: string,
 ): Promise<Result> {
   const client = await sessionClient();
-  let list: string;
-  if ("existing" in input) {
-    list = input.existing;
-  } else {
-    const { data, error } = await client.POST("/admin/price-lists", {
-      body: {
-        name: input.name,
-        currency: input.currency,
-        adjustment: { percent_bps: input.adjustmentBps },
-      },
-    });
-    if (error) return { error: describe(error) };
-    list = data.id;
-  }
   const { error } = await client.POST("/admin/catalogs/{id}/price-lists", {
     params: { path: { id: catalog } },
     body: { price_list: list },
   });
   if (error) return { error: describe(error) };
   refresh(market);
+  revalidatePath("/markets/price-lists", "layout");
   return {};
 }
 
-export async function detachPriceList(market: string, catalog: string): Promise<Result> {
-  const client = await sessionClient();
-  const { error } = await client.PUT("/admin/catalogs/{id}/price-lists", {
-    params: { path: { id: catalog } },
-    body: { price_lists: [] },
-  });
-  if (error) return { error: describe(error) };
-  refresh(market);
-  return {};
-}
-
-export async function setAdjustment(
+/** Takes `list` off the market's catalog; the list itself stays. */
+export async function removeCatalogPriceList(
   market: string,
+  catalog: string,
   list: string,
-  adjustmentBps: number,
 ): Promise<Result> {
   const client = await sessionClient();
-  const { error } = await client.PATCH("/admin/price-lists/{id}", {
-    params: { path: { id: list } },
-    body: { adjustment: { percent_bps: adjustmentBps } },
+  const { error } = await client.DELETE("/admin/catalogs/{id}/price-lists/{price_list}", {
+    params: { path: { id: catalog, price_list: list } },
   });
   if (error) return { error: describe(error) };
   refresh(market);
-  return {};
-}
-
-/** Fixes `variant`'s price in the list to what was typed, in `currency`. */
-export async function setFixedPrice(
-  market: string,
-  list: string,
-  input: { variant: string; price: string; currency: string },
-): Promise<Result> {
-  const amount = parseMoney(input.price, input.currency, await loadCurrencies());
-  if (amount === null) return { error: "Enter the price as a number, like 18 or 18.50." };
-  const client = await sessionClient();
-  const { error } = await client.PUT("/admin/price-lists/{id}/fixed-prices", {
-    params: { path: { id: list } },
-    body: {
-      fixed_prices: [{ variant: input.variant, price: { amount, currency: input.currency } }],
-    },
-  });
-  if (error) return { error: describe(error) };
-  refresh(market);
-  return {};
-}
-
-export async function removeFixedPrice(
-  market: string,
-  list: string,
-  variant: string,
-): Promise<Result> {
-  const client = await sessionClient();
-  const { error } = await client.DELETE("/admin/price-lists/{id}/fixed-prices", {
-    params: { path: { id: list } },
-    body: { variants: [variant] },
-  });
-  if (error) return { error: describe(error) };
-  refresh(market);
+  revalidatePath("/markets/price-lists", "layout");
   return {};
 }
