@@ -1244,6 +1244,21 @@ async fn fixed_price_filters<S: HasProducts + HasCategories + HasPriceLists>(por
         [vid(30), vid(10)]
     );
     assert_eq!(variants(filter(Some(pid(2)), None, Some("mug"))).await, []);
+    // By variant, a variant no product has included, and with another filter.
+    let only = |ids: Vec<VariantId>| filter(None, None, None).with_variants(ids).unwrap();
+    assert_eq!(
+        variants(only(vec![vid(10), vid(99), vid(77)])).await,
+        [vid(99), vid(10)]
+    );
+    assert_eq!(
+        variants(
+            filter(None, Some(kitchen.id()), None)
+                .with_variants(vec![vid(10), vid(20)])
+                .unwrap()
+        )
+        .await,
+        [vid(20)]
+    );
 }
 
 async fn product_categories<S: HasProducts + HasCategories + HasPriceLists>(ports: &S) {

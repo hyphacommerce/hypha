@@ -543,14 +543,34 @@ async fn price_lists_are_listed_filtered_and_deleted_when_free() {
         (&json!([market]), &json!(1))
     );
     let product = mug_product(&app).await;
+    let other = "var_00000000000000000000000000000063";
     for (query, count) in [
         (format!("?product={product}"), 1),
         ("?q=MUG".to_string(), 1),
         ("?q=cup".to_string(), 0),
+        (format!("?variants={mug},{other}"), 1),
+        (format!("?variants={other}"), 0),
     ] {
         let (_, prices) = send(&app, "GET", &format!("{url}/fixed-prices{query}"), None).await;
         assert_eq!(prices["items"].as_array().unwrap().len(), count, "{query}");
     }
+
+    let many: Vec<String> = (0..251).map(|n| format!("var_{:032x}", n + 1)).collect();
+    let (status, error) = send(
+        &app,
+        "GET",
+        &format!("{url}/fixed-prices?variants={}", many.join(",")),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&error), &error["details"]),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "too_many_filter_ids",
+            &json!({"field": "variants", "max": 250})
+        )
+    );
 
     let (status, error) = send(&app, "DELETE", &url, None).await;
     assert_eq!(

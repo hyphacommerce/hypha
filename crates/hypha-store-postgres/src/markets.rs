@@ -835,68 +835,76 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         let product = filter.product().map(|p| p.as_uuid());
         let category = filter.category().map(|c| c.as_uuid());
         let q = filter.q();
+        let variants: Option<Vec<Uuid>> = (!filter.variants().is_empty())
+            .then(|| filter.variants().iter().map(|v| v.as_uuid()).collect());
+        let list = list.as_uuid();
         let mut conn = self.conn().await;
-        let rows = conn
-            .db()
-            .query_typed(
-                "WITH RECURSIVE down (id) AS (
-                     SELECT id FROM categories WHERE id = $5
-                     UNION
-                     SELECT c.id FROM categories c JOIN down ON c.parent_id = down.id
-                 )
-                 SELECT f.variant_id, f.amount, f.currency, f.compare_at
-                     FROM price_list_prices f
-                     LEFT JOIN variants v ON v.id = f.variant_id
-                     LEFT JOIN products p ON p.id = v.product_id
-                     WHERE f.price_list_id = $1 AND ($2::uuid IS NULL OR f.variant_id < $2)
-                       AND ($4::uuid IS NULL OR p.id = $4)
-                       AND ($5::uuid IS NULL OR EXISTS (SELECT 1 FROM category_products cp
-                            JOIN down ON down.id = cp.category_id WHERE cp.product_id = p.id))
-                       AND ($6::text IS NULL
-                            OR strpos(lower(p.title), lower($6)) > 0
-                            OR strpos(lower(p.handle), lower($6)) > 0
-                            OR strpos(lower(v.sku), lower($6)) > 0)
-                     ORDER BY f.variant_id DESC LIMIT $3",
-                &[
-                    (&list.as_uuid(), Type::UUID),
-                    (&after, Type::UUID),
-                    (&fetch, Type::INT8),
-                    (&product, Type::UUID),
-                    (&category, Type::UUID),
-                    (&q, Type::TEXT),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        let prices = rows
-            .iter()
-            .map(fixed_price_from_row)
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut prices = Page::from_overfetch(prices, page.limit);
-        if prices.items.is_empty() {
-            return Ok(prices);
-        }
-        let ids: Vec<Uuid> = prices.items.iter().map(|(v, _)| v.as_uuid()).collect();
-        let break_rows = conn
-            .db()
-            .query_typed(
-                "SELECT price_list_id, variant_id, min_quantity, amount
-                 FROM price_list_price_breaks WHERE price_list_id = $1 AND variant_id = ANY($2)
-                 ORDER BY variant_id, min_quantity",
-                &[(&list.as_uuid(), Type::UUID), (&ids, Type::UUID_ARRAY)],
-            )
-            .await
-            .map_err(repo_error)?;
-        let mut breaks = breaks_by_price(&break_rows)?;
-        prices.items = prices
-            .items
-            .into_iter()
-            .map(|(v, fixed)| {
-                let found = breaks.remove(&(list.as_uuid(), v.as_uuid()));
-                Ok((v, with_breaks(fixed, found)?))
-            })
-            .collect::<Result<_, RepoError>>()?;
-        Ok(prices)
+        // The page and its breaks in one snapshot: a write between them can't pair a
+        // price with another's breaks.
+        consistent_read!(conn, |tx| {
+            let rows = tx
+                .query_typed(
+                    "WITH RECURSIVE down (id) AS (
+                         SELECT id FROM categories WHERE id = $5
+                         UNION
+                         SELECT c.id FROM categories c JOIN down ON c.parent_id = down.id
+                     )
+                     SELECT f.variant_id, f.amount, f.currency, f.compare_at
+                         FROM price_list_prices f
+                         LEFT JOIN variants v ON v.id = f.variant_id
+                         LEFT JOIN products p ON p.id = v.product_id
+                         WHERE f.price_list_id = $1 AND ($2::uuid IS NULL OR f.variant_id < $2)
+                           AND ($4::uuid IS NULL OR p.id = $4)
+                           AND ($5::uuid IS NULL OR EXISTS (SELECT 1 FROM category_products cp
+                                JOIN down ON down.id = cp.category_id WHERE cp.product_id = p.id))
+                           AND ($6::text IS NULL
+                                OR strpos(lower(p.title), lower($6)) > 0
+                                OR strpos(lower(p.handle), lower($6)) > 0
+                                OR strpos(lower(v.sku), lower($6)) > 0)
+                           AND ($7::uuid[] IS NULL OR f.variant_id = ANY($7))
+                         ORDER BY f.variant_id DESC LIMIT $3",
+                    &[
+                        (&list, Type::UUID),
+                        (&after, Type::UUID),
+                        (&fetch, Type::INT8),
+                        (&product, Type::UUID),
+                        (&category, Type::UUID),
+                        (&q, Type::TEXT),
+                        (&variants, Type::UUID_ARRAY),
+                    ],
+                )
+                .await
+                .map_err(repo_error)?;
+            let prices = rows
+                .iter()
+                .map(fixed_price_from_row)
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut prices = Page::from_overfetch(prices, page.limit);
+            if prices.items.is_empty() {
+                return Ok(prices);
+            }
+            let ids: Vec<Uuid> = prices.items.iter().map(|(v, _)| v.as_uuid()).collect();
+            let break_rows = tx
+                .query_typed(
+                    "SELECT price_list_id, variant_id, min_quantity, amount
+                     FROM price_list_price_breaks
+                     WHERE price_list_id = $1 AND variant_id = ANY($2)
+                     ORDER BY variant_id, min_quantity",
+                    &[(&list, Type::UUID), (&ids, Type::UUID_ARRAY)],
+                )
+                .await
+                .map_err(repo_error)?;
+            let mut breaks = breaks_by_price(&break_rows)?;
+            prices.items = prices
+                .items
+                .into_iter()
+                .map(|(v, fixed)| {
+                    let found = breaks.remove(&(list, v.as_uuid()));
+                    Ok((v, with_breaks(fixed, found)?))
+                })
+                .collect::<Result<_, RepoError>>()?;
+            Ok(prices)
+        })
     }
 
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError> {

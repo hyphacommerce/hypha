@@ -65,6 +65,8 @@ pub enum PriceListError {
     TooManyAudienceGroups { max: usize },
     #[error("customer group {0} is listed twice in the audience")]
     DuplicateAudienceGroup(CustomerGroupId),
+    #[error("`{field}` names at most {max} IDs")]
+    TooManyFilterIds { field: &'static str, max: usize },
 }
 
 impl ErrorCode for MarketError {
@@ -108,6 +110,7 @@ impl ErrorCode for PriceListError {
             PriceListError::InvalidFixedPrices(_) => "fixed_prices_invalid",
             PriceListError::TooManyAudienceGroups { .. } => "too_many_audience_groups",
             PriceListError::DuplicateAudienceGroup(_) => "duplicate_audience_group",
+            PriceListError::TooManyFilterIds { .. } => "too_many_filter_ids",
         }
     }
 }

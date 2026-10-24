@@ -1186,6 +1186,12 @@ pub struct FixedPriceFilters {
     /// Only variants whose product's title or handle, or whose SKU, contains this text,
     /// ignoring case. Up to 255 characters; blank filters nothing.
     q: Option<String>,
+    /// Only these variants (a grid's page of them): repeat it (`variants=var_…&variants=var_…`)
+    /// or separate them with commas, up to 250 (`422 too_many_filter_ids`). Those without
+    /// a fixed price are left out.
+    #[serde(default)]
+    #[param(value_type = Vec<VariantId>)]
+    variants: Vec<String>,
 }
 
 /// A price list's fixed prices, newest variant first, narrowed by product, category or
@@ -1205,7 +1211,9 @@ pub async fn list_fixed_prices_handler<S: Storage>(
 ) -> Result<Json<FixedPricePage>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (page, filters, scope) = query.parse()?;
+    let variants = super::page::id_list("variants", filters.variants)?;
     let filter = FixedPriceFilter::new(filters.product, filters.category, filters.q)
+        .and_then(|f| f.with_variants(variants))
         .map_err(hypha_markets::CommandError::from)?;
     let page = list_fixed_prices(&ctx, ports.price_lists(), id, &filter, page)
         .await

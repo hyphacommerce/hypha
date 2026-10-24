@@ -546,6 +546,12 @@ step "fixed prices name their product" 200 - "$BASE/admin/price-lists/$LIST/fixe
 contains "the cup" '"product":{"id":'
 step "fixed prices in an unknown category" 200 - "$BASE/admin/price-lists/$LIST/fixed-prices?category=pcat_00000000000000000000000000000063"
 contains "none" '"items":[]'
+step "fixed prices of a page of variants" 200 - \
+    "$BASE/admin/price-lists/$LIST/fixed-prices?variants=$CUP_VAR,var_00000000000000000000000000000063"
+contains "only the cup's" "\"items\":[{\"variant\":\"$CUP_VAR\""
+MANY_VARIANTS=$(for n in $(seq 1 251); do printf 'var_%032x,' "$n"; done)
+step "too many variants" 422 too_many_filter_ids \
+    "$BASE/admin/price-lists/$LIST/fixed-prices?variants=${MANY_VARIANTS%,}"
 step "list API keys" 200 - "$BASE/admin/api-keys"
 contains "the storefront's key among them" '"kind":"publishable"'
 step "countries for pickers" 200 - "$BASE/admin/countries"

@@ -1,7 +1,7 @@
 //! What lists of price lists and of fixed prices may be narrowed to, and their orders.
 
 use hypha_core::{
-    CategoryId, CustomerGroupId, Direction, PriceListId, ProductId, SortKey, Timestamp,
+    CategoryId, CustomerGroupId, Direction, PriceListId, ProductId, SortKey, Timestamp, VariantId,
     optional_text,
 };
 
@@ -93,6 +93,8 @@ pub struct FixedPriceFilter {
     product: Option<ProductId>,
     category: Option<CategoryId>,
     q: Option<String>,
+    /// Sorted, each once; empty is no filter.
+    variants: Vec<VariantId>,
 }
 
 impl FixedPriceFilter {
@@ -107,7 +109,30 @@ impl FixedPriceFilter {
             product,
             category,
             q: optional_text("q", q)?,
+            variants: Vec::new(),
         })
+    }
+
+    /// Most variants one filter names: a page's worth.
+    pub const MAX_VARIANTS: usize = 250;
+
+    /// The same filter, narrowed to `variants` (repeats dropped; at most `MAX_VARIANTS`).
+    /// Empty narrows nothing.
+    pub fn with_variants(self, mut variants: Vec<VariantId>) -> Result<Self, PriceListError> {
+        variants.sort();
+        variants.dedup();
+        if variants.len() > Self::MAX_VARIANTS {
+            return Err(PriceListError::TooManyFilterIds {
+                field: "variants",
+                max: Self::MAX_VARIANTS,
+            });
+        }
+        Ok(Self { variants, ..self })
+    }
+
+    /// Sorted; empty when not narrowed by variant.
+    pub fn variants(&self) -> &[VariantId] {
+        &self.variants
     }
 
     pub fn product(&self) -> Option<ProductId> {
@@ -125,7 +150,10 @@ impl FixedPriceFilter {
 
     /// Whether it narrows anything.
     pub fn is_empty(&self) -> bool {
-        self.product.is_none() && self.category.is_none() && self.q.is_none()
+        self.product.is_none()
+            && self.category.is_none()
+            && self.q.is_none()
+            && self.variants.is_empty()
     }
 
     /// Whether a product passes: `in_category` says whether it's in the filter's category

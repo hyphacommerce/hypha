@@ -132,6 +132,12 @@ impl InMemoryPriceListRepo {
         if filter.is_empty() {
             return true;
         }
+        if !filter.variants().is_empty() && !filter.variants().contains(&variant) {
+            return false;
+        }
+        if filter.product().is_none() && filter.category().is_none() && filter.q().is_none() {
+            return true;
+        }
         let Some(product) = self.products.find(|p| p.variant(variant).is_some()) else {
             return false;
         };

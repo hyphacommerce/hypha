@@ -749,6 +749,9 @@ impl From<hypha_markets::CommandError> for ApiError {
             E::PriceListNameTaken { price_list, .. } => Some(json!({ "price_list": price_list })),
             E::TooManyPrices { max } => Some(json!({ "max": max })),
             E::PriceListInUse { catalogs, .. } => Some(json!({ "catalogs": catalogs })),
+            E::PriceList(hypha_markets::PriceListError::TooManyFilterIds { field, max }) => {
+                Some(json!({ "field": field, "max": max }))
+            }
             _ => None,
         };
         Self::domain(status, e).with_details(details)
