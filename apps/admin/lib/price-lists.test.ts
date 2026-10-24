@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { CategoryNode } from "./categories.ts";
+import { parsePercent } from "./price-grid/money.ts";
 import {
   type ListForm,
   type PriceList,
-  adjustAmount,
   adjustedPrice,
   adjustmentLabel,
   audienceLabel,
@@ -20,7 +20,6 @@ import {
   entryErrors,
   formFromList,
   fromLocalInput,
-  parsePercent,
   percentInput,
   toLocalInput,
   updateRequest,
@@ -56,24 +55,10 @@ function list(overrides: Partial<PriceList> = {}): PriceList {
 
 // ---- percentages ----
 
-test("parsePercent reads a discount as negative basis points", () => {
-  assert.equal(parsePercent("-20"), -2000);
-  assert.equal(parsePercent("5.5"), 550);
-  assert.equal(parsePercent("+10"), 1000);
-  assert.equal(parsePercent("-12,25"), -1225);
-  assert.equal(parsePercent("0"), 0);
-});
-
-test("parsePercent refuses more than 100% off, three decimals and words", () => {
-  assert.equal(parsePercent("-100"), -10000);
-  assert.equal(parsePercent("-100.01"), null);
-  assert.equal(parsePercent("1.234"), null);
-  assert.equal(parsePercent("ten"), null);
-  assert.equal(parsePercent(""), null);
-});
-
 test("percentInput is what parsePercent reads back", () => {
-  for (const bps of [-2000, 550, 0, -1225]) assert.equal(parsePercent(percentInput(bps)), bps);
+  for (const bps of [-2000, 550, 0, -1225]) {
+    assert.deepEqual(parsePercent(percentInput(bps)), { ok: true, value: bps });
+  }
 });
 
 test("adjustmentLabel says what the adjustment covers", () => {
@@ -89,25 +74,6 @@ test("adjustmentLabel says what the adjustment covers", () => {
 });
 
 // ---- adjusting ----
-
-test("adjustAmount rounds half away from zero, like Money::adjust", () => {
-  assert.equal(adjustAmount(1000, -1000), 900);
-  // 999 × 0.85 = 849.15 → 849
-  assert.equal(adjustAmount(999, -1500), 849);
-  // 5 × 0.9 = 4.5 → 5
-  assert.equal(adjustAmount(5, -1000), 5);
-  // 15 × 0.9 = 13.5 → 14
-  assert.equal(adjustAmount(15, -1000), 14);
-  // 1 × 1.49 = 1.49 → 1
-  assert.equal(adjustAmount(1, 4900), 1);
-  assert.equal(adjustAmount(1, 5000), 2);
-});
-
-test("adjustAmount stays exact near the largest amount", () => {
-  const max = 2 ** 53 - 1;
-  assert.equal(adjustAmount(max, 0), max);
-  assert.equal(adjustAmount(max, -5000), Math.round(max / 2));
-});
 
 test("coveredCategories takes the categories below the listed ones", () => {
   const tree = [node("a", [node("b", [node("c")])]), node("d")];

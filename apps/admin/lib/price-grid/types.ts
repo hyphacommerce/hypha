@@ -1,8 +1,3 @@
-// What the price grid and the price list CSV files work on. The shapes mirror the API's
-// planned JSON (`Money` is the SDK's `{amount, currency}`; a fixed price is `{variant,
-// price, compare_at, breaks}`, as `PUT /admin/price-lists/{id}/fixed-prices` takes it),
-// so wiring them to the SDK is a mapping, not a rewrite.
-
 /** An amount in integer minor units (1050 is 10.50 EUR), as the SDK's `Money`. */
 export type Money = { amount: number; currency: string };
 

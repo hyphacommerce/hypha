@@ -106,6 +106,10 @@ test("adjusting rounds half away from zero, as Money::adjust", () => {
   assert.equal(adjustAmount(1000, 500), 1050);
   assert.equal(adjustAmount(-1005, -1000), -905); // -904.5
   assert.equal(adjustAmount(1000, -10_000), 0);
+  assert.equal(adjustAmount(5, -1000), 5); // 4.5
+  assert.equal(adjustAmount(1, 4900), 1); // 1.49
+  assert.equal(adjustAmount(1, 5000), 2); // 1.5
+  assert.equal(adjustAmount(MAX_AMOUNT, -5000), Math.round(MAX_AMOUNT / 2));
 });
 
 test("adjusting past the largest amount is null", () => {
@@ -124,7 +128,16 @@ test("percentages become basis points", () => {
   assert.equal(bps("12,25%"), 1225);
   assert.equal(bps("−20"), -2000);
   assert.equal(bps("-100"), -10_000);
+  assert.equal(bps("0"), 0);
+  assert.equal(Object.is(bps("-0"), 0), true);
+  assert.equal(bps("10000%"), 1_000_000);
+});
+
+test("percentages out of range, with three decimals or no number are refused", () => {
   assert.equal(bps("-100.01"), "Can't take off more than 100%.");
+  assert.equal(bps("10000.01"), "At most +10,000%.");
   assert.equal(bps("1.234"), "At most two decimal places.");
   assert.equal(bps("ten"), "A percentage, like -10 or 5.5.");
+  assert.equal(bps("12."), "A percentage, like -10 or 5.5.");
+  assert.equal(bps(""), "A percentage, like -10 or 5.5.");
 });

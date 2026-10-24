@@ -29,7 +29,7 @@ import {
   phaseBadge,
 } from "@/lib/price-lists";
 
-import { addCatalogPriceList, removeCatalogPriceList } from "../actions";
+import { addToCatalog, removeFromCatalog } from "../price-lists/actions";
 
 type Market = AdminSchemas["MarketResponse"];
 type Catalog = AdminSchemas["CatalogResponse"];
@@ -142,7 +142,7 @@ export function PriceListsCard({
                                 variant="ghost"
                                 isDisabled={isPending}
                                 onClick={() =>
-                                  run(() => removeCatalogPriceList(market.id, catalog.id, list.id))
+                                  run(() => removeFromCatalog(list.id, catalog.id))
                                 }
                               />
                             </HStack>
@@ -173,7 +173,7 @@ export function PriceListsCard({
                   label="Add"
                   isDisabled={!adding || isPending}
                   onClick={() =>
-                    adding && run(() => addCatalogPriceList(market.id, catalog.id, adding))
+                    adding && run(() => addToCatalog(adding, catalog.id))
                   }
                 />
               </HStack>

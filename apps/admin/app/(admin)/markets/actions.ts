@@ -124,36 +124,3 @@ export async function removeCatalogProduct(
   refresh(market);
   return {};
 }
-
-/** Puts `list` on the market's catalog, beside the lists already there. */
-export async function addCatalogPriceList(
-  market: string,
-  catalog: string,
-  list: string,
-): Promise<Result> {
-  const client = await sessionClient();
-  const { error } = await client.POST("/admin/catalogs/{id}/price-lists", {
-    params: { path: { id: catalog } },
-    body: { price_list: list },
-  });
-  if (error) return { error: describe(error) };
-  refresh(market);
-  revalidatePath("/markets/price-lists", "layout");
-  return {};
-}
-
-/** Takes `list` off the market's catalog; the list itself stays. */
-export async function removeCatalogPriceList(
-  market: string,
-  catalog: string,
-  list: string,
-): Promise<Result> {
-  const client = await sessionClient();
-  const { error } = await client.DELETE("/admin/catalogs/{id}/price-lists/{price_list}", {
-    params: { path: { id: catalog, price_list: list } },
-  });
-  if (error) return { error: describe(error) };
-  refresh(market);
-  revalidatePath("/markets/price-lists", "layout");
-  return {};
-}

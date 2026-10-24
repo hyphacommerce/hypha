@@ -7,6 +7,8 @@ export const MAX_AMOUNT = 2 ** 53 - 1;
 
 /** The lowest adjustment there is: −100%. */
 export const MIN_BASIS_POINTS = -10_000;
+/** The highest a typed adjustment goes: +10,000%. */
+export const MAX_BASIS_POINTS = 1_000_000;
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -194,17 +196,20 @@ export function adjustAmount(amount: number, bps: number): number | null {
 }
 
 /**
- * Basis points from a typed percentage: "-10", "+5.5", "10%", "−12.25" (a typographic
- * minus too). At most two decimals, and no lower than −100%.
+ * Basis points from a typed percentage, negative for a discount: "-10", "+5.5", "10%",
+ * "−12,25" (a typographic minus and a decimal comma too). At most two decimals, from
+ * −100% to +10,000%.
  */
 export function parsePercent(input: string): Parsed<number> {
-  const match = /^([-+−])?\s*(\d+)(?:[.,](\d*))?\s*%?$/.exec(input.trim());
+  const match = /^([-+−])?\s*(\d+)(?:[.,](\d+))?\s*%?$/.exec(input.trim());
   if (!match) return fail("A percentage, like -10 or 5.5.");
   const [, sign, whole = "", fraction = ""] = match;
   if (fraction.length > 2) return fail("At most two decimal places.");
   const magnitude = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
-  const bps = sign === "-" || sign === "−" ? -magnitude : magnitude;
-  if (!Number.isSafeInteger(bps) || bps > 2 ** 31 - 1) return fail("Too large.");
+  if (!Number.isSafeInteger(magnitude)) return fail("Too large.");
+  // `-0` would read back as "-0".
+  const bps = (sign === "-" || sign === "−") && magnitude > 0 ? -magnitude : magnitude;
   if (bps < MIN_BASIS_POINTS) return fail("Can't take off more than 100%.");
+  if (bps > MAX_BASIS_POINTS) return fail("At most +10,000%.");
   return ok(bps);
 }

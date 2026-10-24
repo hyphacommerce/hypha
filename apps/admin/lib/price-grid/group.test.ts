@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { Adjustment } from "../price-lists.ts";
-import { type FixedItem, type VariantItem, chunks, groupVariants, productIdsOf } from "./group.ts";
+import { type FixedItem, type VariantItem, groupVariants, productIdsOf } from "./group.ts";
 
 const eur = (amount: number) => ({ amount, currency: "EUR" });
 const mug = { id: "prod_mug", title: "Mug", handle: "mug" };
@@ -81,9 +81,4 @@ test("product IDs are distinct, in order", () => {
     variant("var_3", mug, "M"),
   ];
   assert.deepEqual(productIdsOf(items), ["prod_mug", "prod_cap"]);
-});
-
-test("chunks split at the size, the last one shorter", () => {
-  assert.deepEqual(chunks([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]]);
-  assert.deepEqual(chunks([], 250), []);
 });

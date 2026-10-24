@@ -10,15 +10,14 @@ import { sessionClient } from "@/lib/hypha";
 import {
   type FixedItem,
   type VariantItem,
-  chunks,
   groupVariants,
   productIdsOf,
 } from "@/lib/price-grid/group";
+import { chunk } from "@/lib/price-csv";
 import type { PriceGridProduct } from "@/lib/price-grid/types";
 import { type PriceList, coveredCategories } from "@/lib/price-lists";
 
 type Client = Awaited<ReturnType<typeof sessionClient>>;
-type Fixed = AdminSchemas["FixedPriceResponse"];
 type ProductSummary = AdminSchemas["ProductSummaryResponse"];
 
 /** What the prices tab's URL narrows the grid to. */
@@ -82,7 +81,7 @@ function allFixed(
   client: Client,
   list: string,
   query: { product?: string; category?: string; q?: string },
-): Promise<Fixed[]> {
+): Promise<FixedItem[]> {
   return everyPage(async (cursor) => {
     const { data, error } = await client.GET("/admin/price-lists/{id}/fixed-prices", {
       params: { path: { id: list }, query: { ...query, cursor, limit: MAX_LIMIT } },
@@ -108,7 +107,7 @@ function allVariants(
 
 /** These variants (those that still exist), in the API's order, 250 IDs per read. */
 async function variantsByIds(client: Client, ids: readonly string[]): Promise<VariantItem[]> {
-  const runs = await each(chunks(ids, IDS_PER_READ), (run) => allVariants(client, { ids: run }));
+  const runs = await each(chunk(ids, IDS_PER_READ), (run) => allVariants(client, { ids: run }));
   return runs.flat();
 }
 
@@ -117,7 +116,7 @@ export async function productSummaries(
   client: Client,
   ids: readonly string[],
 ): Promise<ProductSummary[]> {
-  const runs = await each(chunks([...new Set(ids)], IDS_PER_READ), (run) =>
+  const runs = await each(chunk([...new Set(ids)], IDS_PER_READ), (run) =>
     everyPage(async (cursor) => {
       const { data, error } = await client.GET("/admin/products", {
         params: { query: { ids: run, cursor, limit: MAX_LIMIT } },

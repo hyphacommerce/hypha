@@ -27,6 +27,7 @@ import { useTimeZone } from "@/components/date-time";
 import { ProductPicker } from "@/components/product-picker";
 import { SaveBar } from "@/components/save-bar";
 import { currencyCodes } from "@/lib/format";
+import { parsePercent } from "@/lib/price-grid/money";
 import {
   type FormErrors,
   KINDS,
@@ -38,7 +39,6 @@ import {
   clearErrors,
   emptyForm,
   formFromList,
-  parsePercent,
   percentLabel,
   toLocalInput,
 } from "@/lib/price-lists";
@@ -86,7 +86,8 @@ function SettingsFields({
 }) {
   const currencies = useCurrencies();
   const timeZone = useTimeZone();
-  const bps = parsePercent(form.percent);
+  const percent = parsePercent(form.percent);
+  const bps = percent.ok ? percent.value : null;
   // A group the list names that isn't among those read (no `customers:read`) shows by ID.
   const groupOptions = [
     ...groups,

@@ -6,6 +6,7 @@
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { type CategoryNode, subtree } from "./categories.ts";
+import { adjustAmount, parsePercent } from "./price-grid/money.ts";
 import type { Money } from "./price-grid/types.ts";
 
 export type PriceList = AdminSchemas["PriceListResponse"];
@@ -74,20 +75,6 @@ export function phaseBadge(phase: string): {
 
 // ---- the adjustment ----
 
-/**
- * Basis points from a typed percentage ("-20", "5.5", "+10"), or null when it isn't a
- * number with at most two decimals. Negative is a discount; -100 is the most off.
- */
-export function parsePercent(input: string): number | null {
-  const match = /^([-+−])?\s*(\d+)(?:[.,](\d{1,2}))?$/.exec(input.trim());
-  if (!match) return null;
-  const [, sign, whole, fraction = ""] = match;
-  const bps = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
-  const signed = sign === "-" || sign === "−" ? -bps : bps;
-  if (!Number.isSafeInteger(signed) || signed < -10_000 || signed > 1_000_000) return null;
-  return signed === 0 ? 0 : signed;
-}
-
 /** The percent input's text for `bps`: "-20" for -2000, "5.5" for 550. */
 export function percentInput(bps: number): string {
   return String(bps / 100);
@@ -117,21 +104,6 @@ export function adjustmentLabel(adjustment: Adjustment | null | undefined): stri
     default:
       return `${percent} on every product`;
   }
-}
-
-/**
- * `amount` changed by `bps` basis points, rounded half away from zero in minor units:
- * the API's `Money::adjust`, so the grid shows what the store will charge. BigInt, as
- * an amount near 2⁵³ times 10,000 isn't exact in a double.
- */
-export function adjustAmount(amount: number, bps: number): number {
-  const scale = 10_000n;
-  const numerator = BigInt(amount) * (scale + BigInt(bps));
-  let result = numerator / scale;
-  const remainder = numerator % scale;
-  const twice = (remainder < 0n ? -remainder : remainder) * 2n;
-  if (twice >= scale) result += numerator < 0n ? -1n : 1n;
-  return Number(result);
 }
 
 /**
@@ -185,7 +157,8 @@ export function adjustedPrice(
   const adjustment = list.adjustment;
   if (!adjustment || base.currency !== list.currency) return null;
   if (!coversProduct(adjustment.applies_to, product, covered)) return null;
-  return { amount: adjustAmount(base.amount, adjustment.percent_bps), currency: base.currency };
+  const amount = adjustAmount(base.amount, adjustment.percent_bps);
+  return amount === null ? null : { amount, currency: base.currency };
 }
 
 // ---- the schedule, in the store's time zone ----
@@ -441,7 +414,7 @@ export function checkForm(form: ListForm, timeZone: string): FormErrors {
     errors.groups = `At most ${MAX_AUDIENCE_GROUPS} customer groups.`;
   }
   if (form.hasAdjustment) {
-    if (parsePercent(form.percent) === null) {
+    if (!parsePercent(form.percent).ok) {
       errors.percent = "A percentage, like -20 for 20% off or 5 for 5% more (at most 100% off).";
     }
     if (form.scope === "products" && form.products.length === 0) {
@@ -460,7 +433,8 @@ export function checkForm(form: ListForm, timeZone: string): FormErrors {
 
 function adjustmentOf(form: ListForm): Adjustment | null {
   if (!form.hasAdjustment) return null;
-  const percent_bps = parsePercent(form.percent) ?? 0;
+  const percent = parsePercent(form.percent);
+  const percent_bps = percent.ok ? percent.value : 0;
   const applies_to: AppliesTo =
     form.scope === "products"
       ? { type: "products", products: form.products }

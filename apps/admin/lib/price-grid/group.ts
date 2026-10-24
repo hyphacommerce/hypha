@@ -1,26 +1,16 @@
 // The grid's products from `GET /admin/variants`: its variants grouped by product, each
 // with the list's fixed and adjusted prices. Plain functions (run by `node --test`).
 
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
+
 import { type Adjustment, adjustedPrice } from "../price-lists.ts";
-import type { Money, PriceBreak, PriceGridProduct } from "./types.ts";
+import type { PriceGridProduct } from "./types.ts";
 
 /** A variant as `GET /admin/variants` lists it. */
-export type VariantItem = {
-  id: string;
-  sku?: string | null;
-  title?: string | null;
-  price: Money;
-  compare_at_price?: Money | null;
-  product: { id: string; title: string; handle: string };
-};
+export type VariantItem = AdminSchemas["VariantSummaryResponse"];
 
 /** A fixed price as `GET /admin/price-lists/{id}/fixed-prices` lists it. */
-export type FixedItem = {
-  variant: string;
-  price: Money;
-  compare_at?: Money | null;
-  breaks: PriceBreak[];
-};
+export type FixedItem = AdminSchemas["FixedPriceResponse"];
 
 /**
  * `items` grouped by product, in the order their products first appear (the API lists a
@@ -67,11 +57,4 @@ export function groupVariants(
 /** The distinct products of `items`, in order. */
 export function productIdsOf(items: readonly VariantItem[]): string[] {
   return [...new Set(items.map((v) => v.product.id))];
-}
-
-/** `items` in runs of at most `size`. */
-export function chunks<T>(items: readonly T[], size: number): T[][] {
-  const runs: T[][] = [];
-  for (let i = 0; i < items.length; i += size) runs.push(items.slice(i, i + size));
-  return runs;
 }
