@@ -141,6 +141,7 @@ When a command needs more than one repository, take `ports: &S` bound on the acc
 ## Conventions
 
 - Conventional Commits (`feat(products): …`, `refactor(core): …`); pure moves/refactors in separate commits from features.
+- Branches: features are built on `feat/<name>` branches cut from `dev` and merged into `dev`; `dev` is released to `main` (a pull request from `dev`). Never commit features straight to `main`.
 - LF line endings (enforced by `.gitattributes`). Windows dev machine; prefer cross-platform commands.
 
 ## Working with Danilo

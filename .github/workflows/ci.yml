@@ -5,7 +5,7 @@ name: CI
 # Markdown alone (the README, guides, design notes) changes nothing CI checks.
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths-ignore: ["**/*.md"]
   pull_request:
     paths-ignore: ["**/*.md"]
