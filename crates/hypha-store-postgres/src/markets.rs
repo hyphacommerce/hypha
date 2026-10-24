@@ -8,9 +8,9 @@ use hypha_core::{
 };
 use hypha_markets::{
     Adjustment, AppliesTo, Catalog, CatalogContext, CatalogRepo, CatalogSnapshot, CompareAtMode,
-    FixedPrice, FixedPriceFilter, Market, MarketRepo, MarketSnapshot, PriceList, PriceListFilter,
-    PriceListKind, PriceListPhase, PriceListRepo, PriceListSnapshot, PriceListSort,
-    PriceListStatus,
+    FixedPrice, FixedPriceFilter, Market, MarketRepo, MarketSnapshot, PriceBreak, PriceList,
+    PriceListFilter, PriceListKind, PriceListPhase, PriceListRepo, PriceListSnapshot,
+    PriceListSort, PriceListStatus,
 };
 use tokio_postgres::{
     Row,
@@ -714,24 +714,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         let lists: Vec<Uuid> = lists.iter().map(|l| l.as_uuid()).collect();
         let ids: Vec<Uuid> = variants.iter().map(|v| v.as_uuid()).collect();
         let mut conn = self.conn().await;
-        let rows = conn
-            .db()
-            .query_typed(
-                "SELECT price_list_id, variant_id, amount, currency, compare_at
-                 FROM price_list_prices WHERE price_list_id = ANY($1) AND variant_id = ANY($2)",
-                &[(&lists, Type::UUID_ARRAY), (&ids, Type::UUID_ARRAY)],
-            )
-            .await
-            .map_err(repo_error)?;
-        let mut found: HashMap<PriceListId, HashMap<VariantId, FixedPrice>> = HashMap::new();
-        for row in &rows {
-            let (variant, fixed) = fixed_price_from_row(row)?;
-            found
-                .entry(PriceListId::from_uuid(col(row, "price_list_id")?))
-                .or_default()
-                .insert(variant, fixed);
-        }
-        Ok(found)
+        consistent_read!(conn, |tx| load_fixed_prices(tx, &lists, &ids).await)
     }
 
     async fn product_categories(
@@ -814,7 +797,31 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
             .iter()
             .map(fixed_price_from_row)
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Page::from_overfetch(prices, page.limit))
+        let mut prices = Page::from_overfetch(prices, page.limit);
+        if prices.items.is_empty() {
+            return Ok(prices);
+        }
+        let ids: Vec<Uuid> = prices.items.iter().map(|(v, _)| v.as_uuid()).collect();
+        let break_rows = conn
+            .db()
+            .query_typed(
+                "SELECT price_list_id, variant_id, min_quantity, amount
+                 FROM price_list_price_breaks WHERE price_list_id = $1 AND variant_id = ANY($2)
+                 ORDER BY variant_id, min_quantity",
+                &[(&list.as_uuid(), Type::UUID), (&ids, Type::UUID_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?;
+        let mut breaks = breaks_by_price(&break_rows)?;
+        prices.items = prices
+            .items
+            .into_iter()
+            .map(|(v, fixed)| {
+                let found = breaks.remove(&(list.as_uuid(), v.as_uuid()));
+                Ok((v, with_breaks(fixed, found)?))
+            })
+            .collect::<Result<_, RepoError>>()?;
+        Ok(prices)
     }
 
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
@@ -881,22 +888,92 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         list: PriceListId,
         variants: &[VariantId],
     ) -> Result<HashMap<VariantId, FixedPrice>, RepoError> {
-        if variants.is_empty() {
-            return Ok(HashMap::new());
-        }
-        let ids: Vec<Uuid> = variants.iter().map(|v| v.as_uuid()).collect();
-        let mut conn = self.conn().await;
-        let rows = conn
-            .db()
-            .query_typed(
-                "SELECT variant_id, amount, currency, compare_at FROM price_list_prices
-                 WHERE price_list_id = $1 AND variant_id = ANY($2)",
-                &[(&list.as_uuid(), Type::UUID), (&ids, Type::UUID_ARRAY)],
-            )
-            .await
-            .map_err(repo_error)?;
-        rows.iter().map(fixed_price_from_row).collect()
+        Ok(self
+            .fixed_prices_in(&[list], variants)
+            .await?
+            .remove(&list)
+            .unwrap_or_default())
     }
+}
+
+/// `lists`' fixed prices for `variants` with their quantity prices, in 2 pipelined queries.
+async fn load_fixed_prices(
+    client: &impl Queries,
+    lists: &[Uuid],
+    variants: &[Uuid],
+) -> Result<HashMap<PriceListId, HashMap<VariantId, FixedPrice>>, RepoError> {
+    let params: [(&(dyn ToSql + Sync), Type); 2] =
+        [(&lists, Type::UUID_ARRAY), (&variants, Type::UUID_ARRAY)];
+    let (rows, break_rows) = try_join(
+        client.query_typed(
+            "SELECT price_list_id, variant_id, amount, currency, compare_at
+             FROM price_list_prices WHERE price_list_id = ANY($1) AND variant_id = ANY($2)",
+            &params,
+        ),
+        client.query_typed(
+            "SELECT price_list_id, variant_id, min_quantity, amount FROM price_list_price_breaks
+             WHERE price_list_id = ANY($1) AND variant_id = ANY($2)
+             ORDER BY price_list_id, variant_id, min_quantity",
+            &params,
+        ),
+    )
+    .await
+    .map_err(repo_error)?;
+    let mut breaks = breaks_by_price(&break_rows)?;
+    let mut found: HashMap<PriceListId, HashMap<VariantId, FixedPrice>> = HashMap::new();
+    for row in &rows {
+        let list: Uuid = col(row, "price_list_id")?;
+        let (variant, fixed) = fixed_price_from_row(row)?;
+        let fixed = with_breaks(fixed, breaks.remove(&(list, variant.as_uuid())))?;
+        found
+            .entry(PriceListId::from_uuid(list))
+            .or_default()
+            .insert(variant, fixed);
+    }
+    Ok(found)
+}
+
+/// Quantity prices as `(min_quantity, amount)`, by `(price list, variant)`.
+type BreakRows = HashMap<(Uuid, Uuid), Vec<(u32, i64)>>;
+
+/// `price_list_price_breaks` rows (`price_list_id, variant_id, min_quantity, amount`) by
+/// the fixed price they belong to, in quantity order; their currency is the price's.
+fn breaks_by_price(rows: &[Row]) -> Result<BreakRows, RepoError> {
+    let mut found = BreakRows::new();
+    for row in rows {
+        let quantity: i32 = col(row, "min_quantity")?;
+        found
+            .entry((col(row, "price_list_id")?, col(row, "variant_id")?))
+            .or_default()
+            .push((
+                u32::try_from(quantity).map_err(corrupt)?,
+                col(row, "amount")?,
+            ));
+    }
+    Ok(found)
+}
+
+fn with_breaks(
+    fixed: FixedPrice,
+    breaks: Option<Vec<(u32, i64)>>,
+) -> Result<FixedPrice, RepoError> {
+    let Some(breaks) = breaks else {
+        return Ok(fixed);
+    };
+    let currency = fixed.price().money().currency();
+    let breaks = breaks
+        .into_iter()
+        .map(|(min_quantity, amount)| {
+            let price = hypha_core::Money::new(amount, currency)
+                .and_then(Price::new)
+                .map_err(corrupt)?;
+            Ok(PriceBreak {
+                min_quantity,
+                price,
+            })
+        })
+        .collect::<Result<Vec<_>, RepoError>>()?;
+    fixed.with_breaks(breaks).map_err(corrupt)
 }
 
 /// `PriceListRepo::insert` inside the caller's transaction.
@@ -1026,6 +1103,37 @@ pub(crate) async fn set_fixed_prices(
     )
     .await
     .map_err(repo_error)?;
+    // A fixed price set again replaces its quantity prices.
+    tx.query_typed(
+        "DELETE FROM price_list_price_breaks WHERE price_list_id = $1 AND variant_id = ANY($2)",
+        &[(&list.as_uuid(), Type::UUID), (&variants, Type::UUID_ARRAY)],
+    )
+    .await
+    .map_err(repo_error)?;
+    let mut break_variants = Vec::new();
+    let mut quantities = Vec::new();
+    let mut break_amounts = Vec::new();
+    for (variant, fixed) in prices {
+        for b in fixed.breaks() {
+            break_variants.push(variant.as_uuid());
+            quantities.push(i32::try_from(b.min_quantity).map_err(corrupt)?);
+            break_amounts.push(b.price.money().amount());
+        }
+    }
+    if !break_variants.is_empty() {
+        tx.query_typed(
+            "INSERT INTO price_list_price_breaks (price_list_id, variant_id, min_quantity, amount)
+             SELECT $1, v, q, a FROM unnest($2::uuid[], $3::int4[], $4::bigint[]) AS t (v, q, a)",
+            &[
+                (&list.as_uuid(), Type::UUID),
+                (&break_variants, Type::UUID_ARRAY),
+                (&quantities, Type::INT4_ARRAY),
+                (&break_amounts, Type::INT8_ARRAY),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    }
     Ok(())
 }
 

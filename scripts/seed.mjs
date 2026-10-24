@@ -1577,6 +1577,7 @@ async function main() {
           id: null,
           sku: skuOf(spec.handle, variant.of),
           price: eur(variant.price),
+          compare_at_price: null,
           selections: Object.entries(variant.of).map(([name, label]) => valueId(name, label)),
           weight_grams: variant.shipping === false ? null : variant.weight,
           requires_shipping: variant.shipping !== false,

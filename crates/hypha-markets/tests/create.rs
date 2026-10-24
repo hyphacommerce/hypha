@@ -166,6 +166,7 @@ fn fixed(variant: u128, amount: i64, currency: Currency) -> SetFixedPrice {
         variant: vid(variant),
         price: Money::new(amount, currency).unwrap(),
         compare_at: None,
+        breaks: Vec::new(),
     }
 }
 
@@ -501,6 +502,34 @@ fn set_fixed_prices_reports_every_entrys_problem_and_stores_nothing() {
         block_on(lists.fixed_prices(list, &[vid(1)])),
         Ok(HashMap::new())
     );
+}
+
+#[test]
+fn set_fixed_prices_keeps_quantity_prices_and_reports_bad_ones() {
+    let ports = InMemoryPorts::default();
+    let lists = &ports.price_lists;
+    let ids = SequentialIds::default();
+    let list = stored_list(lists, &ids);
+    let money = |a| Money::new(a, Currency::EUR).unwrap();
+    let mut tiered = fixed(1, 1000, Currency::EUR);
+    tiered.breaks = vec![(5, money(900)), (10, money(800))];
+    let mut rising = fixed(2, 1000, Currency::EUR);
+    rising.breaks = vec![(5, money(900)), (10, money(950))];
+
+    assert_eq!(
+        block_on(set_fixed_prices(
+            &Ctx::system(),
+            &ports,
+            list,
+            vec![tiered.clone(), rising]
+        )),
+        Err(CommandError::PriceList(PriceListError::InvalidFixedPrices(
+            vec![problem(1, 2, FixedPriceProblem::BreaksNotDescending)]
+        )))
+    );
+    block_on(set_fixed_prices(&Ctx::system(), &ports, list, vec![tiered])).unwrap();
+    let stored = block_on(lists.fixed_prices(list, &[vid(1)])).unwrap();
+    assert_eq!(stored[&vid(1)].breaks().len(), 2);
 }
 
 #[test]

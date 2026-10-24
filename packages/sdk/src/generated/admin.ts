@@ -5198,6 +5198,12 @@ export interface components {
             code: string;
         };
         FixedPriceDto: {
+            /**
+             * @description Quantity prices: up to 10, from 2 up with quantities increasing, each price below
+             *     the one before it (the first below `price`). Absent for none; setting a fixed price
+             *     again replaces them.
+             */
+            breaks?: components["schemas"]["PriceBreakDto"][];
             compare_at?: components["schemas"]["Money"] | null;
             /** @description In the list's currency. */
             price: components["schemas"]["Money"];
@@ -5218,6 +5224,8 @@ export interface components {
             variant_title?: string | null;
         };
         FixedPriceResponse: {
+            /** @description Its quantity prices, by quantity. */
+            breaks: components["schemas"]["PriceBreakDto"][];
             compare_at?: components["schemas"]["Money"] | null;
             price: components["schemas"]["Money"];
             product?: components["schemas"]["FixedPriceProduct"] | null;
@@ -6297,6 +6305,12 @@ export interface components {
             body: Record<string, never>;
             /** Format: int32 */
             status: number;
+        };
+        /** @description From `min_quantity` of the variant in one cart line, each costs `price`. */
+        PriceBreakDto: {
+            /** Format: int32 */
+            min_quantity: number;
+            price: components["schemas"]["Money"];
         };
         PriceCandidateResponse: {
             kind: components["schemas"]["PriceListKindDto"];
@@ -7681,6 +7695,8 @@ export interface components {
             /** @description Whether a compare-at price is shown. */
             on_sale: boolean;
             price?: components["schemas"]["Money"] | null;
+            /** @description The winning fixed price's quantity prices. */
+            price_breaks: components["schemas"]["PriceBreakDto"][];
             price_list?: components["schemas"]["PriceListId"] | null;
             problem?: components["schemas"]["PriceProblemResponse"] | null;
             variant: components["schemas"]["VariantId"];

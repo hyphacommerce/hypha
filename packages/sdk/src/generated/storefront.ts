@@ -1530,6 +1530,12 @@ export interface components {
              */
             redacted?: string[] | null;
         };
+        /** @description From `min_quantity` of the variant in one cart line, each costs `price`. */
+        PriceBreakDto: {
+            /** Format: int32 */
+            min_quantity: number;
+            price: components["schemas"]["Money"];
+        };
         /**
          * @description A ProductId: `prod_` and 32 hex digits.
          * @example prod_0190f1a2b3c47d8e9f00112233445566
@@ -1870,6 +1876,11 @@ export interface components {
             /** @description Whether a compare-at price is shown: the variant is on sale. */
             on_sale: boolean;
             price?: components["schemas"]["Money"] | null;
+            /**
+             * @description Cheaper prices from a quantity in one cart line ("8.00 each from 10"); the cart
+             *     prices each line at its quantity.
+             */
+            price_breaks: components["schemas"]["PriceBreakDto"][];
             /** @description One value per option, in the order of `options`. */
             selections: components["schemas"]["OptionValueId"][];
             /** @description Its option values ("M / Blue"); `null` for a product without options. */

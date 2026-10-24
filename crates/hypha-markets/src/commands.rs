@@ -16,7 +16,7 @@ use crate::{
     },
     filter::{FixedPriceFilter, PriceListFilter, PriceListSort},
     price_list::{
-        Adjustment, AppliesTo, CompareAtMode, EntryProblem, FixedPrice, PriceListDraft,
+        Adjustment, AppliesTo, CompareAtMode, EntryProblem, FixedPrice, PriceBreak, PriceListDraft,
         PriceListKind, PriceListPhase, PriceListStatus, Window,
     },
     repo::keys,
@@ -414,11 +414,14 @@ async fn name_taken<P: PriceListRepo>(
 pub const MAX_FIXED_PRICES_PER_WRITE: usize = 1000;
 
 /// One fixed price as a caller sends it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetFixedPrice {
     pub variant: VariantId,
     pub price: Money,
     /// Shown struck through beside the price; above it, in its currency.
     pub compare_at: Option<Money>,
+    /// Quantity prices: `(min_quantity, price)`, by quantity.
+    pub breaks: Vec<(u32, Money)>,
 }
 
 /// Inserts or replaces fixed prices on a price list.
@@ -491,7 +494,17 @@ where
 fn fixed_price(entry: &SetFixedPrice) -> Result<FixedPrice, FixedPriceProblem> {
     let price = Price::new(entry.price)?;
     let compare_at = entry.compare_at.map(Price::new).transpose()?;
-    FixedPrice::new(price, compare_at)
+    let breaks = entry
+        .breaks
+        .iter()
+        .map(|(min_quantity, price)| {
+            Ok(PriceBreak {
+                min_quantity: *min_quantity,
+                price: Price::new(*price)?,
+            })
+        })
+        .collect::<Result<Vec<_>, FixedPriceProblem>>()?;
+    FixedPrice::new(price, compare_at)?.with_breaks(breaks)
 }
 
 fn price_list_subject(list: PriceListId) -> Subject {

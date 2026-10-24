@@ -664,6 +664,9 @@ pub struct StorefrontVariantResponse {
     compare_at_price: Option<Money>,
     /// Whether a compare-at price is shown: the variant is on sale.
     on_sale: bool,
+    /// Cheaper prices from a quantity in one cart line ("8.00 each from 10"); the cart
+    /// prices each line at its quantity.
+    price_breaks: Vec<super::markets::PriceBreakDto>,
     /// The variant's own custom field values storefronts are shown.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     custom_fields: CustomFieldValues,
@@ -706,6 +709,9 @@ impl StorefrontProductResponse {
                             .and_then(|r| r.compare_at)
                             .map(|price| price.money()),
                         on_sale: resolved.is_some_and(|r| r.on_sale()),
+                        price_breaks: resolved
+                            .map(|r| r.breaks.iter().map(Into::into).collect())
+                            .unwrap_or_default(),
                         available: priced.filter(|o| o.price.is_some()).map(|o| o.available),
                         available_quantity: match priced {
                             Some(o) => o.sellable,

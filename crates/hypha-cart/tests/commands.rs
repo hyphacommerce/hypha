@@ -550,6 +550,35 @@ fn add_line_still_works_when_another_line_is_stale() {
 }
 
 #[test]
+fn a_line_is_priced_at_its_quantity() {
+    let world = World::new();
+    let cart = world.create_cart();
+    let price = |a| Price::new(eur(a)).unwrap();
+    let tiered = hypha_markets::FixedPrice::plain(price(450))
+        .with_breaks(vec![hypha_markets::PriceBreak {
+            min_quantity: 3,
+            price: price(400),
+        }])
+        .unwrap();
+    block_on(
+        world
+            .price_lists
+            .set_fixed_prices(list_id(), &[(vid("cup"), tiered)]),
+    )
+    .unwrap();
+
+    assert_eq!(
+        world.add(&Ctx::system(), cart, "cup", 2).unwrap().total,
+        eur(900)
+    );
+    // A third makes every one cheaper.
+    assert_eq!(
+        world.add(&Ctx::system(), cart, "cup", 1).unwrap().total,
+        eur(1200)
+    );
+}
+
+#[test]
 fn uses_fixed_price_from_price_list() {
     let world = World::new();
     let cart = world.create_cart();
@@ -1346,6 +1375,7 @@ fn a_product_is_priced_and_stocked_in_the_countrys_market() {
                 price: Price::new(eur(900)).unwrap(),
                 compare_at: None,
                 price_list: Some(list_id()),
+                breaks: vec![],
             }),
             available: true,
             sellable: Some(1),

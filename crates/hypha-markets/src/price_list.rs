@@ -547,15 +547,27 @@ pub struct EntryProblem {
     pub problem: FixedPriceProblem,
 }
 
-/// A list's price for one variant: what it pays, and what the shopper sees it compared
-/// against.
+/// A quantity price: from `min_quantity` of the variant in one line, each costs `price`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PriceBreak {
+    pub min_quantity: u32,
+    pub price: Price,
+}
+
+/// A list's price for one variant: what it pays, what the shopper sees it compared
+/// against, and cheaper prices for larger quantities.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FixedPrice {
     price: Price,
     compare_at: Option<Price>,
+    /// By `min_quantity`, each cheaper than the one before.
+    breaks: Vec<PriceBreak>,
 }
 
 impl FixedPrice {
+    /// Most quantity prices one fixed price has.
+    pub const MAX_BREAKS: usize = 10;
+
     /// A compare-at price must be in the price's currency and above it: otherwise it
     /// would strike through something cheaper.
     pub fn new(price: Price, compare_at: Option<Price>) -> Result<Self, FixedPriceProblem> {
@@ -567,7 +579,11 @@ impl FixedPrice {
                 return Err(FixedPriceProblem::CompareAtNotAbovePrice);
             }
         }
-        Ok(Self { price, compare_at })
+        Ok(Self {
+            price,
+            compare_at,
+            breaks: Vec::new(),
+        })
     }
 
     /// A price with nothing else.
@@ -575,7 +591,36 @@ impl FixedPrice {
         Self {
             price,
             compare_at: None,
+            breaks: Vec::new(),
         }
+    }
+
+    /// The same price with quantity `breaks`: at most `MAX_BREAKS`, from 2 up with
+    /// quantities strictly increasing, in the price's currency, and each price below the
+    /// one before it (the first below the fixed price), so buying more never costs more
+    /// each.
+    pub fn with_breaks(self, breaks: Vec<PriceBreak>) -> Result<Self, FixedPriceProblem> {
+        if breaks.len() > Self::MAX_BREAKS {
+            return Err(FixedPriceProblem::TooManyBreaks {
+                max: Self::MAX_BREAKS,
+            });
+        }
+        let mut quantity = 1;
+        let mut price = self.price;
+        for b in &breaks {
+            if b.min_quantity <= quantity {
+                return Err(FixedPriceProblem::BreakQuantityInvalid);
+            }
+            if b.price.money().currency() != self.price.money().currency() {
+                return Err(FixedPriceProblem::BreakCurrencyMismatch);
+            }
+            if b.price.money().amount() >= price.money().amount() {
+                return Err(FixedPriceProblem::BreaksNotDescending);
+            }
+            quantity = b.min_quantity;
+            price = b.price;
+        }
+        Ok(Self { breaks, ..self })
     }
 
     pub fn price(&self) -> Price {
@@ -584,6 +629,19 @@ impl FixedPrice {
 
     pub fn compare_at(&self) -> Option<Price> {
         self.compare_at
+    }
+
+    pub fn breaks(&self) -> &[PriceBreak] {
+        &self.breaks
+    }
+
+    /// The unit price for `quantity`: the last break it reaches, else the fixed price.
+    pub fn price_at(&self, quantity: u32) -> Price {
+        self.breaks
+            .iter()
+            .rev()
+            .find(|b| quantity >= b.min_quantity)
+            .map_or(self.price, |b| b.price)
     }
 }
 
@@ -846,6 +904,83 @@ mod tests {
             FixedPrice::new(price(900, Currency::EUR), Some(price(1000, Currency::USD))),
             Err(FixedPriceProblem::CompareAtCurrencyMismatch)
         );
+    }
+
+    fn at_least(min_quantity: u32, amount: i64) -> PriceBreak {
+        PriceBreak {
+            min_quantity,
+            price: price(amount, Currency::EUR),
+        }
+    }
+
+    fn breaks(list: Vec<PriceBreak>) -> Result<FixedPrice, FixedPriceProblem> {
+        fixed(1000, Currency::EUR).with_breaks(list)
+    }
+
+    #[test]
+    fn breaks_start_from_two() {
+        assert_eq!(
+            breaks(vec![at_least(1, 900)]),
+            Err(FixedPriceProblem::BreakQuantityInvalid)
+        );
+        assert!(breaks(vec![at_least(2, 900)]).is_ok());
+    }
+
+    #[test]
+    fn break_quantities_strictly_increase() {
+        assert_eq!(
+            breaks(vec![at_least(5, 900), at_least(5, 800)]),
+            Err(FixedPriceProblem::BreakQuantityInvalid)
+        );
+    }
+
+    #[test]
+    fn break_prices_strictly_descend_below_the_fixed_price() {
+        assert_eq!(
+            breaks(vec![at_least(5, 1000)]),
+            Err(FixedPriceProblem::BreaksNotDescending)
+        );
+        assert_eq!(
+            breaks(vec![at_least(5, 900), at_least(10, 900)]),
+            Err(FixedPriceProblem::BreaksNotDescending)
+        );
+    }
+
+    #[test]
+    fn breaks_are_in_the_price_currency() {
+        let usd = PriceBreak {
+            min_quantity: 5,
+            price: price(900, Currency::USD),
+        };
+        assert_eq!(
+            breaks(vec![usd]),
+            Err(FixedPriceProblem::BreakCurrencyMismatch)
+        );
+    }
+
+    #[test]
+    fn at_most_ten_breaks() {
+        let ten: Vec<PriceBreak> = (0..10)
+            .map(|n| at_least(n + 2, 999 - i64::from(n)))
+            .collect();
+        assert!(breaks(ten.clone()).is_ok());
+        let mut eleven = ten;
+        eleven.push(at_least(20, 1));
+        assert_eq!(
+            breaks(eleven),
+            Err(FixedPriceProblem::TooManyBreaks { max: 10 })
+        );
+    }
+
+    #[test]
+    fn the_price_at_a_quantity_is_the_last_break_it_reaches() {
+        let tiered = breaks(vec![at_least(5, 900), at_least(10, 800)]).unwrap();
+        assert_eq!(tiered.price_at(1), price(1000, Currency::EUR));
+        assert_eq!(tiered.price_at(4), price(1000, Currency::EUR));
+        assert_eq!(tiered.price_at(5), price(900, Currency::EUR));
+        assert_eq!(tiered.price_at(9), price(900, Currency::EUR));
+        assert_eq!(tiered.price_at(10), price(800, Currency::EUR));
+        assert_eq!(tiered.price_at(500), price(800, Currency::EUR));
     }
 
     #[test]

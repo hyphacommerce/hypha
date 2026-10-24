@@ -11,11 +11,11 @@ use hypha_core::{
 use hypha_markets::{
     AdjustmentInput, AppliesTo, Catalog, CatalogContext, CatalogRepo, CompareAtMode, CreateCatalog,
     CreateMarket, CreatePriceList, FixedPriceFilter, HasCatalogs, HasMarkets, HasPriceLists,
-    ListPriceLists, Market, MarketView, PriceList, PriceListKind, PriceListPhase, PriceListRepo,
-    PriceListSort, PriceListStatus, SetFixedPrice, UpdateMarket, add_catalog_price_list,
-    add_catalog_products, add_market_country, create_catalog, create_market, create_price_list,
-    delete_price_list, get_catalog, get_market, get_price_list, list_catalog_products,
-    list_fixed_prices, list_markets, list_markets_only, list_price_lists,
+    ListPriceLists, Market, MarketView, PriceBreak, PriceList, PriceListKind, PriceListPhase,
+    PriceListRepo, PriceListSort, PriceListStatus, SetFixedPrice, UpdateMarket,
+    add_catalog_price_list, add_catalog_products, add_market_country, create_catalog,
+    create_market, create_price_list, delete_price_list, get_catalog, get_market, get_price_list,
+    list_catalog_products, list_fixed_prices, list_markets, list_markets_only, list_price_lists,
     remove_catalog_price_list, remove_catalog_products, remove_fixed_prices, remove_market_country,
     set_catalog_price_lists, set_fixed_prices, update_market, update_price_list,
 };
@@ -589,6 +589,29 @@ pub struct FixedPriceDto {
     /// for none (setting a fixed price again without one clears it).
     #[serde(default)]
     compare_at: Option<Money>,
+    /// Quantity prices: up to 10, from 2 up with quantities increasing, each price below
+    /// the one before it (the first below `price`). Absent for none; setting a fixed price
+    /// again replaces them.
+    #[serde(default)]
+    breaks: Vec<PriceBreakDto>,
+}
+
+/// From `min_quantity` of the variant in one cart line, each costs `price`.
+#[derive(Debug, Clone, Deserialize, Serialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PriceBreakDto {
+    #[schema(minimum = 2)]
+    min_quantity: u32,
+    price: Money,
+}
+
+impl From<&PriceBreak> for PriceBreakDto {
+    fn from(b: &PriceBreak) -> Self {
+        Self {
+            min_quantity: b.min_quantity,
+            price: b.price.money(),
+        }
+    }
 }
 
 /// Creates a price list. Its name is unique, ignoring case (`409 price_list_name_taken`).
@@ -649,6 +672,11 @@ pub async fn set_fixed_prices_handler<S: Storage>(
             variant: f.variant,
             price: f.price,
             compare_at: f.compare_at,
+            breaks: f
+                .breaks
+                .into_iter()
+                .map(|b| (b.min_quantity, b.price))
+                .collect(),
         })
         .collect();
     set_fixed_prices(&ctx, &ports, id, prices)
@@ -994,6 +1022,8 @@ pub struct FixedPriceResponse {
     price: Money,
     /// Shown struck through beside `price`; `null` for none.
     compare_at: Option<Money>,
+    /// Its quantity prices, by quantity.
+    breaks: Vec<PriceBreakDto>,
     /// The variant's product; `null` when the variant no longer exists (fixed prices
     /// store variant IDs as given).
     product: Option<FixedPriceProduct>,
@@ -1159,6 +1189,7 @@ pub async fn list_fixed_prices_handler<S: Storage>(
                 variant,
                 price: fixed.price().money(),
                 compare_at: fixed.compare_at().map(|p| p.money()),
+                breaks: fixed.breaks().iter().map(PriceBreakDto::from).collect(),
                 product: product_of(variant),
             })
         },
@@ -1349,6 +1380,8 @@ pub struct VariantPricesResponse {
     on_sale: bool,
     /// The list whose price won; `null` for the base price.
     price_list: Option<PriceListId>,
+    /// The winning fixed price's quantity prices.
+    price_breaks: Vec<PriceBreakDto>,
     problem: Option<PriceProblemResponse>,
     /// Every list of the market's catalog, in ID order (oldest first).
     candidates: Vec<PriceCandidateResponse>,
@@ -1416,6 +1449,9 @@ pub async fn product_prices_handler<S: Storage>(
                         compare_at_price: resolved.and_then(|r| r.compare_at).map(|p| p.money()),
                         on_sale: resolved.is_some_and(|r| r.on_sale()),
                         price_list: resolved.and_then(|r| r.price_list),
+                        price_breaks: resolved
+                            .map(|r| r.breaks.iter().map(PriceBreakDto::from).collect())
+                            .unwrap_or_default(),
                         problem: explained
                             .resolved
                             .as_ref()

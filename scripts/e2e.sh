@@ -363,10 +363,11 @@ step "the S variant's SKU and price" 200 - -X PATCH "$BASE/admin/products/$SHIRT
 contains "are stored" '"price":{"amount":1400,"currency":"EUR"},"sku":"SHIRT-S"'
 step "a SKU another variant has" 409 sku_taken -X PATCH "$BASE/admin/products/$SHIRT/variants/$SHIRT_S" -H "$JSON" \
     -d '{"sku":"SHIRT-M"}'
-VARIANTS="{\"variants\":[{\"id\":\"$SHIRT_M\",\"sku\":\"SHIRT-M\",\"price\":{\"amount\":1600,\"currency\":\"EUR\"},\"selections\":[\"$SIZE_M\"],\"weight_grams\":null,\"requires_shipping\":true},{\"id\":\"$SHIRT_S\",\"sku\":\"SHIRT-S\",\"price\":{\"amount\":1400,\"currency\":\"EUR\"},\"selections\":[\"$SIZE_S\"],\"weight_grams\":250,\"requires_shipping\":true}]}"
+VARIANTS="{\"variants\":[{\"id\":\"$SHIRT_M\",\"sku\":\"SHIRT-M\",\"price\":{\"amount\":1600,\"currency\":\"EUR\"},\"compare_at_price\":null,\"selections\":[\"$SIZE_M\"],\"weight_grams\":null,\"requires_shipping\":true},{\"id\":\"$SHIRT_S\",\"sku\":\"SHIRT-S\",\"price\":{\"amount\":1400,\"currency\":\"EUR\"},\"compare_at_price\":{\"amount\":1800,\"currency\":\"EUR\"},\"selections\":[\"$SIZE_S\"],\"weight_grams\":250,\"requires_shipping\":true}]}"
 step "the whole variant list in one PUT" 200 - -X PUT "$BASE/admin/products/$SHIRT/variants" \
     -H "$JSON" -d "$VARIANTS"
 contains "M first now, S weighed" '"weight_grams":250'
+contains "S with a compare-at price" '"compare_at_price":{"amount":1800,"currency":"EUR"}'
 step "a list leaving a key out" 422 invalid_body -X PUT "$BASE/admin/products/$SHIRT/variants" -H "$JSON" \
     -d "{\"variants\":[{\"id\":\"$SHIRT_S\",\"price\":{\"amount\":1400,\"currency\":\"EUR\"},\"selections\":[\"$SIZE_S\"],\"weight_grams\":null,\"requires_shipping\":true}]}"
 step "an empty list" 409 no_variants -X PUT "$BASE/admin/products/$SHIRT/variants" -H "$JSON" -d '{"variants":[]}'
@@ -460,8 +461,14 @@ step "pause it" 200 - -X PATCH "$BASE/admin/price-lists/$SCHEDULED_LIST" -H "$JS
     -d '{"status":"draft","description":"Planned"}'
 contains "a draft" '"phase":"draft"'
 
-step "fix cup price at 200" 204 - -X PUT "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
-    -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"}}]}"
+step "fix cup price at 200, 150 from 50" 204 - -X PUT "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
+    -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"},\"breaks\":[{\"min_quantity\":50,\"price\":{\"amount\":150,\"currency\":\"EUR\"}}]}]}"
+step "a quantity price above the price" 422 fixed_prices_invalid -X PUT "$BASE/admin/price-lists/$LIST/fixed-prices" \
+    -H "$JSON" -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"},\"breaks\":[{\"min_quantity\":50,\"price\":{\"amount\":250,\"currency\":\"EUR\"}}]}]}"
+contains "breaks must descend" '"code":"price_breaks_not_descending"'
+step "a quantity price from 1" 422 fixed_prices_invalid -X PUT "$BASE/admin/price-lists/$LIST/fixed-prices" \
+    -H "$JSON" -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"},\"breaks\":[{\"min_quantity\":1,\"price\":{\"amount\":150,\"currency\":\"EUR\"}}]}]}"
+contains "from 2 up" '"code":"price_break_quantity_invalid"'
 step "create catalog" 201 - -X POST "$BASE/admin/catalogs" -H "$JSON" -d "{\"market\":\"$MARKET\"}"
 CATALOG=$(id)
 step "add mug and cup to catalog" 204 - -X POST "$BASE/admin/catalogs/$CATALOG/products" -H "$JSON" \
@@ -532,6 +539,7 @@ step "publish mug and cup to the Online Store" 204 - -X POST "$BASE/admin/channe
     -H "$JSON" -d "{\"products\":[\"$MUG\",\"$CUP\"]}"
 step "the cup's page, priced in Croatia" 200 - "$BASE/storefront/products/by-handle/cup?country=HR"
 contains "at its fixed price" '"price":{"amount":200,"currency":"EUR"},"available":true'
+contains "with its quantity price" '"price_breaks":[{"min_quantity":50,"price":{"amount":150,"currency":"EUR"}}]'
 contains "sold there" '"sold_in_country":true,"currency":"EUR"'
 step "the mug by ID, -10%" 200 - "$BASE/storefront/products/$MUG?country=HR"
 contains "at 9.00" '"price":{"amount":900,"currency":"EUR"}'

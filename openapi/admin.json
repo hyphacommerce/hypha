@@ -4931,6 +4931,13 @@
       "FixedPriceDto": {
         "additionalProperties": false,
         "properties": {
+          "breaks": {
+            "description": "Quantity prices: up to 10, from 2 up with quantities increasing, each price below\nthe one before it (the first below `price`). Absent for none; setting a fixed price\nagain replaces them.",
+            "items": {
+              "$ref": "#/components/schemas/PriceBreakDto"
+            },
+            "type": "array"
+          },
           "compare_at": {
             "oneOf": [
               {
@@ -5007,6 +5014,13 @@
       },
       "FixedPriceResponse": {
         "properties": {
+          "breaks": {
+            "description": "Its quantity prices, by quantity.",
+            "items": {
+              "$ref": "#/components/schemas/PriceBreakDto"
+            },
+            "type": "array"
+          },
           "compare_at": {
             "oneOf": [
               {
@@ -5038,7 +5052,8 @@
         },
         "required": [
           "variant",
-          "price"
+          "price",
+          "breaks"
         ],
         "type": "object"
       },
@@ -8055,6 +8070,25 @@
         "required": [
           "status",
           "body"
+        ],
+        "type": "object"
+      },
+      "PriceBreakDto": {
+        "additionalProperties": false,
+        "description": "From `min_quantity` of the variant in one cart line, each costs `price`.",
+        "properties": {
+          "min_quantity": {
+            "format": "int32",
+            "minimum": 2,
+            "type": "integer"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "min_quantity",
+          "price"
         ],
         "type": "object"
       },
@@ -11850,6 +11884,13 @@
               }
             ]
           },
+          "price_breaks": {
+            "description": "The winning fixed price's quantity prices.",
+            "items": {
+              "$ref": "#/components/schemas/PriceBreakDto"
+            },
+            "type": "array"
+          },
           "price_list": {
             "oneOf": [
               {
@@ -11878,6 +11919,7 @@
         "required": [
           "variant",
           "on_sale",
+          "price_breaks",
           "candidates"
         ],
         "type": "object"

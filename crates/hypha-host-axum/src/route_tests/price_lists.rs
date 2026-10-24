@@ -578,3 +578,74 @@ async fn price_lists_are_listed_filtered_and_deleted_when_free() {
         (StatusCode::NOT_FOUND, "price_list_not_found")
     );
 }
+
+#[tokio::test]
+async fn quantity_prices_show_on_the_product_and_price_the_cart_line() {
+    let app = app().await;
+    let (_, mug, lists) =
+        lists_on_the_catalog(&app, vec![json!({"name": "Wholesale", "currency": "EUR"})]).await;
+    let url = format!("/admin/price-lists/{}/fixed-prices", lists[0]);
+    let body = json!({"fixed_prices": [{"variant": mug, "price": eur(1000),
+        "breaks": [{"min_quantity": 5, "price": eur(900)}, {"min_quantity": 10, "price": eur(800)}]}]});
+    let (status, json) = send(&app, "PUT", &url, Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{json}");
+    let (_, prices) = send(&app, "GET", &url, None).await;
+    assert_eq!(
+        prices["items"][0]["breaks"][1],
+        json!({"min_quantity": 10, "price": eur(800)})
+    );
+
+    let bad = json!({"fixed_prices": [{"variant": mug, "price": eur(1000),
+        "breaks": [{"min_quantity": 5, "price": eur(1000)}]}]});
+    let (status, error) = send(&app, "PUT", &url, Some(&bad.to_string())).await;
+    assert_eq!(
+        (status, &error["details"]["entries"][0]["code"]),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &json!("price_breaks_not_descending")
+        )
+    );
+
+    let product = mug_product(&app).await;
+    let pk = publishable(&app).await;
+    let (_, page) = send_as(
+        &app,
+        &pk,
+        "GET",
+        &format!("/storefront/products/{product}?country=HR"),
+        None,
+    )
+    .await;
+    let variant = &page["variants"][0];
+    assert_eq!(
+        (
+            &variant["price"],
+            variant["price_breaks"].as_array().map(Vec::len)
+        ),
+        (&eur(1000), Some(2))
+    );
+
+    let (_, cart) = send_as(
+        &app,
+        &pk,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    let lines = format!("/storefront/carts/{}/lines", cart["id"].as_str().unwrap());
+    let line = json!({"variant": mug, "quantity": 10}).to_string();
+    let (_, cart) = send_as(&app, &pk, "POST", &lines, Some(&line)).await;
+    assert_eq!(
+        (&cart["lines"][0]["unit_price"], &cart["lines"][0]["total"]),
+        (&eur(800), &eur(8000))
+    );
+    let (_, prices) = send(
+        &app,
+        "GET",
+        &format!("/admin/products/{product}/prices?quantity=5"),
+        None,
+    )
+    .await;
+    assert_eq!(prices["markets"][0]["variants"][0]["price"], eur(900));
+}

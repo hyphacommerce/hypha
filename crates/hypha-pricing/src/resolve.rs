@@ -4,7 +4,7 @@ use hypha_core::{
     CategoryId, Currency, Price, PriceListId, ProductId, Quantity, Timestamp, VariantId,
 };
 use hypha_markets::{
-    Adjustment, Catalog, CompareAtMode, FixedPrice, Market, PriceList, PriceListKind,
+    Adjustment, Catalog, CompareAtMode, FixedPrice, Market, PriceBreak, PriceList, PriceListKind,
     PriceListPhase,
 };
 
@@ -61,6 +61,9 @@ pub struct ResolvedPrice {
     pub compare_at: Option<Price>,
     /// The list whose price won; `None` for the base price.
     pub price_list: Option<PriceListId>,
+    /// The winning fixed price's quantity prices, for showing ("€8 each from 10"); empty
+    /// without.
+    pub breaks: Vec<PriceBreak>,
 }
 
 impl ResolvedPrice {
@@ -126,7 +129,9 @@ struct Offer<'a> {
 ///
 /// 1. The market's catalog must include the product, otherwise it's not available there.
 /// 2. Every live list on the catalog that prices the variant (a fixed price for it, or an
-///    adjustment) offers a price; the lowest wins, a tie going to the oldest list.
+///    adjustment reaching its product) offers its price for `quantity` (its best break
+///    at or below it, else its fixed price, else the base price adjusted); the lowest
+///    wins, a tie going to the oldest list.
 /// 3. With no offer, the base price is the price.
 ///
 /// The compare-at price follows the winner's kind: a `sale` list is measured against the
@@ -166,7 +171,7 @@ pub fn explain_price(
 fn evaluate(
     pricing: &PricingContext,
     variant: VariantPrices,
-    _quantity: Quantity,
+    quantity: Quantity,
 ) -> Result<(ResolvedPrice, Vec<Candidate>), PricingError> {
     let market = &pricing.market;
     let catalog = pricing
@@ -208,7 +213,7 @@ fn evaluate(
             .adjustment()
             .filter(|a| a.covers(variant.product, categories));
         let price = match (fixed, adjustment) {
-            (Some(fixed), _) => Some(fixed.price()),
+            (Some(fixed), _) => Some(fixed.price_at(quantity.value())),
             (None, Some(adjustment)) => {
                 ensure_currency(market.currency(), variant.base)?;
                 Some(Price::new(
@@ -256,6 +261,7 @@ fn evaluate(
             price: variant.base,
             compare_at: shown(variant.compare_at, variant.base),
             price_list: None,
+            breaks: Vec::new(),
         };
         return Ok((resolved, candidates));
     };
@@ -285,6 +291,10 @@ fn evaluate(
         price: winner.price,
         compare_at: compare_at.and_then(|c| shown(Some(c), winner.price)),
         price_list: Some(winner.list.id()),
+        breaks: winner
+            .fixed
+            .map(|f| f.breaks().to_vec())
+            .unwrap_or_default(),
     };
     Ok((resolved, candidates))
 }

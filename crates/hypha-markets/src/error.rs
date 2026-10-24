@@ -33,6 +33,14 @@ pub enum FixedPriceProblem {
     CompareAtCurrencyMismatch,
     #[error("the compare-at price must be above the price")]
     CompareAtNotAbovePrice,
+    #[error("a fixed price has at most {max} quantity prices")]
+    TooManyBreaks { max: usize },
+    #[error("quantity prices start from 2, each for more than the one before")]
+    BreakQuantityInvalid,
+    #[error("a quantity price is in another currency than the price")]
+    BreakCurrencyMismatch,
+    #[error("each quantity price must be below the one before it, the first below the price")]
+    BreaksNotDescending,
 }
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -73,6 +81,10 @@ impl ErrorCode for FixedPriceProblem {
             FixedPriceProblem::Money(e) => e.code(),
             FixedPriceProblem::CompareAtCurrencyMismatch => "compare_at_currency_mismatch",
             FixedPriceProblem::CompareAtNotAbovePrice => "compare_at_not_above_price",
+            FixedPriceProblem::TooManyBreaks { .. } => "too_many_price_breaks",
+            FixedPriceProblem::BreakQuantityInvalid => "price_break_quantity_invalid",
+            FixedPriceProblem::BreakCurrencyMismatch => "price_break_currency_mismatch",
+            FixedPriceProblem::BreaksNotDescending => "price_breaks_not_descending",
         }
     }
 }

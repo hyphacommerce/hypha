@@ -28,8 +28,8 @@ pub use events::{
 pub use filter::{FixedPriceFilter, PriceListFilter, PriceListSort};
 pub use market::{Market, MarketSnapshot};
 pub use price_list::{
-    Adjustment, AppliesTo, CompareAtMode, EntryProblem, FixedPrice, PriceList, PriceListDraft,
-    PriceListKind, PriceListPhase, PriceListSnapshot, PriceListStatus, Window,
+    Adjustment, AppliesTo, CompareAtMode, EntryProblem, FixedPrice, PriceBreak, PriceList,
+    PriceListDraft, PriceListKind, PriceListPhase, PriceListSnapshot, PriceListStatus, Window,
 };
 pub use repo::{
     CatalogRepo, HasCatalogs, HasMarkets, HasPriceLists, MarketRepo, PriceListRepo,

@@ -8,9 +8,9 @@ use hypha_core::{
 };
 use hypha_markets::{
     Adjustment, AppliesTo, Catalog, CatalogContext, CatalogRepo, CompareAtMode, FixedPrice,
-    FixedPriceFilter, HasCatalogs, HasPriceLists, Market, MarketRepo, PriceList, PriceListDraft,
-    PriceListFilter, PriceListKind, PriceListPhase, PriceListRepo, PriceListSort, PriceListStatus,
-    repo::keys,
+    FixedPriceFilter, HasCatalogs, HasPriceLists, Market, MarketRepo, PriceBreak, PriceList,
+    PriceListDraft, PriceListFilter, PriceListKind, PriceListPhase, PriceListRepo, PriceListSort,
+    PriceListStatus, repo::keys,
 };
 use hypha_products::{HasProducts, Product, ProductRepo, VariantPatch};
 use uuid::Uuid;
@@ -491,6 +491,8 @@ pub async fn price_list_repo<R: PriceListRepo>(make: impl AsyncFn() -> R) {
     price_list_names(&make().await).await;
     scenario("price list: a fixed price keeps its compare-at price");
     fixed_price_compare_at(&make().await).await;
+    scenario("price list: a fixed price keeps its quantity prices, replaced with it");
+    fixed_price_breaks(&make().await).await;
     scenario("price list: an adjustment keeps what it applies to");
     price_list_applies_to(&make().await).await;
     scenario("price list: get_many returns those that exist, oldest first");
@@ -665,6 +667,59 @@ async fn fixed_price_compare_at<R: PriceListRepo>(repo: &R) {
             .unwrap()
             .items,
         vec![(vid(2), fp(500)), (vid(1), fp(800))]
+    );
+}
+
+async fn fixed_price_breaks<R: PriceListRepo>(repo: &R) {
+    repo.insert(&mut named_list(1, "Wholesale")).await.unwrap();
+    let at = |q, a| PriceBreak {
+        min_quantity: q,
+        price: eur(a),
+    };
+    let tiered = FixedPrice::new(eur(1000), Some(eur(1200)))
+        .unwrap()
+        .with_breaks(vec![at(5, 900), at(10, 800)])
+        .unwrap();
+    repo.set_fixed_prices(plid(1), &[(vid(1), tiered.clone()), (vid(2), fp(500))])
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.fixed_prices(plid(1), &[vid(1), vid(2)]).await,
+        Ok(HashMap::from([(vid(1), tiered.clone()), (vid(2), fp(500))]))
+    );
+    assert_eq!(
+        repo.fixed_prices_in(&[plid(1)], &[vid(1)]).await,
+        Ok(HashMap::from([(
+            plid(1),
+            HashMap::from([(vid(1), tiered.clone())])
+        )]))
+    );
+    assert_eq!(
+        repo.fixed_price_page(plid(1), &FixedPriceFilter::default(), page(None, 10))
+            .await
+            .unwrap()
+            .items,
+        vec![(vid(2), fp(500)), (vid(1), tiered)]
+    );
+    // Set again with one break: the other goes.
+    let fewer = FixedPrice::plain(eur(1000))
+        .with_breaks(vec![at(3, 950)])
+        .unwrap();
+    repo.set_fixed_prices(plid(1), &[(vid(1), fewer.clone())])
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.fixed_prices(plid(1), &[vid(1)]).await,
+        Ok(HashMap::from([(vid(1), fewer)]))
+    );
+    // Removing the price takes its breaks: a new one starts without.
+    repo.remove_fixed_prices(plid(1), &[vid(1)]).await.unwrap();
+    repo.set_fixed_prices(plid(1), &[(vid(1), fp(990))])
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.fixed_prices(plid(1), &[vid(1)]).await,
+        Ok(HashMap::from([(vid(1), fp(990))]))
     );
 }
 

@@ -2300,6 +2300,25 @@
         ],
         "type": "object"
       },
+      "PriceBreakDto": {
+        "additionalProperties": false,
+        "description": "From `min_quantity` of the variant in one cart line, each costs `price`.",
+        "properties": {
+          "min_quantity": {
+            "format": "int32",
+            "minimum": 2,
+            "type": "integer"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "min_quantity",
+          "price"
+        ],
+        "type": "object"
+      },
       "ProductId": {
         "description": "A ProductId: `prod_` and 32 hex digits.",
         "examples": [
@@ -3258,6 +3277,13 @@
               }
             ]
           },
+          "price_breaks": {
+            "description": "Cheaper prices from a quantity in one cart line (\"8.00 each from 10\"); the cart\nprices each line at its quantity.",
+            "items": {
+              "$ref": "#/components/schemas/PriceBreakDto"
+            },
+            "type": "array"
+          },
           "selections": {
             "description": "One value per option, in the order of `options`.",
             "items": {
@@ -3277,6 +3303,7 @@
           "id",
           "selections",
           "on_sale",
+          "price_breaks",
           "custom_fields"
         ],
         "type": "object"

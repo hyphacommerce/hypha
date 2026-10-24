@@ -143,6 +143,7 @@ fn uses_base_price_without_price_list() {
             price: eur(1000),
             compare_at: None,
             price_list: None,
+            breaks: vec![],
         })
     );
 }
@@ -157,6 +158,7 @@ fn fixed_price_wins_over_adjustment() {
             price: eur(777),
             compare_at: None,
             price_list: Some(plid(1)),
+            breaks: vec![],
         })
     );
 }
@@ -579,5 +581,69 @@ fn a_list_not_live_is_skipped_among_others() {
     assert_eq!(
         explain_price(&ctx, variant(eur(1000)), one()).candidates[1].result,
         CandidateResult::NotLive(PriceListPhase::Expired)
+    );
+}
+
+// ---------- quantity prices ----------
+
+fn tiered(price: i64, breaks: &[(u32, i64)]) -> FixedPrice {
+    FixedPrice::plain(eur(price))
+        .with_breaks(
+            breaks
+                .iter()
+                .map(|(q, p)| hypha_markets::PriceBreak {
+                    min_quantity: *q,
+                    price: eur(*p),
+                })
+                .collect(),
+        )
+        .unwrap()
+}
+
+fn qty(n: u32) -> Quantity {
+    Quantity::new(n).unwrap()
+}
+
+#[test]
+fn a_break_prices_from_its_quantity() {
+    let mut ctx = with_lists(vec![list(1, Currency::EUR, None)]);
+    fix(&mut ctx, plid(1), tiered(1000, &[(10, 800)]));
+    let at = |n| resolve_price(&ctx, variant(eur(1200)), qty(n)).map(|r| r.price);
+    assert_eq!(at(9), Ok(eur(1000)));
+    assert_eq!(at(10), Ok(eur(800)));
+}
+
+#[test]
+fn each_list_is_priced_at_the_quantity_before_the_lowest_wins() {
+    // At 10 the tiered list's break beats the flat sale; at 1 the sale wins.
+    let mut ctx = with_lists(vec![
+        list(1, Currency::EUR, None),
+        list(2, Currency::EUR, Some(-1500)),
+    ]);
+    fix(&mut ctx, plid(1), tiered(1000, &[(10, 700)]));
+    let at = |n| resolve_price(&ctx, variant(eur(1000)), qty(n)).map(|r| (r.price, r.price_list));
+    assert_eq!(at(1), Ok((eur(850), Some(plid(2)))));
+    assert_eq!(at(10), Ok((eur(700), Some(plid(1)))));
+}
+
+#[test]
+fn the_winners_breaks_are_shown() {
+    let mut ctx = with_lists(vec![list(1, Currency::EUR, None)]);
+    let fixed = tiered(1000, &[(5, 900), (10, 800)]);
+    fix(&mut ctx, plid(1), fixed.clone());
+    assert_eq!(
+        resolve_price(&ctx, variant(eur(1000)), one()).map(|r| r.breaks),
+        Ok(fixed.breaks().to_vec())
+    );
+}
+
+#[test]
+fn a_sale_break_is_measured_against_the_regular_price_at_the_quantity() {
+    let mut ctx = with_lists(vec![list(1, Currency::EUR, Some(-1000)), sale(2, None)]);
+    fix(&mut ctx, plid(2), tiered(880, &[(10, 600)]));
+    let resolved = resolve_price(&ctx, variant(eur(1000)), qty(10)).unwrap();
+    assert_eq!(
+        (resolved.price, resolved.compare_at),
+        (eur(600), Some(eur(900)))
     );
 }
