@@ -14,7 +14,7 @@ import { SummaryLine, Totals } from "@/components/totals";
 import { loadAccount } from "@/lib/account";
 import { api, countryOf } from "@/lib/api";
 import { Price } from "@/components/price";
-import { linePrice, readCartDiscounts, readOfferAfter, shippingPrice } from "@/lib/discounts";
+import { linePrice, readCartDiscounts, shippingPrice } from "@/lib/discounts";
 import { formatMoney } from "@/lib/money";
 import { cartId, link } from "@/lib/site";
 
@@ -152,7 +152,7 @@ export default async function CheckoutPage({
                         offers={group.offers.map((offer) => {
                           // "Free" when a shipping discount takes all of it.
                           const price = shippingPrice(
-                            readOfferAfter(offer) ?? offer.amount,
+                            offer.amount_after_discounts,
                             offer.amount,
                             digits,
                           );

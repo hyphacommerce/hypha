@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   type Application,
   type CartCode,
+  type CartFields,
   NO_DISCOUNTS,
   codeMessage,
   discountedTotals,
@@ -13,7 +14,6 @@ import {
   promotionBadges,
   readCartDiscounts,
   readCodeState,
-  readOfferAfter,
   readOrderDiscounts,
   readPromotions,
   shippingPrice,
@@ -38,11 +38,21 @@ const freeShipping: Application = {
   amount: eur(500),
 };
 const message = (code: CartCode, applied: Application[] = []) => codeMessage(code, applied, 2).text;
+const emptyCart: CartFields = {
+  discount_codes: [],
+  discounts: [],
+  discount_total: eur(0),
+  lines: [],
+  shipping_groups: [],
+};
 
-test("a cart without discount fields has none", () => {
+test("a cart without discounts has none, but takes codes", () => {
   assert.deepEqual(
-    readCartDiscounts({ lines: [{ variant: "var_1", total: eur(100) }] }),
-    NO_DISCOUNTS,
+    readCartDiscounts({
+      ...emptyCart,
+      lines: [{ variant: "var_1", subtotal: eur(100), total: eur(100), discounts: [] }],
+    }),
+    { ...NO_DISCOUNTS, takesCodes: true },
   );
   assert.deepEqual(readCartDiscounts(null), NO_DISCOUNTS);
 });
@@ -51,23 +61,28 @@ test("a cart's codes, applications, lines and shipping are read", () => {
   const read = readCartDiscounts({
     discount_codes: [
       { code: "WELCOME10", state: "applied" },
-      { code: "BIG", state: { type: "minimum_not_met", needed: { subtotal: eur(1200) } } },
+      { code: "BIG", state: "minimum_not_met", needed: { subtotal: eur(1200) } },
     ],
-    discounts: [welcome],
+    discounts: [welcome, freeShipping],
     discount_total: eur(740),
     lines: [
       {
         variant: "var_1",
-        total: eur(2400),
-        total_after_discounts: eur(2160),
-        allocations: [{ application: 0, amount: eur(240) }],
+        subtotal: eur(2400),
+        total: eur(2160),
+        discounts: [{ application: 0, amount: eur(240) }],
       },
+      // An unavailable line has no prices.
+      { variant: "var_2" },
     ],
     shipping_groups: [
       {
         id: "grp_1",
-        selected: { amount: eur(500) },
-        allocations: [{ application: 1, amount: eur(500) }],
+        selected: {
+          amount: eur(500),
+          total: eur(0),
+          discounts: [{ application: 1, amount: eur(500) }],
+        },
       },
     ],
   });
@@ -80,19 +95,38 @@ test("a cart's codes, applications, lines and shipping are read", () => {
     },
   ]);
   assert.equal(read.takesCodes, true);
-  assert.deepEqual(read.applications, [welcome]);
+  assert.deepEqual(read.applications, [welcome, freeShipping]);
   assert.deepEqual(read.total, eur(740));
   assert.deepEqual(read.shipping, eur(500));
-  assert.deepEqual(read.lines.var_1, {
-    before: eur(2400),
-    after: eur(2160),
-    allocations: [{ application: 0, amount: eur(240) }],
+  assert.deepEqual(read.lines, {
+    var_1: {
+      before: eur(2400),
+      after: eur(2160),
+      allocations: [{ application: 0, amount: eur(240) }],
+    },
   });
   assert.deepEqual(read.shipments.grp_1, { before: eur(500), after: eur(0) });
 });
 
+test("each known code state is read with its fields", () => {
+  assert.deepEqual(readCodeState({ state: "expired" }), { state: "expired" });
+  assert.deepEqual(readCodeState({ state: "invalid" }), { state: "invalid" });
+  assert.deepEqual(readCodeState({ state: "not_eligible", condition: "signed_in" }), {
+    state: "not_eligible",
+    condition: "signed_in",
+  });
+  assert.deepEqual(readCodeState({ state: "blocked_by_other", discount: "disc_2" }), {
+    state: "blocked_by_other",
+    discount: "disc_2",
+  });
+  assert.deepEqual(readCodeState({ state: "minimum_not_met", needed: { quantity: 2 } }), {
+    state: "minimum_not_met",
+    needed: { subtotal: undefined, quantity: 2 },
+  });
+});
+
 test("an unknown code state is kept as unknown", () => {
-  assert.deepEqual(readCodeState({ code: "X", state: "something_new" }), { state: "unknown" });
+  assert.deepEqual(readCodeState({ state: "something_new" }), { state: "unknown" });
 });
 
 test("an order's lines are keyed by ID, before being the subtotal", () => {
@@ -115,9 +149,14 @@ test("an order's lines are keyed by ID, before being the subtotal", () => {
   assert.deepEqual(read.applications, [welcome]);
 });
 
-test("an order from before discounts reads as none", () => {
+test("an order without discounts reads as none", () => {
   assert.deepEqual(
-    readOrderDiscounts({ lines: [{ id: "line_1", total: eur(100) }], shipping_lines: [] }),
+    readOrderDiscounts({
+      discounts: [],
+      discount_total: eur(0),
+      lines: [{ id: "line_1", subtotal: eur(100), total: eur(100), discounts: [] }],
+      shipping_lines: [],
+    }),
     NO_DISCOUNTS,
   );
 });
@@ -216,11 +255,6 @@ test("a rate that's free anyway isn't called Free", () => {
   assert.deepEqual(shippingPrice(eur(0), eur(0), 2), { text: "€0.00", was: null });
 });
 
-test("an offer's amount after discounts is read when sent", () => {
-  assert.deepEqual(readOfferAfter({ amount: eur(500), amount_after_discounts: eur(0) }), eur(0));
-  assert.equal(readOfferAfter({ amount: eur(500) }), null);
-});
-
 test("an applied code names its discount", () => {
   assert.deepEqual(codeMessage({ code: "WELCOME10", state: "applied" }, [welcome], 2), {
     text: "Applied: Welcome offer",
@@ -276,6 +310,8 @@ test("each other state has its message", () => {
     message({ code: "EU", state: "not_available_in_market" }),
     "EU can't be used in this country",
   );
+  assert.equal(message({ code: "OLD", state: "expired" }), "OLD has expired");
+  assert.equal(message({ code: "GONE", state: "invalid" }), "GONE is no longer valid");
   assert.equal(
     message({ code: "NEW", state: "unknown" }),
     "NEW doesn't apply to this cart right now",
@@ -289,10 +325,10 @@ test("only an applied code is good news", () => {
 test("promotion badges list each title once, at most two", () => {
   const promos = readPromotions({
     promotions: [
-      { title: "Buy 2, get 1 free", summary: "" },
-      { title: "Buy 2, get 1 free", summary: "" },
-      { title: "Volume discount", summary: "" },
-      { title: "Third", summary: "" },
+      { discount: "disc_1", title: "Buy 2, get 1 free", summary: "" },
+      { discount: "disc_2", title: "Buy 2, get 1 free", summary: "" },
+      { discount: "disc_3", title: "Volume discount", summary: "" },
+      { discount: "disc_4", title: "Third", summary: "" },
     ],
   });
   assert.deepEqual(promotionBadges(promos), ["Buy 2, get 1 free", "Volume discount"]);

@@ -167,25 +167,6 @@ export async function setQuantity(input: {
   return { cart: data ?? (await loadCart(input.country)) };
 }
 
-/** The cart's discount code routes, answering with the cart like its other writes.
- * Wired once the SDK has the routes: until then the client is typed here by hand
- * (openapi-fetch fills `{id}` and `{code}` at run time all the same). */
-type CodeRoutes = {
-  POST(
-    path: "/storefront/carts/{id}/discount-codes",
-    init: { params: { path: { id: string } }; body: { code: string } },
-  ): Promise<{ data?: Cart; error?: ApiError }>;
-  DELETE(
-    path: "/storefront/carts/{id}/discount-codes/{code}",
-    init: { params: { path: { id: string; code: string } } },
-  ): Promise<{ data?: Cart; error?: ApiError }>;
-};
-
-function codeRoutes(): CodeRoutes {
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- routes the generated SDK doesn't have yet (see `CodeRoutes`)
-  return api() as unknown as CodeRoutes;
-}
-
 /** Adds a discount code to the cart, and answers with the cart. A code that's known but
  * doesn't apply yet is kept, with its state on the cart; an unknown one is refused
  * (`discount_code_invalid`) and the form shows why. */
@@ -197,7 +178,7 @@ export async function applyDiscountCode(input: {
   if (!id) return { cart: null };
   const code = input.code.trim();
   if (code === "") return { cart: await loadCart(input.country), error: "Enter a code." };
-  const { data, error } = await codeRoutes().POST("/storefront/carts/{id}/discount-codes", {
+  const { data, error } = await api().POST("/storefront/carts/{id}/discount-codes", {
     params: { path: { id } },
     body: { code },
   });
@@ -212,10 +193,9 @@ export async function removeDiscountCode(input: {
 }): Promise<CartResult> {
   const id = await cartId(input.country);
   if (!id) return { cart: null };
-  const { data, error } = await codeRoutes().DELETE(
-    "/storefront/carts/{id}/discount-codes/{code}",
-    { params: { path: { id, code: input.code } } },
-  );
+  const { data, error } = await api().DELETE("/storefront/carts/{id}/discount-codes/{code}", {
+    params: { path: { id, code: input.code } },
+  });
   if (error) return { cart: await loadCart(input.country), error: describe(error) };
   return { cart: data ?? (await loadCart(input.country)) };
 }

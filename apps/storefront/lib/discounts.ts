@@ -3,9 +3,9 @@
 // "Discounts" row, "Free" shipping and the promotion badges on products. Pure, so
 // servers and browsers share it.
 //
-// The `read*` functions are the one place that knows the API's field names. The SDK
-// doesn't type these fields yet, so they read the answer defensively and give "no
-// discounts" for anything missing: pages render as before until the API sends them.
+// The `read*` functions map the API's answers onto what the pages show.
+
+import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
 import { type Money, formatMoney } from "./money.ts";
 import { lineCompareAt } from "./prices.ts";
@@ -23,6 +23,10 @@ export type CodeState =
   | { state: "blocked_by_other"; discount: string }
   | { state: "limit_reached" }
   | { state: "not_available_in_market" }
+  /** Its discount ended. */
+  | { state: "expired" }
+  /** The code or its discount went: deleted, deactivated or made a draft. */
+  | { state: "invalid" }
   /** A state this storefront doesn't know yet. */
   | { state: "unknown" };
 
@@ -50,8 +54,7 @@ export type Shipment = { before: Money; after: Money };
 
 /** Everything a cart or an order says about discounts. */
 export type Discounts = {
-  /** Whether the cart takes codes: it answers with `discount_codes`. Until the API
-   * does, there's no code field to offer. */
+  /** Whether there's a code field to offer: a cart's, not an order's. */
   takesCodes: boolean;
   codes: CartCode[];
   applications: Application[];
@@ -80,23 +83,37 @@ export const NO_DISCOUNTS: Discounts = {
 
 // ---- Reading the API's answers --------------------------------------------------------
 
-type Json = Record<string, unknown>;
+type Schemas = StorefrontSchemas;
+type Share = Schemas["DiscountShareResponse"];
+type CodeResponse = Schemas["CartDiscountCodeResponse"];
+type AppliedResponse = Pick<
+  Schemas["CartDiscountResponse"],
+  "discount" | "code" | "title" | "summary" | "amount"
+>;
 
-function object(value: unknown): Json | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- a plain object; every field read is checked
-  return value as Json;
-}
+/** What reading a cart needs of it: a priced line has `subtotal` (before discounts),
+ * `total` (after) and `discounts`; an unavailable line has none of them. */
+export type CartFields = Pick<Schemas["CartResponse"], "discount_codes" | "discount_total"> & {
+  discounts: readonly AppliedResponse[];
+  lines: readonly { variant: string; subtotal?: Money; total?: Money; discounts?: Share[] }[];
+  shipping_groups: readonly {
+    id: string;
+    selected?: Pick<Schemas["SelectedShippingResponse"], "amount" | "total" | "discounts"> | null;
+  }[];
+};
 
-function list(value: unknown): Json[] {
-  if (!Array.isArray(value)) return [];
-  const found: Json[] = [];
-  for (const v of value as unknown[]) {
-    const o = object(v);
-    if (o) found.push(o);
-  }
-  return found;
-}
+/** What reading an order needs of it. */
+export type OrderFields = Pick<Schemas["StorefrontOrderResponse"], "discount_total"> & {
+  discounts: readonly AppliedResponse[];
+  lines: readonly Pick<
+    Schemas["StorefrontOrderLineResponse"],
+    "id" | "subtotal" | "total" | "discounts"
+  >[];
+  shipping_lines: readonly Pick<
+    Schemas["StorefrontShippingLineResponse"],
+    "group" | "amount" | "total" | "discounts"
+  >[];
+};
 
 /** What came off shipping across the shipments, `null` when nothing did. */
 function shippingOff(shipments: Record<string, Shipment>): Money | null {
@@ -106,161 +123,111 @@ function shippingOff(shipments: Record<string, Shipment>): Money | null {
   return { amount, currency: all[0].before.currency };
 }
 
-function money(value: unknown): Money | null {
-  const v = object(value);
-  return v && typeof v.amount === "number" && typeof v.currency === "string"
-    ? { amount: v.amount, currency: v.currency }
-    : null;
+function allocations(shares: readonly Share[]): Allocation[] {
+  return shares.map((s) => ({ application: s.application, amount: s.amount }));
 }
 
-function text(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
-
-function allocations(value: unknown): Allocation[] {
-  return list(value).flatMap((a) => {
-    const amount = money(a.amount);
-    return typeof a.application === "number" && amount
-      ? [{ application: a.application, amount }]
-      : [];
-  });
-}
-
-/** A code's state, written either flat (`{code, state: "minimum_not_met", needed}`) or
- * as a tagged object (`{code, state: {type: "minimum_not_met", needed}}`). */
-export function readCodeState(entry: Json): CodeState {
-  const nested = object(entry.state);
-  const fields = nested ?? entry;
-  const name = nested ? text(nested.type) : text(entry.state);
-  switch (name) {
+/** A code's state, as the API sends it. A state this storefront doesn't know is
+ * `unknown`: the API may add some, and an unknown one means "not applied". */
+export function readCodeState(entry: Omit<CodeResponse, "code">): CodeState {
+  switch (entry.state) {
     case "applied":
     case "no_matching_items":
     case "limit_reached":
     case "not_available_in_market":
-      return { state: name };
+    case "expired":
+    case "invalid":
+      return { state: entry.state };
     case "not_eligible":
-      return { state: name, condition: text(fields.condition) ?? "" };
-    case "minimum_not_met": {
-      const needed = object(fields.needed) ?? {};
+      return { state: "not_eligible", condition: entry.condition ?? "" };
+    case "minimum_not_met":
       return {
-        state: name,
+        state: "minimum_not_met",
         needed: {
-          subtotal: money(needed.subtotal) ?? undefined,
-          quantity: typeof needed.quantity === "number" ? needed.quantity : undefined,
+          subtotal: entry.needed?.subtotal ?? undefined,
+          quantity: entry.needed?.quantity ?? undefined,
         },
       };
-    }
     case "blocked_by_other":
-      return { state: name, discount: text(fields.discount) ?? "" };
+      return { state: "blocked_by_other", discount: entry.discount ?? "" };
     default:
       return { state: "unknown" };
   }
 }
 
-function applications(value: unknown): Application[] {
-  return list(value).flatMap((a, i) => {
-    const amount = money(a.amount);
-    const title = text(a.title);
-    if (!amount || title === null) return [];
-    return [
-      {
-        index: typeof a.index === "number" ? a.index : i,
-        discount: text(a.discount) ?? "",
-        code: text(a.code),
-        title,
-        summary: text(a.summary) ?? "",
-        amount,
-      },
-    ];
-  });
+/** The applications, numbered by their place in the list: what lines and shipping name. */
+function applications(discounts: readonly AppliedResponse[]): Application[] {
+  return discounts.map((a, index) => ({
+    index,
+    discount: a.discount,
+    code: a.code ?? null,
+    title: a.title,
+    summary: a.summary,
+    amount: a.amount,
+  }));
 }
 
-/** What a cart (`GET /storefront/carts/{id}`) says about discounts: `discount_codes`,
- * `discounts`, `discount_total`, each line's `allocations` and `total_after_discounts`
- * (its `total` being before them), each shipping group's `allocations`. */
-export function readCartDiscounts(cart: unknown): Discounts {
-  const c = object(cart);
-  if (!c) return NO_DISCOUNTS;
-  const codes = list(c.discount_codes).flatMap((entry) => {
-    const code = text(entry.code);
-    return code === null ? [] : [{ code, ...readCodeState(entry) }];
-  });
+/** What a cart says about discounts. A line or a shipment counts as discounted only
+ * when a discount took something off it. */
+export function readCartDiscounts(cart: CartFields | null | undefined): Discounts {
+  if (!cart) return NO_DISCOUNTS;
   const lines: Record<string, LineDiscount> = {};
-  for (const line of list(c.lines)) {
-    const key = text(line.variant);
-    const before = money(line.total);
-    const after = money(line.total_after_discounts);
-    if (key && before && after)
-      lines[key] = { before, after, allocations: allocations(line.allocations) };
+  for (const line of cart.lines) {
+    const taken = allocations(line.discounts ?? []);
+    if (line.subtotal && line.total && taken.length > 0) {
+      lines[line.variant] = { before: line.subtotal, after: line.total, allocations: taken };
+    }
   }
   const shipments: Record<string, Shipment> = {};
-  for (const group of list(c.shipping_groups)) {
-    const key = text(group.id);
-    const taken = allocations(group.allocations);
-    const before = money(object(group.selected)?.amount);
-    if (!key || !before || taken.length === 0) continue;
-    const off = sum(taken.map((a) => a.amount));
-    shipments[key] = { before, after: { ...before, amount: before.amount - off } };
+  for (const group of cart.shipping_groups) {
+    const s = group.selected;
+    if (s && s.discounts.length > 0) shipments[group.id] = { before: s.amount, after: s.total };
   }
   return {
-    takesCodes: Array.isArray(c.discount_codes),
-    codes,
-    applications: applications(c.discounts),
-    total: money(c.discount_total),
+    takesCodes: true,
+    codes: cart.discount_codes.map((entry) => ({ code: entry.code, ...readCodeState(entry) })),
+    applications: applications(cart.discounts),
+    total: cart.discount_total.amount > 0 ? cart.discount_total : null,
     shipping: shippingOff(shipments),
     lines,
     shipments,
   };
 }
 
-/** What a placed order says: `discounts`, `discount_total`, each line's `subtotal`
- * (before), `total` (after) and `discounts`, each shipping line's `amount`, `total` and
- * `discounts`. An order from before discounts has none of them. */
-export function readOrderDiscounts(order: unknown): Discounts {
-  const o = object(order);
-  if (!o) return NO_DISCOUNTS;
+/** What a placed order says: its applications, each line's `subtotal` (before) and
+ * `total` (after), each shipping line's `amount` and `total`. */
+export function readOrderDiscounts(order: OrderFields | null | undefined): Discounts {
+  if (!order) return NO_DISCOUNTS;
   const lines: Record<string, LineDiscount> = {};
-  for (const line of list(o.lines)) {
-    const key = text(line.id);
-    const before = money(line.subtotal);
-    const after = money(line.total);
+  for (const line of order.lines) {
     const taken = allocations(line.discounts);
-    if (key && before && after && taken.length > 0)
-      lines[key] = { before, after, allocations: taken };
+    if (taken.length > 0) {
+      lines[line.id] = { before: line.subtotal, after: line.total, allocations: taken };
+    }
   }
   const shipments: Record<string, Shipment> = {};
-  for (const s of list(o.shipping_lines)) {
-    const key = text(s.group);
-    const before = money(s.amount);
-    const after = money(s.total);
-    if (!key || !before || !after || allocations(s.discounts).length === 0) continue;
-    shipments[key] = { before, after };
+  for (const s of order.shipping_lines) {
+    if (s.discounts.length > 0) shipments[s.group] = { before: s.amount, after: s.total };
   }
   return {
     takesCodes: false,
     codes: [],
-    applications: applications(o.discounts),
-    total: money(o.discount_total),
+    applications: applications(order.discounts),
+    total: order.discount_total.amount > 0 ? order.discount_total : null,
     shipping: shippingOff(shipments),
     lines,
     shipments,
   };
 }
 
-/** A product's (or a search hit's) `promotions`. */
-export function readPromotions(product: unknown): Promotion[] {
-  const p = object(product);
-  return list(p?.promotions).flatMap((promo) => {
-    const title = text(promo.title);
-    return title ? [{ title, summary: text(promo.summary) ?? "" }] : [];
-  });
+/** A product's (or a search hit's) `promotions`: empty without a country. */
+export function readPromotions(product: {
+  promotions?: readonly Schemas["PromotionResponse"][];
+}): Promotion[] {
+  return (product.promotions ?? []).map((p) => ({ title: p.title, summary: p.summary }));
 }
 
 // ---- What's shown ---------------------------------------------------------------------
-
-function sum(amounts: Money[]): number {
-  return amounts.reduce((n, m) => n + m.amount, 0);
-}
 
 /** "−€2.40": an amount taken off (a minus sign, not a hyphen). */
 export function minus(amount: Money, digits: number): string {
@@ -371,6 +338,10 @@ export function codeMessage(
       return { text: `${c} can't be used any more`, tone: "warning" };
     case "not_available_in_market":
       return { text: `${c} can't be used in this country`, tone: "warning" };
+    case "expired":
+      return { text: `${c} has expired`, tone: "warning" };
+    case "invalid":
+      return { text: `${c} is no longer valid`, tone: "warning" };
     case "unknown":
       return { text: `${c} doesn't apply to this cart right now`, tone: "warning" };
   }
@@ -402,10 +373,4 @@ export function promotionBadges(promotions: readonly Promotion[], max = 2): stri
 export function typedCode(value: string): string | null {
   const code = value.trim();
   return code === "" ? null : code;
-}
-
-/** A shipping offer's amount after a shipping discount (`amount_after_discounts`), or
- * `null` when none applies to it. */
-export function readOfferAfter(offer: unknown): Money | null {
-  return money(object(offer)?.amount_after_discounts);
 }
