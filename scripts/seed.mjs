@@ -1767,6 +1767,9 @@ async function main() {
         "category.*",
         "market.*",
         "custom_field_definition.*",
+        "discount.created",
+        "discount.updated",
+        "discount.deleted",
       ],
       webhook: { url: `${STOREFRONT_URL}/api/revalidate` },
     });
