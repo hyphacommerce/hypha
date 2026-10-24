@@ -2506,6 +2506,38 @@ contains "applied" '\"status\":\"applied\"'
 AUTH=("${SAVED_AUTH[@]}")
 
 echo
+echo "## buy X get Y, tiers and promotions"
+step "a cup for the deal" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
+    -d '{"handle":"deal-cup","title":"Deal cup","price":{"amount":300,"currency":"EUR"}}'
+DEAL_CUP=$(id)
+DEAL_CUP_VAR=$(variant)
+step "on sale" 200 - -X PATCH "$BASE/admin/products/$DEAL_CUP/status" -H "$JSON" -d '{"status":"active"}'
+step "in the market's catalog" 204 - -X POST "$BASE/admin/catalogs/$CATALOG/products" -H "$JSON" \
+    -d "{\"products\":[\"$DEAL_CUP\"]}"
+step "in the Online Store" 204 - -X POST "$BASE/admin/channels/$ONLINE_STORE/products" -H "$JSON" \
+    -d "{\"products\":[\"$DEAL_CUP\"]}"
+step "buy 2 cups, get 1 free" 201 - -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d "{\"title\":\"3 for 2\",\"method\":\"automatic\",\"kind\":{\"type\":\"buy_x_get_y\",\"buys\":{\"items\":{\"type\":\"products\",\"ids\":[\"$DEAL_CUP\"]}},\"buy\":{\"type\":\"quantity\",\"quantity\":2},\"gets\":{\"items\":{\"type\":\"products\",\"ids\":[\"$DEAL_CUP\"]}},\"get_quantity\":1,\"value\":{\"type\":\"percent\",\"basis_points\":10000},\"uses_per_order\":1}}"
+DEAL=$(id)
+contains "a product discount" '"classes":["product"]'
+contains "said as a deal" '"summary":"Buy 2 × 1 product, get 1 × 1 product free (up to 1 time per order)"'
+step "the cup shows it" 200 - "$BASE/storefront/products/by-handle/deal-cup?country=HR"
+contains "as a promotion" "\"promotions\":[{\"discount\":\"$DEAL\",\"title\":\"3 for 2\""
+step "a cart for the deal" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
+DEAL_CART=$(id)
+step "three cups" 200 - -X POST "$BASE/storefront/carts/$DEAL_CART/lines" -H "$JSON" \
+    -d "{\"variant\":\"$DEAL_CUP_VAR\",\"quantity\":3}"
+contains "the deal applies" "\"discounts\":[{\"discount\":\"$DEAL\""
+contains "on one unit" '"units":1'
+step "the deal goes" 204 - -X DELETE "$BASE/admin/discounts/$DEAL"
+step "tiers must rise" 422 invalid_discount -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Volume","method":"automatic","kind":{"type":"tiered","items":{"items":{"type":"all"}},"measure":"quantity","tiers":[{"threshold":{"type":"quantity","quantity":5},"value":{"type":"percent","basis_points":1500}},{"threshold":{"type":"quantity","quantity":3},"value":{"type":"percent","basis_points":1000}}]}}'
+contains "naming the tier" '"path":"kind.tiers[1].threshold"'
+step "a volume discount, kept as a draft" 201 - -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Volume","method":"automatic","status":"draft","kind":{"type":"tiered","items":{"items":{"type":"all"},"exclude_on_sale":true},"measure":"quantity","tiers":[{"threshold":{"type":"quantity","quantity":3},"value":{"type":"percent","basis_points":1000}},{"threshold":{"type":"quantity","quantity":5},"value":{"type":"percent","basis_points":1500}}]}}'
+contains "its steps" '"summary":"10% off from 3 items, 15% off from 5 items on all items not on sale"'
+
+echo
 echo "## rate limits"
 # Last on purpose: this uses up the login allowance of the address the script runs from.
 # Ten more tries on top of the script's earlier logins: well past both the address's and

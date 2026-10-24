@@ -1464,3 +1464,75 @@ mod tests {
         assert_eq!(csv_field("WELCOME"), "WELCOME");
     }
 }
+
+// ---------- promotions ----------
+
+/// A promotion a product shows: a live automatic discount that may reach it, whose
+/// conditions are only about market, channel and the items. A badge ("Buy 2, get 1
+/// free"), never a price: what a shopper pays is the cart's.
+#[derive(Serialize, Clone, utoipa::ToSchema)]
+pub struct PromotionResponse {
+    discount: DiscountId,
+    title: String,
+    /// One sentence from its data, amounts in the shopper's market.
+    summary: String,
+}
+
+/// The promotions of each of `products` in `market` and `channel` now, in two reads at
+/// most (the live automatic discounts, and the products' categories when one names
+/// categories). A product without any is left out.
+pub(crate) async fn promotions_of<
+    P: hypha_discounts::HasDiscounts + hypha_markets::HasPriceLists,
+>(
+    ports: &P,
+    products: &[ProductId],
+    market: MarketId,
+    channel: Option<hypha_core::ChannelId>,
+    at: hypha_core::Timestamp,
+) -> Result<HashMap<ProductId, Vec<PromotionResponse>>, ApiError> {
+    use hypha_markets::PriceListRepo;
+    let automatic = ports
+        .discounts()
+        .live_automatic(at)
+        .await
+        .map_err(hypha_discounts::CommandError::from)?;
+    if automatic.is_empty() || products.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let context = hypha_discounts::DiscountContext {
+        automatic,
+        ..Default::default()
+    };
+    let categories = if context.names_categories() {
+        ports
+            .price_lists()
+            .product_categories(products)
+            .await
+            .map_err(hypha_discounts::CommandError::from)?
+    } else {
+        HashMap::new()
+    };
+    let none = std::collections::HashSet::new();
+    let mut found = HashMap::new();
+    for product in products {
+        let shown: Vec<PromotionResponse> = hypha_discounts::promotions(
+            &context.automatic,
+            *product,
+            categories.get(product).unwrap_or(&none),
+            market,
+            channel,
+            at,
+        )
+        .into_iter()
+        .map(|p| PromotionResponse {
+            discount: p.discount,
+            title: p.title,
+            summary: p.summary,
+        })
+        .collect();
+        if !shown.is_empty() {
+            found.insert(*product, shown);
+        }
+    }
+    Ok(found)
+}

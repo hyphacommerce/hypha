@@ -1710,6 +1710,17 @@ export interface components {
             /** Format: int32 */
             width?: number | null;
         };
+        /**
+         * @description A promotion a product shows: a live automatic discount that may reach it, whose
+         *     conditions are only about market, channel and the items. A badge ("Buy 2, get 1
+         *     free"), never a price: what a shopper pays is the cart's.
+         */
+        PromotionResponse: {
+            discount: components["schemas"]["DiscountId"];
+            /** @description One sentence from its data, amounts in the shopper's market. */
+            summary: string;
+            title: string;
+        };
         /** @description An app with a storefront proxy (`/storefront/apps/{app}/proxy/…`). */
         ProxyExtension: {
             app: string;
@@ -1743,6 +1754,11 @@ export interface components {
             /** @description Over the product's variants in this market. */
             product_price: components["schemas"]["SearchPriceRange"];
             product_type?: string | null;
+            /**
+             * @description Live automatic discounts that may reach the product in this market and channel:
+             *     badges, never prices (the cart applies them).
+             */
+            promotions: components["schemas"]["PromotionResponse"][];
             title: string;
             /** @description The variant shown: the best match of its group. */
             variant: components["schemas"]["VariantId"];
@@ -2044,6 +2060,12 @@ export interface components {
             /** @description Whether the prices include tax (the market's rule); `null` when there are none. */
             prices_include_tax?: boolean | null;
             product_type?: string | null;
+            /**
+             * @description Live automatic discounts that may reach it in `country`'s market and the channel,
+             *     conditioned only on those and the items: badges ("Buy 2, get 1 free"), never
+             *     prices (the cart applies them). Empty without `country`.
+             */
+            promotions: components["schemas"]["PromotionResponse"][];
             /**
              * @description Whether `country`'s market sells the product; `null` without `country`. A
              *     product not sold there has no prices: show it as unavailable in the country.

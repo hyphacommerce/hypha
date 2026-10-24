@@ -2616,6 +2616,27 @@
         ],
         "type": "object"
       },
+      "PromotionResponse": {
+        "description": "A promotion a product shows: a live automatic discount that may reach it, whose\nconditions are only about market, channel and the items. A badge (\"Buy 2, get 1\nfree\"), never a price: what a shopper pays is the cart's.",
+        "properties": {
+          "discount": {
+            "$ref": "#/components/schemas/DiscountId"
+          },
+          "summary": {
+            "description": "One sentence from its data, amounts in the shopper's market.",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "discount",
+          "title",
+          "summary"
+        ],
+        "type": "object"
+      },
       "ProxyExtension": {
         "description": "An app with a storefront proxy (`/storefront/apps/{app}/proxy/…`).",
         "properties": {
@@ -2702,6 +2723,13 @@
               "null"
             ]
           },
+          "promotions": {
+            "description": "Live automatic discounts that may reach the product in this market and channel:\nbadges, never prices (the cart applies them).",
+            "items": {
+              "$ref": "#/components/schemas/PromotionResponse"
+            },
+            "type": "array"
+          },
           "title": {
             "type": "string"
           },
@@ -2735,7 +2763,8 @@
           "product_price",
           "listing_price",
           "available",
-          "matched_variants"
+          "matched_variants",
+          "promotions"
         ],
         "type": "object"
       },
@@ -3623,6 +3652,13 @@
               "null"
             ]
           },
+          "promotions": {
+            "description": "Live automatic discounts that may reach it in `country`'s market and the channel,\nconditioned only on those and the items: badges (\"Buy 2, get 1 free\"), never\nprices (the cart applies them). Empty without `country`.",
+            "items": {
+              "$ref": "#/components/schemas/PromotionResponse"
+            },
+            "type": "array"
+          },
           "sold_in_country": {
             "description": "Whether `country`'s market sells the product; `null` without `country`. A\nproduct not sold there has no prices: show it as unavailable in the country.",
             "type": [
@@ -3661,7 +3697,8 @@
           "options",
           "variants",
           "media",
-          "custom_fields"
+          "custom_fields",
+          "promotions"
         ],
         "type": "object"
       },

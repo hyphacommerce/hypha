@@ -744,6 +744,10 @@ pub struct StorefrontProductResponse {
     /// `{"custom.material": "wool", …}`.
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     custom_fields: CustomFieldValues,
+    /// Live automatic discounts that may reach it in `country`'s market and the channel,
+    /// conditioned only on those and the items: badges ("Buy 2, get 1 free"), never
+    /// prices (the cart applies them). Empty without `country`.
+    promotions: Vec<super::discounts::PromotionResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -833,6 +837,7 @@ impl StorefrontProductResponse {
             currency: market.map(|m| m.currency()),
             prices_include_tax: market.map(|m| m.prices_include_tax()),
             custom_fields: fields.json_of(p.id().as_uuid()),
+            promotions: Vec::new(),
         })
     }
 }
@@ -865,7 +870,8 @@ where
         + HasInventoryItems
         + HasLocations
         + HasCustomFieldDefinitions
-        + HasCustomFieldValues,
+        + HasCustomFieldValues
+        + hypha_discounts::HasDiscounts,
 {
     let id = view.product.id();
     let published = match ctx.channel() {
@@ -880,10 +886,26 @@ where
         None => None,
     };
     let fields = product_fields(ctx, &CallerKind::Storefront, ports, &view.product).await?;
-    Ok(Json(
+    let mut response =
         StorefrontProductResponse::new(&view, offer.as_ref(), &fields, state.media.as_deref())
-            .await?,
-    ))
+            .await?;
+    if let Some(market) = offer
+        .as_ref()
+        .filter(|o| o.sold())
+        .and_then(|o| o.market.as_ref())
+    {
+        response.promotions = super::discounts::promotions_of(
+            ports,
+            &[id],
+            market.id(),
+            ctx.channel(),
+            hypha_core::Clock::now(&state.clock),
+        )
+        .await?
+        .remove(&id)
+        .unwrap_or_default();
+    }
+    Ok(Json(response))
 }
 
 /// An active product sold through the caller's channel, priced in `country`; drafts,

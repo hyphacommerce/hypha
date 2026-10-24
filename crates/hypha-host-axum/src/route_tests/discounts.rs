@@ -514,3 +514,124 @@ async fn an_order_keeps_what_its_code_took_off_and_counts_the_use() {
         json!([{"code": "WELCOME10", "state": "limit_reached"}])
     );
 }
+
+#[tokio::test]
+async fn buy_two_get_one_free_takes_the_third_mug_off() {
+    let app = app().await;
+    let d = create(
+        &app,
+        json!({"title": "3 for 2", "method": "automatic", "kind": {"type": "buy_x_get_y",
+            "buys": {"items": {"type": "all"}}, "buy": {"type": "quantity", "quantity": 2},
+            "gets": {"items": {"type": "all"}}, "get_quantity": 1,
+            "value": {"type": "percent", "basis_points": 10000}, "uses_per_order": 1}}),
+    )
+    .await;
+    assert_eq!(
+        (&d["classes"], &d["summary"]),
+        (
+            &json!(["product"]),
+            &json!("Buy 2 × all items, get 1 × all items free (up to 1 time per order)")
+        )
+    );
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let (pk, cart) = cart_of_mugs(&app, &mug, 3).await;
+    let (_, priced) = send_as(&app, &pk, "GET", &cart, None).await;
+    assert_eq!(
+        (
+            &priced["discount_total"],
+            &priced["total"],
+            &priced["lines"][0]["discounts"]
+        ),
+        (
+            &eur(1000),
+            &eur(2000),
+            &json!([{"application": 0, "amount": eur(1000), "units": 1}])
+        )
+    );
+}
+
+#[tokio::test]
+async fn volume_tiers_apply_the_highest_reached() {
+    let app = app().await;
+    let tiers = json!({"title": "Volume", "method": "automatic", "kind": {"type": "tiered",
+        "items": {"items": {"type": "all"}}, "measure": "quantity", "tiers": [
+            {"threshold": {"type": "quantity", "quantity": 2},
+             "value": {"type": "percent", "basis_points": 1000}},
+            {"threshold": {"type": "quantity", "quantity": 3},
+             "value": {"type": "percent", "basis_points": 1500}}]}});
+    create(&app, tiers).await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let (pk, cart) = cart_of_mugs(&app, &mug, 3).await;
+    let (_, priced) = send_as(&app, &pk, "GET", &cart, None).await;
+    assert_eq!(
+        (&priced["discount_total"], &priced["discounts"][0]["value"]),
+        (&eur(450), &json!({"type": "percent", "basis_points": 1500}))
+    );
+
+    let falling = json!({"title": "Wrong", "method": "automatic", "kind": {"type": "tiered",
+        "items": {"items": {"type": "all"}}, "measure": "quantity", "tiers": [
+            {"threshold": {"type": "quantity", "quantity": 3},
+             "value": {"type": "percent", "basis_points": 1000}},
+            {"threshold": {"type": "quantity", "quantity": 2},
+             "value": {"type": "percent", "basis_points": 1500}}]}});
+    let (status, error) = send(&app, "POST", "/admin/discounts", Some(&falling.to_string())).await;
+    assert_eq!(
+        (
+            status,
+            code(&error),
+            &error["details"]["problems"][0]["path"]
+        ),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_discount",
+            &json!("kind.tiers[1].threshold")
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_product_shows_the_promotions_that_may_reach_it() {
+    let app = app().await;
+    create(
+        &app,
+        json!({"title": "3 for 2", "method": "automatic", "kind": {"type": "buy_x_get_y",
+            "buys": {"items": {"type": "all"}}, "buy": {"type": "quantity", "quantity": 2},
+            "gets": {"items": {"type": "all"}}, "get_quantity": 1,
+            "value": {"type": "percent", "basis_points": 10000}}}),
+    )
+    .await;
+    // Only for signed-in customers: never a badge every shopper sees.
+    create(
+        &app,
+        json!({"title": "Members", "method": "automatic", "conditions": [{"type": "signed_in"}],
+            "kind": ten_percent_off_the_order()}),
+    )
+    .await;
+    // An order discount reaches no product.
+    create(
+        &app,
+        json!({"title": "Order", "method": "automatic", "kind": ten_percent_off_the_order()}),
+    )
+    .await;
+    market_selling_a_mug(&app).await;
+    let pk = publishable(&app).await;
+    let (status, product) = send_as(
+        &app,
+        &pk,
+        "GET",
+        "/storefront/products/by-handle/mug?country=HR",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{product}");
+    let titles: Vec<&str> = product["promotions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(titles, vec!["3 for 2"]);
+    let (_, without_country) =
+        send_as(&app, &pk, "GET", "/storefront/products/by-handle/mug", None).await;
+    assert_eq!(without_country["promotions"], json!([]));
+}

@@ -656,3 +656,78 @@ state.
 6. **The storefront:** code field, states, strikethroughs, totals row, "Free" shipping,
    promotion badges, the seed's discounts.
 7. **Next note:** gift cards and store credit (§12), with split tender.
+
+## As built
+
+Steps 1 to 4 (the leaf and its engine, carts, checkout and orders, buy X get Y and tiers)
+and the storefront's promotions. Where they differ from the sections above, or settle
+what they left open:
+
+- **The model** (§2, §3). Classes are derived from the kind, never given: a standard
+  discount's are its rewards' targets'; buy X get Y and tiers are `product` (they reduce
+  item lines). Each condition type appears at most once. Every rule broken is reported at
+  once as `invalid_discount` with `details.problems: [{path, code, message}]` (`code`:
+  `empty`, `too_many`, `duplicate`, `too_small`, `out_of_range`, `duplicate_class`,
+  `allocation_not_allowed`, `value_not_allowed`, `threshold_mismatch`, `not_ascending`,
+  `markets_differ`, `ends_not_after_start`, `invalid_text`). An amount for a market that
+  doesn't exist is `422 market_not_found`, one in another currency `422
+  discount_currency_mismatch` (both with `{path, market}`). The subtotal and shipping take
+  only `across` amounts (the default when `allocation` is left out); a fixed price is for
+  items only, and 0 makes them free. A tier's amount is across its items; spend tiers name
+  the same markets, each rising. The method is fixed: `PATCH` refuses `method` as an
+  unknown field (`422 invalid_body`); the domain's `discount_method_fixed` guards it too.
+- **Storage.** A discount's conditions and kind are one JSON column (`rules`), `classes`
+  beside it for the list's filter. A code's own use count is a column of its row
+  (`discount_codes.used`), moved by the same conditional `UPDATE … WHERE used < limit` as
+  the discount's counter row; neither has a version. Usage rows keep what the discount took
+  off the order (`amount`) and aren't foreign keys to orders or customers (orders aren't
+  deleted, nor customers with orders). Migrations 0083 (discounts), 0084 (carts' codes),
+  0085 (orders' discounts).
+- **The engine** (§4, §5).
+  - A discount's minimum is measured on the qualifying items' prices before discounts when
+    it reduces items, else on their amounts after product discounts.
+  - Product discounts that don't combine still apply together when the lines each one
+    reduces on its own don't overlap.
+  - Several order rewards are each computed on the same subtotal, clipped as stated, then
+    spread one after another over what each line has left (by largest remainder), so no
+    line goes below zero.
+  - Shipping is priced inside the engine, by a function the cart passes: the rate is for
+    the shipped lines' subtotal after product and order discounts, and the shipping reward
+    applies to that price. One pass, so "free over €50" and a 10% order discount agree.
+  - Buy X get Y counts as bought the most expensive units still at full price (on lines no
+    other discount in the set reduces), then gets the cheapest units left of `gets`; a
+    round whose units aren't in the cart gets none. Shares on lines carry `units`.
+  - Each set's members that took nothing are dropped before sets are compared.
+- **Code states** (§6, §14). Unknown, inactive, draft and not-started codes are refused at
+  entry as `422 discount_code_invalid`, alike. A kept code whose discount ended reads
+  `expired`; one whose code or discount went (deleted, deactivated, made a draft) reads
+  `invalid`. In the cart they're flat: `{code, state, condition?, needed?: {subtotal? |
+  quantity?}, discount?}`. A second code of a discount already applied reads
+  `blocked_by_other` naming that discount.
+- **The buyer.** Signed in means the cart has a customer (a session's, or linked by staff).
+  A guest with an email is counted by their email's customer for once-per-customer, as
+  checkout will be; groups come only from a linked customer, as for prices.
+- **Carts** (§6). `subtotal` and `shipping_total` are after discounts; a line has
+  `subtotal` (before), `discounts` and `total` (after, taxed); the chosen shipping
+  `amount`, `discounts`, `total`; the cart `discounts`, `discount_total`,
+  `discount_codes`. Shipping offers carry `amount_after_discounts`. An empty cart holding
+  codes is read in full, so its codes get states. The routes answer the whole cart; rate
+  limits `discount_code_ip` (10, then one every 6 s) and `discount_code_cart` (5, then one
+  every 12 s).
+- **Orders** (§7, §8). A lost claim is `409 discounts_changed` with `{total,
+  discount_codes}` (the cart now) and isn't retried; money a payment committed goes back as
+  on `total_changed`. An order's discounts keep their value and target as the leaf's JSON
+  (`hypha_discounts::json`); Postgres's `jsonb` doesn't keep the keys' order.
+  `OrderLine::refund_of(refunded, units)` is the per-line refund rule for when refunds by
+  line come.
+- **Summaries** (§10) count what they name ("2 categories"), show amounts in the market
+  asked for (else every market's, "5.00 EUR / 600 JPY") and dates as UTC days; an end at
+  midnight reads as the day before.
+- **Promotions** (§9) are on storefront product reads with `country` and on search hits,
+  `[{discount, title, summary}]`, read at request time: live automatic discounts that may
+  reach the product (a variant list may reach any product), with no condition about the
+  buyer. Static pages that show them follow discounts through `discount.created`,
+  `discount.updated` and `discount.deleted`, which the storefront's webhook app should
+  subscribe to.
+- **Agents.** `POST /admin/discounts` is a curated MCP tool (`admin__discounts__create`);
+  every discount route is an operation.
