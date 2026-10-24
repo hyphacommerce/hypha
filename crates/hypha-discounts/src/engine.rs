@@ -215,13 +215,27 @@ pub struct Outcome {
 
 /// Applies the best set of `candidates` to `input`.
 pub fn apply(input: &DiscountInput<'_>, candidates: &[Live<'_>]) -> Outcome {
-    // One candidate per discount: a second code of the same discount adds nothing.
-    let mut seen = HashSet::new();
-    let unique: Vec<Live<'_>> = candidates
-        .iter()
-        .copied()
-        .filter(|c| seen.insert(c.discount.id()))
-        .collect();
+    // One candidate per discount: a second code of the same discount adds nothing. Codes
+    // are taken in the order the cart entered them, and a code with uses left wins over
+    // one of the same discount whose own uses are taken.
+    let entered = |c: &Live<'_>| {
+        c.code
+            .and_then(|code| input.codes.iter().position(|e| e == code))
+            .unwrap_or(usize::MAX)
+    };
+    let mut ordered: Vec<Live<'_>> = candidates.to_vec();
+    ordered.sort_by_key(|c| (c.code.is_some(), entered(c)));
+    let mut unique: Vec<Live<'_>> = Vec::new();
+    for c in ordered {
+        match unique
+            .iter_mut()
+            .find(|u| u.discount.id() == c.discount.id())
+        {
+            None => unique.push(c),
+            Some(kept) if kept.limit_reached && !c.limit_reached => *kept = c,
+            Some(_) => {}
+        }
+    }
 
     let checked: Vec<Option<CodeState>> = unique.iter().map(|c| pre_check(input, c)).collect();
     let mut standalone: Vec<Option<Evaluation>> = vec![None; unique.len()];
@@ -289,6 +303,7 @@ pub fn apply(input: &DiscountInput<'_>, candidates: &[Live<'_>]) -> Outcome {
             code: code.clone(),
             state: code_state(
                 code,
+                input,
                 candidates,
                 &unique,
                 &checked,
@@ -323,6 +338,7 @@ fn better(candidate: &Evaluation, best: &Evaluation, unique: &[Live<'_>]) -> boo
 #[allow(clippy::too_many_arguments)]
 fn code_state(
     code: &str,
+    input: &DiscountInput<'_>,
     candidates: &[Live<'_>],
     unique: &[Live<'_>],
     checked: &[Option<CodeState>],
@@ -339,11 +355,12 @@ fn code_state(
     else {
         return CodeState::Invalid;
     };
-    // A second code of a discount that came by another code.
+    // A second code of a discount that came by another code: its own state when it
+    // couldn't apply anyway (its uses taken), else the discount it gave way to.
     if unique[i].code != Some(code) {
-        return CodeState::BlockedByOther {
+        return pre_check(input, entered).unwrap_or(CodeState::BlockedByOther {
             discount: unique[i].discount.id(),
-        };
+        });
     }
     if let Some(state) = checked[i] {
         return state;

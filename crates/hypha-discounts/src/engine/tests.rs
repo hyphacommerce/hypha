@@ -1093,6 +1093,41 @@ fn a_second_code_of_the_same_discount_adds_nothing() {
     assert_eq!(outcome.applications[0].code.as_deref(), Some("ONE"));
 }
 
+#[test]
+fn of_two_codes_of_one_discount_the_first_entered_applies() {
+    let d = coded(1, percent_off_all(1000));
+    let mut i = input(vec![line(1, 1000, 1)]);
+    i.codes = vec!["ONE".to_string(), "TWO".to_string()];
+    // Storage finds them in its own order.
+    let outcome = apply(&i, &[by_code(&d, "TWO"), by_code(&d, "ONE")]);
+    assert_eq!(outcome.applications[0].code.as_deref(), Some("ONE"));
+    assert_eq!(
+        states(&outcome),
+        vec![
+            CodeState::Applied,
+            CodeState::BlockedByOther { discount: did(1) }
+        ]
+    );
+}
+
+#[test]
+fn a_used_up_code_gives_way_to_another_of_its_discount() {
+    let d = coded(1, percent_off_all(1000));
+    let mut i = input(vec![line(1, 1000, 1)]);
+    i.codes = vec!["ONE".to_string(), "TWO".to_string()];
+    let used_up = Live {
+        limit_reached: true,
+        ..by_code(&d, "ONE")
+    };
+    let outcome = apply(&i, &[used_up, by_code(&d, "TWO")]);
+    assert_eq!(outcome.total, eur(100));
+    assert_eq!(outcome.applications[0].code.as_deref(), Some("TWO"));
+    assert_eq!(
+        states(&outcome),
+        vec![CodeState::LimitReached, CodeState::Applied]
+    );
+}
+
 // ---- buy X get Y ----
 
 fn bxgy(buy: Threshold, get: u32, value: Value, uses: Option<u32>) -> Kind {
