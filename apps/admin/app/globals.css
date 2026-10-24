@@ -903,3 +903,28 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
   gap: 12px;
 }
+
+/* The discount form (components/discounts/): its sections beside a sticky summary, the
+   summary above them on narrow screens. */
+.discount-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  gap: 20px;
+  align-items: start;
+}
+
+.discount-summary {
+  position: sticky;
+  top: 72px;
+}
+
+@media (max-width: 1100px) {
+  .discount-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .discount-summary {
+    position: static;
+    order: -1;
+  }
+}
