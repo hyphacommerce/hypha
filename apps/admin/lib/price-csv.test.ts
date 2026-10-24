@@ -284,6 +284,17 @@ test("a file naming every variant by ID needs only those read", () => {
   assert.deepEqual(importVariantIds(""), []);
 });
 
+test("a step of an import reads only its lines' variants", () => {
+  const text = "variant_id,fixed_price\nvar_a,1\nvar_b,2\nvar_c,3";
+  assert.deepEqual(importVariantIds(text, { from: 3, to: 4 }), ["var_b", "var_c"]);
+  assert.deepEqual(importVariantIds(text, { from: 9, to: 9 }), []);
+  // A row without an ID outside the lines still means the whole catalog.
+  assert.equal(
+    importVariantIds("variant_id,sku,fixed_price\nvar_a,,1\n,GK-S,2", { from: 2, to: 2 }),
+    null,
+  );
+});
+
 test("a file it can't read says why", () => {
   assert.equal(previewPriceImport("", products, "EUR", currencies).error, "The file is empty.");
   assert.equal(

@@ -1,8 +1,10 @@
 "use client";
 
-// Importing a CSV file into a list: the server matches its rows and says what they'd
-// do, nothing written; applying sends the changes in steps of up to 1,000, with the
-// progress shown, and lists any row the API refused.
+// Importing a CSV file into a list: the browser sends the file straight to storage (an
+// upload; it never passes through the admin's server), the server reads it from there,
+// matches its rows and says what they'd do, nothing written; applying runs the preview's
+// steps one by one, each reading the file again, with the progress shown, and lists any
+// row the API refused.
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -22,11 +24,17 @@ import {
 import { Text } from "@astryxdesign/core/Text";
 import { useEffect, useState } from "react";
 
-import { chunk } from "@/lib/price-csv";
-import type { PriceGridDiff } from "@/lib/price-grid/types";
 import type { PriceList } from "@/lib/price-lists";
+import { sendToStorage } from "@/lib/storage-upload";
 
-import { type ImportPreviewResult, previewImport, saveFixedPrices } from "../actions";
+import {
+  type ImportPreviewResult,
+  type ImportStepResult,
+  applyPriceImport,
+  discardPriceImport,
+  previewPriceImport,
+  startPriceImport,
+} from "../actions";
 
 const STATUS_BADGES = {
   changed: { label: "Changes", variant: "info" },
@@ -35,84 +43,108 @@ const STATUS_BADGES = {
   invalid: { label: "Invalid", variant: "error" },
 } as const;
 
-/** The steps applying takes: each at most 1,000 prices to set, or 1,000 to remove. */
-function stepsOf(diff: PriceGridDiff): PriceGridDiff[] {
-  return [
-    ...chunk(diff.upserts).map((upserts) => ({ upserts, clears: [] })),
-    ...chunk(diff.clears).map((clears) => ({ upserts: [], clears })),
-  ];
-}
+/** A row (or a whole step's lines) that applying couldn't write. */
+type Failure = { key: string; where: string; error: string };
 
 type Phase =
+  | { kind: "uploading" }
   | { kind: "previewing" }
-  | { kind: "preview"; preview: ImportPreviewResult }
+  | { kind: "preview"; preview: ImportPreviewResult; upload: string }
   | { kind: "applying"; done: number; total: number }
-  | { kind: "applied"; failed: { line?: number; variant: string; error: string }[]; total: number };
+  | { kind: "applied"; failed: Failure[]; failedCount: number; total: number };
+
+/**
+ * Sends `file` to storage and has the server preview it: the upload's ID and the
+ * preview, or why not.
+ */
+async function uploadAndPreview(
+  list: string,
+  file: File,
+  onUploaded: (upload: string) => boolean,
+): Promise<{ upload: string; preview: ImportPreviewResult } | { error: string } | null> {
+  const started = await startPriceImport({ filename: file.name, byte_size: file.size });
+  if ("error" in started) return started;
+  if (!onUploaded(started.id)) return null;
+  if (!(await sendToStorage(started.upload, file))) {
+    return { error: "The file didn't reach storage. Check your connection and try again." };
+  }
+  return { upload: started.id, preview: await previewPriceImport({ list, upload: started.id }) };
+}
 
 export function ImportDialog({
   list,
-  text,
+  file,
   onClose,
 }: {
   list: PriceList;
-  /** The file's contents. */
-  text: string;
+  /** The CSV file chosen, at most `MAX_IMPORT_BYTES`. */
+  file: File;
   /** `isApplied`: something was written, so the page's prices are stale. */
   onClose: (isApplied: boolean) => void;
 }) {
-  const [phase, setPhase] = useState<Phase>({ kind: "previewing" });
+  const [phase, setPhase] = useState<Phase>({ kind: "uploading" });
   const [error, setError] = useState<string>();
 
+  // The dialog owns its upload: deleted when it closes, applied or not.
   useEffect(() => {
     let isCurrent = true;
-    previewImport(list.id, text).then(
-      (preview) => isCurrent && setPhase({ kind: "preview", preview }),
-      () => isCurrent && setError("The file couldn't be checked. Try again."),
-    );
+    let upload: string | undefined;
+    const uploaded = (id: string) => {
+      upload = id;
+      if (!isCurrent) void discardPriceImport(id);
+      else setPhase({ kind: "previewing" });
+      return isCurrent;
+    };
+    const run = async () => {
+      try {
+        const result = await uploadAndPreview(list.id, file, uploaded);
+        if (!isCurrent || !result) return;
+        if ("error" in result) setError(result.error);
+        else setPhase({ kind: "preview", ...result });
+      } catch {
+        if (isCurrent) setError("The file couldn't be checked. Try again.");
+      }
+    };
+    void run();
     return () => {
       isCurrent = false;
+      if (upload) void discardPriceImport(upload);
     };
-  }, [list.id, text]);
+  }, [list.id, file]);
 
-  const apply = async (preview: ImportPreviewResult) => {
-    const steps = stepsOf(preview.diff);
-    const total = preview.diff.upserts.length + preview.diff.clears.length;
-    const lineOf = new Map(
-      preview.rows.flatMap((r) => (r.variant ? [[r.variant, r.line] as const] : [])),
-    );
-    const failed: { line?: number; variant: string; error: string }[] = [];
+  const apply = async (preview: ImportPreviewResult, upload: string) => {
+    const total = preview.upserts + preview.clears;
+    const failed: Failure[] = [];
+    let failedCount = 0;
     let done = 0;
     setPhase({ kind: "applying", done, total });
     // One step at a time, on purpose: the progress bar moves with each.
-    for (const step of steps) {
-      let result;
+    for (const step of preview.steps) {
+      let result: ImportStepResult;
       try {
-        result = await saveFixedPrices(list.id, step);
+        result = await applyPriceImport({ list: list.id, upload, step });
       } catch {
-        result = { error: "The step couldn't be sent." };
+        result = { failed: [], error: "The step couldn't be sent." };
       }
-      const variants = [
-        ...step.upserts.map((u) => u.variant),
-        ...step.clears.map((c) => c.variant),
-      ];
-      if (result.rowErrors) {
-        for (const [variant, message] of Object.entries(result.rowErrors)) {
-          failed.push({ variant, line: lineOf.get(variant), error: message });
-        }
-      } else if (result.error) {
-        for (const variant of variants) {
-          failed.push({ variant, line: lineOf.get(variant), error: result.error });
-        }
+      if (result.error) {
+        const where = step.from === step.to ? `${step.from}` : `${step.from}–${step.to}`;
+        failed.push({ key: `lines-${step.from}`, where, error: result.error });
+        failedCount += step.changes;
       }
-      done += variants.length;
+      for (const f of result.failed) {
+        failed.push({ key: f.variant, where: f.line ? `${f.line}` : f.variant, error: f.error });
+      }
+      failedCount += result.failed.length;
+      done += step.changes;
       setPhase({ kind: "applying", done, total });
     }
-    setPhase({ kind: "applied", failed, total });
+    setPhase({ kind: "applied", failed, failedCount, total });
   };
 
-  const close = () => onClose(phase.kind === "applied" || phase.kind === "applying");
+  // Not while applying: its steps need the upload the dialog deletes when it closes.
+  const close = () => phase.kind !== "applying" && onClose(phase.kind === "applied");
   const preview = phase.kind === "preview" ? phase.preview : undefined;
-  const changes = preview ? preview.diff.upserts.length + preview.diff.clears.length : 0;
+  const changes = preview ? preview.upserts + preview.clears : 0;
 
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && close()} width={820} purpose="form">
@@ -123,9 +155,13 @@ export function ImportDialog({
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
-        {phase.kind === "previewing" && !error && (
+        {(phase.kind === "uploading" || phase.kind === "previewing") && !error && (
           <VStack gap={2}>
-            <Text color="secondary">Reading the file and matching its rows…</Text>
+            <Text color="secondary">
+              {phase.kind === "uploading"
+                ? "Uploading the file…"
+                : "Reading the file and matching its rows…"}
+            </Text>
             <Skeleton height={120} />
           </VStack>
         )}
@@ -144,7 +180,7 @@ export function ImportDialog({
             <Text type="supporting" color="secondary">
               {changes === 0
                 ? "Nothing to change: every matched row has the prices the list has."
-                : `Applying sets ${preview.diff.upserts.length.toLocaleString("en")} and removes ${preview.diff.clears.length.toLocaleString("en")} fixed ${changes === 1 ? "price" : "prices"}. Unmatched and invalid rows are left out.`}
+                : `Applying sets ${preview.upserts.toLocaleString("en")} and removes ${preview.clears.toLocaleString("en")} fixed ${changes === 1 ? "price" : "prices"}. Unmatched and invalid rows are left out.`}
             </Text>
             {preview.rows.length > 0 && (
               <div style={{ maxHeight: 360, overflow: "auto" }}>
@@ -192,7 +228,7 @@ export function ImportDialog({
           />
         )}
         {phase.kind === "applied" &&
-          (phase.failed.length === 0 ? (
+          (phase.failedCount === 0 ? (
             <Banner
               status="success"
               title={`Applied: ${phase.total.toLocaleString("en")} fixed ${phase.total === 1 ? "price" : "prices"} changed.`}
@@ -201,7 +237,7 @@ export function ImportDialog({
             <VStack gap={2}>
               <Banner
                 status="warning"
-                title={`${phase.failed.length.toLocaleString("en")} of ${phase.total.toLocaleString("en")} weren't saved`}
+                title={`${phase.failedCount.toLocaleString("en")} of ${phase.total.toLocaleString("en")} weren't saved`}
                 description="The rest were. Fix these rows and import the file again: rows already applied show as unchanged."
               />
               <div style={{ maxHeight: 280, overflow: "auto" }}>
@@ -214,8 +250,8 @@ export function ImportDialog({
                   </TableHeader>
                   <TableBody>
                     {phase.failed.slice(0, 500).map((f) => (
-                      <TableRow key={f.variant}>
-                        <TableCell>{f.line ?? f.variant}</TableCell>
+                      <TableRow key={f.key}>
+                        <TableCell>{f.where}</TableCell>
                         <TableCell>{f.error}</TableCell>
                       </TableRow>
                     ))}
@@ -240,7 +276,7 @@ export function ImportDialog({
                 variant="primary"
                 isLoading={phase.kind === "applying"}
                 isDisabled={!preview || Boolean(preview.error) || changes === 0}
-                onClick={() => preview && apply(preview)}
+                onClick={() => phase.kind === "preview" && apply(phase.preview, phase.upload)}
               />
             </>
           )}

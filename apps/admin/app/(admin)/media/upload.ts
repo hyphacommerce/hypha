@@ -1,6 +1,8 @@
 // Uploading from the browser, shared by the Media page and the product page's Media
 // section. Client code: it sends the file itself; the server actions only sign and check.
 
+import { sendToStorage } from "@/lib/storage-upload";
+
 import { completeUpload, startUpload } from "./actions";
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif", "image/gif"];
@@ -23,13 +25,7 @@ export const MAX_BYTES = 1024 * 1024 * 1024;
 export async function uploadFile(file: File): Promise<{ id: string } | { error: string }> {
   const started = await startUpload({ name: file.name, type: file.type, size: file.size });
   if ("error" in started) return started;
-  const headers = Object.fromEntries(started.upload.headers.map((h) => [h.name, h.value]));
-  const stored = await fetch(started.upload.url, {
-    method: started.upload.method,
-    headers,
-    body: file,
-  }).catch(() => undefined);
-  if (!stored?.ok)
+  if (!(await sendToStorage(started.upload, file)))
     return { error: "The upload didn't reach storage. Check your connection and retry." };
   const completed = await completeUpload(started.id);
   return completed.error ? { error: completed.error } : { id: started.id };

@@ -378,18 +378,24 @@ export function previewPriceImport(
 /**
  * The variant IDs a file names, when every data row names one: then only those variants
  * need reading. Null when some row finds its variant another way (by SKU, or handle and
- * options), which takes the whole catalog.
+ * options), which takes the whole catalog. With `lines`, only the IDs on those lines
+ * (as `ImportRow.line` counts them, both ends included), still null unless every row of
+ * the file names one.
  */
-export function importVariantIds(text: string): string[] | null {
+export function importVariantIds(
+  text: string,
+  lines?: { from: number; to: number },
+): string[] | null {
   const [header, ...data] = parseCsv(text);
   if (!header) return [];
   const field = fieldReader(header);
   if (!field.has("variant_id")) return null;
   const ids = new Set<string>();
-  for (const row of data) {
+  for (const [index, row] of data.entries()) {
     const id = field.get(row, "variant_id");
     if (id === "") return null;
-    ids.add(id);
+    const line = index + 2;
+    if (!lines || (line >= lines.from && line <= lines.to)) ids.add(id);
   }
   return [...ids];
 }

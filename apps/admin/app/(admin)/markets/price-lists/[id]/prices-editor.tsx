@@ -17,6 +17,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useEffectEvent, useRef, useState, useTransition } from "react";
 
 import { PriceGrid, type PriceGridProduct } from "@/components/price-grid/price-grid";
+import { MAX_IMPORT_BYTES } from "@/lib/price-import";
 import type { PriceList } from "@/lib/price-lists";
 
 import { saveFixedPrices } from "../actions";
@@ -98,7 +99,7 @@ export function PricesEditor({
 }) {
   const router = useRouter();
   const [isNavigating, startNavigation] = useTransition();
-  const [importText, setImportText] = useState<string>();
+  const [importFile, setImportFile] = useState<File>();
   const [fileError, setFileError] = useState<string>();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -150,16 +151,18 @@ export function PricesEditor({
             accept=".csv,.tsv,.txt,text/csv,text/plain"
             hidden
             aria-label="CSV file to import"
-            onChange={async (e) => {
+            onChange={(e) => {
               const file = e.target.files?.[0];
               e.target.value = "";
               if (!file) return;
-              if (file.size > 9 * 1024 * 1024) {
-                setFileError("That file is over 9 MB. Split it into smaller files.");
+              if (file.size > MAX_IMPORT_BYTES) {
+                setFileError(
+                  `That file is over ${MAX_IMPORT_BYTES / 1024 / 1024} MB. Split it into smaller files.`,
+                );
                 return;
               }
               setFileError(undefined);
-              setImportText(await file.text());
+              setImportFile(file);
             }}
           />
         </>
@@ -220,12 +223,12 @@ export function PricesEditor({
           {nextCursor && <Button label="Next page" onClick={() => go({}, nextCursor)} />}
         </HStack>
       )}
-      {importText !== undefined && (
+      {importFile && (
         <ImportDialog
           list={list}
-          text={importText}
+          file={importFile}
           onClose={(isApplied) => {
-            setImportText(undefined);
+            setImportFile(undefined);
             if (isApplied) router.refresh();
           }}
         />
