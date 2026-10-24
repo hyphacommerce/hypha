@@ -127,23 +127,8 @@ export function CartProvider({
   );
 
   // Changes go one at a time: each writes the cart, so two at once would race.
+  // Each answers with the cart, shown as it comes; the error is the caller's to place.
   const queue = useRef(SETTLED);
-  const change = useCallback(
-    (variant: string, quantity: number) =>
-      startTransition(async () => {
-        const run = queue.current.then(() => setQuantity({ country, variant, quantity }));
-        queue.current = run.catch(() => undefined);
-        const result = await run;
-        startTransition(() => {
-          addTransitionType(WITHIN_PAGE);
-          setCart(result.cart);
-          setError(result.error);
-        });
-      }),
-    [country],
-  );
-
-  // A code's answer is the cart too, through the same queue.
   const write = useCallback(async (send: () => Promise<CartResult>) => {
     const run = queue.current.then(send);
     queue.current = run.catch(() => undefined);
@@ -154,6 +139,14 @@ export function CartProvider({
     });
     return result.error;
   }, []);
+  const change = useCallback(
+    (variant: string, quantity: number) =>
+      startTransition(async () => {
+        const failed = await write(() => setQuantity({ country, variant, quantity }));
+        startTransition(() => setError(failed));
+      }),
+    [country, write],
+  );
   const applyCode = useCallback(
     (code: string) => write(() => applyDiscountCode({ country, code })),
     [country, write],
