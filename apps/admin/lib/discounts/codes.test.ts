@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { CODE_ALPHABET, generateCode, normaliseCode } from "./codes.ts";
+import { CODE_ALPHABET, codesFrom, generateCode, normaliseCode } from "./codes.ts";
+
+test("typed codes are split on lines, commas and spaces, each kept once as compared", () => {
+  assert.deepEqual(codesFrom("WELCOME10\nspring, Welcome10;\n\n  AUTUMN  "), [
+    "WELCOME10",
+    "spring",
+    "AUTUMN",
+  ]);
+  assert.deepEqual(codesFrom(" \n,"), []);
+});
 
 test("codes are compared trimmed, uppercase and NFKC", () => {
   assert.equal(normaliseCode("  welcome10 "), "WELCOME10");

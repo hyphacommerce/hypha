@@ -20,8 +20,6 @@ export type Template = {
   key: TemplateKey;
   label: string;
   description: string;
-  /** Not editable until the API takes its kind: the picker shows it as coming. */
-  isLater: boolean;
   make: () => DiscountDraft;
 };
 
@@ -105,35 +103,30 @@ export const TEMPLATES: readonly Template[] = [
     key: "amount_off_products",
     label: "Amount off products",
     description: "A percentage or an amount off some products, or a fixed price for them.",
-    isLater: false,
     make: amountOffProducts,
   },
   {
     key: "amount_off_order",
     label: "Amount off order",
     description: "A percentage or an amount off the order's subtotal, above a minimum or not.",
-    isLater: false,
     make: amountOffOrder,
   },
   {
     key: "buy_x_get_y",
     label: "Buy X get Y",
     description: "Buy some items, get others free or reduced: the cheapest qualifying ones.",
-    isLater: true,
     make: buyXGetY,
   },
   {
     key: "volume",
     label: "Volume",
     description: "Tiers: more off the more of some items a cart holds, or the more it spends.",
-    isLater: true,
     make: volumeTiers,
   },
   {
     key: "free_shipping",
     label: "Free shipping",
     description: "Shipping free, or reduced, for orders above a minimum.",
-    isLater: false,
     make: freeShipping,
   },
 ];

@@ -11,6 +11,23 @@ export function normaliseCode(code: string): string {
 }
 
 /**
+ * The codes in what was typed into "Add codes" (one per line, or separated by commas,
+ * semicolons or spaces), each once as the store compares them, in the order typed.
+ */
+export function codesFrom(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of text.split(/[\s,;]+/)) {
+    const code = raw.trim();
+    const key = normaliseCode(code);
+    if (code === "" || seen.has(key)) continue;
+    seen.add(key);
+    out.push(code);
+  }
+  return out;
+}
+
+/**
  * A random code of `length` characters from `CODE_ALPHABET`, after `prefix`. `random`
  * fills a byte array (the browser's `crypto.getRandomValues` by default); bytes that
  * would favour some characters are drawn again.

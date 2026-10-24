@@ -143,7 +143,7 @@ export const MAX_TIERS = 10;
 /** The longest title. */
 export const MAX_TITLE = 255;
 /** The longest code. */
-export const MAX_CODE = 255;
+export const MAX_CODE = 64;
 
 export function emptyValue(type: ValueDraft["type"] = "percent"): ValueDraft {
   return { type, percent: "", amounts: {}, allocation: "across", cheapestUnits: "1" };

@@ -333,6 +333,7 @@ const API_FIELDS: Record<string, string> = {
   starts_at: "schedule.startsAt",
   ends_at: "schedule.endsAt",
   combines_with: "combinesWith",
+  "limits.total": "limits.totalUses",
   "limits.total_uses": "limits.totalUses",
   "limits.once_per_customer": "limits.oncePerCustomer",
 };
