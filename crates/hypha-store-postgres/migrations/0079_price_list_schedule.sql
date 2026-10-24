@@ -8,8 +8,11 @@ CREATE TABLE price_list_schedule (
 
 -- Search documents carry the compare-at price a shopper sees struck through beside the
 -- price (in the same currency; NULL for none), and `on_sale` among their facets.
--- Documents written before have neither: drop them, with the option counts kept
--- alongside. The host rebuilds an empty index when it starts.
-TRUNCATE search_documents, search_option_counts, search_channel_option_counts;
-
+-- Documents written before have neither: they keep serving (as not on sale) while a full
+-- rebuild, queued here as the search handler marks one, replaces them. An index with no
+-- documents needs none (the host builds an empty index when it starts).
 ALTER TABLE search_documents ADD COLUMN compare_at bigint;
+
+INSERT INTO search_queue (target, generation)
+SELECT 'all', 1 WHERE EXISTS (SELECT 1 FROM search_documents)
+ON CONFLICT (target) DO UPDATE SET generation = search_queue.generation + 1;
