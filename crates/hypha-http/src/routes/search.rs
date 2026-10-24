@@ -85,9 +85,10 @@ pub struct SearchParams {
     /// descriptions; each must start a word. Absent lists every product.
     q: Option<String>,
     /// Repeatable `key:value`, key `option.<name>` (any case), `vendor`,
-    /// `product_type`, `tag` or `field.<namespace>.<key>` (a custom field the merchant
-    /// made a facet; a choice field's value is its key): values of one key match any,
-    /// different keys all.
+    /// `product_type`, `tag`, `on_sale` (`true`: only what's shown with a compare-at
+    /// price) or `field.<namespace>.<key>` (a custom field the merchant made a facet; a
+    /// choice field's value is its key): values of one key match any, different keys
+    /// all.
     #[serde(default)]
     #[param(value_type = Vec<String>)]
     filter: Vec<String>,
@@ -137,8 +138,13 @@ pub struct SearchHitResponse {
     product_type: Option<String>,
     /// The variant's options, in order.
     options: Vec<SearchOption>,
-    /// In the market's currency.
+    /// In the market's currency: what one of the variant shown costs.
     price: Money,
+    /// What `price` is compared against, struck through: only ever above it; `null`
+    /// when the variant shown isn't on sale.
+    compare_at: Option<Money>,
+    /// Whether the variant shown has a compare-at price (the `on_sale` facet).
+    on_sale: bool,
     /// Over the product's variants in this market.
     product_price: SearchPriceRange,
     /// Over its listing's variants.
@@ -165,8 +171,9 @@ pub struct FacetValueResponse {
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct FacetResponse {
-    /// As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`, or
-    /// `field.<namespace>.<key>` for a custom field (`field.custom.material`).
+    /// As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`, `on_sale`
+    /// (values `true` and `false`), or `field.<namespace>.<key>` for a custom field
+    /// (`field.custom.material`).
     key: String,
     /// The merchant's label, if they set one.
     label: Option<String>,
@@ -285,6 +292,8 @@ pub async fn storefront_search<S: Storage>(
                     .map(|(name, value)| SearchOption { name, value })
                     .collect(),
                 price: d.price,
+                compare_at: d.compare_at,
+                on_sale: d.on_sale,
                 product_price: range(d.product_price),
                 listing_price: range(d.listing_price),
                 available: d.available,
@@ -331,7 +340,8 @@ pub async fn storefront_search<S: Storage>(
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct FacetSettingResponse {
-    /// `option.<name>`, `vendor`, `product_type`, `tag` or `field.<namespace>.<key>`.
+    /// `option.<name>`, `vendor`, `product_type`, `tag`, `on_sale` or
+    /// `field.<namespace>.<key>`.
     key: String,
     label: Option<String>,
 }
@@ -385,7 +395,8 @@ pub async fn fetch_settings<S: Storage>(
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FacetSettingRequest {
-    /// `option.<name>`, `vendor`, `product_type`, `tag`, or `field.<namespace>.<key>`:
+    /// `option.<name>`, `vendor`, `product_type`, `tag`, `on_sale` (whether a compare-at
+    /// price is shown), or `field.<namespace>.<key>`:
     /// a product or variant custom field that's `filterable`, shown to storefronts
     /// (`access.storefront: read`) and of type `text`, `choice`, `boolean`, `integer`
     /// or a list of those (`422 facet_field_not_allowed` otherwise).

@@ -106,7 +106,7 @@ impl Event for PriceListDeleted {
 }
 
 /// `price_list.changed`: what changed, among `name`, `description`, `kind`, `status`,
-/// `starts_at`, `ends_at`, `compare_at` and `adjustment`. Events written before `fields`
+/// `starts_at`, `ends_at`, `compare_at`, `adjustment` and `audience`. Events written before `fields`
 /// existed were for a creation or a new adjustment.
 #[derive(Debug, Serialize)]
 pub struct PriceListChanged {
@@ -140,5 +140,35 @@ pub struct PricesRemoved {
 
 impl Event for PricesRemoved {
     const TYPE: &'static str = "price_list.prices_removed";
+    const VERSION: u16 = 1;
+}
+
+/// `price_list.started`: an active list's window opened (`starts_at`, µs since the epoch),
+/// so it prices the products of `catalogs` from then on. Recorded by the schedule job
+/// within a tick of the moment; a list made active inside its window records
+/// `price_list.changed` instead.
+#[derive(Debug, Serialize)]
+pub struct PriceListStarted {
+    pub price_list: PriceListId,
+    pub catalogs: Vec<CatalogId>,
+    pub starts_at: i64,
+}
+
+impl Event for PriceListStarted {
+    const TYPE: &'static str = "price_list.started";
+    const VERSION: u16 = 1;
+}
+
+/// `price_list.ended`: an active list's window closed (`ends_at`, µs since the epoch), so
+/// it prices nothing in `catalogs` any more.
+#[derive(Debug, Serialize)]
+pub struct PriceListEnded {
+    pub price_list: PriceListId,
+    pub catalogs: Vec<CatalogId>,
+    pub ends_at: i64,
+}
+
+impl Event for PriceListEnded {
+    const TYPE: &'static str = "price_list.ended";
     const VERSION: u16 = 1;
 }

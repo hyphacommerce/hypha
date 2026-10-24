@@ -2,15 +2,15 @@ use std::collections::{HashMap, HashSet};
 
 use hypha_categories::{Category, CategoryRepo, HasCategories, NewCategory};
 use hypha_core::{
-    BasisPoints, CatalogId, CategoryId, CountryCode, Currency, Handle, Keyset, MarketId, Money,
-    Page, PageLimit, PageRequest, Price, PriceListId, ProductId, RepoError, Timestamp, VariantId,
-    Version, Versioned,
+    BasisPoints, CatalogId, CategoryId, CountryCode, Currency, Handle, HasBatch, Keyset, MarketId,
+    Money, Page, PageLimit, PageRequest, Price, PriceListId, ProductId, RepoError, Timestamp,
+    VariantId, Version, Versioned,
 };
 use hypha_markets::{
     Adjustment, AppliesTo, Catalog, CatalogContext, CatalogRepo, CompareAtMode, FixedPrice,
     FixedPriceFilter, HasCatalogs, HasPriceLists, Market, MarketRepo, PriceBreak, PriceList,
     PriceListDraft, PriceListFilter, PriceListKind, PriceListPhase, PriceListRepo, PriceListSort,
-    PriceListStatus, repo::keys,
+    PriceListStatus, StagePriceListSchedule, repo::keys,
 };
 use hypha_products::{HasProducts, Product, ProductRepo, VariantPatch};
 use uuid::Uuid;
@@ -882,6 +882,44 @@ async fn price_list_delete<R: PriceListRepo>(repo: &R) {
         .await
         .unwrap();
     repo.delete(&mut list).await.unwrap();
+}
+
+/// Runs the schedule job's progress scenarios: a one-row record moved only from where a
+/// run found it.
+pub async fn price_list_schedule<S>(make: impl AsyncFn() -> S)
+where
+    S: HasPriceLists + HasBatch,
+    S::Batch: StagePriceListSchedule,
+{
+    scenario("price list schedule: none before the first run, then where it was moved");
+    let ports = make().await;
+    let at = Timestamp::from_unix_micros;
+    assert_eq!(ports.price_lists().schedule_ran_until().await, Ok(None));
+    let mut batch = ports.batch();
+    batch.advance_price_list_schedule(None, at(1_000));
+    ports.commit(batch).await.unwrap();
+    assert_eq!(
+        ports.price_lists().schedule_ran_until().await,
+        Ok(Some(at(1_000)))
+    );
+    let mut batch = ports.batch();
+    batch.advance_price_list_schedule(Some(at(1_000)), at(2_000));
+    ports.commit(batch).await.unwrap();
+    assert_eq!(
+        ports.price_lists().schedule_ran_until().await,
+        Ok(Some(at(2_000)))
+    );
+
+    scenario("price list schedule: moving it from elsewhere is stale and writes nothing");
+    for from in [None, Some(at(1_000))] {
+        let mut batch = ports.batch();
+        batch.advance_price_list_schedule(from, at(3_000));
+        assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+    }
+    assert_eq!(
+        ports.price_lists().schedule_ran_until().await,
+        Ok(Some(at(2_000)))
+    );
 }
 
 /// Runs the scenarios that read other domains' records, as the adapter stores them: the

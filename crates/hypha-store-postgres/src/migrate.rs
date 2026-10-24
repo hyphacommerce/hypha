@@ -414,6 +414,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "price_breaks",
             sql: include_str!("../migrations/0078_price_breaks.sql"),
         },
+        Migration {
+            version: 79,
+            name: "price_list_schedule",
+            sql: include_str!("../migrations/0079_price_list_schedule.sql"),
+        },
     ],
 };
 

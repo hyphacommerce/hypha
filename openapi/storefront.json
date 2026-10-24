@@ -885,7 +885,7 @@
       "FacetResponse": {
         "properties": {
           "key": {
-            "description": "As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`, or\n`field.<namespace>.<key>` for a custom field (`field.custom.material`).",
+            "description": "As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`, `on_sale`\n(values `true` and `false`), or `field.<namespace>.<key>` for a custom field\n(`field.custom.material`).",
             "type": "string"
           },
           "label": {
@@ -2402,6 +2402,17 @@
             "description": "Whether the variant shown can be sold now.",
             "type": "boolean"
           },
+          "compare_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "What `price` is compared against, struck through: only ever above it; `null`\nwhen the variant shown isn't on sale."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "handle": {
             "type": "string"
           },
@@ -2430,6 +2441,10 @@
             "minimum": 0,
             "type": "integer"
           },
+          "on_sale": {
+            "description": "Whether the variant shown has a compare-at price (the `on_sale` facet).",
+            "type": "boolean"
+          },
           "options": {
             "description": "The variant's options, in order.",
             "items": {
@@ -2439,7 +2454,7 @@
           },
           "price": {
             "$ref": "#/components/schemas/Money",
-            "description": "In the market's currency."
+            "description": "In the market's currency: what one of the variant shown costs."
           },
           "product": {
             "$ref": "#/components/schemas/ProductId"
@@ -2483,6 +2498,7 @@
           "title",
           "options",
           "price",
+          "on_sale",
           "product_price",
           "listing_price",
           "available",
@@ -8011,7 +8027,7 @@
             }
           },
           {
-            "description": "Repeatable `key:value`, key `option.<name>` (any case), `vendor`,\n`product_type`, `tag` or `field.<namespace>.<key>` (a custom field the merchant\nmade a facet; a choice field's value is its key): values of one key match any,\ndifferent keys all.",
+            "description": "Repeatable `key:value`, key `option.<name>` (any case), `vendor`,\n`product_type`, `tag`, `on_sale` (`true`: only what's shown with a compare-at\nprice) or `field.<namespace>.<key>` (a custom field the merchant made a facet; a\nchoice field's value is its key): values of one key match any, different keys\nall.",
             "in": "query",
             "name": "filter",
             "required": false,

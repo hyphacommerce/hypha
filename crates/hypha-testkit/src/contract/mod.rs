@@ -69,7 +69,9 @@ pub use extensions::extension_call_repo;
 pub use fulfillments::fulfillment_repo;
 pub use idempotency::idempotency_repo;
 pub use inventory::{inventory_item_repo, location_repo};
-pub use markets::{catalog_repo, market_repo, price_list_joins, price_list_repo};
+pub use markets::{
+    catalog_repo, market_repo, price_list_joins, price_list_repo, price_list_schedule,
+};
 pub use media::{asset_repo, blob_store};
 pub use notifications::{
     notification_repo, notification_settings_batch, notification_settings_repo,

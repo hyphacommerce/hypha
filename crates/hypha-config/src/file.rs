@@ -473,6 +473,10 @@ pub struct Jobs {
     pub media_sweep: Job,
     pub search_sync: SearchSyncJob,
     pub send_notifications: SendNotificationsJob,
+    /// Announcing price lists' windows opening and closing (`price_list.started` /
+    /// `.ended`), so search and storefront caches follow. Prices themselves follow the
+    /// clock without it. A Workers host runs it on the minute's ticks that have work.
+    pub price_list_schedule: Job,
 }
 
 impl Default for Jobs {
@@ -488,6 +492,10 @@ impl Default for Jobs {
             media_sweep: Job {
                 enabled: true,
                 interval: hour,
+            },
+            price_list_schedule: Job {
+                enabled: true,
+                interval: Dur(Duration::from_secs(60)),
             },
         }
     }

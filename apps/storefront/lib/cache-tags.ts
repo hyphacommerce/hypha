@@ -16,7 +16,8 @@ export const TAGS = {
   listings: "listings",
   /** The custom field definitions pages name, order and label values by. */
   fields: "custom-fields",
-  /** Everything priced: product pages and listings (a market or price list changed). */
+  /** Everything priced: product pages and listings (a market or price list changed, a
+   * list's window opened or closed). */
   prices: "prices",
 } as const;
 

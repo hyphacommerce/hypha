@@ -439,3 +439,32 @@ OpenAPI, SDK and e2e steps:
 6. **The admin:** the list pages, templates, grid, CSV, the product page's prices card.
 7. **The storefront:** strikethroughs, breaks, the sale shelf and filter, signed-in
    group prices. The seed gains a sale, a clearance list and a wholesale group.
+
+## As built
+
+Where steps 4 and 5 differ from the sections above:
+
+- **The schedule's progress** (§7) is `price_list_schedule.ran_until`, moved in the same
+  commit as the events it announced (`StagePriceListSchedule`; a run that lost the race
+  gets `StaleVersion` and announces nothing). The first run ever only notes where it
+  starts. A run that finds nothing to announce writes nothing, so a quiet store's job
+  costs two reads a minute.
+- **What's announced**: the start and end of every *active* list that passed since then,
+  oldest first, unless the list was written at or after that moment (its own write
+  recorded `price_list.changed`). A draft made active inside its window records
+  `price_list.changed {fields: ["status"]}` and no `started`. Payloads are
+  `{price_list, catalogs, starts_at}` and `{price_list, catalogs, ends_at}`, the times in
+  microseconds since the epoch like `customer.erasure_requested`'s `due_at`.
+- **Search** rebuilds everything on either event when `catalogs` isn't empty (as on
+  `price_list.changed`), rather than working out the affected products. The storefront
+  expires its `prices` tag on them, and now on `catalog.price_lists_added` / `_removed`.
+- **Workers**: the step runs before dispatch on the ticks the marks wake, and after every
+  write; its `retry_at` is the next window boundary, so the `due` mark wakes a tick for
+  it. Natively it's `[jobs.price_list_schedule]` (every minute), waking the dispatcher
+  when it announced something.
+- **`on_sale` is a facet key**, `on_sale` with values `true` / `false`, so the one
+  `filter=on_sale:true` both filters and (added to the merchant's facets) counts; it
+  isn't a default facet. Documents carry `compare_at` and `on_sale`, hits answer both.
+  A search that filters or counts `on_sale` is always the built-in engine's: a search
+  app indexes from webhooks and can't know what's on sale. Migration 0079 empties the
+  index (the host rebuilds it on start), as 0039 did.

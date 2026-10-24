@@ -882,6 +882,29 @@ fn a_price_list_rebuilds_for_what_prices_depend_on_and_not_for_its_name() {
 }
 
 #[test]
+fn a_price_lists_window_rebuilds_where_a_catalog_holds_it() {
+    use hypha_search::handler::targets;
+    for kind in ["price_list.started", "price_list.ended"] {
+        assert_eq!(
+            targets(&event(
+                kind,
+                serde_json::json!({"price_list": "pl_x", "catalogs": ["cat_y"], "starts_at": 1})
+            )),
+            Ok(vec![Target::All]),
+            "{kind}"
+        );
+        assert_eq!(
+            targets(&event(
+                kind,
+                serde_json::json!({"price_list": "pl_x", "catalogs": [], "ends_at": 1})
+            )),
+            Ok(vec![]),
+            "{kind}"
+        );
+    }
+}
+
+#[test]
 fn a_category_rebuilds_its_subtree_when_it_moves_or_hides() {
     use hypha_search::handler::targets;
     let category = hypha_core::CategoryId::from_uuid(Uuid::from_u128(77));

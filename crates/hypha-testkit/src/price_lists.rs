@@ -5,8 +5,8 @@ use std::{
 
 use hypha_categories::Category;
 use hypha_core::{
-    CategoryId, Keyset, Page, PageRequest, PriceListId, ProductId, Recorded, RepoError, VariantId,
-    Versioned, stamp_insert, stamp_update,
+    CategoryId, Keyset, Page, PageRequest, PriceListId, ProductId, Recorded, RepoError, Timestamp,
+    VariantId, Versioned, stamp_insert, stamp_update,
 };
 use hypha_markets::{
     FixedPrice, FixedPriceFilter, PriceList, PriceListFilter, PriceListRepo, PriceListSort,
@@ -26,6 +26,8 @@ pub struct InMemoryPriceListRepo {
     price_lists: Table<PriceListId, PriceList>,
     /// Fixed prices, stored apart from the list like a separate table would be.
     fixed_prices: Mutex<HashMap<PriceListId, HashMap<VariantId, FixedPrice>>>,
+    /// The schedule job's progress, a one-row table.
+    schedule: Mutex<Option<Timestamp>>,
     pub(crate) outbox: InMemoryOutbox,
     /// What a database would join: the catalogs' price lists (which refuse a delete), the
     /// products and categories fixed prices are filtered by, and the categories' tree.
@@ -70,6 +72,11 @@ impl InMemoryPriceListRepo {
     /// Fixed prices, locked, for a batch (`InMemoryPorts::commit`).
     pub(crate) fn lock_fixed_prices(&self) -> MutexGuard<'_, FixedPrices> {
         self.fixed_prices.lock().unwrap()
+    }
+
+    /// The schedule job's progress, locked, for a batch.
+    pub(crate) fn lock_schedule(&self) -> MutexGuard<'_, Option<Timestamp>> {
+        self.schedule.lock().unwrap()
     }
 
     /// The next `n` lookups by a unique key (`list_all`, which name checks read) find
@@ -295,6 +302,10 @@ impl PriceListRepo for InMemoryPriceListRepo {
             }
         }
         Ok(found)
+    }
+
+    async fn schedule_ran_until(&self) -> Result<Option<Timestamp>, RepoError> {
+        Ok(*self.schedule.lock().unwrap())
     }
 
     async fn product_categories(

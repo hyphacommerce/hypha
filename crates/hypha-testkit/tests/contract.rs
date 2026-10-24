@@ -57,6 +57,13 @@ fn price_list_joins() {
 }
 
 #[test]
+fn price_list_schedule() {
+    block_on(contract::price_list_schedule(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
 fn price_list_repo() {
     block_on(contract::price_list_repo(async || {
         InMemoryPriceListRepo::default()

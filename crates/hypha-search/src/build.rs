@@ -51,7 +51,7 @@ pub fn build_documents(
             compare_at: variant.compare_at_price(),
         };
         // Listings show the price of one.
-        let Ok(price) = resolve_price(pricing, prices, Quantity::ONE).map(|r| r.price) else {
+        let Ok(resolved) = resolve_price(pricing, prices, Quantity::ONE) else {
             continue;
         };
         let options: Vec<(String, String)> = product
@@ -66,7 +66,7 @@ pub fn build_documents(
                     .map(|v| (option.name().to_string(), v.label().to_string()))
             })
             .collect();
-        let price = price.money();
+        let price = resolved.price.money();
         docs.push(SearchDocument {
             market,
             product: product.id(),
@@ -85,6 +85,8 @@ pub fn build_documents(
             options,
             fields: fields.for_variant(variant.id()),
             price,
+            compare_at: resolved.compare_at.map(|c| c.money()),
+            on_sale: resolved.on_sale(),
             product_price: PriceRange::of(price),
             listing_price: PriceRange::of(price),
             available: !matches!(

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
     CatalogId, CategoryId, CountryCode, Keyset, MarketId, Page, PageRequest, PriceListId,
-    ProductId, RepoError, VariantId,
+    ProductId, RepoError, Timestamp, VariantId,
 };
 
 use crate::{
@@ -183,6 +183,9 @@ pub trait PriceListRepo {
         list: PriceListId,
         variants: &[VariantId],
     ) -> Result<HashMap<VariantId, FixedPrice>, RepoError>;
+    /// How far the schedule job has announced window boundaries
+    /// (`StagePriceListSchedule`); `None` before its first run.
+    async fn schedule_ran_until(&self) -> Result<Option<Timestamp>, RepoError>;
 }
 
 /// Whatever holds the `MarketRepo`: a host's per-request ports, a test world. Commands
@@ -245,4 +248,11 @@ pub trait StageCatalogProducts {
 pub trait StageFixedPrices {
     fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, FixedPrice)]);
     fn remove_fixed_prices(&mut self, list: PriceListId, variants: &[VariantId]);
+}
+
+/// The schedule job's progress as a batch writes it, with the events it announced: every
+/// boundary up to `to`, where the run found it at `from` (`None`: never ran). If another
+/// run moved it since, the commit fails with `StaleVersion` and writes nothing.
+pub trait StagePriceListSchedule {
+    fn advance_price_list_schedule(&mut self, from: Option<Timestamp>, to: Timestamp);
 }

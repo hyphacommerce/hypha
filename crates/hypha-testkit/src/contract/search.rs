@@ -59,6 +59,7 @@ fn query(market_n: u128) -> SearchQuery {
             FacetKey::Option("color".to_string()),
             FacetKey::Option("size".to_string()),
             FacetKey::Tag,
+            FacetKey::OnSale,
             FacetKey::Field("custom.material".to_string()),
             FacetKey::Field("custom.care".to_string()),
             FacetKey::Field("custom.organic".to_string()),
@@ -169,6 +170,14 @@ async fn battery<I: SearchIndex>(index: &I) {
     });
     base(&|q| q.filters = vec![filter(FacetKey::Tag, &["Summer"])]);
     base(&|q| q.filters = vec![filter(FacetKey::ProductType, &["Nothing"])]);
+    // On sale: one variant of a listing, a whole product.
+    base(&|q| q.filters = vec![filter(FacetKey::OnSale, &["true"])]);
+    base(&|q| {
+        q.filters = vec![
+            filter(FacetKey::OnSale, &["false"]),
+            filter(FacetKey::Vendor, &["Acme"]),
+        ]
+    });
     base(&|q| {
         q.price = PriceBounds {
             min: Some(1500),

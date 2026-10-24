@@ -603,6 +603,16 @@ mod worker_main {
             ctx.wait_until(Scoped::new(&event, async move {
                 let jobs = state.config.jobs;
                 let mut run = Run::default();
+                // Notes the next window boundary (its `retry_at`), which the write may have
+                // moved, so a tick wakes for it.
+                if jobs.price_list_schedule.enabled {
+                    run = run.and(
+                        steps("price list schedule", &state, Some(deadline), || {
+                            jobs::price_list_schedule(&state)
+                        })
+                        .await,
+                    );
+                }
                 if jobs.dispatch.enabled {
                     run = run.and(
                         steps("dispatch", &state, Some(deadline), || {
@@ -637,8 +647,8 @@ mod worker_main {
     }
 
     /// The cron tick (every minute, `wrangler.toml`; `worker!`'s `#[event(scheduled)]`):
-    /// dispatch, search sync and sending emails when KV's marks say there's work (or on
-    /// the safety net's ticks), the others on the ticks that start their interval
+    /// the price list schedule, dispatch, search sync and sending emails when KV's marks
+    /// say there's work (a window boundary due among them) or on the safety net's ticks, the others on the ticks that start their interval
     /// (`schedule::due`).
     pub async fn scheduled<D: Deployment>(tick: ScheduledEvent, env: Env, ctx: ScheduleContext) {
         let isolate = match isolate::<D>(&env).await {
@@ -664,6 +674,15 @@ mod worker_main {
                 || read.is_none_or(|marks| marks.waiting(started));
             if waiting {
                 let mut run = Run::default();
+                // Before dispatch, which sends what it announced.
+                if jobs.price_list_schedule.enabled {
+                    run = run.and(
+                        steps("price list schedule", &state, None, || {
+                            jobs::price_list_schedule(&state)
+                        })
+                        .await,
+                    );
+                }
                 if jobs.dispatch.enabled {
                     run = run.and(steps("dispatch", &state, None, || jobs::dispatch(&state)).await);
                 }

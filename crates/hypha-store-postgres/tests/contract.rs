@@ -74,6 +74,13 @@ async fn price_list_joins() {
 }
 
 #[tokio::test]
+async fn price_list_schedule() {
+    let Some(url) = database_url() else { return };
+    contract::price_list_schedule(async || fresh_store(&url, "contract_price_list_schedule").await)
+        .await;
+}
+
+#[tokio::test]
 async fn price_list_repo() {
     let Some(url) = database_url() else { return };
     contract::price_list_repo(async || fresh_store(&url, "contract_price_lists").await).await;

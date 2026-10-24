@@ -5167,7 +5167,8 @@ export interface components {
         };
         FacetSettingRequest: {
             /**
-             * @description `option.<name>`, `vendor`, `product_type`, `tag`, or `field.<namespace>.<key>`:
+             * @description `option.<name>`, `vendor`, `product_type`, `tag`, `on_sale` (whether a compare-at
+             *     price is shown), or `field.<namespace>.<key>`:
              *     a product or variant custom field that's `filterable`, shown to storefronts
              *     (`access.storefront: read`) and of type `text`, `choice`, `boolean`, `integer`
              *     or a list of those (`422 facet_field_not_allowed` otherwise).
@@ -5177,7 +5178,10 @@ export interface components {
             label?: string | null;
         };
         FacetSettingResponse: {
-            /** @description `option.<name>`, `vendor`, `product_type`, `tag` or `field.<namespace>.<key>`. */
+            /**
+             * @description `option.<name>`, `vendor`, `product_type`, `tag`, `on_sale` or
+             *     `field.<namespace>.<key>`.
+             */
             key: string;
             label?: string | null;
         };

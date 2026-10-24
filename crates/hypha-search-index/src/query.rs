@@ -7,7 +7,7 @@ use hypha_core::{CategoryId, ChannelId, MarketId, Money};
 use crate::SearchDocument;
 
 /// What a facet counts, and a filter narrows by. As a string (the API's form):
-/// `option.<name>` (name lowercased), `vendor`, `product_type`, `tag`,
+/// `option.<name>` (name lowercased), `vendor`, `product_type`, `tag`, `on_sale`,
 /// `field.<namespace>.<key>`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum FacetKey {
@@ -16,6 +16,8 @@ pub enum FacetKey {
     Vendor,
     ProductType,
     Tag,
+    /// Whether a compare-at price is shown beside the price: `true` or `false`.
+    OnSale,
     /// A custom field, by its full key (`custom.material`): the storefront-visible,
     /// filterable product and variant fields. This leaf can't see definitions: the settings
     /// command checks the field is allowed.
@@ -34,6 +36,7 @@ impl fmt::Display for FacetKey {
             FacetKey::Vendor => f.write_str("vendor"),
             FacetKey::ProductType => f.write_str("product_type"),
             FacetKey::Tag => f.write_str("tag"),
+            FacetKey::OnSale => f.write_str("on_sale"),
             FacetKey::Field(key) => write!(f, "{}{key}", Self::FIELD),
         }
     }
@@ -50,6 +53,7 @@ impl FromStr for FacetKey {
             "vendor" => Ok(FacetKey::Vendor),
             "product_type" => Ok(FacetKey::ProductType),
             "tag" => Ok(FacetKey::Tag),
+            "on_sale" => Ok(FacetKey::OnSale),
             _ => {
                 if let Some(key) = s.strip_prefix(Self::FIELD) {
                     let shaped = key

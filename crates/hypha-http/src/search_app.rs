@@ -110,6 +110,13 @@ where
         let Some(app) = &self.app else {
             return self.built_in.search(query).await;
         };
+        // An app indexes products from webhooks and can't know what's on sale: that's
+        // pricing, which only the built-in documents carry.
+        let on_sale = query.filters.iter().any(|f| f.key == FacetKey::OnSale)
+            || query.facets.contains(&FacetKey::OnSale);
+        if on_sale {
+            return self.built_in.search(query).await;
+        }
         match self.ask(app, query).await {
             Ok(results) => Ok(results),
             Err(why) => {

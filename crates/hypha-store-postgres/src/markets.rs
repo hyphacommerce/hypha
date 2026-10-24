@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use futures_util::future::try_join;
 use hypha_core::{
     BasisPoints, CatalogId, CategoryId, CountryCode, Direction, Keyset, MarketId, Page,
-    PageRequest, Price, PriceListId, ProductId, Recorded, RepoError, SortKey, VariantId, Version,
-    Versioned, stamp_insert, stamp_update,
+    PageRequest, Price, PriceListId, ProductId, Recorded, RepoError, SortKey, Timestamp, VariantId,
+    Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_markets::{
     Adjustment, AppliesTo, Catalog, CatalogContext, CatalogRepo, CatalogSnapshot, CompareAtMode,
@@ -717,6 +717,20 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         consistent_read!(conn, |tx| load_fixed_prices(tx, &lists, &ids).await)
     }
 
+    async fn schedule_ran_until(&self) -> Result<Option<Timestamp>, RepoError> {
+        let mut conn = self.conn().await;
+        let row = conn
+            .db()
+            .query_typed_opt(
+                &format!("SELECT {} FROM price_list_schedule", micros("ran_until")),
+                &[],
+            )
+            .await
+            .map_err(repo_error)?;
+        row.map(|r| col::<i64>(&r, "ran_until").map(Timestamp::from_unix_micros))
+            .transpose()
+    }
+
     async fn product_categories(
         &self,
         products: &[ProductId],
@@ -1228,4 +1242,45 @@ fn fixed_price_from_row(row: &Row) -> Result<(VariantId, FixedPrice), RepoError>
     )
     .map_err(corrupt)?;
     Ok((VariantId::from_uuid(col(row, "variant_id")?), fixed))
+}
+
+/// Moves the schedule job's progress from `from` (`None`: no row yet) to `to`, or fails
+/// with `StaleVersion` when another run moved it first.
+pub(crate) async fn advance_price_list_schedule(
+    client: &impl Queries,
+    from: Option<Timestamp>,
+    to: Timestamp,
+) -> Result<(), RepoError> {
+    let moved = match from {
+        None => client
+            .query_typed(
+                &format!(
+                    "INSERT INTO price_list_schedule (ran_until) VALUES ({})
+                     ON CONFLICT (id) DO NOTHING RETURNING id",
+                    ts(1)
+                ),
+                &[(&to.unix_micros(), Type::INT8)],
+            )
+            .await
+            .map_err(repo_error)?,
+        Some(from) => client
+            .query_typed(
+                &format!(
+                    "UPDATE price_list_schedule SET ran_until = {} WHERE ran_until = {}
+                     RETURNING id",
+                    ts(1),
+                    ts(2)
+                ),
+                &[
+                    (&to.unix_micros(), Type::INT8),
+                    (&from.unix_micros(), Type::INT8),
+                ],
+            )
+            .await
+            .map_err(repo_error)?,
+    };
+    if moved.is_empty() {
+        return Err(RepoError::StaleVersion);
+    }
+    Ok(())
 }

@@ -649,3 +649,61 @@ async fn quantity_prices_show_on_the_product_and_price_the_cart_line() {
     .await;
     assert_eq!(prices["markets"][0]["variants"][0]["price"], eur(900));
 }
+
+#[tokio::test]
+async fn a_sales_start_is_announced_once_and_search_follows() {
+    let app = app().await;
+    let (_, mug, lists) = lists_on_the_catalog(
+        &app,
+        vec![json!({"name": "Weekend", "currency": "EUR", "kind": "sale",
+            "starts_at": "2099-01-01T00:00:00Z", "adjustment": {"percent_bps": -2000}})],
+    )
+    .await;
+    settle_search(&app).await;
+    let pk = publishable(&app).await;
+    let on_sale = "/storefront/search?country=HR&filter=on_sale:true";
+    let (status, found) = send_as(&app, &pk, "GET", on_sale, None).await;
+    assert_eq!(
+        (status, &found["total"]),
+        (StatusCode::OK, &json!(0)),
+        "{found}"
+    );
+
+    // Time passes: the window opened an hour ago, after the job last looked and after the
+    // list was last written (a write records its own event).
+    let list: hypha_core::PriceListId = lists[0].parse().unwrap();
+    sql(
+        &app,
+        &format!(
+            "UPDATE price_lists SET starts_at = now() - interval '1 hour',
+                 updated_at = now() - interval '2 hours'
+             WHERE id = '{}';
+             INSERT INTO price_list_schedule (ran_until) VALUES (now() - interval '90 minutes');",
+            list.as_uuid()
+        ),
+    )
+    .await;
+    let ran = hypha_http::jobs::price_list_schedule(&app.state)
+        .await
+        .unwrap();
+    assert!(!ran.idle);
+    let again = hypha_http::jobs::price_list_schedule(&app.state)
+        .await
+        .unwrap();
+    assert!(again.idle, "announced once");
+
+    settle_search(&app).await;
+    let (_, found) = send_as(&app, &pk, "GET", on_sale, None).await;
+    let hit = &found["items"][0];
+    assert_eq!(
+        (
+            &found["total"],
+            &hit["variant"],
+            &hit["price"],
+            &hit["compare_at"],
+            &hit["on_sale"]
+        ),
+        (&json!(1), &json!(mug), &eur(800), &eur(1000), &json!(true)),
+        "{found}"
+    );
+}

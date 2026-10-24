@@ -1261,6 +1261,19 @@ echo "## search"
 wait_for "search sees every lamp reserved" "$BASE/storefront/search?country=HR&q=LAMP" '"available":false'
 contains "priced in the market (the list takes 10%)" '"price":{"amount":900,"currency":"EUR"}'
 contains "with facets" '"facets":['
+step "nothing on sale yet" 200 - "$BASE/storefront/search?country=HR&filter=on_sale:true"
+contains "no hits" '"total":0'
+step "the lamp gets a was price" 200 - -X PATCH "$BASE/admin/products/$LAMP/variants/$LAMP_VAR" -H "$JSON" \
+    -d '{"compare_at_price":{"amount":2000,"currency":"EUR"}}'
+wait_for "search finds it on sale" "$BASE/storefront/search?country=HR&filter=on_sale:true" '"handle":"lamp"'
+contains "struck through as the list adjusts it" '"compare_at":{"amount":1800,"currency":"EUR"},"on_sale":true'
+step "count what's on sale" 200 - -X PATCH "$BASE/admin/search/settings" -H "$JSON" -d '{"facets":[{"key":"on_sale"}]}'
+step "the on_sale facet" 200 - "$BASE/storefront/search?country=HR"
+contains "counts the lamp" '{"key":"on_sale","label":null,"values":['
+step "back to the default facets" 200 - -X PATCH "$BASE/admin/search/settings" -H "$JSON" -d '{"facets":[]}'
+step "and no was price" 200 - -X PATCH "$BASE/admin/products/$LAMP/variants/$LAMP_VAR" -H "$JSON" \
+    -d '{"compare_at_price":null}'
+wait_for "off sale again" "$BASE/storefront/search?country=HR&filter=on_sale:true" '"total":0'
 step "the shop's listing (no q)" 200 - "$BASE/storefront/search?country=HR&sort=price_asc&limit=1"
 contains "pages with a cursor" '"has_more":true,"next_cursor":"'
 step "a filter is key:value" 422 invalid_filter "$BASE/storefront/search?country=HR&filter=Red"

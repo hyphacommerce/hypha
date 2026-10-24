@@ -59,9 +59,9 @@ const INSERT_ROWS: usize = 1000;
 const COLUMNS: &str =
     "market_id, product_id, variant_id, listing, channels, categories, handle, title, title_sort,
     variant_title, description, vendor, product_type, tags, sku, option_names, option_values,
-    currency, price, product_min, product_max, listing_min, listing_max, available, image_id,
-    created_us, position, terms_a, terms_b, terms_d, tsv, facets";
-const PER_ROW: usize = 32;
+    currency, price, compare_at, product_min, product_max, listing_min, listing_max, available,
+    image_id, created_us, position, terms_a, terms_b, terms_d, tsv, facets";
+const PER_ROW: usize = 33;
 
 // ---------- the engine ----------
 
@@ -318,6 +318,7 @@ async fn insert_documents(
             params.add(values, Type::TEXT_ARRAY),
             params.add(d.price.currency().as_str().to_string(), Type::TEXT),
             params.add(d.price.amount(), Type::INT8),
+            params.add(d.compare_at.map(|c| c.amount()), Type::INT8),
             params.add(d.product_price.min.amount(), Type::INT8),
             params.add(d.product_price.max.amount(), Type::INT8),
             params.add(d.listing_price.min.amount(), Type::INT8),
@@ -490,10 +491,13 @@ fn facet_branch(source: &str, keys: &[&FacetKey], distinct: bool, params: &mut P
 
 /// Vendor, product type and tags are the product's, the same on all its variants: a listing
 /// or product group has one set of them, so they count once per group, from its
-/// representative, instead of over every matching variant. Custom fields aren't: a
-/// variant's value wins over its product's.
+/// representative, instead of over every matching variant. Options, custom fields (a
+/// variant's value wins over its product's) and being on sale are each variant's.
 fn product_level(key: &FacetKey) -> bool {
-    !matches!(key, FacetKey::Option(_) | FacetKey::Field(_))
+    !matches!(
+        key,
+        FacetKey::Option(_) | FacetKey::Field(_) | FacetKey::OnSale
+    )
 }
 
 async fn run_search(tx: &impl Queries, q: &SearchQuery) -> Result<SearchResults, RepoError> {
@@ -694,6 +698,9 @@ fn document_from_row(row: &Row) -> Result<SearchDocument, RepoError> {
     };
     let names: Vec<String> = col(row, "option_names")?;
     let values: Vec<String> = col(row, "option_values")?;
+    let compare_at = col::<Option<i64>>(row, "compare_at")?
+        .map(|n| Money::new(n, currency).map_err(corrupt))
+        .transpose()?;
     // Custom field values live only in `facets`, in the document's order: no column of
     // their own.
     let field_prefix = FacetKey::Field(String::new()).to_string();
@@ -729,6 +736,8 @@ fn document_from_row(row: &Row) -> Result<SearchDocument, RepoError> {
         options: names.into_iter().zip(values).collect(),
         fields,
         price: money("price")?,
+        compare_at,
+        on_sale: compare_at.is_some(),
         product_price: PriceRange {
             min: money("product_min")?,
             max: money("product_max")?,

@@ -43,6 +43,9 @@ const VARIANT_PRICES: &[&str] = &["price_list.prices_set", "price_list.prices_re
 const STOCK: &[&str] = &["inventory_item.changed", "inventory_item.deleted"];
 /// Rare and wide: which products a market sells, at what price, from where.
 const EVERYTHING: &[&str] = &["catalog.changed"];
+/// A list's window opened or closed: what it prices changed in its catalogs' markets, as
+/// when it's edited. One on no catalog prices nothing.
+const WINDOWS: &[&str] = &["price_list.started", "price_list.ended"];
 /// What to rebuild when one of the fields named changed (the event's `fields`):
 /// - a location's `markets` decide where its stock counts, the settings' `split_by`
 ///   changes every listing key, and a market's countries, currency and tax rule decide
@@ -103,6 +106,7 @@ impl<P: HasSearchQueue> EventHandler<P> for SearchIndexer {
             VARIANT_PRICES,
             STOCK,
             EVERYTHING,
+            WINDOWS,
         ]
         .iter()
         .any(|types| types.contains(&event_type))
@@ -157,6 +161,9 @@ pub fn targets(event: &StoredEvent) -> Result<Vec<Target>, String> {
         parse("variant", |id| id.parse().ok().map(Target::Variant))
     } else if EVERYTHING.contains(&t) {
         Ok(vec![Target::All])
+    } else if WINDOWS.contains(&t) {
+        let held = !ids("catalogs")?.is_empty();
+        Ok(if held { vec![Target::All] } else { vec![] })
     } else if let Some((_, wanted)) = FIELD_DEFINITIONS.iter().find(|(w, _)| *w == t) {
         let owner = event.data["owner_type"]
             .as_str()

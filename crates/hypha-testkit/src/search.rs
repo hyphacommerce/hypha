@@ -336,6 +336,12 @@ pub fn search_fixture() -> Vec<SearchDocument> {
         },
     ];
 
+    // The blue linen shirt and the mug are on sale in market 1.
+    let on_sale = |market: u128, variant: u128| match (market, variant) {
+        (1, 13) => Some(3500),
+        (1, 31) => Some(1200),
+        _ => None,
+    };
     let mut documents = Vec::new();
     for p in products {
         let id = product(p.n);
@@ -403,6 +409,8 @@ pub fn search_fixture() -> Vec<SearchDocument> {
                 options,
                 fields: fixture_fields(variant.n),
                 price: eur(variant.price),
+                compare_at: on_sale(p.market, variant.n).map(eur),
+                on_sale: on_sale(p.market, variant.n).is_some(),
                 product_price: range(&prices),
                 listing_price: range(&same_listing),
                 available: variant.available,

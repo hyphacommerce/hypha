@@ -24,7 +24,7 @@ use hypha_customers::{
 };
 use hypha_fulfillment::{Fulfillment, FulfillmentSnapshot, StageFulfillments};
 use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
-use hypha_markets::{FixedPrice, StageCatalogProducts, StageFixedPrices};
+use hypha_markets::{FixedPrice, StageCatalogProducts, StageFixedPrices, StagePriceListSchedule};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_notifications::{
     NotificationSettings, NotificationSettingsSnapshot, StageNotificationSettings,
@@ -139,6 +139,8 @@ enum Staged {
     CategoryProducts(CategoryId, Vec<ProductId>, bool),
     /// Fixed prices set (`Some` price) or removed (`None`), per variant.
     FixedPrices(PriceListId, Vec<(VariantId, Option<FixedPrice>)>),
+    /// The schedule job's progress moved from the first to the second.
+    PriceListSchedule(Option<Timestamp>, Timestamp),
     NewNotificationSettings(NotificationSettingsSnapshot),
     NotificationSettings(NotificationSettingsSnapshot),
     NewApp(AppSnapshot),
@@ -217,6 +219,7 @@ impl Staged {
             Staged::CatalogProducts(..) => 29,
             Staged::Publications(..) => 30,
             Staged::FixedPrices(..) => 31,
+            Staged::PriceListSchedule(..) => 31,
             Staged::TaxAssignment(..) => 32,
             Staged::Idempotency(_) => 33,
             Staged::InventoryItem(_) => 34,
@@ -761,6 +764,9 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     Staged::CustomerGroupMembers(group, customers, false) => {
                         remove_group_members(&db, group, &customers).await?
                     }
+                    Staged::PriceListSchedule(from, to) => {
+                        crate::markets::advance_price_list_schedule(&db, from, to).await?
+                    }
                     Staged::FixedPrices(list, changes) => {
                         let set: Vec<(VariantId, FixedPrice)> = changes
                             .iter()
@@ -895,6 +901,12 @@ impl StageCatalogProducts for PgBatch {
 
     fn remove_catalog_products(&mut self, catalog: CatalogId, products: &[ProductId]) {
         self.stage(Staged::CatalogProducts(catalog, products.to_vec(), false));
+    }
+}
+
+impl StagePriceListSchedule for PgBatch {
+    fn advance_price_list_schedule(&mut self, from: Option<Timestamp>, to: Timestamp) {
+        self.stage(Staged::PriceListSchedule(from, to));
     }
 }
 

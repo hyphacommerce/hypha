@@ -1033,8 +1033,9 @@ export interface components {
         EventId: string;
         FacetResponse: {
             /**
-             * @description As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`, or
-             *     `field.<namespace>.<key>` for a custom field (`field.custom.material`).
+             * @description As `filter` takes it: `option.color`, `vendor`, `product_type`, `tag`, `on_sale`
+             *     (values `true` and `false`), or `field.<namespace>.<key>` for a custom field
+             *     (`field.custom.material`).
              */
             key: string;
             /** @description The merchant's label, if they set one. */
@@ -1582,6 +1583,7 @@ export interface components {
         SearchHitResponse: {
             /** @description Whether the variant shown can be sold now. */
             available: boolean;
+            compare_at?: components["schemas"]["Money"] | null;
             handle: string;
             image?: components["schemas"]["ProductMediaResponse"] | null;
             /** @description The listing it belongs to: the product, split by the merchant's options. */
@@ -1593,9 +1595,11 @@ export interface components {
              * @description How many of the group's variants matched.
              */
             matched_variants: number;
+            /** @description Whether the variant shown has a compare-at price (the `on_sale` facet). */
+            on_sale: boolean;
             /** @description The variant's options, in order. */
             options: components["schemas"]["SearchOption"][];
-            /** @description In the market's currency. */
+            /** @description In the market's currency: what one of the variant shown costs. */
             price: components["schemas"]["Money"];
             product: components["schemas"]["ProductId"];
             /** @description Over the product's variants in this market. */
@@ -5450,9 +5454,10 @@ export interface operations {
                 q?: string;
                 /**
                  * @description Repeatable `key:value`, key `option.<name>` (any case), `vendor`,
-                 *     `product_type`, `tag` or `field.<namespace>.<key>` (a custom field the merchant
-                 *     made a facet; a choice field's value is its key): values of one key match any,
-                 *     different keys all.
+                 *     `product_type`, `tag`, `on_sale` (`true`: only what's shown with a compare-at
+                 *     price) or `field.<namespace>.<key>` (a custom field the merchant made a facet; a
+                 *     choice field's value is its key): values of one key match any, different keys
+                 *     all.
                  */
                 filter?: string[];
                 /** @description Inclusive, in the market currency's minor units. */
