@@ -452,3 +452,196 @@ html[data-theme="dark"] .hypha-wordmark-dark {
 .tile-amounts > span {
   white-space: nowrap;
 }
+
+/* The price grid (components/price-grid): a spreadsheet of products and their variants,
+   in a bordered card like the list card's, scrolling inside with the header and the
+   names column held in place. */
+.pg {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pg-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-container);
+  background: var(--color-background-card);
+  overflow: hidden;
+}
+
+.pg-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.pg-spacer {
+  flex: 1;
+}
+
+.pg-scroll {
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.pg-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.pg-cell {
+  height: 40px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--color-border);
+  border-inline-start: 1px solid var(--color-border);
+  background: var(--color-background-card);
+  vertical-align: middle;
+  white-space: nowrap;
+  outline: none;
+}
+
+.pg-head .pg-cell {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: auto;
+  padding: 8px 12px;
+  background: var(--color-background-muted);
+  font-weight: 500;
+  text-align: start;
+}
+
+.pg-body .pg-cell {
+  cursor: cell;
+}
+
+.pg-table [data-numeric] {
+  text-align: end;
+}
+
+/* The names stay in view while the prices scroll sideways. */
+.pg-row > .pg-cell:first-child {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  min-width: 240px;
+  border-inline-start: none;
+}
+
+.pg-head .pg-cell:first-child {
+  z-index: 3;
+}
+
+.pg-body .pg-row:last-child .pg-cell {
+  border-bottom: none;
+}
+
+.pg-row[data-kind="product"] .pg-cell {
+  background: var(--color-background-muted);
+  font-weight: 500;
+}
+
+.pg-cell[aria-selected="true"] {
+  background: var(--color-accent-muted);
+}
+
+/* The cell the keyboard is on. */
+.pg-cell:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* Changed and not saved yet: a bar down the cell's start. */
+.pg-cell[data-dirty] {
+  box-shadow: inset 3px 0 0 var(--color-warning);
+}
+
+.pg-cell[aria-invalid="true"] {
+  background: var(--color-error-muted);
+  color: var(--color-error);
+  box-shadow: inset 3px 0 0 var(--color-error);
+}
+
+.pg-body .pg-cell[data-readonly]:not(:first-child) {
+  color: var(--color-text-secondary);
+}
+
+.pg-empty {
+  padding: 16px 12px;
+}
+
+.pg-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pg-name-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.pg-variant {
+  padding-inline-start: 28px;
+}
+
+.pg-toggle {
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--color-icon-secondary);
+  cursor: pointer;
+}
+
+.pg-toggle:hover {
+  background: var(--color-overlay-hover);
+}
+
+.pg-none {
+  color: var(--color-text-disabled);
+}
+
+/* A list price the adjustment works out, not one typed in. */
+.pg-derived {
+  color: var(--color-text-disabled);
+  font-style: italic;
+}
+
+.pg-row-error,
+.pg-status-error {
+  color: var(--color-error);
+  font-size: var(--font-size-sm);
+}
+
+.pg-input {
+  width: 100%;
+  min-width: 80px;
+  height: 30px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: var(--color-background-card);
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: end;
+  outline: none;
+  user-select: text;
+}
+
+.pg-status {
+  min-height: 37px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}

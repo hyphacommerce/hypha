@@ -14,7 +14,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "start": "vite preview",
-    "test": "node --test lib/*.test.ts",
+    "test": "node --test \"lib/**/*.test.ts\"",
     "typecheck": "node scripts/clean-next-types.mjs && tsc --noEmit",
     "theme:build": "astryx theme build theme/hyphaTheme.ts --out theme/hypha.css",
     "theme:check": "astryx theme build theme/hyphaTheme.ts --out theme/hypha.css --check"
