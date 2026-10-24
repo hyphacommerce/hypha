@@ -324,6 +324,8 @@ pub enum Family {
     /// Orders and carts.
     Order,
     Notification,
+    /// A discount's use: its customer's names and email.
+    DiscountUsage,
 }
 
 impl Family {
@@ -332,6 +334,11 @@ impl Family {
             Family::Customer => r.customer(node),
             Family::Order => r.order(node),
             Family::Notification => r.notification(node),
+            Family::DiscountUsage => {
+                if let Node::Object(object) = node {
+                    r.strip(object, &[NAME, EMAIL]);
+                }
+            }
         }
     }
 }

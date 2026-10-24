@@ -80,7 +80,9 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
         };
         let fetch = i64::from(page.limit.get()) + 1;
         let group = filter.group().map(|g| g.as_uuid());
-        let mut extra = Params::after(5);
+        let ids: Option<Vec<uuid::Uuid>> =
+            (!filter.ids().is_empty()).then(|| filter.ids().iter().map(|c| c.as_uuid()).collect());
+        let mut extra = Params::after(6);
         let fields = field_predicates(filter.fields(), "c.id", &mut extra);
         let mut conn = self.conn().await;
         let rows = conn
@@ -100,6 +102,7 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
                        AND ($5::uuid IS NULL OR EXISTS (
                             SELECT 1 FROM customer_group_members m
                             WHERE m.group_id = $5 AND m.customer_id = c.id))
+                       AND ($6::uuid[] IS NULL OR c.id = ANY($6))
                        {fields}
                      ORDER BY {order} LIMIT $2",
                     stamps = stamp_columns("c."),
@@ -110,6 +113,7 @@ impl<C: PgConnection> CustomerRepo for PgStore<C> {
                     (&filter.q(), Type::TEXT),
                     (&text_key, Type::TEXT),
                     (&group, Type::UUID),
+                    (&ids, Type::UUID_ARRAY),
                 ]),
             )
             .await

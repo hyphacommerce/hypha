@@ -582,8 +582,26 @@ step "the codes, by code" 200 - "$BASE/admin/discounts/$WELCOME/codes"
 contains "as typed and normalised" '"code":"welcome10","normalized":"WELCOME10"'
 step "export a batch as CSV" 200 - "$BASE/admin/discounts/$WELCOME/codes/export?batch=Newsletter"
 contains "with its header" 'code,normalized,usage_limit,used,active,batch,created_at'
+step "deactivate the batch" 200 - -X PATCH "$BASE/admin/discounts/$WELCOME/codes" -H "$JSON" \
+    -d '{"batch":"Newsletter","active":false}'
+contains "three changed" '"updated":3'
+step "the inactive codes" 200 - "$BASE/admin/discounts/$WELCOME/codes?active=false"
+contains "the batch's" '"normalized":"NL-'
+lacks "not the welcome code" '"normalized":"WELCOME10"'
+step "reactivating a code that's active changes nothing" 200 - -X PATCH "$BASE/admin/discounts/$WELCOME/codes" \
+    -H "$JSON" -d '{"codes":["welcome10"],"active":true}'
+contains "none changed" '"updated":0'
 step "remove the batch" 200 - -X DELETE "$BASE/admin/discounts/$WELCOME/codes" -H "$JSON" -d '{"batch":"Newsletter"}'
 contains "three went" '"removed":3'
+step "a summary worked out without saving" 200 - -X POST "$BASE/admin/discounts/summary" -H "$JSON" \
+    -d '{"title":"Try","method":"codes","kind":{"type":"standard","rewards":[{"target":{"type":"subtotal"},"value":{"type":"percent","basis_points":1500}}]}}'
+contains "its sentence" '"summary":"15% off the order","problems":[]'
+step "a broken one lists its problems" 200 - -X POST "$BASE/admin/discounts/summary" -H "$JSON" \
+    -d '{"title":"Try","method":"codes","kind":{"type":"standard","rewards":[]}}'
+contains "with no sentence" '"summary":null,"problems":[{"path":"kind.rewards"'
+step "changes over a saved one" 200 - -X POST "$BASE/admin/discounts/summary" -H "$JSON" \
+    -d "{\"id\":\"$WELCOME\",\"limits\":{\"total\":5}}"
+contains "as PATCH would make it" '"summary":"10% off the order · 5 uses"'
 step "found by its code" 200 - "$BASE/admin/discounts?code=Welcome10"
 contains "the welcome offer" "\"id\":\"$WELCOME\""
 step "no uses yet" 200 - "$BASE/admin/discounts/$WELCOME/usage"
@@ -968,6 +986,9 @@ contains "and the shipping line" '"code":"standard","name":"Standard","service":
 lacks "but not its provider, which is for staff" '"provider"'
 step "the welcome code was used once" 200 - "$BASE/admin/discounts/$WELCOME/usage"
 contains "on the shipping cart's order" '"code":"WELCOME10","amount":{"amount":90,"currency":"EUR"}'
+contains "with the order's number" '"order_number":'
+step "what it took off in all" 200 - "$BASE/admin/discounts/$WELCOME"
+contains "per currency" '"discounted_total":[{"amount":90,"currency":"EUR"}]'
 
 echo "## payment and search apps"
 step "a payment app that isn't installed" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \
@@ -1243,6 +1264,8 @@ step "rename customer" 200 - -X PATCH "$BASE/admin/customers/$CUSTOMER" -H "$JSO
 contains "null clears, others change" '"first_name":null,"last_name":"Horvat"'
 step "customers by text, by name" 200 - "$BASE/admin/customers?q=horvat&sort=name_asc"
 contains "finds her" "\"items\":[{\"id\":\"$CUSTOMER\""
+step "customers by their IDs" 200 - "$BASE/admin/customers?ids=$CUSTOMER,cus_00000000000000000000000000000063"
+contains "only her" "\"items\":[{\"id\":\"$CUSTOMER\""
 step "add shipping address" 201 - -X POST "$BASE/admin/customers/$CUSTOMER/addresses" -H "$JSON" \
     -d '{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR","default_shipping":true}'
 ADDRESS=$(address)

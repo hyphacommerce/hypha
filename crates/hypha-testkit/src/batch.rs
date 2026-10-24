@@ -144,6 +144,7 @@ enum Staged {
     DiscountCodes(Vec<DiscountCode>),
     RemovedDiscountCodes(hypha_core::DiscountId, CodeSelection),
     DiscountUsage(UsageClaim),
+    DiscountCodesActive(hypha_core::DiscountId, CodeSelection, bool),
     /// The discount schedule job's progress moved from the first to the second.
     DiscountSchedule(Option<Timestamp>, Timestamp),
 }
@@ -163,6 +164,15 @@ impl StageDiscounts for InMemoryBatch {
 
     fn remove_discount_codes(&mut self, discount: hypha_core::DiscountId, codes: CodeSelection) {
         self.stage(Staged::RemovedDiscountCodes(discount, codes));
+    }
+
+    fn set_discount_codes_active(
+        &mut self,
+        discount: hypha_core::DiscountId,
+        codes: CodeSelection,
+        active: bool,
+    ) {
+        self.stage(Staged::DiscountCodesActive(discount, codes, active));
     }
 
     fn claim_discount_usage(&mut self, claim: UsageClaim) {
@@ -1092,6 +1102,9 @@ impl HasBatch for InMemoryPorts {
                         discount_rows.remove_codes(discount, &selection)
                     }
                     Staged::DiscountUsage(claim) => discount_rows.claim(&claim)?,
+                    Staged::DiscountCodesActive(discount, selection, active) => {
+                        discount_rows.set_active(discount, &selection, active)
+                    }
                     Staged::DiscountSchedule(from, to) => {
                         if discount_rows.schedule != from {
                             return Err(RepoError::StaleVersion);

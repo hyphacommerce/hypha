@@ -28,6 +28,9 @@ pub enum CustomerError {
     ErasureAlreadyRequested,
     #[error("no erasure is requested for the customer")]
     ErasureNotRequested,
+    /// A list filter naming more IDs than a list takes.
+    #[error("`{field}` names more than {max} IDs")]
+    TooManyFilterIds { field: &'static str, max: usize },
 }
 
 /// Why stored data can't be rebuilt into a customer. Only `Customer::restore` returns
@@ -52,6 +55,7 @@ impl ErrorCode for CustomerError {
             CustomerError::Erased => "customer_erased",
             CustomerError::ErasureAlreadyRequested => "erasure_already_requested",
             CustomerError::ErasureNotRequested => "erasure_not_requested",
+            CustomerError::TooManyFilterIds { .. } => "too_many_filter_ids",
         }
     }
 }

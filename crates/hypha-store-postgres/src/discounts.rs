@@ -617,6 +617,42 @@ pub(crate) async fn remove_codes(
     Ok(())
 }
 
+pub(crate) async fn set_codes_active(
+    tx: &impl Queries,
+    discount: DiscountId,
+    selection: &CodeSelection,
+    active: bool,
+) -> Result<(), RepoError> {
+    let id = discount.as_uuid();
+    match selection {
+        CodeSelection::Codes(codes) => {
+            tx.query_typed(
+                "UPDATE discount_codes SET active = $3
+                 WHERE discount_id = $1 AND normalized = ANY($2)",
+                &[
+                    (&id, Type::UUID),
+                    (codes, Type::TEXT_ARRAY),
+                    (&active, Type::BOOL),
+                ],
+            )
+            .await
+        }
+        CodeSelection::Batch(batch) => {
+            tx.query_typed(
+                "UPDATE discount_codes SET active = $3 WHERE discount_id = $1 AND batch = $2",
+                &[
+                    (&id, Type::UUID),
+                    (batch, Type::TEXT),
+                    (&active, Type::BOOL),
+                ],
+            )
+            .await
+        }
+    }
+    .map_err(repo_error)?;
+    Ok(())
+}
+
 /// Counts a use: each counter moves only under its limit, or the claim fails
 /// (`Duplicate(DISCOUNT_USAGE_LIMIT)`); the usage row's unique index refuses a second use
 /// by one customer of a once-per-customer discount.
@@ -1092,6 +1128,38 @@ impl<C: PgConnection> DiscountRepo for PgStore<C> {
             .collect()
     }
 
+    async fn discounted_totals(
+        &self,
+        discounts: &[DiscountId],
+    ) -> Result<HashMap<DiscountId, Vec<Money>>, RepoError> {
+        if discounts.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let ids = uuids(discounts, DiscountId::as_uuid);
+        let mut conn = self.conn().await;
+        let rows = conn
+            .db()
+            .query_typed(
+                "SELECT discount_id, currency, sum(amount)::bigint AS total FROM discount_usages
+                 WHERE discount_id = ANY($1) GROUP BY discount_id, currency
+                 ORDER BY discount_id, currency",
+                &[(&ids, Type::UUID_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?;
+        let mut totals: HashMap<DiscountId, Vec<Money>> = HashMap::new();
+        for row in &rows {
+            let currency: String = col(row, "currency")?;
+            let total =
+                Money::new(col(row, "total")?, currency_from_db(&currency)?).map_err(corrupt)?;
+            totals
+                .entry(DiscountId::from_uuid(col(row, "discount_id")?))
+                .or_default()
+                .push(total);
+        }
+        Ok(totals)
+    }
+
     async fn used_by(
         &self,
         discounts: &[DiscountId],
@@ -1174,6 +1242,10 @@ fn code_conditions<'a>(
     if let Some(batch) = &filter.batch {
         params.push((batch, Type::TEXT));
         conditions.push(format!("batch = ${}", params.len()));
+    }
+    if let Some(active) = &filter.active {
+        params.push((active, Type::BOOL));
+        conditions.push(format!("active = ${}", params.len()));
     }
 }
 

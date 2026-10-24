@@ -16,14 +16,17 @@ use hypha_core::{
     BasisPoints, CategoryId, ChannelId, Clock, Currency, CustomerGroupId, CustomerId, DiscountId,
     MarketId, Money, OrderId, PageLimit, PageRequest, ProductId, Stamped, VariantId,
 };
+use hypha_customers::{CustomerFilter, CustomerRepo, CustomerSort, CustomerSummary, HasCustomers};
 use hypha_discounts::{
     Allocation, Class, ClassSet, CodeFilter, CodeSelection, Condition, CreateDiscount, Discount,
     DiscountCode, DiscountDraft, DiscountFilter, DiscountPatch, DiscountRepo, Generation, ItemSet,
-    Items, Kind, Limits, Measure, Method, NewCode, PerMarket, Phase, Reward, Status, Target,
-    Threshold, Tier, Usage, Value, add_codes, create_discount, delete_discount, generate_codes,
-    get_discount, list_codes, list_discounts, list_usage, remove_codes, summary, update_discount,
+    Items, Kind, Limits, Measure, Method, NewCode, PerMarket, Phase, Reward, Status, SummaryDraft,
+    Target, Threshold, Tier, Usage, Value, add_codes, create_discount, delete_discount,
+    generate_codes, get_discount, list_codes, list_discounts, list_usage, remove_codes,
+    set_codes_active, summarize, summary, update_discount,
 };
 use hypha_markets::{HasMarkets, MarketRepo};
+use hypha_orders::{HasOrders, OrderNumber, OrderRepo};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -35,6 +38,7 @@ use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId},
     patch,
+    redact::{self, Family, Redacted},
     state::{SharedState, Storage},
 };
 
@@ -714,6 +718,9 @@ pub struct DiscountResponse {
     /// Orders it was used on.
     #[schema(minimum = 0)]
     used: u64,
+    /// What it took off those orders, one sum per currency, by currency code; `[]` while
+    /// unused.
+    discounted_total: Vec<Money>,
     created_at: String,
     updated_at: String,
 }
@@ -724,6 +731,7 @@ impl DiscountResponse {
         now: hypha_core::Timestamp,
         code_count: u64,
         used: u64,
+        discounted_total: Vec<Money>,
     ) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(d.stamps())?;
         Ok(Self {
@@ -742,6 +750,7 @@ impl DiscountResponse {
             summary: summary(d, None),
             code_count,
             used,
+            discounted_total,
             created_at,
             updated_at,
         })
@@ -764,6 +773,10 @@ async fn responses<P: hypha_discounts::HasDiscounts>(
         .usage_counts(&ids)
         .await
         .map_err(hypha_discounts::CommandError::from)?;
+    let mut totals = repo
+        .discounted_totals(&ids)
+        .await
+        .map_err(hypha_discounts::CommandError::from)?;
     discounts
         .iter()
         .map(|d| {
@@ -772,6 +785,7 @@ async fn responses<P: hypha_discounts::HasDiscounts>(
                 now,
                 codes.get(&d.id()).copied().unwrap_or(0),
                 used.get(&d.id()).copied().unwrap_or(0),
+                totals.remove(&d.id()).unwrap_or_default(),
             )
         })
         .collect()
@@ -1012,6 +1026,21 @@ pub struct UpdateDiscountRequest {
     limits: Option<DiscountLimitsDto>,
 }
 
+fn patch_of(req: UpdateDiscountRequest) -> Result<DiscountPatch, ApiError> {
+    Ok(DiscountPatch {
+        title: req.title,
+        status: req.status.map(Into::into),
+        starts_at: req.starts_at.map(|t| t.map(|i| i.0)),
+        ends_at: req.ends_at.map(|t| t.map(|i| i.0)),
+        conditions: req
+            .conditions
+            .map(|c| c.into_iter().map(Into::into).collect()),
+        kind: req.kind.map(DiscountKindDto::into_kind).transpose()?,
+        combines_with: req.combines_with.map(classes_in),
+        limits: req.limits.map(Into::into),
+    })
+}
+
 /// Changes a discount (JSON Merge Patch); its method is fixed. The result is checked as
 /// a whole, like a new one.
 #[utoipa::path(
@@ -1029,22 +1058,152 @@ pub async fn update<S: Storage>(
     body: JsonBody<UpdateDiscountRequest>,
 ) -> Result<Json<DiscountResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let req = body.parse()?;
-    let patch = DiscountPatch {
-        title: req.title,
-        status: req.status.map(Into::into),
-        starts_at: req.starts_at.map(|t| t.map(|i| i.0)),
-        ends_at: req.ends_at.map(|t| t.map(|i| i.0)),
-        conditions: req
-            .conditions
-            .map(|c| c.into_iter().map(Into::into).collect()),
-        kind: req.kind.map(DiscountKindDto::into_kind).transpose()?,
-        combines_with: req.combines_with.map(classes_in),
-        limits: req.limits.map(Into::into),
-    };
+    let patch = patch_of(body.parse()?)?;
     let currencies = currencies(&ports).await?;
     let d = update_discount(&ctx, &ports, id, patch, &currencies).await?;
     Ok(Json(one(&ports, &d, state.clock.now()).await?))
+}
+
+/// What `POST /admin/discounts/summary` reads: a new discount's body (as `POST
+/// /admin/discounts` takes it; `codes` are ignored), or a saved discount's `id` with the
+/// changes `PATCH` would make to it. The handler reads one or the other by whether `id`
+/// is there, for exact errors; this type is the documented shape.
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(untagged)]
+pub enum DiscountSummaryRequest {
+    New(CreateDiscountRequest),
+    Saved(SavedDiscountSummaryRequest),
+}
+
+/// A saved discount's `id` with the fields `PATCH /admin/discounts/{id}` takes.
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SavedDiscountSummaryRequest {
+    /// The saved discount the changes go over.
+    id: DiscountId,
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = String, required = false)]
+    title: Option<String>,
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = DiscountStatusDto, required = false)]
+    status: Option<DiscountStatusDto>,
+    /// `null` clears it.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    #[schema(value_type = Option<String>, format = DateTime, required = false)]
+    starts_at: Option<Option<Instant>>,
+    /// `null` clears it.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    #[schema(value_type = Option<String>, format = DateTime, required = false)]
+    ends_at: Option<Option<Instant>>,
+    /// Replaces them all; `[]` for none.
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = Vec<DiscountConditionDto>, required = false)]
+    conditions: Option<Vec<DiscountConditionDto>>,
+    /// Replaces it.
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = DiscountKindDto, required = false)]
+    kind: Option<DiscountKindDto>,
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = Vec<DiscountClassDto>, required = false)]
+    combines_with: Option<Vec<DiscountClassDto>>,
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = DiscountLimitsDto, required = false)]
+    limits: Option<DiscountLimitsDto>,
+}
+
+impl SavedDiscountSummaryRequest {
+    fn changes(self) -> UpdateDiscountRequest {
+        UpdateDiscountRequest {
+            title: self.title,
+            status: self.status,
+            starts_at: self.starts_at,
+            ends_at: self.ends_at,
+            conditions: self.conditions,
+            kind: self.kind,
+            combines_with: self.combines_with,
+            limits: self.limits,
+        }
+    }
+}
+
+/// A broken rule, where it is (`kind.rewards[0].value.basis_points`).
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct DiscountProblemResponse {
+    path: String,
+    /// As in `invalid_discount`'s `details.problems`, plus `market_not_found` and
+    /// `discount_currency_mismatch`.
+    code: String,
+    message: String,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct DiscountSummaryResponse {
+    /// The sentence the discount would read as; `null` while it breaks a rule.
+    summary: Option<String>,
+    /// Every rule it breaks; `[]` when it could be saved as is.
+    problems: Vec<DiscountProblemResponse>,
+}
+
+/// What a discount would read as, and every rule it breaks, writing nothing (no preview
+/// token either): for a form that shows its summary as it's typed. A body that isn't a
+/// discount at all (a missing `title`, an unknown field) is `422 invalid_body` as on
+/// `POST /admin/discounts`.
+#[utoipa::path(
+    post,
+    path = "/admin/discounts/summary",
+    request_body = DiscountSummaryRequest,
+    responses((status = 200, description = "OK", body = DiscountSummaryResponse)),
+    extensions(("x-hypha-scopes" = json!(["discounts:read"]))),
+)]
+pub async fn summarize_handler<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    body: JsonBody<serde_json::Value>,
+) -> Result<Json<DiscountSummaryResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let body: serde_json::Value = body.parse()?;
+    let invalid = |e: serde_json::Error| ApiError::invalid_body(e.to_string());
+    let draft = match body.get("id") {
+        Some(_) => {
+            let saved: SavedDiscountSummaryRequest =
+                serde_json::from_value(body).map_err(invalid)?;
+            SummaryDraft::Saved(saved.id, patch_of(saved.changes())?)
+        }
+        None => {
+            let req: CreateDiscountRequest = serde_json::from_value(body).map_err(invalid)?;
+            SummaryDraft::New(draft_of(
+                req.title,
+                req.method.into(),
+                req.status,
+                req.starts_at,
+                req.ends_at,
+                req.conditions,
+                req.kind,
+                req.combines_with,
+                req.limits,
+            )?)
+        }
+    };
+    let currencies = currencies(&ports).await?;
+    Ok(Json(
+        match summarize(&ctx, &ports, draft, &currencies).await? {
+            Ok(summary) => DiscountSummaryResponse {
+                summary: Some(summary),
+                problems: Vec::new(),
+            },
+            Err(problems) => DiscountSummaryResponse {
+                summary: None,
+                problems: problems
+                    .into_iter()
+                    .map(|p| DiscountProblemResponse {
+                        path: p.path,
+                        code: p.code.to_string(),
+                        message: p.message,
+                    })
+                    .collect(),
+            },
+        },
+    ))
 }
 
 /// Deletes a discount with its codes and usage records. Orders keep their copies of what
@@ -1107,6 +1266,8 @@ pub struct CodeFilters {
     q: Option<String>,
     /// Only those added under this batch label.
     batch: Option<String>,
+    /// Only active ones (`true`) or only inactive ones (`false`).
+    active: Option<bool>,
 }
 
 type DiscountCodePage = PageResponse<DiscountCodeResponse>;
@@ -1130,6 +1291,7 @@ pub async fn codes<S: Storage>(
     let filter = CodeFilter {
         q: filters.q,
         batch: filters.batch,
+        active: filters.active,
     };
     let page = list_codes(&ctx, &ports, id, filter, page).await?;
     Ok(Json(PageResponse::new(
@@ -1314,6 +1476,57 @@ pub async fn remove_codes_handler<S: Storage>(
     Ok(Json(RemovedCodesResponse { removed }))
 }
 
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateCodesRequest {
+    /// These codes (as typed), at most 1,000.
+    #[serde(default)]
+    codes: Option<Vec<String>>,
+    /// Or every code of this batch.
+    #[serde(default)]
+    batch: Option<String>,
+    /// `false` deactivates them: carts refuse an inactive code like an unknown one
+    /// (`422 discount_code_invalid`), and a cart holding one shows it `invalid`. `true`
+    /// makes them usable again.
+    active: bool,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct UpdatedCodesResponse {
+    /// How many changed (those already as asked aren't counted).
+    #[schema(minimum = 0)]
+    updated: u64,
+}
+
+/// Deactivates or reactivates listed codes or a whole batch: one of `codes` and `batch`.
+/// Their uses so far stay.
+#[utoipa::path(
+    patch,
+    path = "/admin/discounts/{id}/codes",
+    params(("id" = DiscountId, Path)),
+    request_body = UpdateCodesRequest,
+    responses((status = 200, description = "OK", body = UpdatedCodesResponse)),
+    extensions(("x-hypha-scopes" = json!(["discounts:write"]))),
+)]
+pub async fn update_codes<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<DiscountId>,
+    body: JsonBody<UpdateCodesRequest>,
+) -> Result<Json<UpdatedCodesResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let selection = match (req.codes, req.batch) {
+        (Some(codes), None) => CodeSelection::Codes(codes),
+        (None, Some(batch)) => CodeSelection::Batch(batch),
+        _ => {
+            return Err(ApiError::invalid_body("give one of `codes` and `batch`"));
+        }
+    };
+    let updated = set_codes_active(&ctx, &ports, id, selection, req.active).await?;
+    Ok(Json(UpdatedCodesResponse { updated }))
+}
+
 /// Codes per page of the export: the export reads every code, page by page.
 const EXPORT_PAGE: u32 = 100;
 
@@ -1337,6 +1550,7 @@ pub async fn export<S: Storage>(
     let filter = CodeFilter {
         q: None,
         batch: filters.batch,
+        active: None,
     };
     let mut csv = String::from("code,normalized,usage_limit,used,active,batch,created_at\n");
     let mut after: Option<String> = None;
@@ -1398,32 +1612,57 @@ fn csv_field(value: &str) -> String {
 
 // ---------- usage ----------
 
+/// A use of a discount. The customer's names and email are personal data: callers other
+/// than staff sessions see them only with `customer_data:name` / `customer_data:email`,
+/// else they're absent and listed in `redacted`.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct DiscountUsageResponse {
     order: OrderId,
+    /// The order's number (`1001`).
+    #[schema(minimum = 1)]
+    order_number: Option<i64>,
     customer: CustomerId,
+    /// The customer's now; `null` when unknown.
+    first_name: Option<String>,
+    last_name: Option<String>,
+    email: Option<String>,
     /// The code it came by, normalised; `null` for an automatic discount.
     code: Option<String>,
     /// What it took off the order.
     amount: Money,
     used_at: String,
+    /// The personal fields left out for this caller (absent from the object then); never
+    /// sent to staff.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    redacted: Option<Vec<String>>,
 }
 
 impl DiscountUsageResponse {
-    fn new(u: &Usage) -> Result<Self, ApiError> {
+    fn new(
+        u: &Usage,
+        number: Option<OrderNumber>,
+        customer: Option<&CustomerSummary>,
+    ) -> Result<Self, ApiError> {
         Ok(Self {
             order: u.order,
+            order_number: number.map(|n| n.value()),
             customer: u.customer,
+            first_name: customer.and_then(|c| c.first_name.clone()),
+            last_name: customer.and_then(|c| c.last_name.clone()),
+            email: customer.map(|c| c.email.as_str().to_string()),
             code: u.code.clone(),
             amount: u.amount,
             used_at: rfc3339(u.at)?,
+            redacted: None,
         })
     }
 }
 
 type DiscountUsagePage = PageResponse<DiscountUsageResponse>;
 
-/// The orders a discount was used on, newest first.
+/// The orders a discount was used on, newest first, with each order's number and its
+/// customer's names and email.
 #[utoipa::path(
     get,
     path = "/admin/discounts/{id}/usage",
@@ -1436,16 +1675,54 @@ pub async fn usage<S: Storage>(
     caller: Caller,
     PathId(id): PathId<DiscountId>,
     query: ListQuery,
-) -> Result<Json<DiscountUsagePage>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (page, _, scope) = query.parse::<OrderId>()?;
     let page = list_usage(&ctx, &ports, id, page).await?;
-    Ok(Json(PageResponse::new(
+    let orders: Vec<OrderId> = page.items.iter().map(|u| u.order).collect();
+    let numbers = ports
+        .orders()
+        .numbers(&orders)
+        .await
+        .map_err(hypha_discounts::CommandError::from)?;
+    let customers = customers_by_id(&ports, page.items.iter().map(|u| u.customer)).await?;
+    let page = PageResponse::new(
         page,
         &scope,
         |u| u.order,
-        |u| DiscountUsageResponse::new(&u),
-    )?))
+        |u| {
+            DiscountUsageResponse::new(
+                &u,
+                numbers.get(&u.order).copied(),
+                customers.get(&u.customer),
+            )
+        },
+    )?;
+    redact::page(&ctx, Family::DiscountUsage, page).map(Json)
+}
+
+/// The summaries of `ids`' customers, by ID: at most a page of them.
+async fn customers_by_id<P: HasCustomers>(
+    ports: &P,
+    ids: impl Iterator<Item = CustomerId>,
+) -> Result<HashMap<CustomerId, CustomerSummary>, ApiError> {
+    let ids: Vec<CustomerId> = ids.collect();
+    let filter = CustomerFilter::default()
+        .only(ids)
+        .map_err(ApiError::internal)?;
+    let Ok(limit) = PageLimit::new(filter.ids().len() as u32) else {
+        return Ok(HashMap::new());
+    };
+    let found = ports
+        .customers()
+        .list(
+            &filter,
+            CustomerSort::Newest,
+            PageRequest { after: None, limit },
+        )
+        .await
+        .map_err(hypha_discounts::CommandError::from)?;
+    Ok(found.items.into_iter().map(|c| (c.id, c)).collect())
 }
 
 #[cfg(test)]

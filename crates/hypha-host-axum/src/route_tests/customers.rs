@@ -367,3 +367,34 @@ async fn erasure_is_requested_and_cancelled_and_data_is_exported() {
     assert!(json["payments"].is_array());
     assert!(json["emails"].is_array());
 }
+
+#[tokio::test]
+async fn customers_are_listed_by_their_ids() {
+    let app = app().await;
+    let a = customer(&app, "a@example.hr").await;
+    let b = customer(&app, "b@example.hr").await;
+    customer(&app, "c@example.hr").await;
+    let unknown = "cus_00000000000000000000000000000063";
+    let ids = |page: &Value| -> Vec<String> {
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let uri = format!("/admin/customers?ids={a}&ids={b},{unknown}");
+    let (status, page) = send(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(ids(&page), [b.clone(), a.clone()]);
+    let many: Vec<String> = (1..=251u128)
+        .map(|n| hypha_core::CustomerId::from_uuid(uuid::Uuid::from_u128(n)).to_string())
+        .collect();
+    let uri = format!("/admin/customers?ids={}", many.join(","));
+    let (status, body) = send(&app, "GET", &uri, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "too_many_filter_ids")
+    );
+    assert_eq!(body["details"], json!({"field": "ids", "max": 250}));
+}

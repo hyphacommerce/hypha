@@ -484,12 +484,27 @@ async fn an_order_keeps_what_its_code_took_off_and_counts_the_use() {
 
     let url = format!("/admin/discounts/{}", d["id"].as_str().unwrap());
     let (_, usage) = send(&app, "GET", &format!("{url}/usage"), None).await;
+    let used = &usage["items"][0];
     assert_eq!(
-        (&usage["items"][0]["code"], &usage["items"][0]["amount"]),
-        (&json!("WELCOME10"), &eur(300))
+        (
+            &used["code"],
+            &used["amount"],
+            &used["order_number"],
+            &used["email"]
+        ),
+        (
+            &json!("WELCOME10"),
+            &eur(300),
+            &placed["number"],
+            &placed["email"]
+        ),
+        "{usage}"
     );
     let (_, d) = send(&app, "GET", &url, None).await;
-    assert_eq!(d["used"], json!(1));
+    assert_eq!(
+        (&d["used"], &d["discounted_total"]),
+        (&json!(1), &json!([eur(300)]))
+    );
 
     // Its one use is taken: another cart keeps the code, not applied.
     let (_, cart) = send_as(
@@ -691,4 +706,155 @@ async fn a_discounts_start_is_announced_once() {
     // Promotions are worked out per request: the product shows it at once.
     let (_, product) = send_as(&app, &pk, "GET", mug, None).await;
     assert_eq!(product["promotions"][0]["title"], "3 for 2", "{product}");
+}
+
+#[tokio::test]
+async fn codes_are_deactivated_and_reactivated_in_bulk() {
+    let app = app().await;
+    let d = create(
+        &app,
+        json!({"title": "Welcome", "method": "codes", "kind": ten_percent_off_the_order(),
+            "codes": ["WELCOME10"]}),
+    )
+    .await;
+    let url = format!("/admin/discounts/{}/codes", d["id"].as_str().unwrap());
+    let spring = json!({"codes": [{"code": "SPRING1"}, {"code": "SPRING2"}], "batch": "Spring"});
+    let (status, body) = send(&app, "POST", &url, Some(&spring.to_string())).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let (pk, cart) = cart_of_mugs(&app, &mug, 1).await;
+    let codes = format!("{cart}/discount-codes");
+    let (status, _) = send_as(&app, &pk, "POST", &codes, Some(r#"{"code":"welcome10"}"#)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let off = |body: Value| {
+        let app = &app;
+        let url = url.clone();
+        async move { send(app, "PATCH", &url, Some(&body.to_string())).await }
+    };
+    let (status, done) = off(json!({"codes": ["welcome10"], "active": false})).await;
+    assert_eq!((status, &done), (StatusCode::OK, &json!({"updated": 1})));
+    let (_, again) = off(json!({"codes": ["WELCOME10"], "active": false})).await;
+    assert_eq!(again, json!({"updated": 0}), "already inactive");
+    // The cart keeps it, invalid; a new cart can't enter it.
+    let (_, held) = send_as(&app, &pk, "GET", &cart, None).await;
+    assert_eq!(
+        held["discount_codes"],
+        json!([{"code": "WELCOME10", "state": "invalid"}])
+    );
+    let (_, done) = off(json!({"batch": "Spring", "active": false})).await;
+    assert_eq!(done, json!({"updated": 2}));
+    let (status, error) = send_as(&app, &pk, "POST", &codes, Some(r#"{"code":"spring1"}"#)).await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "discount_code_invalid")
+    );
+    let (_, inactive) = send(&app, "GET", &format!("{url}?active=false"), None).await;
+    let listed: Vec<&str> = inactive["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["normalized"].as_str().unwrap())
+        .collect();
+    assert_eq!(listed, ["SPRING1", "SPRING2", "WELCOME10"]);
+
+    let (_, done) = off(json!({"batch": "Spring", "active": true})).await;
+    assert_eq!(done, json!({"updated": 2}));
+    let (status, priced) = send_as(&app, &pk, "POST", &codes, Some(r#"{"code":"spring1"}"#)).await;
+    assert_eq!(status, StatusCode::OK, "{priced}");
+    let (status, error) = off(json!({"codes": ["X"], "batch": "Spring", "active": true})).await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_body")
+    );
+    let changed = outbox_events(&app)
+        .await
+        .into_iter()
+        .filter(|e| e.event_type == "discount.codes_updated")
+        .count();
+    assert_eq!(changed, 3, "one per change, none for the no-op");
+}
+
+#[tokio::test]
+async fn a_summary_is_worked_out_without_writing() {
+    let app = app().await;
+    let new = json!({"title": "Welcome", "method": "codes", "kind": ten_percent_off_the_order(),
+        "limits": {"total": 5}});
+    let (status, answer) = send(
+        &app,
+        "POST",
+        "/admin/discounts/summary",
+        Some(&new.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(
+        answer,
+        json!({"summary": "10% off the order · 5 uses", "problems": []})
+    );
+    let (_, list) = send(&app, "GET", "/admin/discounts", None).await;
+    assert_eq!(list["items"], json!([]), "nothing stored");
+
+    let broken = json!({"title": "Late", "method": "automatic", "kind": ten_percent_off_the_order(),
+        "starts_at": "2030-01-02T00:00:00Z", "ends_at": "2030-01-01T00:00:00Z"});
+    let (_, answer) = send(
+        &app,
+        "POST",
+        "/admin/discounts/summary",
+        Some(&broken.to_string()),
+    )
+    .await;
+    assert_eq!(answer["summary"], Value::Null, "{answer}");
+    assert_eq!(
+        (
+            &answer["problems"][0]["path"],
+            &answer["problems"][0]["code"]
+        ),
+        (&json!("ends_at"), &json!("ends_not_after_start"))
+    );
+
+    // Changes over a saved one, as PATCH would make them.
+    let d = create(&app, new).await;
+    let saved = json!({"id": d["id"], "limits": {"total": 2}, "title": "Renamed"});
+    let (status, answer) = send(
+        &app,
+        "POST",
+        "/admin/discounts/summary",
+        Some(&saved.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["summary"], "10% off the order · 2 uses");
+    let (_, stored) = send(
+        &app,
+        "GET",
+        &format!("/admin/discounts/{}", d["id"].as_str().unwrap()),
+        None,
+    )
+    .await;
+    assert_eq!(stored["title"], "Welcome", "unchanged");
+    let gone = json!({"id": "disc_00000000000000000000000000000063"});
+    let (status, error) = send(
+        &app,
+        "POST",
+        "/admin/discounts/summary",
+        Some(&gone.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::NOT_FOUND, "discount_not_found")
+    );
+    let (status, error) = send(
+        &app,
+        "POST",
+        "/admin/discounts/summary",
+        Some(r#"{"id": "disc_00000000000000000000000000000063", "method": "automatic"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_body"),
+        "the method is fixed"
+    );
 }

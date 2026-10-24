@@ -208,6 +208,8 @@ where
     code_pages(&make().await).await;
     scenario("discount: codes are removed by list and by batch");
     removing(&make().await).await;
+    scenario("discount: codes are made inactive and active again by list and by batch");
+    activating(&make().await).await;
     scenario("discount: a discount and its codes commit together, or not at all");
     staged(&make().await).await;
     scenario("discount: a claim counts a use under the discount's and the code's limits");
@@ -579,6 +581,7 @@ async fn code_pages<S: HasDiscounts>(ports: &S) {
     let spring = CodeFilter {
         q: None,
         batch: Some("Spring".to_string()),
+        active: None,
     };
     assert_eq!(
         texts(
@@ -592,6 +595,7 @@ async fn code_pages<S: HasDiscounts>(ports: &S) {
     let part = CodeFilter {
         q: Some("2".to_string()),
         batch: None,
+        active: None,
     };
     assert_eq!(
         texts(repo.code_page(did(1), &part, page(10)).await.unwrap().items),
@@ -643,6 +647,48 @@ async fn removing<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(ports: &S) 
         left,
         HashSet::from(["KEEP".to_string(), "OTHER".to_string()])
     );
+}
+
+async fn activating<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(ports: &S) {
+    let repo = ports.discounts();
+    repo.insert(&mut discount(1, Method::Codes)).await.unwrap();
+    repo.insert(&mut discount(2, Method::Codes)).await.unwrap();
+    let spring = |d: u128, text: &str| {
+        DiscountCode::new(did(d), text, None, Some("Spring".to_string())).unwrap()
+    };
+    repo.add_codes(&[
+        code(1, "KEEP"),
+        code(1, "OFF"),
+        spring(1, "S1"),
+        spring(1, "S2"),
+        spring(2, "OTHER"),
+    ])
+    .await
+    .unwrap();
+    let mut batch = ports.batch();
+    batch.set_discount_codes_active(did(1), CodeSelection::Codes(vec!["OFF".to_string()]), false);
+    batch.set_discount_codes_active(did(1), CodeSelection::Batch("Spring".to_string()), false);
+    // Another discount's code isn't changed by naming it.
+    batch.set_discount_codes_active(
+        did(1),
+        CodeSelection::Codes(vec!["OTHER".to_string()]),
+        false,
+    );
+    ports.commit(batch).await.unwrap();
+    let inactive = CodeFilter {
+        active: Some(false),
+        ..CodeFilter::default()
+    };
+    let found = repo.code_page(did(1), &inactive, page(10)).await.unwrap();
+    let texts: Vec<String> = found.items.into_iter().map(|c| c.normalized).collect();
+    assert_eq!(texts, vec!["OFF", "S1", "S2"]);
+    assert_eq!(repo.count_codes(did(1), &inactive).await, Ok(3));
+    let other = repo.find_codes(&["OTHER".to_string()]).await.unwrap();
+    assert!(other.iter().all(|c| c.active));
+    let mut batch = ports.batch();
+    batch.set_discount_codes_active(did(1), CodeSelection::Batch("Spring".to_string()), true);
+    ports.commit(batch).await.unwrap();
+    assert_eq!(repo.count_codes(did(1), &inactive).await, Ok(1));
 }
 
 async fn staged<S: HasDiscounts + HasBatch<Batch: StageDiscounts + StageEvents>>(ports: &S) {
@@ -717,6 +763,26 @@ async fn claims<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(ports: &S) {
     assert_eq!(
         repo.used_by(&[did(1)], customer(2)).await,
         Ok(HashSet::new())
+    );
+    // Totals per currency, by code: two in euros, one in dollars.
+    repo.insert(&mut discount(2, Method::Codes)).await.unwrap();
+    let mut batch = ports.batch();
+    batch.claim_discount_usage(claim(2, 2, None));
+    batch.claim_discount_usage(claim(2, 3, None));
+    batch.claim_discount_usage(UsageClaim {
+        amount: Money::new(70, Currency::USD).unwrap(),
+        ..claim(2, 4, None)
+    });
+    ports.commit(batch).await.unwrap();
+    assert_eq!(
+        repo.discounted_totals(&[did(1), did(2), did(9)]).await,
+        Ok(HashMap::from([
+            (did(1), vec![eur(150)]),
+            (
+                did(2),
+                vec![eur(300), Money::new(70, Currency::USD).unwrap()]
+            ),
+        ]))
     );
 
     // The code's own limit is reached: nothing of the batch is written.

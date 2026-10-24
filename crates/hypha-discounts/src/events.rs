@@ -55,6 +55,22 @@ impl Event for DiscountCodesAdded {
     const VERSION: u16 = 1;
 }
 
+/// `discount.codes_updated`: how many codes were made `active` (or inactive), and the
+/// batch when a whole batch was. An inactive code is refused by carts like an unknown one,
+/// and a cart holding it shows it `invalid`.
+#[derive(Debug, Serialize)]
+pub struct DiscountCodesUpdated {
+    pub discount: DiscountId,
+    pub count: u64,
+    pub batch: Option<String>,
+    pub active: bool,
+}
+
+impl Event for DiscountCodesUpdated {
+    const TYPE: &'static str = "discount.codes_updated";
+    const VERSION: u16 = 1;
+}
+
 /// `discount.codes_removed`: how many, and the batch when a whole batch went.
 #[derive(Debug, Serialize)]
 pub struct DiscountCodesRemoved {

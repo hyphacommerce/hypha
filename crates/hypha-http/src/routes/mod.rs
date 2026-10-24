@@ -220,11 +220,13 @@ macro_rules! route_table {
             // discounts and their codes
             [admin, GET, "/admin/discounts", discounts::list],
             [admin, POST, "/admin/discounts", discounts::create],
+            [admin, POST, "/admin/discounts/summary", discounts::summarize_handler],
             [admin, GET, "/admin/discounts/{id}", discounts::fetch],
             [admin, PATCH, "/admin/discounts/{id}", discounts::update],
             [admin, DELETE, "/admin/discounts/{id}", discounts::remove],
             [admin, GET, "/admin/discounts/{id}/codes", discounts::codes],
             [admin, POST, "/admin/discounts/{id}/codes", discounts::add],
+            [admin, PATCH, "/admin/discounts/{id}/codes", discounts::update_codes],
             [admin, DELETE, "/admin/discounts/{id}/codes", discounts::remove_codes_handler],
             [admin, POST, "/admin/discounts/{id}/codes/generate", discounts::generate],
             [admin, GET, "/admin/discounts/{id}/codes/export", discounts::export],

@@ -59,7 +59,7 @@ use crate::{
         add_group_members, delete_group, insert_group, remove_group_members, update_group,
     },
     customers::{delete_customer, insert_customer, update_customer},
-    discounts::{add_codes, claim_usage, insert_discount, remove_codes},
+    discounts::{add_codes, claim_usage, insert_discount, remove_codes, set_codes_active},
     fulfillments::{insert_fulfillment, update_fulfillment},
     idempotency::insert_records,
     inventory::update_items,
@@ -176,6 +176,7 @@ enum Staged {
     DiscountCodes(Vec<DiscountCode>),
     RemovedDiscountCodes(DiscountId, CodeSelection),
     DiscountUsage(UsageClaim),
+    DiscountCodesActive(DiscountId, CodeSelection, bool),
     /// The discount schedule job's progress moved from the first to the second.
     DiscountSchedule(Option<Timestamp>, Timestamp),
 }
@@ -259,7 +260,9 @@ impl Staged {
             // A discount before its codes; usage claims last, by discount, so two checkouts
             // lock counters in the same order.
             Staged::NewDiscount(..) => 51,
-            Staged::DiscountCodes(_) | Staged::RemovedDiscountCodes(..) => 52,
+            Staged::DiscountCodes(_)
+            | Staged::RemovedDiscountCodes(..)
+            | Staged::DiscountCodesActive(..) => 52,
             Staged::DiscountUsage(_) => 53,
             Staged::DiscountSchedule(..) => 54,
         }
@@ -847,6 +850,9 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                         remove_codes(&db, discount, &selection).await?
                     }
                     Staged::DiscountUsage(claim) => claim_usage(&db, &claim).await?,
+                    Staged::DiscountCodesActive(discount, selection, active) => {
+                        set_codes_active(&db, discount, &selection, active).await?
+                    }
                     Staged::DiscountSchedule(from, to) => {
                         crate::discounts::advance_discount_schedule(&db, from, to).await?
                     }
@@ -1073,6 +1079,15 @@ impl StageDiscounts for PgBatch {
 
     fn remove_discount_codes(&mut self, discount: DiscountId, codes: CodeSelection) {
         self.stage(Staged::RemovedDiscountCodes(discount, codes));
+    }
+
+    fn set_discount_codes_active(
+        &mut self,
+        discount: DiscountId,
+        codes: CodeSelection,
+        active: bool,
+    ) {
+        self.stage(Staged::DiscountCodesActive(discount, codes, active));
     }
 
     fn claim_discount_usage(&mut self, claim: UsageClaim) {

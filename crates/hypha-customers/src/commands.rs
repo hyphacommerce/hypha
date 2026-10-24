@@ -120,21 +120,17 @@ pub async fn get_customer<R: CustomerRepo>(
     load(customers, id).await
 }
 
-/// A page of customer summaries in `sort`'s order, narrowed to text `q` (email, name,
-/// phone) when given and to `fields`, filters on custom fields checked by
-/// `hypha-custom-fields` already. `page.after`'s key must fit the sort
-/// (`CustomerSort::fits`; hosts check cursors).
+/// A page of customer summaries in `sort`'s order, narrowed by `filter` (checked by its
+/// constructors; its custom field filters by `hypha-custom-fields` already).
+/// `page.after`'s key must fit the sort (`CustomerSort::fits`; hosts check cursors).
 pub async fn list_customers<R: CustomerRepo>(
     ctx: &Ctx,
     customers: &R,
-    q: Option<String>,
-    fields: Vec<hypha_core::FieldFilter>,
-    group: Option<CustomerGroupId>,
+    filter: CustomerFilter,
     sort: CustomerSort,
     page: PageRequest<Keyset<CustomerId>>,
 ) -> Result<Page<CustomerSummary>, CommandError> {
     ctx.require(Scope::CustomersRead)?;
-    let filter = CustomerFilter::new(q)?.with_fields(fields).in_group(group);
     Ok(customers.list(&filter, sort, page).await?)
 }
 

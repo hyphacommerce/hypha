@@ -5382,6 +5382,27 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "DiscountProblemResponse": {
+        "description": "A broken rule, where it is (`kind.rewards[0].value.basis_points`).",
+        "properties": {
+          "code": {
+            "description": "As in `invalid_discount`'s `details.problems`, plus `market_not_found` and\n`discount_currency_mismatch`.",
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
       "DiscountResponse": {
         "properties": {
           "classes": {
@@ -5412,6 +5433,13 @@
           },
           "created_at": {
             "type": "string"
+          },
+          "discounted_total": {
+            "description": "What it took off those orders, one sum per currency, by currency code; `[]` while\nunused.",
+            "items": {
+              "$ref": "#/components/schemas/Money"
+            },
+            "type": "array"
           },
           "ends_at": {
             "description": "RFC 3339, exclusive; `null` for never.",
@@ -5478,6 +5506,7 @@
           "summary",
           "code_count",
           "used",
+          "discounted_total",
           "created_at",
           "updated_at"
         ],
@@ -5534,6 +5563,39 @@
         ],
         "type": "string",
         "x-hypha-open-enum": true
+      },
+      "DiscountSummaryRequest": {
+        "description": "What `POST /admin/discounts/summary` reads: a new discount's body (as `POST\n/admin/discounts` takes it; `codes` are ignored), or a saved discount's `id` with the\nchanges `PATCH` would make to it. The handler reads one or the other by whether `id`\nis there, for exact errors; this type is the documented shape.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/CreateDiscountRequest"
+          },
+          {
+            "$ref": "#/components/schemas/SavedDiscountSummaryRequest"
+          }
+        ]
+      },
+      "DiscountSummaryResponse": {
+        "properties": {
+          "problems": {
+            "description": "Every rule it breaks; `[]` when it could be saved as is.",
+            "items": {
+              "$ref": "#/components/schemas/DiscountProblemResponse"
+            },
+            "type": "array"
+          },
+          "summary": {
+            "description": "The sentence the discount would read as; `null` while it breaks a rule.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "problems"
+        ],
+        "type": "object"
       },
       "DiscountTargetDto": {
         "description": "What a reward reduces: items (its class is `product`), the subtotal (`order`), or\nshipping (`shipping`, at most `max_amount` off when given).",
@@ -5697,6 +5759,7 @@
         "type": "object"
       },
       "DiscountUsageResponse": {
+        "description": "A use of a discount. The customer's names and email are personal data: callers other\nthan staff sessions see them only with `customer_data:name` / `customer_data:email`,\nelse they're absent and listed in `redacted`.",
         "properties": {
           "amount": {
             "$ref": "#/components/schemas/Money",
@@ -5712,8 +5775,46 @@
           "customer": {
             "$ref": "#/components/schemas/CustomerId"
           },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "first_name": {
+            "description": "The customer's now; `null` when unknown.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "order": {
             "$ref": "#/components/schemas/OrderId"
+          },
+          "order_number": {
+            "description": "The order's number (`1001`).",
+            "format": "int64",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "redacted": {
+            "description": "The personal fields left out for this caller (absent from the object then); never\nsent to staff.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "used_at": {
             "type": "string"
@@ -11093,6 +11194,62 @@
         ],
         "type": "object"
       },
+      "SavedDiscountSummaryRequest": {
+        "additionalProperties": false,
+        "description": "A saved discount's `id` with the fields `PATCH /admin/discounts/{id}` takes.",
+        "properties": {
+          "combines_with": {
+            "items": {
+              "$ref": "#/components/schemas/DiscountClassDto"
+            },
+            "type": "array"
+          },
+          "conditions": {
+            "description": "Replaces them all; `[]` for none.",
+            "items": {
+              "$ref": "#/components/schemas/DiscountConditionDto"
+            },
+            "type": "array"
+          },
+          "ends_at": {
+            "description": "`null` clears it.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/DiscountId",
+            "description": "The saved discount the changes go over."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DiscountKindDto",
+            "description": "Replaces it."
+          },
+          "limits": {
+            "$ref": "#/components/schemas/DiscountLimitsDto"
+          },
+          "starts_at": {
+            "description": "`null` clears it.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/DiscountStatusDto"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
       "Scope": {
         "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `customers:erase`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `agents:read`, `agents:write`, `discounts:read`, `discounts:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
@@ -12664,6 +12821,36 @@
         },
         "type": "object"
       },
+      "UpdateCodesRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "description": "`false` deactivates them: carts refuse an inactive code like an unknown one\n(`422 discount_code_invalid`), and a cart holding one shows it `invalid`. `true`\nmakes them usable again.",
+            "type": "boolean"
+          },
+          "batch": {
+            "description": "Or every code of this batch.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "codes": {
+            "description": "These codes (as typed), at most 1,000.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "active"
+        ],
+        "type": "object"
+      },
       "UpdateCustomFieldDefinitionRequest": {
         "additionalProperties": false,
         "description": "A JSON Merge Patch of a `custom` definition: absent keeps; `null` clears the\ndescription. Owner type, key and type never change.",
@@ -13314,6 +13501,20 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "UpdatedCodesResponse": {
+        "properties": {
+          "updated": {
+            "description": "How many changed (those already as asked aren't counted).",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "updated"
+        ],
         "type": "object"
       },
       "UploadId": {
@@ -25842,6 +26043,18 @@
             }
           },
           {
+            "description": "Only these customers: repeat it (`ids=cus_…&ids=cus_…`) or separate them with\ncommas, up to 250 (`422 too_many_filter_ids`). IDs that name no customer match\nnothing.",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/CustomerId"
+              },
+              "type": "array"
+            }
+          },
+          {
             "in": "query",
             "name": "sort",
             "required": false,
@@ -28157,6 +28370,136 @@
         ]
       }
     },
+    "/admin/discounts/summary": {
+      "post": {
+        "operationId": "admin.discounts.summarize",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscountSummaryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscountSummaryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "What a discount would read as, and every rule it breaks, writing nothing (no preview\ntoken either): for a form that shows its summary as it's typed. A body that isn't a\ndiscount at all (a missing `title`, an unknown field) is `422 invalid_body` as on\n`POST /admin/discounts`.",
+        "tags": [
+          "discounts"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "discounts:read"
+        ]
+      }
+    },
     "/admin/discounts/{id}": {
       "delete": {
         "operationId": "admin.discounts.remove",
@@ -28697,6 +29040,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Only active ones (`true`) or only inactive ones (`false`).",
+            "in": "query",
+            "name": "active",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -28782,6 +29134,152 @@
         ],
         "x-hypha-scopes": [
           "discounts:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.discounts.update_codes",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiscountId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCodesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatedCodesResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Deactivates or reactivates listed codes or a whole batch: one of `codes` and `batch`.\nTheir uses so far stay.",
+        "tags": [
+          "discounts"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "discounts:write"
         ]
       },
       "post": {
@@ -29288,7 +29786,7 @@
             "bearer": []
           }
         ],
-        "summary": "The orders a discount was used on, newest first.",
+        "summary": "The orders a discount was used on, newest first, with each order's number and its\ncustomer's names and email.",
         "tags": [
           "discounts"
         ],

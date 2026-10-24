@@ -232,6 +232,25 @@ async fn listed<R: CustomerRepo>(repo: &R) {
         ids(&[3]),
         "a phone"
     );
+    let only = every.clone().only(ids(&[3, 1, 9])).unwrap();
+    for limit in [1, 10] {
+        assert_eq!(
+            all_customers(repo, &only, CustomerSort::EmailAsc, limit).await,
+            ids(&[1, 3]),
+            "only those IDs; one naming no customer matches nothing"
+        );
+    }
+    assert_eq!(
+        all_customers(
+            repo,
+            &text("ana").only(ids(&[4])).unwrap(),
+            CustomerSort::Oldest,
+            10
+        )
+        .await,
+        ids(&[4]),
+        "with the other filters"
+    );
 }
 
 async fn round_trips<R: CustomerRepo>(repo: &R) {

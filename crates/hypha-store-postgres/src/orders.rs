@@ -228,6 +228,30 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
         })
     }
 
+    async fn numbers(
+        &self,
+        ids: &[OrderId],
+    ) -> Result<std::collections::HashMap<OrderId, OrderNumber>, RepoError> {
+        if ids.is_empty() {
+            return Ok(Default::default());
+        }
+        let ids: Vec<Uuid> = ids.iter().map(|o| o.as_uuid()).collect();
+        let mut conn = self.conn().await;
+        conn.db()
+            .query_typed(
+                "SELECT id, number FROM orders WHERE id = ANY($1)",
+                &[(&ids, Type::UUID_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(|row| {
+                let number = OrderNumber::new(col(row, "number")?).map_err(corrupt)?;
+                Ok((OrderId::from_uuid(col(row, "id")?), number))
+            })
+            .collect()
+    }
+
     async fn insert(&self, order: &mut Order) -> Result<(), RepoError> {
         stamp_insert(order, self.now());
         let s = order.snapshot();

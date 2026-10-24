@@ -4,8 +4,8 @@ use std::{
 };
 
 use hypha_core::{
-    CustomerId, DiscountId, OrderId, Page, PageRequest, Recorded, RepoError, Timestamp, Versioned,
-    stamp_insert, stamp_update,
+    CustomerId, DiscountId, Money, OrderId, Page, PageRequest, Recorded, RepoError, Timestamp,
+    Versioned, stamp_insert, stamp_update,
 };
 use hypha_discounts::{
     CodeFilter, CodeSelection, Discount, DiscountCode, DiscountFilter, DiscountRepo, Method,
@@ -104,6 +104,24 @@ impl DiscountRows {
         });
     }
 
+    pub(crate) fn set_active(
+        &mut self,
+        discount: DiscountId,
+        selection: &CodeSelection,
+        active: bool,
+    ) {
+        for (normalized, code) in &mut self.codes {
+            let selected = code.discount == discount
+                && match selection {
+                    CodeSelection::Codes(listed) => listed.contains(normalized),
+                    CodeSelection::Batch(batch) => code.batch.as_deref() == Some(batch.as_str()),
+                };
+            if selected {
+                code.active = active;
+            }
+        }
+    }
+
     pub(crate) fn forget(&mut self, discount: DiscountId) {
         self.codes.retain(|_, c| c.discount != discount);
         self.counts.remove(&discount);
@@ -166,6 +184,7 @@ fn code_matches(code: &DiscountCode, filter: &CodeFilter) -> bool {
             .batch
             .as_ref()
             .is_none_or(|b| code.batch.as_deref() == Some(b.as_str()))
+        && filter.active.is_none_or(|a| code.active == a)
 }
 
 impl DiscountRepo for InMemoryDiscounts {
@@ -348,6 +367,33 @@ impl DiscountRepo for InMemoryDiscounts {
             .filter(|(d, used)| discounts.contains(d) && **used > 0)
             .map(|(d, used)| (*d, *used))
             .collect())
+    }
+
+    async fn discounted_totals(
+        &self,
+        discounts: &[DiscountId],
+    ) -> Result<HashMap<DiscountId, Vec<Money>>, RepoError> {
+        let mut sums: BTreeMap<(DiscountId, &'static str), Money> = BTreeMap::new();
+        let rows = self.lock_rows();
+        for (u, _) in rows
+            .usages
+            .iter()
+            .filter(|(u, _)| discounts.contains(&u.discount))
+        {
+            let key = (u.discount, u.amount.currency().as_str());
+            let sum = match sums.get(&key) {
+                Some(sum) => sum
+                    .checked_add(u.amount)
+                    .map_err(|e| RepoError::Backend(e.to_string()))?,
+                None => u.amount,
+            };
+            sums.insert(key, sum);
+        }
+        let mut totals: HashMap<DiscountId, Vec<Money>> = HashMap::new();
+        for ((discount, _), sum) in sums {
+            totals.entry(discount).or_default().push(sum);
+        }
+        Ok(totals)
     }
 
     async fn used_by(

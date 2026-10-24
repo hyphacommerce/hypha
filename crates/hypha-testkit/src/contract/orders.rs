@@ -16,7 +16,7 @@ use super::scenario;
 pub async fn order_repo<R: OrderRepo>(make: impl AsyncFn() -> R) {
     scenario("order: insert stores every field at version 1");
     round_trips(&make().await).await;
-    scenario("order: lookups by ID and number; unknown ones are None");
+    scenario("order: lookups by ID and number, numbers by ID; unknown ones are None or left out");
     lookups(&make().await).await;
     scenario("order: update stores every field and bumps the version; stale and missing fail");
     updates(&make().await).await;
@@ -247,6 +247,11 @@ async fn lookups<R: OrderRepo>(repo: &R) {
     assert_eq!(repo.get_by_number(number(1)).await, Ok(Some(o)));
     assert_eq!(repo.get(oid(99)).await, Ok(None));
     assert_eq!(repo.get_by_number(number(99)).await, Ok(None));
+    assert_eq!(
+        repo.numbers(&[oid(99), oid(1)]).await,
+        Ok(std::collections::HashMap::from([(oid(1), number(1))]))
+    );
+    assert_eq!(repo.numbers(&[]).await, Ok(Default::default()));
 }
 
 async fn updates<R: OrderRepo>(repo: &R) {

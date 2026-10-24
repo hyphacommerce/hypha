@@ -54,9 +54,11 @@ pub struct CodeFilter {
     /// A part of the normalised code.
     pub q: Option<String>,
     pub batch: Option<String>,
+    /// Only active ones (`true`) or only inactive ones (`false`).
+    pub active: Option<bool>,
 }
 
-/// Codes to remove: listed ones (normalised), or a whole batch.
+/// Codes to remove or (de)activate: listed ones (normalised), or a whole batch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodeSelection {
     Codes(Vec<String>),
@@ -159,6 +161,12 @@ pub trait DiscountRepo {
         &self,
         discounts: &[DiscountId],
     ) -> Result<HashMap<DiscountId, u64>, RepoError>;
+    /// What each of `discounts` took off the orders it was used on, summed per currency,
+    /// by currency code; one never used is left out.
+    async fn discounted_totals(
+        &self,
+        discounts: &[DiscountId],
+    ) -> Result<HashMap<DiscountId, Vec<Money>>, RepoError>;
     /// Which of `discounts` `customer` used.
     async fn used_by(
         &self,
@@ -179,6 +187,14 @@ pub trait StageDiscounts {
     /// Precondition: the discount exists (or is inserted in the same batch).
     fn add_discount_codes(&mut self, codes: &[DiscountCode]);
     fn remove_discount_codes(&mut self, discount: DiscountId, codes: CodeSelection);
+    /// Sets `active` on the selected codes of `discount` (a listed code of another
+    /// discount is left alone).
+    fn set_discount_codes_active(
+        &mut self,
+        discount: DiscountId,
+        codes: CodeSelection,
+        active: bool,
+    );
     /// Fails the commit with `Duplicate(DISCOUNT_USAGE_LIMIT)` when a counter is at its
     /// limit (or the discount or code is gone), `Duplicate(DISCOUNT_PER_CUSTOMER)` when the
     /// customer used it already. Precondition: the order and customer are written in the

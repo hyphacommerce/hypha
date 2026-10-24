@@ -13,8 +13,8 @@ use crate::{
         ClassSet, Condition, Discount, DiscountDraft, Kind, Limits, MAX_LIVE_AUTOMATIC, Method,
         Status,
     },
-    error::{CodeError, DiscountError},
-    events::{DISCOUNT, DiscountCodesAdded, DiscountCodesRemoved},
+    error::{CodeError, DiscountError, Problem},
+    events::{DISCOUNT, DiscountCodesAdded, DiscountCodesRemoved, DiscountCodesUpdated},
     repo::{
         CodeFilter, CodeSelection, DiscountFilter, DiscountRepo, HasDiscounts, StageDiscounts,
         Usage, keys,
@@ -241,6 +241,87 @@ pub struct DiscountPatch {
     pub limits: Option<Limits>,
 }
 
+impl DiscountPatch {
+    /// `draft` with the patch's fields in place of its own.
+    pub fn apply_to(self, mut draft: DiscountDraft) -> DiscountDraft {
+        if let Some(title) = self.title {
+            draft.title = title;
+        }
+        if let Some(status) = self.status {
+            draft.status = status;
+        }
+        if let Some(starts_at) = self.starts_at {
+            draft.starts_at = starts_at;
+        }
+        if let Some(ends_at) = self.ends_at {
+            draft.ends_at = ends_at;
+        }
+        if let Some(conditions) = self.conditions {
+            draft.conditions = conditions;
+        }
+        if let Some(kind) = self.kind {
+            draft.kind = kind;
+        }
+        if let Some(combines_with) = self.combines_with {
+            draft.combines_with = combines_with;
+        }
+        if let Some(limits) = self.limits {
+            draft.limits = limits;
+        }
+        draft
+    }
+}
+
+/// What a discount being written would read as, writing nothing: its summary, or every
+/// rule it breaks (amounts checked against `currencies`): a new discount's draft, or a
+/// saved one's with a patch over it.
+pub async fn summarize<S: HasDiscounts>(
+    ctx: &Ctx,
+    ports: &S,
+    draft: SummaryDraft,
+    currencies: &HashMap<MarketId, Currency>,
+) -> Result<Result<String, Vec<Problem>>, CommandError> {
+    ctx.require(Scope::DiscountsRead)?;
+    let (id, draft) = match draft {
+        // It has no ID yet, and a summary doesn't show one.
+        SummaryDraft::New(draft) => (DiscountId::from_uuid(Default::default()), draft),
+        SummaryDraft::Saved(id, patch) => {
+            let saved = ports
+                .discounts()
+                .get(id)
+                .await?
+                .ok_or(CommandError::NotFound(id))?;
+            (id, patch.apply_to(saved.draft()))
+        }
+    };
+    let checked = Discount::new(id, draft).and_then(|d| {
+        d.check_currencies(|m| currencies.get(&m).copied())
+            .map(|()| d)
+    });
+    let e = match checked {
+        Ok(discount) => return Ok(Ok(crate::summary(&discount, None))),
+        Err(e) => e,
+    };
+    let path = match &e {
+        DiscountError::Invalid(problems) => return Ok(Err(problems.clone())),
+        DiscountError::MarketNotFound { path, .. }
+        | DiscountError::CurrencyMismatch { path, .. } => path.clone(),
+        DiscountError::MethodFixed => return Err(e.into()),
+    };
+    Ok(Err(vec![Problem {
+        path,
+        code: e.code(),
+        message: e.to_string(),
+    }]))
+}
+
+/// What `summarize` reads: a new discount, or changes to a saved one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SummaryDraft {
+    New(DiscountDraft),
+    Saved(DiscountId, DiscountPatch),
+}
+
 pub async fn update_discount<S: HasDiscounts + HasClock>(
     ctx: &Ctx,
     ports: &S,
@@ -255,32 +336,7 @@ pub async fn update_discount<S: HasDiscounts + HasClock>(
         .await?
         .ok_or(CommandError::NotFound(id))?;
     let before = discount.clone();
-    let mut draft = discount.draft();
-    if let Some(title) = patch.title {
-        draft.title = title;
-    }
-    if let Some(status) = patch.status {
-        draft.status = status;
-    }
-    if let Some(starts_at) = patch.starts_at {
-        draft.starts_at = starts_at;
-    }
-    if let Some(ends_at) = patch.ends_at {
-        draft.ends_at = ends_at;
-    }
-    if let Some(conditions) = patch.conditions {
-        draft.conditions = conditions;
-    }
-    if let Some(kind) = patch.kind {
-        draft.kind = kind;
-    }
-    if let Some(combines_with) = patch.combines_with {
-        draft.combines_with = combines_with;
-    }
-    if let Some(limits) = patch.limits {
-        draft.limits = limits;
-    }
-    discount.update(draft)?;
+    discount.update(patch.apply_to(discount.draft()))?;
     if !discount.is_changed() {
         return Ok(discount);
     }
@@ -427,16 +483,15 @@ pub async fn generate_codes<S: DiscountPorts>(
     Ok(codes)
 }
 
-/// Removes listed codes or a batch; returns how many went.
-pub async fn remove_codes<S: DiscountPorts>(
-    ctx: &Ctx,
+/// `selection` checked and normalised, with how many of the discount's codes it selects
+/// (those with `active` other than `unless_active`, when given) and its batch label.
+async fn selected<S: HasDiscounts>(
     ports: &S,
     id: DiscountId,
     selection: CodeSelection,
-) -> Result<u64, CommandError> {
-    ctx.require(Scope::DiscountsWrite)?;
-    coded(ports, id).await?;
-    let (selection, count, batch) = match selection {
+    unless_active: Option<bool>,
+) -> Result<(CodeSelection, u64, Option<String>), CommandError> {
+    Ok(match selection {
         CodeSelection::Codes(codes) => {
             if codes.len() > MAX_ADDED {
                 return Err(CommandError::TooManyCodes);
@@ -450,7 +505,7 @@ pub async fn remove_codes<S: DiscountPorts>(
                 .find_codes(&normalized)
                 .await?
                 .iter()
-                .filter(|c| c.discount == id)
+                .filter(|c| c.discount == id && unless_active.is_none_or(|a| c.active != a))
                 .count() as u64;
             (CodeSelection::Codes(normalized), count, None)
         }
@@ -459,11 +514,55 @@ pub async fn remove_codes<S: DiscountPorts>(
             let filter = CodeFilter {
                 q: None,
                 batch: Some(batch.clone()),
+                active: unless_active.map(|a| !a),
             };
             let count = ports.discounts().count_codes(id, &filter).await?;
             (CodeSelection::Batch(batch.clone()), count, Some(batch))
         }
-    };
+    })
+}
+
+/// Makes listed codes or a batch active or inactive; returns how many changed. An
+/// inactive code is refused by carts like an unknown one, and a cart holding it shows it
+/// `invalid`; its uses so far stay.
+pub async fn set_codes_active<S: DiscountPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: DiscountId,
+    selection: CodeSelection,
+    active: bool,
+) -> Result<u64, CommandError> {
+    ctx.require(Scope::DiscountsWrite)?;
+    coded(ports, id).await?;
+    let (selection, count, batch) = selected(ports, id, selection, Some(active)).await?;
+    if count == 0 {
+        return Ok(0);
+    }
+    let mut write = ports.batch();
+    write.set_discount_codes_active(id, selection, active);
+    write.record_events(vec![PendingEvent::new(
+        Subject::new(DISCOUNT, id.as_uuid()),
+        &DiscountCodesUpdated {
+            discount: id,
+            count,
+            batch,
+            active,
+        },
+    )]);
+    ports.commit(write).await?;
+    Ok(count)
+}
+
+/// Removes listed codes or a batch; returns how many went.
+pub async fn remove_codes<S: DiscountPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: DiscountId,
+    selection: CodeSelection,
+) -> Result<u64, CommandError> {
+    ctx.require(Scope::DiscountsWrite)?;
+    coded(ports, id).await?;
+    let (selection, count, batch) = selected(ports, id, selection, None).await?;
     if count == 0 {
         return Ok(0);
     }

@@ -1074,9 +1074,12 @@ impl From<hypha_customers::CommandError> for ApiError {
             E::GroupNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Email(_)
             | E::Address(_)
-            | E::Customer(C::Text(_) | C::Handle(_) | C::ConsentStateNotSettable(_)) => {
-                StatusCode::UNPROCESSABLE_ENTITY
-            }
+            | E::Customer(
+                C::Text(_)
+                | C::Handle(_)
+                | C::ConsentStateNotSettable(_)
+                | C::TooManyFilterIds { .. },
+            ) => StatusCode::UNPROCESSABLE_ENTITY,
             // The customer's state: no phone for SMS consent, erased, or an erasure
             // requested already or not at all.
             E::Customer(
@@ -1092,7 +1095,13 @@ impl From<hypha_customers::CommandError> for ApiError {
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,
         };
-        Self::domain(status, e)
+        let details = match &e {
+            E::Customer(C::TooManyFilterIds { field, max }) => {
+                Some(json!({ "field": field, "max": max }))
+            }
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 
