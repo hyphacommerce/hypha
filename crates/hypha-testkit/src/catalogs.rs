@@ -86,6 +86,12 @@ impl CatalogRepo for InMemoryCatalogRepo {
         Ok(self.catalogs.all_oldest_first())
     }
 
+    async fn holding_price_list(&self, list: PriceListId) -> Result<Vec<Catalog>, RepoError> {
+        let mut found = self.catalogs.all_oldest_first();
+        found.retain(|c| c.price_lists().contains(&list));
+        Ok(found)
+    }
+
     async fn product_page(
         &self,
         catalog: CatalogId,

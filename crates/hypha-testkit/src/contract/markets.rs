@@ -234,6 +234,24 @@ pub async fn catalog_repo<S: HasCatalogs + HasPriceLists>(make: impl AsyncFn() -
     catalog_price_lists(&make().await).await;
     scenario("catalog: a price list a catalog holds can't be deleted");
     catalog_holds_its_lists(&make().await).await;
+    scenario("catalog: the catalogs holding a price list, oldest first");
+    catalogs_holding_a_list(&make().await).await;
+}
+
+async fn catalogs_holding_a_list<S: HasCatalogs + HasPriceLists>(ports: &S) {
+    seed_lists(ports).await;
+    let repo = ports.catalogs();
+    let mut second = catalog(2, 20, [plid(5), plid(6)]);
+    repo.insert(&mut second).await.unwrap();
+    let mut first = catalog(1, 10, [plid(5)]);
+    repo.insert(&mut first).await.unwrap();
+    repo.insert(&mut catalog(3, 30, None)).await.unwrap();
+    assert_eq!(
+        repo.holding_price_list(plid(5)).await,
+        Ok(vec![first.clone(), second.clone()])
+    );
+    assert_eq!(repo.holding_price_list(plid(6)).await, Ok(vec![second]));
+    assert_eq!(repo.holding_price_list(plid(99)).await, Ok(vec![]));
 }
 
 /// Stores lists 5 and 6, for catalogs to hold.
@@ -490,6 +508,12 @@ pub async fn price_list_repo<R: PriceListRepo>(make: impl AsyncFn() -> R) {
     price_list_keys_and_stale(&make().await).await;
     scenario("price list: names are unique, ignoring case");
     price_list_names(&make().await).await;
+    scenario("price list: a list is found by its name, ignoring case");
+    price_list_by_name(&make().await).await;
+    scenario("price list: priced_variants names its fixed-priced variants, by ID, up to a limit");
+    priced_variants(&make().await).await;
+    scenario("price list: deleting a changed or missing list is stale");
+    price_list_delete_stale(&make().await).await;
     scenario("price list: a fixed price keeps its compare-at price");
     fixed_price_compare_at(&make().await).await;
     scenario("price list: a fixed price keeps its quantity prices, replaced with it");
@@ -643,6 +667,57 @@ async fn price_list_names<R: PriceListRepo>(repo: &R) {
         repo.get(plid(1)).await.unwrap().unwrap().name(),
         "WholeSale"
     );
+}
+
+async fn price_list_by_name<R: PriceListRepo>(repo: &R) {
+    let mut list = named_list(1, "Wholesale");
+    repo.insert(&mut list).await.unwrap();
+    repo.insert(&mut named_list(2, "Retail")).await.unwrap();
+    assert_eq!(repo.get_by_name("WHOLESALE").await, Ok(Some(list)));
+    assert_eq!(repo.get_by_name("Whole").await, Ok(None));
+}
+
+async fn priced_variants<R: PriceListRepo>(repo: &R) {
+    for n in [1, 2] {
+        repo.insert(&mut price_list(n, Currency::EUR, 0))
+            .await
+            .unwrap();
+    }
+    repo.set_fixed_prices(
+        plid(1),
+        &[(vid(3), fp(300)), (vid(1), fp(100)), (vid(2), fp(200))],
+    )
+    .await
+    .unwrap();
+    repo.set_fixed_prices(plid(2), &[(vid(4), fp(400))])
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.priced_variants(plid(1), 10).await,
+        Ok(vec![vid(1), vid(2), vid(3)])
+    );
+    assert_eq!(
+        repo.priced_variants(plid(1), 2).await,
+        Ok(vec![vid(1), vid(2)])
+    );
+    assert_eq!(repo.priced_variants(plid(99), 10).await, Ok(vec![]));
+}
+
+async fn price_list_delete_stale<R: PriceListRepo>(repo: &R) {
+    let mut list = price_list(1, Currency::EUR, 0);
+    repo.insert(&mut list).await.unwrap();
+    let mut old = list.clone();
+    list.rename("Renamed").unwrap();
+    repo.update(&mut list).await.unwrap();
+    old.delete();
+    assert_eq!(repo.delete(&mut old).await, Err(RepoError::StaleVersion));
+    assert!(repo.get(plid(1)).await.unwrap().is_some());
+    list.delete();
+    repo.delete(&mut list).await.unwrap();
+    // Gone already.
+    let mut again = list.clone();
+    again.delete();
+    assert_eq!(repo.delete(&mut again).await, Err(RepoError::StaleVersion));
 }
 
 async fn fixed_price_compare_at<R: PriceListRepo>(repo: &R) {
@@ -879,11 +954,10 @@ async fn price_list_delete<R: PriceListRepo>(repo: &R) {
         repo.fixed_prices(plid(1), &[vid(1)]).await,
         Ok(HashMap::new())
     );
-    // Its name is free again, and a list gone already is fine.
+    // Its name is free again.
     repo.insert(&mut price_list(2, Currency::EUR, 0))
         .await
         .unwrap();
-    repo.delete(&mut list).await.unwrap();
 }
 
 /// Runs the schedule job's progress scenarios: a one-row record moved only from where a

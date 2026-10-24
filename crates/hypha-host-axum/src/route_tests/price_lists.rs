@@ -577,6 +577,11 @@ async fn price_lists_are_listed_filtered_and_deleted_when_free() {
         (status, code(&error)),
         (StatusCode::NOT_FOUND, "price_list_not_found")
     );
+    let (status, error) = send(&app, "DELETE", &url, None).await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::NOT_FOUND, "price_list_not_found")
+    );
 }
 
 #[tokio::test]

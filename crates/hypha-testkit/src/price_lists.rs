@@ -115,7 +115,7 @@ impl InMemoryPriceListRepo {
         self.schedule.lock().unwrap()
     }
 
-    /// The next `n` lookups by a unique key (`list_all`, which name checks read) find
+    /// The next `n` lookups by a unique key (`get_by_name`, which name checks read) find
     /// nothing, as if another request inserted the row right after: for testing a command
     /// that loses the race between its pre-check and its write.
     pub fn hide_next_lookups(&self, n: usize) {
@@ -167,6 +167,11 @@ impl PriceListRepo for InMemoryPriceListRepo {
 
     async fn list_all(&self) -> Result<Vec<PriceList>, RepoError> {
         Ok(self.price_lists.all_oldest_first())
+    }
+
+    async fn get_by_name(&self, name: &str) -> Result<Option<PriceList>, RepoError> {
+        let name = name.to_lowercase();
+        Ok(self.price_lists.find(|l| l.name().to_lowercase() == name))
     }
 
     async fn list(
@@ -247,6 +252,13 @@ impl PriceListRepo for InMemoryPriceListRepo {
     }
 
     async fn delete(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
+        if self
+            .price_lists
+            .get(&price_list.id())
+            .is_none_or(|stored| stored.version() != price_list.version())
+        {
+            return Err(RepoError::StaleVersion);
+        }
         let held = self
             .catalog_refs
             .lock()
@@ -306,6 +318,23 @@ impl PriceListRepo for InMemoryPriceListRepo {
             .collect();
         lists.sort();
         Ok(lists)
+    }
+
+    async fn priced_variants(
+        &self,
+        list: PriceListId,
+        limit: u32,
+    ) -> Result<Vec<VariantId>, RepoError> {
+        let all = self.fixed_prices.lock().unwrap();
+        let mut variants: Vec<VariantId> = all
+            .get(&list)
+            .into_iter()
+            .flatten()
+            .map(|(v, _)| *v)
+            .collect();
+        variants.sort();
+        variants.truncate(limit as usize);
+        Ok(variants)
     }
 
     async fn fixed_prices(

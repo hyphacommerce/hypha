@@ -56,6 +56,8 @@ pub trait CatalogRepo {
     async fn get_by_context(&self, context: CatalogContext) -> Result<Option<Catalog>, RepoError>;
     /// Every catalog, oldest first (by ID). A store has one per market.
     async fn list_all(&self) -> Result<Vec<Catalog>, RepoError>;
+    /// The catalogs holding `list`, oldest first (by ID).
+    async fn holding_price_list(&self, list: PriceListId) -> Result<Vec<Catalog>, RepoError>;
     /// Stores a new catalog (version 1) with its price lists. Enforces `CATALOG_ID` and
     /// `CATALOG_CONTEXT`.
     ///
@@ -110,6 +112,8 @@ pub trait PriceListRepo {
     async fn get_many(&self, ids: &[PriceListId]) -> Result<Vec<PriceList>, RepoError>;
     /// Every price list, oldest first (by ID).
     async fn list_all(&self) -> Result<Vec<PriceList>, RepoError>;
+    /// The list named `name`, ignoring case (`keys::PRICE_LIST_NAME` allows one).
+    async fn get_by_name(&self, name: &str) -> Result<Option<PriceList>, RepoError>;
     /// A page of the lists `filter` matches, in `sort`'s order. `page.after`'s key fits
     /// the sort (`PriceListSort::fits`; hosts check cursors).
     async fn list(
@@ -126,7 +130,8 @@ pub trait PriceListRepo {
     /// `PRICE_LIST_NAME` and the audience's groups as `insert` does.
     async fn update(&self, price_list: &mut PriceList) -> Result<(), RepoError>;
     /// Removes the list with its fixed prices, writing the events it recorded
-    /// (`PriceList::delete`); one that doesn't exist any more is fine. Refused with
+    /// (`PriceList::delete`), when it's still at the version loaded: otherwise (changed,
+    /// or gone already) `StaleVersion`, and no event. Refused with
     /// `Reference(CATALOG_PRICE_LIST)` while a catalog holds it, in the same step as the
     /// delete.
     async fn delete(&self, price_list: &mut PriceList) -> Result<(), RepoError>;
@@ -153,6 +158,13 @@ pub trait PriceListRepo {
     /// The price lists with a fixed price for `variant`, by ID: what to clean up when the
     /// variant is removed.
     async fn lists_pricing(&self, variant: VariantId) -> Result<Vec<PriceListId>, RepoError>;
+    /// Up to `limit` of the variants `list` has a fixed price for, by ID: what it prices
+    /// beside its adjustment.
+    async fn priced_variants(
+        &self,
+        list: PriceListId,
+        limit: u32,
+    ) -> Result<Vec<VariantId>, RepoError>;
     /// A page of the list's fixed prices, newest variant first (by variant ID). An
     /// unknown list has none.
     /// `filter` joins the products and categories the variants belong to: a variant no

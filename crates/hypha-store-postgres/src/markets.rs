@@ -233,15 +233,17 @@ fn catalog_from_row(row: &Row, price_lists: Vec<PriceListId>) -> Result<Catalog,
     .map_err(|e| corrupt(format!("catalog {id}: {e}")))
 }
 
-/// Which catalogs a load is for: the filter on `catalogs c` both its queries share, so
-/// they go out together (pipelined).
+/// Which catalogs a load is for.
 enum Catalogs {
     All,
     Id(Uuid),
     Context(&'static str, Uuid),
+    /// Those holding this price list.
+    Holding(Uuid),
 }
 
-/// The catalogs `which` names with their price lists, oldest first, in 2 pipelined queries.
+/// The catalogs `which` names with their price lists, oldest first, in one query: the lists
+/// come as an array column, so the row and its set are read at the same moment.
 async fn load_catalogs(client: &impl Queries, which: Catalogs) -> Result<Vec<Catalog>, RepoError> {
     let none = None::<Uuid>;
     let (filter, params): (&str, Vec<(&(dyn ToSql + Sync), Type)>) = match &which {
@@ -251,34 +253,26 @@ async fn load_catalogs(client: &impl Queries, which: Catalogs) -> Result<Vec<Cat
             "c.context_kind = $1 AND c.context_id = $2",
             vec![(kind, Type::TEXT), (id, Type::UUID)],
         ),
+        Catalogs::Holding(list) => (
+            "c.id IN (SELECT catalog_id FROM catalog_price_lists WHERE price_list_id = $1)",
+            vec![(list, Type::UUID)],
+        ),
     };
-    let catalogs_sql = format!(
-        "SELECT c.id, c.version, c.context_kind, c.context_id, {} FROM catalogs c
-         WHERE {filter} ORDER BY c.id",
+    let sql = format!(
+        "SELECT c.id, c.version, c.context_kind, c.context_id, {},
+                ARRAY(SELECT l.price_list_id FROM catalog_price_lists l
+                      WHERE l.catalog_id = c.id ORDER BY l.price_list_id) AS price_lists
+         FROM catalogs c WHERE {filter} ORDER BY c.id",
         stamp_columns("c."),
     );
-    let lists_sql = format!(
-        "SELECT l.catalog_id, l.price_list_id FROM catalog_price_lists l
-         JOIN catalogs c ON c.id = l.catalog_id
-         WHERE {filter} ORDER BY l.catalog_id, l.price_list_id"
-    );
-    let (rows, list_rows) = try_join(
-        client.query_typed(&catalogs_sql, &params),
-        client.query_typed(&lists_sql, &params),
-    )
-    .await
-    .map_err(repo_error)?;
-    let mut lists: HashMap<Uuid, Vec<PriceListId>> = HashMap::new();
-    for row in list_rows {
-        lists
-            .entry(col(&row, "catalog_id")?)
-            .or_default()
-            .push(PriceListId::from_uuid(col(&row, "price_list_id")?));
-    }
+    let rows = client
+        .query_typed(&sql, &params)
+        .await
+        .map_err(repo_error)?;
     rows.iter()
         .map(|row| {
-            let id: Uuid = col(row, "id")?;
-            catalog_from_row(row, lists.remove(&id).unwrap_or_default())
+            let lists: Vec<Uuid> = col(row, "price_lists")?;
+            catalog_from_row(row, lists.into_iter().map(PriceListId::from_uuid).collect())
         })
         .collect()
 }
@@ -286,24 +280,29 @@ async fn load_catalogs(client: &impl Queries, which: Catalogs) -> Result<Vec<Cat
 impl<C: PgConnection> CatalogRepo for PgStore<C> {
     async fn get(&self, id: CatalogId) -> Result<Option<Catalog>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn, |tx| {
-            Ok(load_catalogs(tx, Catalogs::Id(id.as_uuid())).await?.pop())
-        })
+        Ok(load_catalogs(&conn.db(), Catalogs::Id(id.as_uuid()))
+            .await?
+            .pop())
     }
 
     async fn get_by_context(&self, context: CatalogContext) -> Result<Option<Catalog>, RepoError> {
         let (kind, context_id) = context_to_db(context);
         let mut conn = self.conn().await;
-        consistent_read!(conn, |tx| {
-            Ok(load_catalogs(tx, Catalogs::Context(kind, context_id))
+        Ok(
+            load_catalogs(&conn.db(), Catalogs::Context(kind, context_id))
                 .await?
-                .pop())
-        })
+                .pop(),
+        )
     }
 
     async fn list_all(&self) -> Result<Vec<Catalog>, RepoError> {
         let mut conn = self.conn().await;
-        consistent_read!(conn, |tx| load_catalogs(tx, Catalogs::All).await)
+        load_catalogs(&conn.db(), Catalogs::All).await
+    }
+
+    async fn holding_price_list(&self, list: PriceListId) -> Result<Vec<Catalog>, RepoError> {
+        let mut conn = self.conn().await;
+        load_catalogs(&conn.db(), Catalogs::Holding(list.as_uuid())).await
     }
 
     async fn product_page(
@@ -580,6 +579,23 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         rows.iter().map(price_list_from_row).collect()
     }
 
+    async fn get_by_name(&self, name: &str) -> Result<Option<PriceList>, RepoError> {
+        let mut conn = self.conn().await;
+        // `lower(name)` is the unique index's expression, so this reads it.
+        let row = conn
+            .db()
+            .query_typed_opt(
+                &format!(
+                    "SELECT {} FROM price_lists WHERE lower(name) = lower($1)",
+                    price_list_columns("")
+                ),
+                &[(&name, Type::TEXT)],
+            )
+            .await
+            .map_err(repo_error)?;
+        row.as_ref().map(price_list_from_row).transpose()
+    }
+
     async fn get_many(&self, ids: &[PriceListId]) -> Result<Vec<PriceList>, RepoError> {
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -694,17 +710,22 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
 
     async fn delete(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
         let id = price_list.id().as_uuid();
+        let version = version_to_db(price_list.version())?;
         let events = price_list.take_events();
         let stamp = self.event_stamp();
         in_transaction!(self, |tx| {
             // The catalog reference refuses it while a catalog holds it; fixed prices go
             // with it.
-            tx.query_typed(
-                "DELETE FROM price_lists WHERE id = $1",
-                &[(&id, Type::UUID)],
-            )
-            .await
-            .map_err(repo_error)?;
+            let deleted = tx
+                .query_typed_opt(
+                    "DELETE FROM price_lists WHERE id = $1 AND version = $2 RETURNING id",
+                    &[(&id, Type::UUID), (&version, Type::INT8)],
+                )
+                .await
+                .map_err(repo_error)?;
+            if deleted.is_none() {
+                return Err(RepoError::StaleVersion);
+            }
             insert_events(tx, &events, None, stamp).await
         })
     }
@@ -920,6 +941,28 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         variants: &[VariantId],
     ) -> Result<(), RepoError> {
         in_transaction!(self, |tx| remove_fixed_prices(tx, list, variants).await)
+    }
+
+    async fn priced_variants(
+        &self,
+        list: PriceListId,
+        limit: u32,
+    ) -> Result<Vec<VariantId>, RepoError> {
+        let mut conn = self.conn().await;
+        conn.db()
+            .query_typed(
+                "SELECT variant_id FROM price_list_prices WHERE price_list_id = $1
+                 ORDER BY variant_id LIMIT $2",
+                &[
+                    (&list.as_uuid(), Type::UUID),
+                    (&i64::from(limit), Type::INT8),
+                ],
+            )
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(|row| Ok(VariantId::from_uuid(col(row, "variant_id")?)))
+            .collect()
     }
 
     async fn lists_pricing(&self, variant: VariantId) -> Result<Vec<PriceListId>, RepoError> {

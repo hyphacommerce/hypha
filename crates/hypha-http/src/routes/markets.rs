@@ -511,7 +511,7 @@ pub struct PriceListResponse {
 }
 
 /// `lists` as responses: each with the markets holding it and its count of fixed prices,
-/// read once for them all.
+/// read once for them all (a store has a catalog per market: few).
 async fn price_list_responses<P: HasCatalogs + HasPriceLists>(
     ports: &P,
     lists: &[PriceList],
@@ -522,6 +522,16 @@ async fn price_list_responses<P: HasCatalogs + HasPriceLists>(
         .list_all()
         .await
         .map_err(hypha_markets::CommandError::from)?;
+    responses_with(ports, lists, now, &catalogs).await
+}
+
+/// `lists` as responses, the markets read from `catalogs`.
+async fn responses_with<P: HasPriceLists>(
+    ports: &P,
+    lists: &[PriceList],
+    now: Timestamp,
+    catalogs: &[hypha_markets::Catalog],
+) -> Result<Vec<PriceListResponse>, ApiError> {
     let ids: Vec<PriceListId> = lists.iter().map(|l| l.id()).collect();
     let counts = ports
         .price_lists()
@@ -549,7 +559,12 @@ async fn price_list_response<P: HasCatalogs + HasPriceLists>(
     list: &PriceList,
     now: Timestamp,
 ) -> Result<PriceListResponse, ApiError> {
-    let mut found = price_list_responses(ports, std::slice::from_ref(list), now).await?;
+    let catalogs = ports
+        .catalogs()
+        .holding_price_list(list.id())
+        .await
+        .map_err(hypha_markets::CommandError::from)?;
+    let mut found = responses_with(ports, std::slice::from_ref(list), now, &catalogs).await?;
     found
         .pop()
         .ok_or_else(|| ApiError::internal("a price list without its response"))

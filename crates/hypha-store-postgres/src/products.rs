@@ -225,6 +225,8 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
                  JOIN products p ON p.id = v.product_id
                  WHERE ($1::uuid IS NULL OR v.product_id < $1
                         OR (v.product_id = $1 AND v.position > $2))
+                   -- Implied by the line above, but in a shape the index's range scan uses.
+                   AND ($1::uuid IS NULL OR v.product_id <= $1)
                    AND ($4::uuid[] IS NULL OR v.product_id = ANY($4))
                    AND ($5::uuid IS NULL OR EXISTS (SELECT 1 FROM category_products cp
                         JOIN down ON down.id = cp.category_id WHERE cp.product_id = p.id))

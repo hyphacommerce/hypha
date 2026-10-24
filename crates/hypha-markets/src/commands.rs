@@ -418,12 +418,10 @@ async fn name_taken<P: PriceListRepo>(
     price_lists: &P,
     list: &PriceList,
 ) -> Result<Option<CommandError>, CommandError> {
-    let name = list.name().to_lowercase();
     Ok(price_lists
-        .list_all()
+        .get_by_name(list.name())
         .await?
-        .into_iter()
-        .find(|other| other.id() != list.id() && other.name().to_lowercase() == name)
+        .filter(|other| other.id() != list.id())
         .map(|other| CommandError::PriceListNameTaken {
             name: other.name().to_string(),
             price_list: other.id(),
@@ -653,6 +651,11 @@ pub async fn delete_price_list<S: HasCatalogs + HasPriceLists>(
         Err(RepoError::Reference(keys::CATALOG_PRICE_LIST)) => Err(in_use(ports, id)
             .await?
             .unwrap_or(RepoError::Reference(keys::CATALOG_PRICE_LIST).into())),
+        // Another request deleted it first, or changed it since it was loaded.
+        Err(RepoError::StaleVersion) => match ports.price_lists().get(id).await? {
+            None => Err(CommandError::PriceListNotFound(id)),
+            Some(_) => Err(RepoError::StaleVersion.into()),
+        },
         done => Ok(done?),
     }
 }
@@ -664,10 +667,9 @@ async fn in_use<S: HasCatalogs>(
 ) -> Result<Option<CommandError>, CommandError> {
     let catalogs: Vec<CatalogId> = ports
         .catalogs()
-        .list_all()
+        .holding_price_list(list)
         .await?
         .iter()
-        .filter(|c| c.price_lists().contains(&list))
         .map(|c| c.id())
         .collect();
     Ok(
