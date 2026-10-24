@@ -930,3 +930,68 @@ async fn a_summary_is_worked_out_without_writing() {
         "the method is fixed"
     );
 }
+
+#[tokio::test]
+async fn entering_codes_is_limited_per_address() {
+    // Behind a trusted proxy (the test peer), each request names its client.
+    let app = app_behind_proxy().await;
+    let (burst, _) = hypha_http::rate_limit::Rule::DiscountCodeIp.quota(&Default::default());
+    let (_, _) = market_selling_a_mug(&app).await;
+    let pk = publishable(&app).await;
+    let auth = format!("Bearer {pk}");
+    let new_cart = || async {
+        let (_, cart) = send_as(
+            &app,
+            &pk,
+            "POST",
+            "/storefront/carts",
+            Some(r#"{"country":"HR"}"#),
+        )
+        .await;
+        format!(
+            "/storefront/carts/{}/discount-codes",
+            cart["id"].as_str().unwrap()
+        )
+    };
+    let enter = |codes: String, client: &'static str| {
+        let auth = auth.clone();
+        let app = &app;
+        async move {
+            let headers = [
+                ("authorization", auth.as_str()),
+                ("x-forwarded-for", client),
+            ];
+            let (status, body) =
+                send_with(app, &headers, "POST", &codes, Some(r#"{"code":"GUESS"}"#)).await;
+            (status, code(&body).to_string())
+        }
+    };
+    // A cart takes fewer than an address, so the guesses spread over carts.
+    let (per_cart, _) = hypha_http::rate_limit::Rule::DiscountCodeCart.quota(&Default::default());
+    let mut cart = new_cart().await;
+    for n in 0..burst {
+        if n % per_cart == 0 {
+            cart = new_cart().await;
+        }
+        assert_eq!(
+            enter(cart.clone(), "203.0.113.5").await,
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "discount_code_invalid".to_string()
+            ),
+            "guess {n}"
+        );
+    }
+    let fresh = new_cart().await;
+    assert_eq!(
+        enter(fresh.clone(), "203.0.113.5").await,
+        (StatusCode::TOO_MANY_REQUESTS, "rate_limited".to_string())
+    );
+    assert_eq!(
+        enter(fresh, "198.51.100.9").await,
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "discount_code_invalid".to_string()
+        )
+    );
+}
