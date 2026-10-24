@@ -178,7 +178,9 @@ export async function applyDiscountCode(input: {
   if (!id) return { cart: null };
   const code = input.code.trim();
   if (code === "") return { cart: await loadCart(input.country), error: "Enter a code." };
-  const { data, error } = await api().POST("/storefront/carts/{id}/discount-codes", {
+  // The shopper's address goes on: the API limits code entry per client.
+  const client = await shopperApi();
+  const { data, error } = await client.POST("/storefront/carts/{id}/discount-codes", {
     params: { path: { id } },
     body: { code },
   });
@@ -193,7 +195,8 @@ export async function removeDiscountCode(input: {
 }): Promise<CartResult> {
   const id = await cartId(input.country);
   if (!id) return { cart: null };
-  const { data, error } = await api().DELETE("/storefront/carts/{id}/discount-codes/{code}", {
+  const client = await shopperApi();
+  const { data, error } = await client.DELETE("/storefront/carts/{id}/discount-codes/{code}", {
     params: { path: { id, code: input.code } },
   });
   if (error) return { cart: await loadCart(input.country), error: describe(error) };

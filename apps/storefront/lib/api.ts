@@ -32,7 +32,7 @@ export function api(extra: Record<string, string> = {}) {
 
 /**
  * A client that passes the shopper's address on, for the calls Hypha limits per address
- * (creating a cart), so the limit counts the shopper, not this server. Only from a source
+ * (creating a cart, entering a discount code), so the limit counts the shopper, not this server. Only from a source
  * the browser can't forge, as the admin's (`apps/admin/lib/hypha.ts`): Cloudflare's
  * `cf-connecting-ip` on Workers (the API believes it through its own Service Binding),
  * or, behind this deployment's own proxy (`STOREFRONT_TRUST_X_FORWARDED_FOR=true`, a
