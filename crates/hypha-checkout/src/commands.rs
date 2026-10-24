@@ -1154,7 +1154,6 @@ fn usage_claims(
         });
         claims.push(UsageClaim {
             discount: a.discount,
-            limit: discount.limits().total,
             code,
             order,
             customer,

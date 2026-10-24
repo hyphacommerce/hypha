@@ -1101,7 +1101,9 @@ impl HasBatch for InMemoryPorts {
                     Staged::RemovedDiscountCodes(discount, selection) => {
                         discount_rows.remove_codes(discount, &selection)
                     }
-                    Staged::DiscountUsage(claim) => discount_rows.claim(&claim)?,
+                    Staged::DiscountUsage(claim) => {
+                        discount_rows.claim(&claim, discounts.get(&claim.discount))?
+                    }
                     Staged::DiscountCodesActive(discount, selection, active) => {
                         discount_rows.set_active(discount, &selection, active)
                     }

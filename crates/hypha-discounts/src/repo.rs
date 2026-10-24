@@ -13,8 +13,8 @@ pub mod keys {
     pub const DISCOUNT_ID: &str = "discount_id";
     /// A code's normalised text is unique in the store.
     pub const DISCOUNT_CODE: &str = "discount_code";
-    /// Claiming a use when the discount's or the code's limit is reached (or the discount
-    /// is gone): the counter didn't move.
+    /// Claiming a use when the discount's or the code's limit is reached, or the discount
+    /// or code is gone or no longer live or active: the counter didn't move.
     pub const DISCOUNT_USAGE_LIMIT: &str = "discount_usage_limit";
     /// A second order of one customer for a once-per-customer discount.
     pub const DISCOUNT_PER_CUSTOMER: &str = "discount_per_customer";
@@ -79,13 +79,22 @@ pub struct Usage {
     pub at: Timestamp,
 }
 
-/// A use checkout claims in the order's batch. The discount's counter moves only while
-/// it's under `limit`, and the code's while under its own; a once-per-customer use is
-/// unique per customer.
+/// An active discount's window, all the schedule job reads of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Window {
+    pub discount: DiscountId,
+    pub method: Method,
+    pub starts_at: Option<Timestamp>,
+    pub ends_at: Option<Timestamp>,
+}
+
+/// A use checkout claims in the order's batch. Storage judges it by the discount as it
+/// stands at the commit: still live at `at`, its counter under the limit it has then,
+/// and the code still active and under its own limit; a once-per-customer use is unique
+/// per customer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageClaim {
     pub discount: DiscountId,
-    pub limit: Option<u32>,
     /// The code (normalised) and its own limit.
     pub code: Option<(String, Option<u32>)>,
     pub order: OrderId,
@@ -130,8 +139,8 @@ pub trait DiscountRepo {
     /// Stores a new discount (version 1) with its usage counter at zero. Enforces
     /// `DISCOUNT_ID`.
     async fn insert(&self, discount: &mut Discount) -> Result<(), RepoError>;
-    /// Stores changes and bumps the version, or fails with `StaleVersion`. Never touches
-    /// the usage counter.
+    /// Stores changes and bumps the version, or fails with `StaleVersion`. Its uses so far
+    /// stay as they are.
     async fn update(&self, discount: &mut Discount) -> Result<(), RepoError>;
     /// Removes it with its codes, counter and usages, writing its events, when still at
     /// the version loaded; otherwise `StaleVersion`.
@@ -205,8 +214,8 @@ pub trait StageDiscounts {
         active: bool,
     );
     /// Fails the commit with `Duplicate(DISCOUNT_USAGE_LIMIT)` when a counter is at its
-    /// limit (or the discount or code is gone), `Duplicate(DISCOUNT_PER_CUSTOMER)` when the
-    /// customer used it already. Precondition: the order and customer are written in the
+    /// limit, or the discount is gone or not live at the claim's `at`, or the code is gone
+    /// or inactive; `Duplicate(DISCOUNT_PER_CUSTOMER)` when the customer used it already. Precondition: the order and customer are written in the
     /// same batch or exist.
     fn claim_discount_usage(&mut self, claim: UsageClaim);
     /// Moves the schedule job's progress from `from` (`None`: never ran) to `to`; the

@@ -38,15 +38,29 @@ pub(crate) struct DiscountRows {
 impl DiscountRows {
     /// A batch's claim: both counters move only under their limits, and a
     /// once-per-customer use is unique per customer.
-    pub(crate) fn claim(&mut self, claim: &UsageClaim) -> Result<(), RepoError> {
+    /// `discount` is the stored one, as the commit finds it.
+    pub(crate) fn claim(
+        &mut self,
+        claim: &UsageClaim,
+        discount: Option<&Discount>,
+    ) -> Result<(), RepoError> {
         let limit_hit = RepoError::Duplicate(keys::DISCOUNT_USAGE_LIMIT);
+        let discount = discount
+            .filter(|d| d.is_live(claim.at))
+            .ok_or(limit_hit.clone())?;
         let used = *self.counts.get(&claim.discount).ok_or(limit_hit.clone())?;
-        if claim.limit.is_some_and(|max| used >= u64::from(max)) {
+        if discount
+            .limits()
+            .total
+            .is_some_and(|max| used >= u64::from(max))
+        {
             return Err(limit_hit);
         }
         if let Some((code, limit)) = &claim.code {
             let row = self.codes.get(code).ok_or(limit_hit.clone())?;
-            if row.discount != claim.discount || limit.is_some_and(|max| row.used >= u64::from(max))
+            if row.discount != claim.discount
+                || !row.active
+                || limit.is_some_and(|max| row.used >= u64::from(max))
             {
                 return Err(limit_hit);
             }

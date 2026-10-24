@@ -1898,7 +1898,6 @@ fn used_elsewhere(world: &World, discount: hypha_core::DiscountId, customer: Cus
     let mut batch = world.ports.batch();
     batch.claim_discount_usage(UsageClaim {
         discount,
-        limit: None,
         code: None,
         order: hypha_core::OrderId::from_uuid(Uuid::from_u128(9100)),
         customer,

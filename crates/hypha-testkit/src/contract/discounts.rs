@@ -172,10 +172,16 @@ fn page<Id>(n: u32) -> PageRequest<Id> {
     }
 }
 
-fn claim(discount: u128, n: u128, limit: Option<u32>) -> UsageClaim {
+/// A discount with a total limit of `limit` uses.
+fn limited(n: u128, limit: u32) -> Discount {
+    let mut draft = DiscountDraft::new("Offer", Method::Automatic, percent_off_order());
+    draft.limits.total = Some(limit);
+    Discount::new(did(n), draft).unwrap()
+}
+
+fn claim(discount: u128, n: u128) -> UsageClaim {
     UsageClaim {
         discount: did(discount),
-        limit,
         code: None,
         order: order(n),
         customer: customer(n),
@@ -214,6 +220,10 @@ where
     staged(&make().await).await;
     scenario("discount: a claim counts a use under the discount's and the code's limits");
     claims(&make().await).await;
+    scenario("discount: a claim needs the discount live and the code active at the commit");
+    claims_at_commit(&make().await).await;
+    scenario("discount: uses without a limit are counted; a limit set later counts them");
+    unlimited(&make().await).await;
     scenario("discount: two checkouts race for the last use: one wins, one is refused");
     last_use(&make().await).await;
     scenario("discount: once per customer refuses a second use by the same customer");
@@ -336,7 +346,7 @@ async fn deletes<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(ports: &S) {
     repo.insert(&mut d).await.unwrap();
     repo.add_codes(&[code(1, "GONE")]).await.unwrap();
     let mut batch = ports.batch();
-    batch.claim_discount_usage(claim(1, 1, None));
+    batch.claim_discount_usage(claim(1, 1));
     ports.commit(batch).await.unwrap();
     let mut stale = d.clone();
 
@@ -720,7 +730,7 @@ async fn staged<S: HasDiscounts + HasBatch<Batch: StageDiscounts + StageEvents>>
     );
     // Its counter starts at zero: a claim finds it.
     let mut batch = ports.batch();
-    batch.claim_discount_usage(claim(3, 1, Some(1)));
+    batch.claim_discount_usage(claim(3, 1));
     assert_eq!(ports.commit(batch).await, Ok(()));
 }
 
@@ -731,7 +741,7 @@ async fn claims<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(ports: &S) {
         .await
         .unwrap();
 
-    let mut with_code = claim(1, 1, Some(10));
+    let mut with_code = claim(1, 1);
     with_code.code = Some(("ONCE".to_string(), Some(1)));
     let mut batch = ports.batch();
     batch.claim_discount_usage(with_code.clone());
@@ -767,11 +777,11 @@ async fn claims<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(ports: &S) {
     // Totals per currency, by code: two in euros, one in dollars.
     repo.insert(&mut discount(2, Method::Codes)).await.unwrap();
     let mut batch = ports.batch();
-    batch.claim_discount_usage(claim(2, 2, None));
-    batch.claim_discount_usage(claim(2, 3, None));
+    batch.claim_discount_usage(claim(2, 2));
+    batch.claim_discount_usage(claim(2, 3));
     batch.claim_discount_usage(UsageClaim {
         amount: Money::new(70, Currency::USD).unwrap(),
-        ..claim(2, 4, None)
+        ..claim(2, 4)
     });
     ports.commit(batch).await.unwrap();
     assert_eq!(
@@ -786,7 +796,7 @@ async fn claims<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(ports: &S) {
     );
 
     // The code's own limit is reached: nothing of the batch is written.
-    let mut again = claim(1, 2, Some(10));
+    let mut again = claim(1, 2);
     again.code = Some(("ONCE".to_string(), Some(1)));
     let mut batch = ports.batch();
     batch.claim_discount_usage(again);
@@ -800,14 +810,14 @@ async fn claims<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(ports: &S) {
     );
     // A gone discount is refused like a reached limit.
     let mut batch = ports.batch();
-    batch.claim_discount_usage(claim(9, 3, None));
+    batch.claim_discount_usage(claim(9, 3));
     assert_eq!(
         ports.commit(batch).await,
         Err(RepoError::Duplicate(keys::DISCOUNT_USAGE_LIMIT))
     );
     // Newest order first.
     let mut batch = ports.batch();
-    batch.claim_discount_usage(claim(1, 4, None));
+    batch.claim_discount_usage(claim(1, 4));
     ports.commit(batch).await.unwrap();
     let orders: Vec<OrderId> = repo
         .usage_page(did(1), page(10))
@@ -820,15 +830,109 @@ async fn claims<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(ports: &S) {
     assert_eq!(orders, vec![order(4), order(1)]);
 }
 
+async fn claims_at_commit<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(ports: &S) {
+    let repo = ports.discounts();
+    let mut d = discount(1, Method::Codes);
+    repo.insert(&mut d).await.unwrap();
+    repo.add_codes(&[
+        code(1, "OFF"),
+        DiscountCode::new(did(1), "ONE", Some(5), None).unwrap(),
+    ])
+    .await
+    .unwrap();
+    let by = |n: u128, text: &str, limit: Option<u32>| UsageClaim {
+        code: Some((text.to_string(), limit)),
+        ..claim(1, n)
+    };
+    // Codes deactivated after the cart was priced, with and without a limit of their own.
+    let mut batch = ports.batch();
+    batch.set_discount_codes_active(
+        did(1),
+        CodeSelection::Codes(vec!["OFF".to_string(), "ONE".to_string()]),
+        false,
+    );
+    ports.commit(batch).await.unwrap();
+    for (text, limit) in [("OFF", None), ("ONE", Some(5))] {
+        let mut batch = ports.batch();
+        batch.claim_discount_usage(by(1, text, limit));
+        assert_eq!(
+            ports.commit(batch).await,
+            Err(RepoError::Duplicate(keys::DISCOUNT_USAGE_LIMIT))
+        );
+    }
+    // The discount made a draft, or ended before the claim's moment.
+    let mut draft = d.draft();
+    draft.status = Status::Draft;
+    d.update(draft).unwrap();
+    repo.update(&mut d).await.unwrap();
+    let mut batch = ports.batch();
+    batch.claim_discount_usage(claim(1, 2));
+    assert_eq!(
+        ports.commit(batch).await,
+        Err(RepoError::Duplicate(keys::DISCOUNT_USAGE_LIMIT))
+    );
+    let mut draft = d.draft();
+    draft.status = Status::Active;
+    draft.ends_at = Some(at(5));
+    d.update(draft).unwrap();
+    repo.update(&mut d).await.unwrap();
+    let mut batch = ports.batch();
+    batch.claim_discount_usage(claim(1, 3));
+    assert_eq!(
+        ports.commit(batch).await,
+        Err(RepoError::Duplicate(keys::DISCOUNT_USAGE_LIMIT))
+    );
+    assert_eq!(repo.usage_counts(&[did(1)]).await, Ok(HashMap::new()));
+}
+
+async fn unlimited<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(ports: &S) {
+    let repo = ports.discounts();
+    let mut d = discount(1, Method::Codes);
+    repo.insert(&mut d).await.unwrap();
+    repo.add_codes(&[code(1, "ANY")]).await.unwrap();
+    let mut batch = ports.batch();
+    for n in 1..=2 {
+        batch.claim_discount_usage(UsageClaim {
+            code: Some(("ANY".to_string(), None)),
+            ..claim(1, n)
+        });
+    }
+    ports.commit(batch).await.unwrap();
+    assert_eq!(
+        repo.usage_counts(&[did(1)]).await,
+        Ok(HashMap::from([(did(1), 2)]))
+    );
+    assert_eq!(
+        repo.find_codes(&["ANY".to_string()]).await.unwrap()[0].used,
+        2
+    );
+    // Given a limit of 3 after two uses, it has one left.
+    let mut draft = d.draft();
+    draft.limits.total = Some(3);
+    d.update(draft).unwrap();
+    repo.update(&mut d).await.unwrap();
+    let mut batch = ports.batch();
+    batch.claim_discount_usage(claim(1, 3));
+    ports.commit(batch).await.unwrap();
+    let mut batch = ports.batch();
+    batch.claim_discount_usage(claim(1, 4));
+    assert_eq!(
+        ports.commit(batch).await,
+        Err(RepoError::Duplicate(keys::DISCOUNT_USAGE_LIMIT))
+    );
+    assert_eq!(
+        repo.usage_counts(&[did(1)]).await,
+        Ok(HashMap::from([(did(1), 3)]))
+    );
+}
+
 async fn last_use<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(ports: &S) {
     let repo = ports.discounts();
-    repo.insert(&mut discount(1, Method::Automatic))
-        .await
-        .unwrap();
+    repo.insert(&mut limited(1, 1)).await.unwrap();
     let mut first = ports.batch();
-    first.claim_discount_usage(claim(1, 1, Some(1)));
+    first.claim_discount_usage(claim(1, 1));
     let mut second = ports.batch();
-    second.claim_discount_usage(claim(1, 2, Some(1)));
+    second.claim_discount_usage(claim(1, 2));
     // Both read the counter at zero; only one may move it to the limit.
     assert_eq!(ports.commit(first).await, Ok(()));
     assert_eq!(
@@ -849,7 +953,7 @@ async fn once_per_customer<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(po
     let once = |n: u128, who: u128| UsageClaim {
         once_per_customer: true,
         customer: customer(who),
-        ..claim(1, n, None)
+        ..claim(1, n)
     };
     let mut batch = ports.batch();
     batch.claim_discount_usage(once(1, 7));
@@ -865,7 +969,7 @@ async fn once_per_customer<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(po
     batch.claim_discount_usage(once(3, 8));
     batch.claim_discount_usage(UsageClaim {
         customer: customer(7),
-        ..claim(1, 4, None)
+        ..claim(1, 4)
     });
     ports.commit(batch).await.unwrap();
     assert_eq!(

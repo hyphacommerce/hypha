@@ -550,6 +550,19 @@ async fn update_discount(
         .ok_or(RepoError::StaleVersion)?;
     let version = version_from_db(col(&row, "version")?)?;
     write_stamps(tx, "discounts", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
+    // Claims don't move the counter of a discount without a limit: one given a limit
+    // starts from its real uses. The row update above waits for claims in flight (they
+    // hold the row), so the count includes them, and later claims see the new limit.
+    if limit.is_some() {
+        tx.query_typed(
+            "UPDATE discount_usage_counts SET used = (
+                 SELECT count(*) FROM discount_usages WHERE discount_id = $1
+             ) WHERE discount_id = $1",
+            &[(&s.id.as_uuid(), Type::UUID)],
+        )
+        .await
+        .map_err(repo_error)?;
+    }
     Ok(version)
 }
 
@@ -654,40 +667,68 @@ pub(crate) async fn set_codes_active(
     Ok(())
 }
 
-/// Counts a use: each counter moves only under its limit, or the claim fails
-/// (`Duplicate(DISCOUNT_USAGE_LIMIT)`); the usage row's unique index refuses a second use
-/// by one customer of a once-per-customer discount.
+/// Counts a use. The discount must still be live at the claim's moment, and its row is
+/// held (`FOR SHARE`: concurrent claims don't wait on each other, an edit waits for them)
+/// so its limit can't change before the commit; the code must still be active. Each
+/// counter moves only under its limit, or the claim fails
+/// (`Duplicate(DISCOUNT_USAGE_LIMIT)`); without a limit it isn't written at all, so a
+/// popular unlimited discount or code is no row every checkout queues on, and its uses
+/// are counted from the usage rows instead. The usage row's unique index refuses a second
+/// use by one customer of a once-per-customer discount.
 pub(crate) async fn claim_usage(tx: &impl Queries, claim: &UsageClaim) -> Result<(), RepoError> {
     let id = claim.discount.as_uuid();
-    let limit: Option<i64> = claim.limit.map(i64::from);
-    let moved = tx
+    let at = claim.at.unix_micros();
+    let limit_hit = RepoError::Duplicate(keys::DISCOUNT_USAGE_LIMIT);
+    let live = tx
         .query_typed_opt(
-            "UPDATE discount_usage_counts SET used = used + 1
-             WHERE discount_id = $1 AND ($2::bigint IS NULL OR used < $2) RETURNING used",
-            &[(&id, Type::UUID), (&limit, Type::INT8)],
+            &format!(
+                "SELECT usage_limit FROM discounts WHERE id = $1 AND {} FOR SHARE",
+                phase_sql(Phase::Active, &ts(2))
+            ),
+            &[(&id, Type::UUID), (&at, Type::INT8)],
         )
         .await
-        .map_err(repo_error)?;
-    if moved.is_none() {
-        return Err(RepoError::Duplicate(keys::DISCOUNT_USAGE_LIMIT));
+        .map_err(repo_error)?
+        .ok_or(limit_hit.clone())?;
+    let limit: Option<i32> = col(&live, "usage_limit")?;
+    if let Some(limit) = limit {
+        tx.query_typed_opt(
+            "UPDATE discount_usage_counts SET used = used + 1
+             WHERE discount_id = $1 AND used < $2 RETURNING used",
+            &[(&id, Type::UUID), (&i64::from(limit), Type::INT8)],
+        )
+        .await
+        .map_err(repo_error)?
+        .ok_or(limit_hit.clone())?;
     }
     if let Some((code, code_limit)) = &claim.code {
-        let code_limit: Option<i64> = code_limit.map(i64::from);
-        let moved = tx
-            .query_typed_opt(
-                "UPDATE discount_codes SET used = used + 1
-                 WHERE normalized = $1 AND discount_id = $2
-                     AND ($3::bigint IS NULL OR used < $3) RETURNING used",
-                &[
-                    (code, Type::TEXT),
-                    (&id, Type::UUID),
-                    (&code_limit, Type::INT8),
-                ],
-            )
-            .await
-            .map_err(repo_error)?;
-        if moved.is_none() {
-            return Err(RepoError::Duplicate(keys::DISCOUNT_USAGE_LIMIT));
+        // A code's limit is fixed when it's made, so the claim's is the stored one.
+        let held = match code_limit {
+            Some(code_limit) => {
+                tx.query_typed_opt(
+                    "UPDATE discount_codes SET used = used + 1
+                     WHERE normalized = $1 AND discount_id = $2 AND active AND used < $3
+                     RETURNING used",
+                    &[
+                        (code, Type::TEXT),
+                        (&id, Type::UUID),
+                        (&i64::from(*code_limit), Type::INT8),
+                    ],
+                )
+                .await
+            }
+            None => {
+                tx.query_typed_opt(
+                    "SELECT 1 FROM discount_codes
+                     WHERE normalized = $1 AND discount_id = $2 AND active FOR SHARE",
+                    &[(code, Type::TEXT), (&id, Type::UUID)],
+                )
+                .await
+            }
+        }
+        .map_err(repo_error)?;
+        if held.is_none() {
+            return Err(limit_hit);
         }
     }
     let code = claim.code.as_ref().map(|(c, _)| c.as_str());
@@ -714,9 +755,16 @@ pub(crate) async fn claim_usage(tx: &impl Queries, claim: &UsageClaim) -> Result
     Ok(())
 }
 
+/// A code's columns; an unlimited code's `used` is counted from the usage rows, since
+/// claims don't move its counter.
 fn code_columns() -> String {
     format!(
-        "normalized, discount_id, code, usage_limit, active, batch, used, {}",
+        "normalized, discount_id, code, usage_limit, active, batch,
+         CASE WHEN usage_limit IS NULL THEN (
+             SELECT count(*) FROM discount_usages u
+             WHERE u.discount_id = discount_codes.discount_id
+                 AND u.code = discount_codes.normalized
+         ) ELSE used END AS used, {}",
         micros("created_at")
     )
 }
@@ -1198,8 +1246,15 @@ impl<C: PgConnection> DiscountRepo for PgStore<C> {
         let mut conn = self.conn().await;
         conn.db()
             .query_typed(
-                "SELECT discount_id, used FROM discount_usage_counts
-                 WHERE discount_id = ANY($1) AND used > 0",
+                // An unlimited discount's counter doesn't move: its uses are its rows.
+                "SELECT * FROM (
+                     SELECT d.id AS discount_id,
+                         CASE WHEN d.usage_limit IS NULL THEN (
+                             SELECT count(*) FROM discount_usages u WHERE u.discount_id = d.id
+                         ) ELSE c.used END AS used
+                     FROM discounts d JOIN discount_usage_counts c ON c.discount_id = d.id
+                     WHERE d.id = ANY($1)
+                 ) counted WHERE used > 0",
                 &[(&ids, Type::UUID_ARRAY)],
             )
             .await
