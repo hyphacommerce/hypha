@@ -88,9 +88,12 @@ async function DiscountView({
   tab: DiscountTab;
   query: SearchParams;
 }) {
-  const discount = await loadDiscount(id);
+  const [discount, me] = await Promise.all([loadDiscount(id), requireStaff()]);
   const hasCodes = discount.method === "codes";
-  const tab = asked === "codes" && !hasCodes ? "settings" : asked;
+  // Usage names buyers and their orders, so it needs reading both.
+  const hasUsage = hasScope(me.scopes, "customers:read") && hasScope(me.scopes, "orders:read");
+  const tab =
+    (asked === "codes" && !hasCodes) || (asked === "usage" && !hasUsage) ? "settings" : asked;
   return (
     <>
       <PageHeader
@@ -99,7 +102,7 @@ async function DiscountView({
         badges={<DiscountStatusBadge phase={discount.phase} />}
         description={`${methodLabel(discount)} · ${discount.summary}`}
       />
-      <DiscountTabs id={id} tab={tab} hasCodes={hasCodes}>
+      <DiscountTabs id={id} tab={tab} hasCodes={hasCodes} hasUsage={hasUsage}>
         <Suspense fallback={tabFallback(id, tab)}>
           {tab === "codes" ? (
             <Codes id={id} params={query} />
