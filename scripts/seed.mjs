@@ -89,6 +89,11 @@ function random() {
 const pick = (items) => items[Math.floor(random() * items.length)];
 
 const eur = (euros) => ({ amount: Math.round(euros * 100), currency: "EUR" });
+/** A share of a price, rounded to the minor unit (0.8 is 20% off). */
+const share = (money, factor) => ({
+  amount: Math.round(money.amount * factor),
+  currency: money.currency,
+});
 
 /** A base price (EUR cents) in another market's currency, rounded like a shop would. */
 function convert(cents, currency) {
@@ -580,6 +585,8 @@ const FACETS = [
   { key: "product_type", label: "Type" },
   { key: "option.colour", label: "Colour" },
   { key: "vendor", label: "Maker" },
+  // Counted for the storefront's "On sale" toggle.
+  { key: "on_sale", label: "On sale" },
 ];
 
 const CATEGORIES = [
@@ -1686,6 +1693,57 @@ async function main() {
     await admin.post(`/admin/catalogs/${market.catalog}/products`, { products: ids });
   await admin.post(`/admin/channels/${onlineStore.id}/products`, { products: ids });
 
+  console.log("Sales and clearance");
+  // In euros, the Europe market's base prices: its catalog takes the lists.
+  const europe = MARKETS.find((m) => m.currency === "EUR");
+  const forSale = Object.fromEntries(sellable.map((p) => [p.handle, p]));
+  // A "was" price on a few variants' own prices, struck through wherever no list wins.
+  for (const handle of ["fruiting-chamber", "pressure-sterilizer", "still-air-box"]) {
+    const product = forSale[handle];
+    if (!product) continue;
+    const variant = product.variants[0];
+    await admin.patch(`/admin/products/${product.id}/variants/${variant.id}`, {
+      compare_at_price: share(variant.price, 1.25),
+    });
+  }
+  // A season's sale: 20% off every grow kit, started yesterday, ending in a month. A sale
+  // list's "was" price is the regular one, so nothing else needs typing.
+  const day = 24 * 60 * 60 * 1000;
+  const autumn = await admin.post("/admin/price-lists", {
+    name: "Autumn sale",
+    description: "20% off grow kits while the season lasts.",
+    kind: "sale",
+    currency: "EUR",
+    starts_at: new Date(Date.now() - day).toISOString(),
+    ends_at: new Date(Date.now() + 30 * day).toISOString(),
+    adjustment: {
+      percent_bps: -2000,
+      applies_to: { type: "categories", categories: [categoryIds["grow-kits"]] },
+    },
+  });
+  await admin.post(`/admin/catalogs/${europe.catalog}/price-lists`, { price_list: autumn.id });
+  // Clearance: the last of a few lines at fixed prices, the regular price as the "was",
+  // with no end.
+  const clearance = await admin.post("/admin/price-lists", {
+    name: "Clearance",
+    description: "The last of the old stock.",
+    kind: "sale",
+    currency: "EUR",
+  });
+  const CLEARANCE = { "acoustic-panel": 0.6, "mycelium-brick": 0.5, "packaging-inserts": 0.7 };
+  await admin.put(`/admin/price-lists/${clearance.id}/fixed-prices`, {
+    fixed_prices: Object.entries(CLEARANCE).flatMap(([handle, factor]) =>
+      (forSale[handle]?.variants ?? []).slice(0, 2).map((variant) => ({
+        variant: variant.id,
+        price: share(variant.price, factor),
+        compare_at: variant.price,
+      })),
+    ),
+  });
+  await admin.post(`/admin/catalogs/${europe.catalog}/price-lists`, {
+    price_list: clearance.id,
+  });
+
   console.log("Search");
   await admin.patch("/admin/search/settings", { split_by: [], facets: FACETS });
 
@@ -1934,8 +1992,8 @@ async function main() {
 
   console.log("Customer fields and groups");
   const wholesale = await admin.post("/admin/customer-groups", {
-    name: "Trade",
-    handle: "trade",
+    name: "Wholesale",
+    handle: "wholesale",
     description: "Farms, labs and studios buying at trade prices.",
   });
   const CUSTOMERS = {
@@ -1971,6 +2029,33 @@ async function main() {
       });
     }
   }
+
+  // Their prices: fixed below the regular ones on what they buy in bulk, cheaper again by
+  // the ten and the fifty, seen once they sign in (and in their carts).
+  console.log("Wholesale prices");
+  const tradePrices = await admin.post("/admin/price-lists", {
+    name: "Wholesale",
+    description: "Trade prices and quantity breaks for the Wholesale group.",
+    kind: "override",
+    currency: "EUR",
+    audience: { groups: [wholesale.id] },
+  });
+  const BULK = ["mycelium-leather", "grain-spawn-bag", "hardwood-substrate", "coffee-substrate"];
+  await admin.put(`/admin/price-lists/${tradePrices.id}/fixed-prices`, {
+    fixed_prices: BULK.flatMap((handle) =>
+      (forSale[handle]?.variants ?? []).map((variant) => ({
+        variant: variant.id,
+        price: share(variant.price, 0.85),
+        breaks: [
+          { min_quantity: 10, price: share(variant.price, 0.75) },
+          { min_quantity: 50, price: share(variant.price, 0.65) },
+        ],
+      })),
+    ),
+  });
+  await admin.post(`/admin/catalogs/${europe.catalog}/price-lists`, {
+    price_list: tradePrices.id,
+  });
 
   const variantCount = sellable.reduce((n, p) => n + p.variants.length, 0);
   console.log("\nDone: Mycelium Works is set up.");
