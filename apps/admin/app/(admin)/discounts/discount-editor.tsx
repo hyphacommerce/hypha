@@ -19,7 +19,7 @@ import type { LiveDiscount } from "@/components/discounts/combinations-section";
 import type { DiscountOptions } from "@/components/discounts/fields";
 import { TemplatesPicker } from "@/components/discounts/templates-picker";
 import { SaveBar } from "@/components/save-bar";
-import { type DiscountDraft, isDirty } from "@/lib/discounts/draft";
+import type { DiscountDraft } from "@/lib/discounts/draft";
 import { type TemplateKey, templateOf } from "@/lib/discounts/templates";
 import {
   type CheckContext,
@@ -33,6 +33,7 @@ import {
   apiPathMapper,
   createBody,
   draftOf,
+  isDirty,
   patchBody,
   refusalProblems,
 } from "@/lib/discounts/wire";
@@ -206,7 +207,7 @@ export function EditDiscount({
   const [error, setError] = useState<string>();
   const [names, setNames] = useState(initialNames);
   const [isPending, startTransition] = useTransition();
-  const dirty = isDirty(saved, draft);
+  const dirty = isDirty(saved, draft, ctx);
 
   const built = patchBody(saved, draft, ctx);
   const changes = "body" in built && Object.keys(built.body).length > 0 ? built.body : null;

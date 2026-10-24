@@ -16,8 +16,10 @@ import {
   type CreateDiscount,
   type Discount,
   apiPathMapper,
+  changedSections,
   createBody,
   draftOf,
+  isDirty,
   marketsInDiscount,
   patchBody,
   refusalProblems,
@@ -612,8 +614,82 @@ test("every reward's problem lands on its class, in the order the request sends 
   const cls = { items: "product", subtotal: "order", shipping: "shipping" } as const;
   const map = apiPathMapper(d);
   kind.rewards.forEach((r, i) =>
-    assert.equal(map(`kind.rewards[${i}].value.basis_points`), `kind.${cls[r.target.type]}.value.percent`),
+    assert.equal(
+      map(`kind.rewards[${i}].value.basis_points`),
+      `kind.${cls[r.target.type]}.value.percent`,
+    ),
   );
+});
+
+// ---- what changed ----
+
+const orderOff = (text: string) =>
+  draft({ kind: standard({ order: { value: amounts("amount", text) } }) });
+
+/** 10% off every product, with `products` left from when it named some. */
+const everyProduct = (products: string[]) =>
+  draft({
+    kind: standard({
+      product: { items: { ...emptyItems("all"), products }, value: percent("10") },
+    }),
+  });
+
+const tiered = (first: string, second: string) =>
+  draft({
+    kind: {
+      type: "tiered",
+      items: emptyItems(),
+      measure: "quantity",
+      tiers: [first, second].map((quantity) => ({ quantity, amounts: {}, value: percent("5") })),
+    },
+  });
+
+test("an unchanged draft has no changed sections", () => {
+  assert.deepEqual(changedSections(orderOff("12.50"), orderOff("12.50"), ctx), []);
+  assert.equal(isDirty(orderOff("12.50"), orderOff("12.50"), ctx), false);
+});
+
+test("changed sections are only those that differ", () => {
+  const edited = {
+    ...orderOff("12.50"),
+    title: "Welcome",
+    limits: { totalUses: "5", oncePerCustomer: false },
+  };
+  assert.deepEqual(changedSections(orderOff("12.50"), edited, ctx), ["title", "limits"]);
+});
+
+test("an amount typed another way isn't a change", () => {
+  assert.deepEqual(changedSections(orderOff("12.50"), orderOff("12.5"), ctx), []);
+  assert.deepEqual(changedSections(orderOff("12.50"), orderOff("12.51"), ctx), ["kind"]);
+});
+
+test("a product list hidden behind Every product isn't a change", () => {
+  assert.deepEqual(changedSections(everyProduct([]), everyProduct(["prod_1"]), ctx), []);
+});
+
+test("the order of IDs in a list isn't a change", () => {
+  const before = orderOff("12.50");
+  before.conditions.markets = ["mkt_ie", "mkt_jp"];
+  const edited = orderOff("12.50");
+  edited.conditions.markets = ["mkt_jp", "mkt_ie"];
+  assert.deepEqual(changedSections(before, edited, ctx), []);
+});
+
+test("a blank amount is the same as none", () => {
+  const before = orderOff("12.50");
+  before.conditions.minSubtotal = { enabled: true, amounts: { mkt_ie: "10" } };
+  const edited = orderOff("12.50");
+  edited.conditions.minSubtotal = { enabled: true, amounts: { mkt_ie: "10", mkt_jp: " " } };
+  assert.deepEqual(changedSections(before, edited, ctx), []);
+});
+
+test("a draft with problems is compared by what was typed", () => {
+  const broken = { ...orderOff("12.50"), title: "" };
+  assert.deepEqual(changedSections(orderOff("12.5"), broken, ctx), ["title", "kind"]);
+});
+
+test("reordering tiers is a change", () => {
+  assert.deepEqual(changedSections(tiered("3", "5"), tiered("5", "3"), ctx), ["kind"]);
 });
 
 test("buy X get Y paths", () => {

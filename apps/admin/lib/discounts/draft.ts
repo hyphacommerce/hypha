@@ -1,7 +1,8 @@
 // A discount as the admin's form holds it: what staff type (amounts and percentages as
 // text, times as wall-clock times in the store's zone), shaped by the form's sections
 // rather than by the API's body. Turning it into a request is the page's job; here are
-// the draft, its blank form, the classes it carries and what changed since it was saved.
+// the draft, its blank form and the classes it carries; what changed since it was saved
+// is `wire.ts`'s, by what each would send.
 // Plain functions and types only, shared by server and client code (and `node --test`).
 
 /** How buyers get it: a code they enter, or applied by itself. */
@@ -227,59 +228,6 @@ export function phaseOf(
 
 /** The draft's sections, the units a save sends when they changed. */
 export type Section = keyof DiscountDraft;
-
-const SECTIONS: readonly Section[] = [
-  "method",
-  "title",
-  "code",
-  "status",
-  "kind",
-  "conditions",
-  "combinesWith",
-  "limits",
-  "schedule",
-];
-
-/** Keys whose arrays are ordered: tiers go from the lowest threshold up. */
-const ORDERED = new Set(["tiers"]);
-/** Keys holding amounts by market, where a blank amount is no amount. */
-const AMOUNT_MAPS = new Set(["amounts", "maxAmount"]);
-
-/**
- * A canonical form for comparing: ID lists sorted (their order means nothing), blank
- * amounts dropped (a blank market isn't offered it either way), text trimmed.
- */
-function canonical(value: unknown, key: string): unknown {
-  if (Array.isArray(value)) {
-    const items: unknown[] = value.map((v) => canonical(v, ""));
-    return !ORDERED.has(key) && items.every((v) => typeof v === "string")
-      ? items.toSorted()
-      : items;
-  }
-  if (typeof value === "object" && value !== null) {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value).toSorted(([a], [b]) => a.localeCompare(b))) {
-      if (AMOUNT_MAPS.has(key) && typeof v === "string" && v.trim() === "") continue;
-      out[k] = canonical(v, k);
-    }
-    return out;
-  }
-  return typeof value === "string" ? value.trim() : value;
-}
-
-/**
- * The sections of `draft` that differ from `saved`, for a JSON Merge Patch of changed
- * fields only. Empty when nothing changed.
- */
-export function changedSections(saved: DiscountDraft, draft: DiscountDraft): Section[] {
-  return SECTIONS.filter(
-    (s) => JSON.stringify(canonical(saved[s], s)) !== JSON.stringify(canonical(draft[s], s)),
-  );
-}
-
-export function isDirty(saved: DiscountDraft, draft: DiscountDraft): boolean {
-  return changedSections(saved, draft).length > 0;
-}
 
 /**
  * The markets a draft's amounts are typed for: those its markets condition names, or

@@ -4,21 +4,15 @@ import { test } from "node:test";
 import {
   type DiscountDraft,
   amountMarkets,
-  changedSections,
   classesOf,
   compatible,
   emptyDraft,
   emptyItems,
   emptyValue,
-  isDirty,
   phaseOf,
 } from "./draft.ts";
 
 const NOW = Date.parse("2026-10-24T12:00:00Z");
-
-function tier(quantity: string) {
-  return { quantity, amounts: {}, value: emptyValue() };
-}
 
 function withKind(kind: DiscountDraft["kind"]): DiscountDraft {
   return { ...emptyDraft(), kind };
@@ -56,51 +50,6 @@ test("an active discount is scheduled before its start and expired at its end", 
   assert.equal(phaseOf("active", "2026-10-25T00:00:00Z", null, NOW), "scheduled");
   assert.equal(phaseOf("active", null, "2026-10-24T12:00:00Z", NOW), "expired");
   assert.equal(phaseOf("active", "2026-10-24T12:00:00Z", null, NOW), "active");
-});
-
-test("an unchanged draft has no changed sections", () => {
-  assert.deepEqual(changedSections(emptyDraft(), emptyDraft()), []);
-  assert.equal(isDirty(emptyDraft(), emptyDraft()), false);
-});
-
-test("changed sections are only those that differ", () => {
-  const draft = {
-    ...emptyDraft(),
-    title: "Welcome",
-    limits: { totalUses: "5", oncePerCustomer: false },
-  };
-  assert.deepEqual(changedSections(emptyDraft(), draft), ["title", "limits"]);
-});
-
-test("the order of IDs in a list isn't a change", () => {
-  const saved = emptyDraft();
-  saved.conditions.markets = ["mkt_a", "mkt_b"];
-  const draft = emptyDraft();
-  draft.conditions.markets = ["mkt_b", "mkt_a"];
-  assert.deepEqual(changedSections(saved, draft), []);
-});
-
-test("a blank amount is the same as none", () => {
-  const saved = emptyDraft();
-  const draft = emptyDraft();
-  draft.conditions.minSubtotal.amounts = { mkt_a: " " };
-  assert.deepEqual(changedSections(saved, draft), []);
-});
-
-test("reordering tiers is a change", () => {
-  const saved = withKind({
-    type: "tiered",
-    items: emptyItems(),
-    measure: "quantity",
-    tiers: [tier("3"), tier("5")],
-  });
-  const draft = withKind({
-    type: "tiered",
-    items: emptyItems(),
-    measure: "quantity",
-    tiers: [tier("5"), tier("3")],
-  });
-  assert.deepEqual(changedSections(saved, draft), ["kind"]);
 });
 
 test("amounts are typed for the markets the conditions name, or all of them", () => {

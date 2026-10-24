@@ -20,7 +20,6 @@ import {
   type ThresholdDraft,
   type ValueDraft,
   amountMarkets,
-  changedSections,
   combinedClasses,
   emptyConditions,
   emptyItems,
@@ -255,6 +254,65 @@ export function createBody(draft: DiscountDraft, ctx: CheckContext): Built<Creat
   };
 }
 
+type Fields = ReturnType<typeof fieldsOf>;
+
+/** The fields each section of the draft sends; none for those a patch never sends (the
+ * method is fixed, codes have their tab). */
+const SENT: Record<Section, readonly (keyof Fields)[]> = {
+  method: [],
+  title: ["title"],
+  code: [],
+  status: ["status"],
+  kind: ["kind"],
+  conditions: ["conditions"],
+  combinesWith: ["combines_with"],
+  limits: ["limits"],
+  schedule: ["starts_at", "ends_at"],
+};
+const SECTIONS = Object.keys(SENT).filter((k): k is Section => k in SENT);
+
+/** JSON where the order of a list of IDs (or classes) means nothing; tiers, objects in
+ * a list, keep theirs. */
+const json = (value: unknown) =>
+  JSON.stringify(value, (_key, v: unknown) =>
+    Array.isArray(v) && v.every((x) => typeof x === "string") ? v.toSorted() : v,
+  );
+
+/** The sections that differ: by what each would send when both drafts can be sent
+ * (`sent`), so "12.5" for "12.50", a blank amount or a product list hidden behind
+ * "Every product" isn't a change; else by what was typed. */
+function sectionsChanged(
+  saved: DiscountDraft,
+  draft: DiscountDraft,
+  sent: { saved: Fields; draft: Fields } | null,
+): Section[] {
+  return SECTIONS.filter((s) => {
+    const keys = SENT[s];
+    if (sent && keys.length > 0)
+      return keys.some((k) => json(sent.saved[k]) !== json(sent.draft[k]));
+    return json(saved[s]) !== json(draft[s]);
+  });
+}
+
+/**
+ * The sections of `draft` that differ from `saved`. A draft that passes the checks is
+ * compared by what it would send; one with problems by what was typed (it can't be sent,
+ * and the save bar still has to show it).
+ */
+export function changedSections(
+  saved: DiscountDraft,
+  draft: DiscountDraft,
+  ctx: CheckContext,
+): Section[] {
+  const sendable = checkDraft(draft, ctx).length === 0;
+  const sent = sendable ? { saved: fieldsOf(saved, ctx), draft: fieldsOf(draft, ctx) } : null;
+  return sectionsChanged(saved, draft, sent);
+}
+
+export function isDirty(saved: DiscountDraft, draft: DiscountDraft, ctx: CheckContext): boolean {
+  return changedSections(saved, draft, ctx).length > 0;
+}
+
 /**
  * The JSON Merge Patch for what changed between `saved` (the discount as loaded) and
  * `draft`: only the changed sections' fields. Empty when nothing changed. The method and
@@ -269,6 +327,7 @@ export function patchBody(
   if (problems.length > 0) return { problems };
   const all = fieldsOf(draft, ctx);
   const body: UpdateDiscount = {};
+  const changed = sectionsChanged(saved, draft, { saved: fieldsOf(saved, ctx), draft: all });
   const patchers: Partial<Record<Section, () => void>> = {
     title: () => (body.title = all.title),
     status: () => (body.status = all.status),
@@ -281,7 +340,7 @@ export function patchBody(
       body.ends_at = all.ends_at;
     },
   };
-  for (const section of changedSections(saved, draft)) patchers[section]?.();
+  for (const section of changed) patchers[section]?.();
   // Amounts are typed for the markets the conditions name: a change of markets changes
   // which amounts the kind sends, so the kind goes along.
   if (body.conditions !== undefined && body.kind === undefined) body.kind = all.kind;
