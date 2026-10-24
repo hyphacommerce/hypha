@@ -9,36 +9,30 @@ use hypha_core::{
 };
 
 use crate::{
-    Discount, DiscountRepo, HasDiscounts, StageDiscounts, Status,
+    DiscountRepo, HasDiscounts, StageDiscounts, Window,
     events::{DISCOUNT, DiscountEnded, DiscountStarted},
 };
 
-/// The window boundaries of `discounts` that passed in `(after, until]`, oldest first
-/// (then by discount, a start before an end). Only an active discount's count: a draft
-/// applies nothing either side. Each is announced even when the discount was written after
-/// it: that write's `discount.updated` may have said nothing about its window (a rename).
+/// The boundaries of active discounts' `windows` (a draft applies nothing either side,
+/// so storage reads only active ones) that passed in `(after, until]`, oldest first (then
+/// by discount, a start before an end). Each is announced even when the discount was
+/// written after it: that write's `discount.updated` may have said nothing about its
+/// window (a rename).
 pub fn boundaries(
-    discounts: &[Discount],
+    windows: &[Window],
     after: Timestamp,
     until: Timestamp,
 ) -> Vec<(DiscountId, Boundary, Timestamp)> {
     schedule::passed(
-        active(discounts).map(|d| (d.id(), d.starts_at(), d.ends_at())),
+        windows.iter().map(|w| (w.discount, w.starts_at, w.ends_at)),
         after,
         until,
     )
 }
 
-/// The first window boundary of an active discount after `after`.
-pub fn next_boundary(discounts: &[Discount], after: Timestamp) -> Option<Timestamp> {
-    schedule::next(
-        active(discounts).map(|d| (d.starts_at(), d.ends_at())),
-        after,
-    )
-}
-
-fn active(discounts: &[Discount]) -> impl Iterator<Item = &Discount> {
-    discounts.iter().filter(|d| d.status() == Status::Active)
+/// The first boundary of `windows` after `after`.
+pub fn next_boundary(windows: &[Window], after: Timestamp) -> Option<Timestamp> {
+    schedule::next(windows.iter().map(|w| (w.starts_at, w.ends_at)), after)
 }
 
 /// Records `discount.started` / `discount.ended` for every boundary that passed since the
@@ -71,8 +65,8 @@ where
     let method = |id: DiscountId| {
         discounts
             .iter()
-            .find(|d| d.id() == id)
-            .map_or("", |d| d.method().as_str())
+            .find(|w| w.discount == id)
+            .map_or("", |w| w.method.as_str())
     };
     let events: Vec<PendingEvent> = passed
         .iter()
@@ -116,11 +110,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use hypha_core::BasisPoints;
     use uuid::Uuid;
 
     use super::*;
-    use crate::{DiscountDraft, Kind, Method, Reward, Target, Value};
+    use crate::Method;
 
     fn at(micros: i64) -> Timestamp {
         Timestamp::from_unix_micros(micros)
@@ -130,30 +123,20 @@ mod tests {
         DiscountId::from_uuid(Uuid::from_u128(n))
     }
 
-    fn discount(n: u128, status: Status, starts: Option<i64>, ends: Option<i64>) -> Discount {
-        let kind = Kind::Standard {
-            rewards: vec![Reward {
-                target: Target::Subtotal,
-                value: Value::Percent(BasisPoints::new(1000).unwrap()),
-            }],
-        };
-        Discount::new(
-            id(n),
-            DiscountDraft {
-                status,
-                starts_at: starts.map(at),
-                ends_at: ends.map(at),
-                ..DiscountDraft::new(&format!("Discount {n}"), Method::Automatic, kind)
-            },
-        )
-        .unwrap()
+    fn window(n: u128, starts: Option<i64>, ends: Option<i64>) -> Window {
+        Window {
+            discount: id(n),
+            method: Method::Automatic,
+            starts_at: starts.map(at),
+            ends_at: ends.map(at),
+        }
     }
 
     #[test]
-    fn an_active_discounts_boundaries_are_announced() {
-        let discounts = [discount(1, Status::Active, Some(110), Some(140))];
+    fn a_windows_boundaries_are_announced() {
+        let windows = [window(1, Some(110), Some(140))];
         assert_eq!(
-            boundaries(&discounts, at(100), at(150)),
+            boundaries(&windows, at(100), at(150)),
             vec![
                 (id(1), Boundary::Started, at(110)),
                 (id(1), Boundary::Ended, at(140)),
@@ -162,19 +145,9 @@ mod tests {
     }
 
     #[test]
-    fn a_draft_announces_nothing_and_isnt_waited_for() {
-        let discounts = [discount(1, Status::Draft, Some(120), Some(200))];
-        assert_eq!(boundaries(&discounts, at(100), at(150)), vec![]);
-        assert_eq!(next_boundary(&discounts, at(100)), None);
-    }
-
-    #[test]
     fn the_next_boundary_is_the_earliest_ahead() {
-        let discounts = [
-            discount(1, Status::Active, Some(100), Some(300)),
-            discount(2, Status::Active, Some(200), None),
-        ];
-        assert_eq!(next_boundary(&discounts, at(150)), Some(at(200)));
-        assert_eq!(next_boundary(&discounts, at(300)), None);
+        let windows = [window(1, Some(100), Some(300)), window(2, Some(200), None)];
+        assert_eq!(next_boundary(&windows, at(150)), Some(at(200)));
+        assert_eq!(next_boundary(&windows, at(300)), None);
     }
 }

@@ -130,9 +130,9 @@ pub trait DiscountRepo {
     async fn live_automatic(&self, at: Timestamp) -> Result<Vec<Discount>, RepoError>;
     /// How many automatic discounts are active and not expired at `at`.
     async fn count_live_automatic(&self, at: Timestamp) -> Result<u64, RepoError>;
-    /// The active discounts (any method) with a window boundary (`starts_at` or `ends_at`)
-    /// after `after`, by ID: what the schedule job announces and waits for.
-    async fn with_boundary_after(&self, after: Timestamp) -> Result<Vec<Discount>, RepoError>;
+    /// The windows of the active discounts (any method) with a boundary (`starts_at` or
+    /// `ends_at`) after `after`, by ID: what the schedule job announces and waits for.
+    async fn with_boundary_after(&self, after: Timestamp) -> Result<Vec<Window>, RepoError>;
     /// Where the schedule job last stopped announcing window boundaries, moved by a batch
     /// (`StageDiscounts::advance_discount_schedule`); `None` before its first run.
     async fn schedule_ran_until(&self) -> Result<Option<Timestamp>, RepoError>;

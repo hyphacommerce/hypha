@@ -12,7 +12,7 @@ use hypha_discounts::{
     Allocation, Class, ClassSet, CodeFilter, CodeSelection, Condition, Discount, DiscountCode,
     DiscountDraft, DiscountFilter, DiscountRepo, HasDiscounts, ItemSet, Items, Kind, Limits,
     Measure, Method, NameRequest, Names, PerMarket, Phase, Reward, StageDiscounts, Status, Target,
-    Threshold, Tier, UsageClaim, Value, keys,
+    Threshold, Tier, UsageClaim, Value, Window, keys,
 };
 use uuid::Uuid;
 
@@ -257,10 +257,19 @@ async fn with_boundaries<S: HasDiscounts>(ports: &S) {
     ] {
         repo.insert(&mut d).await.unwrap();
     }
-    let ids = |found: Vec<Discount>| found.iter().map(|d| d.id()).collect::<Vec<_>>();
+    let ids = |found: Vec<Window>| found.iter().map(|w| w.discount).collect::<Vec<_>>();
+    let window = |n: u128, starts: Option<i64>, ends: Option<i64>| Window {
+        discount: did(n),
+        method: Method::Codes,
+        starts_at: starts.map(at),
+        ends_at: ends.map(at),
+    };
     assert_eq!(
-        repo.with_boundary_after(at(500)).await.map(ids),
-        Ok(vec![did(1), did(4)])
+        repo.with_boundary_after(at(500)).await,
+        Ok(vec![
+            window(1, Some(1_000), Some(2_000)),
+            window(4, None, Some(3_000))
+        ])
     );
     // A boundary at `after` is behind it.
     assert_eq!(

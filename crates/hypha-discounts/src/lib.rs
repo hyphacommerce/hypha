@@ -41,7 +41,7 @@ pub use events::{
 };
 pub use repo::{
     CodeFilter, CodeSelection, DiscountFilter, DiscountRepo, HasDiscounts, StageDiscounts, Usage,
-    UsageClaim, keys,
+    UsageClaim, Window, keys,
 };
 pub use schedule::{announce_windows, boundaries, next_boundary};
 pub use summary::{Audience, NameRequest, Names, summary};

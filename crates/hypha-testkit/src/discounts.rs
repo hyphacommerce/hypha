@@ -12,7 +12,7 @@ use hypha_core::{
 use hypha_customers::{Customer, CustomerGroup};
 use hypha_discounts::{
     CodeFilter, CodeSelection, Discount, DiscountCode, DiscountFilter, DiscountRepo, Method,
-    NameRequest, Names, Status, Usage, UsageClaim, keys,
+    NameRequest, Names, Status, Usage, UsageClaim, Window, keys,
 };
 use hypha_markets::Market;
 use hypha_products::{Product, ProductStatus};
@@ -332,8 +332,8 @@ impl DiscountRepo for InMemoryDiscounts {
             .count() as u64)
     }
 
-    async fn with_boundary_after(&self, after: Timestamp) -> Result<Vec<Discount>, RepoError> {
-        let mut found: Vec<Discount> = self
+    async fn with_boundary_after(&self, after: Timestamp) -> Result<Vec<Window>, RepoError> {
+        let mut found: Vec<Window> = self
             .discounts
             .all()
             .into_iter()
@@ -344,8 +344,14 @@ impl DiscountRepo for InMemoryDiscounts {
                         .flatten()
                         .any(|at| at > after)
             })
+            .map(|d| Window {
+                discount: d.id(),
+                method: d.method(),
+                starts_at: d.starts_at(),
+                ends_at: d.ends_at(),
+            })
             .collect();
-        found.sort_by_key(|d| d.id());
+        found.sort_by_key(|w| w.discount);
         Ok(found)
     }
 

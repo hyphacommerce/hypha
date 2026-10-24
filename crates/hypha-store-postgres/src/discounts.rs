@@ -13,7 +13,7 @@ use hypha_discounts::{
     Allocation, Class, ClassSet, CodeFilter, CodeSelection, Condition, Discount, DiscountCode,
     DiscountFilter, DiscountRepo, DiscountSnapshot, ItemSet, Items, Kind, Limits, Measure, Method,
     NameRequest, Names, PerMarket, Phase, Reward, Status, Target, Threshold, Tier, Usage,
-    UsageClaim, Value, keys,
+    UsageClaim, Value, Window, keys,
 };
 use serde::{Deserialize, Serialize};
 use tokio_postgres::{Row, types::Type};
@@ -1036,16 +1036,17 @@ impl<C: PgConnection> DiscountRepo for PgStore<C> {
         u64::try_from(n).map_err(corrupt)
     }
 
-    async fn with_boundary_after(&self, after: Timestamp) -> Result<Vec<Discount>, RepoError> {
+    async fn with_boundary_after(&self, after: Timestamp) -> Result<Vec<Window>, RepoError> {
         let after = after.unix_micros();
         let mut conn = self.conn().await;
         conn.db()
             .query_typed(
                 &format!(
-                    "SELECT {} FROM discounts
+                    "SELECT id, method, {}, {} FROM discounts
                      WHERE status = 'active' AND (starts_at > {at} OR ends_at > {at})
                      ORDER BY id",
-                    columns(""),
+                    micros("starts_at"),
+                    micros("ends_at"),
                     at = ts(1)
                 ),
                 &[(&after, Type::INT8)],
@@ -1053,7 +1054,16 @@ impl<C: PgConnection> DiscountRepo for PgStore<C> {
             .await
             .map_err(repo_error)?
             .iter()
-            .map(discount_from_row)
+            .map(|row| {
+                let method: String = col(row, "method")?;
+                Ok(Window {
+                    discount: DiscountId::from_uuid(col(row, "id")?),
+                    method: Method::parse(&method)
+                        .ok_or_else(|| corrupt(format!("discount method {method:?}")))?,
+                    starts_at: opt_ts(col(row, "starts_at")?),
+                    ends_at: opt_ts(col(row, "ends_at")?),
+                })
+            })
             .collect()
     }
 
