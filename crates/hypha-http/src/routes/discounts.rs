@@ -22,8 +22,9 @@ use hypha_discounts::{
     Discount, DiscountCode, DiscountDraft, DiscountFilter, DiscountPatch, DiscountRepo, Generation,
     ItemSet, Items, Kind, Limits, Measure, Method, NameRequest, Names, NewCode, PerMarket, Phase,
     Reward, Status, SummaryDraft, Target, Threshold, Tier, Usage, Value, add_codes,
-    create_discount, delete_discount, generate_codes, get_discount, list_codes, list_discounts,
-    list_usage, remove_codes, set_codes_active, summarize, summary, update_discount,
+    create_discount, delete_discount, export_codes, generate_codes, get_discount, list_codes,
+    list_discounts, list_usage, remove_codes, set_codes_active, summarize, summary,
+    update_discount,
 };
 use hypha_markets::{HasMarkets, MarketRepo};
 use hypha_orders::{HasOrders, OrderNumber, OrderRepo};
@@ -1564,9 +1565,6 @@ pub async fn update_codes<S: Storage>(
     Ok(Json(UpdatedCodesResponse { updated }))
 }
 
-/// Codes per page of the export: the export reads every code, page by page.
-const EXPORT_PAGE: u32 = 100;
-
 /// Every code of a discount as CSV (`code,normalized,usage_limit,used,active,batch,
 /// created_at`), by code; `batch` narrows it.
 #[utoipa::path(
@@ -1590,30 +1588,18 @@ pub async fn export<S: Storage>(
         active: None,
     };
     let mut csv = String::from("code,normalized,usage_limit,used,active,batch,created_at\n");
-    let mut after: Option<String> = None;
-    loop {
-        let page = PageRequest {
-            after: after.take(),
-            limit: PageLimit::new(EXPORT_PAGE).map_err(ApiError::internal)?,
-        };
-        let found = list_codes(&ctx, &ports, id, filter.clone(), page).await?;
-        for c in &found.items {
-            let created = c.created_at.map(rfc3339).transpose()?.unwrap_or_default();
-            csv.push_str(&format!(
-                "{},{},{},{},{},{},{}\n",
-                csv_field(&c.code),
-                csv_field(&c.normalized),
-                c.usage_limit.map(|n| n.to_string()).unwrap_or_default(),
-                c.used,
-                c.active,
-                csv_field(c.batch.as_deref().unwrap_or("")),
-                created
-            ));
-        }
-        if !found.has_more {
-            break;
-        }
-        after = found.items.last().map(|c| c.normalized.clone());
+    for c in &export_codes(&ctx, &ports, id, filter).await? {
+        let created = c.created_at.map(rfc3339).transpose()?.unwrap_or_default();
+        csv.push_str(&format!(
+            "{},{},{},{},{},{},{}\n",
+            csv_field(&c.code),
+            csv_field(&c.normalized),
+            c.usage_limit.map(|n| n.to_string()).unwrap_or_default(),
+            c.used,
+            c.active,
+            csv_field(c.batch.as_deref().unwrap_or("")),
+            created
+        ));
     }
     Response::builder()
         .header(header::CONTENT_TYPE, "text/csv; charset=utf-8")

@@ -602,6 +602,19 @@ async fn code_pages<S: HasDiscounts>(ports: &S) {
         ),
         vec!["A1", "B2"]
     );
+    // An export's pages: past a list's most, after a code, filtered alike.
+    assert_eq!(
+        texts(
+            repo.codes_after(did(1), &CodeFilter::default(), Some("A1"), 5_000)
+                .await
+                .unwrap()
+        ),
+        vec!["B2", "C3"]
+    );
+    assert_eq!(
+        texts(repo.codes_after(did(1), &spring, None, 1).await.unwrap()),
+        vec!["A1"]
+    );
     let part = CodeFilter {
         q: Some("2".to_string()),
         batch: None,

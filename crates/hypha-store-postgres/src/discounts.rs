@@ -1147,19 +1147,37 @@ impl<C: PgConnection> DiscountRepo for PgStore<C> {
         filter: &CodeFilter,
         page: PageRequest<String>,
     ) -> Result<Page<DiscountCode>, RepoError> {
+        let found = self
+            .codes_after(
+                discount,
+                filter,
+                page.after.as_deref(),
+                page.limit.get() + 1,
+            )
+            .await?;
+        Ok(Page::from_overfetch(found, page.limit))
+    }
+
+    async fn codes_after(
+        &self,
+        discount: DiscountId,
+        filter: &CodeFilter,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<DiscountCode>, RepoError> {
         let id = discount.as_uuid();
-        let fetch = overfetch(page.limit);
+        let fetch = i64::from(limit);
         let mut params: Vec<Param<'_>> = vec![(&id, Type::UUID)];
         let mut conditions = vec!["discount_id = $1".to_string()];
         code_conditions(filter, &mut params, &mut conditions);
-        if let Some(after) = &page.after {
+        let after = after.map(str::to_string);
+        if let Some(after) = &after {
             params.push((after, Type::TEXT));
             conditions.push(format!("normalized > ${}", params.len()));
         }
         params.push((&fetch, Type::INT8));
         let mut conn = self.conn().await;
-        let found = conn
-            .db()
+        conn.db()
             .query_typed(
                 &format!(
                     "SELECT {} FROM discount_codes WHERE {} ORDER BY normalized LIMIT ${}",
@@ -1173,8 +1191,7 @@ impl<C: PgConnection> DiscountRepo for PgStore<C> {
             .map_err(repo_error)?
             .iter()
             .map(code_from_row)
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Page::from_overfetch(found, page.limit))
+            .collect()
     }
 
     async fn count_codes(

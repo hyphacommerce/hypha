@@ -20,8 +20,9 @@ pub mod summary;
 pub use code::{DiscountCode, Generation, normalize};
 pub use commands::{
     CommandError, CreateDiscount, DiscountPatch, DiscountPorts, NewCode, SummaryDraft, add_codes,
-    create_discount, delete_discount, find_live_code, generate_codes, get_discount, list_codes,
-    list_discounts, list_usage, remove_codes, set_codes_active, summarize, update_discount,
+    create_discount, delete_discount, export_codes, find_live_code, generate_codes, get_discount,
+    list_codes, list_discounts, list_usage, remove_codes, set_codes_active, summarize,
+    update_discount,
 };
 pub use context::{DiscountContext, Promotion, promotions};
 pub use discount::{

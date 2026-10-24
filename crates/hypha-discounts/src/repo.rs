@@ -156,6 +156,15 @@ pub trait DiscountRepo {
         filter: &CodeFilter,
         page: PageRequest<String>,
     ) -> Result<Page<DiscountCode>, RepoError>;
+    /// Up to `limit` of the discount's codes `filter` matches after `after` (normalised),
+    /// by normalised code: what an export reads, in pages larger than a list's.
+    async fn codes_after(
+        &self,
+        discount: DiscountId,
+        filter: &CodeFilter,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<DiscountCode>, RepoError>;
     /// How many codes `filter` matches.
     async fn count_codes(
         &self,

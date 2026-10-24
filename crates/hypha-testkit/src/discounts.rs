@@ -416,6 +416,24 @@ impl DiscountRepo for InMemoryDiscounts {
         Ok(Page::from_overfetch(found, page.limit))
     }
 
+    async fn codes_after(
+        &self,
+        discount: DiscountId,
+        filter: &CodeFilter,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<DiscountCode>, RepoError> {
+        Ok(self
+            .lock_rows()
+            .codes
+            .values()
+            .filter(|c| c.discount == discount && code_matches(c, filter))
+            .filter(|c| after.is_none_or(|after| c.normalized.as_str() > after))
+            .take(limit as usize)
+            .cloned()
+            .collect())
+    }
+
     async fn count_codes(
         &self,
         discount: DiscountId,

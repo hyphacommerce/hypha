@@ -398,6 +398,38 @@ pub async fn list_codes<S: HasDiscounts>(
     Ok(ports.discounts().code_page(id, &filter, page).await?)
 }
 
+/// Codes read at once by `export_codes`.
+pub const EXPORT_PAGE: u32 = 5_000;
+
+/// Every code of a discount `filter` matches, by normalised code: what an export writes.
+/// The discount is checked once, then the codes read `EXPORT_PAGE` at a time.
+pub async fn export_codes<S: HasDiscounts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: DiscountId,
+    filter: CodeFilter,
+) -> Result<Vec<DiscountCode>, CommandError> {
+    ctx.require(Scope::DiscountsRead)?;
+    ports
+        .discounts()
+        .get(id)
+        .await?
+        .ok_or(CommandError::NotFound(id))?;
+    let mut codes: Vec<DiscountCode> = Vec::new();
+    loop {
+        let after = codes.last().map(|c| c.normalized.as_str());
+        let page = ports
+            .discounts()
+            .codes_after(id, &filter, after, EXPORT_PAGE)
+            .await?;
+        let full = page.len() == EXPORT_PAGE as usize;
+        codes.extend(page);
+        if !full {
+            return Ok(codes);
+        }
+    }
+}
+
 /// Adds listed codes (at most `MAX_ADDED`), all or none.
 pub async fn add_codes<S: DiscountPorts>(
     ctx: &Ctx,
