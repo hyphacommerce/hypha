@@ -591,6 +591,8 @@ mod worker_main {
             req.extensions_mut()
                 .insert(hypha_http::client_ip::PeerAddr(ip));
         }
+        let boundaries =
+            crate::schedule::may_move_boundaries(req.method().as_str(), req.uri().path());
         let mut app = isolate.app.clone();
         let response = Scoped::new(&event, app.call(req)).await?;
         // A write's events go out after its response, as the VPS's runner wakes. A request
@@ -603,16 +605,7 @@ mod worker_main {
             ctx.wait_until(Scoped::new(&event, async move {
                 let jobs = state.config.jobs;
                 let mut run = Run::default();
-                // Notes the next window boundary (its `retry_at`), which the write may have
-                // moved, so a tick wakes for it.
-                if jobs.price_list_schedule.enabled {
-                    run = run.and(
-                        steps("price list schedule", &state, Some(deadline), || {
-                            jobs::price_list_schedule(&state)
-                        })
-                        .await,
-                    );
-                }
+                // The schedule runs on the ticks (`due` wakes one for the next boundary).
                 if jobs.dispatch.enabled {
                     run = run.and(
                         steps("dispatch", &state, Some(deadline), || {
@@ -639,7 +632,10 @@ mod worker_main {
                     );
                 }
                 if let Some(kv) = kv {
-                    mark(&kv, &state, marks::after(run, None), LAST_DUE.get()).await;
+                    let mut after = marks::after(run, None);
+                    // The write may have moved the next boundary, which `due` counts.
+                    after.due |= boundaries && jobs.price_list_schedule.enabled;
+                    mark(&kv, &state, after, LAST_DUE.get()).await;
                 }
             }));
         }

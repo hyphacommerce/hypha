@@ -541,10 +541,12 @@ async fn agent_upkeep<S: Storage>(
     Ok([calls, Progress::of(tokens, batch), proposals])
 }
 
-/// When dispatch or the send job next has work (`OutboxRepo::next_due`,
-/// `NotificationRepo::next_due`), for a host that runs the jobs only when there's some.
+/// When dispatch, the send job or the price list schedule next has work
+/// (`OutboxRepo::next_due`, `NotificationRepo::next_due`, the next window boundary of an
+/// active list), for a host that runs the jobs only when there's some.
 pub async fn next_due<S: Storage>(state: &AppState<S>) -> Result<Option<Timestamp>, String> {
     use hypha_core::{HasOutbox, OutboxRepo};
+    use hypha_markets::{HasPriceLists, PriceListRepo};
     use hypha_notifications::{HasNotifications, NotificationRepo};
     let ports = state
         .public_ports()
@@ -556,7 +558,17 @@ pub async fn next_due<S: Storage>(state: &AppState<S>) -> Result<Option<Timestam
         .next_due()
         .await
         .map_err(|e| e.to_string())?;
-    Ok(earliest(events, emails))
+    let boundary = if state.config.jobs.price_list_schedule.enabled {
+        let lists = ports
+            .price_lists()
+            .list_all()
+            .await
+            .map_err(|e| e.to_string())?;
+        hypha_markets::next_boundary(&lists, state.clock.now())
+    } else {
+        None
+    };
+    Ok(earliest(earliest(events, emails), boundary))
 }
 
 /// How many search targets are queued, for a host whose runs don't follow each other on a
