@@ -183,7 +183,9 @@ export function ImportDialog({
                 : `Applying sets ${preview.upserts.toLocaleString("en")} and removes ${preview.clears.toLocaleString("en")} fixed ${changes === 1 ? "price" : "prices"}. Unmatched and invalid rows are left out.`}
             </Text>
             {preview.rows.length > 0 && (
-              <div style={{ maxHeight: 360, overflow: "auto" }}>
+              <div
+                style={{ maxHeight: 360, overflow: "auto", flex: "none", padding: 16, margin: -16 }}
+              >
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -240,7 +242,9 @@ export function ImportDialog({
                 title={`${phase.failedCount.toLocaleString("en")} of ${phase.total.toLocaleString("en")} weren't saved`}
                 description="The rest were. Fix these rows and import the file again: rows already applied show as unchanged."
               />
-              <div style={{ maxHeight: 280, overflow: "auto" }}>
+              <div
+                style={{ maxHeight: 280, overflow: "auto", flex: "none", padding: 16, margin: -16 }}
+              >
                 <Table>
                   <TableHeader>
                     <TableRow>
