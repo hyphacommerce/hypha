@@ -30,10 +30,11 @@ export type GridFilters = {
 };
 
 /**
- * Variants per page of the grid. A page may end inside a product: the next page shows
+ * Variants per page of the grid (fixed prices with "fixed prices only"), read in pages
+ * of `MAX_LIMIT` one after another. A page may end inside a product: the next page shows
  * the product's header again, above the rest of its variants.
  */
-export const GRID_PAGE = 100;
+export const GRID_PAGE = 200;
 /**
  * The most IDs `GET /admin/products?ids=`, `GET /admin/variants?ids=` and
  * `GET /admin/price-lists/{id}/fixed-prices?variants=` take.
@@ -173,6 +174,31 @@ async function grouped(
 }
 
 /**
+ * A grid page's items: API pages from `cursor` until `GRID_PAGE` items are in or the list
+ * ends, and the cursor of what follows. A refusal of any read is the page's.
+ */
+async function gridRead<T>(
+  cursor: string | undefined,
+  read: (cursor: string | undefined) => Promise<{
+    data?: { items: T[]; next_cursor?: string | null };
+    error?: ApiError;
+    response: Response;
+  }>,
+): Promise<
+  { items: T[]; nextCursor: string | null } | { failure: NonNullable<GridPage["failure"]> }
+> {
+  const items: T[] = [];
+  let at = cursor;
+  do {
+    const result = await read(at);
+    if (!result.data) return { failure: { status: result.response.status, error: result.error } };
+    items.push(...result.data.items);
+    at = result.data.next_cursor ?? undefined;
+  } while (at && items.length < GRID_PAGE);
+  return { items, nextCursor: at ?? null };
+}
+
+/**
  * A page of the grid. Normally a page of variants (newest product first, narrowed by `q`
  * and `category`), grouped by product. With `fixedOnly`, a page of the list's fixed
  * prices instead, grouped by product, each product showing only those variants.
@@ -185,43 +211,33 @@ export async function gridPage(
   cursor: string | undefined,
 ): Promise<GridPage> {
   if (filters.fixedOnly) {
-    const result = await client.GET("/admin/price-lists/{id}/fixed-prices", {
-      params: {
-        path: { id: list.id },
-        query: { q: filters.q, category: filters.category, cursor, limit: MAX_LIMIT },
-      },
-    });
-    if (!result.data) {
-      return {
-        products: [],
-        nextCursor: null,
-        failure: { status: result.response.status, error: result.error },
-      };
-    }
-    const fixed = new Map(result.data.items.map((f) => [f.variant, f]));
+    const result = await gridRead(cursor, (at) =>
+      client.GET("/admin/price-lists/{id}/fixed-prices", {
+        params: {
+          path: { id: list.id },
+          query: { q: filters.q, category: filters.category, cursor: at, limit: MAX_LIMIT },
+        },
+      }),
+    );
+    if ("failure" in result) return { products: [], nextCursor: null, failure: result.failure };
+    const fixed = new Map(result.items.map((f) => [f.variant, f]));
     // A fixed price whose variant is gone isn't listed: nothing to show it beside.
     const items = await variantsByIds(client, [...fixed.keys()]);
     return {
       products: await grouped(client, list, tree, items, fixed),
-      nextCursor: result.data.next_cursor ?? null,
+      nextCursor: result.nextCursor,
     };
   }
 
-  const result = await client.GET("/admin/variants", {
-    params: {
-      query: { q: filters.q, category: filters.category, cursor, limit: GRID_PAGE },
-    },
-  });
-  if (!result.data) {
-    return {
-      products: [],
-      nextCursor: null,
-      failure: { status: result.response.status, error: result.error },
-    };
-  }
+  const result = await gridRead(cursor, (at) =>
+    client.GET("/admin/variants", {
+      params: { query: { q: filters.q, category: filters.category, cursor: at, limit: MAX_LIMIT } },
+    }),
+  );
+  if ("failure" in result) return { products: [], nextCursor: null, failure: result.failure };
   return {
-    products: await grouped(client, list, tree, result.data.items, null),
-    nextCursor: result.data.next_cursor ?? null,
+    products: await grouped(client, list, tree, result.items, null),
+    nextCursor: result.nextCursor,
   };
 }
 

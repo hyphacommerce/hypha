@@ -34,7 +34,7 @@ import {
   discardPriceImport,
   previewPriceImport,
   startPriceImport,
-} from "../actions";
+} from "@/app/(admin)/markets/price-lists/actions";
 
 const STATUS_BADGES = {
   changed: { label: "Changes", variant: "info" },

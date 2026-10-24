@@ -1,51 +1,40 @@
 "use client";
 
-// A list's prices tab: the grid over a page of products, its filters in the URL, and the
-// CSV export and import. Changing a filter or the page drops unsaved changes, like
-// leaving the page.
+// A list's price editor: the grid over a page of products, the list it edits in the top
+// bar, its filters in the URL, and the CSV export and import. While there are unsaved
+// changes the filters and pages wait (save or discard first), and the way back asks.
 
+import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { EmptyState } from "@astryxdesign/core/EmptyState";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Switch } from "@astryxdesign/core/Switch";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { MagnifyingGlassIcon, TagIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { useRouter } from "next/navigation";
 import { useEffect, useEffectEvent, useRef, useState, useTransition } from "react";
 
+import { saveFixedPrices } from "@/app/(admin)/markets/price-lists/actions";
+import type { GridFilters } from "@/app/(admin)/markets/price-lists/grid-data";
 import { PriceGrid, type PriceGridProduct } from "@/components/price-grid/price-grid";
 import { MAX_IMPORT_BYTES } from "@/lib/price-import";
-import type { PriceList } from "@/lib/price-lists";
+import { type PriceList, adjustmentLabel, kindLabel, phaseBadge } from "@/lib/price-lists";
 
-import { saveFixedPrices } from "../actions";
-import type { GridFilters } from "../grid-data";
+import { exportHref, pricesHref } from "@/lib/price-editor";
 import { ImportDialog } from "./import-dialog";
 
-/** The prices tab's URL with `filters`, on its first page. */
-function pricesHref(id: string, filters: GridFilters, cursor?: string): string {
-  const params = new URLSearchParams({ tab: "prices" });
-  if (filters.q) params.set("q", filters.q);
-  if (filters.category) params.set("category", filters.category);
-  if (filters.fixedOnly) params.set("fixed", "1");
-  if (cursor) params.set("cursor", cursor);
-  return `/markets/price-lists/${id}?${params}`;
-}
-
-/** The export's URL: the same filters, every page. */
-function exportHref(id: string, filters: GridFilters): string {
-  const params = new URLSearchParams();
-  if (filters.q) params.set("q", filters.q);
-  if (filters.category) params.set("category", filters.category);
-  if (filters.fixedOnly) params.set("fixed", "1");
-  const search = params.toString();
-  return `/markets/price-lists/${id}/export${search ? `?${search}` : ""}`;
-}
-
 /** The search box: local while typing, into the URL once the user pauses. */
-function SearchBox({ value, onApply }: { value: string; onApply: (q: string) => void }) {
+function SearchBox({
+  value,
+  isDisabled,
+  onApply,
+}: {
+  value: string;
+  isDisabled: boolean;
+  onApply: (q: string) => void;
+}) {
   const [text, setText] = useState(value);
   const [shownValue, setShownValue] = useState(value);
   if (value !== shownValue) {
@@ -54,19 +43,20 @@ function SearchBox({ value, onApply }: { value: string; onApply: (q: string) => 
   }
   const apply = useEffectEvent((q: string) => onApply(q));
   useEffect(() => {
-    if (text.trim() === value.trim()) return;
+    if (isDisabled || text.trim() === value.trim()) return;
     const timer = setTimeout(() => apply(text.trim()), 400);
     return () => clearTimeout(timer);
-  }, [text, value]);
+  }, [text, value, isDisabled]);
   return (
     <TextInput
       label="Search products"
       isLabelHidden
-      placeholder="Search by title, handle or SKU"
+      placeholder="Search title, handle or SKU"
       startIcon={MagnifyingGlassIcon}
       hasClear
       size="sm"
-      width={260}
+      width={240}
+      isDisabled={isDisabled}
       value={text}
       onChange={setText}
       onEnter={() => onApply(text.trim())}
@@ -108,120 +98,178 @@ export function PricesEditor({
       router.replace(pricesHref(list.id, { ...filters, ...change }, cursor), { scroll: false }),
     );
   const isFiltered = Boolean(filters.q || filters.category || filters.fixedOnly);
-
-  const toolbar = (
-    <HStack gap={2} vAlign="center" wrap="wrap">
-      <SearchBox value={filters.q ?? ""} onApply={(q) => go({ q: q || undefined })} />
-      <Selector
-        label="Category"
-        isLabelHidden
-        size="sm"
-        placeholder="Any category"
-        options={categories}
-        value={filters.category ?? null}
-        hasClear
-        hasSearch
-        onChange={(category: string | null) => go({ category: category ?? undefined })}
-        width={200}
-      />
-      <Switch
-        label="Fixed prices only"
-        size="sm"
-        value={filters.fixedOnly}
-        onChange={(fixedOnly) => go({ fixedOnly })}
-      />
-      <Button
-        label="Export CSV"
-        size="sm"
-        variant="ghost"
-        // A download, not a page: the route answers with the file.
-        onClick={() => window.location.assign(exportHref(list.id, filters))}
-      />
-      {canWrite && (
-        <>
-          <Button
-            label="Import CSV"
-            size="sm"
-            variant="ghost"
-            onClick={() => fileRef.current?.click()}
-          />
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".csv,.tsv,.txt,text/csv,text/plain"
-            hidden
-            aria-label="CSV file to import"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (!file) return;
-              if (file.size > MAX_IMPORT_BYTES) {
-                setFileError(
-                  `That file is over ${MAX_IMPORT_BYTES / 1024 / 1024} MB. Split it into smaller files.`,
-                );
-                return;
-              }
-              setFileError(undefined);
-              setImportFile(file);
-            }}
-          />
-        </>
-      )}
-    </HStack>
-  );
+  const phase = phaseBadge(list.phase);
+  const variantCount = products.reduce((sum, p) => sum + p.variants.length, 0);
 
   return (
-    <VStack gap={4}>
-      <Text type="supporting" color="secondary">
-        Base prices are each variant&apos;s own; the list price is what this list charges, greyed
-        when it comes from the adjustment (worked out here from the base price). Type a fixed price
-        to set one, clear it to go back to the adjustment. Unsaved changes are lost when you change
-        the filters or the page.
-      </Text>
-      {error && <Banner status="error" title={error} />}
-      {fileError && <Banner status="error" title={fileError} />}
-      {/* Above the grid, not in its toolbar: the grid starts afresh on each page, and the
-          search box would lose its focus and text with it. */}
-      {toolbar}
-      <div
-        className="pending-content"
-        aria-busy={isNavigating}
-        data-pending={isNavigating || undefined}
-      >
-        {products.length === 0 ? (
-          <VStack gap={3}>
-            <EmptyState
-              icon={<TagIcon width={32} />}
-              title={
-                isFiltered
-                  ? "No products match these filters"
-                  : isFirstPage
-                    ? "No products yet"
-                    : "No more products"
-              }
-              description={
-                filters.fixedOnly
-                  ? "Only variants with a fixed price in this list are shown."
-                  : undefined
-              }
+    <>
+      <PriceGrid
+        pageKey={pageKey}
+        currency={list.currency}
+        products={products}
+        isReadOnly={!canWrite}
+        isLoading={isNavigating}
+        label={`Prices in ${list.name}`}
+        onSave={(diff) => saveFixedPrices(list.id, diff)}
+        renderChrome={({ isDirty, confirmLeave }) => ({
+          title: (
+            <>
+              <IconButton
+                label={`Back to ${list.name}`}
+                tooltip="Back to the list"
+                icon={<ArrowLeftIcon width={16} height={16} />}
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  confirmLeave(() => router.push(`/markets/price-lists/${list.id}?tab=prices`))
+                }
+              />
+              <h1 className="pe-name">{list.name}</h1>
+              <Badge
+                label={kindLabel(list.kind)}
+                variant={list.kind === "sale" ? "pink" : "blue"}
+              />
+              <Badge label={phase.label} variant={phase.variant} />
+              <span className="pe-meta">
+                <span>{list.currency}</span>
+                <span>{adjustmentLabel(list.adjustment)}</span>
+                <span>
+                  {list.fixed_price_count.toLocaleString("en")} fixed{" "}
+                  {list.fixed_price_count === 1 ? "price" : "prices"}
+                </span>
+              </span>
+            </>
+          ),
+          filters: (
+            <div className="pe-group">
+              <SearchBox
+                value={filters.q ?? ""}
+                isDisabled={isDirty}
+                onApply={(q) => go({ q: q || undefined })}
+              />
+              <Selector
+                label="Category"
+                isLabelHidden
+                size="sm"
+                placeholder="Any category"
+                options={categories}
+                value={filters.category ?? null}
+                hasClear
+                hasSearch
+                isDisabled={isDirty}
+                onChange={(category: string | null) => go({ category: category ?? undefined })}
+                width={200}
+              />
+              <Switch
+                label="Fixed prices only"
+                size="sm"
+                value={filters.fixedOnly}
+                isDisabled={isDirty}
+                onChange={(fixedOnly) => go({ fixedOnly })}
+              />
+              {isDirty && (
+                <Text type="supporting" color="secondary">
+                  Save or discard to change filters
+                </Text>
+              )}
+            </div>
+          ),
+          tools: (
+            <div className="pe-group">
+              <Button
+                label="Export CSV"
+                size="sm"
+                variant="ghost"
+                // A download, not a page: the route answers with the file.
+                onClick={() => window.location.assign(exportHref(list.id, filters))}
+              />
+              {canWrite && (
+                <Button
+                  label="Import CSV"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => fileRef.current?.click()}
+                />
+              )}
+            </div>
+          ),
+          pager: (
+            <div className="pe-pager">
+              {variantCount > 0 && (
+                <span className="pe-meta">
+                  {variantCount.toLocaleString("en")} {variantCount === 1 ? "variant" : "variants"}{" "}
+                  on this page
+                </span>
+              )}
+              {!isFirstPage && (
+                <Button
+                  label="First page"
+                  size="sm"
+                  variant="ghost"
+                  isDisabled={isDirty}
+                  onClick={() => go({})}
+                />
+              )}
+              {nextCursor && (
+                <Button
+                  label="Next page"
+                  size="sm"
+                  isDisabled={isDirty}
+                  tooltip={isDirty ? "Save or discard your changes first" : undefined}
+                  onClick={() => go({}, nextCursor)}
+                />
+              )}
+            </div>
+          ),
+          banner: (error || fileError) && (
+            <Banner
+              status="error"
+              title={error ?? fileError}
+              isDismissable={!error}
+              onDismiss={() => setFileError(undefined)}
             />
-          </VStack>
-        ) : (
-          <PriceGrid
-            key={pageKey}
-            currency={list.currency}
-            products={products}
-            isReadOnly={!canWrite}
-            label={`Prices in ${list.name}`}
-            onSave={(diff) => saveFixedPrices(list.id, diff)}
-          />
-        )}
-      </div>
-      {(!isFirstPage || nextCursor) && (
-        <HStack gap={2} hAlign="end">
-          {!isFirstPage && <Button label="First page" variant="ghost" onClick={() => go({})} />}
-          {nextCursor && <Button label="Next page" onClick={() => go({}, nextCursor)} />}
-        </HStack>
+          ),
+        })}
+        empty={
+          <div className="pe-empty">
+            <Text weight="medium">
+              {isFiltered
+                ? "No products match these filters"
+                : isFirstPage
+                  ? "No products yet"
+                  : "No more products"}
+            </Text>
+            <Text type="supporting" color="secondary">
+              {filters.fixedOnly
+                ? "Only variants with a fixed price in this list are shown. Turn off “Fixed prices only” to set new ones."
+                : isFiltered
+                  ? "Try another search or category."
+                  : "Products you add show here with their prices."}
+            </Text>
+          </div>
+        }
+      />
+      {canWrite && (
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,.tsv,.txt,text/csv,text/plain"
+          hidden
+          aria-label="CSV file to import"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (!file) return;
+            if (file.size > MAX_IMPORT_BYTES) {
+              setFileError(
+                `That file is over ${MAX_IMPORT_BYTES / 1024 / 1024} MB. Split it into smaller files.`,
+              );
+              return;
+            }
+            setFileError(undefined);
+            setImportFile(file);
+          }}
+        />
       )}
       {importFile && (
         <ImportDialog
@@ -233,6 +281,6 @@ export function PricesEditor({
           }}
         />
       )}
-    </VStack>
+    </>
   );
 }

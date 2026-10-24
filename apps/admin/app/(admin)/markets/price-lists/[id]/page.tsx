@@ -1,28 +1,31 @@
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { VStack } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
+import { TableCellsIcon } from "@heroicons/react/24/outline";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { DateTime } from "@/components/date-time";
 import { type Crumb, PageHeader } from "@/components/page-header";
 import { type SearchParams, one } from "@/components/resource-table/params";
-import { DetailSkeleton, TableSkeleton } from "@/components/skeletons";
+import { CardSkeleton, DetailSkeleton } from "@/components/skeletons";
 import { flatten } from "@/lib/categories";
-import { describe, loaded, perRequest, requireStaff, sessionClient } from "@/lib/hypha";
+import { loaded, perRequest, requireStaff, sessionClient } from "@/lib/hypha";
 import { hasScope } from "@/lib/navigation";
 import { type PriceList, adjustmentLabel, kindLabel, phaseBadge } from "@/lib/price-lists";
 
-import { type GridFilters, gridPage, productSummaries } from "../grid-data";
+import { pricesHref } from "@/lib/price-editor";
+
+import { productSummaries } from "../grid-data";
 import { EditPriceListForm } from "../price-list-form";
 import { ListWindow } from "../price-lists-table";
 import { DeletePriceList } from "./delete-list";
 import { ListTabs, type ListTab } from "./list-tabs";
-import { PricesEditor } from "./prices-editor";
 import { WhereCard } from "./where-card";
 
 const BACK: Crumb[] = [
@@ -45,19 +48,10 @@ async function loadList(id: string): Promise<PriceList> {
   return read;
 }
 
-/** The prices tab's filters, from the URL. */
-function filtersOf(params: SearchParams): GridFilters {
-  return {
-    q: one(params, "q"),
-    category: one(params, "category"),
-    fixedOnly: one(params, "fixed") === "1",
-  };
-}
-
 /**
- * A price list: its settings and the markets using it (`?tab=` absent), or its prices
- * as a grid (`?tab=prices`, paged by `cursor`, narrowed by `q`, `category` and
- * `fixed=1`). The way back and the tabs render at once; the list streams in.
+ * A price list: its settings and the markets using it (`?tab=` absent), or what its
+ * prices tab says and the way into the full-window price editor (`?tab=prices`). The
+ * way back and the tabs render at once; the list streams in.
  */
 export default async function PriceListPage({
   params,
@@ -68,6 +62,20 @@ export default async function PriceListPage({
 }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const tab: ListTab = one(query, "tab") === "prices" ? "prices" : "settings";
+  // The grid used to live in this tab: its old addresses open the editor where they were.
+  if (tab === "prices" && ["q", "category", "fixed", "cursor"].some((key) => one(query, key))) {
+    redirect(
+      pricesHref(
+        id,
+        {
+          q: one(query, "q"),
+          category: one(query, "category"),
+          fixedOnly: one(query, "fixed") === "1",
+        },
+        one(query, "cursor"),
+      ),
+    );
+  }
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1320}>
@@ -76,8 +84,8 @@ export default async function PriceListPage({
         </Suspense>
         <ListTabs id={id} tab={tab}>
           {tab === "prices" ? (
-            <Suspense fallback={<TableSkeleton rows={10} />}>
-              <Prices id={id} filters={filtersOf(query)} cursor={one(query, "cursor")} />
+            <Suspense fallback={<CardSkeleton lines={2} />}>
+              <Prices id={id} />
             </Suspense>
           ) : (
             <Suspense fallback={<DetailSkeleton />}>
@@ -191,48 +199,36 @@ async function Settings({ id }: { id: string }) {
   );
 }
 
-async function Prices({
-  id,
-  filters,
-  cursor,
-}: {
-  id: string;
-  filters: GridFilters;
-  cursor: string | undefined;
-}) {
-  const client = await sessionClient();
-  const [list, me, categories] = await Promise.all([
-    loadList(id),
-    requireStaff(),
-    client.GET("/admin/categories"),
-  ]);
-  const tree = categories.data?.items ?? [];
-  const page = await gridPage(client, list, tree, filters, cursor);
-  const base = `/markets/price-lists/${id}`;
-  const query = {
-    tab: "prices",
-    q: filters.q,
-    category: filters.category,
-    fixed: filters.fixedOnly ? "1" : undefined,
-  };
-  if (page.failure?.status === 400) {
-    // An old or foreign cursor (a hand-edited URL): start the pages again.
-    const search = new URLSearchParams(
-      Object.entries(query).filter((e): e is [string, string] => Boolean(e[1])),
-    );
-    redirect(cursor ? `${base}?${search}` : `${base}?tab=prices`);
-  }
+/**
+ * The prices tab: what the list holds and the way into the editor, which takes the whole
+ * window (`/markets/price-lists/{id}/prices`).
+ */
+async function Prices({ id }: { id: string }) {
+  const [list, me] = await Promise.all([loadList(id), requireStaff()]);
+  const canWrite = hasScope(me.scopes, "pricing:write");
+  const count = list.fixed_price_count;
   return (
-    <PricesEditor
-      pageKey={`${filters.q ?? ""}|${filters.category ?? ""}|${filters.fixedOnly}|${cursor ?? ""}`}
-      list={list}
-      products={page.products}
-      nextCursor={page.nextCursor}
-      isFirstPage={!cursor}
-      filters={filters}
-      error={page.failure?.error ? describe(page.failure.error) : undefined}
-      categories={flatten(tree).map((row) => ({ value: row.id, label: row.path }))}
-      canWrite={hasScope(me.scopes, "pricing:write")}
-    />
+    <Card>
+      <VStack gap={4} hAlign="start">
+        <VStack gap={1}>
+          <Text weight="medium">
+            {count === 0
+              ? "No fixed prices yet"
+              : `${count.toLocaleString("en")} fixed ${count === 1 ? "price" : "prices"} in ${list.currency}`}
+          </Text>
+          <Text type="supporting" color="secondary">
+            {canWrite
+              ? "The price editor shows every variant with its base price and the price this list gives it. Click a cell and type to set a fixed price, paste a column from a spreadsheet, or import a CSV."
+              : "The price editor shows every variant with its base price and the price this list gives it."}
+          </Text>
+        </VStack>
+        <Button
+          label={canWrite ? "Open price editor" : "View prices"}
+          variant="primary"
+          icon={<TableCellsIcon width={16} height={16} />}
+          href={pricesHref(id, { fixedOnly: false })}
+        />
+      </VStack>
+    </Card>
   );
 }
