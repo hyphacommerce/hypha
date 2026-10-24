@@ -2,7 +2,7 @@
 title: Staff, scopes and keys
 description: Who can call the API, and what each caller may do.
 sidebar:
-  order: 8
+  order: 10
 ---
 
 Every request to the admin API acts as someone: a staff member, an API key, an installed

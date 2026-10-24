@@ -14,7 +14,9 @@ previewed exactly and approved by a person first.
 | Area | What you get |
 | --- | --- |
 | Catalog | Products with options and sparse, explicit variants (never the Cartesian product), categories, media, rich text, custom fields, search with facets |
-| Selling | Markets (countries and currency), catalogs and price lists, sales channels, tax regions and classes |
+| Selling | Markets (countries and currency), catalogs, sales channels, tax regions and classes |
+| Prices | Price lists that compete on the lowest price: sales and clearances on a schedule, compare-at prices, quantity breaks, prices for customer groups, a spreadsheet editor with CSV import |
+| Discounts | Codes and automatic discounts: amounts or percentages off products, the order or shipping, buy X get Y, volume tiers, combinations, usage limits |
 | Checkout | Carts priced per market, shipping zones and rates (or a rate app), payment methods: manual (bank transfer, cash on delivery) and online payments started before the order exists |
 | Orders | Fulfilment by location with tracking, cancellations, refunds, inventory per location |
 | Customers | Accounts with email sign-in codes, addresses, marketing consent, data export and erasure |
@@ -46,7 +48,8 @@ cp apps/storefront/.env.example apps/storefront/.dev.vars
 HYPHA_DEV_DB=hypha_demo HYPHA_OWNER_EMAIL=owner@example.com \
   HYPHA_OWNER_PASSWORD=demo-owner-password pnpm dev
 
-# In another terminal: a demo store with markets, products, stock and orders.
+# In another terminal: a demo store with markets, products, stock, sales, discounts and
+# orders. A store seeded before price lists and discounts gets them with `pnpm seed --pricing`.
 pnpm seed
 ```
 
@@ -106,7 +109,7 @@ CLI. The design notes in [`docs/design`](docs/design) explain each decision.
   [ucphub.ai](https://ucphub.ai): a connector so shopping agents can browse and buy from a
   Hypha store.
 - Published releases: Docker images, npm packages and the CLI.
-- Documentation and a website at hyphacommerce.com.
+- Gift cards and store credit.
 
 ## Contributing
 

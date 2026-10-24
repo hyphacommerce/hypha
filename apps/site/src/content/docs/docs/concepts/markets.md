@@ -6,7 +6,7 @@ sidebar:
 ---
 
 Three things decide what a shopper sees and pays: the **market** they're in, that market's
-**catalog**, and the catalog's **price list**. This follows Shopify's model of markets.
+**catalog**, and the catalog's **price lists**. This follows Shopify's model of markets.
 
 ## Markets
 
@@ -26,17 +26,16 @@ market's catalog doesn't exist for that market's shoppers.
 
 ## Price lists
 
-A catalog can have a price list, in the market's currency. A variant's price in that market
-is:
+A catalog can hold any number of **price lists** in the market's currency: the market's own
+regular prices, a sale, a clearance, wholesale prices for a customer group. Each one prices
+some or all of the catalog's variants, by a percentage of the base price or with fixed
+prices, and the shopper pays **the lowest** live price. Without a list that prices a
+variant, its base price counts, as long as it's in the market's currency: Hypha doesn't
+convert currencies, so a market in another currency (GBP beside a EUR catalog) gives its
+variants prices of their own.
 
-1. the price list's **fixed price** for that variant, when it has one;
-2. otherwise the variant's base price, adjusted by the price list's **percentage** (in
-   basis points: `-1000` is 10% off);
-3. without a price list, the variant's base price as it is.
-
-Rounding is half away from zero, on whole minor units. Hypha doesn't convert currencies:
-a base price counts only in a market of its own currency, so a market in another currency
-(GBP beside a EUR catalog) gives its variants fixed prices.
+[Prices and sales](/docs/concepts/pricing/) covers price lists in full: sales and schedules,
+compare-at prices, quantity breaks, group prices and the bulk price editor.
 
 ## Taxes
 

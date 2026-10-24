@@ -6,6 +6,11 @@ import { bindings, defineConfig, defineWorker } from "cf/config";
 // storefront:dev`, `vite preview`), a local Worker as before.
 const deploy = process.env;
 const api = deploy.HYPHA_CF_API_WORKER;
+// The public origin for canonical links, previews and structured data: the environment's
+// `STOREFRONT_URL`, else the deployment's domain.
+const siteUrl =
+  deploy.STOREFRONT_URL ??
+  (deploy.HYPHA_CF_DOMAIN ? `https://${deploy.HYPHA_CF_DOMAIN}` : undefined);
 
 // Pages under a country are static with ISR: on Workers their renders live in the Workers
 // Cache and their data in KV, shared by every isolate, so the webhook's revalidation
@@ -39,6 +44,7 @@ export default defineConfig({
       HYPHA_API_URL: bindings.secret(),
       STOREFRONT_KEY: bindings.secret(),
       HYPHA_WEBHOOK_SECRET: bindings.secret(),
+      ...(siteUrl ? { STOREFRONT_URL: bindings.text(siteUrl) } : {}),
       ...(deploy.STOREFRONT_ROUTING
         ? { STOREFRONT_ROUTING: bindings.text(deploy.STOREFRONT_ROUTING) }
         : {}),

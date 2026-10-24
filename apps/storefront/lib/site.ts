@@ -61,3 +61,22 @@ export async function forgetCart(country: string) {
   jar.delete(cartCookie(country));
   jar.delete(cartFlagCookie(country));
 }
+
+/** The storefront's public origin (`STOREFRONT_URL`, `https://shop.example.com`), for
+ * canonical links, link previews and structured data; `undefined` when unset (they're
+ * left out or relative then). Static pages can't read the request's host. */
+export function siteUrl(): URL | undefined {
+  const value = process.env.STOREFRONT_URL;
+  if (!value) return undefined;
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
+}
+
+/** `path` on the storefront's origin, or the path itself without one. */
+export function absolute(path: string): string {
+  const site = siteUrl();
+  return site ? new URL(path, site).href : path;
+}

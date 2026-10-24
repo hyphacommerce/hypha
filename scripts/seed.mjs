@@ -29,6 +29,14 @@
 //
 // `pnpm seed --images` on a store this script seeded uploads the images again (new photos
 // replacing placeholders) and points products, variants and categories at them.
+//
+// `pnpm seed --pricing` on a store this script seeded before price lists and discounts
+// adds only what newer runs add: compare-at prices on three variants, the "Autumn sale",
+// "Clearance" and "Wholesale" price lists in the Europe catalog, the Wholesale customer
+// group (older seeds' "Trade" group renamed) with the customers tagged `trade`, `on_sale` in
+// the search filters and the discounts, and gives the "Demo (read-only)" staff role, if
+// there is one, every `:read` scope it lacks. It skips what exists (price lists by name,
+// discounts by title, the group by handle), so a second run adds nothing.
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -1398,6 +1406,336 @@ async function replaceImages() {
   console.log(`\nDone: ${replaced.size} images replaced, ${removed} placeholders deleted.`);
 }
 
+// ---------- prices and discounts (the run, and `--pricing`) ----------
+
+/** Every item of a paged admin list. */
+async function all(path) {
+  const items = [];
+  let cursor;
+  do {
+    const sep = path.includes("?") ? "&" : "?";
+    const page = await admin.get(
+      `${path}${sep}limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+    );
+    items.push(...page.items);
+    cursor = page.next_cursor;
+  } while (cursor);
+  return items;
+}
+
+/** Products whose own variant price carries a "was" price. */
+const COMPARE_AT = ["fruiting-chamber", "pressure-sterilizer", "still-air-box"];
+/** The last of a few lines, each at this share of its regular price. */
+const CLEARANCE = { "acoustic-panel": 0.6, "mycelium-brick": 0.5, "packaging-inserts": 0.7 };
+/** What the Wholesale group buys in bulk. */
+const BULK = ["mycelium-leather", "grain-spawn-bag", "hardwood-substrate", "coffee-substrate"];
+/** The staff role of the public demo's shared login, which must see every area. */
+const DEMO_ROLE = "Demo (read-only)";
+
+/**
+ * Compare-at prices, the autumn sale and the clearance in the Europe catalog. `forSale`
+ * is the products for sale by handle, with their variants; price lists named in `have`
+ * and variants with a compare-at price already are left alone. What it added.
+ */
+async function seedSales({ catalog, forSale, categoryIds, have }) {
+  const added = [];
+  // A "was" price on a few variants' own prices, struck through wherever no list wins.
+  for (const handle of COMPARE_AT) {
+    const product = forSale[handle];
+    if (!product) continue;
+    const variant = product.variants[0];
+    if (variant.compare_at_price) continue;
+    await admin.patch(`/admin/products/${product.id}/variants/${variant.id}`, {
+      compare_at_price: share(variant.price, 1.25),
+    });
+    added.push(`compare-at price on ${handle}`);
+  }
+  // A season's sale: 20% off every grow kit, started yesterday, ending in a month. A sale
+  // list's "was" price is the regular one, so nothing else needs typing.
+  if (!have.has("Autumn sale")) {
+    const day = 24 * 60 * 60 * 1000;
+    const autumn = await admin.post("/admin/price-lists", {
+      name: "Autumn sale",
+      description: "20% off grow kits while the season lasts.",
+      kind: "sale",
+      currency: "EUR",
+      starts_at: new Date(Date.now() - day).toISOString(),
+      ends_at: new Date(Date.now() + 30 * day).toISOString(),
+      adjustment: {
+        percent_bps: -2000,
+        applies_to: { type: "categories", categories: [categoryIds["grow-kits"]] },
+      },
+    });
+    await admin.post(`/admin/catalogs/${catalog}/price-lists`, { price_list: autumn.id });
+    added.push("price list Autumn sale");
+  }
+  // Clearance: the last of a few lines at fixed prices, the regular price as the "was",
+  // with no end.
+  if (!have.has("Clearance")) {
+    const clearance = await admin.post("/admin/price-lists", {
+      name: "Clearance",
+      description: "The last of the old stock.",
+      kind: "sale",
+      currency: "EUR",
+    });
+    await admin.put(`/admin/price-lists/${clearance.id}/fixed-prices`, {
+      fixed_prices: Object.entries(CLEARANCE).flatMap(([handle, factor]) =>
+        (forSale[handle]?.variants ?? []).slice(0, 2).map((variant) => ({
+          variant: variant.id,
+          price: share(variant.price, factor),
+          compare_at: variant.price,
+        })),
+      ),
+    });
+    await admin.post(`/admin/catalogs/${catalog}/price-lists`, { price_list: clearance.id });
+    added.push("price list Clearance");
+  }
+  return added;
+}
+
+/**
+ * The Wholesale customer group: the one with that handle, or older seeds' `trade` group
+ * renamed to it, or a new one. `{ group, change }`, the change `null` when there was none.
+ */
+async function wholesaleGroup() {
+  const { items } = await admin.get("/admin/customer-groups");
+  const wholesale = items.find((group) => group.handle === "wholesale");
+  if (wholesale) return { group: wholesale, change: null };
+  const trade = items.find((group) => group.handle === "trade");
+  if (trade) {
+    const group = await admin.patch(`/admin/customer-groups/${trade.id}`, {
+      name: "Wholesale",
+      handle: "wholesale",
+    });
+    return { group, change: "customer group Trade renamed Wholesale" };
+  }
+  const group = await admin.post("/admin/customer-groups", {
+    name: "Wholesale",
+    handle: "wholesale",
+    description: "Farms, labs and studios buying at trade prices.",
+  });
+  return { group, change: "customer group Wholesale" };
+}
+
+/** Puts the customers tagged `trade` in `group`, leaving those already in it; how many joined. */
+async function addTradeCustomers(group) {
+  const members = new Set((await all(`/admin/customers?group=${group.id}`)).map((c) => c.id));
+  const joining = (await all("/admin/customers?custom_fields=custom.tags"))
+    .filter((c) => c.custom_fields?.["custom.tags"]?.includes("trade") && !members.has(c.id))
+    .map((c) => c.id);
+  if (joining.length > 0) {
+    await admin.post(`/admin/customer-groups/${group.id}/customers`, { customers: joining });
+  }
+  return joining.length;
+}
+
+/**
+ * The Wholesale group's prices: fixed below the regular ones on what they buy in bulk,
+ * cheaper again by the ten and the fifty, seen once they sign in (and in their carts).
+ * Nothing when a list named Wholesale is in `have`. What it added.
+ */
+async function seedWholesalePrices({ catalog, forSale, group, have }) {
+  if (have.has("Wholesale")) return [];
+  const tradePrices = await admin.post("/admin/price-lists", {
+    name: "Wholesale",
+    description: "Trade prices and quantity breaks for the Wholesale group.",
+    kind: "override",
+    currency: "EUR",
+    audience: { groups: [group.id] },
+  });
+  await admin.put(`/admin/price-lists/${tradePrices.id}/fixed-prices`, {
+    fixed_prices: BULK.flatMap((handle) =>
+      (forSale[handle]?.variants ?? []).map((variant) => ({
+        variant: variant.id,
+        price: share(variant.price, 0.85),
+        breaks: [
+          { min_quantity: 10, price: share(variant.price, 0.75) },
+          { min_quantity: 50, price: share(variant.price, 0.65) },
+        ],
+      })),
+    ),
+  });
+  await admin.post(`/admin/catalogs/${catalog}/price-lists`, { price_list: tradePrices.id });
+  return ["price list Wholesale"];
+}
+
+/**
+ * The discounts, after the orders so they were placed at the prices they show. Each one
+ * combines with the other classes: the welcome code still gets free shipping, and the grow
+ * kit's free syringe still counts toward the minimum. `markets` are `{ name, id, currency }`;
+ * discounts titled as one in `have` are left alone. The ones it created.
+ */
+async function seedDiscounts({ markets, categoryIds, forSale, have }) {
+  const discounts = [
+    {
+      title: "Welcome offer",
+      method: "codes",
+      codes: ["WELCOME10"],
+      kind: {
+        type: "standard",
+        rewards: [{ target: { type: "subtotal" }, value: { type: "percent", basis_points: 1000 } }],
+      },
+      combines_with: ["product", "shipping"],
+      limits: { once_per_customer: true },
+    },
+    // Free shipping above a minimum in each market's own currency, so each says its own
+    // amount.
+    ...[
+      ["Europe", "€50", 5000],
+      ["United Kingdom", "£45", 4500],
+      ["United States", "$60", 6000],
+      ["Serbia", "6,000 RSD", 600000],
+    ].map(([name, over, amount]) => {
+      const market = markets.find((m) => m.name === name);
+      if (!market) throw new Error(`the store has no ${name} market`);
+      return {
+        title: `Free shipping over ${over}`,
+        method: "automatic",
+        conditions: [
+          { type: "markets", markets: [market.id] },
+          {
+            type: "min_subtotal",
+            amounts: { [market.id]: { amount, currency: market.currency } },
+          },
+        ],
+        kind: {
+          type: "standard",
+          rewards: [
+            { target: { type: "shipping" }, value: { type: "percent", basis_points: 10000 } },
+          ],
+        },
+        combines_with: ["product", "order"],
+      };
+    }),
+    {
+      title: "Buy a grow kit, get a syringe free",
+      method: "automatic",
+      kind: {
+        type: "buy_x_get_y",
+        buys: { items: { type: "categories", ids: [categoryIds["grow-kits"]] } },
+        buy: { type: "quantity", quantity: 1 },
+        gets: { items: { type: "products", ids: [forSale["liquid-culture-syringe"].id] } },
+        get_quantity: 1,
+        value: { type: "percent", basis_points: 10000 },
+        uses_per_order: 1,
+      },
+      combines_with: ["order", "shipping"],
+    },
+    {
+      title: "Culture volume discount",
+      method: "automatic",
+      kind: {
+        type: "tiered",
+        items: { items: { type: "categories", ids: [categoryIds.cultures] } },
+        measure: "quantity",
+        tiers: [
+          {
+            threshold: { type: "quantity", quantity: 3 },
+            value: { type: "percent", basis_points: 1000 },
+          },
+          {
+            threshold: { type: "quantity", quantity: 6 },
+            value: { type: "percent", basis_points: 1500 },
+          },
+        ],
+      },
+      combines_with: ["order", "shipping"],
+    },
+  ];
+  const created = [];
+  for (const discount of discounts) {
+    if (have.has(discount.title)) continue;
+    await admin.post("/admin/discounts", discount);
+    console.log(`  ${discount.title}${discount.codes ? ` (${discount.codes.join(", ")})` : ""}`);
+    created.push(discount);
+  }
+  return created;
+}
+
+/**
+ * Gives the demo's read-only role every `:read` scope this build has (the owner role
+ * lists them all) that it lacks, so the shared login sees areas added since it was made.
+ * The scopes it added; none without the role.
+ */
+async function widenDemoRole() {
+  const { items } = await admin.get("/admin/roles");
+  const demo = items.find((r) => r.name === DEMO_ROLE);
+  const owner = items.find((r) => r.owner);
+  if (!demo || !owner) return [];
+  const missing = owner.scopes.filter((s) => s.endsWith(":read") && !demo.scopes.includes(s));
+  if (missing.length > 0) {
+    await admin.patch(`/admin/roles/${demo.id}`, { scopes: [...demo.scopes, ...missing] });
+  }
+  return missing;
+}
+
+/**
+ * `--pricing`, on a store this script seeded before price lists and discounts: adds what
+ * newer runs add (compare-at prices, the sale, clearance and Wholesale lists in the Europe
+ * catalog, the Wholesale group with the customers tagged `trade`, `on_sale` in the search
+ * filters, the discounts) and widens the demo's read-only role. What's there already is
+ * left as it is, so running it again adds nothing.
+ */
+async function addPricing() {
+  console.log("Reading the catalogue");
+  const markets = (await admin.get("/admin/markets")).items;
+  const europe = markets.find((m) => m.name === "Europe");
+  if (!europe?.catalog) throw new Error("the store has no Europe market with a catalog");
+  const categoryIds = {};
+  const walk = (nodes) => {
+    for (const node of nodes) {
+      categoryIds[node.handle] = node.id;
+      walk(node.children ?? []);
+    }
+  };
+  walk((await admin.get("/admin/categories")).items);
+  const wanted = new Set([
+    ...COMPARE_AT,
+    ...Object.keys(CLEARANCE),
+    ...BULK,
+    "liquid-culture-syringe",
+  ]);
+  const forSale = {};
+  for (const summary of await all("/admin/products?status=active")) {
+    if (wanted.has(summary.handle))
+      forSale[summary.handle] = await admin.get(`/admin/products/${summary.id}`);
+  }
+  const lists = new Set((await all("/admin/price-lists")).map((list) => list.name));
+  const titles = new Set((await all("/admin/discounts")).map((d) => d.title));
+
+  const added = [];
+  console.log("Sales and clearance");
+  added.push(...(await seedSales({ catalog: europe.catalog, forSale, categoryIds, have: lists })));
+
+  console.log("Wholesale group and prices");
+  const { group, change } = await wholesaleGroup();
+  if (change) added.push(change);
+  const joined = await addTradeCustomers(group);
+  if (joined > 0) added.push(`${joined} customer(s) in Wholesale`);
+  added.push(
+    ...(await seedWholesalePrices({ catalog: europe.catalog, forSale, group, have: lists })),
+  );
+
+  console.log("Search");
+  const search = await admin.get("/admin/search/settings");
+  if (!search.facets.some((f) => f.key === "on_sale")) {
+    const onSale = FACETS.find((f) => f.key === "on_sale");
+    await admin.patch("/admin/search/settings", { facets: [...search.facets, onSale] });
+    added.push("on_sale search filter");
+  }
+
+  console.log("Discounts");
+  const created = await seedDiscounts({ markets, categoryIds, forSale, have: titles });
+  added.push(...created.map((d) => `discount ${d.title}`));
+
+  console.log("Staff role");
+  const scopes = await widenDemoRole();
+  if (scopes.length > 0) added.push(`${DEMO_ROLE}: ${scopes.join(", ")}`);
+
+  console.log(added.length > 0 ? "\nAdded:" : "\nNothing to add: the store has it all.");
+  for (const line of added) console.log(`  ${line}`);
+}
+
 async function main() {
   console.log(`Seeding ${BASE} as ${EMAIL}`);
   const login = await call("POST", "/admin/auth/login", { email: EMAIL, password: PASSWORD });
@@ -1406,6 +1744,7 @@ async function main() {
   token = login.session.token;
 
   if (process.argv.includes("--images")) return replaceImages();
+  if (process.argv.includes("--pricing")) return addPricing();
 
   const existing = await admin.get("/admin/products?limit=1");
   if (existing.items.length > 0 && !process.argv.includes("--force")) {
@@ -1697,52 +2036,7 @@ async function main() {
   // In euros, the Europe market's base prices: its catalog takes the lists.
   const europe = MARKETS.find((m) => m.currency === "EUR");
   const forSale = Object.fromEntries(sellable.map((p) => [p.handle, p]));
-  // A "was" price on a few variants' own prices, struck through wherever no list wins.
-  for (const handle of ["fruiting-chamber", "pressure-sterilizer", "still-air-box"]) {
-    const product = forSale[handle];
-    if (!product) continue;
-    const variant = product.variants[0];
-    await admin.patch(`/admin/products/${product.id}/variants/${variant.id}`, {
-      compare_at_price: share(variant.price, 1.25),
-    });
-  }
-  // A season's sale: 20% off every grow kit, started yesterday, ending in a month. A sale
-  // list's "was" price is the regular one, so nothing else needs typing.
-  const day = 24 * 60 * 60 * 1000;
-  const autumn = await admin.post("/admin/price-lists", {
-    name: "Autumn sale",
-    description: "20% off grow kits while the season lasts.",
-    kind: "sale",
-    currency: "EUR",
-    starts_at: new Date(Date.now() - day).toISOString(),
-    ends_at: new Date(Date.now() + 30 * day).toISOString(),
-    adjustment: {
-      percent_bps: -2000,
-      applies_to: { type: "categories", categories: [categoryIds["grow-kits"]] },
-    },
-  });
-  await admin.post(`/admin/catalogs/${europe.catalog}/price-lists`, { price_list: autumn.id });
-  // Clearance: the last of a few lines at fixed prices, the regular price as the "was",
-  // with no end.
-  const clearance = await admin.post("/admin/price-lists", {
-    name: "Clearance",
-    description: "The last of the old stock.",
-    kind: "sale",
-    currency: "EUR",
-  });
-  const CLEARANCE = { "acoustic-panel": 0.6, "mycelium-brick": 0.5, "packaging-inserts": 0.7 };
-  await admin.put(`/admin/price-lists/${clearance.id}/fixed-prices`, {
-    fixed_prices: Object.entries(CLEARANCE).flatMap(([handle, factor]) =>
-      (forSale[handle]?.variants ?? []).slice(0, 2).map((variant) => ({
-        variant: variant.id,
-        price: share(variant.price, factor),
-        compare_at: variant.price,
-      })),
-    ),
-  });
-  await admin.post(`/admin/catalogs/${europe.catalog}/price-lists`, {
-    price_list: clearance.id,
-  });
+  await seedSales({ catalog: europe.catalog, forSale, categoryIds, have: new Set() });
 
   console.log("Search");
   await admin.patch("/admin/search/settings", { split_by: [], facets: FACETS });
@@ -1996,11 +2290,7 @@ async function main() {
   }
 
   console.log("Customer fields and groups");
-  const wholesale = await admin.post("/admin/customer-groups", {
-    name: "Wholesale",
-    handle: "wholesale",
-    description: "Farms, labs and studios buying at trade prices.",
-  });
+  const { group: wholesale } = await wholesaleGroup();
   const CUSTOMERS = {
     "ana.horvat@example.com": {
       "custom.business_type": "home",
@@ -2028,123 +2318,24 @@ async function main() {
     const customer = found.items.find((c) => c.email === email);
     if (!customer) continue;
     await admin.patch(`/admin/customers/${customer.id}/custom-fields`, { custom_fields: fields });
-    if (fields["custom.tags"].includes("trade")) {
-      await admin.post(`/admin/customer-groups/${wholesale.id}/customers`, {
-        customers: [customer.id],
-      });
-    }
   }
+  await addTradeCustomers(wholesale);
 
-  // Their prices: fixed below the regular ones on what they buy in bulk, cheaper again by
-  // the ten and the fifty, seen once they sign in (and in their carts).
   console.log("Wholesale prices");
-  const tradePrices = await admin.post("/admin/price-lists", {
-    name: "Wholesale",
-    description: "Trade prices and quantity breaks for the Wholesale group.",
-    kind: "override",
-    currency: "EUR",
-    audience: { groups: [wholesale.id] },
-  });
-  const BULK = ["mycelium-leather", "grain-spawn-bag", "hardwood-substrate", "coffee-substrate"];
-  await admin.put(`/admin/price-lists/${tradePrices.id}/fixed-prices`, {
-    fixed_prices: BULK.flatMap((handle) =>
-      (forSale[handle]?.variants ?? []).map((variant) => ({
-        variant: variant.id,
-        price: share(variant.price, 0.85),
-        breaks: [
-          { min_quantity: 10, price: share(variant.price, 0.75) },
-          { min_quantity: 50, price: share(variant.price, 0.65) },
-        ],
-      })),
-    ),
-  });
-  await admin.post(`/admin/catalogs/${europe.catalog}/price-lists`, {
-    price_list: tradePrices.id,
+  await seedWholesalePrices({
+    catalog: europe.catalog,
+    forSale,
+    group: wholesale,
+    have: new Set(),
   });
 
-  // After the orders, so they were placed at the prices they show. Each one combines with
-  // the other classes: the welcome code still gets free shipping, and the grow kit's free
-  // syringe still counts toward the minimum.
   console.log("Discounts");
-  const discounts = [
-    {
-      title: "Welcome offer",
-      method: "codes",
-      codes: ["WELCOME10"],
-      kind: {
-        type: "standard",
-        rewards: [{ target: { type: "subtotal" }, value: { type: "percent", basis_points: 1000 } }],
-      },
-      combines_with: ["product", "shipping"],
-      limits: { once_per_customer: true },
-    },
-    // Free shipping above a minimum in each market's own currency, so each says its own
-    // amount.
-    ...[
-      ["Europe", "€50", 5000],
-      ["United Kingdom", "£45", 4500],
-      ["United States", "$60", 6000],
-      ["Serbia", "6,000 RSD", 600000],
-    ].map(([name, over, amount]) => {
-      const market = MARKETS.find((m) => m.name === name);
-      return {
-        title: `Free shipping over ${over}`,
-        method: "automatic",
-        conditions: [
-          { type: "markets", markets: [market.id] },
-          {
-            type: "min_subtotal",
-            amounts: { [market.id]: { amount, currency: market.currency } },
-          },
-        ],
-        kind: {
-          type: "standard",
-          rewards: [
-            { target: { type: "shipping" }, value: { type: "percent", basis_points: 10000 } },
-          ],
-        },
-        combines_with: ["product", "order"],
-      };
-    }),
-    {
-      title: "Buy a grow kit, get a syringe free",
-      method: "automatic",
-      kind: {
-        type: "buy_x_get_y",
-        buys: { items: { type: "categories", ids: [categoryIds["grow-kits"]] } },
-        buy: { type: "quantity", quantity: 1 },
-        gets: { items: { type: "products", ids: [forSale["liquid-culture-syringe"].id] } },
-        get_quantity: 1,
-        value: { type: "percent", basis_points: 10000 },
-        uses_per_order: 1,
-      },
-      combines_with: ["order", "shipping"],
-    },
-    {
-      title: "Culture volume discount",
-      method: "automatic",
-      kind: {
-        type: "tiered",
-        items: { items: { type: "categories", ids: [categoryIds.cultures] } },
-        measure: "quantity",
-        tiers: [
-          {
-            threshold: { type: "quantity", quantity: 3 },
-            value: { type: "percent", basis_points: 1000 },
-          },
-          {
-            threshold: { type: "quantity", quantity: 6 },
-            value: { type: "percent", basis_points: 1500 },
-          },
-        ],
-      },
-      combines_with: ["order", "shipping"],
-    },
-  ];
-  for (const discount of discounts) {
-    await admin.post("/admin/discounts", discount);
-    console.log(`  ${discount.title}${discount.codes ? ` (${discount.codes.join(", ")})` : ""}`);
-  }
+  const discounts = await seedDiscounts({
+    markets: MARKETS,
+    categoryIds,
+    forSale,
+    have: new Set(),
+  });
 
   const variantCount = sellable.reduce((n, p) => n + p.variants.length, 0);
   console.log("\nDone: Mycelium Works is set up.");

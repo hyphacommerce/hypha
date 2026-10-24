@@ -18,7 +18,9 @@ It isn't production-proven yet, and its APIs may change between 0.x releases.
 | Area | What you get |
 | --- | --- |
 | Catalog | Products with options and sparse, explicit variants, categories, media, rich text, custom fields, search with facets |
-| Selling | Markets (countries and currency), catalogs and price lists, sales channels, tax regions and classes |
+| Selling | Markets (countries and currency), catalogs, sales channels, tax regions and classes |
+| Prices | Price lists that compete on the lowest price: sales and clearances on a schedule, compare-at prices, quantity breaks, prices for customer groups, a spreadsheet editor with CSV import |
+| Discounts | Codes and automatic discounts: amounts or percentages off products, the order or shipping, buy X get Y, volume tiers, combinations, usage limits |
 | Checkout | Carts priced per market, shipping zones and rates (or a rate app), manual payment methods and online payments started before the order exists |
 | Orders | Fulfilment by location with tracking, cancellations, refunds, inventory per location |
 | Customers | Accounts with email sign-in codes, addresses, marketing consent, data export and erasure |

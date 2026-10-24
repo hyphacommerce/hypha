@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import "./globals.css";
 import { loadStore } from "@/lib/api";
+import { siteUrl } from "@/lib/site";
 
 import { Providers } from "./providers";
 
@@ -22,8 +23,19 @@ async function storeOrDefaults() {
 export async function generateMetadata(): Promise<Metadata> {
   const store = await storeOrDefaults();
   return {
+    // What relative canonical and preview URLs resolve against.
+    metadataBase: siteUrl(),
     title: { default: store.name, template: `%s · ${store.name}` },
     description: store.description ?? undefined,
+    applicationName: store.name,
+    // The shop's icons in public/: replace them with the store's own.
+    icons: {
+      icon: [
+        { url: "/favicon.ico", sizes: "32x32" },
+        { url: "/favicon.svg", type: "image/svg+xml" },
+      ],
+      apple: "/apple-touch-icon.png",
+    },
   };
 }
 
