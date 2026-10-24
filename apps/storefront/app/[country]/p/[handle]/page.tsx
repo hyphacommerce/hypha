@@ -6,10 +6,15 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { AppElements } from "@/components/app-element";
+import { JsonLd } from "@/components/json-ld";
+import { ProductGrid } from "@/components/product-grid";
 import { countryOf, fieldContext, loadProduct } from "@/lib/api";
 import { elementsFor } from "@/lib/app-elements";
 import { presentFields } from "@/lib/custom-fields";
-import { link } from "@/lib/site";
+import { relatedProducts } from "@/lib/listing-data";
+import { pageMetadata } from "@/lib/metadata";
+import { breadcrumbLd, plainText, productLd } from "@/lib/seo";
+import { absolute, link } from "@/lib/site";
 
 import { ProductForm } from "./product-form";
 
@@ -32,8 +37,16 @@ async function load(handle: string, country: string) {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { country, handle } = await params;
-  const product = await load(handle, country.toUpperCase());
-  return { title: product.title };
+  const code = country.toUpperCase();
+  const product = await load(handle, code);
+  const image = product.media.find((m) => m.kind === "image");
+  return pageMetadata({
+    country: code,
+    path: `/p/${handle}`,
+    title: product.title,
+    description: plainText(product.description),
+    image: image && { ...image, alt: image.alt ?? product.title },
+  });
 }
 
 /**
@@ -54,11 +67,11 @@ export default async function ProductPage({ params }: Props) {
   const code = country.country;
   // The merchant's custom fields, formatted here so the form shows the selected
   // variant's over the product's without formatting in the browser.
-  const context = await fieldContext(
-    country,
-    product.custom_fields,
-    ...product.variants.map((v) => v.custom_fields),
-  );
+  const [context, related] = await Promise.all([
+    fieldContext(country, product.custom_fields, ...product.variants.map((v) => v.custom_fields)),
+    relatedProducts(product, code),
+  ]);
+  const url = absolute(link(code, `/p/${product.handle}`));
   const fields = {
     product: presentFields("product", product.custom_fields, context),
     variants: Object.fromEntries(
@@ -68,6 +81,13 @@ export default async function ProductPage({ params }: Props) {
 
   return (
     <VStack gap={5}>
+      <JsonLd data={productLd(product, url, country.minor_units)} />
+      <JsonLd
+        data={breadcrumbLd([
+          { name: "Home", url: absolute(link(code, "/")) },
+          { name: product.title, url },
+        ])}
+      />
       <Breadcrumbs variant="supporting">
         <BreadcrumbItem href={link(code, "/")}>Home</BreadcrumbItem>
         <BreadcrumbItem isCurrent>{product.title}</BreadcrumbItem>
@@ -87,6 +107,17 @@ export default async function ProductPage({ params }: Props) {
         <ProductForm product={product} digits={country.minor_units} fields={fields} />
       )}
       <AppElements elements={appBlocks} props={{ productId: product.id }} />
+      {related.length > 0 && (
+        <VStack gap={4} paddingBlockStart={6}>
+          <Heading level={2}>You may also like</Heading>
+          <ProductGrid
+            hits={related}
+            digits={country.minor_units}
+            productBase={link(code, "/p")}
+            minWidth={200}
+          />
+        </VStack>
+      )}
     </VStack>
   );
 }

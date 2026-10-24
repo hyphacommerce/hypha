@@ -6,11 +6,14 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { CustomFields } from "@/components/custom-fields";
+import { JsonLd } from "@/components/json-ld";
 import { Listing } from "@/components/listing";
 import { countryOf, fieldContext, loadCategory } from "@/lib/api";
 import { presentFields } from "@/lib/custom-fields";
 import { readListingPage } from "@/lib/listing-data";
-import { link } from "@/lib/site";
+import { pageMetadata } from "@/lib/metadata";
+import { breadcrumbLd, plainText } from "@/lib/seo";
+import { absolute, link } from "@/lib/site";
 
 /** Static, refreshed at most every five minutes. */
 export const revalidate = 300;
@@ -32,8 +35,18 @@ async function load(handle: string) {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const category = await load((await params).handle);
-  return { title: category.name };
+  const { country, handle } = await params;
+  const category = await load(handle);
+  return pageMetadata({
+    country: country.toUpperCase(),
+    path: `/c/${handle}`,
+    title: category.name,
+    description: plainText(category.description),
+    image:
+      category.image?.kind === "image"
+        ? { ...category.image, alt: category.image.alt ?? category.name }
+        : null,
+  });
 }
 
 /**
@@ -62,6 +75,13 @@ export default async function CategoryPage({ params }: Props) {
 
   return (
     <VStack gap={6}>
+      <JsonLd
+        data={breadcrumbLd([
+          { name: "Home", url: absolute(link(code, "/")) },
+          ...ancestors.map((a) => ({ name: a.name, url: absolute(link(code, `/c/${a.handle}`)) })),
+          { name: category.name, url: absolute(link(code, `/c/${category.handle}`)) },
+        ])}
+      />
       <VStack gap={3}>
         <Breadcrumbs variant="supporting">
           <BreadcrumbItem href={link(code, "/")}>Home</BreadcrumbItem>

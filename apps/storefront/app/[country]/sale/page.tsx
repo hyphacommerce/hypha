@@ -7,6 +7,7 @@ import type { Metadata } from "next";
 import { Listing } from "@/components/listing";
 import { countryOf } from "@/lib/api";
 import { readListingPage } from "@/lib/listing-data";
+import { pageMetadata } from "@/lib/metadata";
 import { link } from "@/lib/site";
 
 /** Static, refreshed at most every five minutes (and when prices change: the search
@@ -18,7 +19,18 @@ export function generateStaticParams() {
   return [];
 }
 
-export const metadata: Metadata = { title: "Sale" };
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ country: string }>;
+}): Promise<Metadata> {
+  return pageMetadata({
+    country: (await params).country.toUpperCase(),
+    path: "/sale",
+    title: "Sale",
+    description: "Everything on sale now, at its reduced price.",
+  });
+}
 
 /**
  * The sale shelf: everything shown with a compare-at price in the shopper's market,

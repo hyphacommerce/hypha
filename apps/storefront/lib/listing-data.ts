@@ -15,6 +15,7 @@ import {
   sortOf,
   toMinor,
 } from "./listing";
+import { rankRelated } from "./related";
 
 export type ListingPage = {
   state: ListingState;
@@ -111,4 +112,33 @@ export async function readListingPage(input: {
       : undefined,
     nextCursor: data.next_cursor ?? null,
   };
+}
+
+/** A related shelf's length: one row on a wide screen. */
+const RELATED = 4;
+
+/**
+ * Products to show beside `product` in `country` (`rankRelated`): those sharing a tag,
+ * its type or its maker, and the newest to fill up, from four cached searches made at
+ * once. A search that fails leaves its part out: the shelf is extra, never the page's
+ * failure.
+ */
+export async function relatedProducts(
+  product: { id: string; tags: string[]; product_type?: string | null; vendor?: string | null },
+  country: string,
+): Promise<ListingPage["items"]> {
+  const hits = (filter: string[] | null) =>
+    filter === null
+      ? Promise.resolve([])
+      : search({ country, filter, sort: "newest", limit: 12 }).then(
+          (r) => r.data?.items ?? [],
+          () => [],
+        );
+  const [tags, type, vendor, newest] = await Promise.all([
+    hits(product.tags.length > 0 ? product.tags.map((t) => `tag:${t}`) : null),
+    hits(product.product_type ? [`product_type:${product.product_type}`] : null),
+    hits(product.vendor ? [`vendor:${product.vendor}`] : null),
+    hits([]),
+  ]);
+  return rankRelated(product, { tags, type, vendor, newest }, RELATED);
 }

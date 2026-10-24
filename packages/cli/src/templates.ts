@@ -227,6 +227,8 @@ export function newEnv(d: Deployment, owner: Owner): EnvFile {
   if (d.domains.storefront) {
     env
       .comment("")
+      .comment("The storefront's public address, for canonical links and link previews.")
+      .set("STOREFRONT_URL", url(d, d.domains.storefront))
       .comment("The storefront's publishable key and webhook secret: `hypha deploy` creates them.")
       .set("STOREFRONT_KEY", "")
       .set("HYPHA_WEBHOOK_SECRET", "");
