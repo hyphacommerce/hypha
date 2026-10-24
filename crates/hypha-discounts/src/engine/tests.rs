@@ -927,7 +927,23 @@ fn a_code_for_listed_customers_applies_only_to_them() {
         }
     );
     i.buyer.customer = Some(customer);
+    i.buyer.signed_in = true;
     assert_eq!(state_of(&d, &i), CodeState::Applied);
+}
+
+#[test]
+fn a_guest_with_a_listed_customers_email_isnt_that_customer() {
+    // A guest's email finds its customer only to count their uses.
+    let customer = CustomerId::from_uuid(Uuid::from_u128(1));
+    let d = conditioned(Condition::Customers(vec![customer]));
+    let mut i = with_code(vec![line(1, 1000, 1)]);
+    i.buyer.customer = Some(customer);
+    assert_eq!(
+        state_of(&d, &i),
+        CodeState::NotEligible {
+            condition: "customers"
+        }
+    );
 }
 
 #[test]

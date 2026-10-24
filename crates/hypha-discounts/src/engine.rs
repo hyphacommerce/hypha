@@ -375,7 +375,11 @@ fn pre_check(input: &DiscountInput<'_>, candidate: &Live<'_>) -> Option<CodeStat
             Condition::Markets(ids) => ids.contains(&input.market),
             Condition::Channels(ids) => ids.contains(&input.channel),
             Condition::CustomerGroups(ids) => ids.iter().any(|g| input.buyer.groups.contains(g)),
-            Condition::Customers(ids) => input.buyer.customer.is_some_and(|c| ids.contains(&c)),
+            // Only a signed-in (or staff-linked) customer: a guest typing a listed
+            // customer's email isn't them. The email's customer only counts uses.
+            Condition::Customers(ids) => {
+                input.buyer.signed_in && input.buyer.customer.is_some_and(|c| ids.contains(&c))
+            }
             Condition::SignedIn => input.buyer.signed_in,
             Condition::MinSubtotal(_) | Condition::MinQuantity(_) => true,
         };
