@@ -420,6 +420,28 @@ pub async fn price_list_schedule<S: Storage>(state: &AppState<S>) -> Step {
     })
 }
 
+/// Announces the discount windows that opened or closed since the last announcement
+/// (`discount.started` / `.ended`), so storefronts revalidate their pages and promotion
+/// badges. Its `retry_at` is the next boundary, for a host that runs jobs only when
+/// they're due.
+pub async fn discount_schedule<S: Storage>(state: &AppState<S>) -> Step {
+    let ports = state
+        .public_ports()
+        .await
+        .map_err(|_| "no connection".to_string())?;
+    let announced = hypha_discounts::announce_windows(&ports, &state.clock)
+        .await
+        .map_err(|e| e.to_string())?;
+    if announced.events > 0 {
+        tracing::info!(events = announced.events, "discounts: announced windows");
+    }
+    Ok(Ran {
+        more: false,
+        idle: announced.events == 0,
+        retry_at: announced.next,
+    })
+}
+
 /// Deletes uploads abandoned for over `media.abandoned_after`, and temporary uploads past
 /// their lifetime, with their files.
 pub async fn media_sweep<S: Storage>(state: &AppState<S>) -> Step {
@@ -553,11 +575,12 @@ async fn agent_upkeep<S: Storage>(
     Ok([calls, Progress::of(tokens, batch), proposals])
 }
 
-/// When dispatch, the send job or the price list schedule next has work
+/// When dispatch, the send job or the price list or discount schedule next has work
 /// (`OutboxRepo::next_due`, `NotificationRepo::next_due`, the next window boundary of an
-/// active list), for a host that runs the jobs only when there's some.
+/// active list or discount), for a host that runs the jobs only when there's some.
 pub async fn next_due<S: Storage>(state: &AppState<S>) -> Result<Option<Timestamp>, String> {
     use hypha_core::{HasOutbox, OutboxRepo};
+    use hypha_discounts::{DiscountRepo, HasDiscounts};
     use hypha_markets::{HasPriceLists, PriceListRepo};
     use hypha_notifications::{HasNotifications, NotificationRepo};
     let ports = state
@@ -580,7 +603,21 @@ pub async fn next_due<S: Storage>(state: &AppState<S>) -> Result<Option<Timestam
     } else {
         None
     };
-    Ok(earliest(earliest(events, emails), boundary))
+    let discount = if state.config.jobs.discount_schedule.enabled {
+        let now = state.clock.now();
+        let discounts = ports
+            .discounts()
+            .with_boundary_after(now)
+            .await
+            .map_err(|e| e.to_string())?;
+        hypha_discounts::next_boundary(&discounts, now)
+    } else {
+        None
+    };
+    Ok(earliest(
+        earliest(earliest(events, emails), boundary),
+        discount,
+    ))
 }
 
 /// How many search targets are queued, for a host whose runs don't follow each other on a

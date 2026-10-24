@@ -8,8 +8,8 @@ use hypha_core::{
     stamp_insert, stamp_update,
 };
 use hypha_discounts::{
-    CodeFilter, CodeSelection, Discount, DiscountCode, DiscountFilter, DiscountRepo, Method, Usage,
-    UsageClaim, keys,
+    CodeFilter, CodeSelection, Discount, DiscountCode, DiscountFilter, DiscountRepo, Method,
+    Status, Usage, UsageClaim, keys,
 };
 
 use crate::{
@@ -26,6 +26,8 @@ pub(crate) struct DiscountRows {
     pub(crate) counts: HashMap<DiscountId, u64>,
     /// With whether the use was once per customer.
     pub(crate) usages: Vec<(Usage, bool)>,
+    /// The schedule job's progress, a one-row table.
+    pub(crate) schedule: Option<Timestamp>,
 }
 
 impl DiscountRows {
@@ -205,6 +207,27 @@ impl DiscountRepo for InMemoryDiscounts {
             .iter()
             .filter(|d| d.counts_as_live_automatic(at))
             .count() as u64)
+    }
+
+    async fn with_boundary_after(&self, after: Timestamp) -> Result<Vec<Discount>, RepoError> {
+        let mut found: Vec<Discount> = self
+            .discounts
+            .all()
+            .into_iter()
+            .filter(|d| {
+                d.status() == Status::Active
+                    && [d.starts_at(), d.ends_at()]
+                        .into_iter()
+                        .flatten()
+                        .any(|at| at > after)
+            })
+            .collect();
+        found.sort_by_key(|d| d.id());
+        Ok(found)
+    }
+
+    async fn schedule_ran_until(&self) -> Result<Option<Timestamp>, RepoError> {
+        Ok(self.lock_rows().schedule)
     }
 
     async fn insert(&self, discount: &mut Discount) -> Result<(), RepoError> {

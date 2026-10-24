@@ -110,6 +110,12 @@ pub trait DiscountRepo {
     async fn live_automatic(&self, at: Timestamp) -> Result<Vec<Discount>, RepoError>;
     /// How many automatic discounts are active and not expired at `at`.
     async fn count_live_automatic(&self, at: Timestamp) -> Result<u64, RepoError>;
+    /// The active discounts (any method) with a window boundary (`starts_at` or `ends_at`)
+    /// after `after`, by ID: what the schedule job announces and waits for.
+    async fn with_boundary_after(&self, after: Timestamp) -> Result<Vec<Discount>, RepoError>;
+    /// Where the schedule job last stopped announcing window boundaries, moved by a batch
+    /// (`StageDiscounts::advance_discount_schedule`); `None` before its first run.
+    async fn schedule_ran_until(&self) -> Result<Option<Timestamp>, RepoError>;
     /// Stores a new discount (version 1) with its usage counter at zero. Enforces
     /// `DISCOUNT_ID`.
     async fn insert(&self, discount: &mut Discount) -> Result<(), RepoError>;
@@ -178,6 +184,10 @@ pub trait StageDiscounts {
     /// customer used it already. Precondition: the order and customer are written in the
     /// same batch or exist.
     fn claim_discount_usage(&mut self, claim: UsageClaim);
+    /// Moves the schedule job's progress from `from` (`None`: never ran) to `to`; the
+    /// commit fails with `StaleVersion` when it isn't at `from` any more (another run moved
+    /// it first).
+    fn advance_discount_schedule(&mut self, from: Option<Timestamp>, to: Timestamp);
 }
 
 pub trait HasDiscounts {

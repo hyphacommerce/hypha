@@ -22,6 +22,8 @@ const EVENTS = [
   "discount.created",
   "discount.updated",
   "discount.deleted",
+  "discount.started",
+  "discount.ended",
 ];
 
 /** `webhookSecret` is `null` without a webhook (on this machine); `orderUrl` is the

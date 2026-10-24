@@ -176,6 +176,8 @@ enum Staged {
     DiscountCodes(Vec<DiscountCode>),
     RemovedDiscountCodes(DiscountId, CodeSelection),
     DiscountUsage(UsageClaim),
+    /// The discount schedule job's progress moved from the first to the second.
+    DiscountSchedule(Option<Timestamp>, Timestamp),
 }
 
 impl Staged {
@@ -259,6 +261,7 @@ impl Staged {
             Staged::NewDiscount(..) => 51,
             Staged::DiscountCodes(_) | Staged::RemovedDiscountCodes(..) => 52,
             Staged::DiscountUsage(_) => 53,
+            Staged::DiscountSchedule(..) => 54,
         }
     }
 
@@ -844,6 +847,9 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                         remove_codes(&db, discount, &selection).await?
                     }
                     Staged::DiscountUsage(claim) => claim_usage(&db, &claim).await?,
+                    Staged::DiscountSchedule(from, to) => {
+                        crate::discounts::advance_discount_schedule(&db, from, to).await?
+                    }
                 }
             }
             insert_records(&db, &records).await?;
@@ -1071,6 +1077,10 @@ impl StageDiscounts for PgBatch {
 
     fn claim_discount_usage(&mut self, claim: UsageClaim) {
         self.stage(Staged::DiscountUsage(claim));
+    }
+
+    fn advance_discount_schedule(&mut self, from: Option<Timestamp>, to: Timestamp) {
+        self.stage(Staged::DiscountSchedule(from, to));
     }
 }
 

@@ -14,6 +14,7 @@ pub mod error;
 pub mod events;
 pub mod json;
 pub mod repo;
+pub mod schedule;
 pub mod summary;
 
 pub use code::{DiscountCode, Generation, normalize};
@@ -34,10 +35,12 @@ pub use engine::{
 };
 pub use error::{CodeError, DiscountError, Problem};
 pub use events::{
-    DiscountCodesAdded, DiscountCodesRemoved, DiscountCreated, DiscountDeleted, DiscountUpdated,
+    DiscountCodesAdded, DiscountCodesRemoved, DiscountCreated, DiscountDeleted, DiscountEnded,
+    DiscountStarted, DiscountUpdated,
 };
 pub use repo::{
     CodeFilter, CodeSelection, DiscountFilter, DiscountRepo, HasDiscounts, StageDiscounts, Usage,
     UsageClaim, keys,
 };
+pub use schedule::{announce_windows, boundaries, next_boundary};
 pub use summary::summary;

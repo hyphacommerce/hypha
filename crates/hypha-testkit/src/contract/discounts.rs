@@ -216,6 +216,68 @@ where
     last_use(&make().await).await;
     scenario("discount: once per customer refuses a second use by the same customer");
     once_per_customer(&make().await).await;
+    scenario("discount: active ones with a boundary ahead are found, by ID");
+    with_boundaries(&make().await).await;
+    scenario("discount schedule: none before the first run, moved only from where it was");
+    schedule(&make().await).await;
+}
+
+async fn with_boundaries<S: HasDiscounts>(ports: &S) {
+    let repo = ports.discounts();
+    let windowed = |n: u128, status: Status, starts: Option<i64>, ends: Option<i64>| {
+        Discount::new(
+            did(n),
+            DiscountDraft {
+                status,
+                starts_at: starts.map(at),
+                ends_at: ends.map(at),
+                ..DiscountDraft::new("Offer", Method::Codes, percent_off_order())
+            },
+        )
+        .unwrap()
+    };
+    for mut d in [
+        windowed(4, Status::Active, None, Some(3_000)),
+        windowed(1, Status::Active, Some(1_000), Some(2_000)),
+        windowed(2, Status::Active, Some(500), None),
+        windowed(3, Status::Draft, Some(2_500), None),
+        windowed(5, Status::Active, None, None),
+    ] {
+        repo.insert(&mut d).await.unwrap();
+    }
+    let ids = |found: Vec<Discount>| found.iter().map(|d| d.id()).collect::<Vec<_>>();
+    assert_eq!(
+        repo.with_boundary_after(at(500)).await.map(ids),
+        Ok(vec![did(1), did(4)])
+    );
+    // A boundary at `after` is behind it.
+    assert_eq!(
+        repo.with_boundary_after(at(2_000)).await.map(ids),
+        Ok(vec![did(4)])
+    );
+    assert_eq!(
+        repo.with_boundary_after(at(3_000)).await.map(ids),
+        Ok(vec![])
+    );
+}
+
+async fn schedule<S: HasDiscounts + HasBatch<Batch: StageDiscounts>>(ports: &S) {
+    let repo = ports.discounts();
+    assert_eq!(repo.schedule_ran_until().await, Ok(None));
+    let mut batch = ports.batch();
+    batch.advance_discount_schedule(None, at(1_000));
+    ports.commit(batch).await.unwrap();
+    assert_eq!(repo.schedule_ran_until().await, Ok(Some(at(1_000))));
+    let mut batch = ports.batch();
+    batch.advance_discount_schedule(Some(at(1_000)), at(2_000));
+    ports.commit(batch).await.unwrap();
+    assert_eq!(repo.schedule_ran_until().await, Ok(Some(at(2_000))));
+    for from in [None, Some(at(1_000))] {
+        let mut batch = ports.batch();
+        batch.advance_discount_schedule(from, at(3_000));
+        assert_eq!(ports.commit(batch).await, Err(RepoError::StaleVersion));
+    }
+    assert_eq!(repo.schedule_ran_until().await, Ok(Some(at(2_000))));
 }
 
 async fn round_trip<S: HasDiscounts>(ports: &S) {

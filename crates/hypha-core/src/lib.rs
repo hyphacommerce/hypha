@@ -23,6 +23,7 @@ pub mod ports;
 pub mod preview_token;
 pub mod quantity;
 pub mod retry;
+pub mod schedule;
 pub mod scope;
 pub mod secret;
 mod tables;

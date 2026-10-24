@@ -119,6 +119,8 @@ const ALL_EVENTS = [
   "discount.created",
   "discount.updated",
   "discount.deleted",
+  "discount.started",
+  "discount.ended",
 ];
 
 test("an older storefront app gets the events it now needs, keeping the merchant's", async () => {

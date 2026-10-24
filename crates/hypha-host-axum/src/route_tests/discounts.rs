@@ -635,3 +635,60 @@ async fn a_product_shows_the_promotions_that_may_reach_it() {
         send_as(&app, &pk, "GET", "/storefront/products/by-handle/mug", None).await;
     assert_eq!(without_country["promotions"], json!([]));
 }
+
+#[tokio::test]
+async fn a_discounts_start_is_announced_once() {
+    let app = app().await;
+    let d = create(
+        &app,
+        json!({"title": "3 for 2", "method": "automatic", "starts_at": "2099-01-01T00:00:00Z",
+            "kind": {"type": "buy_x_get_y",
+            "buys": {"items": {"type": "all"}}, "buy": {"type": "quantity", "quantity": 2},
+            "gets": {"items": {"type": "all"}}, "get_quantity": 1,
+            "value": {"type": "percent", "basis_points": 10000}}}),
+    )
+    .await;
+    market_selling_a_mug(&app).await;
+    let pk = publishable(&app).await;
+    let mug = "/storefront/products/by-handle/mug?country=HR";
+    let (_, product) = send_as(&app, &pk, "GET", mug, None).await;
+    assert_eq!(product["promotions"], json!([]), "{product}");
+
+    // Time passes: it started an hour ago, after the job last looked, and was last written
+    // after that (a rename's event says nothing of its window); the start is still
+    // announced.
+    let id: hypha_core::DiscountId = d["id"].as_str().unwrap().parse().unwrap();
+    sql(
+        &app,
+        &format!(
+            "UPDATE discounts SET starts_at = now() - interval '1 hour',
+                 updated_at = now() - interval '30 minutes'
+             WHERE id = '{}';
+             INSERT INTO discount_schedule (ran_until) VALUES (now() - interval '90 minutes');",
+            id.as_uuid()
+        ),
+    )
+    .await;
+    let ran = hypha_http::jobs::discount_schedule(&app.state)
+        .await
+        .unwrap();
+    assert!(!ran.idle);
+    let again = hypha_http::jobs::discount_schedule(&app.state)
+        .await
+        .unwrap();
+    assert!(again.idle, "announced once");
+    let started: Vec<Value> = outbox_events(&app)
+        .await
+        .into_iter()
+        .filter(|e| e.event_type == "discount.started")
+        .map(|e| e.data)
+        .collect();
+    assert_eq!(started.len(), 1);
+    assert_eq!(
+        (&started[0]["discount"], &started[0]["method"]),
+        (&d["id"], &json!("automatic"))
+    );
+    // Promotions are worked out per request: the product shows it at once.
+    let (_, product) = send_as(&app, &pk, "GET", mug, None).await;
+    assert_eq!(product["promotions"][0]["title"], "3 for 2", "{product}");
+}

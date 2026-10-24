@@ -634,7 +634,8 @@ mod worker_main {
                 if let Some(kv) = kv {
                     let mut after = marks::after(run, None);
                     // The write may have moved the next boundary, which `due` counts.
-                    after.due |= boundaries && jobs.price_list_schedule.enabled;
+                    after.due |= boundaries
+                        && (jobs.price_list_schedule.enabled || jobs.discount_schedule.enabled);
                     mark(&kv, &state, after, LAST_DUE.get()).await;
                 }
             }));
@@ -643,9 +644,9 @@ mod worker_main {
     }
 
     /// The cron tick (every minute, `wrangler.toml`; `worker!`'s `#[event(scheduled)]`):
-    /// the price list schedule, dispatch, search sync and sending emails when KV's marks
-    /// say there's work (a window boundary due among them) or on the safety net's ticks, the others on the ticks that start their interval
-    /// (`schedule::due`).
+    /// the price list and discount schedules, dispatch, search sync and sending emails when
+    /// KV's marks say there's work (a window boundary due among them) or on the safety
+    /// net's ticks, the others on the ticks that start their interval (`schedule::due`).
     pub async fn scheduled<D: Deployment>(tick: ScheduledEvent, env: Env, ctx: ScheduleContext) {
         let isolate = match isolate::<D>(&env).await {
             Ok(isolate) => isolate,
@@ -675,6 +676,14 @@ mod worker_main {
                     run = run.and(
                         steps("price list schedule", &state, None, || {
                             jobs::price_list_schedule(&state)
+                        })
+                        .await,
+                    );
+                }
+                if jobs.discount_schedule.enabled {
+                    run = run.and(
+                        steps("discount schedule", &state, None, || {
+                            jobs::discount_schedule(&state)
                         })
                         .await,
                     );

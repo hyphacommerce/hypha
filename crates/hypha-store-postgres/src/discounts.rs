@@ -865,6 +865,41 @@ impl<C: PgConnection> DiscountRepo for PgStore<C> {
         u64::try_from(n).map_err(corrupt)
     }
 
+    async fn with_boundary_after(&self, after: Timestamp) -> Result<Vec<Discount>, RepoError> {
+        let after = after.unix_micros();
+        let mut conn = self.conn().await;
+        conn.db()
+            .query_typed(
+                &format!(
+                    "SELECT {} FROM discounts
+                     WHERE status = 'active' AND (starts_at > {at} OR ends_at > {at})
+                     ORDER BY id",
+                    columns(""),
+                    at = ts(1)
+                ),
+                &[(&after, Type::INT8)],
+            )
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(discount_from_row)
+            .collect()
+    }
+
+    async fn schedule_ran_until(&self) -> Result<Option<Timestamp>, RepoError> {
+        let mut conn = self.conn().await;
+        let row = conn
+            .db()
+            .query_typed_opt(
+                &format!("SELECT {} FROM discount_schedule", micros("ran_until")),
+                &[],
+            )
+            .await
+            .map_err(repo_error)?;
+        row.map(|r| col::<i64>(&r, "ran_until").map(Timestamp::from_unix_micros))
+            .transpose()
+    }
+
     async fn insert(&self, discount: &mut Discount) -> Result<(), RepoError> {
         stamp_insert(discount, self.now());
         let s = discount.snapshot();
@@ -1140,4 +1175,45 @@ fn code_conditions<'a>(
         params.push((batch, Type::TEXT));
         conditions.push(format!("batch = ${}", params.len()));
     }
+}
+
+/// Moves the schedule job's progress from `from` (`None`: no row yet) to `to`, or fails
+/// with `StaleVersion` when another run moved it first.
+pub(crate) async fn advance_discount_schedule(
+    client: &impl Queries,
+    from: Option<Timestamp>,
+    to: Timestamp,
+) -> Result<(), RepoError> {
+    let moved = match from {
+        None => client
+            .query_typed(
+                &format!(
+                    "INSERT INTO discount_schedule (ran_until) VALUES ({})
+                     ON CONFLICT (id) DO NOTHING RETURNING id",
+                    ts(1)
+                ),
+                &[(&to.unix_micros(), Type::INT8)],
+            )
+            .await
+            .map_err(repo_error)?,
+        Some(from) => client
+            .query_typed(
+                &format!(
+                    "UPDATE discount_schedule SET ran_until = {} WHERE ran_until = {}
+                     RETURNING id",
+                    ts(1),
+                    ts(2)
+                ),
+                &[
+                    (&to.unix_micros(), Type::INT8),
+                    (&from.unix_micros(), Type::INT8),
+                ],
+            )
+            .await
+            .map_err(repo_error)?,
+    };
+    if moved.is_empty() {
+        return Err(RepoError::StaleVersion);
+    }
+    Ok(())
 }

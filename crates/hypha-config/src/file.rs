@@ -477,6 +477,11 @@ pub struct Jobs {
     /// `.ended`), so search and storefront caches follow. Prices themselves follow the
     /// clock without it. A Workers host runs it on the minute's ticks that have work.
     pub price_list_schedule: Job,
+    /// Announcing discounts' windows opening and closing (`discount.started` /
+    /// `.ended`), so storefront caches and promotion badges follow. Carts themselves
+    /// follow the clock without it. A Workers host runs it on the minute's ticks that have
+    /// work.
+    pub discount_schedule: Job,
 }
 
 impl Default for Jobs {
@@ -494,6 +499,10 @@ impl Default for Jobs {
                 interval: hour,
             },
             price_list_schedule: Job {
+                enabled: true,
+                interval: Dur(Duration::from_secs(60)),
+            },
+            discount_schedule: Job {
                 enabled: true,
                 interval: Dur(Duration::from_secs(60)),
             },

@@ -67,3 +67,34 @@ impl Event for DiscountCodesRemoved {
     const TYPE: &'static str = "discount.codes_removed";
     const VERSION: u16 = 1;
 }
+
+/// `discount.started`: an active discount's window opened (`starts_at`, µs since the
+/// epoch), so it applies from then on. `method` is `automatic` or `codes`: only an
+/// automatic one changes what a product shows. Recorded by the schedule job within a tick
+/// of the moment; a discount made active inside its window records `discount.updated`
+/// instead.
+#[derive(Debug, Serialize)]
+pub struct DiscountStarted {
+    pub discount: DiscountId,
+    pub method: &'static str,
+    pub starts_at: i64,
+}
+
+impl Event for DiscountStarted {
+    const TYPE: &'static str = "discount.started";
+    const VERSION: u16 = 1;
+}
+
+/// `discount.ended`: an active discount's window closed (`ends_at`, µs since the epoch),
+/// so it applies to nothing any more.
+#[derive(Debug, Serialize)]
+pub struct DiscountEnded {
+    pub discount: DiscountId,
+    pub method: &'static str,
+    pub ends_at: i64,
+}
+
+impl Event for DiscountEnded {
+    const TYPE: &'static str = "discount.ended";
+    const VERSION: u16 = 1;
+}

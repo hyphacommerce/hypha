@@ -186,6 +186,13 @@ async function affected(event: Envelope): Promise<{ tags: string[]; paths: strin
     case "discount.updated":
     case "discount.deleted":
       return { tags: [TAGS.listings, TAGS.products], paths: [] };
+    // A window opened or closed. Only an automatic discount shows a badge; one by code
+    // shows nowhere until a cart enters it.
+    case "discount.started":
+    case "discount.ended":
+      return data.method === "codes"
+        ? { tags: [], paths: [] }
+        : { tags: [TAGS.listings, TAGS.products], paths: [] };
     default:
       return { tags: [], paths: [] };
   }
