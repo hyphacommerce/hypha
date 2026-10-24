@@ -405,6 +405,34 @@ fn every_default_renders_against_its_sample() {
 }
 
 #[test]
+fn order_totals_add_up_and_list_the_discounts_they_include() {
+    // The sample's subtotal and shipping are after its 10.80 discount: listing it as
+    // "−10.80" under them would take it off twice.
+    let layout = default_template(TemplateKey::Layout).html;
+    for key in [
+        TemplateKey::OrderConfirmation,
+        TemplateKey::OrderCancelled,
+        TemplateKey::StaffNewOrder,
+    ] {
+        let rendered = render(
+            layout,
+            &default_template(key).sources(),
+            &MailContext::sample(key),
+        )
+        .unwrap();
+        assert!(!rendered.text.contains('−'), "{key}: {}", rendered.text);
+        assert!(!rendered.html.contains('−'), "{key}");
+        assert!(
+            rendered
+                .text
+                .contains("Discounts included above:\n- Welcome offer (WELCOME10): €10.80"),
+            "{key}: {}",
+            rendered.text
+        );
+    }
+}
+
+#[test]
 fn every_default_renders_without_what_may_be_absent() {
     let layout = default_template(TemplateKey::Layout).html;
     for key in TemplateKey::ALL.into_iter().filter(|k| !k.is_layout()) {

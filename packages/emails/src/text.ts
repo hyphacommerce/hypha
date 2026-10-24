@@ -16,10 +16,9 @@ export const shippedLines = `{%- for line in fulfillment.lines %}
 - {{ line.quantity }} × {{ line.title }}{% if line.variant %} ({{ line.variant }}){% endif %}
 {%- endfor %}`;
 
+// The lines' totals and shipping are after discounts, so the discounts are listed as
+// what they include, not taken off again.
 export const totals = `Subtotal: {{ order.subtotal.formatted }}
-{%- for discount in order.discounts %}
-{{ discount.title }}{% if discount.code %} ({{ discount.code }}){% endif %}: −{{ discount.amount.formatted }}
-{%- endfor %}
 Shipping: {{ order.shipping.formatted }}
 {%- if not order.taxes_included %}
 Tax: {{ order.tax.formatted }}
@@ -27,6 +26,13 @@ Tax: {{ order.tax.formatted }}
 Total: {{ order.total.formatted }}
 {%- if order.taxes_included %}
 Including {{ order.tax.formatted }} in taxes
+{%- endif %}
+{%- if order.discounts %}
+
+Discounts included above:
+{%- for discount in order.discounts %}
+- {{ discount.title }}{% if discount.code %} ({{ discount.code }}){% endif %}: {{ discount.amount.formatted }}
+{%- endfor %}
 {%- endif %}`;
 
 export const delivery = `{%- if order.shipping_address %}

@@ -14,9 +14,6 @@ Order {{ order.number }}
 {%- endfor %}
 
 Subtotal: {{ order.subtotal.formatted }}
-{%- for discount in order.discounts %}
-{{ discount.title }}{% if discount.code %} ({{ discount.code }}){% endif %}: −{{ discount.amount.formatted }}
-{%- endfor %}
 Shipping: {{ order.shipping.formatted }}
 {%- if not order.taxes_included %}
 Tax: {{ order.tax.formatted }}
@@ -24,6 +21,13 @@ Tax: {{ order.tax.formatted }}
 Total: {{ order.total.formatted }}
 {%- if order.taxes_included %}
 Including {{ order.tax.formatted }} in taxes
+{%- endif %}
+{%- if order.discounts %}
+
+Discounts included above:
+{%- for discount in order.discounts %}
+- {{ discount.title }}{% if discount.code %} ({{ discount.code }}){% endif %}: {{ discount.amount.formatted }}
+{%- endfor %}
 {%- endif %}
 
 --
