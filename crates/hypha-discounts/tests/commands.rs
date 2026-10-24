@@ -326,7 +326,7 @@ fn generated_codes_are_drawn_again_when_taken() {
     let generation = Generation {
         count: 50,
         prefix: Some("nl-".to_string()),
-        length: 10,
+        length: 11,
     };
     let codes = block_on(generate_codes(
         &w.ctx,
@@ -340,7 +340,7 @@ fn generated_codes_are_drawn_again_when_taken() {
     .unwrap();
     assert_eq!(codes.len(), 50);
     assert!(codes.iter().all(|c| c.normalized.starts_with("NL-")
-        && c.normalized.len() == 10
+        && c.normalized.len() == 11
         && c.usage_limit == Some(1)));
     assert_eq!(
         w.events("discount.codes_added"),

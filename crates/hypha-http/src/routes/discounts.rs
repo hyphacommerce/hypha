@@ -1411,10 +1411,12 @@ fn default_length() -> usize {
 pub struct GenerateCodesRequest {
     /// 1 to 10,000.
     count: usize,
-    /// Starts every code (normalised like a code), leaving room for 4 random characters.
+    /// Starts every code (normalised like a code), leaving room for at least 8 random
+    /// characters.
     #[serde(default)]
     prefix: Option<String>,
-    /// 8 to 24 characters, the prefix included; defaults to 12.
+    /// 8 to 24 characters, the prefix included, at least 8 of them after it; defaults to
+    /// 12.
     #[serde(default = "default_length")]
     length: usize,
     /// Defaults to 1: single-use codes. `null` for no limit of their own.

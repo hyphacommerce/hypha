@@ -575,8 +575,10 @@ step "a code another discount has" 409 discount_code_taken -X POST "$BASE/admin/
     -d '{"title":"Again","method":"codes","kind":{"type":"standard","rewards":[{"target":{"type":"subtotal"},"value":{"type":"percent","basis_points":500}}]},"codes":["WELCOME10"]}'
 step "an automatic discount has no codes" 409 discount_automatic -X POST "$BASE/admin/discounts" -H "$JSON" \
     -d '{"title":"Auto","method":"automatic","kind":{"type":"standard","rewards":[{"target":{"type":"subtotal"},"value":{"type":"percent","basis_points":500}}]},"codes":["X"]}'
+step "a prefix must leave eight random characters" 422 invalid_code_length -X POST \
+    "$BASE/admin/discounts/$WELCOME/codes/generate" -H "$JSON" -d '{"count":3,"prefix":"nl-","length":10}'
 step "generate single-use codes" 201 - -X POST "$BASE/admin/discounts/$WELCOME/codes/generate" -H "$JSON" \
-    -d '{"count":3,"prefix":"nl-","length":10,"batch":"Newsletter"}'
+    -d '{"count":3,"prefix":"nl-","length":11,"batch":"Newsletter"}'
 contains "single use, with the prefix" '"code":"NL-'
 step "the codes, by code" 200 - "$BASE/admin/discounts/$WELCOME/codes"
 contains "as typed and normalised" '"code":"welcome10","normalized":"WELCOME10"'

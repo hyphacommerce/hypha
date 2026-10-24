@@ -4315,7 +4315,8 @@ export interface components {
             /**
              * @description `applied`; `not_eligible` (see `condition`); `minimum_not_met` (see `needed`);
              *     `no_matching_items`; `blocked_by_other` (a better combination left it out, see
-             *     `discount`); `limit_reached`; `not_available_in_market`; `expired` (its end date
+             *     `discount`); `no_saving` (with it the cart would cost no less, say by falling under
+             *     free shipping); `limit_reached`; `not_available_in_market`; `expired` (its end date
              *     passed); `invalid` (the code or its discount is gone, deactivated, a draft or not
              *     started). More may be added: treat an unknown one as not applied.
              */
@@ -6021,9 +6022,15 @@ export interface components {
             batch?: string | null;
             /** @description 1 to 10,000. */
             count: number;
-            /** @description 8 to 24 characters, the prefix included; defaults to 12. */
+            /**
+             * @description 8 to 24 characters, the prefix included, at least 8 of them after it; defaults to
+             *     12.
+             */
             length?: number;
-            /** @description Starts every code (normalised like a code), leaving room for 4 random characters. */
+            /**
+             * @description Starts every code (normalised like a code), leaving room for at least 8 random
+             *     characters.
+             */
             prefix?: string | null;
             /**
              * Format: int32

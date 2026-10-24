@@ -204,7 +204,7 @@ async fn codes_are_added_generated_exported_and_removed() {
         (StatusCode::CONFLICT, "discount_code_taken", &json!("taken"))
     );
 
-    let body = json!({"count": 5, "prefix": "nl-", "length": 10, "batch": "October"}).to_string();
+    let body = json!({"count": 5, "prefix": "nl-", "length": 11, "batch": "October"}).to_string();
     let (status, generated) =
         send(&app, "POST", &format!("{url}/codes/generate"), Some(&body)).await;
     assert_eq!(status, StatusCode::CREATED, "{generated}");
@@ -212,7 +212,7 @@ async fn codes_are_added_generated_exported_and_removed() {
     assert_eq!(codes.len(), 5);
     for c in codes {
         let text = c["code"].as_str().unwrap();
-        assert!(text.starts_with("NL-") && text.len() == 10, "{text}");
+        assert!(text.starts_with("NL-") && text.len() == 11, "{text}");
         assert!(!text[3..].contains(['0', 'O', '1', 'I', 'L']), "{text}");
         assert_eq!(c["usage_limit"], json!(1));
     }

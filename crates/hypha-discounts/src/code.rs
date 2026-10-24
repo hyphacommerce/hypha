@@ -11,6 +11,9 @@ pub const MAX_CODE_LEN: usize = 64;
 /// Generated codes' length, prefix included.
 pub const MIN_GENERATED_LEN: usize = 8;
 pub const MAX_GENERATED_LEN: usize = 24;
+/// Fewest random characters after a generated code's prefix: about 40 bits, so codes
+/// can't be guessed within the rate limits however short the prefix leaves them.
+pub const MIN_RANDOM_LEN: usize = 8;
 /// Most codes generated in one call.
 pub const MAX_GENERATED: usize = 10_000;
 /// Most codes added in one call.
@@ -112,15 +115,15 @@ impl Generation {
         };
         let prefix_len = prefix.as_ref().map_or(0, |p| p.chars().count());
         if !(MIN_GENERATED_LEN..=MAX_GENERATED_LEN).contains(&self.length)
-            || prefix_len + 4 > self.length
+            || prefix_len + MIN_RANDOM_LEN > self.length
         {
             return Err(CodeError::GeneratedLength);
         }
         Ok(Self { prefix, ..self })
     }
 
-    /// One code at random: the prefix, then letters and digits from `ALPHABET` (at least 4,
-    /// about 20 bits, more with a longer length).
+    /// One code at random: the prefix, then letters and digits from `ALPHABET` (at least
+    /// `MIN_RANDOM_LEN`, about 40 bits, more with a longer length).
     pub fn draw(&self, random: &impl Random) -> String {
         let prefix = self.prefix.as_deref().unwrap_or("");
         let mut code = String::with_capacity(self.length);
@@ -248,12 +251,12 @@ mod tests {
         let generation = Generation {
             count: 1,
             prefix: Some("vip-".to_string()),
-            length: 10,
+            length: 12,
         }
         .check()
         .unwrap();
         let code = generation.draw(&Counting(Cell::new(0)));
-        assert_eq!(code, "VIP-ABCDEF");
+        assert_eq!(code, "VIP-ABCDEFGH");
     }
 
     #[test]
@@ -291,13 +294,18 @@ mod tests {
     }
 
     #[test]
-    fn a_prefix_leaves_room_for_four_random_characters() {
-        let generation = Generation {
+    fn a_prefix_leaves_room_for_eight_random_characters() {
+        let short = Generation {
             count: 1,
-            prefix: Some("ABCDE".to_string()),
-            length: 8,
+            prefix: Some("SUMMER".to_string()),
+            length: 13,
         };
-        assert_eq!(generation.check(), Err(CodeError::GeneratedLength));
+        assert_eq!(short.clone().check(), Err(CodeError::GeneratedLength));
+        let enough = Generation {
+            length: 14,
+            ..short
+        };
+        assert_eq!(enough.check().map(|g| g.length), Ok(14));
     }
 
     #[test]

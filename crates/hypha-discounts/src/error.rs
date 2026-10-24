@@ -49,7 +49,7 @@ pub enum CodeError {
     /// Codes are typed by buyers: no spaces or control characters inside.
     #[error("a discount code has no spaces or control characters: {0:?}")]
     Character(String),
-    #[error("a generated code is {min} to {max} characters long", min = crate::code::MIN_GENERATED_LEN, max = crate::code::MAX_GENERATED_LEN)]
+    #[error("a generated code is {min} to {max} characters long, its prefix included, with at least {random} after the prefix", min = crate::code::MIN_GENERATED_LEN, max = crate::code::MAX_GENERATED_LEN, random = crate::code::MIN_RANDOM_LEN)]
     GeneratedLength,
     #[error("at most {max} codes at once", max = crate::code::MAX_GENERATED)]
     TooMany,
