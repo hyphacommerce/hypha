@@ -137,6 +137,7 @@ macro_rules! route_table {
             [admin, POST, "/admin/products/{id}/variants", products::add_variant],
             [admin, PATCH, "/admin/products/{id}/variants/{variant_id}", products::update_variant],
             [admin, DELETE, "/admin/products/{id}/variants/{variant_id}", products::remove_variant],
+            [admin, GET, "/admin/variants", products::list_variants],
             [admin, PUT, "/admin/products/{id}/media", products::set_media],
             [admin, PUT, "/admin/products/{id}/variants/{variant_id}/media", products::set_variant_media_handler],
             // media

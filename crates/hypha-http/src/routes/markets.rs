@@ -1165,7 +1165,8 @@ type FixedPricePage = PageResponse<FixedPriceResponse>;
 pub struct FixedPriceFilters {
     /// Only this product's variants.
     product: Option<ProductId>,
-    /// Only variants of products directly in this category.
+    /// Only variants of products in this category or any category below it, as a price
+    /// list's adjustment for a category reaches them.
     category: Option<CategoryId>,
     /// Only variants whose product's title or handle, or whose SKU, contains this text,
     /// ignoring case. Up to 255 characters; blank filters nothing.

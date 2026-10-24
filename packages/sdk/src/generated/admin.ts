@@ -3384,6 +3384,27 @@ export interface paths {
         patch: operations["admin.staff.update_user"];
         trace?: never;
     };
+    "/admin/variants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Variants across products, in any status: the newest product first, each product's
+         *     variants in their order, narrowed by the filters (every one given must match). A price
+         *     grid or an export pages through them without reading each product.
+         */
+        get: operations["admin.products.list_variants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/variants/{id}/custom-fields": {
         parameters: {
             query?: never;
@@ -5829,6 +5850,7 @@ export interface components {
          */
         OrderLineId: string;
         OrderLineResponse: {
+            compare_at_price?: components["schemas"]["Money"] | null;
             /**
              * Format: int32
              * @description How many of `quantity` standing fulfilments shipped.
@@ -5836,6 +5858,7 @@ export interface components {
             fulfilled_quantity: number;
             id: components["schemas"]["OrderLineId"];
             image?: components["schemas"]["ProductMediaResponse"] | null;
+            price_list?: components["schemas"]["PriceListId"] | null;
             product: components["schemas"]["ProductId"];
             product_title: string;
             /** Format: int32 */
@@ -7719,6 +7742,12 @@ export interface components {
             problem?: components["schemas"]["PriceProblemResponse"] | null;
             variant: components["schemas"]["VariantId"];
         };
+        /** @description A variant's product in a variant list. */
+        VariantProductResponse: {
+            handle: string;
+            id: components["schemas"]["ProductId"];
+            title: string;
+        };
         VariantResponse: {
             compare_at_price?: components["schemas"]["Money"] | null;
             /**
@@ -7744,6 +7773,25 @@ export interface components {
              * @description `null` when not entered; carriers and weight-tiered rates need it.
              */
             weight_grams?: number | null;
+        };
+        /** @description A page of a list, newest first. */
+        VariantSummaryPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["VariantSummaryResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        /** @description A variant in a list across products: what a price grid or an export shows. */
+        VariantSummaryResponse: {
+            compare_at_price?: components["schemas"]["Money"] | null;
+            id: components["schemas"]["VariantId"];
+            /** @description The base price, before markets and price lists. */
+            price: components["schemas"]["Money"];
+            product: components["schemas"]["VariantProductResponse"];
+            sku?: string | null;
+            /** @description Its option values ("M / Blue"); `null` for a product without options. */
+            title?: string | null;
         };
         /**
          * @description `Visibility` on the wire.
@@ -24912,7 +24960,10 @@ export interface operations {
                 limit?: number;
                 /** @description Only this product's variants. */
                 product?: components["schemas"]["ProductId"];
-                /** @description Only variants of products directly in this category. */
+                /**
+                 * @description Only variants of products in this category or any category below it, as a price
+                 *     list's adjustment for a category reaches them.
+                 */
                 category?: components["schemas"]["CategoryId"];
                 /**
                  * @description Only variants whose product's title or handle, or whose SKU, contains this text,
@@ -25244,6 +25295,12 @@ export interface operations {
                  *     matches nothing.
                  */
                 channel?: components["schemas"]["ChannelId"];
+                /**
+                 * @description Only these products: repeat it (`ids=prod_…&ids=prod_…`) or separate them with
+                 *     commas, up to 250 (`422 too_many_filter_ids`). IDs that name no product match
+                 *     nothing.
+                 */
+                ids?: components["schemas"]["ProductId"][];
                 sort?: "newest" | "oldest" | "title_asc" | "title_desc" | "updated_desc" | "updated_asc";
                 /** @description Filters on custom fields, only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
                 field?: {
@@ -30310,6 +30367,96 @@ export interface operations {
                 };
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.products.list_variants": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+                /**
+                 * @description Only variants whose product's title or handle, or whose own SKU, contains this
+                 *     text, ignoring case. Up to 255 characters; blank filters nothing.
+                 */
+                q?: string;
+                /**
+                 * @description Only these products' variants: repeat it (`product=prod_…&product=prod_…`) or
+                 *     separate them with commas, up to 100 (`422 too_many_filter_ids`).
+                 */
+                product?: components["schemas"]["ProductId"][];
+                /**
+                 * @description Only variants of products in this category or any category below it. An ID that
+                 *     names no category matches nothing.
+                 */
+                category?: components["schemas"]["CategoryId"];
+                /**
+                 * @description Only these variants, repeated or comma-separated like `product`, up to 250
+                 *     (`422 too_many_filter_ids`).
+                 */
+                ids?: components["schemas"]["VariantId"][];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VariantSummaryPage"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -20,7 +20,8 @@ use hypha_merchandising::{
 use hypha_products::{
     AddVariant, CreateSimpleProduct, HasProducts, ListProducts, OptionDraft, OptionValueDraft,
     Product, ProductFilterInput, ProductOption, ProductSort, ProductStatus, SetProductOptions,
-    SetVariant, UpdateProduct, UpdateVariant, add_product_variant, create_simple_product,
+    SetVariant, UpdateProduct, UpdateVariant, VariantFilterInput, VariantSummary,
+    add_product_variant, create_simple_product, list_variants as list_variant_summaries,
     remove_product_variant, set_product_options, set_product_status, set_product_variants,
     update_product, update_product_variant,
 };
@@ -33,7 +34,7 @@ use hypha_custom_fields::{
 use super::{
     assets::AssetKindDto,
     custom_fields::{self, CustomFieldValues, FieldParams},
-    page::{ListQuery, PageParams, PageResponse, SortedFilters},
+    page::{ListQuery, PageParams, PageResponse, SortedFilters, id_list},
 };
 use crate::{
     error::ApiError,
@@ -364,6 +365,12 @@ pub struct ProductFilters {
     /// matches nothing.
     #[param(value_type = Option<ChannelId>)]
     channel: Option<ChannelId>,
+    /// Only these products: repeat it (`ids=prod_…&ids=prod_…`) or separate them with
+    /// commas, up to 250 (`422 too_many_filter_ids`). IDs that name no product match
+    /// nothing.
+    #[serde(default)]
+    #[param(value_type = Vec<ProductId>)]
+    ids: Vec<String>,
     #[param(inline)]
     sort: Option<ProductSortDto>,
 }
@@ -513,6 +520,7 @@ pub async fn list<S: Storage>(
             tag: filters.tag,
             category: filters.category,
             channel: filters.channel,
+            ids: id_list("ids", filters.ids)?,
         },
         sort,
         fields: fields.filters,
@@ -556,6 +564,103 @@ pub async fn list<S: Storage>(
             id: v.summary.id,
         },
         items,
+    )?))
+}
+
+/// What a variant list is narrowed to.
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct VariantFilters {
+    /// Only variants whose product's title or handle, or whose own SKU, contains this
+    /// text, ignoring case. Up to 255 characters; blank filters nothing.
+    q: Option<String>,
+    /// Only these products' variants: repeat it (`product=prod_…&product=prod_…`) or
+    /// separate them with commas, up to 100 (`422 too_many_filter_ids`).
+    #[serde(default)]
+    #[param(value_type = Vec<ProductId>)]
+    product: Vec<String>,
+    /// Only variants of products in this category or any category below it. An ID that
+    /// names no category matches nothing.
+    #[param(value_type = Option<CategoryId>)]
+    category: Option<CategoryId>,
+    /// Only these variants, repeated or comma-separated like `product`, up to 250
+    /// (`422 too_many_filter_ids`).
+    #[serde(default)]
+    #[param(value_type = Vec<VariantId>)]
+    ids: Vec<String>,
+}
+
+/// A variant's product in a variant list.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct VariantProductResponse {
+    id: ProductId,
+    title: String,
+    handle: String,
+}
+
+/// A variant in a list across products: what a price grid or an export shows.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct VariantSummaryResponse {
+    id: VariantId,
+    sku: Option<String>,
+    /// Its option values ("M / Blue"); `null` for a product without options.
+    title: Option<String>,
+    /// The base price, before markets and price lists.
+    price: Money,
+    /// The "was" price shown struck through beside the base price; `null` for none.
+    compare_at_price: Option<Money>,
+    product: VariantProductResponse,
+}
+
+impl From<VariantSummary> for VariantSummaryResponse {
+    fn from(v: VariantSummary) -> Self {
+        Self {
+            id: v.id,
+            sku: v.sku,
+            title: v.title,
+            price: v.price.money(),
+            compare_at_price: v.compare_at_price.map(|p| p.money()),
+            product: VariantProductResponse {
+                id: v.product,
+                title: v.product_title,
+                handle: v.product_handle.as_str().to_string(),
+            },
+        }
+    }
+}
+
+type VariantSummaryPage = PageResponse<VariantSummaryResponse>;
+
+/// Variants across products, in any status: the newest product first, each product's
+/// variants in their order, narrowed by the filters (every one given must match). A price
+/// grid or an export pages through them without reading each product.
+#[utoipa::path(
+    get,
+    path = "/admin/variants",
+    params(PageParams, VariantFilters),
+    responses((status = 200, description = "OK", body = VariantSummaryPage)),
+    extensions(("x-hypha-scopes" = json!(["products:read"]))),
+)]
+pub async fn list_variants<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    query: ListQuery<VariantFilters>,
+) -> Result<Json<VariantSummaryPage>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let (page, filters, scope) = query.parse()?;
+    let input = VariantFilterInput {
+        q: filters.q,
+        products: id_list("product", filters.product)?,
+        category: filters.category,
+        ids: id_list("ids", filters.ids)?,
+    };
+    let page = list_variant_summaries(&ctx, ports.products(), input, page).await?;
+    Ok(Json(PageResponse::new(
+        page,
+        &scope,
+        VariantSummary::at,
+        |v| Ok(v.into()),
     )?))
 }
 

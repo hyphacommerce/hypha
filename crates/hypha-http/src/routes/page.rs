@@ -182,6 +182,22 @@ fn next_cursor<U, Id: Display>(
     .map(Some)
 }
 
+/// IDs a list filter takes repeated (`product=a&product=b`), comma-separated
+/// (`product=a,b`) or both; blanks are skipped. One that doesn't parse is
+/// `400 invalid_query`, naming `field`.
+pub(crate) fn id_list<Id: FromStr>(field: &str, values: Vec<String>) -> Result<Vec<Id>, ApiError> {
+    values
+        .iter()
+        .flat_map(|v| v.split(','))
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(|v| {
+            v.parse()
+                .map_err(|_| ApiError::invalid_query(format!("`{field}` has {v:?}, not an ID")))
+        })
+        .collect()
+}
+
 /// The filters of a sorted list: whether a cursor's sort key is the kind the requested sort
 /// uses, so a cursor can't be replayed under another sort.
 pub trait SortedFilters {

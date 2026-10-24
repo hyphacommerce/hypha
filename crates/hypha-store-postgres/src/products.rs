@@ -8,7 +8,8 @@ use hypha_core::{
 };
 use hypha_products::{
     Handle, OptionSnapshot, OptionValueSnapshot, PriceRange, Product, ProductFilter, ProductRepo,
-    ProductSnapshot, ProductSort, ProductSummary, VariantSnapshot,
+    ProductSnapshot, ProductSort, ProductSummary, VariantFilter, VariantPosition, VariantSnapshot,
+    VariantSummary,
 };
 use tokio_postgres::{
     Row,
@@ -109,7 +110,9 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         let category = filter.category().map(|c| c.as_uuid());
         let channel = filter.channel().map(|c| c.as_uuid());
         let fetch = i64::from(page.limit.get()) + 1;
-        let mut extra = Params::after(11);
+        let ids: Option<Vec<Uuid>> = (!filter.ids().is_empty())
+            .then(|| filter.ids().iter().map(|id| id.as_uuid()).collect());
+        let mut extra = Params::after(12);
         let fields = field_predicates(filter.fields(), "p.id", &mut extra);
         let mut conn = self.conn().await;
         let rows = conn
@@ -152,6 +155,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
                    AND ($11::uuid IS NULL
                         OR EXISTS (SELECT 1 FROM channel_products chp
                                    WHERE chp.product_id = p.id AND chp.channel_id = $11))
+                   AND ($12::uuid[] IS NULL OR p.id = ANY($12))
                    {fields}
                  ORDER BY {order} LIMIT $3",
                     stamps = stamp_columns("p."),
@@ -168,6 +172,7 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
                     (&filter.tag(), Type::TEXT),
                     (&category, Type::UUID),
                     (&channel, Type::UUID),
+                    (&ids, Type::UUID_ARRAY),
                 ]),
             )
             .await
@@ -175,6 +180,75 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         let summaries = rows
             .iter()
             .map(summary_from_db)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Page::from_overfetch(summaries, page.limit))
+    }
+
+    /// One query: the variants with their product's title and handle, each title joined
+    /// from its selections' labels in SQL. Newest product first, then position, from
+    /// `variants_by_product` (migration 0081); the position is
+    /// `product_id < $p OR (product_id = $p AND position > $n)`, the two directions
+    /// apart. The category filter walks down the parent pointers once, at the top.
+    async fn list_variants(
+        &self,
+        filter: &VariantFilter,
+        page: PageRequest<VariantPosition>,
+    ) -> Result<Page<VariantSummary>, RepoError> {
+        let after_product = page.after.map(|at| at.product.as_uuid());
+        let after_position = page
+            .after
+            .map(|at| i32::try_from(at.position))
+            .transpose()
+            .map_err(|_| RepoError::Backend("a variant position past i32".to_string()))?;
+        let fetch = i64::from(page.limit.get()) + 1;
+        let uuids = |ids: Vec<Uuid>| (!ids.is_empty()).then_some(ids);
+        let products = uuids(filter.products().iter().map(|p| p.as_uuid()).collect());
+        let variants = uuids(filter.ids().iter().map(|v| v.as_uuid()).collect());
+        let category = filter.category().map(|c| c.as_uuid());
+        let q = filter.q();
+        let mut conn = self.conn().await;
+        let rows = conn
+            .db()
+            .query_typed(
+                "WITH RECURSIVE down (id) AS (
+                     SELECT id FROM categories WHERE id = $5
+                     UNION
+                     SELECT c.id FROM categories c JOIN down ON c.parent_id = down.id
+                 )
+                 SELECT v.id, v.product_id, v.position, v.sku, v.price_amount, v.price_currency,
+                        v.compare_at_amount, p.title AS product_title,
+                        p.handle AS product_handle,
+                        (SELECT string_agg(ov.label, ' / ' ORDER BY s.ord)
+                         FROM unnest(v.selections) WITH ORDINALITY AS s (id, ord)
+                         JOIN product_option_values ov ON ov.id = s.id) AS title
+                 FROM variants v
+                 JOIN products p ON p.id = v.product_id
+                 WHERE ($1::uuid IS NULL OR v.product_id < $1
+                        OR (v.product_id = $1 AND v.position > $2))
+                   AND ($4::uuid[] IS NULL OR v.product_id = ANY($4))
+                   AND ($5::uuid IS NULL OR EXISTS (SELECT 1 FROM category_products cp
+                        JOIN down ON down.id = cp.category_id WHERE cp.product_id = p.id))
+                   AND ($6::uuid[] IS NULL OR v.id = ANY($6))
+                   AND ($7::text IS NULL
+                        OR strpos(lower(p.title), lower($7)) > 0
+                        OR strpos(lower(p.handle), lower($7)) > 0
+                        OR strpos(lower(v.sku), lower($7)) > 0)
+                 ORDER BY v.product_id DESC, v.position ASC LIMIT $3",
+                &[
+                    (&after_product, Type::UUID),
+                    (&after_position, Type::INT4),
+                    (&fetch, Type::INT8),
+                    (&products, Type::UUID_ARRAY),
+                    (&category, Type::UUID),
+                    (&variants, Type::UUID_ARRAY),
+                    (&q, Type::TEXT),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+        let summaries = rows
+            .iter()
+            .map(variant_summary_from_db)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Page::from_overfetch(summaries, page.limit))
     }
@@ -284,6 +358,29 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
         product.set_version(version);
         Ok(())
     }
+}
+
+fn variant_summary_from_db(row: &Row) -> Result<VariantSummary, RepoError> {
+    let currency = currency_from_db(col(row, "price_currency")?)?;
+    let price = |amount: i64| {
+        Money::new(amount, currency)
+            .and_then(Price::new)
+            .map_err(corrupt)
+    };
+    let position: i32 = col(row, "position")?;
+    Ok(VariantSummary {
+        id: VariantId::from_uuid(col(row, "id")?),
+        product: ProductId::from_uuid(col(row, "product_id")?),
+        product_title: col(row, "product_title")?,
+        product_handle: Handle::new(&col::<String>(row, "product_handle")?).map_err(corrupt)?,
+        position: u32::try_from(position).map_err(corrupt)?,
+        sku: col(row, "sku")?,
+        title: col(row, "title")?,
+        price: price(col(row, "price_amount")?)?,
+        compare_at_price: col::<Option<i64>>(row, "compare_at_amount")?
+            .map(price)
+            .transpose()?,
+    })
 }
 
 /// `ProductRepo::insert` inside the caller's transaction: the row, then its children.

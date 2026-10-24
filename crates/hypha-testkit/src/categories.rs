@@ -53,6 +53,38 @@ impl InMemoryCategoryRepo {
     }
 }
 
+/// The products in `category` or any category below it, as a database's walk down the
+/// parent pointers finds them. `members` is copied first, so no lock is held while the
+/// categories' is.
+pub(crate) fn products_in_or_below(
+    members: &Mutex<Members>,
+    categories: &Table<CategoryId, Category>,
+    category: CategoryId,
+) -> HashSet<ProductId> {
+    let members = members.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let below = |mut at: CategoryId| {
+        let mut seen = HashSet::new();
+        // Up the parent pointers; a cycle (which the domain refuses) stops it.
+        loop {
+            if at == category {
+                return true;
+            }
+            if !seen.insert(at) {
+                return false;
+            }
+            match categories.get(&at).and_then(|c| c.parent()) {
+                Some(parent) => at = parent,
+                None => return false,
+            }
+        }
+    };
+    members
+        .into_iter()
+        .filter(|(c, _)| below(*c))
+        .flat_map(|(_, products)| products)
+        .collect()
+}
+
 /// Handles are unique store-wide.
 pub(crate) fn unique(new: &Category, other: &Category) -> Option<&'static str> {
     (new.handle() == other.handle()).then_some(keys::CATEGORY_HANDLE)

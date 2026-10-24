@@ -1527,6 +1527,17 @@
       },
       "OrderLineResponse": {
         "properties": {
+          "compare_at_price": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "What `unit_price` was shown against at checkout, struck through (\"you saved\");\nnever part of the totals. `null` without one, and for lines placed before it was\nkept."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "fulfilled_quantity": {
             "description": "How many of `quantity` standing fulfilments shipped.",
             "format": "int32",
@@ -1541,6 +1552,17 @@
               {
                 "$ref": "#/components/schemas/ProductMediaResponse",
                 "description": "The line's picture as its product is now (an order keeps none): the variant's\nimage, else the product's first media item; `null` for a product gone or without\nmedia, or without file storage."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price_list": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PriceListId",
+                "description": "The price list `unit_price` came from; `null` for the variant's base price."
               },
               {
                 "type": "null"
@@ -2318,6 +2340,14 @@
           "price"
         ],
         "type": "object"
+      },
+      "PriceListId": {
+        "description": "A PriceListId: `pl_` and 32 hex digits.",
+        "examples": [
+          "pl_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^pl_[0-9a-f]{32}$",
+        "type": "string"
       },
       "ProductId": {
         "description": "A ProductId: `prod_` and 32 hex digits.",

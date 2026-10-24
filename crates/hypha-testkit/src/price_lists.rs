@@ -18,7 +18,7 @@ use hypha_products::Product;
 use crate::{
     InMemoryCatalogRepo, InMemoryCategoryRepo, InMemoryOutbox, InMemoryProductRepo,
     catalogs::PriceListRefs,
-    categories::Members,
+    categories::{Members, products_in_or_below},
     table::{Table, missing, page_of},
 };
 
@@ -136,11 +136,7 @@ impl InMemoryPriceListRepo {
             return false;
         };
         let in_category = filter.category().is_some_and(|c| {
-            self.members
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(&c)
-                .is_some_and(|m| m.contains(&product.id()))
+            products_in_or_below(&self.members, &self.categories, c).contains(&product.id())
         });
         let sku = product.variant(variant).and_then(|v| v.sku());
         let texts = [product.title(), product.handle().as_str()]

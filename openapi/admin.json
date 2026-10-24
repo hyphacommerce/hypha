@@ -6760,6 +6760,17 @@
       },
       "OrderLineResponse": {
         "properties": {
+          "compare_at_price": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "What `unit_price` was shown against at checkout, struck through (\"you saved\");\nnever part of the totals. `null` without one, and for lines placed before it was\nkept."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "fulfilled_quantity": {
             "description": "How many of `quantity` standing fulfilments shipped.",
             "format": "int32",
@@ -6774,6 +6785,17 @@
               {
                 "$ref": "#/components/schemas/ProductMediaResponse",
                 "description": "The line's picture as its product is now (an order keeps none): the variant's\nimage, else the product's first media item; `null` for a product gone or without\nmedia, or without file storage."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price_list": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PriceListId",
+                "description": "The price list `unit_price` came from; `null` for the variant's base price."
               },
               {
                 "type": "null"
@@ -11961,6 +11983,26 @@
         ],
         "type": "object"
       },
+      "VariantProductResponse": {
+        "description": "A variant's product in a variant list.",
+        "properties": {
+          "handle": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/ProductId"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "handle"
+        ],
+        "type": "object"
+      },
       "VariantResponse": {
         "properties": {
           "compare_at_price": {
@@ -12040,6 +12082,78 @@
           "selections",
           "requires_shipping",
           "custom_fields"
+        ],
+        "type": "object"
+      },
+      "VariantSummaryPage": {
+        "description": "A page of a list, newest first.",
+        "properties": {
+          "has_more": {
+            "description": "Whether there are more after these.",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VariantSummaryResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "VariantSummaryResponse": {
+        "description": "A variant in a list across products: what a price grid or an export shows.",
+        "properties": {
+          "compare_at_price": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "The \"was\" price shown struck through beside the base price; `null` for none."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/VariantId"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The base price, before markets and price lists."
+          },
+          "product": {
+            "$ref": "#/components/schemas/VariantProductResponse"
+          },
+          "sku": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "description": "Its option values (\"M / Blue\"); `null` for a product without options.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "price",
+          "product"
         ],
         "type": "object"
       },
@@ -35166,7 +35280,7 @@
             }
           },
           {
-            "description": "Only variants of products directly in this category.",
+            "description": "Only variants of products in this category or any category below it, as a price\nlist's adjustment for a category reaches them.",
             "in": "query",
             "name": "category",
             "required": false,
@@ -35499,6 +35613,18 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/ChannelId"
+            }
+          },
+          {
+            "description": "Only these products: repeat it (`ids=prod_…&ids=prod_…`) or separate them with\ncommas, up to 250 (`422 too_many_filter_ids`). IDs that name no product match\nnothing.",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/ProductId"
+              },
+              "type": "array"
             }
           },
           {
@@ -42221,6 +42347,150 @@
         },
         "x-hypha-scopes": [
           "users:write"
+        ]
+      }
+    },
+    "/admin/variants": {
+      "get": {
+        "operationId": "admin.products.list_variants",
+        "parameters": [
+          {
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 100 (default 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only variants whose product's title or handle, or whose own SKU, contains this\ntext, ignoring case. Up to 255 characters; blank filters nothing.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only these products' variants: repeat it (`product=prod_…&product=prod_…`) or\nseparate them with commas, up to 100 (`422 too_many_filter_ids`).",
+            "in": "query",
+            "name": "product",
+            "required": false,
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/ProductId"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "Only variants of products in this category or any category below it. An ID that\nnames no category matches nothing.",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CategoryId"
+            }
+          },
+          {
+            "description": "Only these variants, repeated or comma-separated like `product`, up to 250\n(`422 too_many_filter_ids`).",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/VariantId"
+              },
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VariantSummaryPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Variants across products, in any status: the newest product first, each product's\nvariants in their order, narrowed by the filters (every one given must match). A price\ngrid or an export pages through them without reading each product.",
+        "tags": [
+          "products"
+        ],
+        "x-hypha-scopes": [
+          "products:read"
         ]
       }
     },

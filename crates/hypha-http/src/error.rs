@@ -661,6 +661,7 @@ fn product_status(e: &hypha_products::ProductError) -> StatusCode {
         | P::MediaNotInProduct(_)
         | P::DescriptionTooLong { .. }
         | P::TooManyTags { .. }
+        | P::TooManyFilterIds { .. }
         | P::CompareAtNotAbovePrice(_)
         | P::CompareAtCurrencyMismatch(_) => StatusCode::UNPROCESSABLE_ENTITY,
     }
@@ -674,6 +675,7 @@ fn product_details(e: &hypha_products::ProductError) -> Option<Value> {
         P::CompareAtNotAbovePrice(variant) | P::CompareAtCurrencyMismatch(variant) => {
             Some(json!({ "variant": variant }))
         }
+        P::TooManyFilterIds { field, max } => Some(json!({ "field": field, "max": max })),
         _ => None,
     }
 }

@@ -318,6 +318,23 @@ contains "is the cup" "\"id\":\"$CUP\""
 step "that cursor under another sort" 400 invalid_cursor "$BASE/admin/products?sort=title_asc&limit=1&cursor=$NEXT"
 step "products of any of two statuses, by title" 200 - "$BASE/admin/products?status=active&status=draft&sort=title_desc"
 step "a cursor from another list" 400 invalid_cursor "$BASE/admin/products?cursor=ord_00000000000000000000000000000000"
+step "products by ID, repeated or comma-separated" 200 - "$BASE/admin/products?ids=$MUG&ids=$CUP,prod_00000000000000000000000000000063"
+contains "finds both" "\"items\":[{\"id\":\"$CUP\""
+contains "the mug too" "\"id\":\"$MUG\""
+step "an ID that isn't one" 400 invalid_query "$BASE/admin/products?ids=mug"
+step "variants across products, one per page" 200 - "$BASE/admin/variants?limit=1"
+contains "the newest product's first" "\"items\":[{\"id\":\"$CUP_VAR\""
+contains "with its product" "\"product\":{\"id\":\"$CUP\",\"title\":"
+NEXT=$(sed -E 's/.*"next_cursor":"([^"]+)".*/\1/' <<<"$BODY")
+step "the next page of variants" 200 - "$BASE/admin/variants?limit=1&cursor=$NEXT"
+contains "is the mug's" "\"items\":[{\"id\":\"$MUG_VAR\""
+step "variants of one product" 200 - "$BASE/admin/variants?product=$MUG"
+contains "only the mug's" "\"items\":[{\"id\":\"$MUG_VAR\",\"sku\":null,\"title\":null,\"price\":"
+step "variants by ID" 200 - "$BASE/admin/variants?ids=$CUP_VAR"
+contains "only the cup's" "\"items\":[{\"id\":\"$CUP_VAR\""
+step "variants in an unknown category" 200 - "$BASE/admin/variants?category=pcat_00000000000000000000000000000063"
+contains "none" '"items":[]'
+step "variants by an unknown filter" 400 invalid_query "$BASE/admin/variants?status=active"
 
 # deleting a product
 step "create a product to delete" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
@@ -523,6 +540,8 @@ step "back to -10%" 200 - -X PATCH "$BASE/admin/price-lists/$LIST" -H "$JSON" \
     -d '{"adjustment":{"percent_bps":-1000}}'
 step "fixed prices name their product" 200 - "$BASE/admin/price-lists/$LIST/fixed-prices"
 contains "the cup" '"product":{"id":'
+step "fixed prices in an unknown category" 200 - "$BASE/admin/price-lists/$LIST/fixed-prices?category=pcat_00000000000000000000000000000063"
+contains "none" '"items":[]'
 step "list API keys" 200 - "$BASE/admin/api-keys"
 contains "the storefront's key among them" '"kind":"publishable"'
 step "countries for pickers" 200 - "$BASE/admin/countries"
@@ -775,6 +794,7 @@ contains "and the next action shows them" '"next_action":{"type":"instructions",
 contains "the order is #1001" '"number":1001'
 contains "it is pending and unfulfilled" '"financial_status":"pending","fulfillment_status":"unfulfilled"'
 contains "it copies the line" '"product_title":"Mug","variant_title":null,"sku":null,"unit_price":{"amount":900,"currency":"EUR"}'
+contains "and the price list that priced it" "\"unit_price\":{\"amount\":900,\"currency\":\"EUR\"},\"compare_at_price\":null,\"price_list\":\"$LIST\""
 contains "its total is 1800" '"total":{"amount":1800,"currency":"EUR"},"lines"'
 ORDER_TOKEN=$(sed -E 's/.*"access_token":"(hypha_ord_[0-9a-f]+)".*/\1/' <<<"$BODY")
 step "the buyer reads the order with its token" 200 - "$BASE/storefront/orders/$ORDER?token=$ORDER_TOKEN"

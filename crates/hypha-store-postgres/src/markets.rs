@@ -818,14 +818,19 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         let rows = conn
             .db()
             .query_typed(
-                "SELECT f.variant_id, f.amount, f.currency, f.compare_at
+                "WITH RECURSIVE down (id) AS (
+                     SELECT id FROM categories WHERE id = $5
+                     UNION
+                     SELECT c.id FROM categories c JOIN down ON c.parent_id = down.id
+                 )
+                 SELECT f.variant_id, f.amount, f.currency, f.compare_at
                      FROM price_list_prices f
                      LEFT JOIN variants v ON v.id = f.variant_id
                      LEFT JOIN products p ON p.id = v.product_id
                      WHERE f.price_list_id = $1 AND ($2::uuid IS NULL OR f.variant_id < $2)
                        AND ($4::uuid IS NULL OR p.id = $4)
                        AND ($5::uuid IS NULL OR EXISTS (SELECT 1 FROM category_products cp
-                            WHERE cp.category_id = $5 AND cp.product_id = p.id))
+                            JOIN down ON down.id = cp.category_id WHERE cp.product_id = p.id))
                        AND ($6::text IS NULL
                             OR strpos(lower(p.title), lower($6)) > 0
                             OR strpos(lower(p.handle), lower($6)) > 0

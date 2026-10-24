@@ -83,7 +83,8 @@ impl PriceListSort {
     }
 }
 
-/// A list's fixed prices for one product, the products directly in one category, or
+/// A list's fixed prices for one product, the products in one category or any below it
+/// (as adjustments reach a category's products), or
 /// those whose title, handle or a SKU contains text (ignoring case). Products and
 /// categories are other domains' records, which adapters join: an ID that names none
 /// matches nothing.
@@ -127,8 +128,8 @@ impl FixedPriceFilter {
         self.product.is_none() && self.category.is_none() && self.q.is_none()
     }
 
-    /// Whether a product passes: `in_category` says whether it's directly in the
-    /// filter's category, `texts` are its title, handle and the variant's SKU.
+    /// Whether a product passes: `in_category` says whether it's in the filter's category
+    /// or one below it, `texts` are its title, handle and the variant's SKU.
     pub fn matches<'a>(
         &self,
         product: ProductId,

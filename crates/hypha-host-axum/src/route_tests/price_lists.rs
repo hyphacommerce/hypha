@@ -845,3 +845,56 @@ async fn a_list_for_a_group_prices_only_for_its_signed_in_members() {
     let (status, _) = send(&app, "DELETE", &group_path, None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 }
+
+#[tokio::test]
+async fn an_order_line_keeps_its_compare_at_price_and_price_list() {
+    let app = app().await;
+    let (pk, cart_path, _) = cart_for_three_mugs(&app).await;
+    let sale = create_list(
+        &app,
+        json!({"name": "Sale", "currency": "EUR", "kind": "sale",
+            "adjustment": {"percent_bps": -2000}}),
+    )
+    .await;
+    let (_, markets) = send(&app, "GET", "/admin/markets", None).await;
+    let market = markets["items"][0]["id"].as_str().unwrap();
+    let (_, market) = send(&app, "GET", &format!("/admin/markets/{market}"), None).await;
+    let catalog = market["catalog"].as_str().unwrap();
+    let body = json!({ "price_lists": [sale["id"]] }).to_string();
+    let path = format!("/admin/catalogs/{catalog}/price-lists");
+    let (status, json) = send(&app, "PUT", &path, Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    pay_on_delivery(&app, &pk, &cart_path).await;
+    let (status, order) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/checkout"),
+        Some("{}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{order}");
+    let expected = (&eur(800), &eur(1000), &sale["id"]);
+    let line = &order["lines"][0];
+    assert_eq!(
+        (
+            &line["unit_price"],
+            &line["compare_at_price"],
+            &line["price_list"]
+        ),
+        expected,
+        "the storefront's"
+    );
+    let id = order["id"].as_str().unwrap();
+    let (_, admin) = send(&app, "GET", &format!("/admin/orders/{id}"), None).await;
+    let line = &admin["lines"][0];
+    assert_eq!(
+        (
+            &line["unit_price"],
+            &line["compare_at_price"],
+            &line["price_list"]
+        ),
+        expected,
+        "the admin's"
+    );
+}

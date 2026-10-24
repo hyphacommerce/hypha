@@ -3,18 +3,21 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use hypha_categories::Category;
+use hypha_core::CategoryId;
 use hypha_core::{
     AssetId, Keyset, Page, PageRequest, ProductId, Recorded, RepoError, VariantId, Versioned,
     stamp_insert, stamp_update,
 };
 use hypha_products::{
-    Handle, Product, ProductFilter, ProductSort, ProductSummary,
+    Handle, Product, ProductFilter, ProductSort, ProductSummary, VariantFilter, VariantPosition,
+    VariantSummary,
     repo::{ProductRepo, keys},
 };
 
 use crate::{
     InMemoryCategoryRepo, InMemoryChannelRepo, InMemoryOutbox,
-    categories::Members,
+    categories::{Members, products_in_or_below},
     channels::Publications,
     custom_fields::{SharedValues, fields_match, values_for},
     table::Table,
@@ -29,6 +32,8 @@ pub struct InMemoryProductRepo {
     /// by, as a database joins them. Empty unless shared (`InMemoryPorts` shares its
     /// repos').
     members: Arc<Mutex<Members>>,
+    /// The categories' tree, which the variant list's category filter walks down.
+    categories: Arc<Table<CategoryId, Category>>,
     publications: Arc<Mutex<Publications>>,
     field_values: SharedValues,
 }
@@ -50,6 +55,7 @@ impl InMemoryProductRepo {
     ) -> Self {
         Self {
             members: categories.members.clone(),
+            categories: categories.categories.clone(),
             publications: channels.products.clone(),
             ..self
         }
@@ -156,6 +162,42 @@ impl ProductRepo for InMemoryProductRepo {
             Product::summary,
             |s: &ProductSummary| sort.key(s),
         ))
+    }
+
+    async fn list_variants(
+        &self,
+        filter: &VariantFilter,
+        page: PageRequest<VariantPosition>,
+    ) -> Result<Page<VariantSummary>, RepoError> {
+        let in_category = filter
+            .category()
+            .map(|c| products_in_or_below(&self.members, &self.categories, c));
+        let mut found: Vec<VariantSummary> = self
+            .products
+            .all()
+            .iter()
+            .flat_map(|p| {
+                let summaries = p.variant_summaries();
+                p.variants()
+                    .iter()
+                    .zip(summaries)
+                    .filter(|(v, _)| {
+                        filter.matches(p, v, |_| {
+                            in_category.as_ref().is_some_and(|s| s.contains(&p.id()))
+                        })
+                    })
+                    .map(|(_, s)| s)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|s| page.after.is_none_or(|after| after.precedes(s.at())))
+            .collect();
+        found.sort_by(|a, b| {
+            b.product
+                .cmp(&a.product)
+                .then_with(|| a.position.cmp(&b.position))
+        });
+        found.truncate(page.limit.get() as usize + 1);
+        Ok(Page::from_overfetch(found, page.limit))
     }
 
     async fn get_by_handle(&self, handle: &Handle) -> Result<Option<Product>, RepoError> {

@@ -936,7 +936,7 @@ where
     audience_groups(&make().await).await;
     scenario("price list: an audience names only groups that exist, and keeps them");
     audience_references(&make().await).await;
-    scenario("price list: fixed prices filtered by product, category and text");
+    scenario("price list: fixed prices by product, a category and those below it, and text");
     fixed_price_filters(&make().await).await;
     scenario("price list: a product's categories come with their ancestors");
     product_categories(&make().await).await;
@@ -1115,6 +1115,14 @@ async fn fixed_price_filters<S: HasProducts + HasCategories + HasPriceLists>(por
         .add_products(kitchen.id(), &[pid(2)])
         .await
         .unwrap();
+    // Mugs, below Kitchen: Kitchen's filter reaches its products too.
+    let mut mugs = category(51, Some(50));
+    ports.categories().insert(&mut mugs).await.unwrap();
+    ports
+        .categories()
+        .add_products(mugs.id(), &[pid(3)])
+        .await
+        .unwrap();
     let repo = ports.price_lists();
     repo.insert(&mut price_list(1, Currency::EUR, 0))
         .await
@@ -1150,7 +1158,11 @@ async fn fixed_price_filters<S: HasProducts + HasCategories + HasPriceLists>(por
     assert_eq!(variants(filter(Some(pid(1)), None, None)).await, [vid(10)]);
     assert_eq!(
         variants(filter(None, Some(kitchen.id()), None)).await,
-        [vid(20)]
+        [vid(30), vid(20)]
+    );
+    assert_eq!(
+        variants(filter(None, Some(mugs.id()), None)).await,
+        [vid(30)]
     );
     // By title or SKU, ignoring case.
     assert_eq!(

@@ -7,8 +7,8 @@ use std::collections::HashMap;
 
 use hypha_core::{
     AssetId, CartId, ChannelId, CountryCode, Currency, CustomerId, Email, Keyset, LocationId,
-    MarketId, Money, OrderId, OrderLineId, PaymentId, ProductId, Scope, ShippingGroupId,
-    ShippingOptionId, SortKey, TaxClassId, TaxRate, Timestamp, VariantId,
+    MarketId, Money, OrderId, OrderLineId, PaymentId, PriceListId, ProductId, Scope,
+    ShippingGroupId, ShippingOptionId, SortKey, TaxClassId, TaxRate, Timestamp, VariantId,
 };
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_order_actions::{
@@ -220,6 +220,12 @@ pub struct OrderLineResponse {
     variant_title: Option<String>,
     sku: Option<String>,
     unit_price: Money,
+    /// What `unit_price` was shown against at checkout, struck through ("you saved");
+    /// never part of the totals. `null` without one, and for lines placed before it was
+    /// kept.
+    compare_at_price: Option<Money>,
+    /// The price list `unit_price` came from; `null` for the variant's base price.
+    price_list: Option<PriceListId>,
     total: Money,
     /// `null` when the country had no tax rates.
     tax: Option<OrderTaxResponse>,
@@ -318,6 +324,8 @@ impl From<&OrderLine> for OrderLineResponse {
             variant_title: l.variant_title.clone(),
             sku: l.sku.clone(),
             unit_price: l.unit_price.money(),
+            compare_at_price: l.compare_at_price.map(|p| p.money()),
+            price_list: l.price_list,
             total: l.total,
             tax: l.tax.map(|t| OrderTaxResponse {
                 rate_ppm: t.rate,

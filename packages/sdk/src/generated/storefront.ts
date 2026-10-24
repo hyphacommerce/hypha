@@ -1279,6 +1279,7 @@ export interface components {
          */
         OrderLineId: string;
         OrderLineResponse: {
+            compare_at_price?: components["schemas"]["Money"] | null;
             /**
              * Format: int32
              * @description How many of `quantity` standing fulfilments shipped.
@@ -1286,6 +1287,7 @@ export interface components {
             fulfilled_quantity: number;
             id: components["schemas"]["OrderLineId"];
             image?: components["schemas"]["ProductMediaResponse"] | null;
+            price_list?: components["schemas"]["PriceListId"] | null;
             product: components["schemas"]["ProductId"];
             product_title: string;
             /** Format: int32 */
@@ -1537,6 +1539,11 @@ export interface components {
             min_quantity: number;
             price: components["schemas"]["Money"];
         };
+        /**
+         * @description A PriceListId: `pl_` and 32 hex digits.
+         * @example pl_0190f1a2b3c47d8e9f00112233445566
+         */
+        PriceListId: string;
         /**
          * @description A ProductId: `prod_` and 32 hex digits.
          * @example prod_0190f1a2b3c47d8e9f00112233445566

@@ -1090,6 +1090,152 @@ async fn products_are_listed_by_text() {
 }
 
 #[tokio::test]
+async fn products_are_listed_by_id_repeated_or_comma_separated() {
+    let app = app().await;
+    let a = create_product(&app, "a").await;
+    let b = create_product(&app, "b").await;
+    let c = create_product(&app, "c").await;
+    let unknown = "prod_00000000000000000000000000000063";
+
+    let uri = format!("/admin/products?ids={a}&ids={c},{unknown}");
+    let (status, page) = send(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(ids(&page), [c.as_str(), a.as_str()]);
+    let (_, page) = send(&app, "GET", &format!("/admin/products?ids={b}"), None).await;
+    assert_eq!(ids(&page), [b.as_str()]);
+
+    let (status, body) = send(&app, "GET", "/admin/products?ids=mug", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+    let many: Vec<String> = (1..=251u128)
+        .map(|n| hypha_core::ProductId::from_uuid(uuid::Uuid::from_u128(n)).to_string())
+        .collect();
+    let uri = format!("/admin/products?ids={}", many.join(","));
+    let (status, body) = send(&app, "GET", &uri, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "too_many_filter_ids")
+    );
+    assert_eq!(body["details"], json!({"field": "ids", "max": 250}));
+}
+
+#[tokio::test]
+async fn variants_are_listed_across_products_in_pages() {
+    let app = app().await;
+    let mug = create_product(&app, "mug").await;
+    let shirt = create_product(&app, "shirt").await;
+    let product = format!("/admin/products/{shirt}");
+    let body = r#"{"options":[{"name":"Size","values":[{"label":"S"},{"label":"M"}]}]}"#;
+    let (_, sized) = send(&app, "PUT", &format!("{product}/options"), Some(body)).await;
+    let s = sized["variants"][0]["id"].as_str().unwrap().to_string();
+    let m_value = &sized["options"][0]["values"][1]["id"];
+    let body = json!({
+        "price": { "amount": 1200, "currency": "EUR" },
+        "compare_at_price": { "amount": 1500, "currency": "EUR" },
+        "sku": "SHIRT-M",
+        "selections": [m_value],
+    });
+    let (status, added) = send(
+        &app,
+        "POST",
+        &format!("{product}/variants"),
+        Some(&body.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{added}");
+    let m = added["variants"][1]["id"].as_str().unwrap().to_string();
+    let (_, mug_page) = send(&app, "GET", &format!("/admin/products/{mug}"), None).await;
+    let cup = mug_page["variants"][0]["id"].as_str().unwrap().to_string();
+
+    // The newest product first, its variants in their order, paged.
+    let (status, first) = send(&app, "GET", "/admin/variants?limit=2", None).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(ids(&first), [s.as_str(), m.as_str()]);
+    assert_eq!(
+        first["items"][1],
+        json!({
+            "id": m,
+            "sku": "SHIRT-M",
+            "title": "M",
+            "price": { "amount": 1200, "currency": "EUR" },
+            "compare_at_price": { "amount": 1500, "currency": "EUR" },
+            "product": { "id": shirt, "title": "shirt", "handle": "shirt" },
+        })
+    );
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let (_, second) = send(
+        &app,
+        "GET",
+        &format!("/admin/variants?limit=2&cursor={cursor}"),
+        None,
+    )
+    .await;
+    assert_eq!(ids(&second), [cup.as_str()]);
+    assert_eq!(second["items"][0]["title"], Value::Null);
+    assert_eq!(second["next_cursor"], Value::Null);
+    // A cursor belongs to its filters.
+    let uri = format!("/admin/variants?limit=2&q=shirt&cursor={cursor}");
+    let (status, body) = send(&app, "GET", &uri, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_cursor")
+    );
+
+    let get = async |query: String| {
+        let (status, page) = send(&app, "GET", &format!("/admin/variants?{query}"), None).await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        ids(&page)
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(get(format!("product={mug}")).await, [cup.as_str()]);
+    assert_eq!(
+        get(format!("product={mug},{shirt}")).await,
+        [s.as_str(), m.as_str(), cup.as_str()]
+    );
+    assert_eq!(
+        get(format!("ids={cup}&ids={m}")).await,
+        [m.as_str(), cup.as_str()]
+    );
+    assert_eq!(
+        get("q=shirt-m".to_string()).await,
+        [m.as_str()],
+        "the variant's own SKU"
+    );
+    assert_eq!(get("q=SHIRT".to_string()).await, [s.as_str(), m.as_str()]);
+
+    // A category reaches the products below it.
+    let create = async |body: Value| {
+        let (status, json) = send(&app, "POST", "/admin/categories", Some(&body.to_string())).await;
+        assert_eq!(status, StatusCode::CREATED, "{json}");
+        json["id"].as_str().unwrap().to_string()
+    };
+    let kitchen = create(json!({"name": "Kitchen", "handle": "kitchen", "visible": true})).await;
+    let mugs =
+        create(json!({"name": "Mugs", "handle": "mugs", "parent": kitchen, "visible": true})).await;
+    let body = json!({"products": [mug]}).to_string();
+    let uri = format!("/admin/categories/{mugs}/products");
+    let (status, _) = send(&app, "POST", &uri, Some(&body)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(get(format!("category={kitchen}")).await, [cup.as_str()]);
+    assert_eq!(get(format!("category={mugs}")).await, [cup.as_str()]);
+
+    let (status, body) = send(&app, "GET", "/admin/variants?product=mug", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+    let (status, body) = send(&app, "GET", "/admin/variants?status=draft", None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+}
+
+#[tokio::test]
 async fn a_listed_product_is_a_summary() {
     let app = app().await;
     let id = create_product(&app, "mug").await;

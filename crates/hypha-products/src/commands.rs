@@ -6,8 +6,8 @@ use thiserror::Error;
 
 use crate::{
     Handle, NewVariant, OptionDraft, Product, ProductError, ProductFilter, ProductFilterInput,
-    ProductRepo, ProductSort, ProductStatus, ProductSummary, VariantDraft, VariantPatch,
-    repo::keys,
+    ProductRepo, ProductSort, ProductStatus, ProductSummary, VariantDraft, VariantFilter,
+    VariantFilterInput, VariantPatch, VariantPosition, VariantSummary, repo::keys,
 };
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -119,6 +119,20 @@ pub async fn list_products<R: ProductRepo>(
     ctx.require(Scope::ProductsRead)?;
     let filter = ProductFilter::new(input.filter)?.with_fields(input.fields);
     Ok(repo.list(&filter, input.sort, page).await?)
+}
+
+/// A page of variants across products (newest product first, each one's variants in their
+/// order), narrowed by `filter`: what a price grid pages through without reading each
+/// product.
+pub async fn list_variants<R: ProductRepo>(
+    ctx: &Ctx,
+    repo: &R,
+    filter: VariantFilterInput,
+    page: PageRequest<VariantPosition>,
+) -> Result<Page<VariantSummary>, CommandError> {
+    ctx.require(Scope::ProductsRead)?;
+    let filter = VariantFilter::new(filter)?;
+    Ok(repo.list_variants(&filter, page).await?)
 }
 
 /// The product `variant` belongs to (`/admin/variants/{id}/…` routes: a variant ID is

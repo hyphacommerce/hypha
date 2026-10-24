@@ -73,6 +73,9 @@ pub enum ProductError {
     CompareAtNotAbovePrice(VariantId),
     #[error("variant {0}'s compare-at price is in another currency than its price")]
     CompareAtCurrencyMismatch(VariantId),
+    /// A list filter names more IDs than it takes.
+    #[error("`{field}` takes at most {max} IDs")]
+    TooManyFilterIds { field: &'static str, max: usize },
 }
 
 fn join(ids: &[VariantId]) -> String {
@@ -114,6 +117,7 @@ impl ErrorCode for ProductError {
             ProductError::MediaNotInProduct(_) => "media_not_in_product",
             ProductError::DescriptionTooLong { .. } => "description_too_long",
             ProductError::TooManyTags { .. } => "too_many_tags",
+            ProductError::TooManyFilterIds { .. } => "too_many_filter_ids",
         }
     }
 }
