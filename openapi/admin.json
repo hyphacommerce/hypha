@@ -1828,6 +1828,99 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "CartDiscountCodeResponse": {
+        "description": "Where a code the cart holds stands, for a UCP-style message pointing at\n`$.discount_codes[i]`.",
+        "properties": {
+          "code": {
+            "description": "Normalised.",
+            "type": "string"
+          },
+          "condition": {
+            "description": "For `not_eligible`: `markets`, `channels`, `customer_groups`, `customers` or\n`signed_in`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DiscountId",
+                "description": "For `blocked_by_other`: a discount applied instead."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "needed": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NeededResponse",
+                "description": "For `minimum_not_met`: what's missing."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "description": "`applied`; `not_eligible` (see `condition`); `minimum_not_met` (see `needed`);\n`no_matching_items`; `blocked_by_other` (a better combination left it out, see\n`discount`); `limit_reached`; `not_available_in_market`; `expired` (its end date\npassed); `invalid` (the code or its discount is gone, deactivated, a draft or not\nstarted). More may be added: treat an unknown one as not applied.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "state"
+        ],
+        "type": "object"
+      },
+      "CartDiscountResponse": {
+        "description": "A discount applied to the cart: one reward of it.",
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What it took off in all."
+          },
+          "class": {
+            "$ref": "#/components/schemas/DiscountClassDto"
+          },
+          "code": {
+            "description": "The code it came by, normalised; `null` for an automatic discount.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discount": {
+            "$ref": "#/components/schemas/DiscountId"
+          },
+          "summary": {
+            "description": "One sentence from its data, amounts in the cart's market.",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/DiscountTargetDto"
+          },
+          "title": {
+            "description": "The discount's title, shown to buyers.",
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/DiscountValueDto"
+          }
+        },
+        "required": [
+          "discount",
+          "title",
+          "summary",
+          "class",
+          "value",
+          "target",
+          "amount"
+        ],
+        "type": "object"
+      },
       "CartId": {
         "description": "A CartId: `cart_` and 32 hex digits.",
         "examples": [
@@ -1854,6 +1947,24 @@
                 "type": "null"
               }
             ]
+          },
+          "discount_codes": {
+            "description": "Each code the cart holds, in the order entered, with where it stands. A code that\ndoesn't apply now is kept: it applies once the cart qualifies.",
+            "items": {
+              "$ref": "#/components/schemas/CartDiscountCodeResponse"
+            },
+            "type": "array"
+          },
+          "discount_total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Everything they took off: already out of `subtotal` and `shipping_total`."
+          },
+          "discounts": {
+            "description": "The discounts applied, one per reward: product ones first, then order, then\nshipping. Lines and shipping name them by their index here.",
+            "items": {
+              "$ref": "#/components/schemas/CartDiscountResponse"
+            },
+            "type": "array"
           },
           "email": {
             "oneOf": [
@@ -1943,11 +2054,11 @@
           },
           "shipping_total": {
             "$ref": "#/components/schemas/Money",
-            "description": "The chosen shipping, priced now; zero until chosen. Part of `total`."
+            "description": "The chosen shipping, priced now, after shipping discounts; zero until chosen. Part\nof `total`."
           },
           "subtotal": {
             "$ref": "#/components/schemas/Money",
-            "description": "Sum of the available lines, as priced. All totals count available lines only."
+            "description": "Sum of the available lines' totals, after discounts. All totals count available\nlines only."
           },
           "tax_total": {
             "$ref": "#/components/schemas/Money",
@@ -1976,7 +2087,10 @@
           "lines",
           "shipping_groups",
           "shipping_ready",
-          "marketing_opt_in"
+          "marketing_opt_in",
+          "discounts",
+          "discount_total",
+          "discount_codes"
         ],
         "type": "object"
       },
@@ -5385,6 +5499,33 @@
         ],
         "type": "object"
       },
+      "DiscountShareResponse": {
+        "description": "Part of a discount on a line or a shipping group.",
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "application": {
+            "description": "Its index in the cart's (or order's) `discounts`.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "units": {
+            "description": "The units it covered, for a buy X get Y discount; absent otherwise.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "application",
+          "amount"
+        ],
+        "type": "object"
+      },
       "DiscountStatusDto": {
         "description": "Known values: `draft`, `active`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
@@ -6938,11 +7079,22 @@
                   }
                 ]
               },
+              "discounts": {
+                "description": "What discounts took off the line.",
+                "items": {
+                  "$ref": "#/components/schemas/DiscountShareResponse"
+                },
+                "type": "array"
+              },
               "status": {
                 "enum": [
                   "priced"
                 ],
                 "type": "string"
+              },
+              "subtotal": {
+                "$ref": "#/components/schemas/Money",
+                "description": "`unit_price` × `quantity`: before discounts."
               },
               "tax": {
                 "oneOf": [
@@ -6956,7 +7108,8 @@
                 ]
               },
               "total": {
-                "$ref": "#/components/schemas/Money"
+                "$ref": "#/components/schemas/Money",
+                "description": "What the buyer pays for the line: `subtotal` less the discounts. Tax is on this."
               },
               "unit_price": {
                 "$ref": "#/components/schemas/Money"
@@ -6965,6 +7118,8 @@
             "required": [
               "unit_price",
               "total",
+              "subtotal",
+              "discounts",
               "status"
             ],
             "type": "object"
@@ -7428,6 +7583,32 @@
         "required": [
           "scopes"
         ],
+        "type": "object"
+      },
+      "NeededResponse": {
+        "description": "What's missing for a minimum: one of the two.",
+        "properties": {
+          "quantity": {
+            "description": "This many more qualifying units.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "subtotal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "This much more of the qualifying items."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
         "type": "object"
       },
       "NotificationAudience": {
@@ -10987,10 +11168,18 @@
       "SelectedShippingResponse": {
         "properties": {
           "amount": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "The option's price, before shipping discounts."
           },
           "code": {
             "type": "string"
+          },
+          "discounts": {
+            "description": "What shipping discounts took off it.",
+            "items": {
+              "$ref": "#/components/schemas/DiscountShareResponse"
+            },
+            "type": "array"
           },
           "estimate": {
             "oneOf": [
@@ -11025,13 +11214,19 @@
                 "type": "null"
               }
             ]
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What the buyer pays for it: `amount` less the discounts. Tax is on this."
           }
         },
         "required": [
           "option",
           "code",
           "name",
-          "amount"
+          "amount",
+          "discounts",
+          "total"
         ],
         "type": "object"
       },

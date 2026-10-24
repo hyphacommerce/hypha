@@ -686,6 +686,18 @@ contains "mug line is named, with its handle" '"product_title":"Mug","variant_ti
 step "add 3 cups" 200 - -X POST "$BASE/storefront/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$CUP_VAR\",\"quantity\":3}"
 contains "cart total is 2400" '"total":{"amount":2400,"currency":"EUR"},"fully_available":true'
+step "a code that isn't one" 422 discount_code_invalid -X POST "$BASE/storefront/carts/$CART/discount-codes" \
+    -H "$JSON" -d '{"code":"NOPE"}'
+step "enter the welcome code as typed" 200 - -X POST "$BASE/storefront/carts/$CART/discount-codes" \
+    -H "$JSON" -d '{"code":" welcome10"}'
+contains "10% off 24.00" '"discount_total":{"amount":240,"currency":"EUR"}'
+contains "the code applies" '"discount_codes":[{"code":"WELCOME10","state":"applied"}]'
+contains "the mugs' share" '"total":{"amount":1620,"currency":"EUR"},"tax":null,"compare_at_price":null,"subtotal":{"amount":1800,"currency":"EUR"},"discounts":[{"application":0,"amount":{"amount":180,"currency":"EUR"}}]'
+contains "the cart total after it" '"total":{"amount":2160,"currency":"EUR"},"fully_available":true'
+step "let go of it" 200 - -X DELETE "$BASE/storefront/carts/$CART/discount-codes/welcome10"
+contains "back to 24.00" '"total":{"amount":2400,"currency":"EUR"},"fully_available":true'
+step "a code the cart doesn't hold" 404 discount_code_not_on_cart -X DELETE \
+    "$BASE/storefront/carts/$CART/discount-codes/WELCOME10"
 
 echo "## idempotency keys"
 fresh "a first request isn't marked replayed" -X POST "$BASE/storefront/carts" -H "$JSON" \

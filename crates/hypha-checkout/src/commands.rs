@@ -1071,6 +1071,7 @@ fn order_line(line: &PricedLine, id: OrderLineId) -> Result<OrderLine, CommandEr
         price_list,
         total,
         tax,
+        ..
     } = &line.status
     else {
         return Err(unavailable());

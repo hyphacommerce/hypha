@@ -2,12 +2,12 @@ use hypha_core::{
     AddressError, AddressParts, AuthError, CartId, Clock, CountryCode, CountryError, Ctx,
     CustomerGroupId, CustomerId, Email, EmailError, ErrorCode, HasBatch, HasClock, HasIdempotency,
     IdGenerator, IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, MarketId,
-    MoneyError, ProductId, Quantity, QuantityError, RepoError, Scope, ShippingGroupId,
+    Money, MoneyError, ProductId, Quantity, QuantityError, RepoError, Scope, ShippingGroupId,
     ShippingOptionId, StageIdempotency, Timestamp, VariantId, earlier_id,
 };
 use hypha_customers::{CustomerGroupRepo, CustomerRepo, HasCustomerGroups, HasCustomers};
 use hypha_inventory::{HasInventoryItems, HasLocations, StockContext};
-use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo};
+use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo, PriceListRepo};
 use hypha_pricing::PricingContext;
 use hypha_products::{HasProducts, Product, ProductRepo};
 use hypha_shipping::{
@@ -20,9 +20,12 @@ use thiserror::Error;
 use crate::{
     Cart, CartError, CartRepo, HasCarts, LineError, LineStatus, PricedCart, Publication,
     SelectedShipping, ShippingContext, StageCarts, StoredQuote, check_stock,
-    price_cart_with_shipping, price_line,
+    price_cart_with_shipping, price_line, shipping_after_discounts,
 };
 use hypha_channels::{ChannelRepo, HasChannels};
+use hypha_discounts::{Buyer, DiscountContext, HasDiscounts, find_live_code, normalize};
+
+use crate::DiscountReading;
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -65,6 +68,10 @@ pub enum CommandError {
     NothingToShip,
     #[error("no shipping to {0}")]
     NoShippingToCountry(CountryCode),
+    /// Unknown, inactive, not live, or not a code at all: all read alike, so codes can't
+    /// be told apart by their errors.
+    #[error("that discount code can't be used")]
+    DiscountCodeInvalid,
     #[error("shipping option {0} isn't one of the cart's zone")]
     ShippingOptionUnknown(ShippingOptionId),
     /// Known, but not offered to this cart right now (`reason`).
@@ -103,6 +110,7 @@ impl ErrorCode for CommandError {
             CommandError::ShippingGroupNotFound(_) => "shipping_group_not_found",
             CommandError::NothingToShip => "nothing_to_ship",
             CommandError::NoShippingToCountry(_) => "no_shipping_to_country",
+            CommandError::DiscountCodeInvalid => "discount_code_invalid",
             CommandError::ShippingOptionUnknown(_) => "shipping_option_unknown",
             CommandError::ShippingOptionNotOffered { .. } => "shipping_option_not_offered",
         }
@@ -163,10 +171,13 @@ impl<T> IdempotentCartPorts for T where
 {
 }
 
-/// What pricing a cart reads: everything but the carts and customers themselves (their
-/// groups, which decide the lists that price for them, included).
+/// What pricing a cart reads: everything but the carts themselves (the buyer's groups,
+/// which decide the lists that price for them, and the discounts that may apply
+/// included).
 pub trait PricingPorts:
     HasClock
+    + HasCustomers
+    + HasDiscounts
     + HasCustomerGroups
     + HasChannels
     + HasProducts
@@ -183,6 +194,8 @@ pub trait PricingPorts:
 
 impl<T> PricingPorts for T where
     T: HasClock
+        + HasCustomers
+        + HasDiscounts
         + HasCustomerGroups
         + HasChannels
         + HasProducts
@@ -495,6 +508,47 @@ pub async fn set_line_quantity<S: HasCarts + PricingPorts>(
     Ok(priced)
 }
 
+/// Holds a discount code on the cart and returns it repriced, the code with its state. A
+/// code that isn't active and live now (or isn't one at all) is `discount_code_invalid`,
+/// the same for each so codes can't be found out by their errors, and isn't kept. A code
+/// that's live but doesn't apply yet is kept: it applies once the cart qualifies.
+pub async fn add_discount_code<S: HasCarts + PricingPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: CartId,
+    code: &str,
+) -> Result<PricedCart, CommandError> {
+    ctx.require(Scope::CartsWrite)?;
+    let mut cart = load_open_cart(ctx, ports, id).await?;
+    let code = normalize(code).map_err(|_| CommandError::DiscountCodeInvalid)?;
+    if find_live_code(ports, &code, ports.now()).await?.is_none() {
+        return Err(CommandError::DiscountCodeInvalid);
+    }
+    if !cart.add_discount_code(code)? {
+        return reprice(ports, &cart).await;
+    }
+    let priced = reprice(ports, &cart).await?;
+    ports.carts().update(&mut cart).await?;
+    Ok(priced)
+}
+
+/// Lets go of a discount code (as typed: it's normalised) and returns the repriced cart.
+pub async fn remove_discount_code<S: HasCarts + PricingPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: CartId,
+    code: &str,
+) -> Result<PricedCart, CommandError> {
+    ctx.require(Scope::CartsWrite)?;
+    let mut cart = load_open_cart(ctx, ports, id).await?;
+    let normalized =
+        normalize(code).map_err(|_| CartError::DiscountCodeNotOnCart(code.trim().to_string()))?;
+    cart.remove_discount_code(&normalized)?;
+    let priced = reprice(ports, &cart).await?;
+    ports.carts().update(&mut cart).await?;
+    Ok(priced)
+}
+
 /// Takes a variant out of the cart and returns the repriced cart.
 pub async fn remove_cart_line<S: HasCarts + PricingPorts>(
     ctx: &Ctx,
@@ -527,7 +581,7 @@ async fn reprice_grown_line<S: PricingPorts>(
     if !published.allows(product.id()) {
         return Err(LineError::ProductNotPublished(product.id()).into());
     }
-    let pricing = load_pricing(ports, cart).await?;
+    let (pricing, groups) = load_pricing(ports, cart).await?;
     price_line(&product, variant, cart.line(variant)?.quantity(), &pricing)?;
 
     // The whole line counts: adding 1 to a line of 2 needs 3 in stock. Nothing is
@@ -548,6 +602,7 @@ async fn reprice_grown_line<S: PricingPorts>(
             .get_by_country(cart.country())
             .await?,
     };
+    let discounts = load_discounts(ports, cart, groups, pricing.at).await?;
     let priced = price_cart_with_shipping(
         cart,
         &cart_products,
@@ -556,6 +611,7 @@ async fn reprice_grown_line<S: PricingPorts>(
         &stock,
         &shipping,
         &published,
+        &discounts,
     );
 
     refuse_unavailable(&priced, variant)?;
@@ -646,6 +702,8 @@ pub struct CartReading {
     pub stock: StockContext,
     pub products: Vec<Product>,
     pub shipping: ShippingContext,
+    /// What the discounts were weighed with: checkout claims the uses of those applied.
+    pub discounts: DiscountReading,
 }
 
 /// Prices `cart` in a fixed number of queries (see `load_pricing`), its shipping too.
@@ -654,7 +712,8 @@ pub async fn read_cart<S: PricingPorts>(
     ports: &S,
     cart: &Cart,
 ) -> Result<CartReading, CommandError> {
-    if cart.lines().is_empty() {
+    // Codes held still get their states on an empty cart.
+    if cart.lines().is_empty() && cart.discount_codes().is_empty() {
         let market = ports
             .markets()
             .get(cart.market())
@@ -662,7 +721,7 @@ pub async fn read_cart<S: PricingPorts>(
             .ok_or(CommandError::MarketNotFound(cart.market()))?;
         return Ok(empty_reading(cart, market));
     }
-    let pricing = load_pricing(ports, cart).await?;
+    let (pricing, groups) = load_pricing(ports, cart).await?;
     let tax = load_tax(ports, cart, &pricing.market).await?;
     let stock = load_stock(ports, cart).await?;
     let products = load_products(ports, cart).await?;
@@ -673,14 +732,16 @@ pub async fn read_cart<S: PricingPorts>(
             .await?,
     };
     let published = load_publication(ports, cart).await?;
+    let discounts = load_discounts(ports, cart, groups, pricing.at).await?;
     let priced = price_cart_with_shipping(
-        cart, &products, &pricing, &tax, &stock, &shipping, &published,
+        cart, &products, &pricing, &tax, &stock, &shipping, &published, &discounts,
     );
     Ok(CartReading {
         priced,
         stock,
         products,
         shipping,
+        discounts,
     })
 }
 
@@ -702,12 +763,23 @@ fn empty_reading(cart: &Cart, market: Market) -> CartReading {
     let stock = StockContext::default();
     let shipping = ShippingContext::default();
     let published = Publication::new(Default::default());
-    let priced = price_cart_with_shipping(cart, &[], &pricing, &tax, &stock, &shipping, &published);
+    let discounts = DiscountReading::default();
+    let priced = price_cart_with_shipping(
+        cart,
+        &[],
+        &pricing,
+        &tax,
+        &stock,
+        &shipping,
+        &published,
+        &discounts,
+    );
     CartReading {
         priced,
         stock,
         products: Vec::new(),
         shipping,
+        discounts,
     }
 }
 
@@ -733,20 +805,56 @@ async fn load_publication<S: HasChannels>(
 /// number of round trips for 1 line or 100 (on Postgres about 20, counting the
 /// BEGIN/COMMIT of each multi-query load); an empty cart reads only its market
 /// (`empty_reading`).
+/// Also returns the buyer's groups, which discounts weigh too.
 async fn load_pricing<
     S: HasMarkets + HasCatalogs + HasPriceLists + HasCustomerGroups + HasClock,
 >(
     ports: &S,
     cart: &Cart,
-) -> Result<PricingContext, CommandError> {
+) -> Result<(PricingContext, Vec<CustomerGroupId>), CommandError> {
     let variants: Vec<VariantId> = cart.lines().iter().map(|l| l.variant()).collect();
     let groups = match cart.customer() {
         Some(customer) => buyer_groups(ports, customer).await?,
         None => Vec::new(),
     };
-    hypha_pricing::load_pricing(ports, cart.market(), &product_ids(cart), &variants, &groups)
-        .await?
-        .ok_or(CommandError::MarketNotFound(cart.market()))
+    let pricing =
+        hypha_pricing::load_pricing(ports, cart.market(), &product_ids(cart), &variants, &groups)
+            .await?
+            .ok_or(CommandError::MarketNotFound(cart.market()))?;
+    Ok((pricing, groups))
+}
+
+/// The discounts that may apply to `cart` at `at`, and its buyer: the linked customer, or
+/// for a guest the customer their email belongs to (once-per-customer counts by email
+/// too). Signed in means the cart has a customer.
+async fn load_discounts<S: HasDiscounts + HasCustomers + HasPriceLists>(
+    ports: &S,
+    cart: &Cart,
+    groups: Vec<CustomerGroupId>,
+    at: Timestamp,
+) -> Result<DiscountReading, CommandError> {
+    let customer = match (cart.customer(), cart.email()) {
+        (Some(customer), _) => Some(customer),
+        (None, Some(email)) => ports.customers().get_by_email(email).await?.map(|c| c.id()),
+        (None, None) => None,
+    };
+    let context = DiscountContext::load(ports, at, cart.discount_codes(), customer).await?;
+    let products = product_ids(cart);
+    let categories = if context.names_categories() && !products.is_empty() {
+        ports.price_lists().product_categories(&products).await?
+    } else {
+        Default::default()
+    };
+    Ok(DiscountReading {
+        context,
+        buyer: Buyer {
+            customer,
+            groups,
+            signed_in: cart.customer().is_some(),
+        },
+        categories,
+        at,
+    })
 }
 
 /// The groups `customer` is in: who a list for groups prices for.
@@ -826,6 +934,9 @@ pub async fn set_shipping_address<S: HasCarts + PricingPorts>(
 pub struct GroupOffers {
     pub group: ShippingGroupId,
     pub offers: Vec<OfferOutcome>,
+    /// Beside each offer, what it comes to after shipping discounts, as the cart is now;
+    /// `None` for one not offered.
+    pub after_discounts: Vec<Option<Money>>,
 }
 
 /// Every option the cart's zone offers its groups, priced: built-in rates computed,
@@ -956,9 +1067,23 @@ pub async fn group_offers<P: RateProvider>(
             items,
             subtotal,
         };
+        let offered = offers(zone, rates, &request).await;
+        let after_discounts = offered
+            .iter()
+            .map(|o| match o {
+                OfferOutcome::Offered(offer) => Some(shipping_after_discounts(
+                    cart,
+                    &reading.priced,
+                    &reading.discounts,
+                    offer.amount,
+                )),
+                OfferOutcome::NotOffered { .. } => None,
+            })
+            .collect();
         result.push(GroupOffers {
             group: group.id,
-            offers: offers(zone, rates, &request).await,
+            offers: offered,
+            after_discounts,
         });
     }
     Ok(result)

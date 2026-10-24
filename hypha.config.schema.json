@@ -157,6 +157,14 @@
           "burst": 10,
           "per": "30s"
         },
+        "discount_code_cart": {
+          "burst": 5,
+          "per": "12s"
+        },
+        "discount_code_ip": {
+          "burst": 10,
+          "per": "6s"
+        },
         "invite_ip": {
           "burst": 10,
           "per": "30s"
@@ -750,6 +758,22 @@
           "default": {
             "burst": 10,
             "per": "30s"
+          }
+        },
+        "discount_code_cart": {
+          "description": "Entering a discount code, per cart.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 5,
+            "per": "12s"
+          }
+        },
+        "discount_code_ip": {
+          "description": "Entering a discount code on a cart, per client address: single-use codes are\nguessable.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 10,
+            "per": "6s"
           }
         },
         "invite_ip": {

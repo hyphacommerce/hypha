@@ -343,6 +343,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/carts/{id}/discount-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enters a discount code. A code that isn't active and live (or isn't one) is `422
+         *     discount_code_invalid`, the same for each, and isn't kept; a live code that doesn't
+         *     apply yet is kept with its state, so it applies once the cart qualifies. At most 5
+         *     (`409 too_many_discount_codes`). Rate limited per client address and per cart.
+         */
+        post: operations["storefront.carts.add_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/carts/{id}/discount-codes/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Lets go of a discount code (as entered, or normalised). */
+        delete: operations["storefront.carts.remove_code"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/carts/{id}/email": {
         parameters: {
             query?: never;
@@ -768,6 +807,10 @@ export interface components {
             /** @description Consent to marketing by SMS; needs a phone. */
             sms_marketing: components["schemas"]["ConsentResponse"];
         };
+        AddDiscountCodeRequest: {
+            /** @description As the buyer typed it: it's trimmed and compared ignoring case. */
+            code: string;
+        };
         AddLineRequest: {
             /** Format: int32 */
             quantity: number;
@@ -828,6 +871,44 @@ export interface components {
          */
         AssetKindDto: string;
         /**
+         * @description Where a code the cart holds stands, for a UCP-style message pointing at
+         *     `$.discount_codes[i]`.
+         */
+        CartDiscountCodeResponse: {
+            /** @description Normalised. */
+            code: string;
+            /**
+             * @description For `not_eligible`: `markets`, `channels`, `customer_groups`, `customers` or
+             *     `signed_in`.
+             */
+            condition?: string | null;
+            discount?: components["schemas"]["DiscountId"] | null;
+            needed?: components["schemas"]["NeededResponse"] | null;
+            /**
+             * @description `applied`; `not_eligible` (see `condition`); `minimum_not_met` (see `needed`);
+             *     `no_matching_items`; `blocked_by_other` (a better combination left it out, see
+             *     `discount`); `limit_reached`; `not_available_in_market`; `expired` (its end date
+             *     passed); `invalid` (the code or its discount is gone, deactivated, a draft or not
+             *     started). More may be added: treat an unknown one as not applied.
+             */
+            state: string;
+        };
+        /** @description A discount applied to the cart: one reward of it. */
+        CartDiscountResponse: {
+            /** @description What it took off in all. */
+            amount: components["schemas"]["Money"];
+            class: components["schemas"]["DiscountClassDto"];
+            /** @description The code it came by, normalised; `null` for an automatic discount. */
+            code?: string | null;
+            discount: components["schemas"]["DiscountId"];
+            /** @description One sentence from its data, amounts in the cart's market. */
+            summary: string;
+            target: components["schemas"]["DiscountTargetDto"];
+            /** @description The discount's title, shown to buyers. */
+            title: string;
+            value: components["schemas"]["DiscountValueDto"];
+        };
+        /**
          * @description A CartId: `cart_` and 32 hex digits.
          * @example cart_0190f1a2b3c47d8e9f00112233445566
          */
@@ -863,6 +944,18 @@ export interface components {
             /** @description The currency of every amount in the cart. */
             currency: components["schemas"]["Currency"];
             customer?: components["schemas"]["CustomerId"] | null;
+            /**
+             * @description Each code the cart holds, in the order entered, with where it stands. A code that
+             *     doesn't apply now is kept: it applies once the cart qualifies.
+             */
+            discount_codes: components["schemas"]["CartDiscountCodeResponse"][];
+            /** @description Everything they took off: already out of `subtotal` and `shipping_total`. */
+            discount_total: components["schemas"]["Money"];
+            /**
+             * @description The discounts applied, one per reward: product ones first, then order, then
+             *     shipping. Lines and shipping name them by their index here.
+             */
+            discounts: components["schemas"]["CartDiscountResponse"][];
             email?: components["schemas"]["Email"] | null;
             /** @description False when any line is unavailable; checkout should refuse such a cart. */
             fully_available: boolean;
@@ -891,9 +984,15 @@ export interface components {
             shipping_groups: components["schemas"]["ShippingGroupResponse"][];
             /** @description Whether every group has an option priced now (checkout requires it). */
             shipping_ready: boolean;
-            /** @description The chosen shipping, priced now; zero until chosen. Part of `total`. */
+            /**
+             * @description The chosen shipping, priced now, after shipping discounts; zero until chosen. Part
+             *     of `total`.
+             */
             shipping_total: components["schemas"]["Money"];
-            /** @description Sum of the available lines, as priced. All totals count available lines only. */
+            /**
+             * @description Sum of the available lines' totals, after discounts. All totals count available
+             *     lines only.
+             */
             subtotal: components["schemas"]["Money"];
             /**
              * @description Tax on the available lines and on shipping: part of `subtotal` and
@@ -997,6 +1096,103 @@ export interface components {
             max_days: number;
             /** Format: int32 */
             min_days: number;
+        };
+        /** @description How an amount off is spread over the items it reaches. */
+        DiscountAllocationDto: {
+            /** @enum {string} */
+            type: "each";
+        } | {
+            /** @enum {string} */
+            type: "across";
+        } | {
+            /** @enum {string} */
+            type: "cheapest";
+            /** Format: int32 */
+            units: number;
+        };
+        /**
+         * @description What a reward reduces, for combining: `product` (item lines), `order` (the subtotal
+         *     after product discounts), `shipping`.
+         *
+         *     Known values: `product`, `order`, `shipping`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        DiscountClassDto: string;
+        /**
+         * @description A DiscountId: `disc_` and 32 hex digits.
+         * @example disc_0190f1a2b3c47d8e9f00112233445566
+         */
+        DiscountId: string;
+        /**
+         * @description Which items: all, or listed products, variants or categories (a category reaches the
+         *     products in it and in every category below it).
+         */
+        DiscountItemsDto: {
+            /** @enum {string} */
+            type: "all";
+        } | {
+            ids: components["schemas"]["ProductId"][];
+            /** @enum {string} */
+            type: "products";
+        } | {
+            ids: components["schemas"]["VariantId"][];
+            /** @enum {string} */
+            type: "variants";
+        } | {
+            ids: components["schemas"]["CategoryId"][];
+            /** @enum {string} */
+            type: "categories";
+        };
+        /** @description Part of a discount on a line or a shipping group. */
+        DiscountShareResponse: {
+            amount: components["schemas"]["Money"];
+            /** @description Its index in the cart's (or order's) `discounts`. */
+            application: number;
+            /**
+             * Format: int32
+             * @description The units it covered, for a buy X get Y discount; absent otherwise.
+             */
+            units?: number | null;
+        };
+        /**
+         * @description What a reward reduces: items (its class is `product`), the subtotal (`order`), or
+         *     shipping (`shipping`, at most `max_amount` off when given).
+         */
+        DiscountTargetDto: {
+            /** @description Defaults to `false`. */
+            exclude_on_sale?: boolean;
+            items: components["schemas"]["DiscountItemsDto"];
+            /** @enum {string} */
+            type: "items";
+        } | {
+            /** @enum {string} */
+            type: "subtotal";
+        } | {
+            max_amount?: {
+                [key: string]: components["schemas"]["Money"];
+            } | null;
+            /** @enum {string} */
+            type: "shipping";
+        };
+        /** @description How much comes off. */
+        DiscountValueDto: {
+            /** Format: int32 */
+            basis_points: number;
+            /** @enum {string} */
+            type: "percent";
+        } | {
+            allocation?: components["schemas"]["DiscountAllocationDto"];
+            amounts: {
+                [key: string]: components["schemas"]["Money"];
+            };
+            /** @enum {string} */
+            type: "amount";
+        } | {
+            amounts: {
+                [key: string]: components["schemas"]["Money"];
+            };
+            /** @enum {string} */
+            type: "fixed_price";
         };
         /** @description A web component an app adds to a storefront (`docs/apps/elements.md`). */
         ElementExtension: {
@@ -1120,9 +1316,14 @@ export interface components {
         };
         LineState: {
             compare_at_price?: components["schemas"]["Money"] | null;
+            /** @description What discounts took off the line. */
+            discounts: components["schemas"]["DiscountShareResponse"][];
             /** @enum {string} */
             status: "priced";
+            /** @description `unit_price` × `quantity`: before discounts. */
+            subtotal: components["schemas"]["Money"];
             tax?: components["schemas"]["TaxLineResponse"] | null;
+            /** @description What the buyer pays for the line: `subtotal` less the discounts. Tax is on this. */
             total: components["schemas"]["Money"];
             unit_price: components["schemas"]["Money"];
         } | {
@@ -1165,6 +1366,15 @@ export interface components {
              * @example EUR
              */
             currency: string;
+        };
+        /** @description What's missing for a minimum: one of the two. */
+        NeededResponse: {
+            /**
+             * Format: int32
+             * @description This many more qualifying units.
+             */
+            quantity?: number | null;
+            subtotal?: components["schemas"]["Money"] | null;
         };
         /** @description What the shopper must do next to pay. */
         NextActionResponse: {
@@ -1242,8 +1452,10 @@ export interface components {
          */
         NotificationTemplateKey: string;
         OfferResponse: {
-            /** @description Before tax if the market's prices exclude it. */
+            /** @description Before tax if the market's prices exclude it, and before shipping discounts. */
             amount: components["schemas"]["Money"];
+            /** @description What it comes to after the shipping discounts the cart has now (0: free). */
+            amount_after_discounts: components["schemas"]["Money"];
             code: string;
             estimate?: components["schemas"]["DeliveryEstimateDto"] | null;
             name: string;
@@ -1553,8 +1765,11 @@ export interface components {
             option: components["schemas"]["ShippingOptionId"];
         };
         SelectedShippingResponse: {
+            /** @description The option's price, before shipping discounts. */
             amount: components["schemas"]["Money"];
             code: string;
+            /** @description What shipping discounts took off it. */
+            discounts: components["schemas"]["DiscountShareResponse"][];
             estimate?: components["schemas"]["DeliveryEstimateDto"] | null;
             name: string;
             option: components["schemas"]["ShippingOptionId"];
@@ -1564,6 +1779,8 @@ export interface components {
              */
             quote_expires_at?: string | null;
             tax?: components["schemas"]["TaxLineResponse"] | null;
+            /** @description What the buyer pays for it: `amount` less the discounts. Tax is on this. */
+            total: components["schemas"]["Money"];
         };
         /**
          * @description What the customer says about marketing. The time is now and the source `storefront`:
@@ -3869,6 +4086,203 @@ export interface operations {
             };
             /** @description Over the rate limit for this cart (`rate_limited`); see `Retry-After` */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.carts.add_code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CartId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddDiscountCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CartResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Over the rate limit for codes per client address or per cart (`rate_limited`); see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.carts.remove_code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CartId"];
+                /**
+                 * @description The code as entered, or normalised.
+                 * @example WELCOME10
+                 */
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CartResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

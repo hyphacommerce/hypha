@@ -66,6 +66,8 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
                 unit_price: line.unit_price,
                 compare_at: line.compare_at_price,
                 price_list: line.price_list,
+                subtotal: line.total,
+                discounts: Vec::new(),
                 total: line.total,
                 tax: line.tax.map(tax_line),
             },
@@ -100,6 +102,8 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
                     code: s.code.clone(),
                     name: s.name.clone(),
                     amount: s.amount.money(),
+                    discounts: Vec::new(),
+                    total: s.amount.money(),
                     tax: s.tax.map(tax_line),
                     estimate: s
                         .estimate_days
@@ -111,6 +115,9 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
             })
             .collect(),
         shipping_total: order.shipping_total(),
+        discounts: Vec::new(),
+        discount_total: hypha_core::Money::zero(order.currency()),
+        discount_codes: Vec::new(),
         tax_total: order.tax_total(),
         total: order.total(),
         payment_method: cart.payment_method(),

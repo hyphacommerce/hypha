@@ -150,6 +150,19 @@
         ],
         "type": "object"
       },
+      "AddDiscountCodeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "As the buyer typed it: it's trimmed and compared ignoring case.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
       "AddLineRequest": {
         "additionalProperties": false,
         "properties": {
@@ -334,6 +347,99 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "CartDiscountCodeResponse": {
+        "description": "Where a code the cart holds stands, for a UCP-style message pointing at\n`$.discount_codes[i]`.",
+        "properties": {
+          "code": {
+            "description": "Normalised.",
+            "type": "string"
+          },
+          "condition": {
+            "description": "For `not_eligible`: `markets`, `channels`, `customer_groups`, `customers` or\n`signed_in`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DiscountId",
+                "description": "For `blocked_by_other`: a discount applied instead."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "needed": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NeededResponse",
+                "description": "For `minimum_not_met`: what's missing."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "description": "`applied`; `not_eligible` (see `condition`); `minimum_not_met` (see `needed`);\n`no_matching_items`; `blocked_by_other` (a better combination left it out, see\n`discount`); `limit_reached`; `not_available_in_market`; `expired` (its end date\npassed); `invalid` (the code or its discount is gone, deactivated, a draft or not\nstarted). More may be added: treat an unknown one as not applied.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "state"
+        ],
+        "type": "object"
+      },
+      "CartDiscountResponse": {
+        "description": "A discount applied to the cart: one reward of it.",
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What it took off in all."
+          },
+          "class": {
+            "$ref": "#/components/schemas/DiscountClassDto"
+          },
+          "code": {
+            "description": "The code it came by, normalised; `null` for an automatic discount.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discount": {
+            "$ref": "#/components/schemas/DiscountId"
+          },
+          "summary": {
+            "description": "One sentence from its data, amounts in the cart's market.",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/DiscountTargetDto"
+          },
+          "title": {
+            "description": "The discount's title, shown to buyers.",
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/DiscountValueDto"
+          }
+        },
+        "required": [
+          "discount",
+          "title",
+          "summary",
+          "class",
+          "value",
+          "target",
+          "amount"
+        ],
+        "type": "object"
+      },
       "CartId": {
         "description": "A CartId: `cart_` and 32 hex digits.",
         "examples": [
@@ -448,6 +554,24 @@
               }
             ]
           },
+          "discount_codes": {
+            "description": "Each code the cart holds, in the order entered, with where it stands. A code that\ndoesn't apply now is kept: it applies once the cart qualifies.",
+            "items": {
+              "$ref": "#/components/schemas/CartDiscountCodeResponse"
+            },
+            "type": "array"
+          },
+          "discount_total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Everything they took off: already out of `subtotal` and `shipping_total`."
+          },
+          "discounts": {
+            "description": "The discounts applied, one per reward: product ones first, then order, then\nshipping. Lines and shipping name them by their index here.",
+            "items": {
+              "$ref": "#/components/schemas/CartDiscountResponse"
+            },
+            "type": "array"
+          },
           "email": {
             "oneOf": [
               {
@@ -536,11 +660,11 @@
           },
           "shipping_total": {
             "$ref": "#/components/schemas/Money",
-            "description": "The chosen shipping, priced now; zero until chosen. Part of `total`."
+            "description": "The chosen shipping, priced now, after shipping discounts; zero until chosen. Part\nof `total`."
           },
           "subtotal": {
             "$ref": "#/components/schemas/Money",
-            "description": "Sum of the available lines, as priced. All totals count available lines only."
+            "description": "Sum of the available lines' totals, after discounts. All totals count available\nlines only."
           },
           "tax_total": {
             "$ref": "#/components/schemas/Money",
@@ -569,7 +693,10 @@
           "lines",
           "shipping_groups",
           "shipping_ready",
-          "marketing_opt_in"
+          "marketing_opt_in",
+          "discounts",
+          "discount_total",
+          "discount_codes"
         ],
         "type": "object"
       },
@@ -813,6 +940,334 @@
           "max_days"
         ],
         "type": "object"
+      },
+      "DiscountAllocationDto": {
+        "description": "How an amount off is spread over the items it reaches.",
+        "oneOf": [
+          {
+            "description": "Off every unit (items only).",
+            "properties": {
+              "type": {
+                "enum": [
+                  "each"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Once, split over the items (or the order, or shipping) in proportion.",
+            "properties": {
+              "type": {
+                "enum": [
+                  "across"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Off each of the cheapest `units` units (items only).",
+            "properties": {
+              "type": {
+                "enum": [
+                  "cheapest"
+                ],
+                "type": "string"
+              },
+              "units": {
+                "format": "int32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "units",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DiscountClassDto": {
+        "description": "What a reward reduces, for combining: `product` (item lines), `order` (the subtotal\nafter product discounts), `shipping`.\n\nKnown values: `product`, `order`, `shipping`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "product",
+          "order",
+          "shipping"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "DiscountId": {
+        "description": "A DiscountId: `disc_` and 32 hex digits.",
+        "examples": [
+          "disc_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^disc_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "DiscountItemsDto": {
+        "description": "Which items: all, or listed products, variants or categories (a category reaches the\nproducts in it and in every category below it).",
+        "oneOf": [
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "all"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "ids": {
+                "items": {
+                  "$ref": "#/components/schemas/ProductId"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "products"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "ids",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "ids": {
+                "items": {
+                  "$ref": "#/components/schemas/VariantId"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "variants"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "ids",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "ids": {
+                "items": {
+                  "$ref": "#/components/schemas/CategoryId"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "categories"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "ids",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DiscountShareResponse": {
+        "description": "Part of a discount on a line or a shipping group.",
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "application": {
+            "description": "Its index in the cart's (or order's) `discounts`.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "units": {
+            "description": "The units it covered, for a buy X get Y discount; absent otherwise.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "application",
+          "amount"
+        ],
+        "type": "object"
+      },
+      "DiscountTargetDto": {
+        "description": "What a reward reduces: items (its class is `product`), the subtotal (`order`), or\nshipping (`shipping`, at most `max_amount` off when given).",
+        "oneOf": [
+          {
+            "properties": {
+              "exclude_on_sale": {
+                "description": "Defaults to `false`.",
+                "type": "boolean"
+              },
+              "items": {
+                "$ref": "#/components/schemas/DiscountItemsDto"
+              },
+              "type": {
+                "enum": [
+                  "items"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "items",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "subtotal"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "max_amount": {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/Money"
+                },
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "type": {
+                "enum": [
+                  "shipping"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DiscountValueDto": {
+        "description": "How much comes off.",
+        "oneOf": [
+          {
+            "description": "1 to 10000 basis points: 1000 is 10%, 10000 everything (free).",
+            "properties": {
+              "basis_points": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "type": {
+                "enum": [
+                  "percent"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "basis_points",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "An amount per market; `allocation` defaults to `across`.",
+            "properties": {
+              "allocation": {
+                "$ref": "#/components/schemas/DiscountAllocationDto"
+              },
+              "amounts": {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/Money"
+                },
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "type": {
+                "enum": [
+                  "amount"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "amounts",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Items only: each unit costs this much in the market, when that's lower than its\nprice (0 makes them free).",
+            "properties": {
+              "amounts": {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/Money"
+                },
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "type": {
+                "enum": [
+                  "fixed_price"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "amounts",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "ElementExtension": {
         "description": "A web component an app adds to a storefront (`docs/apps/elements.md`).",
@@ -1085,11 +1540,22 @@
                   }
                 ]
               },
+              "discounts": {
+                "description": "What discounts took off the line.",
+                "items": {
+                  "$ref": "#/components/schemas/DiscountShareResponse"
+                },
+                "type": "array"
+              },
               "status": {
                 "enum": [
                   "priced"
                 ],
                 "type": "string"
+              },
+              "subtotal": {
+                "$ref": "#/components/schemas/Money",
+                "description": "`unit_price` × `quantity`: before discounts."
               },
               "tax": {
                 "oneOf": [
@@ -1103,7 +1569,8 @@
                 ]
               },
               "total": {
-                "$ref": "#/components/schemas/Money"
+                "$ref": "#/components/schemas/Money",
+                "description": "What the buyer pays for the line: `subtotal` less the discounts. Tax is on this."
               },
               "unit_price": {
                 "$ref": "#/components/schemas/Money"
@@ -1112,6 +1579,8 @@
             "required": [
               "unit_price",
               "total",
+              "subtotal",
+              "discounts",
               "status"
             ],
             "type": "object"
@@ -1202,6 +1671,32 @@
           "amount",
           "currency"
         ],
+        "type": "object"
+      },
+      "NeededResponse": {
+        "description": "What's missing for a minimum: one of the two.",
+        "properties": {
+          "quantity": {
+            "description": "This many more qualifying units.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "subtotal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "This much more of the qualifying items."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
         "type": "object"
       },
       "NextActionResponse": {
@@ -1426,7 +1921,11 @@
         "properties": {
           "amount": {
             "$ref": "#/components/schemas/Money",
-            "description": "Before tax if the market's prices exclude it."
+            "description": "Before tax if the market's prices exclude it, and before shipping discounts."
+          },
+          "amount_after_discounts": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What it comes to after the shipping discounts the cart has now (0: free)."
           },
           "code": {
             "type": "string"
@@ -1452,7 +1951,8 @@
           "option",
           "code",
           "name",
-          "amount"
+          "amount",
+          "amount_after_discounts"
         ],
         "type": "object"
       },
@@ -2293,10 +2793,18 @@
       "SelectedShippingResponse": {
         "properties": {
           "amount": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "The option's price, before shipping discounts."
           },
           "code": {
             "type": "string"
+          },
+          "discounts": {
+            "description": "What shipping discounts took off it.",
+            "items": {
+              "$ref": "#/components/schemas/DiscountShareResponse"
+            },
+            "type": "array"
           },
           "estimate": {
             "oneOf": [
@@ -2331,13 +2839,19 @@
                 "type": "null"
               }
             ]
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What the buyer pays for it: `amount` less the discounts. Tax is on this."
           }
         },
         "required": [
           "option",
           "code",
           "name",
-          "amount"
+          "amount",
+          "discounts",
+          "total"
         ],
         "type": "object"
       },
@@ -5902,6 +6416,264 @@
         ],
         "x-hypha-scopes": [
           "checkout"
+        ]
+      }
+    },
+    "/storefront/carts/{id}/discount-codes": {
+      "post": {
+        "operationId": "storefront.carts.add_code",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddDiscountCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Over the rate limit for codes per client address or per cart (`rate_limited`); see `Retry-After`"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Enters a discount code. A code that isn't active and live (or isn't one) is `422\ndiscount_code_invalid`, the same for each, and isn't kept; a live code that doesn't\napply yet is kept with its state, so it applies once the cart qualifies. At most 5\n(`409 too_many_discount_codes`). Rate limited per client address and per cart.",
+        "tags": [
+          "carts"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
+      }
+    },
+    "/storefront/carts/{id}/discount-codes/{code}": {
+      "delete": {
+        "operationId": "storefront.carts.remove_code",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          },
+          {
+            "description": "The code as entered, or normalised.",
+            "example": "WELCOME10",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Lets go of a discount code (as entered, or normalised).",
+        "tags": [
+          "carts"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
         ]
       }
     },

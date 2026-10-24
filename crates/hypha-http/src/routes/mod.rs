@@ -420,6 +420,8 @@ macro_rules! route_table {
             [storefront, DELETE, "/storefront/carts/{id}/lines/{variant}", carts::remove_line],
             [storefront, PUT, "/storefront/carts/{id}/email", carts::set_email],
             [storefront, PUT, "/storefront/carts/{id}/marketing", carts::set_marketing],
+            [storefront, POST, "/storefront/carts/{id}/discount-codes", carts::add_code],
+            [storefront, DELETE, "/storefront/carts/{id}/discount-codes/{code}", carts::remove_code],
             [storefront, PUT, "/storefront/carts/{id}/shipping-address", carts::set_address],
             [storefront, GET, "/storefront/carts/{id}/shipping-options", carts::shipping_options],
             [storefront, PUT, "/storefront/carts/{id}/shipping/{group_id}", carts::select],

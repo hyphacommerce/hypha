@@ -980,6 +980,7 @@ dependencies = [
  "hypha-channels",
  "hypha-core",
  "hypha-customers",
+ "hypha-discounts",
  "hypha-inventory",
  "hypha-markets",
  "hypha-pricing",

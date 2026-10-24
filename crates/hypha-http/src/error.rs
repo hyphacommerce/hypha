@@ -929,8 +929,11 @@ impl From<hypha_cart::CommandError> for ApiError {
             E::Cart(
                 CartError::Completed { .. }
                 | CartError::ShippingAddressRequired
-                | CartError::CustomerEmailFixed,
+                | CartError::CustomerEmailFixed
+                | CartError::TooManyDiscountCodes { .. },
             ) => StatusCode::CONFLICT,
+            // The code is the URL's (`DELETE …/discount-codes/{code}`).
+            E::Cart(CartError::DiscountCodeNotOnCart(_)) => StatusCode::NOT_FOUND,
             // Shipping: the group is in the URL; nothing to ship, no zone and an option not
             // offered right now are the cart's state.
             E::ShippingGroupNotFound(_) => StatusCode::NOT_FOUND,
@@ -948,6 +951,7 @@ impl From<hypha_cart::CommandError> for ApiError {
             | E::Email(_)
             | E::Country(_)
             | E::Idempotency(_)
+            | E::DiscountCodeInvalid
             | E::CustomerNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(

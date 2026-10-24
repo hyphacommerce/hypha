@@ -309,3 +309,121 @@ async fn discounts_need_their_scopes() {
         (StatusCode::FORBIDDEN, "missing_scope")
     );
 }
+
+/// A storefront cart for `quantity` mugs (10.00 each) in Croatia: the key and the cart's
+/// path.
+async fn cart_of_mugs(app: &TestApp, mug: &str, quantity: u32) -> (String, String) {
+    let pk = publishable(app).await;
+    let (_, cart) = send_as(
+        app,
+        &pk,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"HR"}"#),
+    )
+    .await;
+    let path = format!("/storefront/carts/{}", cart["id"].as_str().unwrap());
+    let line = json!({"variant": mug, "quantity": quantity}).to_string();
+    let (status, body) = send_as(app, &pk, "POST", &format!("{path}/lines"), Some(&line)).await;
+    assert!(status.is_success(), "{body}");
+    (pk, path)
+}
+
+#[tokio::test]
+async fn a_code_on_a_cart_takes_its_discount_off_the_lines() {
+    let app = app().await;
+    create(
+        &app,
+        json!({"title": "Welcome", "method": "codes", "kind": ten_percent_off_the_order(),
+            "codes": ["WELCOME10"]}),
+    )
+    .await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let (pk, cart) = cart_of_mugs(&app, &mug, 3).await;
+    let codes = format!("{cart}/discount-codes");
+
+    let (status, error) = send_as(&app, &pk, "POST", &codes, Some(r#"{"code":"NOPE"}"#)).await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "discount_code_invalid")
+    );
+
+    let (status, priced) =
+        send_as(&app, &pk, "POST", &codes, Some(r#"{"code":" welcome10"}"#)).await;
+    assert_eq!(status, StatusCode::OK, "{priced}");
+    assert_eq!(
+        (
+            &priced["discount_total"],
+            &priced["subtotal"],
+            &priced["total"],
+            &priced["discount_codes"],
+        ),
+        (
+            &eur(300),
+            &eur(2700),
+            &eur(2700),
+            &json!([{"code": "WELCOME10", "state": "applied"}]),
+        )
+    );
+    assert_eq!(
+        (
+            &priced["discounts"][0]["title"],
+            &priced["discounts"][0]["code"],
+            &priced["discounts"][0]["class"],
+            &priced["discounts"][0]["summary"],
+        ),
+        (
+            &json!("Welcome"),
+            &json!("WELCOME10"),
+            &json!("order"),
+            &json!("10% off the order")
+        )
+    );
+    let line = &priced["lines"][0];
+    assert_eq!(
+        (&line["subtotal"], &line["total"], &line["discounts"]),
+        (
+            &eur(3000),
+            &eur(2700),
+            &json!([{"application": 0, "amount": eur(300)}])
+        )
+    );
+
+    let (status, priced) = send_as(&app, &pk, "DELETE", &format!("{codes}/welcome10"), None).await;
+    assert_eq!(
+        (status, &priced["total"], &priced["discount_codes"]),
+        (StatusCode::OK, &eur(3000), &json!([]))
+    );
+    let (status, error) = send_as(&app, &pk, "DELETE", &format!("{codes}/WELCOME10"), None).await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::NOT_FOUND, "discount_code_not_on_cart")
+    );
+}
+
+#[tokio::test]
+async fn a_code_short_of_its_minimum_is_kept_with_what_is_missing() {
+    let app = app().await;
+    let (market, mug) = market_selling_a_mug(&app).await;
+    create(
+        &app,
+        json!({"title": "Big order", "method": "codes", "kind": ten_percent_off_the_order(),
+            "codes": ["BIG"], "conditions": [{"type": "min_subtotal",
+                "amounts": {market: eur(5000)}}]}),
+    )
+    .await;
+    let (pk, cart) = cart_of_mugs(&app, &mug, 2).await;
+    let (_, priced) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart}/discount-codes"),
+        Some(r#"{"code":"big"}"#),
+    )
+    .await;
+    assert_eq!(
+        priced["discount_codes"],
+        json!([{"code": "BIG", "state": "minimum_not_met", "needed": {"subtotal": eur(3000)}}])
+    );
+    assert_eq!(priced["total"], eur(2000));
+}

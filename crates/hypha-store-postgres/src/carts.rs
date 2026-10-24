@@ -56,8 +56,8 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
 pub(crate) async fn insert_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<(), RepoError> {
     tx.query_typed(
         "INSERT INTO carts (id, version, market_id, country, email, customer_id, order_id,
-             channel_id, payment_method_id, marketing_opt_in)
-         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9)",
+             channel_id, payment_method_id, marketing_opt_in, discount_codes)
+         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&s.market.as_uuid(), Type::UUID),
@@ -68,6 +68,7 @@ pub(crate) async fn insert_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<(
             (&s.channel.as_uuid(), Type::UUID),
             (&s.payment_method.map(|m| m.as_uuid()), Type::UUID),
             (&s.marketing_opt_in, Type::BOOL),
+            (&s.discount_codes, Type::TEXT_ARRAY),
         ],
     )
     .await
@@ -152,7 +153,7 @@ pub(crate) async fn update_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<V
         .query_typed_opt(
             "UPDATE carts SET version = version + 1, market_id = $3, country = $4, email = $5,
                      customer_id = $6, order_id = $7, payment_method_id = $8,
-                     marketing_opt_in = $9
+                     marketing_opt_in = $9, discount_codes = $10
                  WHERE id = $1 AND version = $2 RETURNING version",
             &[
                 (&s.id.as_uuid(), Type::UUID),
@@ -164,6 +165,7 @@ pub(crate) async fn update_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<V
                 (&s.order.map(|o| o.as_uuid()), Type::UUID),
                 (&s.payment_method.map(|m| m.as_uuid()), Type::UUID),
                 (&s.marketing_opt_in, Type::BOOL),
+                (&s.discount_codes, Type::TEXT_ARRAY),
             ],
         )
         .await
@@ -285,7 +287,7 @@ async fn load_carts_of(
 fn select_carts() -> String {
     format!(
         "SELECT id, version, market_id, country, email, customer_id, order_id, channel_id,
-                payment_method_id, marketing_opt_in, {},
+                payment_method_id, marketing_opt_in, discount_codes, {},
                 shipping_option_id, quote_amount, quote_currency, quote_provider,
                 quote_service, quote_reference, {}, {}
          FROM carts",
@@ -326,6 +328,7 @@ fn cart_from_row(row: &Row, id: CartId, lines: Vec<CartLineSnapshot>) -> Result<
         payment_method: col::<Option<Uuid>>(row, "payment_method_id")?
             .map(PaymentMethodId::from_uuid),
         marketing_opt_in: col(row, "marketing_opt_in")?,
+        discount_codes: col(row, "discount_codes")?,
         shipping_address: address_from_row(row, "shipping_")?,
         shipping: match col::<Option<Uuid>>(row, "shipping_option_id")? {
             None => None,

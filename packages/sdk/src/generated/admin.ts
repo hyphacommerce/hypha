@@ -4270,6 +4270,44 @@ export interface components {
          */
         CandidateResultDto: string;
         /**
+         * @description Where a code the cart holds stands, for a UCP-style message pointing at
+         *     `$.discount_codes[i]`.
+         */
+        CartDiscountCodeResponse: {
+            /** @description Normalised. */
+            code: string;
+            /**
+             * @description For `not_eligible`: `markets`, `channels`, `customer_groups`, `customers` or
+             *     `signed_in`.
+             */
+            condition?: string | null;
+            discount?: components["schemas"]["DiscountId"] | null;
+            needed?: components["schemas"]["NeededResponse"] | null;
+            /**
+             * @description `applied`; `not_eligible` (see `condition`); `minimum_not_met` (see `needed`);
+             *     `no_matching_items`; `blocked_by_other` (a better combination left it out, see
+             *     `discount`); `limit_reached`; `not_available_in_market`; `expired` (its end date
+             *     passed); `invalid` (the code or its discount is gone, deactivated, a draft or not
+             *     started). More may be added: treat an unknown one as not applied.
+             */
+            state: string;
+        };
+        /** @description A discount applied to the cart: one reward of it. */
+        CartDiscountResponse: {
+            /** @description What it took off in all. */
+            amount: components["schemas"]["Money"];
+            class: components["schemas"]["DiscountClassDto"];
+            /** @description The code it came by, normalised; `null` for an automatic discount. */
+            code?: string | null;
+            discount: components["schemas"]["DiscountId"];
+            /** @description One sentence from its data, amounts in the cart's market. */
+            summary: string;
+            target: components["schemas"]["DiscountTargetDto"];
+            /** @description The discount's title, shown to buyers. */
+            title: string;
+            value: components["schemas"]["DiscountValueDto"];
+        };
+        /**
          * @description A CartId: `cart_` and 32 hex digits.
          * @example cart_0190f1a2b3c47d8e9f00112233445566
          */
@@ -4279,6 +4317,18 @@ export interface components {
             /** @description The currency of every amount in the cart. */
             currency: components["schemas"]["Currency"];
             customer?: components["schemas"]["CustomerId"] | null;
+            /**
+             * @description Each code the cart holds, in the order entered, with where it stands. A code that
+             *     doesn't apply now is kept: it applies once the cart qualifies.
+             */
+            discount_codes: components["schemas"]["CartDiscountCodeResponse"][];
+            /** @description Everything they took off: already out of `subtotal` and `shipping_total`. */
+            discount_total: components["schemas"]["Money"];
+            /**
+             * @description The discounts applied, one per reward: product ones first, then order, then
+             *     shipping. Lines and shipping name them by their index here.
+             */
+            discounts: components["schemas"]["CartDiscountResponse"][];
             email?: components["schemas"]["Email"] | null;
             /** @description False when any line is unavailable; checkout should refuse such a cart. */
             fully_available: boolean;
@@ -4307,9 +4357,15 @@ export interface components {
             shipping_groups: components["schemas"]["ShippingGroupResponse"][];
             /** @description Whether every group has an option priced now (checkout requires it). */
             shipping_ready: boolean;
-            /** @description The chosen shipping, priced now; zero until chosen. Part of `total`. */
+            /**
+             * @description The chosen shipping, priced now, after shipping discounts; zero until chosen. Part
+             *     of `total`.
+             */
             shipping_total: components["schemas"]["Money"];
-            /** @description Sum of the available lines, as priced. All totals count available lines only. */
+            /**
+             * @description Sum of the available lines' totals, after discounts. All totals count available
+             *     lines only.
+             */
             subtotal: components["schemas"]["Money"];
             /**
              * @description Tax on the available lines and on shipping: part of `subtotal` and
@@ -5529,6 +5585,17 @@ export interface components {
             target: components["schemas"]["DiscountTargetDto"];
             value: components["schemas"]["DiscountValueDto"];
         };
+        /** @description Part of a discount on a line or a shipping group. */
+        DiscountShareResponse: {
+            amount: components["schemas"]["Money"];
+            /** @description Its index in the cart's (or order's) `discounts`. */
+            application: number;
+            /**
+             * Format: int32
+             * @description The units it covered, for a buy X get Y discount; absent otherwise.
+             */
+            units?: number | null;
+        };
         /**
          * @description Known values: `draft`, `active`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
@@ -6079,9 +6146,14 @@ export interface components {
         };
         LineState: {
             compare_at_price?: components["schemas"]["Money"] | null;
+            /** @description What discounts took off the line. */
+            discounts: components["schemas"]["DiscountShareResponse"][];
             /** @enum {string} */
             status: "priced";
+            /** @description `unit_price` × `quantity`: before discounts. */
+            subtotal: components["schemas"]["Money"];
             tax?: components["schemas"]["TaxLineResponse"] | null;
+            /** @description What the buyer pays for the line: `subtotal` less the discounts. Tax is on this. */
             total: components["schemas"]["Money"];
             unit_price: components["schemas"]["Money"];
         } | {
@@ -6232,6 +6304,15 @@ export interface components {
         NarrowGrantRequest: {
             /** @description Some of the grant's scopes; the rest are taken away at once. */
             scopes: components["schemas"]["Scope"][];
+        };
+        /** @description What's missing for a minimum: one of the two. */
+        NeededResponse: {
+            /**
+             * Format: int32
+             * @description This many more qualifying units.
+             */
+            quantity?: number | null;
+            subtotal?: components["schemas"]["Money"] | null;
         };
         /**
          * @description Who a template's messages go to.
@@ -7516,8 +7597,11 @@ export interface components {
             queued: number;
         };
         SelectedShippingResponse: {
+            /** @description The option's price, before shipping discounts. */
             amount: components["schemas"]["Money"];
             code: string;
+            /** @description What shipping discounts took off it. */
+            discounts: components["schemas"]["DiscountShareResponse"][];
             estimate?: components["schemas"]["DeliveryEstimateDto"] | null;
             name: string;
             option: components["schemas"]["ShippingOptionId"];
@@ -7527,6 +7611,8 @@ export interface components {
              */
             quote_expires_at?: string | null;
             tax?: components["schemas"]["TaxLineResponse"] | null;
+            /** @description What the buyer pays for it: `amount` less the discounts. Tax is on this. */
+            total: components["schemas"]["Money"];
         };
         ServiceDto: {
             code: string;

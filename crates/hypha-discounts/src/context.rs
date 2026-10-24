@@ -84,6 +84,25 @@ impl DiscountContext {
         })
     }
 
+    /// Whether a discount here names categories: only then does pricing need the
+    /// products' categories.
+    pub fn names_categories(&self) -> bool {
+        let names = |set: &crate::discount::ItemSet| {
+            matches!(set.items, crate::discount::Items::Categories(_))
+        };
+        self.automatic
+            .iter()
+            .chain(self.coded.iter().map(|(_, d)| d))
+            .any(|d| match d.kind() {
+                Kind::Standard { rewards } => rewards.iter().any(|r| match &r.target {
+                    Target::Items(set) => names(set),
+                    _ => false,
+                }),
+                Kind::BuyXGetY { buys, gets, .. } => names(buys) || names(gets),
+                Kind::Tiered { items, .. } => names(items),
+            })
+    }
+
     /// Every discount that may apply, each with whether its limits are reached.
     pub fn candidates(&self) -> Vec<Live<'_>> {
         let reached = |d: &Discount| {
