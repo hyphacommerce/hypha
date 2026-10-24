@@ -270,20 +270,6 @@ impl OrderLine {
         Ok(sum)
     }
 
-    /// What refunding `units` more of the line gives back once `refunded` were: its
-    /// `total` (after discounts) prorated by unit, rounded down, so the last units
-    /// refunded take the remainder and a line refunded whole returns exactly its total.
-    /// The buyer keeps the discounts' benefit on what they keep; nothing is redistributed
-    /// over the other lines. `None` past the line's quantity.
-    pub fn refund_of(&self, refunded: u32, units: u32) -> Option<Money> {
-        let quantity = self.quantity.value();
-        let upto = refunded.checked_add(units).filter(|n| *n <= quantity)?;
-        let total = i128::from(self.total.amount());
-        let share = |n: u32| total * i128::from(n) / i128::from(quantity);
-        let amount = i64::try_from(share(upto) - share(refunded)).ok()?;
-        Money::new(amount, self.total.currency()).ok()
-    }
-
     /// How many are still to ship.
     pub fn unfulfilled_quantity(&self) -> u32 {
         self.quantity
@@ -1598,22 +1584,5 @@ mod tests {
             events[0].data["discount_total"],
             serde_json::json!({"amount": 240, "currency": "EUR"})
         );
-    }
-
-    #[test]
-    fn a_partial_refund_is_prorated_and_the_last_units_take_the_remainder() {
-        // 3 units charged 10.00 after discounts: 3.33, 3.33, then 3.34.
-        let mut l = line(1, 500, 3, None);
-        l.discounts = vec![share(500)];
-        l.total = eur(1000);
-        assert_eq!(l.refund_of(0, 1), Some(eur(333)));
-        assert_eq!(l.refund_of(1, 1), Some(eur(333)));
-        assert_eq!(l.refund_of(2, 1), Some(eur(334)));
-        assert_eq!(l.refund_of(0, 3), Some(eur(1000)));
-    }
-
-    #[test]
-    fn no_refund_past_the_lines_quantity() {
-        assert_eq!(line(1, 500, 3, None).refund_of(2, 2), None);
     }
 }
