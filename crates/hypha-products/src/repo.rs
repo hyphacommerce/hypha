@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use hypha_core::{AssetId, Keyset, Page, PageRequest, ProductId, RepoError, VariantId};
 
-use crate::{Handle, Product, ProductFilter, ProductSort, ProductSummary};
+use crate::{
+    Handle, Product, ProductFilter, ProductSort, ProductSummary, VariantFilter, VariantPosition,
+    VariantSummary,
+};
 
 /// Uniqueness rules a `ProductRepo` enforces, reported as `RepoError::Duplicate(key)`.
 /// Adapters map their constraint names to these.
@@ -54,6 +57,16 @@ pub trait ProductRepo {
         sort: ProductSort,
         page: PageRequest<Keyset<ProductId>>,
     ) -> Result<Page<ProductSummary>, RepoError>;
+    /// A page of variant summaries across products: the newest product first, each
+    /// product's variants in their order, those after `page.after`
+    /// (`VariantPosition::precedes`) and only those `filter` matches
+    /// (`VariantFilter::matches`, with the category membership as stored and the categories'
+    /// tree). Each equals the stored product's `Product::variant_summaries` item.
+    async fn list_variants(
+        &self,
+        filter: &VariantFilter,
+        page: PageRequest<VariantPosition>,
+    ) -> Result<Page<VariantSummary>, RepoError>;
     /// Stores a new product and sets its version to 1. Fails with `Duplicate` on any
     /// key in `keys`.
     async fn insert(&self, product: &mut Product) -> Result<(), RepoError>;

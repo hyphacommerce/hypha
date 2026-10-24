@@ -1,7 +1,8 @@
 use hypha_core::{
-    AuthError, BasisPoints, CatalogId, CountryCode, CountryError, Ctx, Currency, ErrorCode,
-    HasBatch, IdGenerator, MarketId, Money, MoneyError, Page, PageRequest, PendingEvent, Price,
-    PriceListId, ProductId, RepoError, Scope, StageEvents, Subject, VariantId, report_duplicate,
+    AuthError, BasisPoints, CatalogId, CountryCode, CountryError, Ctx, Currency, CustomerGroupId,
+    ErrorCode, HasBatch, IdGenerator, Keyset, MarketId, Money, MoneyError, Page, PageRequest,
+    PendingEvent, Price, PriceListId, ProductId, RepoError, Scope, StageEvents, Subject, Timestamp,
+    VariantId, report_duplicate,
 };
 use thiserror::Error;
 
@@ -9,8 +10,14 @@ use crate::{
     Catalog, CatalogContext, CatalogRepo, HasCatalogs, HasMarkets, HasPriceLists, Market,
     MarketError, MarketRepo, PriceList, PriceListError, PriceListRepo, StageCatalogProducts,
     StageFixedPrices,
+    error::FixedPriceProblem,
     events::{
         CATALOG, CatalogProductsAdded, CatalogProductsRemoved, PRICE_LIST, PricesRemoved, PricesSet,
+    },
+    filter::{FixedPriceFilter, PriceListFilter, PriceListSort},
+    price_list::{
+        Adjustment, AppliesTo, Audience, CompareAtMode, EntryProblem, FixedPrice, PriceBreak,
+        PriceListDraft, PriceListKind, PriceListPhase, PriceListStatus, Window,
     },
     repo::keys,
 };
@@ -48,6 +55,23 @@ pub enum CommandError {
         market: MarketId,
         catalog: CatalogId,
     },
+    #[error("price list {price_list} is already named {name:?}")]
+    PriceListNameTaken {
+        name: String,
+        price_list: PriceListId,
+    },
+    #[error("at most {max} fixed prices can be set at once")]
+    TooManyPrices { max: usize },
+    /// The catalogs holding it, by ID.
+    #[error("price list {price_list} is on a catalog")]
+    PriceListInUse {
+        price_list: PriceListId,
+        catalogs: Vec<CatalogId>,
+    },
+    /// The audience names a group that doesn't exist (storage's check: this leaf can't
+    /// see groups).
+    #[error("a customer group the audience names doesn't exist")]
+    AudienceGroupNotFound,
 }
 
 impl ErrorCode for CommandError {
@@ -65,55 +89,114 @@ impl ErrorCode for CommandError {
             CommandError::CurrencyMismatch { .. } => "price_list_currency_mismatch",
             CommandError::CountryInOtherMarket { .. } => "country_in_other_market",
             CommandError::CatalogExists { .. } => "catalog_exists",
+            CommandError::PriceListNameTaken { .. } => "price_list_name_taken",
+            CommandError::TooManyPrices { .. } => "too_many_prices",
+            CommandError::PriceListInUse { .. } => "price_list_in_use",
+            CommandError::AudienceGroupNotFound => "customer_group_not_found",
         }
     }
 }
 
-/// Attach a price list to a catalog, or detach it with `None`.
+/// Replaces a catalog's price lists with `lists`, which compete to price its products (the
+/// lowest live price wins).
 ///
-/// Rejects a price list in another currency than the catalog's market up front,
-/// so the mistake surfaces here instead of at checkout. Price resolution still
-/// checks too, because stored data can predate this rule.
-pub async fn assign_price_list<M: MarketRepo, C: CatalogRepo, P: PriceListRepo>(
+/// Every list must exist and be in the market's currency: the mistake surfaces here
+/// instead of at checkout. Price resolution still checks too, because stored data can
+/// predate this rule.
+pub async fn set_catalog_price_lists<S: HasMarkets + HasCatalogs + HasPriceLists>(
     ctx: &Ctx,
-    markets: &M,
-    catalogs: &C,
-    price_lists: &P,
+    ports: &S,
     catalog_id: CatalogId,
-    price_list_id: Option<PriceListId>,
+    lists: Vec<PriceListId>,
 ) -> Result<Catalog, CommandError> {
     ctx.require(Scope::PricingWrite)?;
-
-    let mut catalog = catalogs
-        .get(catalog_id)
-        .await?
-        .ok_or(CommandError::CatalogNotFound(catalog_id))?;
-
-    if let Some(list_id) = price_list_id {
-        let list = price_lists
-            .get(list_id)
-            .await?
-            .ok_or(CommandError::PriceListNotFound(list_id))?;
-
-        let expected = match catalog.context() {
-            CatalogContext::Market(market_id) => markets
-                .get(market_id)
-                .await?
-                .ok_or(CommandError::MarketNotFound(market_id))?
-                .currency(),
-        };
-
-        if list.currency() != expected {
-            return Err(CommandError::CurrencyMismatch {
-                expected,
-                found: list.currency(),
-            });
-        }
-    }
-
-    catalog.set_price_list(price_list_id);
-    catalogs.update(&mut catalog).await?;
+    let mut catalog = load_catalog(ports.catalogs(), catalog_id).await?;
+    catalog.set_price_lists(lists)?;
+    save_catalog_lists(ports, &mut catalog).await?;
     Ok(catalog)
+}
+
+/// Adds one list to a catalog's; one already there changes nothing.
+pub async fn add_catalog_price_list<S: HasMarkets + HasCatalogs + HasPriceLists>(
+    ctx: &Ctx,
+    ports: &S,
+    catalog_id: CatalogId,
+    list: PriceListId,
+) -> Result<Catalog, CommandError> {
+    ctx.require(Scope::PricingWrite)?;
+    let mut catalog = load_catalog(ports.catalogs(), catalog_id).await?;
+    catalog.add_price_list(list)?;
+    save_catalog_lists(ports, &mut catalog).await?;
+    Ok(catalog)
+}
+
+/// Takes one list off a catalog (`PriceListNotInCatalog` when it isn't on it).
+pub async fn remove_catalog_price_list<S: HasCatalogs>(
+    ctx: &Ctx,
+    ports: &S,
+    catalog_id: CatalogId,
+    list: PriceListId,
+) -> Result<Catalog, CommandError> {
+    ctx.require(Scope::PricingWrite)?;
+    let mut catalog = load_catalog(ports.catalogs(), catalog_id).await?;
+    catalog.remove_price_list(list)?;
+    ports.catalogs().update(&mut catalog).await?;
+    Ok(catalog)
+}
+
+async fn load_catalog<C: CatalogRepo>(
+    catalogs: &C,
+    id: CatalogId,
+) -> Result<Catalog, CommandError> {
+    catalogs
+        .get(id)
+        .await?
+        .ok_or(CommandError::CatalogNotFound(id))
+}
+
+/// Checks the catalog's lists exist and are in its market's currency, then stores it. A
+/// list deleted after the check is the storage rule's (`Reference`), read as missing.
+async fn save_catalog_lists<S: HasMarkets + HasCatalogs + HasPriceLists>(
+    ports: &S,
+    catalog: &mut Catalog,
+) -> Result<(), CommandError> {
+    let found = ports.price_lists().get_many(catalog.price_lists()).await?;
+    if let Some(missing) = catalog
+        .price_lists()
+        .iter()
+        .find(|id| !found.iter().any(|l| l.id() == **id))
+    {
+        return Err(CommandError::PriceListNotFound(*missing));
+    }
+    let expected = match catalog.context() {
+        CatalogContext::Market(market_id) => ports
+            .markets()
+            .get(market_id)
+            .await?
+            .ok_or(CommandError::MarketNotFound(market_id))?
+            .currency(),
+    };
+    if let Some(other) = found.iter().find(|l| l.currency() != expected) {
+        return Err(CommandError::CurrencyMismatch {
+            expected,
+            found: other.currency(),
+        });
+    }
+    match ports.catalogs().update(catalog).await {
+        Err(RepoError::Reference(keys::CATALOG_PRICE_LIST)) => {
+            let found = ports.price_lists().get_many(catalog.price_lists()).await?;
+            let missing = catalog
+                .price_lists()
+                .iter()
+                .copied()
+                .find(|id| !found.iter().any(|l| l.id() == *id));
+            Err(match missing {
+                Some(id) => CommandError::PriceListNotFound(id),
+                None => RepoError::Reference(keys::CATALOG_PRICE_LIST).into(),
+            })
+        }
+        done => Ok(done?),
+    }
 }
 
 pub struct CreateMarket {
@@ -248,12 +331,38 @@ async fn country_conflict<M: MarketRepo>(
 }
 
 pub struct CreatePriceList {
+    pub name: String,
+    pub description: Option<String>,
     pub currency: Currency,
-    /// Basis points: -1000 = 10% off, 500 = 5% markup.
-    pub adjustment: i32,
+    pub kind: PriceListKind,
+    pub status: PriceListStatus,
+    pub starts_at: Option<Timestamp>,
+    pub ends_at: Option<Timestamp>,
+    pub compare_at: CompareAtMode,
+    /// `None` adjusts nothing, so the list prices only the variants it has fixed prices
+    /// for.
+    pub adjustment: Option<AdjustmentInput>,
+    /// The customer groups it prices for; none is everyone.
+    pub groups: Vec<CustomerGroupId>,
 }
 
-/// Creates an empty price list. Fixed prices are added with `set_fixed_prices`.
+/// An adjustment as a caller sends it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdjustmentInput {
+    /// Basis points: -1000 = 10% off, 500 = 5% markup.
+    pub percent: i32,
+    pub applies_to: AppliesTo,
+}
+
+fn adjustment(input: AdjustmentInput) -> Result<Adjustment, CommandError> {
+    Ok(Adjustment::new(
+        BasisPoints::new(input.percent)?,
+        input.applies_to,
+    )?)
+}
+
+/// Creates a price list without fixed prices (add them with `set_fixed_prices`). Its
+/// name is unique, ignoring case.
 pub async fn create_price_list<P: PriceListRepo, I: IdGenerator>(
     ctx: &Ctx,
     price_lists: &P,
@@ -262,56 +371,158 @@ pub async fn create_price_list<P: PriceListRepo, I: IdGenerator>(
 ) -> Result<PriceList, CommandError> {
     ctx.require(Scope::PricingWrite)?;
 
-    let adjustment = BasisPoints::new(input.adjustment)?;
+    let adjustment = input.adjustment.map(adjustment).transpose()?;
+    let audience = Audience::of_groups(input.groups)?;
     let mut list = PriceList::new(
         PriceListId::from_uuid(ids.new_uuid()),
-        input.currency,
-        adjustment,
-    );
-    price_lists.insert(&mut list).await?;
+        PriceListDraft {
+            name: input.name,
+            description: input.description,
+            currency: input.currency,
+            kind: input.kind,
+            status: input.status,
+            starts_at: input.starts_at,
+            ends_at: input.ends_at,
+            compare_at: input.compare_at,
+            adjustment,
+            audience,
+        },
+    )?;
+    // Precise error in the normal case; the repo's unique key catches a concurrent insert.
+    if let Some(taken) = name_taken(price_lists, &list).await? {
+        return Err(taken);
+    }
+    let written = unknown_group(price_lists.insert(&mut list).await)?;
+    report_duplicate(
+        written,
+        keys::PRICE_LIST_NAME,
+        name_taken(price_lists, &list),
+    )
+    .await?;
     Ok(list)
 }
 
-pub struct FixedPrice {
+/// A write refused for an audience group that doesn't exist as `AudienceGroupNotFound`;
+/// everything else (a duplicate name included) passed on for the caller to judge.
+fn unknown_group(written: Result<(), RepoError>) -> Result<Result<(), RepoError>, CommandError> {
+    match written {
+        Err(RepoError::Reference(key)) if key == keys::PRICE_LIST_GROUP => {
+            Err(CommandError::AudienceGroupNotFound)
+        }
+        other => Ok(other),
+    }
+}
+
+/// `PriceListNameTaken` when another list has `list`'s name, ignoring case.
+async fn name_taken<P: PriceListRepo>(
+    price_lists: &P,
+    list: &PriceList,
+) -> Result<Option<CommandError>, CommandError> {
+    Ok(price_lists
+        .get_by_name(list.name())
+        .await?
+        .filter(|other| other.id() != list.id())
+        .map(|other| CommandError::PriceListNameTaken {
+            name: other.name().to_string(),
+            price_list: other.id(),
+        }))
+}
+
+/// How many fixed prices one `set_fixed_prices` takes: bulk callers page through.
+pub const MAX_FIXED_PRICES_PER_WRITE: usize = 1000;
+
+/// One fixed price as a caller sends it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetFixedPrice {
     pub variant: VariantId,
     pub price: Money,
+    /// Shown struck through beside the price; above it, in its currency.
+    pub compare_at: Option<Money>,
+    /// Quantity prices: `(min_quantity, price)`, by quantity.
+    pub breaks: Vec<(u32, Money)>,
 }
 
 /// Inserts or replaces fixed prices on a price list.
 ///
 /// All prices are validated before anything is stored: non-negative, in the list's
-/// currency, each variant once. Variant IDs are not checked against the products crate
-/// (markets is a leaf domain); a price for an unknown variant is simply never used.
+/// currency, a compare-at above its price, each variant once. Every entry's problem is
+/// reported at once (`InvalidFixedPrices`). Variant IDs are not checked against the
+/// products crate (markets is a leaf domain); a price for an unknown variant is simply
+/// never used.
 pub async fn set_fixed_prices<S>(
     ctx: &Ctx,
     ports: &S,
     list_id: PriceListId,
-    prices: Vec<FixedPrice>,
+    prices: Vec<SetFixedPrice>,
 ) -> Result<(), CommandError>
 where
     S: HasPriceLists + HasBatch<Batch: StageFixedPrices + StageEvents>,
 {
     ctx.require(Scope::PricingWrite)?;
+    if prices.len() > MAX_FIXED_PRICES_PER_WRITE {
+        return Err(CommandError::TooManyPrices {
+            max: MAX_FIXED_PRICES_PER_WRITE,
+        });
+    }
 
     let list = ports
         .price_lists()
         .get(list_id)
         .await?
         .ok_or(CommandError::PriceListNotFound(list_id))?;
-    let prices = prices
-        .into_iter()
-        .map(|p| Ok((p.variant, Price::new(p.price)?)))
-        .collect::<Result<Vec<_>, MoneyError>>()?;
-    list.check_fixed_prices(&prices)?;
+    let mut problems = Vec::new();
+    let mut parsed = Vec::with_capacity(prices.len());
+    // Each parsed entry's index in the request, so the list's own checks report it.
+    let mut indexes = Vec::with_capacity(prices.len());
+    for (index, entry) in prices.into_iter().enumerate() {
+        match fixed_price(&entry) {
+            Ok(fixed) => {
+                indexes.push(index);
+                parsed.push((entry.variant, fixed));
+            }
+            Err(problem) => problems.push(EntryProblem {
+                index,
+                variant: Some(entry.variant),
+                problem,
+            }),
+        }
+    }
+    if let Err(PriceListError::InvalidFixedPrices(found)) = list.check_fixed_prices(&parsed) {
+        problems.extend(found.into_iter().map(|p| EntryProblem {
+            index: indexes[p.index],
+            ..p
+        }));
+    }
+    if !problems.is_empty() {
+        problems.sort_by_key(|p| p.index);
+        return Err(PriceListError::InvalidFixedPrices(problems).into());
+    }
 
     let event = PricesSet {
         price_list: list_id,
-        variants: prices.iter().map(|(v, _)| *v).collect(),
+        variants: parsed.iter().map(|(v, _)| *v).collect(),
     };
     let mut batch = ports.batch();
-    batch.set_fixed_prices(list_id, &prices);
+    batch.set_fixed_prices(list_id, &parsed);
     batch.record_events(vec![PendingEvent::new(price_list_subject(list_id), &event)]);
     Ok(ports.commit(batch).await?)
+}
+
+/// One entry's own rules: amounts that are prices, a compare-at above the price.
+fn fixed_price(entry: &SetFixedPrice) -> Result<FixedPrice, FixedPriceProblem> {
+    let price = Price::new(entry.price)?;
+    let compare_at = entry.compare_at.map(Price::new).transpose()?;
+    let breaks = entry
+        .breaks
+        .iter()
+        .map(|(min_quantity, price)| {
+            Ok(PriceBreak {
+                min_quantity: *min_quantity,
+                price: Price::new(*price)?,
+            })
+        })
+        .collect::<Result<Vec<_>, FixedPriceProblem>>()?;
+    FixedPrice::new(price, compare_at)?.with_breaks(breaks)
 }
 
 fn price_list_subject(list: PriceListId) -> Subject {
@@ -347,15 +558,25 @@ where
     Ok(ports.commit(batch).await?)
 }
 
-/// A price list's changes; `None` keeps a field.
+/// A price list's changes; `None` keeps a field, and `Some(None)` clears one that may be
+/// empty.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UpdatePriceList {
-    /// Basis points (-1000 = 10% off).
-    pub adjustment: Option<i32>,
+    pub name: Option<String>,
+    pub description: Option<Option<String>>,
+    pub kind: Option<PriceListKind>,
+    pub status: Option<PriceListStatus>,
+    pub starts_at: Option<Option<Timestamp>>,
+    pub ends_at: Option<Option<Timestamp>>,
+    pub compare_at: Option<CompareAtMode>,
+    pub adjustment: Option<Option<AdjustmentInput>>,
+    /// The audience's groups, replacing them; none is everyone.
+    pub groups: Option<Vec<CustomerGroupId>>,
 }
 
-/// Changes a price list's adjustment. Its currency is fixed: catalogs and fixed prices
-/// depend on it.
+/// Changes a price list. Its currency is fixed: catalogs and fixed prices depend on it.
+/// The window is checked as it ends up, so moving both ends at once works in either
+/// order.
 pub async fn update_price_list<P: PriceListRepo>(
     ctx: &Ctx,
     lists: &P,
@@ -367,19 +588,104 @@ pub async fn update_price_list<P: PriceListRepo>(
         .get(id)
         .await?
         .ok_or(CommandError::PriceListNotFound(id))?;
-    if let Some(adjustment) = input.adjustment {
-        list.set_adjustment(BasisPoints::new(adjustment)?);
+    if let Some(name) = &input.name {
+        list.rename(name)?;
     }
-    lists.update(&mut list).await?;
+    if let Some(description) = input.description {
+        list.set_description(description)?;
+    }
+    if let Some(kind) = input.kind {
+        list.set_kind(kind);
+    }
+    if let Some(status) = input.status {
+        list.set_status(status);
+    }
+    if input.starts_at.is_some() || input.ends_at.is_some() {
+        let window = list.window();
+        let starts_at = input.starts_at.unwrap_or(window.starts_at());
+        let ends_at = input.ends_at.unwrap_or(window.ends_at());
+        list.set_window(Window::new(starts_at, ends_at)?);
+    }
+    if let Some(mode) = input.compare_at {
+        list.set_compare_at(mode);
+    }
+    if let Some(new) = input.adjustment {
+        list.set_adjustment(new.map(adjustment).transpose()?);
+    }
+    if let Some(groups) = input.groups {
+        list.set_audience(Audience::of_groups(groups)?);
+    }
+    // Nothing to write: no event, and its `updated_at` stays when it was last changed.
+    if !list.is_changed() {
+        return Ok(list);
+    }
+    if input.name.is_some()
+        && let Some(taken) = name_taken(lists, &list).await?
+    {
+        return Err(taken);
+    }
+    let written = unknown_group(lists.update(&mut list).await)?;
+    report_duplicate(written, keys::PRICE_LIST_NAME, name_taken(lists, &list)).await?;
     Ok(list)
+}
+
+/// Deletes a price list with its fixed prices. Refused while a catalog holds it
+/// (`PriceListInUse`): take it off them first.
+pub async fn delete_price_list<S: HasCatalogs + HasPriceLists>(
+    ctx: &Ctx,
+    ports: &S,
+    id: PriceListId,
+) -> Result<(), CommandError> {
+    ctx.require(Scope::PricingWrite)?;
+    let mut list = ports
+        .price_lists()
+        .get(id)
+        .await?
+        .ok_or(CommandError::PriceListNotFound(id))?;
+    if let Some(in_use) = in_use(ports, id).await? {
+        return Err(in_use);
+    }
+    list.delete();
+    match ports.price_lists().delete(&mut list).await {
+        // A catalog took it on after the check.
+        Err(RepoError::Reference(keys::CATALOG_PRICE_LIST)) => Err(in_use(ports, id)
+            .await?
+            .unwrap_or(RepoError::Reference(keys::CATALOG_PRICE_LIST).into())),
+        // Another request deleted it first, or changed it since it was loaded.
+        Err(RepoError::StaleVersion) => match ports.price_lists().get(id).await? {
+            None => Err(CommandError::PriceListNotFound(id)),
+            Some(_) => Err(RepoError::StaleVersion.into()),
+        },
+        done => Ok(done?),
+    }
+}
+
+/// `PriceListInUse` naming the catalogs that hold `list`, if any do.
+async fn in_use<S: HasCatalogs>(
+    ports: &S,
+    list: PriceListId,
+) -> Result<Option<CommandError>, CommandError> {
+    let catalogs: Vec<CatalogId> = ports
+        .catalogs()
+        .holding_price_list(list)
+        .await?
+        .iter()
+        .map(|c| c.id())
+        .collect();
+    Ok(
+        (!catalogs.is_empty()).then_some(CommandError::PriceListInUse {
+            price_list: list,
+            catalogs,
+        }),
+    )
 }
 
 pub struct CreateCatalog {
     pub market: MarketId,
 }
 
-/// Creates an empty catalog for a market, without a price list.
-/// Add products with `add_catalog_products` and a price list with `assign_price_list`.
+/// Creates an empty catalog for a market, without price lists. Add products with
+/// `add_catalog_products` and price lists with `set_catalog_price_lists`.
 pub async fn create_catalog<M: MarketRepo, C: CatalogRepo, I: IdGenerator>(
     ctx: &Ctx,
     markets: &M,
@@ -398,7 +704,7 @@ pub async fn create_catalog<M: MarketRepo, C: CatalogRepo, I: IdGenerator>(
     if let Some(exists) = catalog_exists(catalogs, input.market).await? {
         return Err(exists);
     }
-    let mut catalog = Catalog::new(CatalogId::from_uuid(ids.new_uuid()), context, None);
+    let mut catalog = Catalog::new(CatalogId::from_uuid(ids.new_uuid()), context, []);
     let written = catalogs.insert(&mut catalog).await;
     report_duplicate(
         written,
@@ -478,11 +784,13 @@ where
 
 // ---------- reads ----------
 
-/// A market as the admin reads it: the market and the ID of its catalog, if it has one.
+/// A market as the admin reads it: the market, the ID of its catalog if it has one, and
+/// the catalog's price lists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketView {
     pub market: Market,
     pub catalog: Option<CatalogId>,
+    pub price_lists: Vec<PriceListId>,
 }
 
 /// Every market, oldest first, without their catalogs: what a storefront's country list
@@ -508,9 +816,14 @@ pub async fn list_markets<S: HasMarkets + HasCatalogs>(
         .map(|market| {
             let catalog = catalogs
                 .iter()
-                .find(|c| c.context() == CatalogContext::Market(market.id()))
-                .map(|c| c.id());
-            MarketView { market, catalog }
+                .find(|c| c.context() == CatalogContext::Market(market.id()));
+            MarketView {
+                market,
+                catalog: catalog.map(|c| c.id()),
+                price_lists: catalog
+                    .map(|c| c.price_lists().to_vec())
+                    .unwrap_or_default(),
+            }
         })
         .collect())
 }
@@ -529,9 +842,14 @@ pub async fn get_market<S: HasMarkets + HasCatalogs>(
     let catalog = ports
         .catalogs()
         .get_by_context(CatalogContext::Market(id))
-        .await?
-        .map(|c| c.id());
-    Ok(MarketView { market, catalog })
+        .await?;
+    Ok(MarketView {
+        market,
+        catalog: catalog.as_ref().map(|c| c.id()),
+        price_lists: catalog
+            .map(|c| c.price_lists().to_vec())
+            .unwrap_or_default(),
+    })
 }
 
 pub async fn get_catalog<C: CatalogRepo>(
@@ -561,13 +879,52 @@ pub async fn list_catalog_products<C: CatalogRepo>(
     Ok(catalogs.product_page(id, page).await?)
 }
 
-/// Every price list, oldest first.
-pub async fn list_price_lists<P: PriceListRepo>(
+/// What a list of price lists is narrowed to, as a request gives it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ListPriceLists {
+    pub kind: Option<PriceListKind>,
+    /// The phase lists are in now (`at`).
+    pub phase: Option<PriceListPhase>,
+    /// Only the lists on this market's catalog; a market without one has none.
+    pub market: Option<MarketId>,
+    /// Only the lists whose audience names this group.
+    pub group: Option<CustomerGroupId>,
+    pub sort: PriceListSort,
+}
+
+/// A page of price lists in `input.sort`'s order. `at` is now: what phases are judged at.
+pub async fn list_price_lists<S: HasMarkets + HasCatalogs + HasPriceLists>(
     ctx: &Ctx,
-    lists: &P,
-) -> Result<Vec<PriceList>, CommandError> {
+    ports: &S,
+    input: ListPriceLists,
+    at: Timestamp,
+    page: PageRequest<Keyset<PriceListId>>,
+) -> Result<Page<PriceList>, CommandError> {
     ctx.require(Scope::PricingRead)?;
-    Ok(lists.list_all().await?)
+    let ids = match input.market {
+        Some(market) => {
+            if ports.markets().get(market).await?.is_none() {
+                return Err(CommandError::MarketNotFound(market));
+            }
+            Some(
+                ports
+                    .catalogs()
+                    .get_by_context(CatalogContext::Market(market))
+                    .await?
+                    .map(|c| c.price_lists().to_vec())
+                    .unwrap_or_default(),
+            )
+        }
+        None => None,
+    };
+    let filter = PriceListFilter {
+        kind: input.kind,
+        phase: input.phase,
+        at,
+        ids,
+        group: input.group,
+    };
+    Ok(ports.price_lists().list(&filter, input.sort, page).await?)
 }
 
 pub async fn get_price_list<P: PriceListRepo>(
@@ -582,16 +939,17 @@ pub async fn get_price_list<P: PriceListRepo>(
         .ok_or(CommandError::PriceListNotFound(id))
 }
 
-/// A page of the list's fixed prices, newest variant first.
+/// A page of the list's fixed prices, newest variant first, narrowed by `filter`.
 pub async fn list_fixed_prices<P: PriceListRepo>(
     ctx: &Ctx,
     lists: &P,
     id: PriceListId,
+    filter: &FixedPriceFilter,
     page: PageRequest<VariantId>,
-) -> Result<Page<(VariantId, Price)>, CommandError> {
+) -> Result<Page<(VariantId, FixedPrice)>, CommandError> {
     ctx.require(Scope::PricingRead)?;
     if lists.get(id).await?.is_none() {
         return Err(CommandError::PriceListNotFound(id));
     }
-    Ok(lists.fixed_price_page(id, page).await?)
+    Ok(lists.fixed_price_page(id, filter, page).await?)
 }

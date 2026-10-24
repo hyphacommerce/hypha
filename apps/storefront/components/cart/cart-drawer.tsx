@@ -1,8 +1,9 @@
 "use client";
 
 // The cart in a drawer: a dialog against the page's end edge, opened from the header
-// and after adding to the cart, with the lines, the subtotal and the way on to the cart
-// page and checkout.
+// and after adding to the cart, with the lines, the discount code field, the subtotal
+// (before discounts, as the cart page shows it, then what they took off and what's left)
+// and the way on to the cart page and checkout.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -13,14 +14,16 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 
-import { formatMoney } from "@/lib/money";
+import { readCartDiscounts, subtotalRows } from "@/lib/discounts";
 
 import { CartLines } from "./cart-lines";
 import { useCart } from "./cart-provider";
+import { DiscountCodeField } from "./discount-code-field";
 
 export function CartDrawer() {
   const { cart, count, digits, base, isOpen, close, error } = useCart();
   const isEmpty = !cart || cart.lines.length === 0;
+  const discounts = readCartDiscounts(cart);
   return (
     <Dialog
       isOpen={isOpen}
@@ -51,12 +54,20 @@ export function CartDrawer() {
             </div>
             <Divider />
             <VStack gap={3}>
-              <HStack hAlign="between">
-                <Text weight="medium">Subtotal</Text>
-                <Text weight="semibold" hasTabularNumbers>
-                  {formatMoney(cart.subtotal, digits)}
-                </Text>
-              </HStack>
+              <DiscountCodeField discounts={discounts} />
+              {subtotalRows(cart.subtotal, discounts, digits).map((row) => (
+                <HStack key={row.label} hAlign="between">
+                  <Text
+                    color={row.strong ? undefined : "secondary"}
+                    weight={row.strong ? "medium" : undefined}
+                  >
+                    {row.label}
+                  </Text>
+                  <Text weight={row.strong ? "semibold" : undefined} hasTabularNumbers>
+                    {row.value}
+                  </Text>
+                </HStack>
+              ))}
               <Text type="supporting" color="secondary">
                 Shipping and taxes are worked out at checkout.
               </Text>

@@ -60,6 +60,152 @@ function items(n: number): string {
   return `${n} ${n === 1 ? "item" : "items"}`;
 }
 
+type OrderLine = AdminSchemas["OrderLineResponse"];
+
+/**
+ * A line's unit price, its compare-at struck through beside it when that's above what it
+ * cost, and the price list that priced it (linked; by ID until its name is read, and
+ * when it can't be).
+ */
+function UnitPrice({
+  line,
+  currencies,
+  listNames,
+}: {
+  line: OrderLine;
+  currencies: Currencies;
+  listNames: Promise<Map<string, string>>;
+}) {
+  const was = line.compare_at_price;
+  const isStruck =
+    was && was.currency === line.unit_price.currency && was.amount > line.unit_price.amount;
+  return (
+    <VStack gap={0.5}>
+      <HStack gap={2} wrap="wrap">
+        <Text type="body" hasTabularNumbers>
+          {formatMoney(line.unit_price, currencies)}
+        </Text>
+        {isStruck && (
+          <Text type="body" color="secondary" hasStrikethrough hasTabularNumbers>
+            {formatMoney(was, currencies)}
+          </Text>
+        )}
+      </HStack>
+      {line.price_list && (
+        <Link href={`/markets/price-lists/${line.price_list}`}>
+          <Text type="supporting">
+            <Suspense fallback={line.price_list}>
+              <ListName id={line.price_list} names={listNames} />
+            </Suspense>
+          </Text>
+        </Link>
+      )}
+    </VStack>
+  );
+}
+
+/** A price list's name once `names` is read; its ID when it isn't among them. */
+async function ListName({ id, names }: { id: string; names: Promise<Map<string, string>> }) {
+  return (await names).get(id) ?? id;
+}
+
+/**
+ * The names of the price lists that priced `lines`, by ID: one read per list, none for
+ * an order without. Without `pricing:read` (or when a read fails), none: the lines show
+ * the lists by ID. Never awaited by the page, so the order shows without waiting.
+ */
+async function priceListNames(
+  client: Awaited<ReturnType<typeof sessionClient>>,
+  lines: readonly OrderLine[],
+): Promise<Map<string, string>> {
+  const ids = [...new Set(lines.flatMap((l) => (l.price_list ? [l.price_list] : [])))];
+  const read = await Promise.all(
+    ids.map((id) =>
+      client
+        .GET("/admin/price-lists/{id}", { params: { path: { id } } })
+        .then((r) => (r.data ? ([id, r.data.name] as const) : null))
+        .catch(() => null),
+    ),
+  );
+  return new Map(read.filter((e) => e !== null));
+}
+
+type DiscountShare = AdminSchemas["DiscountShareResponse"];
+type OrderDiscount = AdminSchemas["OrderDiscountResponse"];
+
+/**
+ * What a line or a shipping line was charged: its amount before discounts struck through
+ * above it when discounts took something off, and each discount's part under it
+ * ("−€2.40 Welcome offer").
+ */
+function Charged({
+  before,
+  total,
+  shares,
+  discounts,
+  currencies,
+}: {
+  before: AdminSchemas["Money"];
+  total: AdminSchemas["Money"];
+  shares: readonly DiscountShare[];
+  /** The order's discounts, which `shares` name by index. */
+  discounts: readonly OrderDiscount[];
+  currencies: Currencies;
+}) {
+  if (shares.length === 0) return <>{formatMoney(total, currencies)}</>;
+  return (
+    <VStack gap={0.5}>
+      <Text type="supporting" color="secondary" hasStrikethrough hasTabularNumbers>
+        {formatMoney(before, currencies)}
+      </Text>
+      <Text type="body" hasTabularNumbers>
+        {formatMoney(total, currencies)}
+      </Text>
+      {shares.map((share) => (
+        <Text key={share.application} type="supporting" color="secondary">
+          −{formatMoney(share.amount, currencies)}{" "}
+          {discounts[share.application]?.title ?? "Discount"}
+          {share.units ? ` (${items(share.units)})` : ""}
+        </Text>
+      ))}
+    </VStack>
+  );
+}
+
+/** The discounts an order got, one row per reward, with what each took off. */
+function DiscountsList({ order, currencies }: { order: Order; currencies: Currencies }) {
+  if (order.discounts.length === 0) return null;
+  return (
+    <VStack gap={2}>
+      <HStack gap={2} hAlign="between" vAlign="center">
+        <Text weight="semibold">Discounts</Text>
+        <Text weight="semibold" hasTabularNumbers>
+          −{formatMoney(order.discount_total, currencies)}
+        </Text>
+      </HStack>
+      {order.discounts.map((d) => (
+        // A discount gives at most one reward per class.
+        <HStack key={`${d.discount}-${d.class}`} gap={2} hAlign="between" vAlign="start">
+          <VStack gap={0}>
+            <Link href={`/discounts/${d.discount}`}>
+              <Text type="body" weight="medium">
+                {d.title}
+              </Text>
+            </Link>
+            <Text type="supporting" color="secondary">
+              {[d.code ? `Code ${d.code}` : "Automatic", d.summary].join(" · ")}
+            </Text>
+          </VStack>
+          <Text hasTabularNumbers>−{formatMoney(d.amount, currencies)}</Text>
+        </HStack>
+      ))}
+      <Text type="supporting" color="secondary">
+        Already taken off the lines and shipping above.
+      </Text>
+    </VStack>
+  );
+}
+
 /** A footer row of the items table: its label, and the amount in the last column. */
 function TotalRow({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
@@ -126,6 +272,7 @@ async function Order({ id }: { id: string }) {
     client.GET("/admin/orders/{id}/custom-fields", { params: { path: { id } } }),
   ]);
   const order = loaded(found);
+  const listNames = priceListNames(client, order.lines);
   const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
   const fulfillments = shipments.data?.items ?? [];
   const places: Place[] = (locations.data?.items ?? []).map((l) => ({ id: l.id, name: l.name }));
@@ -211,7 +358,9 @@ async function Order({ id }: { id: string }) {
                           )}
                         </VStack>
                       </TableCell>
-                      <TableCell>{formatMoney(line.unit_price, currencies)}</TableCell>
+                      <TableCell>
+                        <UnitPrice line={line} currencies={currencies} listNames={listNames} />
+                      </TableCell>
                       <TableCell>{line.quantity}</TableCell>
                       <TableCell>
                         {line.fulfilled_quantity} of {line.quantity}
@@ -221,7 +370,15 @@ async function Order({ id }: { id: string }) {
                           ? `${formatMoney(line.tax.amount, currencies)} (${percent(line.tax.rate_ppm)})`
                           : "—"}
                       </TableCell>
-                      <TableCell>{formatMoney(line.total, currencies)}</TableCell>
+                      <TableCell>
+                        <Charged
+                          before={line.subtotal}
+                          total={line.total}
+                          shares={line.discounts}
+                          discounts={order.discounts}
+                          currencies={currencies}
+                        />
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -249,7 +406,15 @@ async function Order({ id }: { id: string }) {
                           ? `${formatMoney(shipping.tax.amount, currencies)} (${percent(shipping.tax.rate_ppm)})`
                           : "—"}
                       </TableCell>
-                      <TableCell>{formatMoney(shipping.amount, currencies)}</TableCell>
+                      <TableCell>
+                        <Charged
+                          before={shipping.amount}
+                          total={shipping.total}
+                          shares={shipping.discounts}
+                          discounts={order.discounts}
+                          currencies={currencies}
+                        />
+                      </TableCell>
                     </TableRow>
                   ))}
                   <TotalRow label={order.taxes_included ? "Tax (included)" : "Tax"}>
@@ -268,6 +433,7 @@ async function Order({ id }: { id: string }) {
                   </TotalRow>
                 </TableFooter>
               </Table>
+              <DiscountsList order={order} currencies={currencies} />
             </VStack>
           </Card>
 

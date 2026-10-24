@@ -44,7 +44,7 @@ async fn login(
 }
 
 /// A request with the key and the customer's session.
-async fn send_signed_in(
+pub(super) async fn send_signed_in(
     app: &TestApp,
     pk: &str,
     session: &str,
@@ -288,7 +288,7 @@ async fn guessing_one_emails_code_is_limited_per_address() {
 // ---------- the account ----------
 
 /// Signs `email` in and answers (the publishable key, the session token).
-async fn signed_in(app: &TestApp, email: &str) -> (String, String) {
+pub(super) async fn signed_in(app: &TestApp, email: &str) -> (String, String) {
     let pk = publishable(app).await;
     ask(app, &pk, email).await;
     let digits = last_code(app);

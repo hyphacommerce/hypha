@@ -144,7 +144,12 @@ impl World {
         );
         block_on(p.catalogs.insert(&mut catalog)).unwrap();
         block_on(p.catalogs.add_products(catalog_id, &[pid(1100), pid(1101)])).unwrap();
-        let mut list = PriceList::new(list_id, Currency::EUR, BasisPoints::new(0).unwrap());
+        let mut list = PriceList::new(
+            list_id,
+            hypha_markets::PriceListDraft::new("Euro", Currency::EUR)
+                .adjusted(BasisPoints::new(0).unwrap()),
+        )
+        .unwrap();
         block_on(p.price_lists.insert(&mut list)).unwrap();
 
         let mut zone = ShippingZone::new(zone_id(), "Croatia", vec![hr()]).unwrap();
@@ -577,4 +582,68 @@ fn a_cart_of_things_never_shipped_has_no_groups() {
     let priced = w.get(cart);
     assert!(priced.shipping_groups.is_empty());
     assert!(priced.is_shipping_ready());
+}
+
+// ---- shipping discounts ----
+
+/// Free shipping for everyone, automatically.
+fn free_shipping(w: &World) {
+    use hypha_discounts::{
+        Discount, DiscountDraft, DiscountRepo, Kind, Method, Reward, Target, Value,
+    };
+    let kind = Kind::Standard {
+        rewards: vec![Reward {
+            target: Target::Shipping { max_amount: None },
+            value: Value::Percent(hypha_core::BasisPoints::new(10_000).unwrap()),
+        }],
+    };
+    let mut d = Discount::new(
+        hypha_core::DiscountId::from_uuid(uuid::Uuid::from_u128(7000)),
+        DiscountDraft::new("Free shipping", Method::Automatic, kind),
+    )
+    .unwrap();
+    block_on(w.ports.discounts.insert(&mut d)).unwrap();
+}
+
+#[test]
+fn free_shipping_keeps_the_price_and_takes_it_off_the_total() {
+    let w = World::new();
+    w.tax();
+    free_shipping(&w);
+    let cart = w.cart_with(mug(), 1);
+    w.ship_to(cart, "HR").unwrap();
+    let priced = w.select(&Dhl::failing(), cart, standard()).unwrap();
+    let selected = priced.shipping_groups[0].selected.as_ref().unwrap();
+    assert_eq!(
+        (
+            selected.amount,
+            selected.total,
+            selected.tax.map(|t| t.amount)
+        ),
+        (eur(400), eur(0), Some(eur(0)))
+    );
+    assert_eq!(
+        (priced.shipping_total, priced.discount_total, priced.total),
+        (eur(0), eur(400), eur(1250))
+    );
+}
+
+#[test]
+fn offers_show_their_price_after_shipping_discounts() {
+    let w = World::new();
+    free_shipping(&w);
+    let cart = w.cart_with(mug(), 2);
+    w.ship_to(cart, "HR").unwrap();
+    let offers = block_on(shipping_offers(
+        &Ctx::system(),
+        &w.ports,
+        &Dhl::quoting(1290),
+        cart,
+    ))
+    .unwrap();
+    // The hidden backup is the third outcome: not offered, so nothing beside it.
+    assert_eq!(
+        offers[0].after_discounts,
+        vec![Some(eur(0)), Some(eur(0)), None]
+    );
 }

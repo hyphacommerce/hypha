@@ -394,6 +394,71 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "proposal_applying",
             sql: include_str!("../migrations/0074_proposal_applying.sql"),
         },
+        Migration {
+            version: 75,
+            name: "price_list_names",
+            sql: include_str!("../migrations/0075_price_list_names.sql"),
+        },
+        Migration {
+            version: 76,
+            name: "compare_at_prices",
+            sql: include_str!("../migrations/0076_compare_at_prices.sql"),
+        },
+        Migration {
+            version: 77,
+            name: "catalog_price_lists",
+            sql: include_str!("../migrations/0077_catalog_price_lists.sql"),
+        },
+        Migration {
+            version: 78,
+            name: "price_breaks",
+            sql: include_str!("../migrations/0078_price_breaks.sql"),
+        },
+        Migration {
+            version: 79,
+            name: "price_list_schedule",
+            sql: include_str!("../migrations/0079_price_list_schedule.sql"),
+        },
+        Migration {
+            version: 80,
+            name: "price_list_groups",
+            sql: include_str!("../migrations/0080_price_list_groups.sql"),
+        },
+        Migration {
+            version: 81,
+            name: "variants_by_product",
+            sql: include_str!("../migrations/0081_variants_by_product.sql"),
+        },
+        Migration {
+            version: 82,
+            name: "temporary_uploads",
+            sql: include_str!("../migrations/0082_temporary_uploads.sql"),
+        },
+        Migration {
+            version: 83,
+            name: "discounts",
+            sql: include_str!("../migrations/0083_discounts.sql"),
+        },
+        Migration {
+            version: 84,
+            name: "cart_discount_codes",
+            sql: include_str!("../migrations/0084_cart_discount_codes.sql"),
+        },
+        Migration {
+            version: 85,
+            name: "order_discounts",
+            sql: include_str!("../migrations/0085_order_discounts.sql"),
+        },
+        Migration {
+            version: 86,
+            name: "discount_schedule",
+            sql: include_str!("../migrations/0086_discount_schedule.sql"),
+        },
+        Migration {
+            version: 87,
+            name: "discount_usages_by_code",
+            sql: include_str!("../migrations/0087_discount_usages_by_code.sql"),
+        },
     ],
 };
 

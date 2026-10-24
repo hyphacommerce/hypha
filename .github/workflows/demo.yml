@@ -1,0 +1,66 @@
+# Deploys the public demo (demo.hyphacommerce.com: the API, the admin and the storefront
+# as Workers) when main changes, with `hypha deploy` exactly as from a laptop. The
+# deployment folder is rebuilt from the repository's settings:
+# - secret DEMO_DEPLOY_ENV: the whole `hypha-deploy-demo/.env` (its token, database URL,
+#   secret key, owner, storefront key and webhook secret);
+# - variables DEMO_HYPHA_JSON and DEMO_HYPHA_CONFIG: its `hypha.json` and
+#   `hypha.config.toml`.
+# Without the secret the job stops before deploying.
+name: Demo
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - apps/site/**
+      - docs/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DEMO_DEPLOY_ENV: ${{ secrets.DEMO_DEPLOY_ENV }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: worker-build
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # `hypha deploy` calls wrangler from the PATH; the workspace pins it in apps/site.
+      - run: echo "$GITHUB_WORKSPACE/apps/site/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Write the deployment folder
+        if: ${{ env.DEMO_DEPLOY_ENV != '' }}
+        env:
+          HYPHA_JSON: ${{ vars.DEMO_HYPHA_JSON }}
+          HYPHA_CONFIG: ${{ vars.DEMO_HYPHA_CONFIG }}
+        run: |
+          mkdir -p hypha-deploy-demo
+          printf '%s\n' "$DEMO_DEPLOY_ENV" > hypha-deploy-demo/.env
+          printf '%s\n' "$HYPHA_JSON" > hypha-deploy-demo/hypha.json
+          printf '%s\n' "$HYPHA_CONFIG" > hypha-deploy-demo/hypha.config.toml
+          cp hypha.config.schema.json hypha-deploy-demo/
+      - name: Deploy
+        if: ${{ env.DEMO_DEPLOY_ENV != '' }}
+        run: pnpm hypha deploy --dir hypha-deploy-demo --yes

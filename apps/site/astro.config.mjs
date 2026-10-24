@@ -143,6 +143,7 @@ export default defineConfig({
       customCss: [
         "@fontsource-variable/geist",
         "@fontsource-variable/geist-mono",
+        "./src/styles/fonts.css",
         "./src/styles/starlight.css",
       ],
       sidebar: [

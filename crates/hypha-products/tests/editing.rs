@@ -35,6 +35,7 @@ impl World {
             handle: handle.to_string(),
             title: "Shirt".to_string(),
             price: eur(1000),
+            compare_at_price: None,
         };
         block_on(create_simple_product(
             &self.ctx, &self.repo, &self.ids, input,
@@ -114,6 +115,7 @@ fn variant(sku: Option<&str>, selections: Vec<OptionValueId>) -> AddVariant {
         selections,
         weight: None,
         requires_shipping: true,
+        compare_at_price: None,
     }
 }
 
@@ -580,6 +582,7 @@ fn each_edit_records_what_changed() {
     let patch = UpdateVariant {
         sku: None,
         price: Some(eur(1200)),
+        compare_at_price: None,
         selections: None,
         weight: None,
         requires_shipping: None,
@@ -642,6 +645,7 @@ fn set(
         selections,
         weight: None,
         requires_shipping: true,
+        compare_at_price: None,
     }
 }
 

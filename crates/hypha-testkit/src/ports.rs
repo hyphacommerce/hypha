@@ -53,6 +53,7 @@ pub struct InMemoryPorts {
     pub payment_methods: InMemoryPaymentMethodRepo,
     pub payments: InMemoryPaymentRepo,
     pub assets: InMemoryAssetRepo,
+    pub temporary_uploads: crate::InMemoryTemporaryUploadRepo,
     pub shipping_zones: InMemoryShippingZoneRepo,
     pub app_providers: InMemoryAppProviderRepo,
     pub apps: InMemoryAppRepo,
@@ -90,6 +91,8 @@ pub struct InMemoryPorts {
     pub custom_fields: crate::InMemoryCustomFields,
     /// Admin agents, their proposals and their call log.
     pub agents: crate::InMemoryAgents,
+    /// Discounts, their codes and their usage.
+    pub discounts: crate::InMemoryDiscounts,
 }
 
 impl Default for InMemoryPorts {
@@ -101,21 +104,36 @@ impl Default for InMemoryPorts {
         let custom_fields = crate::InMemoryCustomFields::sharing(&outbox);
         let categories = InMemoryCategoryRepo::sharing(&outbox).joining_fields(&custom_fields);
         let customer_groups = crate::InMemoryCustomerGroupRepo::sharing(&outbox);
+        let products = InMemoryProductRepo::sharing(&outbox)
+            .joining(&categories, &channels)
+            .joining_fields(&custom_fields);
+        let catalogs = InMemoryCatalogRepo::sharing(&outbox);
+        let price_lists = InMemoryPriceListRepo::sharing(&outbox)
+            .joining(&catalogs, &products, &categories)
+            .joining_groups(&customer_groups);
+        let markets = InMemoryMarketRepo::sharing(&outbox);
+        let customers = InMemoryCustomerRepo::sharing(&outbox)
+            .joining_fields(&custom_fields)
+            .joining_groups(&customer_groups);
+        let discounts = crate::InMemoryDiscounts::sharing(&outbox).joining(
+            &products,
+            &categories,
+            &markets,
+            &channels,
+            &customer_groups,
+            &customers,
+        );
         Self {
             carts: InMemoryCartRepo::sharing(&outbox),
-            products: InMemoryProductRepo::sharing(&outbox)
-                .joining(&categories, &channels)
-                .joining_fields(&custom_fields),
-            markets: InMemoryMarketRepo::sharing(&outbox),
-            catalogs: InMemoryCatalogRepo::sharing(&outbox),
-            price_lists: InMemoryPriceListRepo::sharing(&outbox),
+            products,
+            markets,
+            catalogs,
+            price_lists,
             tax_classes: InMemoryTaxClassRepo::sharing(&outbox),
             tax_regions: InMemoryTaxRegionRepo::sharing(&outbox),
             inventory_items: InMemoryInventoryItemRepo::sharing(&outbox),
             locations: InMemoryLocationRepo::sharing(&outbox),
-            customers: InMemoryCustomerRepo::sharing(&outbox)
-                .joining_fields(&custom_fields)
-                .joining_groups(&customer_groups),
+            customers,
             customer_groups,
             idempotency: InMemoryIdempotencyRepo::default(),
             preview_tokens: crate::InMemoryPreviewTokenRepo::default(),
@@ -126,6 +144,7 @@ impl Default for InMemoryPorts {
             payment_methods,
             payments,
             assets: InMemoryAssetRepo::sharing(&outbox),
+            temporary_uploads: crate::InMemoryTemporaryUploadRepo::default(),
             shipping_zones: InMemoryShippingZoneRepo::sharing(&outbox),
             app_providers,
             apps: apps.joining_fields(&custom_fields),
@@ -150,6 +169,7 @@ impl Default for InMemoryPorts {
             spore_settings: crate::InMemorySporeSettingsRepo::sharing(&outbox),
             custom_fields,
             agents: crate::InMemoryAgents::sharing(&outbox),
+            discounts,
             outbox,
         }
     }
@@ -159,6 +179,17 @@ impl hypha_core::HasPreviewTokens for InMemoryPorts {
     type PreviewTokens = crate::InMemoryPreviewTokenRepo;
     fn preview_tokens(&self) -> &crate::InMemoryPreviewTokenRepo {
         &self.preview_tokens
+    }
+}
+
+impl hypha_cart::HasPromotions for InMemoryPorts {
+    type Promotions = hypha_promotions::CartPromotions;
+}
+
+impl hypha_discounts::HasDiscounts for InMemoryPorts {
+    type Discounts = crate::InMemoryDiscounts;
+    fn discounts(&self) -> &crate::InMemoryDiscounts {
+        &self.discounts
     }
 }
 
@@ -285,6 +316,12 @@ impl HasCatalogs for InMemoryPorts {
     }
 }
 
+impl hypha_core::HasClock for InMemoryPorts {
+    fn now(&self) -> hypha_core::Timestamp {
+        self.outbox.now()
+    }
+}
+
 impl HasPriceLists for InMemoryPorts {
     type PriceLists = InMemoryPriceListRepo;
     fn price_lists(&self) -> &InMemoryPriceListRepo {
@@ -345,6 +382,13 @@ impl HasAssets for InMemoryPorts {
     type Assets = InMemoryAssetRepo;
     fn assets(&self) -> &InMemoryAssetRepo {
         &self.assets
+    }
+}
+
+impl hypha_media::HasTemporaryUploads for InMemoryPorts {
+    type TemporaryUploads = crate::InMemoryTemporaryUploadRepo;
+    fn temporary_uploads(&self) -> &crate::InMemoryTemporaryUploadRepo {
+        &self.temporary_uploads
     }
 }
 

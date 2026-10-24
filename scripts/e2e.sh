@@ -75,6 +75,16 @@ contains() {
     fi
 }
 
+# lacks NAME TEXT: asserts the last response body doesn't contain TEXT.
+lacks() {
+    if [[ $BODY != *"$2"* ]]; then
+        echo "ok   $1"
+    else
+        echo "FAIL $1: expected body not to contain $2: $BODY"
+        FAILED=$((FAILED + 1))
+    fi
+}
+
 # replayed NAME CURL_ARGS...: sends the request again and asserts the response carries
 # `Idempotent-Replayed: true`.
 replayed() {
@@ -286,6 +296,16 @@ CUP_VAR=$(variant)
 step "activate mug" 200 - -X PATCH "$BASE/admin/products/$MUG/status" -H "$JSON" -d '{"status":"active"}'
 contains "mug is active" '"status":"active"'
 step "activate cup" 200 - -X PATCH "$BASE/admin/products/$CUP/status" -H "$JSON" -d '{"status":"active"}'
+step "a compare-at price for the mug" 200 - -X PATCH "$BASE/admin/products/$MUG/variants/$MUG_VAR" -H "$JSON" \
+    -d '{"compare_at_price":{"amount":1500,"currency":"EUR"}}'
+contains "the was price is kept" '"compare_at_price":{"amount":1500,"currency":"EUR"}'
+step "a compare-at price at the price" 422 compare_at_not_above_price -X PATCH \
+    "$BASE/admin/products/$MUG/variants/$MUG_VAR" -H "$JSON" -d '{"compare_at_price":{"amount":1000,"currency":"EUR"}}'
+step "a price raised past the compare-at" 422 compare_at_not_above_price -X PATCH \
+    "$BASE/admin/products/$MUG/variants/$MUG_VAR" -H "$JSON" -d '{"price":{"amount":1600,"currency":"EUR"}}'
+step "clear the compare-at price" 200 - -X PATCH "$BASE/admin/products/$MUG/variants/$MUG_VAR" -H "$JSON" \
+    -d '{"compare_at_price":null}'
+contains "it is gone" '"compare_at_price":null'
 step "list products, one per page" 200 - "$BASE/admin/products?limit=1"
 contains "newest first, with more after it" "\"items\":[{\"id\":\"$CUP\""
 contains "with a cursor for the next page" '"has_more":true,"next_cursor":"'
@@ -308,6 +328,23 @@ contains "is the cup" "\"id\":\"$CUP\""
 step "that cursor under another sort" 400 invalid_cursor "$BASE/admin/products?sort=title_asc&limit=1&cursor=$NEXT"
 step "products of any of two statuses, by title" 200 - "$BASE/admin/products?status=active&status=draft&sort=title_desc"
 step "a cursor from another list" 400 invalid_cursor "$BASE/admin/products?cursor=ord_00000000000000000000000000000000"
+step "products by ID, repeated or comma-separated" 200 - "$BASE/admin/products?ids=$MUG&ids=$CUP,prod_00000000000000000000000000000063"
+contains "finds both" "\"items\":[{\"id\":\"$CUP\""
+contains "the mug too" "\"id\":\"$MUG\""
+step "an ID that isn't one" 400 invalid_query "$BASE/admin/products?ids=mug"
+step "variants across products, one per page" 200 - "$BASE/admin/variants?limit=1"
+contains "the newest product's first" "\"items\":[{\"id\":\"$CUP_VAR\""
+contains "with its product" "\"product\":{\"id\":\"$CUP\",\"title\":"
+NEXT=$(sed -E 's/.*"next_cursor":"([^"]+)".*/\1/' <<<"$BODY")
+step "the next page of variants" 200 - "$BASE/admin/variants?limit=1&cursor=$NEXT"
+contains "is the mug's" "\"items\":[{\"id\":\"$MUG_VAR\""
+step "variants of one product" 200 - "$BASE/admin/variants?product=$MUG"
+contains "only the mug's" "\"items\":[{\"id\":\"$MUG_VAR\",\"sku\":null,\"title\":null,\"price\":"
+step "variants by ID" 200 - "$BASE/admin/variants?ids=$CUP_VAR"
+contains "only the cup's" "\"items\":[{\"id\":\"$CUP_VAR\""
+step "variants in an unknown category" 200 - "$BASE/admin/variants?category=pcat_00000000000000000000000000000063"
+contains "none" '"items":[]'
+step "variants by an unknown filter" 400 invalid_query "$BASE/admin/variants?status=active"
 
 # deleting a product
 step "create a product to delete" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
@@ -353,10 +390,11 @@ step "the S variant's SKU and price" 200 - -X PATCH "$BASE/admin/products/$SHIRT
 contains "are stored" '"price":{"amount":1400,"currency":"EUR"},"sku":"SHIRT-S"'
 step "a SKU another variant has" 409 sku_taken -X PATCH "$BASE/admin/products/$SHIRT/variants/$SHIRT_S" -H "$JSON" \
     -d '{"sku":"SHIRT-M"}'
-VARIANTS="{\"variants\":[{\"id\":\"$SHIRT_M\",\"sku\":\"SHIRT-M\",\"price\":{\"amount\":1600,\"currency\":\"EUR\"},\"selections\":[\"$SIZE_M\"],\"weight_grams\":null,\"requires_shipping\":true},{\"id\":\"$SHIRT_S\",\"sku\":\"SHIRT-S\",\"price\":{\"amount\":1400,\"currency\":\"EUR\"},\"selections\":[\"$SIZE_S\"],\"weight_grams\":250,\"requires_shipping\":true}]}"
+VARIANTS="{\"variants\":[{\"id\":\"$SHIRT_M\",\"sku\":\"SHIRT-M\",\"price\":{\"amount\":1600,\"currency\":\"EUR\"},\"compare_at_price\":null,\"selections\":[\"$SIZE_M\"],\"weight_grams\":null,\"requires_shipping\":true},{\"id\":\"$SHIRT_S\",\"sku\":\"SHIRT-S\",\"price\":{\"amount\":1400,\"currency\":\"EUR\"},\"compare_at_price\":{\"amount\":1800,\"currency\":\"EUR\"},\"selections\":[\"$SIZE_S\"],\"weight_grams\":250,\"requires_shipping\":true}]}"
 step "the whole variant list in one PUT" 200 - -X PUT "$BASE/admin/products/$SHIRT/variants" \
     -H "$JSON" -d "$VARIANTS"
 contains "M first now, S weighed" '"weight_grams":250'
+contains "S with a compare-at price" '"compare_at_price":{"amount":1800,"currency":"EUR"}'
 step "a list leaving a key out" 422 invalid_body -X PUT "$BASE/admin/products/$SHIRT/variants" -H "$JSON" \
     -d "{\"variants\":[{\"id\":\"$SHIRT_S\",\"price\":{\"amount\":1400,\"currency\":\"EUR\"},\"selections\":[\"$SIZE_S\"],\"weight_grams\":null,\"requires_shipping\":true}]}"
 step "an empty list" 409 no_variants -X PUT "$BASE/admin/products/$SHIRT/variants" -H "$JSON" -d '{"variants":[]}'
@@ -416,6 +454,31 @@ contains "the variant shows nothing now" '"media_asset_id":null'
 step "delete the asset" 204 - -X DELETE "$BASE/admin/assets/$ASSET"
 step "it is gone" 404 asset_not_found "$BASE/admin/assets/$ASSET"
 
+# temporary uploads: a price CSV goes straight to storage, and the admin's server reads it
+# back.
+CSV_FILE=$(mktemp)
+printf 'variant,price\nvar_1,9.50\n' > "$CSV_FILE"
+CSV_SIZE=$(wc -c < "$CSV_FILE" | tr -d ' ')
+step "start a price import upload" 201 - -X POST "$BASE/admin/uploads" -H "$JSON" \
+    -d "{\"purpose\":\"price_import\",\"filename\":\"prices.csv\",\"byte_size\":$CSV_SIZE}"
+contains "signed for CSV" '"name":"content-type","value":"text/csv"'
+UPLOAD=$(sed -E 's/^\{"id":"([^"]+)".*/\1/' <<<"$BODY")
+UPLOAD_URL=$(sed -E 's/.*"upload":\{"method":"PUT","url":"([^"]+)".*/\1/' <<<"$BODY")
+step "read before uploading" 409 upload_missing "$BASE/admin/uploads/$UPLOAD/content"
+STORED=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: text/csv' \
+    -H 'cache-control: private, no-store' --data-binary "@$CSV_FILE" "$UPLOAD_URL")
+if [[ $STORED == 200 ]]; then echo "ok   upload the CSV to storage"; else
+    echo "FAIL upload the CSV to storage: HTTP $STORED"; FAILED=$((FAILED + 1)); fi
+rm -f "$CSV_FILE"
+step "read the CSV back" 200 - "$BASE/admin/uploads/$UPLOAD/content"
+contains "its rows" 'var_1,9.50'
+step "an upload too large" 422 file_too_large -X POST "$BASE/admin/uploads" -H "$JSON" \
+    -d '{"purpose":"price_import","filename":"big.csv","byte_size":20971521}'
+step "an unknown purpose" 422 invalid_body -X POST "$BASE/admin/uploads" -H "$JSON" \
+    -d '{"purpose":"avatar","filename":"me.png","byte_size":10}'
+step "delete the upload" 204 - -X DELETE "$BASE/admin/uploads/$UPLOAD"
+step "the upload is gone" 404 upload_not_found "$BASE/admin/uploads/$UPLOAD/content"
+
 step "currencies for pickers" 200 - "$BASE/admin/currencies"
 contains "yen has no minor units" '{"code":"JPY","name":"Japanese Yen","minor_units":0}'
 contains "dinar has three" '{"code":"KWD","name":"Kuwaiti Dinar","minor_units":3}'
@@ -435,39 +498,153 @@ contains "Slovenia added" '"countries":["HR","DE","SI"]'
 step "stop selling to Slovenia" 200 - -X DELETE "$BASE/admin/markets/$MARKET/countries/SI"
 contains "Slovenia removed" '"countries":["HR","DE"]'
 step "create price list (-10%)" 201 - -X POST "$BASE/admin/price-lists" -H "$JSON" \
-    -d '{"currency":"EUR","adjustment_bps":-1000}'
+    -d '{"name":"Eurozone prices","currency":"EUR","adjustment":{"percent_bps":-1000}}'
 LIST=$(id)
-step "fix cup price at 200" 204 - -X PUT "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
-    -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"}}]}"
+contains "an active override list by default" '"kind":"override","status":"active","phase":"active"'
+step "a list's name is unique, ignoring case" 409 price_list_name_taken -X POST "$BASE/admin/price-lists" \
+    -H "$JSON" -d '{"name":"EUROZONE PRICES","currency":"EUR"}'
+step "a window ending before it starts" 422 ends_not_after_start -X POST "$BASE/admin/price-lists" -H "$JSON" \
+    -d '{"name":"Never","currency":"EUR","starts_at":"2026-02-01T00:00:00Z","ends_at":"2026-01-01T00:00:00Z"}'
+step "a scheduled sale" 201 - -X POST "$BASE/admin/price-lists" -H "$JSON" \
+    -d '{"name":"Next year sale","currency":"EUR","kind":"sale","starts_at":"2999-01-01T00:00:00Z"}'
+contains "not started yet" '"phase":"scheduled"'
+SCHEDULED_LIST=$(id)
+step "pause it" 200 - -X PATCH "$BASE/admin/price-lists/$SCHEDULED_LIST" -H "$JSON" \
+    -d '{"status":"draft","description":"Planned"}'
+contains "a draft" '"phase":"draft"'
+
+step "fix cup price at 200, 150 from 50" 204 - -X PUT "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
+    -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"},\"breaks\":[{\"min_quantity\":50,\"price\":{\"amount\":150,\"currency\":\"EUR\"}}]}]}"
+step "a quantity price above the price" 422 fixed_prices_invalid -X PUT "$BASE/admin/price-lists/$LIST/fixed-prices" \
+    -H "$JSON" -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"},\"breaks\":[{\"min_quantity\":50,\"price\":{\"amount\":250,\"currency\":\"EUR\"}}]}]}"
+contains "breaks must descend" '"code":"price_breaks_not_descending"'
+step "a quantity price from 1" 422 fixed_prices_invalid -X PUT "$BASE/admin/price-lists/$LIST/fixed-prices" \
+    -H "$JSON" -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"},\"breaks\":[{\"min_quantity\":1,\"price\":{\"amount\":150,\"currency\":\"EUR\"}}]}]}"
+contains "from 2 up" '"code":"price_break_quantity_invalid"'
+step "a quantity price past a million" 422 fixed_prices_invalid -X PUT "$BASE/admin/price-lists/$LIST/fixed-prices" \
+    -H "$JSON" -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"},\"breaks\":[{\"min_quantity\":3000000000,\"price\":{\"amount\":150,\"currency\":\"EUR\"}}]}]}"
+contains "up to a million" '"code":"price_break_quantity_invalid"'
 step "create catalog" 201 - -X POST "$BASE/admin/catalogs" -H "$JSON" -d "{\"market\":\"$MARKET\"}"
 CATALOG=$(id)
 step "add mug and cup to catalog" 204 - -X POST "$BASE/admin/catalogs/$CATALOG/products" -H "$JSON" \
     -d "{\"products\":[\"$MUG\",\"$CUP\"]}"
-step "assign price list" 200 - -X PUT "$BASE/admin/catalogs/$CATALOG/price-list" -H "$JSON" \
-    -d "{\"price_list\":\"$LIST\"}"
+step "give the catalog its price list" 200 - -X PUT "$BASE/admin/catalogs/$CATALOG/price-lists" -H "$JSON" \
+    -d "{\"price_lists\":[\"$LIST\"]}"
+contains "the catalog's lists" "\"price_lists\":[\"$LIST\"]"
+step "add the scheduled sale too" 200 - -X POST "$BASE/admin/catalogs/$CATALOG/price-lists" -H "$JSON" \
+    -d "{\"price_list\":\"$SCHEDULED_LIST\"}"
+step "a list on a catalog isn't deleted" 409 price_list_in_use -X DELETE "$BASE/admin/price-lists/$SCHEDULED_LIST"
+contains "naming the catalog" "\"catalogs\":[\"$CATALOG\"]"
+step "take it off the catalog" 200 - -X DELETE "$BASE/admin/catalogs/$CATALOG/price-lists/$SCHEDULED_LIST"
+contains "only the first list left" "\"price_lists\":[\"$LIST\"]"
+step "a list the catalog doesn't hold" 404 price_list_not_in_catalog -X DELETE \
+    "$BASE/admin/catalogs/$CATALOG/price-lists/$SCHEDULED_LIST"
 step "list markets" 200 - "$BASE/admin/markets"
 contains "a market names its catalog" "\"catalog\":\"$CATALOG\""
 step "fetch the market" 200 - "$BASE/admin/markets/$MARKET"
 step "an unknown market" 404 market_not_found "$BASE/admin/markets/mkt_00000000000000000000000000000063"
 step "fetch the catalog" 200 - "$BASE/admin/catalogs/$CATALOG"
-contains "with its price list" "\"price_list\":\"$LIST\""
+contains "with its price lists" "\"price_lists\":[\"$LIST\"]"
 step "the catalog's products, a page of one" 200 - "$BASE/admin/catalogs/$CATALOG/products?limit=1"
 contains "there are more" '"has_more":true'
 step "an unknown catalog's products" 404 catalog_not_found \
     "$BASE/admin/catalogs/cat_00000000000000000000000000000063/products"
 step "list price lists" 200 - "$BASE/admin/price-lists"
-contains "with its adjustment" '"adjustment_bps":-1000'
+contains "with its adjustment" '"adjustment":{"percent_bps":-1000,"applies_to":{"type":"all"}}'
+step "only the drafts" 200 - "$BASE/admin/price-lists?status=draft"
+contains "the paused sale" '"name":"Next year sale"'
+step "by name" 200 - "$BASE/admin/price-lists?sort=name_asc&limit=1"
+contains "alphabetically first" '"name":"Eurozone prices"'
+step "the market's" 200 - "$BASE/admin/price-lists?market=$MARKET"
+contains "on its catalog" "\"markets\":[\"$MARKET\"]"
+step "delete the paused sale" 204 - -X DELETE "$BASE/admin/price-lists/$SCHEDULED_LIST"
+
+# Discounts: typed rules, codes in their own rows. Only codes apply here, so the carts
+# below are untouched until one is entered.
+step "a 10% welcome code in one call" 201 - -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Welcome","method":"codes","kind":{"type":"standard","rewards":[{"target":{"type":"subtotal"},"value":{"type":"percent","basis_points":1000}}]},"codes":["welcome10"],"limits":{"once_per_customer":true}}'
+WELCOME=$(id)
+contains "summarised from its data" '"summary":"10% off the order · once per customer"'
+contains "an order discount" '"classes":["order"]'
+step "every broken rule at once" 422 invalid_discount -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":" ","method":"codes","kind":{"type":"standard","rewards":[]},"limits":{"total":0}}'
+contains "with its path" '"path":"kind.rewards"'
+step "an amount in another currency than the market's" 422 discount_currency_mismatch -X POST "$BASE/admin/discounts" \
+    -H "$JSON" -d "{\"title\":\"Off\",\"method\":\"codes\",\"kind\":{\"type\":\"standard\",\"rewards\":[{\"target\":{\"type\":\"subtotal\"},\"value\":{\"type\":\"amount\",\"amounts\":{\"$MARKET\":{\"amount\":500,\"currency\":\"USD\"}}}}]}}"
+step "a code another discount has" 409 discount_code_taken -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Again","method":"codes","kind":{"type":"standard","rewards":[{"target":{"type":"subtotal"},"value":{"type":"percent","basis_points":500}}]},"codes":["WELCOME10"]}'
+step "an automatic discount has no codes" 409 discount_automatic -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Auto","method":"automatic","kind":{"type":"standard","rewards":[{"target":{"type":"subtotal"},"value":{"type":"percent","basis_points":500}}]},"codes":["X"]}'
+step "a prefix must leave eight random characters" 422 invalid_code_length -X POST \
+    "$BASE/admin/discounts/$WELCOME/codes/generate" -H "$JSON" -d '{"count":3,"prefix":"nl-","length":10}'
+step "generate single-use codes" 201 - -X POST "$BASE/admin/discounts/$WELCOME/codes/generate" -H "$JSON" \
+    -d '{"count":3,"prefix":"nl-","length":11,"batch":"Newsletter"}'
+contains "single use, with the prefix" '"code":"NL-'
+step "the codes, by code" 200 - "$BASE/admin/discounts/$WELCOME/codes"
+contains "as typed and normalised" '"code":"welcome10","normalized":"WELCOME10"'
+step "export a batch as CSV" 200 - "$BASE/admin/discounts/$WELCOME/codes/export?batch=Newsletter"
+contains "with its header" 'code,normalized,usage_limit,used,active,batch,created_at'
+step "deactivate the batch" 200 - -X PATCH "$BASE/admin/discounts/$WELCOME/codes" -H "$JSON" \
+    -d '{"batch":"Newsletter","active":false}'
+contains "three changed" '"updated":3'
+step "the inactive codes" 200 - "$BASE/admin/discounts/$WELCOME/codes?active=false"
+contains "the batch's" '"normalized":"NL-'
+lacks "not the welcome code" '"normalized":"WELCOME10"'
+step "reactivating a code that's active changes nothing" 200 - -X PATCH "$BASE/admin/discounts/$WELCOME/codes" \
+    -H "$JSON" -d '{"codes":["welcome10"],"active":true}'
+contains "none changed" '"updated":0'
+step "remove the batch" 200 - -X DELETE "$BASE/admin/discounts/$WELCOME/codes" -H "$JSON" -d '{"batch":"Newsletter"}'
+contains "three went" '"removed":3'
+step "a summary worked out without saving" 200 - -X POST "$BASE/admin/discounts/summary" -H "$JSON" \
+    -d '{"title":"Try","method":"codes","kind":{"type":"standard","rewards":[{"target":{"type":"subtotal"},"value":{"type":"percent","basis_points":1500}}]}}'
+contains "its sentence" '"summary":"15% off the order","problems":[]'
+step "a broken one lists its problems" 200 - -X POST "$BASE/admin/discounts/summary" -H "$JSON" \
+    -d '{"title":"Try","method":"codes","kind":{"type":"standard","rewards":[]}}'
+contains "with no sentence" '"summary":null,"problems":[{"path":"kind.rewards"'
+step "changes over a saved one" 200 - -X POST "$BASE/admin/discounts/summary" -H "$JSON" \
+    -d "{\"id\":\"$WELCOME\",\"limits\":{\"total\":5}}"
+contains "as PATCH would make it" '"summary":"10% off the order · 5 uses"'
+step "found by its code" 200 - "$BASE/admin/discounts?code=Welcome10"
+contains "the welcome offer" "\"id\":\"$WELCOME\""
+step "no uses yet" 200 - "$BASE/admin/discounts/$WELCOME/usage"
+contains "an empty page" '"items":[]'
+step "a draft automatic discount" 201 - -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Later","method":"automatic","status":"draft","kind":{"type":"standard","rewards":[{"target":{"type":"shipping"},"value":{"type":"percent","basis_points":10000}}]}}'
+DRAFT_DISCOUNT=$(id)
+step "only the drafts" 200 - "$BASE/admin/discounts?status=draft"
+contains "the draft" "\"id\":\"$DRAFT_DISCOUNT\""
+step "its method is fixed" 422 invalid_body -X PATCH "$BASE/admin/discounts/$DRAFT_DISCOUNT" -H "$JSON" -d '{"method":"codes"}'
+step "delete it" 204 - -X DELETE "$BASE/admin/discounts/$DRAFT_DISCOUNT"
+step "gone" 404 discount_not_found "$BASE/admin/discounts/$DRAFT_DISCOUNT"
+step "it is gone" 404 price_list_not_found "$BASE/admin/price-lists/$SCHEDULED_LIST"
+step "deleting it again" 404 price_list_not_found -X DELETE "$BASE/admin/price-lists/$SCHEDULED_LIST"
 step "fetch the price list" 200 - "$BASE/admin/price-lists/$LIST"
 step "its fixed prices" 200 - "$BASE/admin/price-lists/$LIST/fixed-prices"
 contains "the cup at 200" "{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"}"
 step "rename the market" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"name":"Euro area"}'
 contains "renamed" '"name":"Euro area"'
 step "and back" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"name":"Eurozone"}'
-step "deepen the discount" 200 - -X PATCH "$BASE/admin/price-lists/$LIST" -H "$JSON" -d '{"adjustment_bps":-2000}'
-contains "-20%" '"adjustment_bps":-2000'
-step "back to -10%" 200 - -X PATCH "$BASE/admin/price-lists/$LIST" -H "$JSON" -d '{"adjustment_bps":-1000}'
+step "deepen the discount" 200 - -X PATCH "$BASE/admin/price-lists/$LIST" -H "$JSON" \
+    -d '{"adjustment":{"percent_bps":-2000}}'
+contains "-20%" '"adjustment":{"percent_bps":-2000,'
+step "the mug's prices, explained" 200 - "$BASE/admin/products/$MUG/prices?market=$MARKET"
+contains "priced by the list" "\"price\":{\"amount\":800,\"currency\":\"EUR\"},\"compare_at_price\":null,\"on_sale\":false,\"price_list\":\"$LIST\""
+contains "which won" '"result":"won"'
+step "for no quantity" 422 invalid_quantity "$BASE/admin/products/$MUG/prices?quantity=0"
+step "in an unknown market" 404 market_not_found \
+    "$BASE/admin/products/$MUG/prices?market=mkt_00000000000000000000000000000063"
+step "back to -10%" 200 - -X PATCH "$BASE/admin/price-lists/$LIST" -H "$JSON" \
+    -d '{"adjustment":{"percent_bps":-1000}}'
 step "fixed prices name their product" 200 - "$BASE/admin/price-lists/$LIST/fixed-prices"
 contains "the cup" '"product":{"id":'
+step "fixed prices in an unknown category" 200 - "$BASE/admin/price-lists/$LIST/fixed-prices?category=pcat_00000000000000000000000000000063"
+contains "none" '"items":[]'
+step "fixed prices of a page of variants" 200 - \
+    "$BASE/admin/price-lists/$LIST/fixed-prices?variants=$CUP_VAR,var_00000000000000000000000000000063"
+contains "only the cup's" "\"items\":[{\"variant\":\"$CUP_VAR\""
+MANY_VARIANTS=$(for n in $(seq 1 251); do printf 'var_%032x,' "$n"; done)
+step "too many variants" 422 too_many_filter_ids \
+    "$BASE/admin/price-lists/$LIST/fixed-prices?variants=${MANY_VARIANTS%,}"
 step "list API keys" 200 - "$BASE/admin/api-keys"
 contains "the storefront's key among them" '"kind":"publishable"'
 step "countries for pickers" 200 - "$BASE/admin/countries"
@@ -484,6 +661,7 @@ step "publish mug and cup to the Online Store" 204 - -X POST "$BASE/admin/channe
     -H "$JSON" -d "{\"products\":[\"$MUG\",\"$CUP\"]}"
 step "the cup's page, priced in Croatia" 200 - "$BASE/storefront/products/by-handle/cup?country=HR"
 contains "at its fixed price" '"price":{"amount":200,"currency":"EUR"},"available":true'
+contains "with its quantity price" '"price_breaks":[{"min_quantity":50,"price":{"amount":150,"currency":"EUR"}}]'
 contains "sold there" '"sold_in_country":true,"currency":"EUR"'
 step "the mug by ID, -10%" 200 - "$BASE/storefront/products/$MUG?country=HR"
 contains "at 9.00" '"price":{"amount":900,"currency":"EUR"}'
@@ -528,6 +706,18 @@ contains "mug line is named, with its handle" '"product_title":"Mug","variant_ti
 step "add 3 cups" 200 - -X POST "$BASE/storefront/carts/$CART/lines" -H "$JSON" \
     -d "{\"variant\":\"$CUP_VAR\",\"quantity\":3}"
 contains "cart total is 2400" '"total":{"amount":2400,"currency":"EUR"},"fully_available":true'
+step "a code that isn't one" 422 discount_code_invalid -X POST "$BASE/storefront/carts/$CART/discount-codes" \
+    -H "$JSON" -d '{"code":"NOPE"}'
+step "enter the welcome code as typed" 200 - -X POST "$BASE/storefront/carts/$CART/discount-codes" \
+    -H "$JSON" -d '{"code":" welcome10"}'
+contains "10% off 24.00" '"discount_total":{"amount":240,"currency":"EUR"}'
+contains "the code applies" '"discount_codes":[{"code":"WELCOME10","state":"applied"}]'
+contains "the mugs' share" '"total":{"amount":1620,"currency":"EUR"},"tax":null,"compare_at_price":null,"subtotal":{"amount":1800,"currency":"EUR"},"discounts":[{"application":0,"amount":{"amount":180,"currency":"EUR"}}]'
+contains "the cart total after it" '"total":{"amount":2160,"currency":"EUR"},"fully_available":true'
+step "let go of it" 200 - -X DELETE "$BASE/storefront/carts/$CART/discount-codes/welcome10"
+contains "back to 24.00" '"total":{"amount":2400,"currency":"EUR"},"fully_available":true'
+step "a code the cart doesn't hold" 404 discount_code_not_on_cart -X DELETE \
+    "$BASE/storefront/carts/$CART/discount-codes/WELCOME10"
 
 echo "## idempotency keys"
 fresh "a first request isn't marked replayed" -X POST "$BASE/storefront/carts" -H "$JSON" \
@@ -719,6 +909,8 @@ contains "and the next action shows them" '"next_action":{"type":"instructions",
 contains "the order is #1001" '"number":1001'
 contains "it is pending and unfulfilled" '"financial_status":"pending","fulfillment_status":"unfulfilled"'
 contains "it copies the line" '"product_title":"Mug","variant_title":null,"sku":null,"unit_price":{"amount":900,"currency":"EUR"}'
+contains "and its compare-at" '"unit_price":{"amount":900,"currency":"EUR"},"compare_at_price":null,"total"'
+lacks "but not the price list that priced it" '"price_list"'
 contains "its total is 1800" '"total":{"amount":1800,"currency":"EUR"},"lines"'
 ORDER_TOKEN=$(sed -E 's/.*"access_token":"(hypha_ord_[0-9a-f]+)".*/\1/' <<<"$BODY")
 step "the buyer reads the order with its token" 200 - "$BASE/storefront/orders/$ORDER?token=$ORDER_TOKEN"
@@ -745,6 +937,7 @@ step "a completed cart takes no lines" 409 cart_completed -X POST "$BASE/storefr
     -H "$JSON" -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
 step "get the order" 200 - "$BASE/admin/orders/$ORDER"
 contains "it has a placed_at" '"placed_at":"20'
+contains "the admin sees the price list that priced it" "\"compare_at_price\":null,\"price_list\":\"$LIST\""
 step "list orders" 200 - "$BASE/admin/orders?limit=1"
 contains "the order is listed first" "\"items\":[{\"id\":\"$ORDER\""
 step "orders by status and total" 200 - "$BASE/admin/orders?financial_status=pending&currency=EUR&sort=total_desc"
@@ -781,13 +974,23 @@ step "an order ID of the wrong kind" 400 invalid_path "$BASE/admin/orders/$CART"
 step "a new cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 contains "an open cart has no order" '"order":null'
 step "checkout an empty cart" 409 cart_empty -X POST "$BASE/storefront/carts/$(id)/checkout" -H "$JSON" -d '{}'
+step "the welcome code on the shipping cart" 200 - -X POST "$SHIP/discount-codes" -H "$JSON" -d '{"code":"WELCOME10"}'
+contains "0.90 off the mug, shipping as it was" '"total":{"amount":1300,"currency":"EUR"},"fully_available":true'
 step "pay the shipping cart on delivery" 200 - -X PUT "$SHIP/payment-method" -H "$JSON" \
     -d "{\"payment_method\":\"$COD\"}"
-step "checkout the shipping cart" 201 - -X POST "$SHIP/checkout" -H "$JSON" -d '{}'
+step "checkout the shipping cart" 201 - -X POST "$SHIP/checkout" -H "$JSON" -d '{"expected_total":{"amount":1300,"currency":"EUR"}}'
 contains "told to pay the courier" '"next_action":{"type":"instructions","instructions":"Pay the courier."}'
-contains "the order charges shipping" '"shipping_total":{"amount":490,"currency":"EUR"},"tax_total":{"amount":0,"currency":"EUR"},"total":{"amount":1390'
+contains "the order charges shipping" '"shipping_total":{"amount":490,"currency":"EUR"},"tax_total":{"amount":0,"currency":"EUR"},"total":{"amount":1300'
+contains "the order keeps the discount" '"discount_total":{"amount":90,"currency":"EUR"}'
+contains "with its code and value" '"code":"WELCOME10","title":"Welcome","summary":"10% off the order · once per customer","class":"order","value":{"basis_points":1000,"type":"percent"}'
 contains "it copies the address" '"shipping_address":{"first_name":"Ana","last_name":"Horvat"'
-contains "and the shipping line" '"code":"standard","name":"Standard","provider":null,"service":null,"reference":null,"amount":{"amount":490,"currency":"EUR"},"estimate":{"min_days":2,"max_days":4}'
+contains "and the shipping line" '"code":"standard","name":"Standard","service":null,"amount":{"amount":490,"currency":"EUR"},"estimate":{"min_days":2,"max_days":4}'
+lacks "but not its provider, which is for staff" '"provider"'
+step "the welcome code was used once" 200 - "$BASE/admin/discounts/$WELCOME/usage"
+contains "on the shipping cart's order" '"code":"WELCOME10","amount":{"amount":90,"currency":"EUR"}'
+contains "with the order's number" '"order_number":'
+step "what it took off in all" 200 - "$BASE/admin/discounts/$WELCOME"
+contains "per currency" '"discounted_total":[{"amount":90,"currency":"EUR"}]'
 
 echo "## payment and search apps"
 step "a payment app that isn't installed" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \
@@ -1063,6 +1266,8 @@ step "rename customer" 200 - -X PATCH "$BASE/admin/customers/$CUSTOMER" -H "$JSO
 contains "null clears, others change" '"first_name":null,"last_name":"Horvat"'
 step "customers by text, by name" 200 - "$BASE/admin/customers?q=horvat&sort=name_asc"
 contains "finds her" "\"items\":[{\"id\":\"$CUSTOMER\""
+step "customers by their IDs" 200 - "$BASE/admin/customers?ids=$CUSTOMER,cus_00000000000000000000000000000063"
+contains "only her" "\"items\":[{\"id\":\"$CUSTOMER\""
 step "add shipping address" 201 - -X POST "$BASE/admin/customers/$CUSTOMER/addresses" -H "$JSON" \
     -d '{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR","default_shipping":true}'
 ADDRESS=$(address)
@@ -1103,6 +1308,27 @@ contains "out again" '"groups":[]'
 step "every group" 200 - "$BASE/admin/customer-groups"
 contains "one" '"handle":"wholesale"'
 step "an unknown group" 404 customer_group_not_found "$BASE/admin/customer-groups/cgrp_00000000000000000000000000000063"
+step "trade prices, for the group" 201 - -X POST "$BASE/admin/price-lists" -H "$JSON" \
+    -d "{\"name\":\"Trade prices\",\"currency\":\"EUR\",\"adjustment\":{\"percent_bps\":-3000},\"audience\":{\"groups\":[\"$WHOLESALE\"]}}"
+TRADE=$(id)
+contains "its audience" "\"audience\":{\"groups\":[\"$WHOLESALE\"]}"
+step "an audience of a group that doesn't exist" 422 customer_group_not_found -X POST "$BASE/admin/price-lists" -H "$JSON" \
+    -d '{"name":"Nobody","currency":"EUR","audience":{"groups":["cgrp_00000000000000000000000000000063"]}}'
+step "the market's catalog holds it" 200 - -X POST "$BASE/admin/catalogs/$CATALOG/price-lists" -H "$JSON" \
+    -d "{\"price_list\":\"$TRADE\"}"
+step "the group's lists" 200 - "$BASE/admin/price-lists?group=$WHOLESALE"
+contains "trade prices" '"name":"Trade prices"'
+step "the mug for anyone" 200 - "$BASE/admin/products/$MUG/prices?market=$MARKET"
+contains "the trade list isn't theirs" '"result":"not_in_audience"'
+step "the mug for the group" 200 - "$BASE/admin/products/$MUG/prices?market=$MARKET&group=$WHOLESALE"
+contains "30% off" "\"price\":{\"amount\":700,\"currency\":\"EUR\"},\"compare_at_price\":null,\"on_sale\":false,\"price_list\":\"$TRADE\""
+step "for a group that doesn't exist" 404 customer_group_not_found \
+    "$BASE/admin/products/$MUG/prices?group=cgrp_00000000000000000000000000000063"
+step "a group a list names stays" 409 customer_group_in_use -X DELETE "$BASE/admin/customer-groups/$WHOLESALE"
+step "the lamp, for a shopper not signed in" 200 - "$BASE/storefront/products/$LAMP?country=HR"
+contains "the public price" '"price":{"amount":900,"currency":"EUR"}'
+step "off the catalog again" 200 - -X DELETE "$BASE/admin/catalogs/$CATALOG/price-lists/$TRADE"
+step "and gone" 204 - -X DELETE "$BASE/admin/price-lists/$TRADE"
 step "a passer-by" 201 - -X POST "$BASE/admin/customers" -H "$JSON" -d '{"email":"passerby@example.hr"}'
 PASSERBY=$(id)
 step "is deleted" 204 - -X DELETE "$BASE/admin/customers/$PASSERBY"
@@ -1134,7 +1360,7 @@ step "cash on delivery" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/payment-
 step "checkout" 201 - -X POST "$BASE/storefront/carts/$SHOP_CART/checkout" -H "$JSON" -d '{}'
 SHOP_ORDER=$(id)
 GUEST=$(customer)
-contains "the order copies the tax line" '"tax":{"rate_ppm":130000,"amount":{"amount":117,"currency":"EUR"},"tax_class":null}'
+contains "the order copies the tax line" '"tax":{"rate_ppm":130000,"amount":{"amount":117,"currency":"EUR"}}'
 contains "and adds tax on top" '"subtotal":{"amount":2700,"currency":"EUR"},"shipping_total":{"amount":0,"currency":"EUR"},"tax_total":{"amount":351,"currency":"EUR"},"total":{"amount":3051'
 step "the guest became a customer" 200 - "$BASE/admin/customers/$GUEST"
 contains "with the cart's email" '"email":"guest@example.hr"'
@@ -1205,6 +1431,19 @@ echo "## search"
 wait_for "search sees every lamp reserved" "$BASE/storefront/search?country=HR&q=LAMP" '"available":false'
 contains "priced in the market (the list takes 10%)" '"price":{"amount":900,"currency":"EUR"}'
 contains "with facets" '"facets":['
+step "nothing on sale yet" 200 - "$BASE/storefront/search?country=HR&filter=on_sale:true"
+contains "no hits" '"total":0'
+step "the lamp gets a was price" 200 - -X PATCH "$BASE/admin/products/$LAMP/variants/$LAMP_VAR" -H "$JSON" \
+    -d '{"compare_at_price":{"amount":2000,"currency":"EUR"}}'
+wait_for "search finds it on sale" "$BASE/storefront/search?country=HR&filter=on_sale:true" '"handle":"lamp"'
+contains "struck through as the list adjusts it" '"compare_at":{"amount":1800,"currency":"EUR"},"on_sale":true'
+step "count what's on sale" 200 - -X PATCH "$BASE/admin/search/settings" -H "$JSON" -d '{"facets":[{"key":"on_sale"}]}'
+step "the on_sale facet" 200 - "$BASE/storefront/search?country=HR"
+contains "counts the lamp" '{"key":"on_sale","label":null,"values":['
+step "back to the default facets" 200 - -X PATCH "$BASE/admin/search/settings" -H "$JSON" -d '{"facets":[]}'
+step "and no was price" 200 - -X PATCH "$BASE/admin/products/$LAMP/variants/$LAMP_VAR" -H "$JSON" \
+    -d '{"compare_at_price":null}'
+wait_for "off sale again" "$BASE/storefront/search?country=HR&filter=on_sale:true" '"total":0'
 step "the shop's listing (no q)" 200 - "$BASE/storefront/search?country=HR&sort=price_asc&limit=1"
 contains "pages with a cursor" '"has_more":true,"next_cursor":"'
 step "a filter is key:value" 422 invalid_filter "$BASE/storefront/search?country=HR&filter=Red"
@@ -1900,15 +2139,23 @@ step "remove a country the market lacks" 404 country_not_in_market -X DELETE \
     "$BASE/admin/markets/$MARKET/countries/FR"
 step "second catalog for market" 409 catalog_exists -X POST "$BASE/admin/catalogs" -H "$JSON" \
     -d "{\"market\":\"$MARKET\"}"
-step "create RSD price list" 201 - -X POST "$BASE/admin/price-lists" -H "$JSON" -d '{"currency":"RSD"}'
+step "create RSD price list" 201 - -X POST "$BASE/admin/price-lists" -H "$JSON" \
+    -d '{"name":"Dinar prices","currency":"RSD"}'
 RSD_LIST=$(id)
 step "assign RSD list to EUR market" 422 price_list_currency_mismatch -X PUT \
-    "$BASE/admin/catalogs/$CATALOG/price-list" -H "$JSON" -d "{\"price_list\":\"$RSD_LIST\"}"
+    "$BASE/admin/catalogs/$CATALOG/price-lists" -H "$JSON" -d "{\"price_lists\":[\"$LIST\",\"$RSD_LIST\"]}"
+step "a list on a catalog twice" 422 duplicate_price_list -X PUT \
+    "$BASE/admin/catalogs/$CATALOG/price-lists" -H "$JSON" -d "{\"price_lists\":[\"$LIST\",\"$LIST\"]}"
 step "fixed prices on unknown list" 404 price_list_not_found -X PUT \
     "$BASE/admin/price-lists/pl_00000000000000000000000000000063/fixed-prices" -H "$JSON" -d '{"fixed_prices":[]}'
-step "fixed price in other currency" 422 fixed_price_currency_mismatch -X PUT \
+step "fixed price in other currency" 422 fixed_prices_invalid -X PUT \
     "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
     -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"RSD\"}}]}"
+contains "the entry's own code" '"code":"fixed_price_currency_mismatch"'
+step "a compare-at price at or below the fixed price" 422 fixed_prices_invalid -X PUT \
+    "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
+    -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":200,\"currency\":\"EUR\"},\"compare_at\":{\"amount\":200,\"currency\":\"EUR\"}}]}"
+contains "named by index" '"code":"compare_at_not_above_price","index":0'
 step "misspelled PATCH field" 422 invalid_body -X PATCH "$BASE/admin/customers/$CUSTOMER" -H "$JSON" \
     -d '{"frist_name":"Ana"}'
 step "null for a field that can't be cleared" 422 invalid_body -X PATCH \
@@ -1978,12 +2225,13 @@ step "market without countries" 422 no_countries -X POST "$BASE/admin/markets" -
 step "market listing a country twice" 422 duplicate_country -X POST "$BASE/admin/markets" -H "$JSON" \
     -d '{"name":"France","countries":["FR","FR"],"currency":"EUR"}'
 step "discount beyond 100%" 422 invalid_basis_points -X POST "$BASE/admin/price-lists" -H "$JSON" \
-    -d '{"currency":"EUR","adjustment_bps":-10001}'
-step "the same variant twice in fixed prices" 422 duplicate_fixed_price -X PUT \
+    -d '{"name":"Too much","currency":"EUR","adjustment":{"percent_bps":-10001}}'
+step "the same variant twice in fixed prices" 422 fixed_prices_invalid -X PUT \
     "$BASE/admin/price-lists/$LIST/fixed-prices" -H "$JSON" \
     -d "{\"fixed_prices\":[{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":1,\"currency\":\"EUR\"}},{\"variant\":\"$CUP_VAR\",\"price\":{\"amount\":2,\"currency\":\"EUR\"}}]}"
-step "unknown price list in a body" 422 price_list_not_found -X PUT "$BASE/admin/catalogs/$CATALOG/price-list" \
-    -H "$JSON" -d '{"price_list":"pl_00000000000000000000000000000063"}'
+contains "the duplicate named" '"code":"duplicate_fixed_price"'
+step "unknown price list in a body" 422 price_list_not_found -X PUT "$BASE/admin/catalogs/$CATALOG/price-lists" \
+    -H "$JSON" -d '{"price_lists":["pl_00000000000000000000000000000063"]}'
 step "unknown market in a body" 422 market_not_found -X POST "$BASE/admin/catalogs" -H "$JSON" \
     -d '{"market":"mkt_00000000000000000000000000000063"}'
 step "unknown variant in a cart line" 422 variant_not_found -X POST "$BASE/storefront/carts/$CART/lines" \
@@ -2281,6 +2529,38 @@ AUTH=(-H "authorization: Bearer $MCP_KEY")
 mcp_tool "the agent learns it was applied" get_proposal "{\"proposal\":\"$PROPOSAL\"}"
 contains "applied" '\"status\":\"applied\"'
 AUTH=("${SAVED_AUTH[@]}")
+
+echo
+echo "## buy X get Y, tiers and promotions"
+step "a cup for the deal" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
+    -d '{"handle":"deal-cup","title":"Deal cup","price":{"amount":300,"currency":"EUR"}}'
+DEAL_CUP=$(id)
+DEAL_CUP_VAR=$(variant)
+step "on sale" 200 - -X PATCH "$BASE/admin/products/$DEAL_CUP/status" -H "$JSON" -d '{"status":"active"}'
+step "in the market's catalog" 204 - -X POST "$BASE/admin/catalogs/$CATALOG/products" -H "$JSON" \
+    -d "{\"products\":[\"$DEAL_CUP\"]}"
+step "in the Online Store" 204 - -X POST "$BASE/admin/channels/$ONLINE_STORE/products" -H "$JSON" \
+    -d "{\"products\":[\"$DEAL_CUP\"]}"
+step "buy 2 cups, get 1 free" 201 - -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d "{\"title\":\"3 for 2\",\"method\":\"automatic\",\"kind\":{\"type\":\"buy_x_get_y\",\"buys\":{\"items\":{\"type\":\"products\",\"ids\":[\"$DEAL_CUP\"]}},\"buy\":{\"type\":\"quantity\",\"quantity\":2},\"gets\":{\"items\":{\"type\":\"products\",\"ids\":[\"$DEAL_CUP\"]}},\"get_quantity\":1,\"value\":{\"type\":\"percent\",\"basis_points\":10000},\"uses_per_order\":1}}"
+DEAL=$(id)
+contains "a product discount" '"classes":["product"]'
+contains "said as a deal, naming the cup" '"summary":"Buy 2 Deal cup, get 1 Deal cup free (once per order)"'
+step "the cup shows it" 200 - "$BASE/storefront/products/by-handle/deal-cup?country=HR"
+contains "as a promotion" "\"promotions\":[{\"discount\":\"$DEAL\",\"title\":\"3 for 2\",\"summary\":\"Buy 2 Deal cup, get 1 Deal cup free (once per order)\""
+step "a cart for the deal" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
+DEAL_CART=$(id)
+step "three cups" 200 - -X POST "$BASE/storefront/carts/$DEAL_CART/lines" -H "$JSON" \
+    -d "{\"variant\":\"$DEAL_CUP_VAR\",\"quantity\":3}"
+contains "the deal applies" "\"discounts\":[{\"discount\":\"$DEAL\""
+contains "on one unit" '"units":1'
+step "the deal goes" 204 - -X DELETE "$BASE/admin/discounts/$DEAL"
+step "tiers must rise" 422 invalid_discount -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Volume","method":"automatic","kind":{"type":"tiered","items":{"items":{"type":"all"}},"measure":"quantity","tiers":[{"threshold":{"type":"quantity","quantity":5},"value":{"type":"percent","basis_points":1500}},{"threshold":{"type":"quantity","quantity":3},"value":{"type":"percent","basis_points":1000}}]}}'
+contains "naming the tier" '"path":"kind.tiers[1].threshold"'
+step "a volume discount, kept as a draft" 201 - -X POST "$BASE/admin/discounts" -H "$JSON" \
+    -d '{"title":"Volume","method":"automatic","status":"draft","kind":{"type":"tiered","items":{"items":{"type":"all"},"exclude_on_sale":true},"measure":"quantity","tiers":[{"threshold":{"type":"quantity","quantity":3},"value":{"type":"percent","basis_points":1000}},{"threshold":{"type":"quantity","quantity":5},"value":{"type":"percent","basis_points":1500}}]}}'
+contains "its steps" '"summary":"10% off 3+ items, 15% off 5+ items not on sale"'
 
 echo
 echo "## rate limits"

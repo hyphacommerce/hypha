@@ -1,12 +1,14 @@
 use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_cart::{
     AddLine, CreateCart, GroupOffers, LineStatus, PricedCart, PricedShippingGroup, SetLineQuantity,
-    add_line, create_cart, remove_cart_line, select_shipping, set_cart_customer, set_cart_email,
-    set_line_quantity, set_shipping_address, shipping_offers,
+    add_discount_code, add_line, create_cart, remove_cart_line, remove_discount_code,
+    select_shipping, set_cart_customer, set_cart_email, set_line_quantity, set_shipping_address,
+    shipping_offers,
 };
 use hypha_core::{
-    AssetId, CartId, CountryCode, Currency, CustomerId, Email, ErrorCode, MarketId, Money, OrderId,
-    PaymentMethodId, ProductId, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate, VariantId,
+    AssetId, CartId, CountryCode, Currency, CustomerId, DiscountId, Email, ErrorCode, MarketId,
+    Money, OrderId, PaymentMethodId, ProductId, ShippingGroupId, ShippingOptionId, TaxClassId,
+    TaxRate, VariantId,
 };
 use hypha_customers::{HasCustomers, get_customer};
 use hypha_media::{AssetRepo, HasAssets};
@@ -16,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     address::{PostalAddressRequest, PostalAddressResponse},
+    discounts::{DiscountClassDto, DiscountTargetDto, DiscountValueDto},
     payments::CartPaymentMethodResponse,
     products::ProductMediaResponse,
     rfc3339,
@@ -79,9 +82,11 @@ pub struct CartResponse {
     order: Option<OrderId>,
     /// Whether line prices include tax (set on the market).
     taxes_included: bool,
-    /// Sum of the available lines, as priced. All totals count available lines only.
+    /// Sum of the available lines' totals, after discounts. All totals count available
+    /// lines only.
     subtotal: Money,
-    /// The chosen shipping, priced now; zero until chosen. Part of `total`.
+    /// The chosen shipping, priced now, after shipping discounts; zero until chosen. Part
+    /// of `total`.
     shipping_total: Money,
     /// Tax on the available lines and on shipping: part of `subtotal` and
     /// `shipping_total` if `taxes_included`, else on top.
@@ -104,6 +109,14 @@ pub struct CartResponse {
     /// Whether the buyer ticked "Email me with news and offers" (`PUT …/marketing`):
     /// checkout records the consent then.
     marketing_opt_in: bool,
+    /// The discounts applied, one per reward: product ones first, then order, then
+    /// shipping. Lines and shipping name them by their index here.
+    discounts: Vec<CartDiscountResponse>,
+    /// Everything they took off: already out of `subtotal` and `shipping_total`.
+    discount_total: Money,
+    /// Each code the cart holds, in the order entered, with where it stands. A code that
+    /// doesn't apply now is kept: it applies once the cart qualifies.
+    discount_codes: Vec<CartDiscountCodeResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -125,6 +138,7 @@ pub struct SelectedShippingResponse {
     option: ShippingOptionId,
     code: String,
     name: String,
+    /// The option's price, before shipping discounts.
     amount: Money,
     /// `null` when the cart's country has no tax rates.
     tax: Option<TaxLineResponse>,
@@ -132,6 +146,10 @@ pub struct SelectedShippingResponse {
     /// RFC 3339: for a provider's rate, when checkout asks the provider again (and may
     /// answer `total_changed`). `null` for built-in rates, which are always current.
     quote_expires_at: Option<String>,
+    /// What shipping discounts took off it.
+    discounts: Vec<DiscountShareResponse>,
+    /// What the buyer pays for it: `amount` less the discounts. Tax is on this.
+    total: Money,
 }
 
 impl From<&PricedShippingGroup> for ShippingGroupResponse {
@@ -144,6 +162,12 @@ impl From<&PricedShippingGroup> for ShippingGroupResponse {
                 code: s.code.clone(),
                 name: s.name.clone(),
                 amount: s.amount,
+                discounts: s
+                    .discounts
+                    .iter()
+                    .map(DiscountShareResponse::from)
+                    .collect(),
+                total: s.total,
                 tax: s.tax.as_ref().map(TaxLineResponse::from),
                 estimate: s.estimate.map(Into::into),
                 // A clock reading plus 15 minutes is always in RFC 3339's range.
@@ -159,9 +183,17 @@ impl From<&PricedShippingGroup> for ShippingGroupResponse {
 pub enum LineState {
     Priced {
         unit_price: Money,
+        /// What the buyer pays for the line: `subtotal` less the discounts. Tax is on this.
         total: Money,
         /// `null` when the cart's country has no tax rates.
         tax: Option<TaxLineResponse>,
+        /// What `unit_price` is shown against, struck through: only ever above it; `null`
+        /// for none.
+        compare_at_price: Option<Money>,
+        /// `unit_price` × `quantity`: before discounts.
+        subtotal: Money,
+        /// What discounts took off the line.
+        discounts: Vec<DiscountShareResponse>,
     },
     Unavailable {
         /// Stable `ErrorCode`, e.g. "product_not_active".
@@ -227,6 +259,17 @@ impl From<&PricedCart> for CartResponse {
             taxes_included: cart.taxes_included,
             subtotal: cart.subtotal,
             shipping_total: cart.shipping_total,
+            discounts: cart
+                .discounts
+                .iter()
+                .map(CartDiscountResponse::from)
+                .collect(),
+            discount_total: cart.discount_total,
+            discount_codes: cart
+                .discount_codes
+                .iter()
+                .map(CartDiscountCodeResponse::from)
+                .collect(),
             tax_total: cart.tax_total,
             total: cart.total,
             fully_available: cart.is_fully_available(),
@@ -254,10 +297,17 @@ impl From<&PricedCart> for CartResponse {
                     state: match &l.status {
                         LineStatus::Priced {
                             unit_price,
+                            compare_at,
+                            subtotal,
+                            discounts,
                             total,
                             tax,
+                            ..
                         } => LineState::Priced {
                             unit_price: unit_price.money(),
+                            compare_at_price: compare_at.map(|p| p.money()),
+                            subtotal: *subtotal,
+                            discounts: discounts.iter().map(DiscountShareResponse::from).collect(),
                             total: *total,
                             tax: tax.as_ref().map(TaxLineResponse::from),
                         },
@@ -270,6 +320,219 @@ impl From<&PricedCart> for CartResponse {
                 .collect(),
         }
     }
+}
+
+/// A discount applied to the cart: one reward of it.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct CartDiscountResponse {
+    discount: DiscountId,
+    /// The code it came by, normalised; `null` for an automatic discount.
+    code: Option<String>,
+    /// The discount's title, shown to buyers.
+    title: String,
+    /// One sentence from its data, naming what it applies to as a shopper may see it,
+    /// amounts in the cart's market.
+    summary: String,
+    class: DiscountClassDto,
+    value: DiscountValueDto,
+    target: DiscountTargetDto,
+    /// What it took off in all.
+    amount: Money,
+}
+
+impl From<&hypha_cart::promotions::Application> for CartDiscountResponse {
+    /// Value and target come as the discounts' JSON; JSON in another shape reads as
+    /// nothing off the subtotal (it can't be, short of a bug), so the cart still reads.
+    fn from(a: &hypha_cart::promotions::Application) -> Self {
+        use hypha_cart::promotions::Class;
+        use hypha_discounts::{
+            Target, Value,
+            json::{target_from_json, value_from_json},
+        };
+        let value =
+            value_from_json(&a.value).unwrap_or(Value::Percent(hypha_core::BasisPoints::ZERO));
+        let target = target_from_json(&a.target).unwrap_or(Target::Subtotal);
+        Self {
+            discount: a.discount,
+            code: a.code.clone(),
+            title: a.title.clone(),
+            summary: a.summary.clone(),
+            class: match a.class {
+                Class::Product => DiscountClassDto::Product,
+                Class::Order => DiscountClassDto::Order,
+                Class::Shipping => DiscountClassDto::Shipping,
+            },
+            value: (&value).into(),
+            target: (&target).into(),
+            amount: a.amount,
+        }
+    }
+}
+
+/// Part of a discount on a line or a shipping group.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct DiscountShareResponse {
+    /// Its index in the cart's (or order's) `discounts`.
+    application: usize,
+    amount: Money,
+    /// The units it covered, for a buy X get Y discount; absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    units: Option<u32>,
+}
+
+impl From<&hypha_cart::promotions::Share> for DiscountShareResponse {
+    fn from(s: &hypha_cart::promotions::Share) -> Self {
+        Self {
+            application: s.application,
+            amount: s.amount,
+            units: s.units,
+        }
+    }
+}
+
+impl From<&hypha_orders::DiscountShare> for DiscountShareResponse {
+    fn from(s: &hypha_orders::DiscountShare) -> Self {
+        Self {
+            application: usize::from(s.application),
+            amount: s.amount,
+            units: s.units,
+        }
+    }
+}
+
+/// Where a code the cart holds stands, for a UCP-style message pointing at
+/// `$.discount_codes[i]`.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct CartDiscountCodeResponse {
+    /// Normalised.
+    code: String,
+    /// `applied`; `not_eligible` (see `condition`); `minimum_not_met` (see `needed`);
+    /// `no_matching_items`; `blocked_by_other` (a better combination left it out, see
+    /// `discount`); `no_saving` (with it the cart would cost no less, say by falling under
+    /// free shipping); `limit_reached`; `not_available_in_market`; `expired` (its end date
+    /// passed); `invalid` (the code or its discount is gone, deactivated, a draft or not
+    /// started). More may be added: treat an unknown one as not applied.
+    state: &'static str,
+    /// For `not_eligible`: `markets`, `channels`, `customer_groups`, `customers` or
+    /// `signed_in`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    condition: Option<&'static str>,
+    /// For `minimum_not_met`: what's missing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    needed: Option<NeededResponse>,
+    /// For `blocked_by_other`: a discount applied instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    discount: Option<DiscountId>,
+}
+
+/// What's missing for a minimum: one of the two.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct NeededResponse {
+    /// This much more of the qualifying items.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    subtotal: Option<Money>,
+    /// This many more qualifying units.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    quantity: Option<u32>,
+}
+
+impl From<&hypha_cart::promotions::CodeOutcome> for CartDiscountCodeResponse {
+    fn from(c: &hypha_cart::promotions::CodeOutcome) -> Self {
+        use hypha_cart::promotions::{CodeState, Needed};
+        let mut response = Self {
+            code: c.code.clone(),
+            state: c.state.name(),
+            condition: None,
+            needed: None,
+            discount: None,
+        };
+        match c.state {
+            CodeState::NotEligible { condition } => response.condition = Some(condition),
+            CodeState::MinimumNotMet { needed } => {
+                response.needed = Some(match needed {
+                    Needed::Amount(m) => NeededResponse {
+                        subtotal: Some(m),
+                        quantity: None,
+                    },
+                    Needed::Quantity(n) => NeededResponse {
+                        subtotal: None,
+                        quantity: Some(n),
+                    },
+                })
+            }
+            CodeState::BlockedByOther { discount } => response.discount = Some(discount),
+            CodeState::Applied
+            | CodeState::NoMatchingItems
+            | CodeState::NoSaving
+            | CodeState::LimitReached
+            | CodeState::NotAvailableInMarket
+            | CodeState::Expired
+            | CodeState::Invalid => {}
+        }
+        response
+    }
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AddDiscountCodeRequest {
+    /// As the buyer typed it: it's trimmed and compared ignoring case.
+    code: String,
+}
+
+/// Enters a discount code. A code that isn't active and live (or isn't one) is `422
+/// discount_code_invalid`, the same for each, and isn't kept; a live code that doesn't
+/// apply yet is kept with its state, so it applies once the cart qualifies. At most 5
+/// (`409 too_many_discount_codes`). Rate limited per client address and per cart.
+#[utoipa::path(
+    post,
+    path = "/storefront/carts/{id}/discount-codes",
+    params(("id" = CartId, Path)),
+    request_body = AddDiscountCodeRequest,
+    responses((status = 200, description = "OK", body = CartResponse), (status = 429, description = "Over the rate limit for codes per client address or per cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    extensions(("x-hypha-scopes" = json!(["carts:write"]))),
+)]
+pub async fn add_code<S: Storage>(
+    State(state): State<SharedState<S>>,
+    ClientIp(ip): ClientIp,
+    caller: Caller<Storefront>,
+    PathId(id): PathId<CartId>,
+    body: JsonBody<AddDiscountCodeRequest>,
+) -> Result<Json<CartResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    rate_limit::enforce(&state.limiter, Rule::DiscountCodeIp, &ip).await?;
+    rate_limit::enforce(&state.limiter, Rule::DiscountCodeCart, &id.to_string()).await?;
+    let req = body.parse()?;
+    let priced = add_discount_code(&ctx, &ports, id, &req.code).await?;
+    Ok(Json(
+        cart_response(&priced, &ports, state.media.as_deref()).await?,
+    ))
+}
+
+/// Lets go of a discount code (as entered, or normalised).
+#[utoipa::path(
+    delete,
+    path = "/storefront/carts/{id}/discount-codes/{code}",
+    params(("id" = CartId, Path), ("code" = String, Path, example = "WELCOME10", description = "The code as entered, or normalised.")),
+    responses((status = 200, description = "OK", body = CartResponse)),
+    extensions(("x-hypha-scopes" = json!(["carts:write"]))),
+)]
+pub async fn remove_code<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller<Storefront>,
+    PathId((id, code)): PathId<(CartId, String)>,
+) -> Result<Json<CartResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let priced = remove_discount_code(&ctx, &ports, id, &code).await?;
+    Ok(Json(
+        cart_response(&priced, &ports, state.media.as_deref()).await?,
+    ))
 }
 
 /// The response for `cart` with its lines' images: the assets loaded in one query and
@@ -576,9 +839,11 @@ pub struct OfferResponse {
     option: ShippingOptionId,
     code: String,
     name: String,
-    /// Before tax if the market's prices exclude it.
+    /// Before tax if the market's prices exclude it, and before shipping discounts.
     amount: Money,
     estimate: Option<DeliveryEstimateDto>,
+    /// What it comes to after the shipping discounts the cart has now (0: free).
+    amount_after_discounts: Money,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -594,13 +859,19 @@ impl From<&GroupOffers> for GroupOffersResponse {
     fn from(g: &GroupOffers) -> Self {
         let mut offers = Vec::new();
         let mut unavailable = Vec::new();
-        for outcome in &g.offers {
+        for (i, outcome) in g.offers.iter().enumerate() {
             match outcome {
                 OfferOutcome::Offered(o) => offers.push(OfferResponse {
                     option: o.option,
                     code: o.code.clone(),
                     name: o.name.clone(),
                     amount: o.amount,
+                    amount_after_discounts: g
+                        .after_discounts
+                        .get(i)
+                        .copied()
+                        .flatten()
+                        .unwrap_or(o.amount),
                     estimate: o.estimate.map(Into::into),
                 }),
                 OfferOutcome::NotOffered {

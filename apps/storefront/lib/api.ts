@@ -32,7 +32,7 @@ export function api(extra: Record<string, string> = {}) {
 
 /**
  * A client that passes the shopper's address on, for the calls Hypha limits per address
- * (creating a cart), so the limit counts the shopper, not this server. Only from a source
+ * (creating a cart, entering a discount code), so the limit counts the shopper, not this server. Only from a source
  * the browser can't forge, as the admin's (`apps/admin/lib/hypha.ts`): Cloudflare's
  * `cf-connecting-ip` on Workers (the API believes it through its own Service Binding),
  * or, behind this deployment's own proxy (`STOREFRONT_TRUST_X_FORWARDED_FOR=true`, a
@@ -266,6 +266,10 @@ export function describe(error: { code: string; error: string }): string {
       return "Fill in your name, street address and city.";
     case "no_shipping_to_country":
       return "We don't ship to this country yet.";
+    case "discount_code_invalid":
+      return "That code isn't valid. Check it and try again.";
+    case "discounts_changed":
+      return "A discount changed since you looked. Check the total and place the order again.";
     case "total_changed":
       return "Prices or shipping changed since you looked. Check the total and place the order again.";
     case "cart_completed":

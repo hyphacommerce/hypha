@@ -10,9 +10,9 @@ use hypha_cart::{Cart, CartSnapshot, StageCarts};
 use hypha_categories::{Category, CategorySnapshot, StageCategories};
 use hypha_core::{
     CartId, CatalogId, CategoryId, ChannelId, CustomFieldDefinitionId, CustomerGroupId, CustomerId,
-    HasBatch, IdempotencyRecord, IdentityId, PendingEvent, Price, PriceListId, ProductId, Recorded,
-    RepoError, SessionId, StageEvents, StageIdempotency, TaxClassId, Timestamp, VariantId, Version,
-    Versioned, stamp_insert, stamp_update,
+    DiscountId, HasBatch, IdempotencyRecord, IdentityId, PendingEvent, PriceListId, ProductId,
+    Recorded, RepoError, SessionId, StageEvents, StageIdempotency, TaxClassId, Timestamp,
+    VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_custom_fields::{
     CustomFieldDefinition, DefinitionSnapshot, StageCustomFieldDefinitions, StageCustomFieldValues,
@@ -22,9 +22,12 @@ use hypha_customers::{
     Customer, CustomerGroup, CustomerGroupSnapshot, CustomerSnapshot, StageCustomerGroups,
     StageCustomers,
 };
+use hypha_discounts::{
+    ClassSet, CodeSelection, Discount, DiscountCode, DiscountSnapshot, StageDiscounts, UsageClaim,
+};
 use hypha_fulfillment::{Fulfillment, FulfillmentSnapshot, StageFulfillments};
 use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
-use hypha_markets::{StageCatalogProducts, StageFixedPrices};
+use hypha_markets::{FixedPrice, StageCatalogProducts, StageFixedPrices, StagePriceListSchedule};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_notifications::{
     NotificationSettings, NotificationSettingsSnapshot, StageNotificationSettings,
@@ -56,6 +59,7 @@ use crate::{
         add_group_members, delete_group, insert_group, remove_group_members, update_group,
     },
     customers::{delete_customer, insert_customer, update_customer},
+    discounts::{add_codes, claim_usage, insert_discount, remove_codes, set_codes_active},
     fulfillments::{insert_fulfillment, update_fulfillment},
     idempotency::insert_records,
     inventory::update_items,
@@ -138,7 +142,9 @@ enum Staged {
     /// Category membership: added (`true`) or removed.
     CategoryProducts(CategoryId, Vec<ProductId>, bool),
     /// Fixed prices set (`Some` price) or removed (`None`), per variant.
-    FixedPrices(PriceListId, Vec<(VariantId, Option<Price>)>),
+    FixedPrices(PriceListId, Vec<(VariantId, Option<FixedPrice>)>),
+    /// The schedule job's progress moved from the first to the second.
+    PriceListSchedule(Option<Timestamp>, Timestamp),
     NewNotificationSettings(NotificationSettingsSnapshot),
     NotificationSettings(NotificationSettingsSnapshot),
     NewApp(AppSnapshot),
@@ -165,6 +171,14 @@ enum Staged {
     ReindexedCustomFieldValue(ValueRow, Version),
     RemovedCustomFieldValue(CustomFieldDefinitionId, uuid::Uuid, Option<Version>),
     NewAgent(AgentSnapshot),
+    /// A new discount with its classes (derived, stored for lists).
+    NewDiscount(DiscountSnapshot, ClassSet),
+    DiscountCodes(Vec<DiscountCode>),
+    RemovedDiscountCodes(DiscountId, CodeSelection),
+    DiscountUsage(UsageClaim),
+    DiscountCodesActive(DiscountId, CodeSelection, bool),
+    /// The discount schedule job's progress moved from the first to the second.
+    DiscountSchedule(Option<Timestamp>, Timestamp),
 }
 
 impl Staged {
@@ -217,6 +231,7 @@ impl Staged {
             Staged::CatalogProducts(..) => 29,
             Staged::Publications(..) => 30,
             Staged::FixedPrices(..) => 31,
+            Staged::PriceListSchedule(..) => 31,
             Staged::TaxAssignment(..) => 32,
             Staged::Idempotency(_) => 33,
             Staged::InventoryItem(_) => 34,
@@ -242,6 +257,14 @@ impl Staged {
             | Staged::RemovedCustomFieldValue(..) => 49,
             // An agent before its proposals.
             Staged::NewAgent(_) => 50,
+            // A discount before its codes; usage claims last, by discount, so two checkouts
+            // lock counters in the same order.
+            Staged::NewDiscount(..) => 51,
+            Staged::DiscountCodes(_)
+            | Staged::RemovedDiscountCodes(..)
+            | Staged::DiscountCodesActive(..) => 52,
+            Staged::DiscountUsage(_) => 53,
+            Staged::DiscountSchedule(..) => 54,
         }
     }
 
@@ -324,6 +347,11 @@ impl Staged {
                     | Staged::RemovedCustomFieldValue(..),
                 ) => value_key(self).cmp(&value_key(other)),
                 (Staged::NewAgent(a), Staged::NewAgent(b)) => a.id.cmp(&b.id),
+                (Staged::NewDiscount(a, _), Staged::NewDiscount(b, _)) => a.id.cmp(&b.id),
+                (Staged::DiscountUsage(a), Staged::DiscountUsage(b)) => a
+                    .discount
+                    .cmp(&b.discount)
+                    .then_with(|| a.code.cmp(&b.code)),
                 _ => Ordering::Equal,
             })
     }
@@ -761,10 +789,13 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     Staged::CustomerGroupMembers(group, customers, false) => {
                         remove_group_members(&db, group, &customers).await?
                     }
+                    Staged::PriceListSchedule(from, to) => {
+                        crate::markets::advance_price_list_schedule(&db, from, to).await?
+                    }
                     Staged::FixedPrices(list, changes) => {
-                        let set: Vec<(VariantId, Price)> = changes
+                        let set: Vec<(VariantId, FixedPrice)> = changes
                             .iter()
-                            .filter_map(|(v, p)| p.map(|p| (*v, p)))
+                            .filter_map(|(v, p)| p.clone().map(|p| (*v, p)))
                             .collect();
                         let removed: Vec<VariantId> = changes
                             .iter()
@@ -813,6 +844,18 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                         crate::custom_fields::remove_value(&db, definition, owner, expected).await?
                     }
                     Staged::NewAgent(s) => crate::agents::insert_agent(&db, &s).await?,
+                    Staged::NewDiscount(s, classes) => insert_discount(&db, &s, classes).await?,
+                    Staged::DiscountCodes(codes) => add_codes(&db, &codes).await?,
+                    Staged::RemovedDiscountCodes(discount, selection) => {
+                        remove_codes(&db, discount, &selection).await?
+                    }
+                    Staged::DiscountUsage(claim) => claim_usage(&db, &claim).await?,
+                    Staged::DiscountCodesActive(discount, selection, active) => {
+                        set_codes_active(&db, discount, &selection, active).await?
+                    }
+                    Staged::DiscountSchedule(from, to) => {
+                        crate::discounts::advance_discount_schedule(&db, from, to).await?
+                    }
                 }
             }
             insert_records(&db, &records).await?;
@@ -898,9 +941,15 @@ impl StageCatalogProducts for PgBatch {
     }
 }
 
+impl StagePriceListSchedule for PgBatch {
+    fn advance_price_list_schedule(&mut self, from: Option<Timestamp>, to: Timestamp) {
+        self.stage(Staged::PriceListSchedule(from, to));
+    }
+}
+
 impl StageFixedPrices for PgBatch {
-    fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, Price)]) {
-        let changes = prices.iter().map(|(v, p)| (*v, Some(*p))).collect();
+    fn set_fixed_prices(&mut self, list: PriceListId, prices: &[(VariantId, FixedPrice)]) {
+        let changes = prices.iter().map(|(v, p)| (*v, Some(p.clone()))).collect();
         self.stage(Staged::FixedPrices(list, changes));
     }
 
@@ -1013,6 +1062,40 @@ impl StageCustomFieldValues for PgBatch {
 
     fn reindex_custom_field_value(&mut self, row: ValueRow, at: Version) {
         self.stage(Staged::ReindexedCustomFieldValue(row, at));
+    }
+}
+
+impl StageDiscounts for PgBatch {
+    fn insert_discount(&mut self, discount: &mut Discount) {
+        stamp_insert(discount, self.now);
+        self.stage(Staged::NewDiscount(discount.snapshot(), discount.classes()));
+        self.stage_events_of(discount, Version::NEW.next());
+        discount.set_version(Version::NEW.next());
+    }
+
+    fn add_discount_codes(&mut self, codes: &[DiscountCode]) {
+        self.stage(Staged::DiscountCodes(codes.to_vec()));
+    }
+
+    fn remove_discount_codes(&mut self, discount: DiscountId, codes: CodeSelection) {
+        self.stage(Staged::RemovedDiscountCodes(discount, codes));
+    }
+
+    fn set_discount_codes_active(
+        &mut self,
+        discount: DiscountId,
+        codes: CodeSelection,
+        active: bool,
+    ) {
+        self.stage(Staged::DiscountCodesActive(discount, codes, active));
+    }
+
+    fn claim_discount_usage(&mut self, claim: UsageClaim) {
+        self.stage(Staged::DiscountUsage(claim));
+    }
+
+    fn advance_discount_schedule(&mut self, from: Option<Timestamp>, to: Timestamp) {
+        self.stage(Staged::DiscountSchedule(from, to));
     }
 }
 

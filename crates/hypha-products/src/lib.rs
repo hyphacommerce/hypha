@@ -12,16 +12,20 @@ pub mod variant;
 pub use commands::{
     AddVariant, CommandError, CreateSimpleProduct, ListProducts, SetProductOptions, SetVariant,
     UpdateProduct, UpdateVariant, add_product_variant, create_simple_product, get_product,
-    get_products, get_variant_product, list_products, products_of_variants, remove_product_variant,
-    set_product_options, set_product_status, set_product_variants, update_product,
-    update_product_variant,
+    get_products, get_variant_product, list_products, list_variants, products_of_variants,
+    remove_product_variant, set_product_options, set_product_status, set_product_variants,
+    update_product, update_product_variant,
 };
 pub use content::MAX_TAGS;
 pub use error::ProductError;
 pub use events::{
     ProductCreated, ProductDeleted, ProductUpdated, VariantAdded, VariantRemoved, VariantUpdated,
 };
-pub use filter::{ProductFilter, ProductFilterInput, ProductQuery, ProductSort};
+pub use filter::{
+    MAX_FILTER_PRODUCTS, MAX_FILTER_VARIANT_PRODUCTS, MAX_FILTER_VARIANTS, ProductFilter,
+    ProductFilterInput, ProductQuery, ProductSort, VariantFilter, VariantFilterInput,
+    VariantPosition,
+};
 /// Shared with categories, so they live in core.
 pub use hypha_core::{Description, Handle, HandleError};
 pub use option::{OptionValue, ProductOption};
@@ -30,5 +34,5 @@ pub use product::{
     ProductStatus, VariantDraft, VariantSnapshot,
 };
 pub use repo::{HasProducts, ProductRepo, StageProducts};
-pub use summary::{PriceRange, ProductSummary};
+pub use summary::{PriceRange, ProductSummary, VariantSummary};
 pub use variant::{NewVariant, Variant, VariantPatch};

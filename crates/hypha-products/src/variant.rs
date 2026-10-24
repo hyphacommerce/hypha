@@ -5,6 +5,9 @@ pub struct Variant {
     id: VariantId,
     sku: Option<String>,
     base_price: Price,
+    /// The merchant's "was" price, struck through beside the base price; above it, in its
+    /// currency (`Product::update_variant` checks).
+    compare_at_price: Option<Price>,
     selections: Vec<OptionValueId>,
     media: Option<AssetId>,
     /// A fact about the product, read by shipping; `None` when not entered.
@@ -27,6 +30,8 @@ pub struct NewVariant {
 pub struct VariantPatch {
     pub sku: Option<Option<String>>,
     pub price: Option<Price>,
+    /// `Some(None)` clears the compare-at price.
+    pub compare_at_price: Option<Option<Price>>,
     pub selections: Option<Vec<OptionValueId>>,
     /// `Some(None)` clears the weight.
     pub weight: Option<Option<Weight>>,
@@ -44,6 +49,7 @@ impl Variant {
             id,
             sku,
             base_price,
+            compare_at_price: None,
             selections,
             media: None,
             weight: None,
@@ -56,6 +62,9 @@ impl Variant {
     }
     pub fn base_price(&self) -> Price {
         self.base_price
+    }
+    pub fn compare_at_price(&self) -> Option<Price> {
+        self.compare_at_price
     }
     pub fn sku(&self) -> Option<&str> {
         self.sku.as_deref()
@@ -79,6 +88,9 @@ impl Variant {
     }
     pub(crate) fn set_base_price(&mut self, price: Price) {
         self.base_price = price;
+    }
+    pub(crate) fn set_compare_at_price(&mut self, price: Option<Price>) {
+        self.compare_at_price = price;
     }
     pub(crate) fn set_selections(&mut self, selections: Vec<OptionValueId>) {
         self.selections = selections;

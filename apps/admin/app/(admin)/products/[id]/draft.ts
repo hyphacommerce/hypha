@@ -34,6 +34,8 @@ export type VariantDraft = {
   weight: string;
   ships: boolean;
   selections: Record<string, string>;
+  /** The price shown struck through beside the price, as typed; "" for none. */
+  compareAt: string;
 };
 
 export type Draft = {
@@ -76,6 +78,7 @@ export function fromProduct(product: Product, currencies: Currencies): Draft {
       price: moneyInput(v.price, currencies),
       weight: v.weight_grams == null ? "" : String(v.weight_grams),
       ships: v.requires_shipping,
+      compareAt: v.compare_at_price ? moneyInput(v.compare_at_price, currencies) : "",
       selections: Object.fromEntries(
         product.options.map((o, i) => [o.id, v.selections[i]] as const),
       ),
@@ -154,6 +157,7 @@ export type VariantPlan = {
   id: string | null;
   sku: string | null;
   price: AdminSchemas["Money"];
+  compare_at_price: AdminSchemas["Money"] | null;
   weight_grams: number | null;
   requires_shipping: boolean;
   selections: SelectionRef[];
@@ -185,6 +189,10 @@ function variantsKey(draft: Draft, currency: string, currencies: Currencies) {
     id: v.id ?? null,
     sku: v.sku.trim(),
     price: parseMoney(v.price, currency, currencies) ?? v.price,
+    compareAt:
+      v.compareAt.trim() === ""
+        ? null
+        : (parseMoney(v.compareAt, currency, currencies) ?? v.compareAt),
     weight: parseGrams(v.weight) ?? v.weight,
     ships: v.ships,
     selections: resolvedSelections(draft, v),
@@ -258,6 +266,18 @@ export function plan(
       const amount = parseMoney(v.price, currency, currencies);
       if (amount === null)
         return { error: `Enter the price of ${title} as a number, like 18 or 18.50.` };
+      let compareAt: number | null = null;
+      if (v.compareAt.trim() !== "") {
+        compareAt = parseMoney(v.compareAt, currency, currencies);
+        if (compareAt === null) {
+          return {
+            error: `Enter the compare-at price of ${title} as a number, or leave it empty.`,
+          };
+        }
+        if (compareAt <= amount) {
+          return { error: `The compare-at price of ${title} must be above its price.` };
+        }
+      }
       const grams = parseGrams(v.weight);
       if (grams === undefined)
         return { error: `Enter the weight of ${title} in whole grams, like 350.` };
@@ -269,6 +289,7 @@ export function plan(
         id: v.id ?? null,
         sku: v.sku.trim() === "" ? null : v.sku,
         price: { amount, currency },
+        compare_at_price: compareAt === null ? null : { amount: compareAt, currency },
         weight_grams: grams,
         requires_shipping: v.ships,
         selections: draft.options.map((option, i) => {
@@ -361,6 +382,7 @@ export function withAllCombinations(current: Draft): { draft: Draft } | { error:
       key: newKey(),
       sku: "",
       price: first?.price ?? "",
+      compareAt: first?.compareAt ?? "",
       weight: first?.weight ?? "",
       ships: first?.ships ?? true,
       selections: Object.fromEntries(draft.options.map((o, i) => [o.key, keys[i]] as const)),

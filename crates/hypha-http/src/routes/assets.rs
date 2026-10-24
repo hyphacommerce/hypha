@@ -181,6 +181,21 @@ pub struct UploadRequestResponse {
     expires_at: String,
 }
 
+impl UploadRequestResponse {
+    pub(super) fn new(upload: hypha_media::PresignedUpload) -> Result<Self, ApiError> {
+        Ok(Self {
+            method: upload.method,
+            url: upload.url,
+            headers: upload
+                .headers
+                .into_iter()
+                .map(|(name, value)| HeaderResponse { name, value })
+                .collect(),
+            expires_at: rfc3339(upload.expires_at)?,
+        })
+    }
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct HeaderResponse {
     name: String,
@@ -194,7 +209,7 @@ pub struct CreateAssetResponse {
 }
 
 /// The `Media` or `503 media_not_configured`.
-fn media<S>(state: &SharedState<S>) -> Result<&Media, ApiError> {
+pub(super) fn media<S>(state: &SharedState<S>) -> Result<&Media, ApiError> {
     state
         .media
         .as_deref()
@@ -237,16 +252,7 @@ pub async fn create<S: Storage>(
     .await?;
     let response = CreateAssetResponse {
         asset: AssetResponse::new(&asset, media).await?,
-        upload: UploadRequestResponse {
-            method: upload.method,
-            url: upload.url,
-            headers: upload
-                .headers
-                .into_iter()
-                .map(|(name, value)| HeaderResponse { name, value })
-                .collect(),
-            expires_at: rfc3339(upload.expires_at)?,
-        },
+        upload: UploadRequestResponse::new(upload)?,
     };
     Ok((StatusCode::CREATED, Json(response)))
 }

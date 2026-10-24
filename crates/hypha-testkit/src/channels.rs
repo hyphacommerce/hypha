@@ -18,7 +18,7 @@ pub(crate) type Publications = HashMap<ChannelId, HashSet<ProductId>>;
 
 #[derive(Default)]
 pub struct InMemoryChannelRepo {
-    channels: Table<ChannelId, Channel>,
+    pub(crate) channels: Arc<Table<ChannelId, Channel>>,
     /// Stored apart from the channels, like a separate table would be; shared with the
     /// product repo, whose list filters by channel.
     pub(crate) products: Arc<Mutex<Publications>>,

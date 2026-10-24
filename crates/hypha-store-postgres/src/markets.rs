@@ -2,12 +2,15 @@ use std::collections::{HashMap, HashSet};
 
 use futures_util::future::try_join;
 use hypha_core::{
-    BasisPoints, CatalogId, CountryCode, MarketId, Page, PageRequest, Price, PriceListId,
-    ProductId, Recorded, RepoError, VariantId, Version, Versioned, stamp_insert, stamp_update,
+    BasisPoints, CatalogId, CategoryId, CountryCode, CustomerGroupId, Direction, Keyset, MarketId,
+    Page, PageRequest, Price, PriceListId, ProductId, Recorded, RepoError, SortKey, Timestamp,
+    VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_markets::{
-    Catalog, CatalogContext, CatalogRepo, CatalogSnapshot, Market, MarketRepo, MarketSnapshot,
-    PriceList, PriceListRepo, PriceListSnapshot,
+    Adjustment, AppliesTo, Catalog, CatalogContext, CatalogRepo, CatalogSnapshot, CompareAtMode,
+    FixedPrice, FixedPriceFilter, Market, MarketRepo, MarketSnapshot, PriceBreak, PriceList,
+    PriceListFilter, PriceListKind, PriceListPhase, PriceListRepo, PriceListSnapshot,
+    PriceListSort, PriceListStatus,
 };
 use tokio_postgres::{
     Row,
@@ -17,8 +20,8 @@ use uuid::Uuid;
 
 use crate::{
     columns::{
-        col, currency_from_db, stamp_columns, stamps_from_row, version_from_db, version_to_db,
-        write_stamps,
+        col, currency_from_db, micros, opt_micros, opt_ts, stamp_columns, stamps_from_row, ts,
+        version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
@@ -213,72 +216,93 @@ fn context_to_db(context: CatalogContext) -> (&'static str, Uuid) {
     }
 }
 
-fn catalog_from_row(row: &Row) -> Result<Catalog, RepoError> {
+fn catalog_from_row(row: &Row, price_lists: Vec<PriceListId>) -> Result<Catalog, RepoError> {
     let kind: String = col(row, "context_kind")?;
     let context = match kind.as_str() {
         "market" => CatalogContext::Market(MarketId::from_uuid(col(row, "context_id")?)),
         other => return Err(corrupt(format!("catalog context kind {other:?}"))),
     };
-    let price_list: Option<Uuid> = col(row, "price_list_id")?;
-    Ok(Catalog::restore(CatalogSnapshot {
-        id: CatalogId::from_uuid(col(row, "id")?),
+    let id: Uuid = col(row, "id")?;
+    Catalog::restore(CatalogSnapshot {
+        id: CatalogId::from_uuid(id),
         version: version_from_db(col(row, "version")?)?,
         stamps: stamps_from_row(row)?,
         context,
-        price_list: price_list.map(PriceListId::from_uuid),
-    }))
+        price_lists,
+    })
+    .map_err(|e| corrupt(format!("catalog {id}: {e}")))
 }
 
-/// `catalogs`' columns, as `catalog_from_row` reads them.
-fn catalog_columns() -> String {
-    format!(
-        "id, version, context_kind, context_id, price_list_id, {}",
-        stamp_columns("")
-    )
+/// Which catalogs a load is for.
+enum Catalogs {
+    All,
+    Id(Uuid),
+    Context(&'static str, Uuid),
+    /// Those holding this price list.
+    Holding(Uuid),
+}
+
+/// The catalogs `which` names with their price lists, oldest first, in one query: the lists
+/// come as an array column, so the row and its set are read at the same moment.
+async fn load_catalogs(client: &impl Queries, which: Catalogs) -> Result<Vec<Catalog>, RepoError> {
+    let none = None::<Uuid>;
+    let (filter, params): (&str, Vec<(&(dyn ToSql + Sync), Type)>) = match &which {
+        Catalogs::All => ("$1::uuid IS NULL", vec![(&none, Type::UUID)]),
+        Catalogs::Id(id) => ("c.id = $1", vec![(id, Type::UUID)]),
+        Catalogs::Context(kind, id) => (
+            "c.context_kind = $1 AND c.context_id = $2",
+            vec![(kind, Type::TEXT), (id, Type::UUID)],
+        ),
+        Catalogs::Holding(list) => (
+            "c.id IN (SELECT catalog_id FROM catalog_price_lists WHERE price_list_id = $1)",
+            vec![(list, Type::UUID)],
+        ),
+    };
+    let sql = format!(
+        "SELECT c.id, c.version, c.context_kind, c.context_id, {},
+                ARRAY(SELECT l.price_list_id FROM catalog_price_lists l
+                      WHERE l.catalog_id = c.id ORDER BY l.price_list_id) AS price_lists
+         FROM catalogs c WHERE {filter} ORDER BY c.id",
+        stamp_columns("c."),
+    );
+    let rows = client
+        .query_typed(&sql, &params)
+        .await
+        .map_err(repo_error)?;
+    rows.iter()
+        .map(|row| {
+            let lists: Vec<Uuid> = col(row, "price_lists")?;
+            catalog_from_row(row, lists.into_iter().map(PriceListId::from_uuid).collect())
+        })
+        .collect()
 }
 
 impl<C: PgConnection> CatalogRepo for PgStore<C> {
     async fn get(&self, id: CatalogId) -> Result<Option<Catalog>, RepoError> {
         let mut conn = self.conn().await;
-        let row = conn
-            .db()
-            .query_typed_opt(
-                &format!("SELECT {} FROM catalogs WHERE id = $1", catalog_columns()),
-                &[(&id.as_uuid(), Type::UUID)],
-            )
-            .await
-            .map_err(repo_error)?;
-        row.as_ref().map(catalog_from_row).transpose()
+        Ok(load_catalogs(&conn.db(), Catalogs::Id(id.as_uuid()))
+            .await?
+            .pop())
     }
 
     async fn get_by_context(&self, context: CatalogContext) -> Result<Option<Catalog>, RepoError> {
         let (kind, context_id) = context_to_db(context);
         let mut conn = self.conn().await;
-        let row = conn
-            .db()
-            .query_typed_opt(
-                &format!(
-                    "SELECT {} FROM catalogs WHERE context_kind = $1 AND context_id = $2",
-                    catalog_columns(),
-                ),
-                &[(&kind, Type::TEXT), (&context_id, Type::UUID)],
-            )
-            .await
-            .map_err(repo_error)?;
-        row.as_ref().map(catalog_from_row).transpose()
+        Ok(
+            load_catalogs(&conn.db(), Catalogs::Context(kind, context_id))
+                .await?
+                .pop(),
+        )
     }
 
     async fn list_all(&self) -> Result<Vec<Catalog>, RepoError> {
         let mut conn = self.conn().await;
-        let rows = conn
-            .db()
-            .query_typed(
-                &format!("SELECT {} FROM catalogs ORDER BY id", catalog_columns()),
-                &[],
-            )
-            .await
-            .map_err(repo_error)?;
-        rows.iter().map(catalog_from_row).collect()
+        load_catalogs(&conn.db(), Catalogs::All).await
+    }
+
+    async fn holding_price_list(&self, list: PriceListId) -> Result<Vec<Catalog>, RepoError> {
+        let mut conn = self.conn().await;
+        load_catalogs(&conn.db(), Catalogs::Holding(list.as_uuid())).await
     }
 
     async fn product_page(
@@ -379,51 +403,68 @@ impl<C: PgConnection> CatalogRepo for PgStore<C> {
     }
 }
 
-/// `CatalogRepo::insert` inside the caller's transaction.
+/// `CatalogRepo::insert` inside the caller's transaction: the row, then its price lists.
 pub(crate) async fn insert_catalog(
     tx: &impl Queries,
     s: &CatalogSnapshot,
 ) -> Result<(), RepoError> {
     let (kind, context_id) = context_to_db(s.context);
     tx.query_typed(
-        "INSERT INTO catalogs (id, version, context_kind, context_id, price_list_id)
-         VALUES ($1, 1, $2, $3, $4)",
+        "INSERT INTO catalogs (id, version, context_kind, context_id) VALUES ($1, 1, $2, $3)",
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&kind, Type::TEXT),
             (&context_id, Type::UUID),
-            (&s.price_list.map(|p| p.as_uuid()), Type::UUID),
         ],
     )
     .await
     .map_err(repo_error)?;
-    let written = ();
+    write_catalog_lists(tx, s).await?;
     write_stamps(tx, "catalogs", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
-    Ok(written)
+    Ok(())
 }
 
-/// `CatalogRepo::update` inside the caller's transaction; the new version. Membership
-/// rows are untouched.
+/// `CatalogRepo::update` inside the caller's transaction; the new version. The version
+/// check comes first; the price lists are only replaced if it passes. Membership rows are
+/// untouched.
 pub(crate) async fn update_catalog(
     tx: &impl Queries,
     s: &CatalogSnapshot,
 ) -> Result<Version, RepoError> {
     let bumped = tx
         .query_typed_opt(
-            "UPDATE catalogs SET version = version + 1, price_list_id = $3
+            "UPDATE catalogs SET version = version + 1
              WHERE id = $1 AND version = $2 RETURNING version",
             &[
                 (&s.id.as_uuid(), Type::UUID),
                 (&version_to_db(s.version)?, Type::INT8),
-                (&s.price_list.map(|p| p.as_uuid()), Type::UUID),
             ],
         )
         .await
         .map_err(repo_error)?;
     let row = bumped.ok_or(RepoError::StaleVersion)?;
+    tx.query_typed(
+        "DELETE FROM catalog_price_lists WHERE catalog_id = $1",
+        &[(&s.id.as_uuid(), Type::UUID)],
+    )
+    .await
+    .map_err(repo_error)?;
+    write_catalog_lists(tx, s).await?;
     let written = version_from_db(col(&row, "version")?)?;
     write_stamps(tx, "catalogs", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
     Ok(written)
+}
+
+async fn write_catalog_lists(tx: &impl Queries, s: &CatalogSnapshot) -> Result<(), RepoError> {
+    let lists: Vec<Uuid> = s.price_lists.iter().map(|l| l.as_uuid()).collect();
+    tx.query_typed(
+        "INSERT INTO catalog_price_lists (catalog_id, price_list_id)
+         SELECT $1, l FROM unnest($2::uuid[]) AS t (l)",
+        &[(&s.id.as_uuid(), Type::UUID), (&lists, Type::UUID_ARRAY)],
+    )
+    .await
+    .map_err(repo_error)?;
+    Ok(())
 }
 
 /// `CatalogRepo::add_products` inside the caller's transaction.
@@ -462,6 +503,49 @@ pub(crate) async fn remove_catalog_products(
 
 // ---------- price lists ----------
 
+/// `price_lists`' columns, as `price_list_from_row` reads them.
+fn price_list_columns(prefix: &str) -> String {
+    let owner = if prefix.is_empty() {
+        "price_lists."
+    } else {
+        prefix
+    };
+    format!(
+        "{prefix}id, {prefix}version, {prefix}name, {prefix}description, {prefix}currency,
+         {prefix}kind, {prefix}status, {}, {}, {prefix}compare_at, {prefix}adjustment,
+         {prefix}applies_to, {prefix}applies_to_ids, {},
+         ARRAY(SELECT g.group_id FROM price_list_groups g
+               WHERE g.price_list_id = {owner}id ORDER BY g.group_id) AS audience_groups",
+        micros(&format!("{prefix}starts_at")),
+        micros(&format!("{prefix}ends_at")),
+        stamp_columns(prefix),
+    )
+}
+
+/// Replaces the list's audience with `s.groups`. An unknown group is
+/// `Reference(PRICE_LIST_GROUP)`.
+async fn write_audience(tx: &impl Queries, s: &PriceListSnapshot) -> Result<(), RepoError> {
+    let groups: Vec<Uuid> = s.groups.iter().map(|g| g.as_uuid()).collect();
+    let params: [(&(dyn ToSql + Sync), Type); 2] =
+        [(&s.id.as_uuid(), Type::UUID), (&groups, Type::UUID_ARRAY)];
+    tx.query_typed(
+        "DELETE FROM price_list_groups WHERE price_list_id = $1 AND NOT (group_id = ANY($2))",
+        &params,
+    )
+    .await
+    .map_err(repo_error)?;
+    if !groups.is_empty() {
+        tx.query_typed(
+            "INSERT INTO price_list_groups (price_list_id, group_id)
+             SELECT $1, g FROM unnest($2::uuid[]) AS t (g) ON CONFLICT DO NOTHING",
+            &params,
+        )
+        .await
+        .map_err(repo_error)?;
+    }
+    Ok(())
+}
+
 impl<C: PgConnection> PriceListRepo for PgStore<C> {
     async fn get(&self, id: PriceListId) -> Result<Option<PriceList>, RepoError> {
         let mut conn = self.conn().await;
@@ -469,8 +553,8 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
             .db()
             .query_typed_opt(
                 &format!(
-                    "SELECT id, version, currency, adjustment, {} FROM price_lists WHERE id = $1",
-                    stamp_columns(""),
+                    "SELECT {} FROM price_lists WHERE id = $1",
+                    price_list_columns("")
                 ),
                 &[(&id.as_uuid(), Type::UUID)],
             )
@@ -485,8 +569,8 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
             .db()
             .query_typed(
                 &format!(
-                    "SELECT id, version, currency, adjustment, {} FROM price_lists ORDER BY id",
-                    stamp_columns(""),
+                    "SELECT {} FROM price_lists ORDER BY id",
+                    price_list_columns("")
                 ),
                 &[],
             )
@@ -495,33 +579,332 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         rows.iter().map(price_list_from_row).collect()
     }
 
-    async fn fixed_price_page(
+    async fn get_by_name(&self, name: &str) -> Result<Option<PriceList>, RepoError> {
+        let mut conn = self.conn().await;
+        // `lower(name)` is the unique index's expression, so this reads it.
+        let row = conn
+            .db()
+            .query_typed_opt(
+                &format!(
+                    "SELECT {} FROM price_lists WHERE lower(name) = lower($1)",
+                    price_list_columns("")
+                ),
+                &[(&name, Type::TEXT)],
+            )
+            .await
+            .map_err(repo_error)?;
+        row.as_ref().map(price_list_from_row).transpose()
+    }
+
+    async fn get_many(&self, ids: &[PriceListId]) -> Result<Vec<PriceList>, RepoError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
+        let mut conn = self.conn().await;
+        let rows = conn
+            .db()
+            .query_typed(
+                &format!(
+                    "SELECT {} FROM price_lists WHERE id = ANY($1) ORDER BY id",
+                    price_list_columns("")
+                ),
+                &[(&ids, Type::UUID_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?;
+        rows.iter().map(price_list_from_row).collect()
+    }
+
+    async fn list(
         &self,
-        list: PriceListId,
-        page: PageRequest<VariantId>,
-    ) -> Result<Page<(VariantId, Price)>, RepoError> {
-        let after = page.after.map(|id| id.as_uuid());
+        filter: &PriceListFilter,
+        sort: PriceListSort,
+        page: PageRequest<Keyset<PriceListId>>,
+    ) -> Result<Page<PriceList>, RepoError> {
+        let (cmp, dir) = match sort.direction() {
+            Direction::Ascending => (">", "ASC"),
+            Direction::Descending => ("<", "DESC"),
+        };
+        let mut name_key = None::<String>;
+        let after = match &page.after {
+            None => None,
+            Some(after) => {
+                match (&after.key, sort) {
+                    (SortKey::Id, PriceListSort::Newest | PriceListSort::Oldest) => {}
+                    (SortKey::Text(t), PriceListSort::NameAsc | PriceListSort::NameDesc) => {
+                        name_key = Some(t.clone())
+                    }
+                    (key, sort) => {
+                        return Err(RepoError::Backend(format!(
+                            "a {key:?} position for a {sort:?} list"
+                        )));
+                    }
+                }
+                Some(after.id.as_uuid())
+            }
+        };
+        let (position, order) = match sort {
+            PriceListSort::Newest | PriceListSort::Oldest => {
+                (format!("id {cmp} $1"), format!("id {dir}"))
+            }
+            PriceListSort::NameAsc | PriceListSort::NameDesc => (
+                format!(r#"((lower(name) COLLATE "C"), id) {cmp} (($2::text COLLATE "C"), $1)"#),
+                format!(r#"(lower(name) COLLATE "C") {dir}, id {dir}"#),
+            ),
+        };
+        // Where a list stands at `$6`, as `PriceList::phase` judges it.
+        let phase = match filter.phase {
+            None => "TRUE",
+            Some(PriceListPhase::Draft) => "status = 'draft'",
+            Some(PriceListPhase::Scheduled) => "status = 'active' AND starts_at > $6",
+            Some(PriceListPhase::Active) => {
+                "status = 'active' AND (starts_at IS NULL OR starts_at <= $6)
+                 AND (ends_at IS NULL OR ends_at > $6)"
+            }
+            Some(PriceListPhase::Expired) => {
+                "status = 'active' AND (starts_at IS NULL OR starts_at <= $6) AND ends_at <= $6"
+            }
+        };
+        let ids: Option<Vec<Uuid>> = filter
+            .ids
+            .as_ref()
+            .map(|ids| ids.iter().map(|id| id.as_uuid()).collect());
+        let kind = filter.kind.map(|k| k.as_str());
         let fetch = i64::from(page.limit.get()) + 1;
         let mut conn = self.conn().await;
         let rows = conn
             .db()
             .query_typed(
-                "SELECT variant_id, amount, currency FROM price_list_prices
-                 WHERE price_list_id = $1 AND ($2::uuid IS NULL OR variant_id < $2)
-                 ORDER BY variant_id DESC LIMIT $3",
+                &format!(
+                    "SELECT {} FROM price_lists
+                     WHERE ($1::uuid IS NULL OR {position})
+                       AND ($4::text IS NULL OR kind = $4)
+                       AND ($5::uuid[] IS NULL OR id = ANY($5))
+                       AND ($7::uuid IS NULL OR EXISTS (
+                           SELECT 1 FROM price_list_groups g
+                           WHERE g.price_list_id = price_lists.id AND g.group_id = $7))
+                       AND {phase}
+                     ORDER BY {order} LIMIT $3",
+                    price_list_columns(""),
+                    phase = phase.replace("$6", &ts(6)),
+                ),
                 &[
-                    (&list.as_uuid(), Type::UUID),
                     (&after, Type::UUID),
+                    (&name_key, Type::TEXT),
                     (&fetch, Type::INT8),
+                    (&kind, Type::TEXT),
+                    (&ids, Type::UUID_ARRAY),
+                    (&filter.at.unix_micros(), Type::INT8),
+                    (&filter.group.map(|g| g.as_uuid()), Type::UUID),
                 ],
             )
             .await
             .map_err(repo_error)?;
-        let prices = rows
+        let lists = rows
             .iter()
-            .map(fixed_price_from_row)
+            .map(price_list_from_row)
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Page::from_overfetch(prices, page.limit))
+        Ok(Page::from_overfetch(lists, page.limit))
+    }
+
+    async fn delete(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
+        let id = price_list.id().as_uuid();
+        let version = version_to_db(price_list.version())?;
+        let events = price_list.take_events();
+        let stamp = self.event_stamp();
+        in_transaction!(self, |tx| {
+            // The catalog reference refuses it while a catalog holds it; fixed prices go
+            // with it.
+            let deleted = tx
+                .query_typed_opt(
+                    "DELETE FROM price_lists WHERE id = $1 AND version = $2 RETURNING id",
+                    &[(&id, Type::UUID), (&version, Type::INT8)],
+                )
+                .await
+                .map_err(repo_error)?;
+            if deleted.is_none() {
+                return Err(RepoError::StaleVersion);
+            }
+            insert_events(tx, &events, None, stamp).await
+        })
+    }
+
+    async fn fixed_price_counts(
+        &self,
+        lists: &[PriceListId],
+    ) -> Result<HashMap<PriceListId, u64>, RepoError> {
+        if lists.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let ids: Vec<Uuid> = lists.iter().map(|l| l.as_uuid()).collect();
+        let mut conn = self.conn().await;
+        let rows = conn
+            .db()
+            .query_typed(
+                "SELECT price_list_id, count(*) AS n FROM price_list_prices
+                 WHERE price_list_id = ANY($1) GROUP BY price_list_id",
+                &[(&ids, Type::UUID_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?;
+        rows.iter()
+            .map(|row| {
+                let n: i64 = col(row, "n")?;
+                Ok((
+                    PriceListId::from_uuid(col(row, "price_list_id")?),
+                    u64::try_from(n).map_err(corrupt)?,
+                ))
+            })
+            .collect()
+    }
+
+    async fn fixed_prices_in(
+        &self,
+        lists: &[PriceListId],
+        variants: &[VariantId],
+    ) -> Result<HashMap<PriceListId, HashMap<VariantId, FixedPrice>>, RepoError> {
+        if lists.is_empty() || variants.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let lists: Vec<Uuid> = lists.iter().map(|l| l.as_uuid()).collect();
+        let ids: Vec<Uuid> = variants.iter().map(|v| v.as_uuid()).collect();
+        let mut conn = self.conn().await;
+        consistent_read!(conn, |tx| load_fixed_prices(tx, &lists, &ids).await)
+    }
+
+    async fn schedule_ran_until(&self) -> Result<Option<Timestamp>, RepoError> {
+        let mut conn = self.conn().await;
+        let row = conn
+            .db()
+            .query_typed_opt(
+                &format!("SELECT {} FROM price_list_schedule", micros("ran_until")),
+                &[],
+            )
+            .await
+            .map_err(repo_error)?;
+        row.map(|r| col::<i64>(&r, "ran_until").map(Timestamp::from_unix_micros))
+            .transpose()
+    }
+
+    async fn product_categories(
+        &self,
+        products: &[ProductId],
+    ) -> Result<HashMap<ProductId, HashSet<CategoryId>>, RepoError> {
+        if products.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let ids: Vec<Uuid> = products.iter().map(|p| p.as_uuid()).collect();
+        let mut conn = self.conn().await;
+        // Up the parent pointers from each product's categories; UNION (not ALL) stops
+        // at a category already reached.
+        let rows = conn
+            .db()
+            .query_typed(
+                "WITH RECURSIVE up (product_id, category_id) AS (
+                     SELECT product_id, category_id FROM category_products
+                     WHERE product_id = ANY($1)
+                     UNION
+                     SELECT up.product_id, c.parent_id FROM up
+                     JOIN categories c ON c.id = up.category_id
+                     WHERE c.parent_id IS NOT NULL
+                 )
+                 SELECT product_id, category_id FROM up",
+                &[(&ids, Type::UUID_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?;
+        let mut found: HashMap<ProductId, HashSet<CategoryId>> = HashMap::new();
+        for row in &rows {
+            found
+                .entry(ProductId::from_uuid(col(row, "product_id")?))
+                .or_default()
+                .insert(CategoryId::from_uuid(col(row, "category_id")?));
+        }
+        Ok(found)
+    }
+
+    async fn fixed_price_page(
+        &self,
+        list: PriceListId,
+        filter: &FixedPriceFilter,
+        page: PageRequest<VariantId>,
+    ) -> Result<Page<(VariantId, FixedPrice)>, RepoError> {
+        let after = page.after.map(|id| id.as_uuid());
+        let fetch = i64::from(page.limit.get()) + 1;
+        let product = filter.product().map(|p| p.as_uuid());
+        let category = filter.category().map(|c| c.as_uuid());
+        let q = filter.q();
+        let variants: Option<Vec<Uuid>> = (!filter.variants().is_empty())
+            .then(|| filter.variants().iter().map(|v| v.as_uuid()).collect());
+        let list = list.as_uuid();
+        let mut conn = self.conn().await;
+        // The page and its breaks in one snapshot: a write between them can't pair a
+        // price with another's breaks.
+        consistent_read!(conn, |tx| {
+            let rows = tx
+                .query_typed(
+                    "WITH RECURSIVE down (id) AS (
+                         SELECT id FROM categories WHERE id = $5
+                         UNION
+                         SELECT c.id FROM categories c JOIN down ON c.parent_id = down.id
+                     )
+                     SELECT f.variant_id, f.amount, f.currency, f.compare_at
+                         FROM price_list_prices f
+                         LEFT JOIN variants v ON v.id = f.variant_id
+                         LEFT JOIN products p ON p.id = v.product_id
+                         WHERE f.price_list_id = $1 AND ($2::uuid IS NULL OR f.variant_id < $2)
+                           AND ($4::uuid IS NULL OR p.id = $4)
+                           AND ($5::uuid IS NULL OR EXISTS (SELECT 1 FROM category_products cp
+                                JOIN down ON down.id = cp.category_id WHERE cp.product_id = p.id))
+                           AND ($6::text IS NULL
+                                OR strpos(lower(p.title), lower($6)) > 0
+                                OR strpos(lower(p.handle), lower($6)) > 0
+                                OR strpos(lower(v.sku), lower($6)) > 0)
+                           AND ($7::uuid[] IS NULL OR f.variant_id = ANY($7))
+                         ORDER BY f.variant_id DESC LIMIT $3",
+                    &[
+                        (&list, Type::UUID),
+                        (&after, Type::UUID),
+                        (&fetch, Type::INT8),
+                        (&product, Type::UUID),
+                        (&category, Type::UUID),
+                        (&q, Type::TEXT),
+                        (&variants, Type::UUID_ARRAY),
+                    ],
+                )
+                .await
+                .map_err(repo_error)?;
+            let prices = rows
+                .iter()
+                .map(fixed_price_from_row)
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut prices = Page::from_overfetch(prices, page.limit);
+            if prices.items.is_empty() {
+                return Ok(prices);
+            }
+            let ids: Vec<Uuid> = prices.items.iter().map(|(v, _)| v.as_uuid()).collect();
+            let break_rows = tx
+                .query_typed(
+                    "SELECT price_list_id, variant_id, min_quantity, amount
+                     FROM price_list_price_breaks
+                     WHERE price_list_id = $1 AND variant_id = ANY($2)
+                     ORDER BY variant_id, min_quantity",
+                    &[(&list, Type::UUID), (&ids, Type::UUID_ARRAY)],
+                )
+                .await
+                .map_err(repo_error)?;
+            let mut breaks = breaks_by_price(&break_rows)?;
+            prices.items = prices
+                .items
+                .into_iter()
+                .map(|(v, fixed)| {
+                    let found = breaks.remove(&(list, v.as_uuid()));
+                    Ok((v, with_breaks(fixed, found)?))
+                })
+                .collect::<Result<_, RepoError>>()?;
+            Ok(prices)
+        })
     }
 
     async fn insert(&self, price_list: &mut PriceList) -> Result<(), RepoError> {
@@ -555,7 +938,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
     async fn set_fixed_prices(
         &self,
         list: PriceListId,
-        prices: &[(VariantId, Price)],
+        prices: &[(VariantId, FixedPrice)],
     ) -> Result<(), RepoError> {
         in_transaction!(self, |tx| set_fixed_prices(tx, list, prices).await)
     }
@@ -566,6 +949,28 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         variants: &[VariantId],
     ) -> Result<(), RepoError> {
         in_transaction!(self, |tx| remove_fixed_prices(tx, list, variants).await)
+    }
+
+    async fn priced_variants(
+        &self,
+        list: PriceListId,
+        limit: u32,
+    ) -> Result<Vec<VariantId>, RepoError> {
+        let mut conn = self.conn().await;
+        conn.db()
+            .query_typed(
+                "SELECT variant_id FROM price_list_prices WHERE price_list_id = $1
+                 ORDER BY variant_id LIMIT $2",
+                &[
+                    (&list.as_uuid(), Type::UUID),
+                    (&i64::from(limit), Type::INT8),
+                ],
+            )
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(|row| Ok(VariantId::from_uuid(col(row, "variant_id")?)))
+            .collect()
     }
 
     async fn lists_pricing(&self, variant: VariantId) -> Result<Vec<PriceListId>, RepoError> {
@@ -587,23 +992,93 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
         &self,
         list: PriceListId,
         variants: &[VariantId],
-    ) -> Result<HashMap<VariantId, Price>, RepoError> {
-        if variants.is_empty() {
-            return Ok(HashMap::new());
-        }
-        let ids: Vec<Uuid> = variants.iter().map(|v| v.as_uuid()).collect();
-        let mut conn = self.conn().await;
-        let rows = conn
-            .db()
-            .query_typed(
-                "SELECT variant_id, amount, currency FROM price_list_prices
-                 WHERE price_list_id = $1 AND variant_id = ANY($2)",
-                &[(&list.as_uuid(), Type::UUID), (&ids, Type::UUID_ARRAY)],
-            )
-            .await
-            .map_err(repo_error)?;
-        rows.iter().map(fixed_price_from_row).collect()
+    ) -> Result<HashMap<VariantId, FixedPrice>, RepoError> {
+        Ok(self
+            .fixed_prices_in(&[list], variants)
+            .await?
+            .remove(&list)
+            .unwrap_or_default())
     }
+}
+
+/// `lists`' fixed prices for `variants` with their quantity prices, in 2 pipelined queries.
+async fn load_fixed_prices(
+    client: &impl Queries,
+    lists: &[Uuid],
+    variants: &[Uuid],
+) -> Result<HashMap<PriceListId, HashMap<VariantId, FixedPrice>>, RepoError> {
+    let params: [(&(dyn ToSql + Sync), Type); 2] =
+        [(&lists, Type::UUID_ARRAY), (&variants, Type::UUID_ARRAY)];
+    let (rows, break_rows) = try_join(
+        client.query_typed(
+            "SELECT price_list_id, variant_id, amount, currency, compare_at
+             FROM price_list_prices WHERE price_list_id = ANY($1) AND variant_id = ANY($2)",
+            &params,
+        ),
+        client.query_typed(
+            "SELECT price_list_id, variant_id, min_quantity, amount FROM price_list_price_breaks
+             WHERE price_list_id = ANY($1) AND variant_id = ANY($2)
+             ORDER BY price_list_id, variant_id, min_quantity",
+            &params,
+        ),
+    )
+    .await
+    .map_err(repo_error)?;
+    let mut breaks = breaks_by_price(&break_rows)?;
+    let mut found: HashMap<PriceListId, HashMap<VariantId, FixedPrice>> = HashMap::new();
+    for row in &rows {
+        let list: Uuid = col(row, "price_list_id")?;
+        let (variant, fixed) = fixed_price_from_row(row)?;
+        let fixed = with_breaks(fixed, breaks.remove(&(list, variant.as_uuid())))?;
+        found
+            .entry(PriceListId::from_uuid(list))
+            .or_default()
+            .insert(variant, fixed);
+    }
+    Ok(found)
+}
+
+/// Quantity prices as `(min_quantity, amount)`, by `(price list, variant)`.
+type BreakRows = HashMap<(Uuid, Uuid), Vec<(u32, i64)>>;
+
+/// `price_list_price_breaks` rows (`price_list_id, variant_id, min_quantity, amount`) by
+/// the fixed price they belong to, in quantity order; their currency is the price's.
+fn breaks_by_price(rows: &[Row]) -> Result<BreakRows, RepoError> {
+    let mut found = BreakRows::new();
+    for row in rows {
+        let quantity: i32 = col(row, "min_quantity")?;
+        found
+            .entry((col(row, "price_list_id")?, col(row, "variant_id")?))
+            .or_default()
+            .push((
+                u32::try_from(quantity).map_err(corrupt)?,
+                col(row, "amount")?,
+            ));
+    }
+    Ok(found)
+}
+
+fn with_breaks(
+    fixed: FixedPrice,
+    breaks: Option<Vec<(u32, i64)>>,
+) -> Result<FixedPrice, RepoError> {
+    let Some(breaks) = breaks else {
+        return Ok(fixed);
+    };
+    let currency = fixed.price().money().currency();
+    let breaks = breaks
+        .into_iter()
+        .map(|(min_quantity, amount)| {
+            let price = hypha_core::Money::new(amount, currency)
+                .and_then(Price::new)
+                .map_err(corrupt)?;
+            Ok(PriceBreak {
+                min_quantity,
+                price,
+            })
+        })
+        .collect::<Result<Vec<_>, RepoError>>()?;
+    fixed.with_breaks(breaks).map_err(corrupt)
 }
 
 /// `PriceListRepo::insert` inside the caller's transaction.
@@ -611,17 +1086,33 @@ pub(crate) async fn insert_price_list(
     tx: &impl Queries,
     s: &PriceListSnapshot,
 ) -> Result<(), RepoError> {
+    let (percent, applies_to, targets) = adjustment_to_db(s);
     tx.query_typed(
-        "INSERT INTO price_lists (id, version, currency, adjustment) VALUES ($1, 1, $2, $3)",
+        &format!(
+            "INSERT INTO price_lists (id, version, name, description, currency, kind, status,
+                 starts_at, ends_at, compare_at, adjustment, applies_to, applies_to_ids)
+             VALUES ($1, 1, $2, $3, $4, $5, $6, {}, {}, $9, $10, $11, $12)",
+            ts(7),
+            ts(8),
+        ),
         &[
             (&s.id.as_uuid(), Type::UUID),
+            (&s.name, Type::TEXT),
+            (&s.description, Type::TEXT),
             (&s.currency.as_str(), Type::TEXT),
-            (&s.adjustment.value(), Type::INT4),
+            (&s.kind.as_str(), Type::TEXT),
+            (&s.status.as_str(), Type::TEXT),
+            (&opt_micros(s.starts_at), Type::INT8),
+            (&opt_micros(s.ends_at), Type::INT8),
+            (&s.compare_at.as_str(), Type::TEXT),
+            (&percent, Type::INT4),
+            (&applies_to, Type::TEXT),
+            (&targets, Type::UUID_ARRAY),
         ],
     )
     .await
     .map_err(repo_error)?;
-    let written = ();
+    write_audience(tx, s).await?;
     write_stamps(
         tx,
         "price_lists",
@@ -631,7 +1122,7 @@ pub(crate) async fn insert_price_list(
         s.stamps,
     )
     .await?;
-    Ok(written)
+    Ok(())
 }
 
 /// `PriceListRepo::update` inside the caller's transaction; the new version.
@@ -639,21 +1130,38 @@ pub(crate) async fn update_price_list(
     tx: &impl Queries,
     s: &PriceListSnapshot,
 ) -> Result<Version, RepoError> {
+    let (percent, applies_to, targets) = adjustment_to_db(s);
     let bumped = tx
         .query_typed_opt(
-            "UPDATE price_lists SET version = version + 1, currency = $3, adjustment = $4
-             WHERE id = $1 AND version = $2 RETURNING version",
+            &format!(
+                "UPDATE price_lists SET version = version + 1, name = $3, description = $4,
+                     currency = $5, kind = $6, status = $7, starts_at = {}, ends_at = {},
+                     compare_at = $10, adjustment = $11, applies_to = $12, applies_to_ids = $13
+                 WHERE id = $1 AND version = $2 RETURNING version",
+                ts(8),
+                ts(9),
+            ),
             &[
                 (&s.id.as_uuid(), Type::UUID),
                 (&version_to_db(s.version)?, Type::INT8),
+                (&s.name, Type::TEXT),
+                (&s.description, Type::TEXT),
                 (&s.currency.as_str(), Type::TEXT),
-                (&s.adjustment.value(), Type::INT4),
+                (&s.kind.as_str(), Type::TEXT),
+                (&s.status.as_str(), Type::TEXT),
+                (&opt_micros(s.starts_at), Type::INT8),
+                (&opt_micros(s.ends_at), Type::INT8),
+                (&s.compare_at.as_str(), Type::TEXT),
+                (&percent, Type::INT4),
+                (&applies_to, Type::TEXT),
+                (&targets, Type::UUID_ARRAY),
             ],
         )
         .await
         .map_err(repo_error)?;
     let row = bumped.ok_or(RepoError::StaleVersion)?;
     let written = version_from_db(col(&row, "version")?)?;
+    write_audience(tx, s).await?;
     write_stamps(
         tx,
         "price_lists",
@@ -670,28 +1178,69 @@ pub(crate) async fn update_price_list(
 pub(crate) async fn set_fixed_prices(
     tx: &impl Queries,
     list: PriceListId,
-    prices: &[(VariantId, Price)],
+    prices: &[(VariantId, FixedPrice)],
 ) -> Result<(), RepoError> {
     let variants: Vec<Uuid> = prices.iter().map(|(v, _)| v.as_uuid()).collect();
-    let amounts: Vec<i64> = prices.iter().map(|(_, p)| p.money().amount()).collect();
+    let amounts: Vec<i64> = prices
+        .iter()
+        .map(|(_, p)| p.price().money().amount())
+        .collect();
     let currencies: Vec<&str> = prices
         .iter()
-        .map(|(_, p)| p.money().currency().as_str())
+        .map(|(_, p)| p.price().money().currency().as_str())
+        .collect();
+    let compare_at: Vec<Option<i64>> = prices
+        .iter()
+        .map(|(_, p)| p.compare_at().map(|c| c.money().amount()))
         .collect();
     tx.query_typed(
-        "INSERT INTO price_list_prices (price_list_id, variant_id, amount, currency)
-         SELECT $1, v, a, c FROM unnest($2::uuid[], $3::bigint[], $4::text[]) AS t (v, a, c)
+        "INSERT INTO price_list_prices (price_list_id, variant_id, amount, currency, compare_at)
+         SELECT $1, v, a, c, w
+         FROM unnest($2::uuid[], $3::bigint[], $4::text[], $5::bigint[]) AS t (v, a, c, w)
          ON CONFLICT (price_list_id, variant_id)
-         DO UPDATE SET amount = EXCLUDED.amount, currency = EXCLUDED.currency",
+         DO UPDATE SET amount = EXCLUDED.amount, currency = EXCLUDED.currency,
+             compare_at = EXCLUDED.compare_at",
         &[
             (&list.as_uuid(), Type::UUID),
             (&variants, Type::UUID_ARRAY),
             (&amounts, Type::INT8_ARRAY),
             (&currencies, Type::TEXT_ARRAY),
+            (&compare_at, Type::INT8_ARRAY),
         ],
     )
     .await
     .map_err(repo_error)?;
+    // A fixed price set again replaces its quantity prices.
+    tx.query_typed(
+        "DELETE FROM price_list_price_breaks WHERE price_list_id = $1 AND variant_id = ANY($2)",
+        &[(&list.as_uuid(), Type::UUID), (&variants, Type::UUID_ARRAY)],
+    )
+    .await
+    .map_err(repo_error)?;
+    let mut break_variants = Vec::new();
+    let mut quantities = Vec::new();
+    let mut break_amounts = Vec::new();
+    for (variant, fixed) in prices {
+        for b in fixed.breaks() {
+            break_variants.push(variant.as_uuid());
+            quantities.push(i32::try_from(b.min_quantity).map_err(corrupt)?);
+            break_amounts.push(b.price.money().amount());
+        }
+    }
+    if !break_variants.is_empty() {
+        tx.query_typed(
+            "INSERT INTO price_list_price_breaks (price_list_id, variant_id, min_quantity, amount)
+             SELECT $1, v, q, a FROM unnest($2::uuid[], $3::int4[], $4::bigint[]) AS t (v, q, a)",
+            &[
+                (&list.as_uuid(), Type::UUID),
+                (&break_variants, Type::UUID_ARRAY),
+                (&quantities, Type::INT4_ARRAY),
+                (&break_amounts, Type::INT8_ARRAY),
+            ],
+        )
+        .await
+        .map_err(repo_error)?;
+    }
     Ok(())
 }
 
@@ -711,24 +1260,124 @@ pub(crate) async fn remove_fixed_prices(
     Ok(())
 }
 
-fn price_list_from_row(row: &Row) -> Result<PriceList, RepoError> {
-    let adjustment: i32 = col(row, "adjustment")?;
-    Ok(PriceList::restore(PriceListSnapshot {
-        id: PriceListId::from_uuid(col(row, "id")?),
-        version: version_from_db(col(row, "version")?)?,
-        stamps: stamps_from_row(row)?,
-        currency: currency_from_db(col(row, "currency")?)?,
-        adjustment: BasisPoints::new(adjustment).map_err(corrupt)?,
-    }))
+/// An adjustment as its columns: the percentage (`NULL` without one), what it applies to
+/// and the listed IDs.
+fn adjustment_to_db(s: &PriceListSnapshot) -> (Option<i32>, &'static str, Vec<Uuid>) {
+    match &s.adjustment {
+        None => (None, "all", Vec::new()),
+        Some(a) => {
+            let targets = match a.applies_to() {
+                AppliesTo::All => Vec::new(),
+                AppliesTo::Products(p) => p.iter().map(|id| id.as_uuid()).collect(),
+                AppliesTo::Categories(c) => c.iter().map(|id| id.as_uuid()).collect(),
+            };
+            (Some(a.percent().value()), a.applies_to().as_str(), targets)
+        }
+    }
 }
 
-/// A `price_list_prices` row (`variant_id, amount, currency`).
-fn fixed_price_from_row(row: &Row) -> Result<(VariantId, Price), RepoError> {
-    let money = hypha_core::Money::new(
-        col(row, "amount")?,
-        currency_from_db(col(row, "currency")?)?,
+fn price_list_from_row(row: &Row) -> Result<PriceList, RepoError> {
+    let id: Uuid = col(row, "id")?;
+    let adjustment: Option<i32> = col(row, "adjustment")?;
+    let kind: String = col(row, "kind")?;
+    let status: String = col(row, "status")?;
+    let compare_at: String = col(row, "compare_at")?;
+    PriceList::restore(PriceListSnapshot {
+        groups: col::<Vec<Uuid>>(row, "audience_groups")?
+            .into_iter()
+            .map(CustomerGroupId::from_uuid)
+            .collect(),
+        id: PriceListId::from_uuid(id),
+        version: version_from_db(col(row, "version")?)?,
+        stamps: stamps_from_row(row)?,
+        name: col(row, "name")?,
+        description: col(row, "description")?,
+        currency: currency_from_db(col(row, "currency")?)?,
+        kind: PriceListKind::parse(&kind)
+            .ok_or_else(|| corrupt(format!("price list kind {kind:?}")))?,
+        status: PriceListStatus::parse(&status)
+            .ok_or_else(|| corrupt(format!("price list status {status:?}")))?,
+        starts_at: opt_ts(col(row, "starts_at")?),
+        ends_at: opt_ts(col(row, "ends_at")?),
+        compare_at: CompareAtMode::parse(&compare_at)
+            .ok_or_else(|| corrupt(format!("price list compare-at mode {compare_at:?}")))?,
+        adjustment: match adjustment {
+            None => None,
+            Some(percent) => {
+                let percent = BasisPoints::new(percent).map_err(corrupt)?;
+                let applies_to: String = col(row, "applies_to")?;
+                let targets: Vec<Uuid> = col(row, "applies_to_ids")?;
+                let applies_to = match applies_to.as_str() {
+                    "all" => AppliesTo::All,
+                    "products" => {
+                        AppliesTo::Products(targets.into_iter().map(ProductId::from_uuid).collect())
+                    }
+                    "categories" => AppliesTo::Categories(
+                        targets.into_iter().map(CategoryId::from_uuid).collect(),
+                    ),
+                    other => return Err(corrupt(format!("applies to {other:?}"))),
+                };
+                Some(Adjustment::new(percent, applies_to).map_err(corrupt)?)
+            }
+        },
+    })
+    .map_err(|e| corrupt(format!("price list {id}: {e}")))
+}
+
+/// A `price_list_prices` row (`variant_id, amount, currency, compare_at`).
+fn fixed_price_from_row(row: &Row) -> Result<(VariantId, FixedPrice), RepoError> {
+    let currency = currency_from_db(col(row, "currency")?)?;
+    let price = |amount: i64| {
+        hypha_core::Money::new(amount, currency)
+            .and_then(Price::new)
+            .map_err(corrupt)
+    };
+    let compare_at: Option<i64> = col(row, "compare_at")?;
+    let fixed = FixedPrice::new(
+        price(col(row, "amount")?)?,
+        compare_at.map(price).transpose()?,
     )
     .map_err(corrupt)?;
-    let price = Price::new(money).map_err(corrupt)?;
-    Ok((VariantId::from_uuid(col(row, "variant_id")?), price))
+    Ok((VariantId::from_uuid(col(row, "variant_id")?), fixed))
+}
+
+/// Moves the schedule job's progress from `from` (`None`: no row yet) to `to`, or fails
+/// with `StaleVersion` when another run moved it first.
+pub(crate) async fn advance_price_list_schedule(
+    client: &impl Queries,
+    from: Option<Timestamp>,
+    to: Timestamp,
+) -> Result<(), RepoError> {
+    let moved = match from {
+        None => client
+            .query_typed(
+                &format!(
+                    "INSERT INTO price_list_schedule (ran_until) VALUES ({})
+                     ON CONFLICT (id) DO NOTHING RETURNING id",
+                    ts(1)
+                ),
+                &[(&to.unix_micros(), Type::INT8)],
+            )
+            .await
+            .map_err(repo_error)?,
+        Some(from) => client
+            .query_typed(
+                &format!(
+                    "UPDATE price_list_schedule SET ran_until = {} WHERE ran_until = {}
+                     RETURNING id",
+                    ts(1),
+                    ts(2)
+                ),
+                &[
+                    (&to.unix_micros(), Type::INT8),
+                    (&from.unix_micros(), Type::INT8),
+                ],
+            )
+            .await
+            .map_err(repo_error)?,
+    };
+    if moved.is_empty() {
+        return Err(RepoError::StaleVersion);
+    }
+    Ok(())
 }

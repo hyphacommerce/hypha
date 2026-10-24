@@ -591,6 +591,8 @@ mod worker_main {
             req.extensions_mut()
                 .insert(hypha_http::client_ip::PeerAddr(ip));
         }
+        let boundaries =
+            crate::schedule::may_move_boundaries(req.method().as_str(), req.uri().path());
         let mut app = isolate.app.clone();
         let response = Scoped::new(&event, app.call(req)).await?;
         // A write's events go out after its response, as the VPS's runner wakes. A request
@@ -603,6 +605,7 @@ mod worker_main {
             ctx.wait_until(Scoped::new(&event, async move {
                 let jobs = state.config.jobs;
                 let mut run = Run::default();
+                // The schedule runs on the ticks (`due` wakes one for the next boundary).
                 if jobs.dispatch.enabled {
                     run = run.and(
                         steps("dispatch", &state, Some(deadline), || {
@@ -629,7 +632,11 @@ mod worker_main {
                     );
                 }
                 if let Some(kv) = kv {
-                    mark(&kv, &state, marks::after(run, None), LAST_DUE.get()).await;
+                    let mut after = marks::after(run, None);
+                    // The write may have moved the next boundary, which `due` counts.
+                    after.due |= boundaries
+                        && (jobs.price_list_schedule.enabled || jobs.discount_schedule.enabled);
+                    mark(&kv, &state, after, LAST_DUE.get()).await;
                 }
             }));
         }
@@ -637,9 +644,9 @@ mod worker_main {
     }
 
     /// The cron tick (every minute, `wrangler.toml`; `worker!`'s `#[event(scheduled)]`):
-    /// dispatch, search sync and sending emails when KV's marks say there's work (or on
-    /// the safety net's ticks), the others on the ticks that start their interval
-    /// (`schedule::due`).
+    /// the price list and discount schedules, dispatch, search sync and sending emails when
+    /// KV's marks say there's work (a window boundary due among them) or on the safety
+    /// net's ticks, the others on the ticks that start their interval (`schedule::due`).
     pub async fn scheduled<D: Deployment>(tick: ScheduledEvent, env: Env, ctx: ScheduleContext) {
         let isolate = match isolate::<D>(&env).await {
             Ok(isolate) => isolate,
@@ -664,6 +671,23 @@ mod worker_main {
                 || read.is_none_or(|marks| marks.waiting(started));
             if waiting {
                 let mut run = Run::default();
+                // Before dispatch, which sends what it announced.
+                if jobs.price_list_schedule.enabled {
+                    run = run.and(
+                        steps("price list schedule", &state, None, || {
+                            jobs::price_list_schedule(&state)
+                        })
+                        .await,
+                    );
+                }
+                if jobs.discount_schedule.enabled {
+                    run = run.and(
+                        steps("discount schedule", &state, None, || {
+                            jobs::discount_schedule(&state)
+                        })
+                        .await,
+                    );
+                }
                 if jobs.dispatch.enabled {
                     run = run.and(steps("dispatch", &state, None, || jobs::dispatch(&state)).await);
                 }

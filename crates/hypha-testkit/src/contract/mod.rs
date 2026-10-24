@@ -30,6 +30,7 @@ mod custom_fields;
 mod customer_groups;
 mod customers;
 mod deletions;
+mod discounts;
 mod endpoints;
 mod extensions;
 mod fulfillments;
@@ -64,13 +65,16 @@ pub use custom_fields::{custom_field_definitions, custom_field_filters, custom_f
 pub use customer_groups::customer_group_repo;
 pub use customers::customer_repo;
 pub use deletions::deletions;
+pub use discounts::{discount_names, discount_repo};
 pub use endpoints::extension_endpoint_repo;
 pub use extensions::extension_call_repo;
 pub use fulfillments::fulfillment_repo;
 pub use idempotency::idempotency_repo;
 pub use inventory::{inventory_item_repo, location_repo};
-pub use markets::{catalog_repo, market_repo, price_list_repo};
-pub use media::{asset_repo, blob_store};
+pub use markets::{
+    catalog_repo, market_repo, price_list_joins, price_list_repo, price_list_schedule,
+};
+pub use media::{asset_repo, blob_store, temporary_upload_repo};
 pub use notifications::{
     notification_repo, notification_settings_batch, notification_settings_repo,
     notification_template_repo,

@@ -8,7 +8,8 @@ use hypha_core::{
 };
 use hypha_products::{
     Handle, HasProducts, NewVariant, OptionValue, Product, ProductFilter, ProductFilterInput,
-    ProductOption, ProductRepo, ProductSort, ProductStatus, VariantPatch, repo::keys,
+    ProductOption, ProductRepo, ProductSort, ProductStatus, VariantFilter, VariantFilterInput,
+    VariantPatch, VariantPosition, VariantSummary, repo::keys,
 };
 use uuid::Uuid;
 
@@ -42,6 +43,12 @@ pub async fn product_repo<R: ProductRepo>(make: impl AsyncFn() -> R) {
     list_sorted(&make().await).await;
     scenario("product: list by several statuses, vendor, product type and tag");
     list_by_details(&make().await).await;
+    scenario("product: list by IDs, any of several");
+    list_by_ids(&make().await).await;
+    scenario("variant list: newest product first, variants in order, paged, as summaries");
+    variant_list_pages(&make().await).await;
+    scenario("variant list: by products, variant IDs and text in the titles or the own SKU");
+    variant_list_filters(&make().await).await;
     scenario("product: media and variant media round trip, in order");
     media_round_trips(&make().await).await;
     scenario("product: images_of is each variant's image, else its product's first item");
@@ -66,6 +73,57 @@ where
 {
     scenario("product list: by category and by channel, alone, together, and unknown");
     by_membership(&make().await).await;
+    scenario("variant list: by a category and every category below it");
+    variants_by_category(&make().await).await;
+}
+
+async fn variants_by_category<S: HasProducts + HasCategories>(ports: &S) {
+    for n in 1..=4 {
+        ports
+            .products()
+            .insert(&mut simple(n, &format!("p{n}")))
+            .await
+            .unwrap();
+    }
+    let cid = |n| CategoryId::from_uuid(Uuid::from_u128(n));
+    // 50 Kitchen › 51 Mugs › 52 Espresso; 53 Garden.
+    for (n, parent) in [(50, None), (51, Some(50)), (52, Some(51)), (53, None)] {
+        let mut category = Category::new(NewCategory {
+            id: cid(n),
+            name: format!("Category {n}"),
+            handle: Handle::new(&format!("category-{n}")).unwrap(),
+            description: None,
+            parent: parent.map(cid),
+            position: 0,
+            visible: true,
+        })
+        .unwrap();
+        ports.categories().insert(&mut category).await.unwrap();
+    }
+    for (category, product) in [(50, 1), (52, 2), (53, 3), (51, 1)] {
+        ports
+            .categories()
+            .add_products(cid(category), &[pid(product)])
+            .await
+            .unwrap();
+    }
+    let found = async |category| {
+        let filter = VariantFilter::new(VariantFilterInput {
+            category: Some(cid(category)),
+            ..VariantFilterInput::default()
+        })
+        .unwrap();
+        variant_pages(ports.products(), &filter, 1).await
+    };
+    assert_eq!(found(50).await, [vid(201), vid(101)], "each product once");
+    assert_eq!(found(51).await, [vid(201), vid(101)]);
+    assert_eq!(found(52).await, [vid(201)]);
+    assert_eq!(found(53).await, [vid(301)]);
+    assert_eq!(
+        found(99).await,
+        Vec::<VariantId>::new(),
+        "an unknown category matches nothing"
+    );
 }
 
 async fn by_membership<S: HasProducts + HasCategories + HasChannels>(ports: &S) {
@@ -160,7 +218,7 @@ pub(crate) fn simple(n: u128, handle: &str) -> Product {
 
 /// Configurable product `n` with Size (S, M) and Color (Red, Blue) and two variants:
 /// `n*100+1` S/Red with a SKU, `n*100+2` M/Blue without one.
-fn shirt(n: u128, handle: &str) -> Product {
+pub(crate) fn shirt(n: u128, handle: &str) -> Product {
     let b = n * 100;
     let size = ProductOption::new(
         oid(b + 10),
@@ -251,6 +309,180 @@ fn sorted(mut products: Vec<Product>) -> Vec<Product> {
 }
 
 // ---------- scenarios ----------
+
+async fn list_by_ids<R: ProductRepo>(repo: &R) {
+    for n in 1..=4 {
+        repo.insert(&mut simple(n, &format!("p{n}"))).await.unwrap();
+    }
+    let found = async |ids: Vec<ProductId>| {
+        let filter = ProductFilter::new(ProductFilterInput {
+            ids,
+            ..ProductFilterInput::default()
+        })
+        .unwrap();
+        all_pages(repo, &filter, ProductSort::Oldest, 1).await
+    };
+    assert_eq!(found(vec![pid(3), pid(1), pid(3)]).await, [pid(1), pid(3)]);
+    assert_eq!(found(vec![pid(9)]).await, Vec::<ProductId>::new());
+    assert_eq!(found(vec![]).await, [pid(1), pid(2), pid(3), pid(4)]);
+}
+
+/// Every page of the variant list `filter` gives, `limit` at a time.
+async fn variant_pages<R: ProductRepo>(
+    repo: &R,
+    filter: &VariantFilter,
+    limit: u32,
+) -> Vec<VariantId> {
+    let mut found = Vec::new();
+    let mut after = None;
+    loop {
+        let page = repo
+            .list_variants(
+                filter,
+                PageRequest {
+                    after,
+                    limit: PageLimit::new(limit).unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        found.extend(page.items.iter().map(|s| s.id));
+        match page.items.last() {
+            Some(last) if page.has_more => after = Some(last.at()),
+            _ => return found,
+        }
+    }
+}
+
+async fn variant_list_pages<R: ProductRepo>(repo: &R) {
+    // 1: a shirt with S/Red and M/Blue (M/Blue with a compare-at price); 2 and 3: simple.
+    let mut shirt = shirt(1, "shirt");
+    shirt
+        .update_variant(
+            vid(102),
+            VariantPatch {
+                compare_at_price: Some(Some(eur(2000))),
+                ..VariantPatch::default()
+            },
+        )
+        .unwrap();
+    repo.insert(&mut shirt).await.unwrap();
+    for n in 2..=3 {
+        repo.insert(&mut simple(n, &format!("p{n}"))).await.unwrap();
+    }
+    let mut expected: Vec<VariantSummary> = Vec::new();
+    for n in [3, 2, 1] {
+        let stored = repo.get(pid(n)).await.unwrap().unwrap();
+        expected.extend(stored.variant_summaries());
+    }
+    let all = repo
+        .list_variants(&VariantFilter::default(), PageRequest::default())
+        .await
+        .unwrap();
+    assert_eq!(all.items, expected);
+    assert!(!all.has_more);
+    assert_eq!(all.items[2].title.as_deref(), Some("S / Red"));
+    assert_eq!(all.items[3].compare_at_price, Some(eur(2000)));
+    assert_eq!(all.items[0].title, None, "a simple product's variant");
+
+    let first = repo
+        .list_variants(
+            &VariantFilter::default(),
+            PageRequest {
+                after: None,
+                limit: PageLimit::new(3).unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.items, expected[..3]);
+    assert!(first.has_more);
+    let rest = repo
+        .list_variants(
+            &VariantFilter::default(),
+            PageRequest {
+                after: Some(VariantPosition {
+                    product: pid(1),
+                    position: 0,
+                }),
+                limit: PageLimit::new(3).unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(rest.items, expected[3..]);
+    assert!(!rest.has_more);
+    assert_eq!(
+        variant_pages(repo, &VariantFilter::default(), 1).await,
+        [vid(301), vid(201), vid(101), vid(102)]
+    );
+}
+
+async fn variant_list_filters<R: ProductRepo>(repo: &R) {
+    // 1: "Shirt" (shirt), S/Red with SKU SHIRT-S-RED, M/Blue without; 2, 3: "Product n".
+    repo.insert(&mut shirt(1, "shirt")).await.unwrap();
+    for n in 2..=3 {
+        repo.insert(&mut simple(n, &format!("p{n}"))).await.unwrap();
+    }
+    let found = async |input: VariantFilterInput| {
+        let filter = VariantFilter::new(input).unwrap();
+        variant_pages(repo, &filter, 1).await
+    };
+    let none = VariantFilterInput::default;
+    let text = |t: &str| Some(t.to_string());
+    assert_eq!(
+        found(VariantFilterInput {
+            products: vec![pid(1), pid(3)],
+            ..none()
+        })
+        .await,
+        [vid(301), vid(101), vid(102)]
+    );
+    assert_eq!(
+        found(VariantFilterInput {
+            ids: vec![vid(102), vid(201), vid(999)],
+            ..none()
+        })
+        .await,
+        [vid(201), vid(102)]
+    );
+    assert_eq!(
+        found(VariantFilterInput {
+            q: text("shirt-s"),
+            ..none()
+        })
+        .await,
+        [vid(101)],
+        "the variant's own SKU, ignoring case"
+    );
+    assert_eq!(
+        found(VariantFilterInput {
+            q: text("SHIRT"),
+            ..none()
+        })
+        .await,
+        [vid(101), vid(102)],
+        "the product's title or handle"
+    );
+    assert_eq!(
+        found(VariantFilterInput {
+            q: text("p2"),
+            products: vec![pid(1), pid(2)],
+            ..none()
+        })
+        .await,
+        [vid(201)]
+    );
+    assert_eq!(
+        found(VariantFilterInput {
+            q: text("p2"),
+            ids: vec![vid(101)],
+            ..none()
+        })
+        .await,
+        Vec::<VariantId>::new()
+    );
+}
 
 async fn insert_round_trips<R: ProductRepo>(repo: &R) {
     for mut product in [simple(1, "mug"), shirt(2, "shirt")] {

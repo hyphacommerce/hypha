@@ -23,9 +23,30 @@ pub struct VariantDraft {
     pub id: Option<VariantId>,
     pub sku: Option<String>,
     pub price: Price,
+    pub compare_at_price: Option<Price>,
     pub selections: Vec<OptionValueId>,
     pub weight: Option<Weight>,
     pub requires_shipping: bool,
+}
+
+/// A compare-at price is a "was" price: above the price it's shown beside, in the same
+/// currency. Checked whenever either changes, so lowering a compare-at or raising a price
+/// past the other is refused rather than shown as a sale that isn't one.
+pub(crate) fn check_compare_at(
+    variant: VariantId,
+    price: Price,
+    compare_at: Option<Price>,
+) -> Result<(), ProductError> {
+    let Some(compare_at) = compare_at else {
+        return Ok(());
+    };
+    if compare_at.money().currency() != price.money().currency() {
+        return Err(ProductError::CompareAtCurrencyMismatch(variant));
+    }
+    if compare_at.money().amount() <= price.money().amount() {
+        return Err(ProductError::CompareAtNotAbovePrice(variant));
+    }
+    Ok(())
 }
 
 /// An option as a request lists it: an existing one by `id`, or a new one without.
@@ -271,6 +292,14 @@ impl Product {
             }
             None => None,
         };
+        if patch.price.is_some() || patch.compare_at_price.is_some() {
+            let current = &self.variants[index];
+            check_compare_at(
+                id,
+                patch.price.unwrap_or(current.base_price()),
+                patch.compare_at_price.unwrap_or(current.compare_at_price()),
+            )?;
+        }
 
         let variant = &mut self.variants[index];
         let mut changed = Vec::new();
@@ -285,6 +314,12 @@ impl Product {
         {
             variant.set_base_price(price);
             changed.push("price");
+        }
+        if let Some(compare_at) = patch.compare_at_price
+            && variant.compare_at_price() != compare_at
+        {
+            variant.set_compare_at_price(compare_at);
+            changed.push("compare_at_price");
         }
         if let Some(selections) = patch.selections
             && variant.selections() != selections.as_slice()
@@ -369,8 +404,10 @@ impl Product {
                     Vec::new(),
                 ),
             };
+            check_compare_at(variant.id(), draft.price, draft.compare_at_price)?;
             variant.set_sku(sku);
             variant.set_base_price(draft.price);
+            variant.set_compare_at_price(draft.compare_at_price);
             variant.set_selections(draft.selections);
             variant.set_weight(draft.weight);
             variant.set_requires_shipping(draft.requires_shipping);
@@ -395,6 +432,9 @@ impl Product {
             }
             if old.base_price() != new.base_price() {
                 changed.push("price");
+            }
+            if old.compare_at_price() != new.compare_at_price() {
+                changed.push("compare_at_price");
             }
             if old.selections() != new.selections() {
                 changed.push("selections");

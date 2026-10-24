@@ -35,14 +35,11 @@ export function CatalogCard({
   catalog,
   page,
   isFirstPage,
-  pricesCursor,
 }: {
   market: Market;
   catalog?: Catalog;
   page?: Page;
   isFirstPage: boolean;
-  /** The other list's cursor, kept when this one pages. */
-  pricesCursor?: string;
 }) {
   const [error, setError] = useState<string>();
   const [isAdding, setIsAdding] = useState(false);
@@ -136,7 +133,7 @@ export function CatalogCard({
         {page && (
           <Pager
             path={`/markets/${market.id}`}
-            query={{ prices: pricesCursor }}
+            query={{}}
             param="products"
             isFirstPage={isFirstPage}
             nextCursor={page.next_cursor}

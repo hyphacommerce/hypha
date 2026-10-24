@@ -3,7 +3,7 @@
 //! in storage (Postgres aggregates it in SQL), and the repository contract checks it equals
 //! `Product::summary`.
 
-use hypha_core::{AssetId, Currency, Price, ProductId, Stamped, Stamps};
+use hypha_core::{AssetId, Currency, Price, ProductId, Stamped, Stamps, VariantId};
 
 use crate::{Handle, Product, ProductStatus};
 
@@ -33,7 +33,43 @@ pub struct PriceRange {
     pub max: Price,
 }
 
+/// A variant in a list of variants across products: what a price grid shows, with its
+/// product's title and handle. Adapters may compute it in storage; the repository contract
+/// checks it equals what `Product::variant_summaries` gives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariantSummary {
+    pub id: VariantId,
+    pub product: ProductId,
+    pub product_title: String,
+    pub product_handle: Handle,
+    /// Its index in the product's variants.
+    pub position: u32,
+    pub sku: Option<String>,
+    /// `Product::variant_title`.
+    pub title: Option<String>,
+    pub price: Price,
+    pub compare_at_price: Option<Price>,
+}
+
 impl Product {
+    /// Each variant's summary, in the product's order.
+    pub fn variant_summaries(&self) -> Vec<VariantSummary> {
+        (0u32..)
+            .zip(self.variants())
+            .map(|(position, v)| VariantSummary {
+                id: v.id(),
+                product: self.id(),
+                product_title: self.title().to_string(),
+                product_handle: self.handle().clone(),
+                position,
+                sku: v.sku().map(str::to_string),
+                title: self.variant_title(v.id()),
+                price: v.base_price(),
+                compare_at_price: v.compare_at_price(),
+            })
+            .collect()
+    }
+
     pub fn summary(&self) -> ProductSummary {
         let mut price_ranges: Vec<PriceRange> = Vec::new();
         for variant in self.variants() {

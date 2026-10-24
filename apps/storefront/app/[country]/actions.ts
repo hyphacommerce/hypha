@@ -19,7 +19,7 @@ import { formatRange } from "@/lib/money";
 import { COUNTRY_COOKIE } from "@/lib/routing";
 import { paymentElementModule } from "@/lib/app-elements";
 import { checkOutCart } from "@/lib/checkout";
-import { forgetSession, sessionHeaders } from "@/lib/account";
+import { accountApi, forgetSession, sessionHeaders } from "@/lib/account";
 import { cartId, forgetCart, link, mode, rememberCart } from "@/lib/site";
 
 /** What a refused action tells its form. */
@@ -86,6 +86,45 @@ export async function loadCart(country: string): Promise<Cart | null> {
   return null;
 }
 
+/** A variant's prices: what the product page shows and follows the quantity with. */
+export type VariantPrices = Pick<
+  StorefrontSchemas["StorefrontVariantResponse"],
+  "price" | "compare_at_price" | "on_sale" | "price_breaks"
+>;
+
+/**
+ * The signed-in shopper's own prices for a product page's variants, by variant ID: the
+ * product read with their session, so price lists for their customer groups count. The
+ * page is static and shows everyone's prices; it asks this once, only when the browser
+ * says there's a session. `null` without one (or when it ended: the cookie goes), or
+ * when the product can't be read.
+ */
+export async function customerPrices(input: {
+  country: string;
+  handle: string;
+}): Promise<Record<string, VariantPrices> | null> {
+  const client = await accountApi();
+  if (!client) return null;
+  const { data, response } = await client.GET("/storefront/products/by-handle/{handle}", {
+    params: { path: { handle: input.handle }, query: { country: input.country } },
+  });
+  if (!data) {
+    if (response.status === 401) await forgetSession();
+    return null;
+  }
+  return Object.fromEntries(
+    data.variants.map((v) => [
+      v.id,
+      {
+        price: v.price,
+        compare_at_price: v.compare_at_price,
+        on_sale: v.on_sale,
+        price_breaks: v.price_breaks,
+      },
+    ]),
+  );
+}
+
 /** Adds a variant to the cart (opening one if needed), and answers with the cart. */
 export async function addToCart(input: {
   country: string;
@@ -124,6 +163,42 @@ export async function setQuantity(input: {
           body: { quantity: Math.floor(input.quantity) },
         })
       : await client.DELETE("/storefront/carts/{id}/lines/{variant}", { params: { path } });
+  if (error) return { cart: await loadCart(input.country), error: describe(error) };
+  return { cart: data ?? (await loadCart(input.country)) };
+}
+
+/** Adds a discount code to the cart, and answers with the cart. A code that's known but
+ * doesn't apply yet is kept, with its state on the cart; an unknown one is refused
+ * (`discount_code_invalid`) and the form shows why. */
+export async function applyDiscountCode(input: {
+  country: string;
+  code: string;
+}): Promise<CartResult> {
+  const id = await cartId(input.country);
+  if (!id) return { cart: null };
+  const code = input.code.trim();
+  if (code === "") return { cart: await loadCart(input.country), error: "Enter a code." };
+  // The shopper's address goes on: the API limits code entry per client.
+  const client = await shopperApi();
+  const { data, error } = await client.POST("/storefront/carts/{id}/discount-codes", {
+    params: { path: { id } },
+    body: { code },
+  });
+  if (error) return { cart: await loadCart(input.country), error: describe(error) };
+  return { cart: data ?? (await loadCart(input.country)) };
+}
+
+/** Takes a code off the cart, and answers with the cart. */
+export async function removeDiscountCode(input: {
+  country: string;
+  code: string;
+}): Promise<CartResult> {
+  const id = await cartId(input.country);
+  if (!id) return { cart: null };
+  const client = await shopperApi();
+  const { data, error } = await client.DELETE("/storefront/carts/{id}/discount-codes/{code}", {
+    params: { path: { id, code: input.code } },
+  });
   if (error) return { cart: await loadCart(input.country), error: describe(error) };
   return { cart: data ?? (await loadCart(input.country)) };
 }
@@ -244,6 +319,9 @@ export async function placeOrder(input: {
       return { error: result.error, step: "payment" };
     }
     if (result.code === "payment_pending") return { error: result.error, pending: true };
+    // A code's last use went to another order meanwhile: the summary re-renders with
+    // the code's new state and total, which is what the shopper confirms next.
+    if (result.code === "discounts_changed") refresh();
     if (result.code === "payment_failed" || result.code === "payment_required") {
       return { error: result.error, step: "payment" };
     }
@@ -354,6 +432,8 @@ export async function suggest(country: string, q: string): Promise<Suggestion[]>
 export async function listingPage(input: {
   country: string;
   category?: string;
+  /** Only what's on sale (the sale page). */
+  onSale?: boolean;
   query: string;
 }): Promise<ListingPage> {
   const known = (await loadCountries()).find((c) => c.country === input.country);
@@ -364,5 +444,6 @@ export async function listingPage(input: {
     digits: known?.minor_units ?? 2,
     params,
     category: input.category,
+    onSale: input.onSale,
   });
 }

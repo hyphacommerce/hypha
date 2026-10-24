@@ -162,12 +162,17 @@ impl World {
         }
 
         let list = PriceListId::from_uuid(id(1500));
-        let mut prices = PriceList::new(list, Currency::EUR, BasisPoints::new(-1000).unwrap());
-        block_on(p.price_lists.insert(&mut prices)).unwrap();
-        block_on(
-            p.price_lists
-                .set_fixed_prices(list, &[(blue_s(), price(1000))]),
+        let mut prices = PriceList::new(
+            list,
+            hypha_markets::PriceListDraft::new("Croatia", Currency::EUR)
+                .adjusted(BasisPoints::new(-1000).unwrap()),
         )
+        .unwrap();
+        block_on(p.price_lists.insert(&mut prices)).unwrap();
+        block_on(p.price_lists.set_fixed_prices(
+            list,
+            &[(blue_s(), hypha_markets::FixedPrice::plain(price(1000)))],
+        ))
         .unwrap();
         for (n, market, price_list, products) in [
             (1600, hr_market(), Some(list), vec![shirt(), mug(), draft()]),
@@ -855,6 +860,232 @@ fn a_market_rebuilds_for_what_prices_depend_on_and_not_for_its_name() {
         marks(serde_json::json!({"market": market})),
         Ok(vec![Target::All])
     );
+}
+
+fn croatia() -> PriceListId {
+    PriceListId::from_uuid(id(1500))
+}
+
+fn category_id(n: u128) -> hypha_core::CategoryId {
+    hypha_core::CategoryId::from_uuid(id(n))
+}
+
+/// What the handler marks for `event`, read against the world's storage.
+fn marks_of(w: &World, event_type: &str, data: serde_json::Value) -> Result<Vec<Target>, String> {
+    block_on(hypha_search::handler::marks(
+        &w.ports,
+        &event(event_type, data),
+    ))
+}
+
+/// Croatia's adjustment narrowed to `applies_to`, stored.
+fn narrow_croatia(w: &World, applies_to: hypha_markets::AppliesTo) {
+    let mut list = block_on(w.ports.price_lists.get(croatia()))
+        .unwrap()
+        .unwrap();
+    list.set_adjustment(Some(
+        hypha_markets::Adjustment::new(BasisPoints::new(-1000).unwrap(), applies_to).unwrap(),
+    ));
+    block_on(w.ports.price_lists.update(&mut list)).unwrap();
+}
+
+#[test]
+fn a_price_list_rebuilds_for_what_prices_depend_on_and_not_for_its_name() {
+    let w = World::new();
+    let changed = |fields: serde_json::Value| {
+        marks_of(
+            &w,
+            "price_list.changed",
+            serde_json::json!({"price_list": croatia(), "fields": fields}),
+        )
+    };
+    assert_eq!(
+        changed(serde_json::json!(["name", "description"])),
+        Ok(vec![])
+    );
+    // Croatia adjusts every product.
+    assert_eq!(
+        changed(serde_json::json!(["name", "ends_at"])),
+        Ok(vec![Target::All])
+    );
+    // Written before `fields` existed (a creation or a new adjustment): rebuilt.
+    assert_eq!(
+        marks_of(
+            &w,
+            "price_list.changed",
+            serde_json::json!({"price_list": croatia()})
+        ),
+        Ok(vec![Target::All])
+    );
+}
+
+#[test]
+fn a_price_list_marks_only_what_it_reaches() {
+    let w = World::new();
+    narrow_croatia(&w, hypha_markets::AppliesTo::Products(vec![mug()]));
+    // Its adjustment's products and the variants it has fixed prices for.
+    assert_eq!(
+        marks_of(
+            &w,
+            "price_list.changed",
+            serde_json::json!({"price_list": croatia(), "fields": ["kind"]})
+        ),
+        Ok(vec![Target::Product(mug()), Target::Variant(blue_s())])
+    );
+    narrow_croatia(
+        &w,
+        hypha_markets::AppliesTo::Categories(vec![category_id(1)]),
+    );
+    assert_eq!(
+        marks_of(
+            &w,
+            "price_list.changed",
+            serde_json::json!({"price_list": croatia(), "fields": ["compare_at"]})
+        ),
+        Ok(vec![
+            Target::Category(category_id(1)),
+            Target::Variant(blue_s())
+        ])
+    );
+}
+
+#[test]
+fn a_changed_reach_marks_what_it_reached_before_too() {
+    let w = World::new();
+    narrow_croatia(
+        &w,
+        hypha_markets::AppliesTo::Categories(vec![category_id(2)]),
+    );
+    let previously = serde_json::json!({"type": "categories", "categories": [category_id(1)]});
+    assert_eq!(
+        marks_of(
+            &w,
+            "price_list.changed",
+            serde_json::json!({
+                "price_list": croatia(),
+                "fields": ["adjustment"],
+                "previous_applies_to": previously,
+            })
+        ),
+        Ok(vec![
+            Target::Category(category_id(2)),
+            Target::Category(category_id(1)),
+            Target::Variant(blue_s()),
+        ])
+    );
+    // From every product: everything.
+    assert_eq!(
+        marks_of(
+            &w,
+            "price_list.changed",
+            serde_json::json!({
+                "price_list": croatia(),
+                "fields": ["adjustment"],
+                "previous_applies_to": {"type": "all"},
+            })
+        ),
+        Ok(vec![Target::All])
+    );
+}
+
+#[test]
+fn a_list_on_no_catalog_or_for_groups_marks_nothing() {
+    let w = World::new();
+    let mut loose = PriceList::new(
+        PriceListId::from_uuid(id(1590)),
+        hypha_markets::PriceListDraft::new("Loose", Currency::EUR)
+            .adjusted(BasisPoints::new(-1000).unwrap()),
+    )
+    .unwrap();
+    block_on(w.ports.price_lists.insert(&mut loose)).unwrap();
+    assert_eq!(
+        marks_of(
+            &w,
+            "price_list.changed",
+            serde_json::json!({"price_list": loose.id(), "fields": ["kind"]})
+        ),
+        Ok(vec![])
+    );
+
+    // Search prices for no customer group: a list for groups changes nothing there, unless
+    // its audience changed (it may have priced for everyone).
+    let mut group = hypha_customers::CustomerGroup::new(
+        hypha_core::CustomerGroupId::from_uuid(id(1591)),
+        "Wholesale",
+        Handle::new("wholesale").unwrap(),
+        None,
+    )
+    .unwrap();
+    block_on(hypha_customers::CustomerGroupRepo::insert(
+        &w.ports.customer_groups,
+        &mut group,
+    ))
+    .unwrap();
+    let mut list = block_on(w.ports.price_lists.get(croatia()))
+        .unwrap()
+        .unwrap();
+    list.set_audience(hypha_markets::Audience::of_groups(vec![group.id()]).unwrap());
+    block_on(w.ports.price_lists.update(&mut list)).unwrap();
+    let changed = |fields: serde_json::Value| {
+        marks_of(
+            &w,
+            "price_list.changed",
+            serde_json::json!({"price_list": croatia(), "fields": fields}),
+        )
+    };
+    assert_eq!(changed(serde_json::json!(["kind"])), Ok(vec![]));
+    assert_eq!(
+        changed(serde_json::json!(["audience"])),
+        Ok(vec![Target::All])
+    );
+}
+
+#[test]
+fn a_price_lists_window_rebuilds_where_a_catalog_holds_it() {
+    let w = World::new();
+    narrow_croatia(&w, hypha_markets::AppliesTo::Products(vec![mug()]));
+    for kind in ["price_list.started", "price_list.ended"] {
+        assert_eq!(
+            marks_of(
+                &w,
+                kind,
+                serde_json::json!({"price_list": croatia(), "catalogs": ["cat_y"], "starts_at": 1})
+            ),
+            Ok(vec![Target::Product(mug()), Target::Variant(blue_s())]),
+            "{kind}"
+        );
+        assert_eq!(
+            marks_of(
+                &w,
+                kind,
+                serde_json::json!({"price_list": croatia(), "catalogs": [], "ends_at": 1})
+            ),
+            Ok(vec![]),
+            "{kind}"
+        );
+    }
+}
+
+#[test]
+fn a_list_joining_or_leaving_a_catalog_marks_what_it_reaches() {
+    let w = World::new();
+    narrow_croatia(&w, hypha_markets::AppliesTo::Products(vec![mug()]));
+    for kind in ["catalog.price_lists_added", "catalog.price_lists_removed"] {
+        assert_eq!(
+            marks_of(
+                &w,
+                kind,
+                serde_json::json!({"catalog": "cat_x", "price_lists": [croatia()]})
+            ),
+            Ok(vec![Target::Product(mug()), Target::Variant(blue_s())]),
+            "{kind}"
+        );
+    }
+    // `catalog.changed`, beside them, asks nothing more.
+    assert!(!EventHandler::<InMemoryPorts>::wants(
+        &SearchIndexer,
+        "catalog.changed"
+    ));
 }
 
 #[test]

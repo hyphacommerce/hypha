@@ -2,12 +2,12 @@
 
 use hypha_core::{
     Actor, AuthError, BasisPoints, CatalogId, CountryCode, Ctx, Currency, MarketId, Money, Page,
-    PageLimit, PageRequest, Price, PriceListId, ProductId, Scope, UserId, VariantId,
+    PageLimit, PageRequest, Price, PriceListId, ProductId, Scope, Timestamp, UserId, VariantId,
 };
 use hypha_markets::{
-    Catalog, CatalogContext, CatalogRepo, CommandError, Market, MarketRepo, MarketView, PriceList,
-    PriceListRepo, get_catalog, get_market, list_catalog_products, list_fixed_prices, list_markets,
-    list_markets_only, list_price_lists,
+    Catalog, CatalogContext, CatalogRepo, CommandError, FixedPriceFilter, ListPriceLists, Market,
+    MarketRepo, MarketView, PriceList, PriceListRepo, get_catalog, get_market,
+    list_catalog_products, list_fixed_prices, list_markets, list_markets_only, list_price_lists,
 };
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
 use hypha_testkit::InMemoryPorts;
@@ -38,8 +38,10 @@ fn vid(n: u128) -> VariantId {
     VariantId::from_uuid(Uuid::from_u128(n))
 }
 
-fn eur(amount: i64) -> Price {
-    Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap()
+fn eur(amount: i64) -> hypha_markets::FixedPrice {
+    hypha_markets::FixedPrice::plain(
+        Price::new(Money::new(amount, Currency::EUR).unwrap()).unwrap(),
+    )
 }
 
 fn first(limit: u32) -> PageRequest<ProductId> {
@@ -65,7 +67,12 @@ fn world() -> InMemoryPorts {
     let mut catalog = Catalog::new(cid(10), CatalogContext::Market(mid(1)), Some(plid(20)));
     block_on(ports.catalogs().insert(&mut catalog)).unwrap();
     block_on(ports.catalogs().add_products(cid(10), &[pid(1), pid(2)])).unwrap();
-    let mut list = PriceList::new(plid(20), Currency::EUR, BasisPoints::new(-1000).unwrap());
+    let mut list = PriceList::new(
+        plid(20),
+        hypha_markets::PriceListDraft::new("Sale", Currency::EUR)
+            .adjusted(BasisPoints::new(-1000).unwrap()),
+    )
+    .unwrap();
     block_on(ports.price_lists().insert(&mut list)).unwrap();
     block_on(
         ports
@@ -107,8 +114,15 @@ fn markets_list_alone_oldest_first() {
 fn a_market_is_read_with_its_catalog_and_an_unknown_one_is_not_found() {
     let ports = world();
     let reader = ctx(vec![Scope::MarketsRead]);
-    let MarketView { market, catalog } = block_on(get_market(&reader, &ports, mid(1))).unwrap();
-    assert_eq!((market.id(), catalog), (mid(1), Some(cid(10))));
+    let MarketView {
+        market,
+        catalog,
+        price_lists,
+    } = block_on(get_market(&reader, &ports, mid(1))).unwrap();
+    assert_eq!(
+        (market.id(), catalog, price_lists),
+        (mid(1), Some(cid(10)), vec![plid(20)])
+    );
     assert_eq!(
         block_on(get_market(&reader, &ports, mid(99))),
         Err(CommandError::MarketNotFound(mid(99)))
@@ -164,20 +178,43 @@ fn a_catalogs_products_come_in_pages() {
 fn price_lists_and_their_fixed_prices_need_pricing_read() {
     let ports = world();
     let reader = ctx(vec![Scope::PricingRead]);
-    let lists = block_on(list_price_lists(&reader, ports.price_lists())).unwrap();
+    let list = |ctx: &Ctx, market| {
+        let input = ListPriceLists {
+            market,
+            ..ListPriceLists::default()
+        };
+        let page = PageRequest {
+            after: None,
+            limit: PageLimit::DEFAULT,
+        };
+        block_on(list_price_lists(
+            ctx,
+            &ports,
+            input,
+            Timestamp::UNIX_EPOCH,
+            page,
+        ))
+        .map(|page| page.items.iter().map(|l| l.id()).collect::<Vec<_>>())
+    };
+    assert_eq!(list(&reader, None), Ok(vec![plid(20)]));
+    // A market's lists are its catalog's; a market without one has none.
+    assert_eq!(list(&reader, Some(mid(1))), Ok(vec![plid(20)]));
+    assert_eq!(list(&reader, Some(mid(2))), Ok(vec![]));
     assert_eq!(
-        lists.iter().map(|l| l.id()).collect::<Vec<_>>(),
-        vec![plid(20)]
+        list(&reader, Some(mid(99))),
+        Err(CommandError::MarketNotFound(mid(99)))
     );
     let page = PageRequest {
         after: None,
         limit: PageLimit::DEFAULT,
     };
+    let everything = FixedPriceFilter::default();
     assert_eq!(
         block_on(list_fixed_prices(
             &reader,
             ports.price_lists(),
             plid(20),
+            &everything,
             page
         )),
         Ok(Page {
@@ -190,15 +227,13 @@ fn price_lists_and_their_fixed_prices_need_pricing_read() {
             &reader,
             ports.price_lists(),
             plid(99),
+            &everything,
             page
         )),
         Err(CommandError::PriceListNotFound(plid(99)))
     );
     assert_eq!(
-        block_on(list_price_lists(
-            &ctx(vec![Scope::MarketsRead]),
-            ports.price_lists()
-        )),
+        list(&ctx(vec![Scope::MarketsRead]), None),
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::PricingRead
         )))

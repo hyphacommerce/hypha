@@ -67,11 +67,16 @@ pub enum Rule {
     AgentCall,
     /// An agent's writes and proposals, per agent, on top of `AgentCall`.
     AgentWrite,
+    /// `POST /storefront/carts/{id}/discount-codes`, per client address: single-use codes
+    /// are guessable.
+    DiscountCodeIp,
+    /// The same, per cart.
+    DiscountCodeCart,
 }
 
 impl Rule {
     /// In declaration order: an in-memory limiter can index by `rule as usize`.
-    pub const ALL: [Rule; 18] = [
+    pub const ALL: [Rule; 20] = [
         Rule::LoginIp,
         Rule::LoginEmailFromIp,
         Rule::LoginEmail,
@@ -90,6 +95,8 @@ impl Rule {
         Rule::CustomerLoginEmailFromIp,
         Rule::AgentCall,
         Rule::AgentWrite,
+        Rule::DiscountCodeIp,
+        Rule::DiscountCodeCart,
     ];
 
     /// The rule's key under `[rate_limits]` (`login_ip`): a contract with operators,
@@ -114,6 +121,8 @@ impl Rule {
             Rule::CustomerLoginEmailFromIp => "customer_login_email_from_ip",
             Rule::AgentCall => "agent_call",
             Rule::AgentWrite => "agent_write",
+            Rule::DiscountCodeIp => "discount_code_ip",
+            Rule::DiscountCodeCart => "discount_code_cart",
         }
     }
 
@@ -140,6 +149,8 @@ impl Rule {
             Rule::CustomerLoginEmailFromIp => "RL_CUSTOMER_LOGIN_EMAIL_FROM_IP",
             Rule::AgentCall => "RL_AGENT_CALL",
             Rule::AgentWrite => "RL_AGENT_WRITE",
+            Rule::DiscountCodeIp => "RL_DISCOUNT_CODE_IP",
+            Rule::DiscountCodeCart => "RL_DISCOUNT_CODE_CART",
         }
     }
 
@@ -166,6 +177,8 @@ impl Rule {
             Rule::CustomerLoginEmailFromIp => 15,
             Rule::AgentCall => 16,
             Rule::AgentWrite => 17,
+            Rule::DiscountCodeIp => 18,
+            Rule::DiscountCodeCart => 19,
         }
     }
 
@@ -199,6 +212,8 @@ impl Rule {
             Rule::CustomerLoginEmailFromIp => limits.customer_login_email_from_ip,
             Rule::AgentCall => limits.agent_call,
             Rule::AgentWrite => limits.agent_write,
+            Rule::DiscountCodeIp => limits.discount_code_ip,
+            Rule::DiscountCodeCart => limits.discount_code_cart,
         };
         (quota.burst, quota.per.0)
     }

@@ -115,6 +115,21 @@ export function toMinor(value: string | undefined, digits: number): number | und
   return Number.isSafeInteger(minor) ? minor : undefined;
 }
 
+/** The filter that keeps only what's shown with a compare-at price. */
+export const ON_SALE = "on_sale:true";
+
+/** Whether the listing shows only what's on sale. */
+export function onSaleOnly(state: ListingState): boolean {
+  return state.filters.includes(ON_SALE);
+}
+
+/** The listing with or without the on-sale filter, from its first page. Any other
+ * `on_sale` value goes: the toggle is the one way to set it. */
+export function withOnSale(state: ListingState, on: boolean): ListingState {
+  const filters = state.filters.filter((f) => !f.startsWith("on_sale:"));
+  return changed(state, { filters: on ? [...filters, ON_SALE] : filters });
+}
+
 /** `option.color` → "Color", `field.custom.skin_type` → "Skin type" (a custom field: its
  * namespace isn't shown), `product_type` → "Type". */
 export function facetName(key: string): string {
@@ -127,5 +142,5 @@ export function facetName(key: string): string {
     const name = field.slice(field.indexOf(".") + 1).replaceAll("_", " ");
     return name.charAt(0).toUpperCase() + name.slice(1);
   }
-  return { vendor: "Brand", product_type: "Type", tag: "Tag" }[key] ?? key;
+  return { vendor: "Brand", product_type: "Type", tag: "Tag", on_sale: "On sale" }[key] ?? key;
 }

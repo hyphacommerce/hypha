@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use hypha_core::{CustomerId, Keyset, OrderId, Page, PageRequest, RepoError};
 
 use crate::{
@@ -18,6 +20,8 @@ pub mod keys {
 pub trait OrderRepo {
     async fn get(&self, id: OrderId) -> Result<Option<Order>, RepoError>;
     async fn get_by_number(&self, number: OrderNumber) -> Result<Option<Order>, RepoError>;
+    /// The numbers of those of `ids` that exist, without loading them.
+    async fn numbers(&self, ids: &[OrderId]) -> Result<HashMap<OrderId, OrderNumber>, RepoError>;
     /// A page of order summaries in `sort`'s order: the orders after `page.after` by
     /// `OrderSort::key` and then ID, only those `filter` matches (`OrderFilter::matches`).
     /// Each equals `Order::summary` of the stored order; an adapter may compute them

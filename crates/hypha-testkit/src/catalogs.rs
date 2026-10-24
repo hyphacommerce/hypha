@@ -1,11 +1,11 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use hypha_core::{
-    CatalogId, Page, PageRequest, ProductId, Recorded, RepoError, Versioned, stamp_insert,
-    stamp_update,
+    CatalogId, Page, PageRequest, PriceListId, ProductId, Recorded, RepoError, Versioned,
+    stamp_insert, stamp_update,
 };
 use hypha_markets::{Catalog, CatalogContext, CatalogRepo, repo::keys};
 
@@ -19,6 +19,9 @@ pub struct InMemoryCatalogRepo {
     catalogs: Table<CatalogId, Catalog>,
     /// Catalog membership, stored apart from the catalog like a separate table would be.
     products: Mutex<HashMap<CatalogId, HashSet<ProductId>>>,
+    /// Each catalog's price lists, as a referencing table would hold them: shared with the
+    /// price list repo, whose delete they refuse.
+    pub(crate) price_list_refs: Arc<Mutex<PriceListRefs>>,
     pub(crate) outbox: InMemoryOutbox,
 }
 
@@ -44,9 +47,17 @@ impl InMemoryCatalogRepo {
     pub(crate) fn exists(&self, id: CatalogId) -> bool {
         self.catalogs.get(&id).is_some()
     }
+
+    fn note_price_lists(&self, catalog: &Catalog) {
+        self.price_list_refs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(catalog.id(), catalog.price_lists().to_vec());
+    }
 }
 
 pub(crate) type Memberships = HashMap<CatalogId, HashSet<ProductId>>;
+pub(crate) type PriceListRefs = HashMap<CatalogId, Vec<PriceListId>>;
 
 /// At most one catalog per context.
 fn unique(new: &Catalog, other: &Catalog) -> Option<&'static str> {
@@ -75,6 +86,12 @@ impl CatalogRepo for InMemoryCatalogRepo {
         Ok(self.catalogs.all_oldest_first())
     }
 
+    async fn holding_price_list(&self, list: PriceListId) -> Result<Vec<Catalog>, RepoError> {
+        let mut found = self.catalogs.all_oldest_first();
+        found.retain(|c| c.price_lists().contains(&list));
+        Ok(found)
+    }
+
     async fn product_page(
         &self,
         catalog: CatalogId,
@@ -94,6 +111,7 @@ impl CatalogRepo for InMemoryCatalogRepo {
         let events = catalog.take_events();
         self.catalogs
             .insert(catalog.id(), catalog, keys::CATALOG_ID, &unique)?;
+        self.note_price_lists(catalog);
         self.outbox.write(events, Some(catalog.version()));
         Ok(())
     }
@@ -102,6 +120,7 @@ impl CatalogRepo for InMemoryCatalogRepo {
         stamp_update(catalog, self.outbox.now());
         let events = catalog.take_events();
         self.catalogs.update(catalog.id(), catalog, &unique)?;
+        self.note_price_lists(catalog);
         self.outbox.write(events, Some(catalog.version()));
         Ok(())
     }

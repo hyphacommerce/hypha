@@ -39,7 +39,12 @@ pub struct CustomerFilter {
     q: Option<String>,
     fields: Vec<FieldFilter>,
     group: Option<CustomerGroupId>,
+    /// Sorted, without repeats; empty for any.
+    ids: Vec<CustomerId>,
 }
+
+/// Most IDs a customer list's `ids` takes.
+pub const MAX_FILTER_IDS: usize = 250;
 
 impl CustomerFilter {
     /// `q`, text the email, first or last name or phone contains (ignoring case),
@@ -49,7 +54,27 @@ impl CustomerFilter {
             q: optional_text("q", q)?,
             fields: Vec::new(),
             group: None,
+            ids: Vec::new(),
         })
+    }
+
+    /// Only these customers (none: any), at most `MAX_FILTER_IDS` once repeats are
+    /// dropped. An ID that names no customer matches nothing.
+    pub fn only(mut self, mut ids: Vec<CustomerId>) -> Result<Self, CustomerError> {
+        ids.sort();
+        ids.dedup();
+        if ids.len() > MAX_FILTER_IDS {
+            return Err(CustomerError::TooManyFilterIds {
+                field: "ids",
+                max: MAX_FILTER_IDS,
+            });
+        }
+        self.ids = ids;
+        Ok(self)
+    }
+
+    pub fn ids(&self) -> &[CustomerId] {
+        &self.ids
     }
 
     /// Only customers in `group`. `matches` doesn't see it: adapters apply it to the
@@ -82,14 +107,15 @@ impl CustomerFilter {
     /// Whether `customer` is in the list. Adapters that filter in storage must agree
     /// (the repository contract checks).
     pub fn matches(&self, customer: &Customer) -> bool {
-        self.q.as_ref().is_none_or(|q| {
-            let q = q.to_lowercase();
-            let has = |text: &str| text.to_lowercase().contains(&q);
-            has(customer.email().as_str())
-                || customer.first_name().is_some_and(has)
-                || customer.last_name().is_some_and(has)
-                || customer.phone().is_some_and(has)
-        })
+        (self.ids.is_empty() || self.ids.binary_search(&customer.id()).is_ok())
+            && self.q.as_ref().is_none_or(|q| {
+                let q = q.to_lowercase();
+                let has = |text: &str| text.to_lowercase().contains(&q);
+                has(customer.email().as_str())
+                    || customer.first_name().is_some_and(has)
+                    || customer.last_name().is_some_and(has)
+                    || customer.phone().is_some_and(has)
+            })
     }
 }
 
@@ -163,6 +189,27 @@ mod tests {
         assert_eq!(
             CustomerSort::EmailDesc.key(&summary),
             SortKey::text("ana@example.hr")
+        );
+    }
+
+    #[test]
+    fn ids_past_the_limit_are_refused_after_repeats_go() {
+        let id = |n: u128| CustomerId::from_uuid(Uuid::from_u128(n));
+        let mut ids: Vec<CustomerId> = (0..MAX_FILTER_IDS as u128).map(id).collect();
+        ids.push(id(0));
+        assert_eq!(
+            CustomerFilter::default()
+                .only(ids.clone())
+                .map(|f| f.ids().len()),
+            Ok(MAX_FILTER_IDS)
+        );
+        ids.push(id(MAX_FILTER_IDS as u128));
+        assert_eq!(
+            CustomerFilter::default().only(ids),
+            Err(CustomerError::TooManyFilterIds {
+                field: "ids",
+                max: MAX_FILTER_IDS
+            })
         );
     }
 

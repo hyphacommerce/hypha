@@ -185,6 +185,8 @@ pub struct JobsConfig {
     pub media_sweep: JobConfig,
     pub search_sync: JobConfig,
     pub send_notifications: JobConfig,
+    pub price_list_schedule: JobConfig,
+    pub discount_schedule: JobConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -780,6 +782,14 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
         ("jobs.dispatch.interval", jobs.dispatch.interval),
         ("jobs.prune.interval", jobs.prune.interval),
         ("jobs.media_sweep.interval", jobs.media_sweep.interval),
+        (
+            "jobs.price_list_schedule.interval",
+            jobs.price_list_schedule.interval,
+        ),
+        (
+            "jobs.discount_schedule.interval",
+            jobs.discount_schedule.interval,
+        ),
         ("jobs.search_sync.interval", jobs.search_sync.interval),
         (
             "jobs.send_notifications.interval",
@@ -1010,6 +1020,14 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             send_notifications: job(
                 jobs.send_notifications.enabled,
                 jobs.send_notifications.interval,
+            ),
+            price_list_schedule: job(
+                jobs.price_list_schedule.enabled,
+                jobs.price_list_schedule.interval,
+            ),
+            discount_schedule: job(
+                jobs.discount_schedule.enabled,
+                jobs.discount_schedule.interval,
             ),
         },
         rate_limits: file.rate_limits.clone(),

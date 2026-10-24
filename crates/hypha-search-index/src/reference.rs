@@ -5,7 +5,7 @@
 //!
 //! 1. **Match:** the market's documents whose terms contain every query term as a
 //!    prefix (`terms::matches_all`), within the price bounds, availability and every
-//!    filter (values of one key OR, keys AND).
+//!    filter (values of one key OR, keys AND; `on_sale` is one such key).
 //! 2. **Group:** by the query's group key; a group's representative is its first
 //!    document by the sort (lowest price for `PriceAsc`, highest for `PriceDesc`,
 //!    best score for `Relevance`), then by `position`.
@@ -265,6 +265,8 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
             price,
+            compare_at: None,
+            on_sale: false,
             product_price: PriceRange::of(price),
             listing_price: PriceRange::of(price),
             available: true,
@@ -361,6 +363,7 @@ mod tests {
         assert_eq!(
             doc(2, 21, &[(MATERIAL, "wool"), (MATERIAL, "linen")]).facet_values(),
             vec![
+                ("on_sale".to_string(), "false".to_string()),
                 ("field.custom.material".to_string(), "wool".to_string()),
                 ("field.custom.material".to_string(), "linen".to_string()),
             ]

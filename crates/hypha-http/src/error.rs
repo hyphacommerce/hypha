@@ -10,7 +10,9 @@
 //! option (`POST`/`PATCH /admin/shipping-zones/{id}/options…`). An unknown one is stored and
 //! simply never matches. Checking them belongs in a composing layer (like `hypha-cart`),
 //! not in these crates. Likewise a payment method's markets and channels
-//! (`POST`/`PATCH /admin/payment-methods…`).
+//! (`POST`/`PATCH /admin/payment-methods…`), and a discount's products, variants,
+//! categories, customers, customer groups and channels (`POST`/`PATCH /admin/discounts…`;
+//! its markets are checked, since its amounts are priced in their currencies).
 
 use axum::{
     Json,
@@ -45,6 +47,8 @@ pub struct ApiErrorBody {
 /// - `out_of_stock`: `{"lines": [{"variant", "requested", "available"}]}`
 /// - `cart_unavailable`: `{"lines": ["var_…"]}`, the lines `GET /storefront/carts/{id}` explains
 /// - `total_changed`: `{"expected": Money, "actual": Money}`
+/// - `discounts_changed`: `{"total": Money, "discount_codes": [{"code", "state", …}]}`, the
+///   cart's total and codes' states now (a discount's last use went to another order)
 /// - `cart_completed`: `{"order": "ord_…"}`
 /// - `mfa_locked`: `{"locked_until": "<RFC 3339>"}`
 /// - `rate_limited`: `{"retry_after_secs": n}`, also sent as `Retry-After`
@@ -75,6 +79,19 @@ pub struct ApiErrorBody {
 /// - `too_many_items` / `too_few_items`: `{"owner", "count", "max"}` / `{…, "min"}`
 /// - `owner_not_found` / `invalid_owner`: `{"owners": ["prod_…"]}`, owners of a bulk
 ///   custom fields call that don't exist or aren't the definition's owner type
+/// - `fixed_prices_invalid`: `{"entries": [{"index", "variant", "code", "message"}]}`,
+///   every entry's problem at once, by its position in the request (`code`:
+///   `duplicate_fixed_price`, `fixed_price_currency_mismatch`, `negative_amount`,
+///   `compare_at_not_above_price`, `compare_at_currency_mismatch`, …)
+/// - `too_many_prices`: `{"max"}`, the most one request may set
+/// - `price_list_in_use`: `{"catalogs": ["cat_…"]}`, the catalogs holding it
+/// - `price_list_name_taken`: `{"price_list": "pl_…"}`, the list that has the name
+/// - `invalid_discount`: `{"problems": [{"path", "code", "message"}]}`, every rule the
+///   discount breaks at once (`path` like `kind.rewards[0].value.basis_points`)
+/// - `discount_currency_mismatch` / `market_not_found` (discounts): `{"path", "market"}`
+/// - `discount_code_taken`: `{"code"}`, the code another discount has
+/// - `compare_at_not_above_price` / `compare_at_currency_mismatch` (variants):
+///   `{"variant": "var_…"}`
 ///
 /// Status rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 429 over
 /// a rate limit or locked second factor; 403
@@ -246,6 +263,12 @@ impl ApiError {
             "invalid_query",
             format!("invalid query string: {message}"),
         )
+    }
+
+    /// A body that parses but breaks a rule of its shape the types can't say (one of two
+    /// fields).
+    pub fn invalid_body(message: impl std::fmt::Display) -> Self {
+        Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_body", message)
     }
 
     /// A list's `?cursor=` that isn't one the list handed out.
@@ -651,7 +674,10 @@ fn product_status(e: &hypha_products::ProductError) -> StatusCode {
         | P::DuplicateMedia(_)
         | P::MediaNotInProduct(_)
         | P::DescriptionTooLong { .. }
-        | P::TooManyTags { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+        | P::TooManyTags { .. }
+        | P::TooManyFilterIds { .. }
+        | P::CompareAtNotAbovePrice(_)
+        | P::CompareAtCurrencyMismatch(_) => StatusCode::UNPROCESSABLE_ENTITY,
     }
 }
 
@@ -660,6 +686,10 @@ fn product_details(e: &hypha_products::ProductError) -> Option<Value> {
     match e {
         P::OptionValueInUse { variants } => Some(json!({ "variants": variants })),
         P::VariantsCollide { first, second } => Some(json!({ "variants": [first, second] })),
+        P::CompareAtNotAbovePrice(variant) | P::CompareAtCurrencyMismatch(variant) => {
+            Some(json!({ "variant": variant }))
+        }
+        P::TooManyFilterIds { field, max } => Some(json!({ "field": field, "max": max })),
         _ => None,
     }
 }
@@ -697,20 +727,48 @@ impl From<hypha_markets::CommandError> for ApiError {
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
             E::CatalogNotFound(_) => StatusCode::NOT_FOUND,
-            E::CountryInOtherMarket { .. } | E::CatalogExists { .. } => StatusCode::CONFLICT,
+            E::CountryInOtherMarket { .. }
+            | E::CatalogExists { .. }
+            | E::PriceListNameTaken { .. }
+            | E::PriceListInUse { .. } => StatusCode::CONFLICT,
             E::Country(_)
             | E::Market(_)
             | E::Money(_)
             | E::PriceList(_)
             | E::PriceListNotFound(_)
             | E::MarketNotFound(_)
-            | E::CurrencyMismatch { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            | E::CurrencyMismatch { .. }
+            | E::TooManyPrices { .. }
+            | E::AudienceGroupNotFound => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,
         };
-        Self::domain(status, e)
+        let details = match &e {
+            E::PriceList(hypha_markets::PriceListError::InvalidFixedPrices(entries)) => {
+                let entries: Vec<Value> = entries
+                    .iter()
+                    .map(|p| {
+                        json!({
+                            "index": p.index,
+                            "variant": p.variant,
+                            "code": p.problem.code(),
+                            "message": p.problem.to_string(),
+                        })
+                    })
+                    .collect();
+                Some(json!({ "entries": entries }))
+            }
+            E::PriceListNameTaken { price_list, .. } => Some(json!({ "price_list": price_list })),
+            E::TooManyPrices { max } => Some(json!({ "max": max })),
+            E::PriceListInUse { catalogs, .. } => Some(json!({ "catalogs": catalogs })),
+            E::PriceList(hypha_markets::PriceListError::TooManyFilterIds { field, max }) => {
+                Some(json!({ "field": field, "max": max }))
+            }
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 
@@ -875,8 +933,11 @@ impl From<hypha_cart::CommandError> for ApiError {
             E::Cart(
                 CartError::Completed { .. }
                 | CartError::ShippingAddressRequired
-                | CartError::CustomerEmailFixed,
+                | CartError::CustomerEmailFixed
+                | CartError::TooManyDiscountCodes { .. },
             ) => StatusCode::CONFLICT,
+            // The code is the URL's (`DELETE …/discount-codes/{code}`).
+            E::Cart(CartError::DiscountCodeNotOnCart(_)) => StatusCode::NOT_FOUND,
             // Shipping: the group is in the URL; nothing to ship, no zone and an option not
             // offered right now are the cart's state.
             E::ShippingGroupNotFound(_) => StatusCode::NOT_FOUND,
@@ -894,6 +955,7 @@ impl From<hypha_cart::CommandError> for ApiError {
             | E::Email(_)
             | E::Country(_)
             | E::Idempotency(_)
+            | E::DiscountCodeInvalid
             | E::CustomerNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
@@ -1006,16 +1068,20 @@ impl From<hypha_customers::CommandError> for ApiError {
             E::Auth(_) => StatusCode::FORBIDDEN,
             // Customer and address IDs only ever arrive in URLs.
             E::CustomerNotFound(_) | E::Customer(C::AddressNotFound(_)) => StatusCode::NOT_FOUND,
-            E::CustomerExists { .. } | E::GroupHandleTaken(_) | E::GroupNameTaken(_) => {
-                StatusCode::CONFLICT
-            }
+            E::CustomerExists { .. }
+            | E::GroupHandleTaken(_)
+            | E::GroupNameTaken(_)
+            | E::GroupInUse(_) => StatusCode::CONFLICT,
             // A group in a body (a customer's groups) unless a route says it's its URL's.
             E::GroupNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Email(_)
             | E::Address(_)
-            | E::Customer(C::Text(_) | C::Handle(_) | C::ConsentStateNotSettable(_)) => {
-                StatusCode::UNPROCESSABLE_ENTITY
-            }
+            | E::Customer(
+                C::Text(_)
+                | C::Handle(_)
+                | C::ConsentStateNotSettable(_)
+                | C::TooManyFilterIds { .. },
+            ) => StatusCode::UNPROCESSABLE_ENTITY,
             // The customer's state: no phone for SMS consent, erased, or an erasure
             // requested already or not at all.
             E::Customer(
@@ -1031,7 +1097,13 @@ impl From<hypha_customers::CommandError> for ApiError {
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,
         };
-        Self::domain(status, e)
+        let details = match &e {
+            E::Customer(C::TooManyFilterIds { field, max }) => {
+                Some(json!({ "field": field, "max": max }))
+            }
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 
@@ -1056,6 +1128,7 @@ fn order_error_status(e: &hypha_orders::OrderError) -> Option<StatusCode> {
         | O::CurrencyMismatch { .. }
         | O::LineTotalMismatch(_)
         | O::TotalsMismatch
+        | O::DiscountsMismatch
         | O::InvalidNumber(_)
         | O::ShippingWithoutAddress
         | O::UnknownShippedLine(_)
@@ -1219,17 +1292,20 @@ impl From<hypha_media::CommandError> for ApiError {
         use hypha_media::{CommandError as E, MediaError as M};
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
-            // Every asset route names the asset in its URL.
-            E::AssetNotFound(_) => StatusCode::NOT_FOUND,
-            // The asset's state: not uploaded yet, or not pending any more.
-            E::UploadMissing(_) | E::Media(M::NotPending { .. }) | E::AssetInUse { .. } => {
-                StatusCode::CONFLICT
-            }
+            // Every asset and upload route names the asset or upload in its URL.
+            E::AssetNotFound(_) | E::TemporaryUploadNotFound(_) => StatusCode::NOT_FOUND,
+            // The asset's or upload's state: not uploaded yet, or not pending any more.
+            E::UploadMissing(_)
+            | E::TemporaryUploadMissing(_)
+            | E::Media(M::NotPending { .. })
+            | E::AssetInUse { .. } => StatusCode::CONFLICT,
             E::Media(
                 M::Text(_)
                 | M::UnsupportedMediaType(_)
                 | M::EmptyFile
                 | M::FileTooLarge { .. }
+                | M::UploadTooLarge { .. }
+                | M::UnknownPurpose(_)
                 | M::InvalidChecksum(_)
                 | M::InvalidOwnerKind(_)
                 | M::InvalidOwnerId(_)
@@ -1367,6 +1443,7 @@ impl From<hypha_checkout::CommandError> for ApiError {
             | E::MissingEmail(_)
             | E::Unavailable { .. }
             | E::TotalChanged { .. }
+            | E::DiscountsChanged { .. }
             | E::ShippingAddressRequired(_)
             | E::ShippingOptionRequired(_)
             | E::ShippingUnavailable(_)
@@ -1390,6 +1467,14 @@ impl From<hypha_checkout::CommandError> for ApiError {
             E::TotalChanged { expected, actual } => {
                 Some(json!({ "expected": expected, "actual": actual }))
             }
+            E::DiscountsChanged { total, codes } => Some(json!({
+                "total": total,
+                "discount_codes": codes
+                    .iter()
+                    .map(crate::routes::carts::CartDiscountCodeResponse::from)
+                    .map(|c| serde_json::to_value(c).unwrap_or(Value::Null))
+                    .collect::<Vec<_>>(),
+            })),
             E::CartPaymentCommitted { payment, .. } | E::PaymentPending { payment, .. } => {
                 Some(json!({ "payment": payment }))
             }
@@ -1541,6 +1626,58 @@ impl From<hypha_oauth::CommandError> for ApiError {
             ) => StatusCode::CONFLICT,
         };
         Self::domain(status, e)
+    }
+}
+
+impl From<hypha_discounts::CommandError> for ApiError {
+    fn from(e: hypha_discounts::CommandError) -> Self {
+        use hypha_discounts::{CodeError as C, CommandError as E, DiscountError as D};
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Discounts only arrive in URLs.
+            E::NotFound(_) => StatusCode::NOT_FOUND,
+            E::Discount(D::Invalid(_) | D::MarketNotFound { .. } | D::CurrencyMismatch { .. })
+            | E::Code(
+                C::Length
+                | C::Character(_)
+                | C::GeneratedLength
+                | C::TooMany
+                | C::Batch
+                | C::UsageLimit,
+            )
+            | E::TooManyCodes => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Discount(D::MethodFixed)
+            | E::CodeTaken(_)
+            | E::TooManyAutomatic
+            | E::AutomaticHasNoCodes(_)
+            | E::CodeSpaceExhausted(_) => StatusCode::CONFLICT,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        let details = discount_details(&e);
+        Self::domain(status, e).with_details(details)
+    }
+}
+
+/// `invalid_discount`: `{"problems": [{"path", "code", "message"}]}`, every broken rule;
+/// `discount_currency_mismatch` / `market_not_found`: `{"path", "market"}`;
+/// `discount_code_taken`: `{"code"}`.
+fn discount_details(e: &hypha_discounts::CommandError) -> Option<Value> {
+    use hypha_discounts::{CommandError as E, DiscountError as D};
+    match e {
+        E::Discount(D::Invalid(problems)) => Some(json!({
+            "problems": problems
+                .iter()
+                .map(|p| json!({"path": p.path, "code": p.code, "message": p.message}))
+                .collect::<Vec<_>>()
+        })),
+        E::Discount(
+            D::CurrencyMismatch { path, market, .. } | D::MarketNotFound { path, market },
+        ) => Some(json!({"path": path, "market": market})),
+        E::CodeTaken(code) => Some(json!({ "code": code })),
+        _ => None,
     }
 }
 

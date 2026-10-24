@@ -15,7 +15,7 @@ use crate::{
 
 #[derive(Default)]
 pub struct InMemoryCustomerRepo {
-    pub(crate) customers: Table<CustomerId, Customer>,
+    pub(crate) customers: std::sync::Arc<Table<CustomerId, Customer>>,
     pub(crate) outbox: InMemoryOutbox,
     field_values: SharedValues,
     group_members: SharedGroupMembers,

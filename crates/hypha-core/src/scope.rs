@@ -109,6 +109,11 @@ pub enum Scope {
     AgentsRead,
     #[serde(rename = "agents:write")]
     AgentsWrite,
+    /// Discounts and their codes, and what they were used on.
+    #[serde(rename = "discounts:read")]
+    DiscountsRead,
+    #[serde(rename = "discounts:write")]
+    DiscountsWrite,
     /// Personal data: without these, a caller that isn't a staff session (an API key, an
     /// app) gets customers, orders and carts with the field absent and listed in
     /// `redacted`. First and last names.
@@ -174,6 +179,8 @@ impl Scope {
             Scope::CustomFieldsWrite => "custom_fields:write",
             Scope::AgentsRead => "agents:read",
             Scope::AgentsWrite => "agents:write",
+            Scope::DiscountsRead => "discounts:read",
+            Scope::DiscountsWrite => "discounts:write",
             Scope::CustomerDataName => "customer_data:name",
             Scope::CustomerDataEmail => "customer_data:email",
             Scope::CustomerDataPhone => "customer_data:phone",
@@ -218,6 +225,7 @@ impl Scope {
             Scope::NotificationsRead => Some(Scope::NotificationsWrite),
             Scope::CustomFieldsRead => Some(Scope::CustomFieldsWrite),
             Scope::AgentsRead => Some(Scope::AgentsWrite),
+            Scope::DiscountsRead => Some(Scope::DiscountsWrite),
             Scope::ProductsWrite
             | Scope::MarketsWrite
             | Scope::PricingWrite
@@ -240,6 +248,7 @@ impl Scope {
             | Scope::NotificationsWrite
             | Scope::CustomFieldsWrite
             | Scope::AgentsWrite
+            | Scope::DiscountsWrite
             | Scope::CustomerDataName
             | Scope::CustomerDataEmail
             | Scope::CustomerDataPhone
@@ -268,7 +277,7 @@ impl Scope {
         Scope::CustomerDataProfile,
     ];
 
-    pub const ALL: [Scope; 47] = [
+    pub const ALL: [Scope; 49] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -311,6 +320,8 @@ impl Scope {
         Scope::CustomFieldsWrite,
         Scope::AgentsRead,
         Scope::AgentsWrite,
+        Scope::DiscountsRead,
+        Scope::DiscountsWrite,
         Scope::CustomerDataName,
         Scope::CustomerDataEmail,
         Scope::CustomerDataPhone,

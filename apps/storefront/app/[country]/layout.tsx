@@ -108,6 +108,9 @@ export default async function CountryLayout({
                   <Link href={link(code, "/search")} color="secondary">
                     All products
                   </Link>
+                  <Link href={link(code, "/sale")} color="secondary">
+                    Sale
+                  </Link>
                 </VStack>
                 <VStack gap={2}>
                   <Text type="label">Help</Text>

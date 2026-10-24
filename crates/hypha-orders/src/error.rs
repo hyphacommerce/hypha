@@ -17,8 +17,12 @@ pub enum OrderError {
     DuplicateLine(OrderLineId),
     #[error("the order is in {expected}, but an amount is in {found}")]
     CurrencyMismatch { expected: Currency, found: Currency },
-    #[error("line {0}'s total is not its unit price times its quantity")]
+    #[error("line {0}'s total is not its unit price times its quantity, less its discounts")]
     LineTotalMismatch(OrderLineId),
+    /// A line's or shipping line's share names a discount the order doesn't list, or an
+    /// application isn't the sum of its shares.
+    #[error("the order's discounts don't add up from their shares")]
+    DiscountsMismatch,
     #[error("the order's totals don't add up from its lines")]
     TotalsMismatch,
     #[error("order numbers start at 1, got {0}")]
@@ -69,6 +73,7 @@ impl ErrorCode for OrderError {
             OrderError::CurrencyMismatch { .. } => "currency_mismatch",
             OrderError::LineTotalMismatch(_) => "line_total_mismatch",
             OrderError::TotalsMismatch => "totals_mismatch",
+            OrderError::DiscountsMismatch => "discounts_mismatch",
             OrderError::InvalidNumber(_) => "invalid_order_number",
             OrderError::ShippingWithoutAddress => "shipping_without_address",
             OrderError::UnknownShippedLine(_) => "unknown_shipped_line",

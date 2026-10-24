@@ -925,7 +925,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/admin/catalogs/{id}/price-list": {
+    "/admin/catalogs/{id}/price-lists": {
         parameters: {
             query?: never;
             header?: never;
@@ -933,10 +933,32 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Sets or clears a catalog's price list. */
-        put: operations["admin.markets.assign_price_list"];
-        post?: never;
+        /**
+         * Sets a catalog's price lists, which compete to price its products: the lowest live
+         *     price wins, a tie going to the oldest list. Every list is in the market's currency
+         *     (`422 price_list_currency_mismatch`).
+         */
+        put: operations["admin.markets.set_catalog_price_lists"];
+        /** Adds a price list to a catalog's; one already there changes nothing. */
+        post: operations["admin.markets.add_catalog_price_list"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/catalogs/{id}/price-lists/{price_list}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Takes a price list off a catalog. */
+        delete: operations["admin.markets.remove_catalog_price_list"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1576,6 +1598,163 @@ export interface paths {
          *     Nothing to do for a customer without one.
          */
         post: operations["admin.customers.revoke_sessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/discounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Discounts, newest first. */
+        get: operations["admin.discounts.list"];
+        put?: never;
+        /**
+         * Creates a discount, with its first codes in the same write. "A 10% welcome code" is
+         *     `{"title": "Welcome", "method": "codes", "kind": {"type": "standard", "rewards":
+         *     [{"target": {"type": "subtotal"}, "value": {"type": "percent", "basis_points":
+         *     1000}}]}, "codes": ["WELCOME10"]}`. Every broken rule is answered at once
+         *     (`invalid_discount`); at most 100 automatic discounts are active and not expired.
+         */
+        post: operations["admin.discounts.create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/discounts/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What a discount would read as, and every rule it breaks, writing nothing (no preview
+         *     token either): for a form that shows its summary as it's typed. A body that isn't a
+         *     discount at all (a missing `title`, an unknown field) is `422 invalid_body` as on
+         *     `POST /admin/discounts`.
+         */
+        post: operations["admin.discounts.summarize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/discounts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A discount. */
+        get: operations["admin.discounts.fetch"];
+        put?: never;
+        post?: never;
+        /**
+         * Deletes a discount with its codes and usage records. Orders keep their copies of what
+         *     it took off; carts holding its codes show them `invalid`.
+         */
+        delete: operations["admin.discounts.remove"];
+        options?: never;
+        head?: never;
+        /**
+         * Changes a discount (JSON Merge Patch); its method is fixed. The result is checked as
+         *     a whole, like a new one.
+         */
+        patch: operations["admin.discounts.update"];
+        trace?: never;
+    };
+    "/admin/discounts/{id}/codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A discount's codes, by code. */
+        get: operations["admin.discounts.codes"];
+        put?: never;
+        /**
+         * Adds codes to a discount by code (`409 discount_automatic` for an automatic one). A
+         *     code another discount has is `409 discount_code_taken`, and nothing is added.
+         */
+        post: operations["admin.discounts.add"];
+        /** Removes listed codes or a whole batch: one of `codes` and `batch`. */
+        delete: operations["admin.discounts.remove_codes"];
+        options?: never;
+        head?: never;
+        /**
+         * Deactivates or reactivates listed codes or a whole batch: one of `codes` and `batch`.
+         *     Their uses so far stay.
+         */
+        patch: operations["admin.discounts.update_codes"];
+        trace?: never;
+    };
+    "/admin/discounts/{id}/codes/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every code of a discount as CSV (`code,normalized,usage_limit,used,active,batch,
+         *     created_at`), by code; `batch` narrows it.
+         */
+        get: operations["admin.discounts.export"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/discounts/{id}/codes/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generates codes: random letters and digits without look-alikes (no `0`/`O`, `1`/`I`/
+         *     `L`), drawn again when taken, all added in one write.
+         */
+        post: operations["admin.discounts.generate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/discounts/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The orders a discount was used on, newest first, with each order's number and its
+         *     customer's names and email: it needs reading orders and customers too.
+         */
+        get: operations["admin.discounts.usage"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2616,10 +2795,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Every price list, oldest first. */
+        /** Price lists, newest first or in `sort`'s order, narrowed by kind, status and market. */
         get: operations["admin.markets.list_price_lists"];
         put?: never;
-        /** Creates a price list. */
+        /** Creates a price list. Its name is unique, ignoring case (`409 price_list_name_taken`). */
         post: operations["admin.markets.create_price_list"];
         delete?: never;
         options?: never;
@@ -2638,10 +2817,14 @@ export interface paths {
         get: operations["admin.markets.fetch_price_list"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Deletes a price list with its fixed prices. One a catalog holds is refused
+         *     (`409 price_list_in_use`, `details.catalogs`): take it off them first.
+         */
+        delete: operations["admin.markets.delete_price_list"];
         options?: never;
         head?: never;
-        /** Changes a price list's adjustment; its currency is fixed. */
+        /** Changes a price list; its currency is fixed. */
         patch: operations["admin.markets.update_price_list"];
         trace?: never;
     };
@@ -2652,9 +2835,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A price list's fixed prices, newest variant first. */
+        /**
+         * A price list's fixed prices, newest variant first, narrowed by product, category or
+         *     text: what a price grid pages through.
+         */
         get: operations["admin.markets.list_fixed_prices"];
-        /** Sets fixed prices for variants in a price list. */
+        /**
+         * Sets fixed prices for variants in a price list: up to 1,000 at once, every entry's
+         *     problem answered together (`422 fixed_prices_invalid`, `details.entries`).
+         */
         put: operations["admin.markets.set_fixed_prices"];
         post?: never;
         /** Removes fixed prices from a price list. */
@@ -2826,6 +3015,29 @@ export interface paths {
          *     a new option gives every variant its first value.
          */
         put: operations["admin.products.set_options"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/products/{id}/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A product's prices in each market (or one), each variant's with every price list of
+         *     the market's catalog and why it won or lost: the lowest live price wins, a tie going
+         *     to the oldest list, and the base price only when no live list prices the variant. Lists
+         *     for customer groups price only for a buyer in one (`group`). A product that isn't
+         *     active is priced too.
+         */
+        get: operations["admin.markets.product_prices"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -3294,6 +3506,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Starts a temporary upload: the request that sends a file straight to storage, to read
+         *     back with `GET /admin/uploads/{id}/content` until `expires_at`. The scope is the
+         *     purpose's: `pricing:write` for `price_import`.
+         */
+        post: operations["admin.uploads.create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/uploads/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Deletes the upload and its file before it expires. The scope is the purpose's. */
+        delete: operations["admin.uploads.remove"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/uploads/{id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The uploaded file's bytes, with the purpose's type. `404 upload_not_found` once it
+         *     expired, `409 upload_missing` until the file has been uploaded. The scope is the
+         *     purpose's.
+         */
+        get: operations["admin.uploads.content"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/users": {
         parameters: {
             query?: never;
@@ -3327,6 +3598,27 @@ export interface paths {
         head?: never;
         /** A disabled user's sessions stop working on their next request. */
         patch: operations["admin.staff.update_user"];
+        trace?: never;
+    };
+    "/admin/variants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Variants across products, in any status: the newest product first, each product's
+         *     variants in their order, narrowed by the filters (every one given must match). A price
+         *     grid or an export pages through them without reading each product.
+         */
+        get: operations["admin.products.list_variants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/admin/variants/{id}/custom-fields": {
@@ -3418,6 +3710,16 @@ export interface components {
             /** @description Reload what the action was pressed on. */
             refresh: boolean;
         };
+        AddCatalogPriceListRequest: {
+            /** @description In the market's currency. */
+            price_list: components["schemas"]["PriceListId"];
+        };
+        AddCodesRequest: {
+            /** @description A label to find, export or remove them by. */
+            batch?: string | null;
+            /** @description 1 to 1,000; all are added or none. */
+            codes: components["schemas"]["DiscountNewCodeDto"][];
+        };
         AddCountryRequest: {
             country: string;
         };
@@ -3432,6 +3734,7 @@ export interface components {
             tax_class?: components["schemas"]["TaxClassId"] | null;
         };
         AddVariantRequest: {
+            compare_at_price?: components["schemas"]["Money"] | null;
             /** @description The base price, before markets and price lists. */
             price: components["schemas"]["Money"];
             /** @description Defaults to `true`. */
@@ -3445,6 +3748,10 @@ export interface components {
             sku?: string | null;
             /** Format: int32 */
             weight_grams?: number | null;
+        };
+        AddedCodesResponse: {
+            /** @description The codes added, in the order given. */
+            codes: components["schemas"]["DiscountCodeResponse"][];
         };
         /**
          * @description A AddressId: `addr_` and 32 hex digits.
@@ -3494,6 +3801,16 @@ export interface components {
              * @description Negative to remove stock.
              */
             delta: number;
+        };
+        /** @description A percentage applied to base prices, for the products it applies to. */
+        AdjustmentDto: {
+            /** @description Defaults to every product of the catalog. */
+            applies_to?: components["schemas"]["AppliesToDto"];
+            /**
+             * Format: int32
+             * @description Basis points: -1000 = 10% off, 500 = 5% markup. At least -10000.
+             */
+            percent_bps: number;
         };
         /** @description Every installed app's admin contributions to a target. */
         AdminExtensionsResponse: {
@@ -3795,6 +4112,23 @@ export interface components {
             /** @description Verify `Hypha-Signature` on webhooks and rate requests with it. Shown only now. */
             secret: string;
         };
+        /**
+         * @description Which products an adjustment reaches: `all` of the catalog's, listed `products`, or
+         *     the products in listed `categories` and the categories below them. Up to 1,000 IDs,
+         *     each once; they aren't checked (one that names nothing reaches nothing).
+         */
+        AppliesToDto: {
+            /** @enum {string} */
+            type: "all";
+        } | {
+            products: components["schemas"]["ProductId"][];
+            /** @enum {string} */
+            type: "products";
+        } | {
+            categories: components["schemas"]["CategoryId"][];
+            /** @enum {string} */
+            type: "categories";
+        };
         /** @description The staff member's answer: a name for the agent and its grant. */
         ApproveConnectionRequest: {
             /** @description No more than the staff member holds; `apply` only for scopes they could approve. */
@@ -3884,12 +4218,17 @@ export interface components {
             /** @description How the owner uses it: for a product, `featured` (its first item) or `gallery`. */
             role: string;
         };
-        AssignPriceListRequest: {
-            price_list?: components["schemas"]["PriceListId"] | null;
-        };
         AssignTaxClassRequest: {
             products: components["schemas"]["ProductId"][];
             tax_class?: components["schemas"]["TaxClassId"] | null;
+        };
+        /**
+         * @description Who a price list prices for: buyers signed in as a customer in any of `groups` (up to
+         *     100, each existing, `422 customer_group_not_found`), or everyone when it's empty. A
+         *     list for groups never prices search documents or a shopper who isn't signed in.
+         */
+        AudienceDto: {
+            groups: components["schemas"]["CustomerGroupId"][];
         };
         /**
          * @description Known values: `flat`, `subtotal`, `weight`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
@@ -3953,6 +4292,55 @@ export interface components {
          */
         CancelReasonDto: string;
         /**
+         * @description What became of one price list for a variant.
+         *
+         *     Known values: `won`, `higher`, `tied_with_older`, `not_live`, `not_in_audience`, `not_pricing`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        CandidateResultDto: string;
+        /**
+         * @description Where a code the cart holds stands, for a UCP-style message pointing at
+         *     `$.discount_codes[i]`.
+         */
+        CartDiscountCodeResponse: {
+            /** @description Normalised. */
+            code: string;
+            /**
+             * @description For `not_eligible`: `markets`, `channels`, `customer_groups`, `customers` or
+             *     `signed_in`.
+             */
+            condition?: string | null;
+            discount?: components["schemas"]["DiscountId"] | null;
+            needed?: components["schemas"]["NeededResponse"] | null;
+            /**
+             * @description `applied`; `not_eligible` (see `condition`); `minimum_not_met` (see `needed`);
+             *     `no_matching_items`; `blocked_by_other` (a better combination left it out, see
+             *     `discount`); `no_saving` (with it the cart would cost no less, say by falling under
+             *     free shipping); `limit_reached`; `not_available_in_market`; `expired` (its end date
+             *     passed); `invalid` (the code or its discount is gone, deactivated, a draft or not
+             *     started). More may be added: treat an unknown one as not applied.
+             */
+            state: string;
+        };
+        /** @description A discount applied to the cart: one reward of it. */
+        CartDiscountResponse: {
+            /** @description What it took off in all. */
+            amount: components["schemas"]["Money"];
+            class: components["schemas"]["DiscountClassDto"];
+            /** @description The code it came by, normalised; `null` for an automatic discount. */
+            code?: string | null;
+            discount: components["schemas"]["DiscountId"];
+            /**
+             * @description One sentence from its data, naming what it applies to as a shopper may see it,
+             *     amounts in the cart's market.
+             */
+            summary: string;
+            target: components["schemas"]["DiscountTargetDto"];
+            /** @description The discount's title, shown to buyers. */
+            title: string;
+            value: components["schemas"]["DiscountValueDto"];
+        };
+        /**
          * @description A CartId: `cart_` and 32 hex digits.
          * @example cart_0190f1a2b3c47d8e9f00112233445566
          */
@@ -3962,6 +4350,18 @@ export interface components {
             /** @description The currency of every amount in the cart. */
             currency: components["schemas"]["Currency"];
             customer?: components["schemas"]["CustomerId"] | null;
+            /**
+             * @description Each code the cart holds, in the order entered, with where it stands. A code that
+             *     doesn't apply now is kept: it applies once the cart qualifies.
+             */
+            discount_codes: components["schemas"]["CartDiscountCodeResponse"][];
+            /** @description Everything they took off: already out of `subtotal` and `shipping_total`. */
+            discount_total: components["schemas"]["Money"];
+            /**
+             * @description The discounts applied, one per reward: product ones first, then order, then
+             *     shipping. Lines and shipping name them by their index here.
+             */
+            discounts: components["schemas"]["CartDiscountResponse"][];
             email?: components["schemas"]["Email"] | null;
             /** @description False when any line is unavailable; checkout should refuse such a cart. */
             fully_available: boolean;
@@ -3990,9 +4390,15 @@ export interface components {
             shipping_groups: components["schemas"]["ShippingGroupResponse"][];
             /** @description Whether every group has an option priced now (checkout requires it). */
             shipping_ready: boolean;
-            /** @description The chosen shipping, priced now; zero until chosen. Part of `total`. */
+            /**
+             * @description The chosen shipping, priced now, after shipping discounts; zero until chosen. Part
+             *     of `total`.
+             */
             shipping_total: components["schemas"]["Money"];
-            /** @description Sum of the available lines, as priced. All totals count available lines only. */
+            /**
+             * @description Sum of the available lines' totals, after discounts. All totals count available
+             *     lines only.
+             */
             subtotal: components["schemas"]["Money"];
             /**
              * @description Tax on the available lines and on shipping: part of `subtotal` and
@@ -4033,7 +4439,8 @@ export interface components {
         CatalogResponse: {
             id: components["schemas"]["CatalogId"];
             market: components["schemas"]["MarketId"];
-            price_list?: components["schemas"]["PriceListId"] | null;
+            /** @description Its price lists, by ID: the lowest live price among them wins. */
+            price_lists: components["schemas"]["PriceListId"][];
         };
         /**
          * @description A CategoryId: `pcat_` and 32 hex digits.
@@ -4173,6 +4580,14 @@ export interface components {
             /** @description From the authenticator app, or (to disable or regenerate) a recovery code. */
             code: string;
         };
+        /**
+         * @description How an `override` list shows a variant's own compare-at price when its fixed price
+         *     has none: `adjusted` by the list's adjustment, or `hidden`.
+         *
+         *     Known values: `adjusted`, `hidden`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        CompareAtModeDto: string;
         ConfirmResetRequest: {
             password: string;
             token: string;
@@ -4429,6 +4844,35 @@ export interface components {
             last_name?: string | null;
             phone?: string | null;
         };
+        CreateDiscountRequest: {
+            /**
+             * @description Codes to add with it (`method: codes` only), at most 1,000; more through
+             *     `POST …/codes` and `…/codes/generate`.
+             */
+            codes?: string[];
+            /** @description Defaults to none: it applies alone. */
+            combines_with?: components["schemas"]["DiscountClassDto"][];
+            /** @description All must hold; none for everyone. */
+            conditions?: components["schemas"]["DiscountConditionDto"][];
+            /**
+             * Format: date-time
+             * @description RFC 3339, exclusive; `null` for never. After `starts_at`.
+             */
+            ends_at?: string | null;
+            kind: components["schemas"]["DiscountKindDto"];
+            /** @description Defaults to no limit. */
+            limits?: components["schemas"]["DiscountLimitsDto"];
+            /** @description Fixed for good. */
+            method: components["schemas"]["DiscountMethodDto"];
+            /**
+             * Format: date-time
+             * @description RFC 3339; `null` for at once.
+             */
+            starts_at?: string | null;
+            status?: components["schemas"]["DiscountStatusDto"] | null;
+            /** @description Shown to buyers; 1 to 255 characters. */
+            title: string;
+        };
         CreateFulfillmentRequest: {
             /** @description Each order line once; at most what it has left to ship. */
             lines: components["schemas"]["FulfillmentLineDto"][];
@@ -4496,14 +4940,30 @@ export interface components {
             settings?: Record<string, never> | null;
         };
         CreatePriceListRequest: {
-            /**
-             * Format: int32
-             * @description Basis points: -1000 = 10% off. Defaults to 0.
-             */
-            adjustment_bps?: number;
+            adjustment?: components["schemas"]["AdjustmentDto"] | null;
+            audience?: components["schemas"]["AudienceDto"] | null;
+            compare_at?: components["schemas"]["CompareAtModeDto"] | null;
+            /** @description Fixed for good: catalogs and fixed prices depend on it. */
             currency: components["schemas"]["Currency"];
+            /** @description Up to 255 characters; for staff. */
+            description?: string | null;
+            /**
+             * Format: date-time
+             * @description When it stops (exclusive); `null` for never. After `starts_at`.
+             */
+            ends_at?: string | null;
+            kind?: components["schemas"]["PriceListKindDto"] | null;
+            /** @description Unique, ignoring case; 1 to 255 characters, trimmed. */
+            name: string;
+            /**
+             * Format: date-time
+             * @description When it starts pricing (inclusive); `null` for at once.
+             */
+            starts_at?: string | null;
+            status?: components["schemas"]["PriceListStatusDto"] | null;
         };
         CreateProductRequest: {
+            compare_at_price?: components["schemas"]["Money"] | null;
             handle: string;
             price: components["schemas"]["Money"];
             title: string;
@@ -4522,6 +4982,18 @@ export interface components {
              * @description Parts per million: 250000 = 25%.
              */
             default_rate_ppm: number;
+        };
+        CreateUploadRequest: {
+            /**
+             * Format: int64
+             * @description Exactly the file's size: storage refuses another.
+             */
+            byte_size: number;
+            /** @description SHA-256 as 64 hex characters: storage then refuses other contents. */
+            checksum?: string | null;
+            /** @description The file's name, kept for people; up to 255 characters. */
+            filename: string;
+            purpose: components["schemas"]["UploadPurposeDto"];
         };
         CreateZoneRequest: {
             /** @description ISO 3166-1 alpha-2 codes, each in no other zone. */
@@ -4907,6 +5379,387 @@ export interface components {
          * @enum {string}
          */
         DeliveryStatus: string;
+        /** @description How an amount off is spread over the items it reaches. */
+        DiscountAllocationDto: {
+            /** @enum {string} */
+            type: "each";
+        } | {
+            /** @enum {string} */
+            type: "across";
+        } | {
+            /** @enum {string} */
+            type: "cheapest";
+            /** Format: int32 */
+            units: number;
+        };
+        /**
+         * @description What a reward reduces, for combining: `product` (item lines), `order` (the subtotal
+         *     after product discounts), `shipping`.
+         *
+         *     Known values: `product`, `order`, `shipping`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        DiscountClassDto: string;
+        /** @description A page of a list, newest first. */
+        DiscountCodePage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["DiscountCodeResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        DiscountCodeResponse: {
+            active: boolean;
+            /** @description The label it was added or generated under. */
+            batch?: string | null;
+            /** @description As added. */
+            code: string;
+            created_at?: string | null;
+            /**
+             * @description As compared: trimmed, compatibility-normalised and upper-cased. Unique in the
+             *     store.
+             */
+            normalized: string;
+            /**
+             * Format: int32
+             * @description Orders it may be used on (1 for a single-use code); `null` for no limit of its own.
+             */
+            usage_limit?: number | null;
+            /** Format: int64 */
+            used: number;
+        };
+        /**
+         * @description A condition: all of a discount's must hold; inside one, any of its values will do.
+         *     Lists hold 1 to 1,000 IDs, each once; each condition type appears at most once.
+         */
+        DiscountConditionDto: {
+            markets: components["schemas"]["MarketId"][];
+            /** @enum {string} */
+            type: "markets";
+        } | {
+            channels: components["schemas"]["ChannelId"][];
+            /** @enum {string} */
+            type: "channels";
+        } | {
+            groups: components["schemas"]["CustomerGroupId"][];
+            /** @enum {string} */
+            type: "customer_groups";
+        } | {
+            customers: components["schemas"]["CustomerId"][];
+            /** @enum {string} */
+            type: "customers";
+        } | {
+            /** @enum {string} */
+            type: "signed_in";
+        } | {
+            amounts: {
+                [key: string]: components["schemas"]["Money"];
+            };
+            /** @enum {string} */
+            type: "min_subtotal";
+        } | {
+            /** Format: int32 */
+            quantity: number;
+            /** @enum {string} */
+            type: "min_quantity";
+        };
+        /**
+         * @description A DiscountId: `disc_` and 32 hex digits.
+         * @example disc_0190f1a2b3c47d8e9f00112233445566
+         */
+        DiscountId: string;
+        /**
+         * @description A set of items, optionally leaving out those on sale (shown against a compare-at
+         *     price).
+         */
+        DiscountItemSetDto: {
+            /** @description Defaults to `false`. */
+            exclude_on_sale?: boolean;
+            items: components["schemas"]["DiscountItemsDto"];
+        };
+        /**
+         * @description Which items: all, or listed products, variants or categories (a category reaches the
+         *     products in it and in every category below it).
+         */
+        DiscountItemsDto: {
+            /** @enum {string} */
+            type: "all";
+        } | {
+            ids: components["schemas"]["ProductId"][];
+            /** @enum {string} */
+            type: "products";
+        } | {
+            ids: components["schemas"]["VariantId"][];
+            /** @enum {string} */
+            type: "variants";
+        } | {
+            ids: components["schemas"]["CategoryId"][];
+            /** @enum {string} */
+            type: "categories";
+        };
+        /**
+         * @description The shape of a discount. Its classes follow: a standard discount's are its rewards'
+         *     targets', buy X get Y and tiers are `product`.
+         */
+        DiscountKindDto: {
+            rewards: components["schemas"]["DiscountRewardDto"][];
+            /** @enum {string} */
+            type: "standard";
+        } | {
+            buy: components["schemas"]["DiscountThresholdDto"];
+            buys: components["schemas"]["DiscountItemSetDto"];
+            /** Format: int32 */
+            get_quantity: number;
+            gets: components["schemas"]["DiscountItemSetDto"];
+            /** @enum {string} */
+            type: "buy_x_get_y";
+            /** Format: int32 */
+            uses_per_order?: number | null;
+            /**
+             * @description A percentage (10000 is free) or an amount off each unit got (`allocation:
+             *     each`).
+             */
+            value: components["schemas"]["DiscountValueDto"];
+        } | {
+            items: components["schemas"]["DiscountItemSetDto"];
+            measure: components["schemas"]["DiscountMeasureDto"];
+            tiers: components["schemas"]["DiscountTierDto"][];
+            /** @enum {string} */
+            type: "tiered";
+        };
+        /**
+         * @description How often a discount may be used. Uses are counted when orders are placed and not
+         *     given back when an order is cancelled.
+         */
+        DiscountLimitsDto: {
+            /** @description At most one order per customer (a guest counts by their email's customer). */
+            once_per_customer?: boolean;
+            /**
+             * Format: int32
+             * @description Orders it may apply to in all; `null` for no limit.
+             */
+            total?: number | null;
+        };
+        /**
+         * @description Known values: `quantity`, `subtotal`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        DiscountMeasureDto: string;
+        /**
+         * @description Known values: `automatic`, `codes`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        DiscountMethodDto: string;
+        DiscountNewCodeDto: {
+            /** @description 1 to 64 characters, no spaces; unique in the store ignoring case. */
+            code: string;
+            /**
+             * Format: int32
+             * @description `null` (the default) for no limit of its own; 1 for single use.
+             */
+            usage_limit?: number | null;
+        };
+        /** @description A page of a list, newest first. */
+        DiscountPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["DiscountResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        /**
+         * @description Where a discount stands now, from its status and dates.
+         *
+         *     Known values: `draft`, `scheduled`, `active`, `expired`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        DiscountPhaseDto: string;
+        /** @description A broken rule, where it is (`kind.rewards[0].value.basis_points`). */
+        DiscountProblemResponse: {
+            /**
+             * @description As in `invalid_discount`'s `details.problems`, plus `market_not_found` and
+             *     `discount_currency_mismatch`.
+             */
+            code: string;
+            message: string;
+            path: string;
+        };
+        DiscountResponse: {
+            /** @description What its rewards reduce. */
+            classes: components["schemas"]["DiscountClassDto"][];
+            /**
+             * Format: int64
+             * @description How many codes it has (0 for an automatic one).
+             */
+            code_count: number;
+            /**
+             * @description The classes of the discounts it may apply together with. Two apply together only
+             *     when each allows every class of the other.
+             */
+            combines_with: components["schemas"]["DiscountClassDto"][];
+            conditions: components["schemas"]["DiscountConditionDto"][];
+            created_at: string;
+            /**
+             * @description What it took off those orders, one sum per currency, by currency code; `[]` while
+             *     unused.
+             */
+            discounted_total: components["schemas"]["Money"][];
+            /** @description RFC 3339, exclusive; `null` for never. */
+            ends_at?: string | null;
+            id: components["schemas"]["DiscountId"];
+            kind: components["schemas"]["DiscountKindDto"];
+            limits: components["schemas"]["DiscountLimitsDto"];
+            method: components["schemas"]["DiscountMethodDto"];
+            /** @description Where it stands now, from `status` and the dates. */
+            phase: components["schemas"]["DiscountPhaseDto"];
+            /** @description RFC 3339; `null` for at once. */
+            starts_at?: string | null;
+            status: components["schemas"]["DiscountStatusDto"];
+            /**
+             * @description One sentence from its data, naming what it applies to ("10% off Grow kits on
+             *     orders from €50"): what the admin, the storefront and agents show alike. Customers
+             *     are named only to a caller who may see their names; otherwise counted.
+             */
+            summary: string;
+            /** @description Shown to buyers. */
+            title: string;
+            updated_at: string;
+            /**
+             * Format: int64
+             * @description Orders it was used on.
+             */
+            used: number;
+        };
+        DiscountRewardDto: {
+            target: components["schemas"]["DiscountTargetDto"];
+            value: components["schemas"]["DiscountValueDto"];
+        };
+        /** @description Part of a discount on a line or a shipping group. */
+        DiscountShareResponse: {
+            amount: components["schemas"]["Money"];
+            /** @description Its index in the cart's (or order's) `discounts`. */
+            application: number;
+            /**
+             * Format: int32
+             * @description The units it covered, for a buy X get Y discount; absent otherwise.
+             */
+            units?: number | null;
+        };
+        /**
+         * @description Known values: `draft`, `active`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        DiscountStatusDto: string;
+        /**
+         * @description What `POST /admin/discounts/summary` reads: a new discount's body (as `POST
+         *     /admin/discounts` takes it; `codes` are ignored), or a saved discount's `id` with the
+         *     changes `PATCH` would make to it. The handler reads one or the other by whether `id`
+         *     is there, for exact errors; this type is the documented shape.
+         */
+        DiscountSummaryRequest: components["schemas"]["CreateDiscountRequest"] | components["schemas"]["SavedDiscountSummaryRequest"];
+        DiscountSummaryResponse: {
+            /** @description Every rule it breaks; `[]` when it could be saved as is. */
+            problems: components["schemas"]["DiscountProblemResponse"][];
+            /** @description The sentence the discount would read as; `null` while it breaks a rule. */
+            summary?: string | null;
+        };
+        /**
+         * @description What a reward reduces: items (its class is `product`), the subtotal (`order`), or
+         *     shipping (`shipping`, at most `max_amount` off when given).
+         */
+        DiscountTargetDto: {
+            /** @description Defaults to `false`. */
+            exclude_on_sale?: boolean;
+            items: components["schemas"]["DiscountItemsDto"];
+            /** @enum {string} */
+            type: "items";
+        } | {
+            /** @enum {string} */
+            type: "subtotal";
+        } | {
+            max_amount?: {
+                [key: string]: components["schemas"]["Money"];
+            } | null;
+            /** @enum {string} */
+            type: "shipping";
+        };
+        /** @description What must be bought (buy X get Y) or reached (a tier). */
+        DiscountThresholdDto: {
+            /** Format: int32 */
+            quantity: number;
+            /** @enum {string} */
+            type: "quantity";
+        } | {
+            amounts: {
+                [key: string]: components["schemas"]["Money"];
+            };
+            /** @enum {string} */
+            type: "amount";
+        };
+        /**
+         * @description From `threshold` (a quantity or an amount, as the tiers' `measure` says), `value` off
+         *     the items: a percentage, or an amount spread across them.
+         */
+        DiscountTierDto: {
+            threshold: components["schemas"]["DiscountThresholdDto"];
+            value: components["schemas"]["DiscountValueDto"];
+        };
+        /** @description A page of a list, newest first. */
+        DiscountUsagePage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["DiscountUsageResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        /**
+         * @description A use of a discount. The customer's names and email are personal data: callers other
+         *     than staff sessions see them only with `customer_data:name` / `customer_data:email`,
+         *     else they're absent and listed in `redacted`.
+         */
+        DiscountUsageResponse: {
+            /** @description What it took off the order. */
+            amount: components["schemas"]["Money"];
+            /** @description The code it came by, normalised; `null` for an automatic discount. */
+            code?: string | null;
+            customer: components["schemas"]["CustomerId"];
+            email?: string | null;
+            /** @description The customer's now; `null` when unknown. */
+            first_name?: string | null;
+            last_name?: string | null;
+            order: components["schemas"]["OrderId"];
+            /**
+             * Format: int64
+             * @description The order's number (`1001`).
+             */
+            order_number?: number | null;
+            /**
+             * @description The personal fields left out for this caller (absent from the object then); never
+             *     sent to staff.
+             */
+            redacted?: string[] | null;
+            used_at: string;
+        };
+        /** @description How much comes off. */
+        DiscountValueDto: {
+            /** Format: int32 */
+            basis_points: number;
+            /** @enum {string} */
+            type: "percent";
+        } | {
+            allocation?: components["schemas"]["DiscountAllocationDto"];
+            amounts: {
+                [key: string]: components["schemas"]["Money"];
+            };
+            /** @enum {string} */
+            type: "amount";
+        } | {
+            amounts: {
+                [key: string]: components["schemas"]["Money"];
+            };
+            /** @enum {string} */
+            type: "fixed_price";
+        };
         /**
          * Format: email
          * @description An email address; stored trimmed and lowercased, so responses show it that way.
@@ -5053,7 +5906,8 @@ export interface components {
         };
         FacetSettingRequest: {
             /**
-             * @description `option.<name>`, `vendor`, `product_type`, `tag`, or `field.<namespace>.<key>`:
+             * @description `option.<name>`, `vendor`, `product_type`, `tag`, `on_sale` (whether a compare-at
+             *     price is shown), or `field.<namespace>.<key>`:
              *     a product or variant custom field that's `filterable`, shown to storefronts
              *     (`access.storefront: read`) and of type `text`, `choice`, `boolean`, `integer`
              *     or a list of those (`422 facet_field_not_allowed` otherwise).
@@ -5063,7 +5917,10 @@ export interface components {
             label?: string | null;
         };
         FacetSettingResponse: {
-            /** @description `option.<name>`, `vendor`, `product_type`, `tag` or `field.<namespace>.<key>`. */
+            /**
+             * @description `option.<name>`, `vendor`, `product_type`, `tag`, `on_sale` or
+             *     `field.<namespace>.<key>`.
+             */
             key: string;
             label?: string | null;
         };
@@ -5084,6 +5941,14 @@ export interface components {
             code: string;
         };
         FixedPriceDto: {
+            /**
+             * @description Quantity prices: up to 10, from 2 up with quantities increasing, each price below
+             *     the one before it (the first below `price`). Absent for none; setting a fixed price
+             *     again replaces them.
+             */
+            breaks?: components["schemas"]["PriceBreakDto"][];
+            compare_at?: components["schemas"]["Money"] | null;
+            /** @description In the list's currency. */
             price: components["schemas"]["Money"];
             variant: components["schemas"]["VariantId"];
         };
@@ -5102,6 +5967,9 @@ export interface components {
             variant_title?: string | null;
         };
         FixedPriceResponse: {
+            /** @description Its quantity prices, by quantity. */
+            breaks: components["schemas"]["PriceBreakDto"][];
+            compare_at?: components["schemas"]["Money"] | null;
             price: components["schemas"]["Money"];
             product?: components["schemas"]["FixedPriceProduct"] | null;
             variant: components["schemas"]["VariantId"];
@@ -5149,6 +6017,27 @@ export interface components {
          * @enum {string}
          */
         FulfillmentStatusDto: string;
+        GenerateCodesRequest: {
+            /** @description A label to find, export or remove them by. */
+            batch?: string | null;
+            /** @description 1 to 10,000. */
+            count: number;
+            /**
+             * @description 8 to 24 characters, the prefix included, at least 8 of them after it; defaults to
+             *     12.
+             */
+            length?: number;
+            /**
+             * @description Starts every code (normalised like a code), leaving room for at least 8 random
+             *     characters.
+             */
+            prefix?: string | null;
+            /**
+             * Format: int32
+             * @description Defaults to 1: single-use codes. `null` for no limit of their own.
+             */
+            usage_limit?: number | null;
+        };
         /** @description One authorization request in an app's history. */
         GrantHistoryEntry: {
             created_at: string;
@@ -5343,9 +6232,15 @@ export interface components {
             variant_title?: string | null;
         };
         LineState: {
+            compare_at_price?: components["schemas"]["Money"] | null;
+            /** @description What discounts took off the line. */
+            discounts: components["schemas"]["DiscountShareResponse"][];
             /** @enum {string} */
             status: "priced";
+            /** @description `unit_price` × `quantity`: before discounts. */
+            subtotal: components["schemas"]["Money"];
             tax?: components["schemas"]["TaxLineResponse"] | null;
+            /** @description What the buyer pays for the line: `subtotal` less the discounts. Tax is on this. */
             total: components["schemas"]["Money"];
             unit_price: components["schemas"]["Money"];
         } | {
@@ -5420,12 +6315,21 @@ export interface components {
             /** @description Oldest first. A store has a handful, so they come in one list. */
             items: components["schemas"]["MarketResponse"][];
         };
+        MarketPricesResponse: {
+            currency: components["schemas"]["Currency"];
+            market: components["schemas"]["MarketId"];
+            prices_include_tax: boolean;
+            /** @description In the product's variant order. */
+            variants: components["schemas"]["VariantPricesResponse"][];
+        };
         MarketResponse: {
             catalog?: components["schemas"]["CatalogId"] | null;
             countries: components["schemas"]["CountryCode"][];
             currency: components["schemas"]["Currency"];
             id: components["schemas"]["MarketId"];
             name: string;
+            /** @description The catalog's price lists, by ID: the lowest live price among them wins. */
+            price_lists: components["schemas"]["PriceListId"][];
             prices_include_tax: boolean;
         };
         MeResponse: {
@@ -5487,6 +6391,15 @@ export interface components {
         NarrowGrantRequest: {
             /** @description Some of the grant's scopes; the rest are taken away at once. */
             scopes: components["schemas"]["Scope"][];
+        };
+        /** @description What's missing for a minimum: one of the two. */
+        NeededResponse: {
+            /**
+             * Format: int32
+             * @description This many more qualifying units.
+             */
+            quantity?: number | null;
+            subtotal?: components["schemas"]["Money"] | null;
         };
         /**
          * @description Who a template's messages go to.
@@ -5669,6 +6582,20 @@ export interface components {
             id: components["schemas"]["OptionValueId"];
             label: string;
         };
+        /** @description A discount as it applied to an order. */
+        OrderDiscountResponse: {
+            /** @description What it took off in all. */
+            amount: components["schemas"]["Money"];
+            class: components["schemas"]["DiscountClassDto"];
+            /** @description The code it came by, normalised; `null` for an automatic discount. */
+            code?: string | null;
+            discount: components["schemas"]["DiscountId"];
+            /** @description The sentence the shopper saw at checkout, kept as it was. */
+            summary: string;
+            target: components["schemas"]["DiscountTargetDto"];
+            title: string;
+            value: components["schemas"]["DiscountValueDto"];
+        };
         /**
          * @description A OrderId: `ord_` and 32 hex digits.
          * @example ord_0190f1a2b3c47d8e9f00112233445566
@@ -5680,6 +6607,9 @@ export interface components {
          */
         OrderLineId: string;
         OrderLineResponse: {
+            compare_at_price?: components["schemas"]["Money"] | null;
+            /** @description What discounts took off the line. */
+            discounts: components["schemas"]["DiscountShareResponse"][];
             /**
              * Format: int32
              * @description How many of `quantity` standing fulfilments shipped.
@@ -5687,12 +6617,19 @@ export interface components {
             fulfilled_quantity: number;
             id: components["schemas"]["OrderLineId"];
             image?: components["schemas"]["ProductMediaResponse"] | null;
+            price_list?: components["schemas"]["PriceListId"] | null;
             product: components["schemas"]["ProductId"];
             product_title: string;
             /** Format: int32 */
             quantity: number;
             sku?: string | null;
+            /** @description `unit_price` × `quantity`: before discounts. */
+            subtotal: components["schemas"]["Money"];
             tax?: components["schemas"]["OrderTaxResponse"] | null;
+            /**
+             * @description What the buyer was charged for the line: `subtotal` less its discounts. Tax is on
+             *     this, and a refund of part of the line refunds that part of it.
+             */
             total: components["schemas"]["Money"];
             unit_price: components["schemas"]["Money"];
             variant: components["schemas"]["VariantId"];
@@ -5708,6 +6645,13 @@ export interface components {
             created_at: string;
             currency: components["schemas"]["Currency"];
             customer: components["schemas"]["CustomerId"];
+            /** @description What they took off: already out of `subtotal` and `shipping_total`. */
+            discount_total: components["schemas"]["Money"];
+            /**
+             * @description The discounts it got, one per reward, as they were then (kept after the discount
+             *     changes or is deleted). Lines and shipping lines name them by index.
+             */
+            discounts: components["schemas"]["OrderDiscountResponse"][];
             email: components["schemas"]["Email"];
             financial_status: components["schemas"]["FinancialStatusDto"];
             fulfillment_status: components["schemas"]["FulfillmentStatusDto"];
@@ -5747,6 +6691,8 @@ export interface components {
         OrderShippingLineResponse: {
             amount: components["schemas"]["Money"];
             code: string;
+            /** @description What shipping discounts took off `amount`. */
+            discounts: components["schemas"]["DiscountShareResponse"][];
             estimate?: components["schemas"]["DeliveryEstimateDto"] | null;
             group: components["schemas"]["ShippingGroupId"];
             /** @description The order lines this ships. */
@@ -5759,6 +6705,8 @@ export interface components {
             reference?: string | null;
             service?: string | null;
             tax?: components["schemas"]["OrderTaxResponse"] | null;
+            /** @description `amount` less the discounts: what was charged for it, and what its tax is on. */
+            total: components["schemas"]["Money"];
         };
         /**
          * @description A customer's orders, added up over those that weren't cancelled: `GET
@@ -6171,20 +7119,87 @@ export interface components {
             /** Format: int32 */
             status: number;
         };
+        /** @description From `min_quantity` of the variant in one cart line, each costs `price`. */
+        PriceBreakDto: {
+            /** Format: int32 */
+            min_quantity: number;
+            price: components["schemas"]["Money"];
+        };
+        PriceCandidateResponse: {
+            kind: components["schemas"]["PriceListKindDto"];
+            name: string;
+            phase: components["schemas"]["PriceListPhaseDto"];
+            price?: components["schemas"]["Money"] | null;
+            price_list: components["schemas"]["PriceListId"];
+            result: components["schemas"]["CandidateResultDto"];
+        };
         /**
          * @description A PriceListId: `pl_` and 32 hex digits.
          * @example pl_0190f1a2b3c47d8e9f00112233445566
          */
         PriceListId: string;
-        PriceListListResponse: {
-            /** @description Oldest first. A store has a handful, so they come in one list. */
+        /**
+         * @description What a list's prices mean: a `sale` is struck through against the regular price, an
+         *     `override` is the regular price. Either kind competes the same way: the lowest live
+         *     price wins.
+         *
+         *     Known values: `sale`, `override`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        PriceListKindDto: string;
+        /** @description A page of a list, newest first. */
+        PriceListPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
             items: components["schemas"]["PriceListResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
         };
+        /**
+         * @description Where a list stands now, from its status and window: only `active` prices anything.
+         *
+         *     Known values: `draft`, `scheduled`, `active`, `expired`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        PriceListPhaseDto: string;
         PriceListResponse: {
-            /** Format: int32 */
-            adjustment_bps: number;
+            adjustment?: components["schemas"]["AdjustmentDto"] | null;
+            /** @description Its customer groups, sorted; none for everyone. */
+            audience: components["schemas"]["AudienceDto"];
+            compare_at: components["schemas"]["CompareAtModeDto"];
+            created_at: string;
             currency: components["schemas"]["Currency"];
+            description?: string | null;
+            /** @description RFC 3339; `null` for no end. */
+            ends_at?: string | null;
+            /**
+             * Format: int64
+             * @description How many fixed prices it has.
+             */
+            fixed_price_count: number;
             id: components["schemas"]["PriceListId"];
+            kind: components["schemas"]["PriceListKindDto"];
+            /** @description The markets whose catalogs hold it. */
+            markets: components["schemas"]["MarketId"][];
+            name: string;
+            /** @description Where it stands now, from `status` and the window. */
+            phase: components["schemas"]["PriceListPhaseDto"];
+            /** @description RFC 3339; `null` for no start. */
+            starts_at?: string | null;
+            status: components["schemas"]["PriceListStatusDto"];
+            updated_at: string;
+        };
+        /**
+         * @description `draft` never prices anything, whatever its window says.
+         *
+         *     Known values: `draft`, `active`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        PriceListStatusDto: string;
+        PriceProblemResponse: {
+            /** @description Stable `ErrorCode`, e.g. `not_available_in_market`. */
+            code: string;
+            message: string;
         };
         PriceRangeResponse: {
             /** @description Equal to `min` when every variant in this currency costs the same. */
@@ -6295,6 +7310,13 @@ export interface components {
             url: string;
             /** Format: int32 */
             width?: number | null;
+        };
+        ProductPricesResponse: {
+            /** @description Oldest market first. */
+            markets: components["schemas"]["MarketPricesResponse"][];
+            product: components["schemas"]["ProductId"];
+            /** Format: int32 */
+            quantity: number;
         };
         ProductResponse: {
             /** @description The categories it's directly in, sorted. */
@@ -6520,8 +7542,21 @@ export interface components {
             /** @description Why, for the agent (at most 2000 characters). */
             note?: string | null;
         };
+        RemoveCodesRequest: {
+            /** @description Or every code of this batch. */
+            batch?: string | null;
+            /** @description These codes (as typed), at most 1,000. */
+            codes?: string[] | null;
+        };
         RemoveFixedPricesRequest: {
             variants: components["schemas"]["VariantId"][];
+        };
+        RemovedCodesResponse: {
+            /**
+             * Format: int64
+             * @description How many went.
+             */
+            removed: number;
         };
         RenderedNotificationResponse: {
             html: string;
@@ -6632,8 +7667,31 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** @description A saved discount's `id` with the fields `PATCH /admin/discounts/{id}` takes. */
+        SavedDiscountSummaryRequest: {
+            combines_with?: components["schemas"]["DiscountClassDto"][];
+            /** @description Replaces them all; `[]` for none. */
+            conditions?: components["schemas"]["DiscountConditionDto"][];
+            /**
+             * Format: date-time
+             * @description `null` clears it.
+             */
+            ends_at?: string | null;
+            /** @description The saved discount the changes go over. */
+            id: components["schemas"]["DiscountId"];
+            /** @description Replaces it. */
+            kind?: components["schemas"]["DiscountKindDto"];
+            limits?: components["schemas"]["DiscountLimitsDto"];
+            /**
+             * Format: date-time
+             * @description `null` clears it.
+             */
+            starts_at?: string | null;
+            status?: components["schemas"]["DiscountStatusDto"];
+            title?: string;
+        };
         /**
-         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `customers:erase`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `agents:read`, `agents:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `customers:erase`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `agents:read`, `agents:write`, `discounts:read`, `discounts:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         Scope: string;
@@ -6682,8 +7740,11 @@ export interface components {
             queued: number;
         };
         SelectedShippingResponse: {
+            /** @description The option's price, before shipping discounts. */
             amount: components["schemas"]["Money"];
             code: string;
+            /** @description What shipping discounts took off it. */
+            discounts: components["schemas"]["DiscountShareResponse"][];
             estimate?: components["schemas"]["DeliveryEstimateDto"] | null;
             name: string;
             option: components["schemas"]["ShippingOptionId"];
@@ -6693,6 +7754,8 @@ export interface components {
              */
             quote_expires_at?: string | null;
             tax?: components["schemas"]["TaxLineResponse"] | null;
+            /** @description What the buyer pays for it: `amount` less the discounts. Tax is on this. */
+            total: components["schemas"]["Money"];
         };
         ServiceDto: {
             code: string;
@@ -6721,6 +7784,13 @@ export interface components {
              *     `verifySessionToken` (`docs/apps/bridge.md`).
              */
             token: string;
+        };
+        SetCatalogPriceListsRequest: {
+            /**
+             * @description The catalog's lists after the change, each once, at most 50, all in the market's
+             *     currency; `[]` takes them all off.
+             */
+            price_lists: components["schemas"]["PriceListId"][];
         };
         SetClassRateRequest: {
             /** Format: int32 */
@@ -6777,6 +7847,7 @@ export interface components {
             values: components["schemas"]["OwnerValueRequest"][];
         };
         SetFixedPricesRequest: {
+            /** @description Up to 1,000 per request; bulk callers page through. */
             fixed_prices: components["schemas"]["FixedPriceDto"][];
         };
         SetMediaRequest: {
@@ -6820,6 +7891,7 @@ export interface components {
          *     replaces the list, so a missing key would silently clear what's stored.
          */
         SetVariantRequest: {
+            compare_at_price: components["schemas"]["Money"] | null;
             id: components["schemas"]["VariantId"] | null;
             /** @description The base price, before markets and price lists. */
             price: components["schemas"]["Money"];
@@ -7188,6 +8260,18 @@ export interface components {
         UpdateChannelRequest: {
             name?: string;
         };
+        UpdateCodesRequest: {
+            /**
+             * @description `false` deactivates them: carts refuse an inactive code like an unknown one
+             *     (`422 discount_code_invalid`), and a cart holding one shows it `invalid`. `true`
+             *     makes them usable again.
+             */
+            active: boolean;
+            /** @description Or every code of this batch. */
+            batch?: string | null;
+            /** @description These codes (as typed), at most 1,000. */
+            codes?: string[] | null;
+        };
         /**
          * @description A JSON Merge Patch of a `custom` definition: absent keeps; `null` clears the
          *     description. Owner type, key and type never change.
@@ -7221,6 +8305,26 @@ export interface components {
             first_name?: string | null;
             last_name?: string | null;
             phone?: string | null;
+        };
+        UpdateDiscountRequest: {
+            combines_with?: components["schemas"]["DiscountClassDto"][];
+            /** @description Replaces them all; `[]` for none. */
+            conditions?: components["schemas"]["DiscountConditionDto"][];
+            /**
+             * Format: date-time
+             * @description `null` clears it.
+             */
+            ends_at?: string | null;
+            /** @description Replaces it. */
+            kind?: components["schemas"]["DiscountKindDto"];
+            limits?: components["schemas"]["DiscountLimitsDto"];
+            /**
+             * Format: date-time
+             * @description `null` clears it.
+             */
+            starts_at?: string | null;
+            status?: components["schemas"]["DiscountStatusDto"];
+            title?: string;
         };
         /** @description A JSON Merge Patch of a fulfilment: absent fields stay as they are. */
         UpdateFulfillmentRequest: {
@@ -7299,12 +8403,28 @@ export interface components {
             /** @description Replaces the provider's settings, checked by it. */
             settings?: Record<string, never>;
         };
+        /** @description A price list's changes (JSON Merge Patch). Its currency is fixed. */
         UpdatePriceListRequest: {
+            adjustment?: components["schemas"]["AdjustmentDto"] | null;
+            /** @description Replaces the audience; `{"groups": []}` for everyone. */
+            audience?: components["schemas"]["AudienceDto"];
+            compare_at?: components["schemas"]["CompareAtModeDto"];
+            /** @description `null` clears it. */
+            description?: string | null;
             /**
-             * Format: int32
-             * @description Basis points: -1000 = 10% off.
+             * Format: date-time
+             * @description RFC 3339; `null` clears it.
              */
-            adjustment_bps?: number;
+            ends_at?: string | null;
+            kind?: components["schemas"]["PriceListKindDto"];
+            /** @description Unique, ignoring case. */
+            name?: string;
+            /**
+             * Format: date-time
+             * @description RFC 3339; `null` clears it. The window is checked as it ends up.
+             */
+            starts_at?: string | null;
+            status?: components["schemas"]["PriceListStatusDto"];
         };
         /** @description Title and handle (JSON Merge Patch; neither can be `null`). */
         UpdateProductRequest: {
@@ -7384,6 +8504,7 @@ export interface components {
         };
         /** @description A variant's SKU, price and option values (JSON Merge Patch). */
         UpdateVariantRequest: {
+            compare_at_price?: components["schemas"]["Money"] | null;
             price?: components["schemas"]["Money"];
             requires_shipping?: boolean;
             /** @description One value per option, in option order; another variant can't have them. */
@@ -7402,6 +8523,26 @@ export interface components {
             countries?: string[];
             name?: string;
         };
+        UpdatedCodesResponse: {
+            /**
+             * Format: int64
+             * @description How many changed (those already as asked aren't counted).
+             */
+            updated: number;
+        };
+        /**
+         * @description A UploadId: `upl_` and 32 hex digits.
+         * @example upl_0190f1a2b3c47d8e9f00112233445566
+         */
+        UploadId: string;
+        /**
+         * @description What an upload is for, which decides who may make and read it, its file's type and its
+         *     largest size: `price_import` (`pricing:write`, `text/csv`, up to 20 MB).
+         *
+         *     Known values: `price_import`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        UploadPurposeDto: string;
         /** @description A request for the client to send itself, with the file as its body. */
         UploadRequestResponse: {
             /** @description RFC 3339, UTC: the URL stops working then. */
@@ -7411,6 +8552,20 @@ export interface components {
             /** @description `PUT`. */
             method: string;
             url: string;
+        };
+        UploadResponse: {
+            /** Format: int64 */
+            byte_size: number;
+            /** @description RFC 3339, UTC: the upload and its file are deleted after then. */
+            expires_at: string;
+            filename: string;
+            id: components["schemas"]["UploadId"];
+            purpose: components["schemas"]["UploadPurposeDto"];
+            /**
+             * @description The request that sends the file straight to storage, with the file as its body
+             *     (the purpose's type as `Content-Type`).
+             */
+            upload: components["schemas"]["UploadRequestResponse"];
         };
         /** @description Something that uses an asset. */
         UsageOwnerResponse: {
@@ -7457,7 +8612,30 @@ export interface components {
          * @example var_0190f1a2b3c47d8e9f00112233445566
          */
         VariantId: string;
+        VariantPricesResponse: {
+            /** @description Every list of the market's catalog, in ID order (oldest first). */
+            candidates: components["schemas"]["PriceCandidateResponse"][];
+            compare_at_price?: components["schemas"]["Money"] | null;
+            /** @description Whether a compare-at price is shown. */
+            on_sale: boolean;
+            price?: components["schemas"]["Money"] | null;
+            /**
+             * @description What lines larger than `quantity` cost each, across every list: by quantity, each
+             *     below `price` and the one before it, a line of `min_quantity` paying its `price`.
+             */
+            price_breaks: components["schemas"]["PriceBreakDto"][];
+            price_list?: components["schemas"]["PriceListId"] | null;
+            problem?: components["schemas"]["PriceProblemResponse"] | null;
+            variant: components["schemas"]["VariantId"];
+        };
+        /** @description A variant's product in a variant list. */
+        VariantProductResponse: {
+            handle: string;
+            id: components["schemas"]["ProductId"];
+            title: string;
+        };
         VariantResponse: {
+            compare_at_price?: components["schemas"]["Money"] | null;
             /**
              * @description Its own custom field values the caller may read (variant fields); `PATCH
              *     /admin/variants/{id}/custom-fields` writes them.
@@ -7481,6 +8659,25 @@ export interface components {
              * @description `null` when not entered; carriers and weight-tiered rates need it.
              */
             weight_grams?: number | null;
+        };
+        /** @description A page of a list, newest first. */
+        VariantSummaryPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["VariantSummaryResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        /** @description A variant in a list across products: what a price grid or an export shows. */
+        VariantSummaryResponse: {
+            compare_at_price?: components["schemas"]["Money"] | null;
+            id: components["schemas"]["VariantId"];
+            /** @description The base price, before markets and price lists. */
+            price: components["schemas"]["Money"];
+            product: components["schemas"]["VariantProductResponse"];
+            sku?: string | null;
+            /** @description Its option values ("M / Blue"); `null` for a product without options. */
+            title?: string | null;
         };
         /**
          * @description `Visibility` on the wire.
@@ -12739,7 +13936,7 @@ export interface operations {
             };
         };
     };
-    "admin.markets.assign_price_list": {
+    "admin.markets.set_catalog_price_lists": {
         parameters: {
             query?: never;
             header?: {
@@ -12755,7 +13952,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AssignPriceListRequest"];
+                "application/json": components["schemas"]["SetCatalogPriceListsRequest"];
             };
         };
         responses: {
@@ -12832,6 +14029,209 @@ export interface operations {
                 };
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.markets.add_catalog_price_list": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["CatalogId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddCatalogPriceListRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.markets.remove_catalog_price_list": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["CatalogId"];
+                price_list: components["schemas"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -16364,6 +17764,12 @@ export interface operations {
                 q?: string;
                 /** @description Only customers in this group. */
                 group?: components["schemas"]["CustomerGroupId"];
+                /**
+                 * @description Only these customers: repeat it (`ids=cus_…&ids=cus_…`) or separate them with
+                 *     commas, up to 250 (`422 too_many_filter_ids`). IDs that name no customer match
+                 *     nothing.
+                 */
+                ids?: components["schemas"]["CustomerId"][];
                 sort?: "newest" | "oldest" | "email_asc" | "email_desc" | "name_asc" | "name_desc";
                 /** @description Filters on custom fields, only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
                 field?: {
@@ -17849,6 +19255,1240 @@ export interface operations {
                 };
             };
             /** @description A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.discounts.list": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+                /** @description Where they stand now. */
+                status?: "draft" | "scheduled" | "active" | "expired";
+                method?: "automatic" | "codes";
+                /** @description Those with a reward of this class. */
+                class?: "product" | "order" | "shipping";
+                /** @description In the title, ignoring case, or a part of one of its codes. */
+                q?: string;
+                /** @description The discount with this code (as typed: it's normalised). */
+                code?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscountPage"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.discounts.create": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDiscountRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscountResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.discounts.summarize": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiscountSummaryRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscountSummaryResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.discounts.fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["DiscountId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscountResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.discounts.remove": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["DiscountId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.discounts.update": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["DiscountId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateDiscountRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscountResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.discounts.codes": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+                /** @description A part of the code, as typed. */
+                q?: string;
+                /** @description Only those added under this batch label. */
+                batch?: string;
+                /** @description Only active ones (`true`) or only inactive ones (`false`). */
+                active?: boolean;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["DiscountId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscountCodePage"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.discounts.add": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["DiscountId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddCodesRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddedCodesResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.discounts.remove_codes": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["DiscountId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoveCodesRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemovedCodesResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.discounts.update_codes": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["DiscountId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateCodesRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdatedCodesResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.discounts.export": {
+        parameters: {
+            query?: {
+                /** @description Only this batch's codes. */
+                batch?: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["DiscountId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The codes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.discounts.generate": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["DiscountId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerateCodesRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddedCodesResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.discounts.usage": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["DiscountId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscountUsagePage"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -23990,7 +26630,23 @@ export interface operations {
     };
     "admin.markets.list_price_lists": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+                kind?: "sale" | "override";
+                /**
+                 * @description Where they stand now: `draft`, `scheduled` (active, not started), `active`, or
+                 *     `expired` (active, ended).
+                 */
+                status?: "draft" | "scheduled" | "active" | "expired";
+                /** @description Only those on this market's catalog. */
+                market?: components["schemas"]["MarketId"];
+                /** @description Only those whose audience names this customer group. */
+                group?: components["schemas"]["CustomerGroupId"];
+                sort?: "newest" | "oldest" | "name_asc" | "name_desc";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -24003,7 +26659,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PriceListListResponse"];
+                    "application/json": components["schemas"]["PriceListPage"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
@@ -24017,6 +26682,15 @@ export interface operations {
             };
             /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24203,6 +26877,94 @@ export interface operations {
             };
         };
     };
+    "admin.markets.delete_price_list": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.markets.update_price_list": {
         parameters: {
             query?: never;
@@ -24322,6 +27084,24 @@ export interface operations {
                 cursor?: string;
                 /** @description Items per page, 1 to 100 (default 50). */
                 limit?: number;
+                /** @description Only this product's variants. */
+                product?: components["schemas"]["ProductId"];
+                /**
+                 * @description Only variants of products in this category or any category below it, as a price
+                 *     list's adjustment for a category reaches them.
+                 */
+                category?: components["schemas"]["CategoryId"];
+                /**
+                 * @description Only variants whose product's title or handle, or whose SKU, contains this text,
+                 *     ignoring case. Up to 255 characters; blank filters nothing.
+                 */
+                q?: string;
+                /**
+                 * @description Only these variants (a grid's page of them): repeat it (`variants=var_…&variants=var_…`)
+                 *     or separate them with commas, up to 250 (`422 too_many_filter_ids`). Those without
+                 *     a fixed price are left out.
+                 */
+                variants?: components["schemas"]["VariantId"][];
             };
             header?: never;
             path: {
@@ -24647,6 +27427,12 @@ export interface operations {
                  *     matches nothing.
                  */
                 channel?: components["schemas"]["ChannelId"];
+                /**
+                 * @description Only these products: repeat it (`ids=prod_…&ids=prod_…`) or separate them with
+                 *     commas, up to 250 (`422 too_many_filter_ids`). IDs that name no product match
+                 *     nothing.
+                 */
+                ids?: components["schemas"]["ProductId"][];
                 sort?: "newest" | "oldest" | "title_asc" | "title_desc" | "updated_desc" | "updated_asc";
                 /** @description Filters on custom fields, only `filterable` ones: `field[custom.material]=wool,cotton` (any of these; a list field holds any of them), `field[custom.weight][gte]=1.5` (`gt`, `gte`, `lt`, `lte`: numbers, money in minor units, measurements like `1.5kg`, dates and times), `field[custom.erp_id][exists]=false`, `field[custom.flag]=true`. Every filter must match. Text compares ignoring case; a `unique` field's filter finds at most one. An unknown key is `422 custom_field_unknown`, one that isn't filterable `422 custom_field_not_filterable`, a personal one needs `customer_data:profile`. */
                 field?: {
@@ -25768,6 +28554,83 @@ export interface operations {
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.markets.product_prices": {
+        parameters: {
+            query?: {
+                /** @description Only this market; every market without it. */
+                market?: components["schemas"]["MarketId"];
+                /** @description How many of each variant, for quantity prices; 1 without it. */
+                quantity?: number;
+                /**
+                 * @description Priced for a customer in this group (`404 customer_group_not_found`); without it,
+                 *     for a shopper who isn't signed in.
+                 */
+                group?: components["schemas"]["CustomerGroupId"];
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductPricesResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -29429,6 +32292,262 @@ export interface operations {
             };
         };
     };
+    "admin.uploads.create": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateUploadRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.uploads.remove": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.uploads.content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "admin.staff.list_users": {
         parameters: {
             query?: never;
@@ -29636,6 +32755,96 @@ export interface operations {
                 };
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.products.list_variants": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+                /**
+                 * @description Only variants whose product's title or handle, or whose own SKU, contains this
+                 *     text, ignoring case. Up to 255 characters; blank filters nothing.
+                 */
+                q?: string;
+                /**
+                 * @description Only these products' variants: repeat it (`product=prod_…&product=prod_…`) or
+                 *     separate them with commas, up to 100 (`422 too_many_filter_ids`).
+                 */
+                product?: components["schemas"]["ProductId"][];
+                /**
+                 * @description Only variants of products in this category or any category below it. An ID that
+                 *     names no category matches nothing.
+                 */
+                category?: components["schemas"]["CategoryId"];
+                /**
+                 * @description Only these variants, repeated or comma-separated like `product`, up to 250
+                 *     (`422 too_many_filter_ids`).
+                 */
+                ids?: components["schemas"]["VariantId"][];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VariantSummaryPage"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
             422: {
                 headers: {
                     [name: string]: unknown;

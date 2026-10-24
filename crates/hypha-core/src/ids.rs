@@ -111,6 +111,8 @@ define_id!(OptionValueId, "optval");
 define_id!(MarketId, "mkt");
 define_id!(CatalogId, "cat");
 define_id!(PriceListId, "pl");
+// Discounts: automatic, or by code (codes are keyed by their normalised text).
+define_id!(DiscountId, "disc");
 define_id!(UserId, "user");
 define_id!(AgentId, "agent");
 // A write an agent proposed, waiting for a person.
@@ -166,6 +168,8 @@ define_id!(AppId, "appid");
 define_id!(OAuthRequestId, "oareq");
 // Custom field definitions.
 define_id!(CustomFieldDefinitionId, "cfd");
+// Files uploaded for a while, to be read back (a CSV to import).
+define_id!(UploadId, "upl");
 
 #[cfg(test)]
 mod tests {

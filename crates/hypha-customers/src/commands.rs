@@ -33,6 +33,9 @@ pub enum CommandError {
     GroupHandleTaken(Handle),
     #[error("a customer group named {0:?} exists")]
     GroupNameTaken(String),
+    /// Something points at the group (a price list's audience): change that first.
+    #[error("customer group {0} is in use")]
+    GroupInUse(CustomerGroupId),
 }
 
 impl ErrorCode for CommandError {
@@ -48,6 +51,7 @@ impl ErrorCode for CommandError {
             CommandError::GroupNotFound(_) => "customer_group_not_found",
             CommandError::GroupHandleTaken(_) => "customer_group_handle_taken",
             CommandError::GroupNameTaken(_) => "customer_group_name_taken",
+            CommandError::GroupInUse(_) => "customer_group_in_use",
         }
     }
 }
@@ -116,21 +120,17 @@ pub async fn get_customer<R: CustomerRepo>(
     load(customers, id).await
 }
 
-/// A page of customer summaries in `sort`'s order, narrowed to text `q` (email, name,
-/// phone) when given and to `fields`, filters on custom fields checked by
-/// `hypha-custom-fields` already. `page.after`'s key must fit the sort
-/// (`CustomerSort::fits`; hosts check cursors).
+/// A page of customer summaries in `sort`'s order, narrowed by `filter` (checked by its
+/// constructors; its custom field filters by `hypha-custom-fields` already).
+/// `page.after`'s key must fit the sort (`CustomerSort::fits`; hosts check cursors).
 pub async fn list_customers<R: CustomerRepo>(
     ctx: &Ctx,
     customers: &R,
-    q: Option<String>,
-    fields: Vec<hypha_core::FieldFilter>,
-    group: Option<CustomerGroupId>,
+    filter: CustomerFilter,
     sort: CustomerSort,
     page: PageRequest<Keyset<CustomerId>>,
 ) -> Result<Page<CustomerSummary>, CommandError> {
     ctx.require(Scope::CustomersRead)?;
-    let filter = CustomerFilter::new(q)?.with_fields(fields).in_group(group);
     Ok(customers.list(&filter, sort, page).await?)
 }
 

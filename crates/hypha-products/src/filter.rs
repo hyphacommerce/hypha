@@ -2,11 +2,21 @@
 //! so staff see drafts and their own edits at once. Shoppers search the index instead
 //! (`hypha-search`).
 
+use std::{fmt, str::FromStr};
+
 use hypha_core::{
-    CategoryId, ChannelId, Direction, FieldFilter, SortKey, Timestamp, optional_text,
+    CategoryId, ChannelId, Direction, FieldFilter, ProductId, SortKey, Timestamp, VariantId,
+    optional_text,
 };
 
-use crate::{Product, ProductError, ProductStatus, ProductSummary};
+use crate::{Product, ProductError, ProductStatus, ProductSummary, Variant, VariantSummary};
+
+/// How many product IDs a product list may be narrowed to (`ids`).
+pub const MAX_FILTER_PRODUCTS: usize = 250;
+/// How many products a variant list may be narrowed to: each may have many variants.
+pub const MAX_FILTER_VARIANT_PRODUCTS: usize = 100;
+/// How many variant IDs a variant list may be narrowed to.
+pub const MAX_FILTER_VARIANTS: usize = 250;
 
 /// A list's filters, checked. Every one given must match.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -19,6 +29,8 @@ pub struct ProductFilter {
     tag: Option<String>,
     category: Option<CategoryId>,
     channel: Option<ChannelId>,
+    /// Any of these; empty is every product.
+    ids: Vec<ProductId>,
     fields: Vec<FieldFilter>,
 }
 
@@ -38,6 +50,8 @@ pub struct ProductFilterInput {
     pub category: Option<CategoryId>,
     /// Products published to this channel; the same.
     pub channel: Option<ChannelId>,
+    /// Any of these products (at most `MAX_FILTER_PRODUCTS`); empty is every product.
+    pub ids: Vec<ProductId>,
 }
 
 impl ProductFilter {
@@ -55,6 +69,7 @@ impl ProductFilter {
             tag: optional_text("tag", input.tag)?,
             category: input.category,
             channel: input.channel,
+            ids: id_set("ids", input.ids, MAX_FILTER_PRODUCTS)?,
             fields: Vec::new(),
         })
     }
@@ -100,6 +115,11 @@ impl ProductFilter {
         self.channel
     }
 
+    /// Only these products (sorted, no repeats); empty is all of them.
+    pub fn ids(&self) -> &[ProductId] {
+        &self.ids
+    }
+
     /// Whether `product` is in the list, given whether it is in the filter's category
     /// and channel (asked only when the filter has them: membership is stored by other
     /// domains). Adapters that filter in storage must agree (the repository contract
@@ -116,6 +136,7 @@ impl ProductFilter {
                 .is_none_or(|w| value.is_some_and(|v| v.to_lowercase() == w.to_lowercase()))
         };
         (self.statuses.is_empty() || self.statuses.contains(&product.status()))
+            && (self.ids.is_empty() || self.ids.contains(&product.id()))
             && self.q.as_ref().is_none_or(|q| q.matches(product))
             && same(&self.vendor, product.vendor())
             && same(&self.product_type, product.product_type())
@@ -125,6 +146,140 @@ impl ProductFilter {
             })
             && self.category.is_none_or(in_category)
             && self.channel.is_none_or(in_channel)
+    }
+}
+
+/// `ids` sorted without repeats, refused past `max`.
+fn id_set<Id: Ord>(
+    field: &'static str,
+    mut ids: Vec<Id>,
+    max: usize,
+) -> Result<Vec<Id>, ProductError> {
+    ids.sort();
+    ids.dedup();
+    if ids.len() > max {
+        return Err(ProductError::TooManyFilterIds { field, max });
+    }
+    Ok(ids)
+}
+
+/// A variant list's filters, checked. Every one given must match.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VariantFilter {
+    q: Option<String>,
+    products: Vec<ProductId>,
+    category: Option<CategoryId>,
+    ids: Vec<VariantId>,
+}
+
+/// What a variant list may be narrowed to, unchecked (`VariantFilter::new` checks it).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VariantFilterInput {
+    /// Text the product's title or handle, or the variant's own SKU, contains, ignoring
+    /// case.
+    pub q: Option<String>,
+    /// Variants of any of these products (at most `MAX_FILTER_VARIANT_PRODUCTS`); empty is
+    /// every product.
+    pub products: Vec<ProductId>,
+    /// Variants of products in this category or any below it. Stored by the categories
+    /// domain: an ID that names none matches nothing.
+    pub category: Option<CategoryId>,
+    /// Any of these variants (at most `MAX_FILTER_VARIANTS`); empty is every variant.
+    pub ids: Vec<VariantId>,
+}
+
+impl VariantFilter {
+    /// Text follows the shared text rule (trimmed, at most 255 characters); blank is no
+    /// filter.
+    pub fn new(input: VariantFilterInput) -> Result<Self, ProductError> {
+        Ok(Self {
+            q: optional_text("q", input.q)?,
+            products: id_set("products", input.products, MAX_FILTER_VARIANT_PRODUCTS)?,
+            category: input.category,
+            ids: id_set("ids", input.ids, MAX_FILTER_VARIANTS)?,
+        })
+    }
+
+    pub fn q(&self) -> Option<&str> {
+        self.q.as_deref()
+    }
+
+    /// Sorted, no repeats; empty is all of them.
+    pub fn products(&self) -> &[ProductId] {
+        &self.products
+    }
+
+    pub fn category(&self) -> Option<CategoryId> {
+        self.category
+    }
+
+    /// Sorted, no repeats; empty is all of them.
+    pub fn ids(&self) -> &[VariantId] {
+        &self.ids
+    }
+
+    /// Whether `product`'s `variant` is in the list, given whether the product is in the
+    /// filter's category or one below it (asked only when the filter has one). Adapters
+    /// that filter in storage must agree (the repository contract checks).
+    pub fn matches(
+        &self,
+        product: &Product,
+        variant: &Variant,
+        in_category: impl Fn(CategoryId) -> bool,
+    ) -> bool {
+        let text = |q: &str| {
+            let q = q.to_lowercase();
+            let has = |text: &str| text.to_lowercase().contains(&q);
+            has(product.title()) || has(product.handle().as_str()) || variant.sku().is_some_and(has)
+        };
+        (self.products.is_empty() || self.products.contains(&product.id()))
+            && (self.ids.is_empty() || self.ids.contains(&variant.id()))
+            && self.q.as_deref().is_none_or(text)
+            && self.category.is_none_or(in_category)
+    }
+}
+
+/// Where a variant list is: the newest product first, each product's variants in their
+/// order. A page continues after one of these; written `prod_…/3` in a cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VariantPosition {
+    pub product: ProductId,
+    /// The variant's index in its product's variants.
+    pub position: u32,
+}
+
+impl VariantPosition {
+    /// Whether the variant at `other` comes after this position in the list.
+    pub fn precedes(&self, other: VariantPosition) -> bool {
+        other.product < self.product
+            || (other.product == self.product && other.position > self.position)
+    }
+}
+
+impl VariantSummary {
+    pub fn at(&self) -> VariantPosition {
+        VariantPosition {
+            product: self.product,
+            position: self.position,
+        }
+    }
+}
+
+impl fmt::Display for VariantPosition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.product, self.position)
+    }
+}
+
+impl FromStr for VariantPosition {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (product, position) = s.split_once('/').ok_or(())?;
+        Ok(Self {
+            product: product.parse().map_err(|_| ())?,
+            position: position.parse().map_err(|_| ())?,
+        })
     }
 }
 
@@ -361,6 +516,103 @@ mod tests {
         });
         assert!(both.matches(&p, |c| c == pcat, |c| c == chan));
         assert!(!both.matches(&p, |c| c == pcat, |_| false));
+    }
+
+    #[test]
+    fn filter_ids_are_capped_counted_without_repeats() {
+        let ids = |n: u128| (1..=n).map(|i| ProductId::from_uuid(Uuid::from_u128(i)));
+        let mut at_limit: Vec<ProductId> = ids(250).collect();
+        at_limit.push(ProductId::from_uuid(Uuid::from_u128(1)));
+        let filter = ProductFilter::new(ProductFilterInput {
+            ids: at_limit,
+            ..ProductFilterInput::default()
+        })
+        .unwrap();
+        assert_eq!(filter.ids().len(), 250);
+        assert_eq!(
+            ProductFilter::new(ProductFilterInput {
+                ids: ids(251).collect(),
+                ..ProductFilterInput::default()
+            }),
+            Err(ProductError::TooManyFilterIds {
+                field: "ids",
+                max: 250
+            })
+        );
+        assert_eq!(
+            VariantFilter::new(VariantFilterInput {
+                products: ids(101).collect(),
+                ..VariantFilterInput::default()
+            }),
+            Err(ProductError::TooManyFilterIds {
+                field: "products",
+                max: 100
+            })
+        );
+        assert!(
+            VariantFilter::new(VariantFilterInput {
+                products: ids(100).collect(),
+                ..VariantFilterInput::default()
+            })
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn listed_ids_match_only_those_products() {
+        let p = mug();
+        let by = |n: u128| {
+            filter(ProductFilterInput {
+                ids: vec![ProductId::from_uuid(Uuid::from_u128(n))],
+                ..ProductFilterInput::default()
+            })
+        };
+        assert!(matches(&by(1), &p));
+        assert!(!matches(&by(2), &p));
+    }
+
+    #[test]
+    fn variant_text_matches_the_title_handle_or_sku_ignoring_case() {
+        let p = mug();
+        let q = |text: &str| {
+            VariantFilter::new(VariantFilterInput {
+                q: Some(text.to_string()),
+                ..VariantFilterInput::default()
+            })
+            .unwrap()
+        };
+        let variant = &p.variants()[0];
+        for text in ["čAŠA", "ware-m", "mug-01"] {
+            assert!(q(text).matches(&p, variant, |_| panic!()), "{text}");
+        }
+        assert!(!q("cup").matches(&p, variant, |_| panic!()));
+    }
+
+    #[test]
+    fn a_variant_position_continues_within_the_product_then_older_ones() {
+        let at = |p: u128, position| VariantPosition {
+            product: ProductId::from_uuid(Uuid::from_u128(p)),
+            position,
+        };
+        assert!(at(5, 1).precedes(at(5, 2)));
+        assert!(!at(5, 1).precedes(at(5, 1)), "not itself");
+        assert!(!at(5, 1).precedes(at(5, 0)));
+        assert!(at(5, 1).precedes(at(4, 0)));
+        assert!(!at(5, 1).precedes(at(6, 9)));
+    }
+
+    #[test]
+    fn a_variant_position_reads_back_from_its_text() {
+        let at = VariantPosition {
+            product: ProductId::from_uuid(Uuid::from_u128(7)),
+            position: 12,
+        };
+        assert_eq!(at.to_string().parse(), Ok(at));
+        assert_eq!("prod_x/1".parse::<VariantPosition>(), Err(()));
+        assert_eq!(
+            format!("{}/-1", at.product).parse::<VariantPosition>(),
+            Err(())
+        );
     }
 
     #[test]

@@ -2,8 +2,9 @@
 
 // The product page's interactive part (the `product-detail` template): the gallery,
 // the option pickers, quantity and "Add to cart". Price, availability and image
-// follow the choice; nothing is fetched here, since the page passed every variant
-// priced in the shopper's country.
+// follow the choice (and the price the quantity, through its breaks); nothing is
+// fetched here, since the page passed every variant priced in the shopper's country,
+// except a signed-in shopper's own prices (their customer groups'), asked once.
 
 import { AspectRatio } from "@astryxdesign/core/AspectRatio";
 import { Badge } from "@astryxdesign/core/Badge";
@@ -20,10 +21,14 @@ import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { MinusIcon, PlusIcon } from "@heroicons/react/24/outline";
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
-import { startTransition, useState, useTransition } from "react";
+import { startTransition, useEffect, useState, useTransition } from "react";
+
+import { type VariantPrices, customerPrices } from "@/app/[country]/actions";
 
 import { useCart } from "@/components/cart/cart-provider";
 import { CustomFields } from "@/components/custom-fields";
+import { PromotionBadges } from "@/components/discounts";
+import { Price, SaleBadge } from "@/components/price";
 import { productImageName } from "@/components/product-grid";
 import {
   HERO_IMAGE,
@@ -32,7 +37,9 @@ import {
   addTransitionType,
 } from "@/components/view-transition";
 import { type FieldEntry, withVariant } from "@/lib/custom-fields";
-import { formatMoney } from "@/lib/money";
+import { readPromotions } from "@/lib/discounts";
+import { breakLabel, sortedBreaks, unitPriceFor } from "@/lib/prices";
+import { hasSessionFlag } from "@/lib/session-flag";
 
 type Product = StorefrontSchemas["StorefrontProductResponse"];
 type Variant = StorefrontSchemas["StorefrontVariantResponse"];
@@ -57,6 +64,32 @@ function offered(product: Product, selections: string[], index: number, value: s
   );
 }
 
+/**
+ * The signed-in shopper's own prices, once the page is in the browser: the static page
+ * shows everyone's. Asked only when the browser's cookies say there's a session, so a
+ * guest's page makes no call.
+ */
+function useCustomerPrices(country: string, handle: string) {
+  const [prices, setPrices] = useState<Record<string, VariantPrices> | null>(null);
+  useEffect(() => {
+    if (!hasSessionFlag()) return;
+    let current = true;
+    const read = async () => {
+      try {
+        const found = await customerPrices({ country, handle });
+        if (current) setPrices(found);
+      } catch {
+        // The shop's server didn't answer: everyone's prices stay, as the page has them.
+      }
+    };
+    void read();
+    return () => {
+      current = false;
+    };
+  }, [country, handle]);
+  return prices;
+}
+
 /** The product's custom fields and each variant's (by ID), formatted by the page. */
 export type ProductFields = { product: FieldEntry[]; variants: Record<string, FieldEntry[]> };
 
@@ -76,13 +109,27 @@ export function ProductForm({
   const [wanted, setQuantity] = useState(1);
   const [error, setError] = useState<string>();
   const [pending, startAdding] = useTransition();
-  const variant = variantWith(product, selections);
+  const own = useCustomerPrices(cart.country, product.handle);
+  const chosen = variantWith(product, selections);
+  // The shopper's own prices replace everyone's, amount for amount in the same place.
+  const variant = chosen && own?.[chosen.id] ? { ...chosen, ...own[chosen.id] } : chosen;
   // How many more can go in the cart: the stock left, less what's in it already (the API
   // refuses more). `null` stock means no limit.
   const inCart = cart.cart?.lines.find((l) => l.variant === variant?.id)?.quantity ?? 0;
   const stock = variant?.available_quantity;
   const room = stock == null ? MAX_QUANTITY : Math.min(MAX_QUANTITY, Math.max(0, stock - inCart));
   const quantity = Math.max(1, Math.min(wanted, room));
+  // The line's quantity once these are in: the cart prices the whole line by its breaks.
+  const lineQuantity = inCart + quantity;
+  const breaks = sortedBreaks(variant?.price_breaks ?? []);
+  // Its live automatic discounts, as badges: never a price, so the static page is right
+  // for every shopper.
+  const promotions = readPromotions(product);
+  const unit = variant?.price ? unitPriceFor(variant.price, breaks, lineQuantity) : null;
+  // A break's price is shown against the regular one, unless a sale already has a "was".
+  const unitCompareAt =
+    variant?.compare_at_price ??
+    (unit && variant?.price && unit !== variant.price ? variant.price : null);
 
   const images = product.media.filter((m) => m.kind === "image");
   // Start on the variant's image, if it has one; picking a variant moves to its image.
@@ -206,15 +253,44 @@ export function ProductForm({
             <Heading level={1} type="display-2">
               {product.title}
             </Heading>
-            <HStack gap={2} vAlign="center">
-              {variant?.price ? (
-                <Text type="large" weight="semibold">
-                  {formatMoney(variant.price, digits)}
-                </Text>
+            <HStack gap={2} vAlign="center" wrap="wrap">
+              {unit ? (
+                <Price
+                  price={unit}
+                  compareAt={unitCompareAt}
+                  digits={digits}
+                  type="large"
+                  weight="semibold"
+                />
               ) : null}
+              {unit && breaks.length > 0 && <Text type="supporting">each</Text>}
               {product.prices_include_tax === false && <Text type="supporting">plus tax</Text>}
+              {variant?.on_sale && <SaleBadge />}
+              <PromotionBadges promotions={promotions} />
               {variant && !variant.available && <Badge label="Sold out" variant="neutral" />}
             </HStack>
+            {promotions
+              .filter((p) => p.summary)
+              .map((p) => (
+                <Text key={p.title} type="supporting" color="secondary">
+                  {p.summary}
+                </Text>
+              ))}
+            {variant?.price && breaks.length > 0 && (
+              <VStack as="ul" gap={1} aria-label="Quantity prices" className="shop-breaks">
+                {breaks.map((b) => (
+                  <li key={b.min_quantity}>
+                    <Text
+                      type="supporting"
+                      color={b.min_quantity <= lineQuantity ? "primary" : "secondary"}
+                      weight={b.min_quantity <= lineQuantity ? "medium" : undefined}
+                    >
+                      {breakLabel(b, digits)}
+                    </Text>
+                  </li>
+                ))}
+              </VStack>
+            )}
           </VStack>
 
           {product.options.map((option, index) => (

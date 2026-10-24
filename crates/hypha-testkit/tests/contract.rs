@@ -2,11 +2,11 @@
 
 use hypha_core::Timestamp;
 use hypha_testkit::{
-    InMemoryAppRepo, InMemoryAssetRepo, InMemoryBlobStore, InMemoryCartRepo, InMemoryCatalogRepo,
-    InMemoryCustomerRepo, InMemoryFulfillmentRepo, InMemoryInventoryItemRepo, InMemoryLocationRepo,
-    InMemoryMarketRepo, InMemoryOrderRepo, InMemoryPorts, InMemoryPriceListRepo,
-    InMemoryProductRepo, InMemorySearchIndex, InMemorySearchQueue, InMemorySearchSettingsRepo,
-    InMemoryStoreRepo, InMemoryTaxClassRepo, InMemoryTaxRegionRepo, contract,
+    InMemoryAppRepo, InMemoryAssetRepo, InMemoryBlobStore, InMemoryCartRepo, InMemoryCustomerRepo,
+    InMemoryFulfillmentRepo, InMemoryInventoryItemRepo, InMemoryLocationRepo, InMemoryMarketRepo,
+    InMemoryOrderRepo, InMemoryPorts, InMemoryPriceListRepo, InMemoryProductRepo,
+    InMemorySearchIndex, InMemorySearchQueue, InMemorySearchSettingsRepo, InMemoryStoreRepo,
+    InMemoryTaxClassRepo, InMemoryTaxRegionRepo, contract,
 };
 use pollster::block_on;
 
@@ -46,8 +46,20 @@ fn market_repo() {
 
 #[test]
 fn catalog_repo() {
-    block_on(contract::catalog_repo(async || {
-        InMemoryCatalogRepo::default()
+    block_on(contract::catalog_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn price_list_joins() {
+    block_on(contract::price_list_joins(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
+fn price_list_schedule() {
+    block_on(contract::price_list_schedule(async || {
+        InMemoryPorts::default()
     }));
 }
 
@@ -218,6 +230,13 @@ fn asset_repo() {
 }
 
 #[test]
+fn temporary_upload_repo() {
+    block_on(contract::temporary_upload_repo(async || {
+        hypha_testkit::InMemoryTemporaryUploadRepo::default()
+    }));
+}
+
+#[test]
 fn asset_usages() {
     block_on(contract::asset_usages(async || InMemoryPorts::default()));
 }
@@ -294,6 +313,16 @@ fn search_settings_repo() {
     block_on(contract::search_settings_repo(async || {
         InMemorySearchSettingsRepo::default()
     }));
+}
+
+#[test]
+fn discount_repo() {
+    block_on(contract::discount_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn discount_names() {
+    block_on(contract::discount_names(async || InMemoryPorts::default()));
 }
 
 #[test]

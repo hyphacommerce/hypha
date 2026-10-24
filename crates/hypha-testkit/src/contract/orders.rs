@@ -16,7 +16,7 @@ use super::scenario;
 pub async fn order_repo<R: OrderRepo>(make: impl AsyncFn() -> R) {
     scenario("order: insert stores every field at version 1");
     round_trips(&make().await).await;
-    scenario("order: lookups by ID and number; unknown ones are None");
+    scenario("order: lookups by ID and number, numbers by ID; unknown ones are None or left out");
     lookups(&make().await).await;
     scenario("order: update stores every field and bumps the version; stale and missing fail");
     updates(&make().await).await;
@@ -38,6 +38,88 @@ pub async fn order_repo<R: OrderRepo>(make: impl AsyncFn() -> R) {
     fulfilment_round_trips(&make().await).await;
     scenario("order: sales add up a period's orders per bucket and currency, with top products");
     sales(&make().await).await;
+    scenario("order: discounts, their shares on lines and shipping, round trip");
+    discount_round_trips(&make().await).await;
+}
+
+async fn discount_round_trips<R: OrderRepo>(repo: &R) {
+    use hypha_orders::{DiscountClass, DiscountShare, OrderDiscount, OrderShippingLine};
+    let share = |application: u16, amount: i64, units: Option<u32>| DiscountShare {
+        application,
+        amount: eur(amount),
+        units,
+    };
+    let mut line = plain_line(10);
+    line.discounts = vec![share(0, 50, Some(1)), share(1, 45, None)];
+    line.total = eur(405);
+    let shipping = OrderShippingLine {
+        group: hypha_core::ShippingGroupId::from_uuid(Uuid::from_u128(40)),
+        lines: vec![line.id],
+        option: hypha_core::ShippingOptionId::from_uuid(Uuid::from_u128(41)),
+        code: "standard".to_string(),
+        name: "Standard".to_string(),
+        provider: None,
+        service: None,
+        reference: None,
+        amount: Price::new(eur(490)).unwrap(),
+        discounts: vec![share(2, 490, None)],
+        total: eur(0),
+        estimate_days: None,
+        tax: None,
+    };
+    let discount = |n: u128, class, amount: i64, code: Option<&str>| OrderDiscount {
+        discount: hypha_core::DiscountId::from_uuid(Uuid::from_u128(n)),
+        code: code.map(str::to_string),
+        title: format!("Offer {n}"),
+        summary: "10% off the order".to_string(),
+        class,
+        value: serde_json::json!({"type": "percent", "basis_points": 1000}),
+        target: serde_json::json!({"type": "subtotal"}),
+        amount: eur(amount),
+    };
+    let mut order = Order::place(NewOrder {
+        id: oid(1),
+        number: number(1),
+        placed_at: Timestamp::from_unix_micros(1_767_225_600_000_001),
+        cart: CartId::from_uuid(Uuid::from_u128(1001)),
+        channel: ChannelId::from_uuid(Uuid::from_u128(501)),
+        market: MarketId::from_uuid(Uuid::from_u128(2001)),
+        currency: Currency::EUR,
+        country: CountryCode::new("HR").unwrap(),
+        taxes_included: true,
+        customer: CustomerId::from_uuid(Uuid::from_u128(3001)),
+        email: Email::new("ana@example.hr").unwrap(),
+        lines: vec![line],
+        shipping_address: Some(
+            hypha_core::Address::new(hypha_core::AddressParts {
+                first_name: Some("Ana".to_string()),
+                last_name: "Horvat".to_string(),
+                company: None,
+                line1: "Ilica 1".to_string(),
+                line2: None,
+                city: "Zagreb".to_string(),
+                province: None,
+                postal_code: Some("10000".to_string()),
+                country: "HR".to_string(),
+                phone: None,
+            })
+            .unwrap(),
+        ),
+        shipping_lines: vec![shipping],
+        discounts: vec![
+            discount(7, DiscountClass::Product, 50, None),
+            discount(8, DiscountClass::Order, 45, Some("WELCOME10")),
+            discount(9, DiscountClass::Shipping, 490, None),
+        ],
+        discount_total: eur(585),
+        subtotal: eur(405),
+        shipping_total: eur(0),
+        tax_total: eur(0),
+        total: eur(405),
+    })
+    .unwrap();
+    repo.insert(&mut order).await.unwrap();
+    assert_eq!(repo.get(oid(1)).await.unwrap(), Some(order));
 }
 
 fn eur(amount: i64) -> Money {
@@ -67,9 +149,13 @@ fn plain_line(id: u128) -> OrderLine {
         variant_title: None,
         sku: None,
         unit_price: Price::new(eur(500)).unwrap(),
+        subtotal: eur(500),
+        discounts: Vec::new(),
         total: eur(500),
         tax: None,
         fulfilled_quantity: 0,
+        compare_at_price: None,
+        price_list: None,
     }
 }
 
@@ -85,6 +171,8 @@ fn full_line(id: u128) -> OrderLine {
         variant_title: Some("M / Blue".to_string()),
         sku: Some("SH-M-BL".to_string()),
         unit_price: Price::new(eur(2)).unwrap(),
+        subtotal: eur(2 * i64::from(u32::MAX)),
+        discounts: Vec::new(),
         total: eur(2 * i64::from(u32::MAX)),
         tax: Some(OrderTax {
             rate: TaxRate::new(50_000).unwrap(),
@@ -95,6 +183,8 @@ fn full_line(id: u128) -> OrderLine {
             },
         }),
         fulfilled_quantity: 0,
+        compare_at_price: Some(Price::new(eur(3)).unwrap()),
+        price_list: Some(hypha_core::PriceListId::from_uuid(Uuid::from_u128(id + 5))),
     }
 }
 
@@ -121,6 +211,8 @@ fn order_with(n: u128, lines: Vec<OrderLine>, taxes_included: bool) -> Order {
         cart: CartId::from_uuid(Uuid::from_u128(1000 + n)),
         channel: hypha_core::ChannelId::from_uuid(Uuid::from_u128(500 + n)),
         market: MarketId::from_uuid(Uuid::from_u128(2000 + n)),
+        discounts: Vec::new(),
+        discount_total: hypha_core::Money::zero(Currency::EUR),
         currency: Currency::EUR,
         country: CountryCode::new("HR").unwrap(),
         taxes_included,
@@ -155,6 +247,11 @@ async fn lookups<R: OrderRepo>(repo: &R) {
     assert_eq!(repo.get_by_number(number(1)).await, Ok(Some(o)));
     assert_eq!(repo.get(oid(99)).await, Ok(None));
     assert_eq!(repo.get_by_number(number(99)).await, Ok(None));
+    assert_eq!(
+        repo.numbers(&[oid(99), oid(1)]).await,
+        Ok(std::collections::HashMap::from([(oid(1), number(1))]))
+    );
+    assert_eq!(repo.numbers(&[]).await, Ok(Default::default()));
 }
 
 async fn updates<R: OrderRepo>(repo: &R) {
@@ -314,6 +411,7 @@ fn varied(n: u128, amount: i64, currency: Currency, email: &str, country: &str, 
     let money = Money::new(amount, currency).unwrap();
     let line = OrderLine {
         unit_price: Price::new(money).unwrap(),
+        subtotal: money,
         total: money,
         ..plain_line(n * 10)
     };
@@ -324,6 +422,8 @@ fn varied(n: u128, amount: i64, currency: Currency, email: &str, country: &str, 
         cart: CartId::from_uuid(Uuid::from_u128(1000 + n)),
         channel: ChannelId::from_uuid(Uuid::from_u128(500 + n % 2)),
         market: MarketId::from_uuid(Uuid::from_u128(2000 + n)),
+        discounts: Vec::new(),
+        discount_total: hypha_core::Money::zero(currency),
         currency,
         country: CountryCode::new(country).unwrap(),
         taxes_included: true,
@@ -642,6 +742,8 @@ async fn shipping_round_trips<R: OrderRepo>(repo: &R) {
         provider: Some("spore_dhl".to_string()),
         service: Some("EXPRESS".to_string()),
         reference: Some("q-1".to_string()),
+        discounts: Vec::new(),
+        total: (Price::new(eur(1290)).unwrap()).money(),
         amount: Price::new(eur(1290)).unwrap(),
         estimate_days: Some((0, u16::MAX)),
         tax: Some(OrderTax {
@@ -662,6 +764,8 @@ async fn shipping_round_trips<R: OrderRepo>(repo: &R) {
         provider: None,
         service: None,
         reference: None,
+        discounts: Vec::new(),
+        total: (Price::new(eur(0)).unwrap()).money(),
         amount: Price::new(eur(0)).unwrap(),
         estimate_days: None,
         tax: None,
@@ -768,6 +872,8 @@ fn sale(s: Sale) -> Order {
             variant_title: None,
             sku: None,
             unit_price: Price::new(money(*unit)).unwrap(),
+            subtotal: money(unit * i64::from(*quantity)),
+            discounts: Vec::new(),
             total: money(unit * i64::from(*quantity)),
             tax: (i == 0 && s.tax > 0).then(|| OrderTax {
                 rate: TaxRate::new(250_000).unwrap(),
@@ -778,6 +884,8 @@ fn sale(s: Sale) -> Order {
                 },
             }),
             fulfilled_quantity: 0,
+            compare_at_price: None,
+            price_list: None,
         })
         .collect();
     let subtotal: i64 = lines.iter().map(|l| l.total.amount()).sum();
@@ -785,6 +893,7 @@ fn sale(s: Sale) -> Order {
     snapshot.version = Version::NEW;
     snapshot.placed_at = Timestamp::from_unix_micros(s.at);
     snapshot.currency = s.currency;
+    snapshot.discount_total = money(0);
     snapshot.channel = ChannelId::from_uuid(Uuid::from_u128(s.channel));
     snapshot.market = MarketId::from_uuid(Uuid::from_u128(s.market));
     snapshot.lines = lines;
@@ -813,6 +922,8 @@ fn sale(s: Sale) -> Order {
             provider: None,
             service: None,
             reference: None,
+            discounts: Vec::new(),
+            total: (Price::new(money(s.shipping)).unwrap()).money(),
             amount: Price::new(money(s.shipping)).unwrap(),
             estimate_days: None,
             tax: None,

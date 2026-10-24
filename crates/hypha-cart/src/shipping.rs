@@ -3,13 +3,14 @@
 //! side, with no I/O.
 
 use hypha_core::{
-    Currency, Money, MoneyError, ShippingGroupId, ShippingOptionId, TotalWeight, VariantId,
+    Money, MoneyError, ProductId, Quantity, ShippingGroupId, ShippingOptionId, TotalWeight,
+    VariantId,
 };
 use hypha_products::Product;
 use hypha_shipping::{DeliveryEstimate, OptionRate, ShippingZone, Unpriced};
 use hypha_tax::{TaxContext, TaxLine, TaxableKind, TaxableLine, tax_line};
 
-use crate::{Cart, LineStatus, PricedLine, SelectedShipping, StoredQuote};
+use crate::{Cart, SelectedShipping, StoredQuote, promotions::Share};
 
 /// What pricing needs to price a cart's shipping: the zone of its country, if any.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -34,7 +35,12 @@ pub struct PricedShipping {
     pub option: ShippingOptionId,
     pub code: String,
     pub name: String,
+    /// The option's price, before shipping discounts.
     pub amount: Money,
+    /// What shipping discounts took off it.
+    pub discounts: Vec<Share>,
+    /// What the buyer pays for it: `amount` less the discounts. Tax is on this.
+    pub total: Money,
     /// `None` where the cart's country has no tax region.
     pub tax: Option<TaxLine>,
     pub estimate: Option<DeliveryEstimate>,
@@ -65,60 +71,85 @@ impl ShippingProblem {
     }
 }
 
-/// The cart's shipping group, priced: `None` when no available line needs shipping.
-/// Its price isn't in any total yet; `price_cart_with_shipping` adds it.
-pub(crate) fn price_group(
-    cart: &Cart,
-    currency: Currency,
-    lines: &[PricedLine],
+/// The lines of the cart's shipping group and their weight, before anything is priced:
+/// `None` when no available line needs shipping.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GroupBasis {
+    pub lines: Vec<VariantId>,
+    /// `None` when a line's weight isn't known.
+    pub weight: Option<TotalWeight>,
+}
+
+/// The group of `available` lines (product, variant, quantity) that need shipping.
+pub(crate) fn group_basis(
+    available: impl Iterator<Item = (ProductId, VariantId, Quantity)>,
     products: &[Product],
+) -> Option<GroupBasis> {
+    let mut lines = Vec::new();
+    let mut weight = Some(TotalWeight::default());
+    for (product, variant, quantity) in available {
+        let found = products
+            .iter()
+            .find(|p| p.id() == product)
+            .and_then(|p| p.variant(variant));
+        let Some(found) = found.filter(|v| v.requires_shipping()) else {
+            continue;
+        };
+        lines.push(variant);
+        weight = weight.and_then(|w| Some(w.add(found.weight()?, quantity.value())));
+    }
+    (!lines.is_empty()).then_some(GroupBasis { lines, weight })
+}
+
+/// What the buyer's choice costs for a group whose lines come to `subtotal`, before
+/// shipping discounts: what discounts weigh a rate by.
+pub(crate) fn rate_for(
+    cart: &Cart,
+    basis: &GroupBasis,
+    subtotal: Money,
     tax: &TaxContext,
     shipping: &ShippingContext,
-) -> Option<PricedShippingGroup> {
-    let mut group_lines = Vec::new();
-    let mut subtotal = Money::zero(currency);
-    let mut weight = Some(TotalWeight::default());
-    for line in lines {
-        let LineStatus::Priced { total, .. } = &line.status else {
-            continue;
-        };
-        let variant = products
-            .iter()
-            .find(|p| p.id() == line.product)
-            .and_then(|p| p.variant(line.variant));
-        let Some(variant) = variant.filter(|v| v.requires_shipping()) else {
-            continue;
-        };
-        group_lines.push(line.variant);
-        // Priced lines already fit the cart's totals together, so their sum fits too.
-        subtotal = subtotal.checked_add(*total).unwrap_or(subtotal);
-        weight = weight.and_then(|w| Some(w.add(variant.weight()?, line.quantity.value())));
-    }
-    if group_lines.is_empty() {
-        return None;
-    }
+) -> Option<Money> {
+    let choice = cart.shipping()?;
+    price_choice(choice, subtotal, basis.weight, &[], tax, shipping)
+        .ok()
+        .map(|p| p.amount)
+}
 
+/// The cart's shipping group, priced for its lines' `subtotal` (after discounts), with the
+/// shipping discounts' `shares`. Its price isn't in any total yet;
+/// `price_cart_with_shipping` adds it.
+pub(crate) fn price_group(
+    cart: &Cart,
+    basis: GroupBasis,
+    subtotal: Money,
+    shares: &[Share],
+    tax: &TaxContext,
+    shipping: &ShippingContext,
+) -> PricedShippingGroup {
     let (selected, problem) = match cart.shipping() {
         None => (None, None),
-        Some(choice) => match price_choice(choice, subtotal, weight, tax, shipping) {
+        Some(choice) => match price_choice(choice, subtotal, basis.weight, shares, tax, shipping) {
             Ok(priced) => (Some(priced), None),
             Err(problem) => (None, Some(problem)),
         },
     };
-    Some(PricedShippingGroup {
+    PricedShippingGroup {
         id: cart.shipping_group(),
-        lines: group_lines,
+        lines: basis.lines,
         selected,
         problem,
-    })
+    }
 }
 
 /// The buyer's choice at its price now: a built-in rate recomputed for the group, a
-/// provider's as quoted (if the option still asks that provider for that service).
+/// provider's as quoted (if the option still asks that provider for that service), less
+/// the shipping discounts' `shares`.
 fn price_choice(
     choice: &SelectedShipping,
     subtotal: Money,
     weight: Option<TotalWeight>,
+    shares: &[Share],
     tax: &TaxContext,
     shipping: &ShippingContext,
 ) -> Result<PricedShipping, ShippingProblem> {
@@ -150,11 +181,17 @@ fn price_choice(
             return Err(ShippingProblem::OptionUnavailable(option.id()));
         }
     };
+    let mut total = amount;
+    for share in shares {
+        total = total
+            .checked_sub(share.amount)
+            .map_err(ShippingProblem::Money)?;
+    }
     let taxable = TaxableLine {
         kind: TaxableKind::Shipping {
             class: option.tax_class(),
         },
-        amount,
+        amount: total,
     };
     let tax = tax_line(tax, &taxable).map_err(ShippingProblem::Money)?;
     Ok(PricedShipping {
@@ -162,6 +199,8 @@ fn price_choice(
         code: option.code().as_str().to_string(),
         name: option.name().to_string(),
         amount,
+        discounts: shares.to_vec(),
+        total,
         tax,
         estimate: option.estimate(),
         quote,

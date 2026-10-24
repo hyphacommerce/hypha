@@ -1,4 +1,5 @@
-// An order as its buyer sees it: the lines and totals, when it was placed and
+// An order as its buyer sees it: the lines and totals (with the discounts it got
+// under them, and what each took off a line under that line), when it was placed and
 // how it ships, the payment, the address. The confirmation page and the account's
 // order page share it.
 
@@ -13,9 +14,12 @@ import { Text } from "@astryxdesign/core/Text";
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
 import { AppElements } from "@/components/app-element";
+import { AppliedDiscounts } from "@/components/discounts";
 import { lineImage } from "@/components/line-image";
+import { Price } from "@/components/price";
 import { SummaryLine, Totals } from "@/components/totals";
 import { type Country } from "@/lib/api";
+import { linePrice, readOrderDiscounts } from "@/lib/discounts";
 import { formatMoney } from "@/lib/money";
 import { elementsFor } from "@/lib/app-elements";
 
@@ -63,6 +67,7 @@ export async function OrderDetails({
   after?: React.ReactNode;
 }) {
   const digits = country.minor_units;
+  const discounts = readOrderDiscounts(order);
   const to = order.shipping_address;
   const payment = order.payment ?? null;
   // An order paid online was paid before it existed; one paid by hand shows its
@@ -76,16 +81,25 @@ export async function OrderDetails({
         <Card padding={5}>
           <VStack gap={4}>
             <Heading level={2}>Your order</Heading>
-            {order.lines.map((line) => (
-              <SummaryLine
-                key={line.id}
-                quantity={line.quantity}
-                title={line.product_title}
-                image={lineImage(line.image)}
-                variant={line.variant_title}
-                total={formatMoney(line.total, digits)}
-              />
-            ))}
+            {order.lines.map((line) => {
+              const shown = linePrice(
+                line,
+                discounts.lines[line.id],
+                discounts.applications,
+                digits,
+              );
+              return (
+                <SummaryLine
+                  key={line.id}
+                  quantity={line.quantity}
+                  title={line.product_title}
+                  image={lineImage(line.image)}
+                  variant={line.variant_title}
+                  notes={shown.notes}
+                  total={<Price price={shown.price} compareAt={shown.compareAt} digits={digits} />}
+                />
+              );
+            })}
             <Divider />
             <Totals
               subtotal={order.subtotal}
@@ -94,7 +108,9 @@ export async function OrderDetails({
               total={order.total}
               taxesIncluded={order.taxes_included}
               digits={digits}
+              discounts={discounts}
             />
+            <AppliedDiscounts applications={discounts.applications} digits={digits} />
           </VStack>
         </Card>
         <VStack gap={4}>

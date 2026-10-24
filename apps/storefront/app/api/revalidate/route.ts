@@ -1,10 +1,10 @@
 // Hypha's webhook for the storefront's static pages. Register the storefront as an app
 // in the admin (Settings → Apps) with this URL as its webhook and the product,
-// inventory, price, catalog, channel, category, market and custom_field_definition
-// events, and put its signing secret in `HYPHA_WEBHOOK_SECRET`. Each event expires the
-// tags of the cached reads it affects (`lib/cache-tags.ts`); the pages that rendered
-// them are re-rendered on their next visit. Nothing is warmed here: a page nobody
-// visits isn't rendered for nothing.
+// inventory, price, catalog, channel, category, market, custom_field_definition and
+// discount events, and put its signing secret in `HYPHA_WEBHOOK_SECRET`. Each event
+// expires the tags of the cached reads it affects (`lib/cache-tags.ts`); the pages that
+// rendered them are re-rendered on their next visit. Nothing is warmed here: a page
+// nobody visits isn't rendered for nothing.
 //
 // Deliveries are signed like Stripe's (`Hypha-Signature: t=<unix seconds>,v1=<hex
 // HMAC-SHA256 of "<t>.<body>">`, `outbound.rs`) and retried until a 2xx; this answers
@@ -132,6 +132,16 @@ async function affected(event: Envelope): Promise<{ tags: string[]; paths: strin
     case "market.changed":
     case "catalog.changed":
       return { tags: [TAGS.prices, TAGS.store], paths: [] };
+    // A list started or stopped pricing (its window opened or closed, it joined or left a
+    // catalog): any price may have changed. A list on no catalog prices nothing.
+    case "price_list.started":
+    case "price_list.ended":
+      return ids(data.catalogs).length > 0
+        ? { tags: [TAGS.prices], paths: [] }
+        : { tags: [], paths: [] };
+    case "catalog.price_lists_added":
+    case "catalog.price_lists_removed":
+      return { tags: [TAGS.prices], paths: [] };
     // Custom fields: values appear on product pages and, when a field is a facet, in
     // listings.
     case "product.custom_fields_updated": {
@@ -170,6 +180,19 @@ async function affected(event: Envelope): Promise<{ tags: string[]; paths: strin
         tags: [TAGS.categories, TAGS.listings, ...(await productTags(ids(data.products)))],
         paths: [],
       };
+    // An automatic discount's promotion badges show on product pages and in listings, and
+    // any product may be one it reaches (a category or variant list, or all of them).
+    case "discount.created":
+    case "discount.updated":
+    case "discount.deleted":
+      return { tags: [TAGS.listings, TAGS.products], paths: [] };
+    // A window opened or closed. Only an automatic discount shows a badge; one by code
+    // shows nowhere until a cart enters it.
+    case "discount.started":
+    case "discount.ended":
+      return data.method === "codes"
+        ? { tags: [], paths: [] }
+        : { tags: [TAGS.listings, TAGS.products], paths: [] };
     default:
       return { tags: [], paths: [] };
   }

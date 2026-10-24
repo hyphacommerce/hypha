@@ -67,9 +67,13 @@ fn line(id: OrderLineId, variant: u128, quantity: u32) -> OrderLine {
         variant_title: None,
         sku: None,
         unit_price: Price::new(eur(500)).unwrap(),
+        subtotal: eur(500 * i64::from(quantity)),
+        discounts: Vec::new(),
         total: eur(500 * i64::from(quantity)),
         tax: None,
         fulfilled_quantity: 0,
+        compare_at_price: None,
+        price_list: None,
     }
 }
 
@@ -108,6 +112,8 @@ impl World {
             cart: CartId::from_uuid(Uuid::from_u128(6001)),
             channel: hypha_core::ChannelId::from_uuid(Uuid::from_u128(500)),
             market,
+            discounts: Vec::new(),
+            discount_total: hypha_core::Money::zero(Currency::EUR),
             currency: Currency::EUR,
             country: CountryCode::new("HR").unwrap(),
             taxes_included: true,

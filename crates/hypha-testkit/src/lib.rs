@@ -13,6 +13,7 @@ mod clock;
 mod custom_fields;
 mod customer_groups;
 mod customers;
+mod discounts;
 mod env;
 mod extensions;
 mod fulfillments;
@@ -54,6 +55,7 @@ pub use clock::FixedClock;
 pub use custom_fields::InMemoryCustomFields;
 pub use customer_groups::InMemoryCustomerGroupRepo;
 pub use customers::InMemoryCustomerRepo;
+pub use discounts::InMemoryDiscounts;
 pub use env::TestEnv;
 pub use extensions::InMemoryExtensionCallRepo;
 pub use fulfillments::InMemoryFulfillmentRepo;
@@ -62,7 +64,7 @@ pub use ids::SequentialIds;
 pub use inventory_items::InMemoryInventoryItemRepo;
 pub use locations::InMemoryLocationRepo;
 pub use markets::InMemoryMarketRepo;
-pub use media::{InMemoryAssetRepo, InMemoryBlobStore};
+pub use media::{InMemoryAssetRepo, InMemoryBlobStore, InMemoryTemporaryUploadRepo};
 pub use notifications::{
     InMemoryEmailSender, InMemoryNotificationRepo, InMemoryNotificationSettingsRepo,
     InMemoryNotificationTemplateRepo,

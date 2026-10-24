@@ -3,10 +3,11 @@ use hypha_core::{
     Scope, UserId,
 };
 use hypha_markets::{
-    Catalog, CatalogContext, CatalogRepo, CommandError, Market, MarketRepo, PriceList,
-    PriceListRepo, assign_price_list,
+    Catalog, CatalogContext, CatalogRepo, CommandError, Market, MarketError, MarketRepo, PriceList,
+    PriceListDraft, PriceListRepo, add_catalog_price_list, delete_price_list,
+    remove_catalog_price_list, set_catalog_price_lists,
 };
-use hypha_testkit::{InMemoryCatalogRepo, InMemoryMarketRepo, InMemoryPriceListRepo};
+use hypha_testkit::InMemoryPorts;
 use pollster::block_on;
 use uuid::Uuid;
 
@@ -22,141 +23,203 @@ fn list_id(n: u128) -> PriceListId {
     PriceListId::from_uuid(Uuid::from_u128(n))
 }
 
-/// Repos with an EUR market, its catalog (no price list), an EUR list (10) and an RSD list (11).
-struct World {
-    markets: InMemoryMarketRepo,
-    catalogs: InMemoryCatalogRepo,
-    price_lists: InMemoryPriceListRepo,
-}
-
-impl World {
-    fn new() -> Self {
-        let world = Self {
-            markets: InMemoryMarketRepo::default(),
-            catalogs: InMemoryCatalogRepo::default(),
-            price_lists: InMemoryPriceListRepo::default(),
-        };
-        let mut market = Market::new(
-            market_id(),
-            "Eurozone".to_string(),
-            vec![CountryCode::new("HR").unwrap()],
-            Currency::EUR,
+/// Ports with an EUR market, its catalog (no price lists), EUR lists 10 and 12 and an
+/// RSD list 11.
+fn world() -> InMemoryPorts {
+    let ports = InMemoryPorts::default();
+    let mut market = Market::new(
+        market_id(),
+        "Eurozone".to_string(),
+        vec![CountryCode::new("HR").unwrap()],
+        Currency::EUR,
+    )
+    .unwrap();
+    let mut catalog = Catalog::new(catalog_id(), CatalogContext::Market(market_id()), None);
+    block_on(ports.markets.insert(&mut market)).unwrap();
+    block_on(ports.catalogs.insert(&mut catalog)).unwrap();
+    for (n, currency) in [
+        (10, Currency::EUR),
+        (11, Currency::RSD),
+        (12, Currency::EUR),
+    ] {
+        let mut list = PriceList::new(
+            list_id(n),
+            PriceListDraft::new(&format!("List {n}"), currency).adjusted(BasisPoints::ZERO),
         )
         .unwrap();
-        let mut catalog = Catalog::new(catalog_id(), CatalogContext::Market(market_id()), None);
-        block_on(world.markets.insert(&mut market)).unwrap();
-        block_on(world.catalogs.insert(&mut catalog)).unwrap();
-        for (n, currency) in [(10, Currency::EUR), (11, Currency::RSD)] {
-            let mut list = PriceList::new(list_id(n), currency, BasisPoints::ZERO);
-            block_on(world.price_lists.insert(&mut list)).unwrap();
-        }
-        world
+        block_on(ports.price_lists.insert(&mut list)).unwrap();
     }
+    ports
+}
 
-    fn assign(
-        &self,
-        ctx: &Ctx,
-        catalog: CatalogId,
-        list: Option<PriceListId>,
-    ) -> Result<Catalog, CommandError> {
-        block_on(assign_price_list(
-            ctx,
-            &self.markets,
-            &self.catalogs,
-            &self.price_lists,
-            catalog,
-            list,
-        ))
-    }
+fn set(ports: &InMemoryPorts, ctx: &Ctx, lists: Vec<PriceListId>) -> Result<Catalog, CommandError> {
+    block_on(set_catalog_price_lists(ctx, ports, catalog_id(), lists))
+}
 
-    fn stored_price_list(&self) -> Option<PriceListId> {
-        block_on(self.catalogs.get(catalog_id()))
-            .unwrap()
-            .unwrap()
-            .price_list()
-    }
+fn stored(ports: &InMemoryPorts) -> Vec<PriceListId> {
+    block_on(ports.catalogs.get(catalog_id()))
+        .unwrap()
+        .unwrap()
+        .price_lists()
+        .to_vec()
 }
 
 #[test]
-fn assigns_list_in_market_currency() {
-    let world = World::new();
-    let catalog = world
-        .assign(&Ctx::system(), catalog_id(), Some(list_id(10)))
-        .unwrap();
-    assert_eq!(catalog.price_list(), Some(list_id(10)));
-    assert_eq!(world.stored_price_list(), Some(list_id(10)));
+fn sets_lists_in_the_market_currency() {
+    let ports = world();
+    let catalog = set(&ports, &Ctx::system(), vec![list_id(12), list_id(10)]).unwrap();
+    assert_eq!(catalog.price_lists(), [list_id(10), list_id(12)]);
+    assert_eq!(stored(&ports), [list_id(10), list_id(12)]);
+    assert!(
+        ports
+            .outbox
+            .types()
+            .contains(&"catalog.price_lists_added".to_string())
+    );
 }
 
 #[test]
-fn rejects_list_in_other_currency_and_stores_nothing() {
-    let world = World::new();
+fn rejects_a_list_in_another_currency_and_stores_nothing() {
+    let ports = world();
     assert_eq!(
-        world.assign(&Ctx::system(), catalog_id(), Some(list_id(11))),
+        set(&ports, &Ctx::system(), vec![list_id(10), list_id(11)]),
         Err(CommandError::CurrencyMismatch {
             expected: Currency::EUR,
             found: Currency::RSD,
         })
     );
-    assert_eq!(world.stored_price_list(), None);
+    assert_eq!(stored(&ports), []);
 }
 
 #[test]
-fn unassigns_list_with_none() {
-    let world = World::new();
-    world
-        .assign(&Ctx::system(), catalog_id(), Some(list_id(10)))
-        .unwrap();
-    world.assign(&Ctx::system(), catalog_id(), None).unwrap();
-    assert_eq!(world.stored_price_list(), None);
+fn rejects_a_list_listed_twice() {
+    let ports = world();
+    assert_eq!(
+        set(&ports, &Ctx::system(), vec![list_id(10), list_id(10)]),
+        Err(CommandError::Market(MarketError::DuplicatePriceList(
+            list_id(10)
+        )))
+    );
+}
+
+#[test]
+fn adds_and_removes_one_list() {
+    let ports = world();
+    block_on(add_catalog_price_list(
+        &Ctx::system(),
+        &ports,
+        catalog_id(),
+        list_id(10),
+    ))
+    .unwrap();
+    block_on(add_catalog_price_list(
+        &Ctx::system(),
+        &ports,
+        catalog_id(),
+        list_id(12),
+    ))
+    .unwrap();
+    block_on(remove_catalog_price_list(
+        &Ctx::system(),
+        &ports,
+        catalog_id(),
+        list_id(10),
+    ))
+    .unwrap();
+    assert_eq!(stored(&ports), [list_id(12)]);
+    assert_eq!(
+        block_on(remove_catalog_price_list(
+            &Ctx::system(),
+            &ports,
+            catalog_id(),
+            list_id(10),
+        )),
+        Err(CommandError::Market(MarketError::PriceListNotInCatalog(
+            list_id(10)
+        )))
+    );
 }
 
 #[test]
 fn rejects_unknown_catalog() {
-    let world = World::new();
+    let ports = world();
     let unknown = CatalogId::from_uuid(Uuid::from_u128(99));
     assert_eq!(
-        world.assign(&Ctx::system(), unknown, Some(list_id(10))),
+        block_on(set_catalog_price_lists(
+            &Ctx::system(),
+            &ports,
+            unknown,
+            vec![list_id(10)]
+        )),
         Err(CommandError::CatalogNotFound(unknown))
     );
 }
 
 #[test]
 fn rejects_unknown_price_list() {
-    let world = World::new();
+    let ports = world();
     assert_eq!(
-        world.assign(&Ctx::system(), catalog_id(), Some(list_id(99))),
+        set(&ports, &Ctx::system(), vec![list_id(99)]),
         Err(CommandError::PriceListNotFound(list_id(99)))
     );
 }
 
 #[test]
 fn rejects_catalog_whose_market_is_missing() {
-    let world = World::new();
+    let ports = world();
     let orphan_market = MarketId::from_uuid(Uuid::from_u128(98));
     let mut orphan = Catalog::new(
         CatalogId::from_uuid(Uuid::from_u128(97)),
         CatalogContext::Market(orphan_market),
         None,
     );
-    block_on(world.catalogs.insert(&mut orphan)).unwrap();
+    block_on(ports.catalogs.insert(&mut orphan)).unwrap();
     assert_eq!(
-        world.assign(&Ctx::system(), orphan.id(), Some(list_id(10))),
+        block_on(set_catalog_price_lists(
+            &Ctx::system(),
+            &ports,
+            orphan.id(),
+            vec![list_id(10)]
+        )),
         Err(CommandError::MarketNotFound(orphan_market))
     );
 }
 
 #[test]
 fn rejects_missing_pricing_write_scope_and_stores_nothing() {
-    let world = World::new();
+    let ports = world();
     let reader = Ctx::new(
         Actor::User(UserId::from_uuid(Uuid::from_u128(1))),
         vec![Scope::MarketsWrite, Scope::PricingRead],
     );
     assert_eq!(
-        world.assign(&reader, catalog_id(), Some(list_id(10))),
+        set(&ports, &reader, vec![list_id(10)]),
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::PricingWrite
         )))
     );
-    assert_eq!(world.stored_price_list(), None);
+    assert_eq!(stored(&ports), []);
+}
+
+#[test]
+fn a_list_on_a_catalog_is_not_deleted() {
+    let ports = world();
+    set(&ports, &Ctx::system(), vec![list_id(10)]).unwrap();
+    assert_eq!(
+        block_on(delete_price_list(&Ctx::system(), &ports, list_id(10))),
+        Err(CommandError::PriceListInUse {
+            price_list: list_id(10),
+            catalogs: vec![catalog_id()],
+        })
+    );
+    block_on(delete_price_list(&Ctx::system(), &ports, list_id(12))).unwrap();
+    assert_eq!(block_on(ports.price_lists.get(list_id(12))), Ok(None));
+    assert_eq!(
+        ports.outbox.types().last().map(String::as_str),
+        Some("price_list.deleted")
+    );
+    assert_eq!(
+        block_on(delete_price_list(&Ctx::system(), &ports, list_id(12))),
+        Err(CommandError::PriceListNotFound(list_id(12)))
+    );
 }

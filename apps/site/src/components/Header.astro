@@ -1,7 +1,7 @@
 ---
 import wordmarkDark from "../../../admin/public/brand/hypha-wordmark-on-dark.svg?url";
 import wordmark from "../../../admin/public/brand/hypha-wordmark.svg?url";
-import { DEMO_ADMIN, DEMO_STORE, GITHUB, SPONSOR } from "../consts";
+import { DEMO_ADMIN, DEMO_LOGIN, DEMO_STORE, GITHUB, SPONSOR } from "../consts";
 
 const links = [
   { href: "/docs", label: "Docs" },
@@ -9,7 +9,6 @@ const links = [
   { href: "/blog", label: "Blog" },
   { href: "/changelog", label: "Changelog" },
   { href: GITHUB, label: "GitHub" },
-  { href: DEMO_STORE, label: "Demo", menuLabel: "Demo store" },
 ];
 const path = Astro.url.pathname;
 const current = (href: string) => href.startsWith("/") && path.startsWith(href);
@@ -32,6 +31,22 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
             </li>
           ))
         }
+        <li>
+          <details class="demo">
+            <summary>Demo <span class="chevron" aria-hidden="true"></span></summary>
+            <div class="panel">
+              <p>Mycelium Works, a demo store. The admin is read-only.</p>
+              <a href={DEMO_STORE}>Open the store <span>→</span></a>
+              <a href={DEMO_ADMIN}>Open the admin <span>→</span></a>
+              <dl>
+                <dt>Email</dt>
+                <dd><code>{DEMO_LOGIN.email}</code></dd>
+                <dt>Password</dt>
+                <dd><code>{DEMO_LOGIN.password}</code></dd>
+              </dl>
+            </div>
+          </details>
+        </li>
       </ul>
     </nav>
     <button class="theme" type="button" aria-label="Dark theme" aria-pressed="false">
@@ -48,11 +63,16 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
         {
           links.map((l) => (
             <li>
-              <a href={l.href}>{l.menuLabel ?? l.label}</a>
+              <a href={l.href}>{l.label}</a>
             </li>
           ))
         }
+        <li><a href={DEMO_STORE}>Demo store</a></li>
         <li><a href={DEMO_ADMIN}>Demo admin</a></li>
+        <li class="login">
+          Admin login<br />
+          <code>{DEMO_LOGIN.email}</code> / <code>{DEMO_LOGIN.password}</code>
+        </li>
         <li><a href="/docs/getting-started">Get started</a></li>
         <li><a href={SPONSOR}>Sponsor</a></li>
       </ul>
@@ -61,6 +81,15 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
 </header>
 
 <script>
+  // The demo panel closes like a menu: on a click elsewhere or Escape.
+  const demo = document.querySelector<HTMLDetailsElement>(".header .demo");
+  document.addEventListener("click", (e) => {
+    if (demo?.open && !demo.contains(e.target as Node)) demo.open = false;
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && demo?.open) demo.open = false;
+  });
+
   // Shares Starlight's key, so the docs open in the theme chosen here.
   const button = document.querySelector<HTMLButtonElement>(".header .theme");
   const sync = () =>
@@ -144,9 +173,123 @@ const current = (href: string) => href.startsWith("/") && path.startsWith(href);
 
   .links a:hover,
   .links a[aria-current="page"],
-  .quiet:hover {
+  .quiet:hover,
+  .demo summary:hover,
+  .demo[open] summary {
     color: var(--text);
     background: var(--muted);
+  }
+
+  .demo {
+    position: relative;
+  }
+
+  .demo summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-size: 14px;
+    list-style: none;
+    cursor: pointer;
+  }
+
+  .demo summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .chevron {
+    width: 6px;
+    height: 6px;
+    margin-top: -3px;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(45deg);
+    transition: transform 0.15s;
+  }
+
+  .demo[open] .chevron {
+    margin-top: 3px;
+    transform: rotate(225deg);
+  }
+
+  .panel {
+    position: absolute;
+    left: 0;
+    top: calc(100% + 10px);
+    z-index: 5;
+    width: 300px;
+    padding: 8px;
+    background: var(--bg-raised);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    box-shadow: 0 12px 32px rgb(26 27 25 / 0.12);
+  }
+
+  .panel p {
+    margin: 0;
+    padding: 8px 12px 10px;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--text-muted);
+  }
+
+  .panel a {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+  }
+
+  .panel a:hover {
+    background: var(--muted);
+  }
+
+  .panel a span {
+    color: var(--text-muted);
+  }
+
+  .panel dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 12px;
+    align-items: center;
+    margin: 6px 0 0;
+    padding: 12px;
+    border-top: 1px solid var(--rule);
+    font-size: 13px;
+  }
+
+  .panel dt {
+    color: var(--text-muted);
+  }
+
+  .panel dd,
+  .login {
+    margin: 0;
+  }
+
+  .panel code,
+  .login code {
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    user-select: all;
+  }
+
+  .login {
+    padding: 12px;
+    font-size: 13px;
+    line-height: 1.8;
+    color: var(--text-muted);
   }
 
   .theme {

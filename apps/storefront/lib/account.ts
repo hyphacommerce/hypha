@@ -7,14 +7,15 @@ import { cookies } from "next/headers";
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
 import { api } from "./api";
+import { SESSION_LIFETIME_COOKIE } from "./session-flag";
 
 export type Account = StorefrontSchemas["AccountResponse"];
 
 export const SESSION_COOKIE = "customer_session";
 /** How long the session lasts unused, in seconds (the login's answer), beside the token:
  * `proxy.ts` sets both cookies again on every request, so the cookie slides with use
- * like the session does. Not secret. */
-export const SESSION_LIFETIME_COOKIE = "customer_session_ttl";
+ * like the session does. Not secret: pages read it to know there's a session. */
+export { SESSION_LIFETIME_COOKIE };
 
 /** The session token, if the shopper signed in on this browser. */
 export async function sessionToken(): Promise<string | undefined> {

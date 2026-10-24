@@ -3,9 +3,13 @@
 use hypha_cart::{
     Cart, CartRepo, CartStatus, HasCarts, LineDetails, LineStatus, PricedCart, PricedLine,
     PricedShipping, PricedShippingGroup, PricingPorts, price_for_checkout,
+    promotions::{Application, Class, Share},
 };
 use hypha_core::{CartId, Ctx, RepoError, Scope};
-use hypha_orders::{HasOrders, Order, OrderRepo, OrderTax, OrderTaxSource};
+use hypha_orders::{
+    DiscountClass, DiscountShare, HasOrders, Order, OrderDiscount, OrderRepo, OrderTax,
+    OrderTaxSource,
+};
 use hypha_shipping::DeliveryEstimate;
 use hypha_tax::{TaxLine, TaxSource};
 
@@ -64,6 +68,10 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
             sellable: Some(0),
             status: LineStatus::Priced {
                 unit_price: line.unit_price,
+                compare_at: line.compare_at_price,
+                price_list: line.price_list,
+                subtotal: line.subtotal,
+                discounts: shares(&line.discounts),
                 total: line.total,
                 tax: line.tax.map(tax_line),
             },
@@ -98,6 +106,8 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
                     code: s.code.clone(),
                     name: s.name.clone(),
                     amount: s.amount.money(),
+                    discounts: shares(&s.discounts),
+                    total: s.total,
                     tax: s.tax.map(tax_line),
                     estimate: s
                         .estimate_days
@@ -109,9 +119,46 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
             })
             .collect(),
         shipping_total: order.shipping_total(),
+        discounts: order.discounts().iter().map(application).collect(),
+        discount_total: order.discount_total(),
+        // Checked out: what applied is in `discounts`; the codes' states were for pricing.
+        discount_codes: Vec::new(),
         tax_total: order.tax_total(),
         total: order.total(),
         payment_method: cart.payment_method(),
+    }
+}
+
+fn shares(shares: &[DiscountShare]) -> Vec<Share> {
+    shares
+        .iter()
+        .map(|s| Share {
+            application: usize::from(s.application),
+            amount: s.amount,
+            units: s.units,
+        })
+        .collect()
+}
+
+/// An order's discount as the cart showed it. Its value and target are the discounts
+/// domain's JSON, copied as checkout wrote them.
+fn application(d: &OrderDiscount) -> Application {
+    Application {
+        discount: d.discount,
+        code: d.code.clone(),
+        title: d.title.clone(),
+        summary: d.summary.clone(),
+        class: match d.class {
+            DiscountClass::Product => Class::Product,
+            DiscountClass::Order => Class::Order,
+            DiscountClass::Shipping => Class::Shipping,
+        },
+        value: d.value.clone(),
+        target: d.target.clone(),
+        amount: d.amount,
+        // Claimed when the order was placed: nothing left to claim.
+        once_per_customer: false,
+        code_limit: None,
     }
 }
 

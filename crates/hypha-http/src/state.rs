@@ -563,6 +563,7 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_users::HasStaffSessions
         + HasApiKeys
         + hypha_media::HasAssets
+        + hypha_media::HasTemporaryUploads
         + hypha_media::HasAssetUsages
         + hypha_merchandising::MerchandisingPorts
         + hypha_shipping::HasShippingZones
@@ -591,10 +592,12 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_agents::HasAgents
         + hypha_agents::HasProposals
         + hypha_agents::HasAgentCalls
+        + hypha_discounts::HasDiscounts
         + HasBatch<
             Batch: hypha_core::StageEvents
                        + hypha_markets::StageCatalogProducts
                        + hypha_markets::StageFixedPrices
+                       + hypha_markets::StagePriceListSchedule
                        + hypha_tax::StageTaxAssignments
                        + hypha_channels::StagePublications
                        + hypha_categories::StageCategories
@@ -604,7 +607,8 @@ pub trait Storage: Send + Sync + 'static {
                        + hypha_notifications::StageNotificationSettings
                        + hypha_apps::StageApps
                        + hypha_oauth::StageOAuth
-                       + hypha_agents::StageAgents,
+                       + hypha_agents::StageAgents
+                       + hypha_discounts::StageDiscounts,
         >
     where
         Self: 'a;

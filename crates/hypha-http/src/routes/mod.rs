@@ -19,6 +19,7 @@ pub mod channels;
 pub mod custom_fields;
 pub mod customer_groups;
 pub mod customers;
+pub mod discounts;
 pub mod fulfillments;
 pub mod health;
 pub mod inventory;
@@ -39,6 +40,7 @@ pub mod shipping;
 pub mod staff;
 pub mod stores;
 pub mod taxes;
+pub mod uploads;
 
 use hypha_core::{Stamps, Timestamp};
 
@@ -137,6 +139,7 @@ macro_rules! route_table {
             [admin, POST, "/admin/products/{id}/variants", products::add_variant],
             [admin, PATCH, "/admin/products/{id}/variants/{variant_id}", products::update_variant],
             [admin, DELETE, "/admin/products/{id}/variants/{variant_id}", products::remove_variant],
+            [admin, GET, "/admin/variants", products::list_variants],
             [admin, PUT, "/admin/products/{id}/media", products::set_media],
             [admin, PUT, "/admin/products/{id}/variants/{variant_id}/media", products::set_variant_media_handler],
             // media
@@ -147,6 +150,9 @@ macro_rules! route_table {
             [admin, DELETE, "/admin/assets/{id}", assets::remove],
             [admin, POST, "/admin/assets/{id}/complete", assets::complete],
             [admin, GET, "/admin/assets/{id}/usages", assets::usages],
+            [admin, POST, "/admin/uploads", uploads::create],
+            [admin, GET, "/admin/uploads/{id}/content", uploads::content],
+            [admin, DELETE, "/admin/uploads/{id}", uploads::remove],
             // markets, price lists, catalogs
             [admin, GET, "/admin/markets", markets::list_markets_handler],
             [admin, POST, "/admin/markets", markets::create_market_handler],
@@ -158,6 +164,8 @@ macro_rules! route_table {
             [admin, POST, "/admin/price-lists", markets::create_price_list_handler],
             [admin, GET, "/admin/price-lists/{id}", markets::fetch_price_list],
             [admin, PATCH, "/admin/price-lists/{id}", markets::update_price_list_handler],
+            [admin, DELETE, "/admin/price-lists/{id}", markets::delete_price_list_handler],
+            [admin, GET, "/admin/products/{id}/prices", markets::product_prices_handler],
             [admin, GET, "/admin/price-lists/{id}/fixed-prices", markets::list_fixed_prices_handler],
             [admin, PUT, "/admin/price-lists/{id}/fixed-prices", markets::set_fixed_prices_handler],
             [admin, DELETE, "/admin/price-lists/{id}/fixed-prices", markets::remove_fixed_prices_handler],
@@ -166,7 +174,9 @@ macro_rules! route_table {
             [admin, GET, "/admin/catalogs/{id}/products", markets::list_catalog_products_handler],
             [admin, POST, "/admin/catalogs/{id}/products", markets::add_products_handler],
             [admin, DELETE, "/admin/catalogs/{id}/products", markets::remove_products_handler],
-            [admin, PUT, "/admin/catalogs/{id}/price-list", markets::assign_price_list_handler],
+            [admin, PUT, "/admin/catalogs/{id}/price-lists", markets::set_catalog_price_lists_handler],
+            [admin, POST, "/admin/catalogs/{id}/price-lists", markets::add_catalog_price_list_handler],
+            [admin, DELETE, "/admin/catalogs/{id}/price-lists/{price_list}", markets::remove_catalog_price_list_handler],
             // carts: only linking a customer (storefronts set an email)
             [admin, PUT, "/admin/carts/{id}/customer", carts::set_customer],
             // orders
@@ -207,6 +217,20 @@ macro_rules! route_table {
             [admin, POST, "/admin/customers/{id}/sessions/revoke", customers::revoke_sessions],
             [admin, PUT, "/admin/customers/{id}/marketing/{channel}", customers::set_consent],
             [admin, PUT, "/admin/customers/{id}/groups", customers::set_groups],
+            // discounts and their codes
+            [admin, GET, "/admin/discounts", discounts::list],
+            [admin, POST, "/admin/discounts", discounts::create],
+            [admin, POST, "/admin/discounts/summary", discounts::summarize_handler],
+            [admin, GET, "/admin/discounts/{id}", discounts::fetch],
+            [admin, PATCH, "/admin/discounts/{id}", discounts::update],
+            [admin, DELETE, "/admin/discounts/{id}", discounts::remove],
+            [admin, GET, "/admin/discounts/{id}/codes", discounts::codes],
+            [admin, POST, "/admin/discounts/{id}/codes", discounts::add],
+            [admin, PATCH, "/admin/discounts/{id}/codes", discounts::update_codes],
+            [admin, DELETE, "/admin/discounts/{id}/codes", discounts::remove_codes_handler],
+            [admin, POST, "/admin/discounts/{id}/codes/generate", discounts::generate],
+            [admin, GET, "/admin/discounts/{id}/codes/export", discounts::export],
+            [admin, GET, "/admin/discounts/{id}/usage", discounts::usage],
             [admin, GET, "/admin/customer-groups", customer_groups::list],
             [admin, POST, "/admin/customer-groups", customer_groups::create],
             [admin, GET, "/admin/customer-groups/{id}", customer_groups::fetch],
@@ -398,6 +422,8 @@ macro_rules! route_table {
             [storefront, DELETE, "/storefront/carts/{id}/lines/{variant}", carts::remove_line],
             [storefront, PUT, "/storefront/carts/{id}/email", carts::set_email],
             [storefront, PUT, "/storefront/carts/{id}/marketing", carts::set_marketing],
+            [storefront, POST, "/storefront/carts/{id}/discount-codes", carts::add_code],
+            [storefront, DELETE, "/storefront/carts/{id}/discount-codes/{code}", carts::remove_code],
             [storefront, PUT, "/storefront/carts/{id}/shipping-address", carts::set_address],
             [storefront, GET, "/storefront/carts/{id}/shipping-options", carts::shipping_options],
             [storefront, PUT, "/storefront/carts/{id}/shipping/{group_id}", carts::select],

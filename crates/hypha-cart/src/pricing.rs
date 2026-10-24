@@ -2,17 +2,23 @@ use std::collections::HashSet;
 
 use hypha_core::{
     Address, AssetId, CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money,
-    MoneyError, OrderId, PaymentMethodId, Price, ProductId, Quantity, VariantId,
+    MoneyError, OrderId, PaymentMethodId, Price, PriceListId, ProductId, Quantity, VariantId,
 };
 use hypha_inventory::{Availability, StockContext};
-use hypha_pricing::{PricingContext, resolve_price};
+use hypha_pricing::{PricingContext, ResolvedPrice, VariantPrices, resolve_price};
 use hypha_products::{Product, ProductStatus};
 use hypha_tax::{TaxContext, TaxLine, TaxableKind, TaxableLine, tax_line};
 
 use crate::{
     cart::{Cart, CartLine, CartStatus},
     error::LineError,
-    shipping::{PricedShippingGroup, ShippingContext, ShippingProblem, price_group},
+    promotions::{
+        Application, CodeOutcome, PromotionInput, PromotionLine, PromotionReading,
+        PromotionShipping, Share,
+    },
+    shipping::{
+        PricedShippingGroup, ShippingContext, ShippingProblem, group_basis, price_group, rate_for,
+    },
 };
 
 /// Whether a line can be bought right now.
@@ -25,6 +31,16 @@ use crate::{
 pub enum LineStatus {
     Priced {
         unit_price: Price,
+        /// What `unit_price` is shown against, struck through; only ever above it.
+        compare_at: Option<Price>,
+        /// The price list `unit_price` came from; `None` for the base price.
+        price_list: Option<PriceListId>,
+        /// `unit_price` × quantity: before discounts.
+        subtotal: Money,
+        /// What discounts took off the line, each naming its `PricedCart::discounts`
+        /// entry.
+        discounts: Vec<Share>,
+        /// `subtotal` less the discounts: what the buyer pays for the line. Tax is on this.
         total: Money,
         /// `None` when the cart's country has no tax region.
         tax: Option<TaxLine>,
@@ -101,7 +117,7 @@ pub struct PricedCart {
     pub lines: Vec<PricedLine>,
     /// Whether line prices include tax (the market decides).
     pub taxes_included: bool,
-    /// Sum of the available lines' totals, as priced. All amounts are in the market's
+    /// Sum of the available lines' totals after discounts. All amounts are in the market's
     /// currency and count the available lines only.
     pub subtotal: Money,
     /// Where the cart ships.
@@ -109,8 +125,16 @@ pub struct PricedCart {
     /// The groups of lines that need shipping, with the buyer's choice; empty when nothing
     /// in the cart is shipped. One group for now.
     pub shipping_groups: Vec<PricedShippingGroup>,
-    /// The chosen options' prices, as priced (inclusive of tax as the lines are).
+    /// The chosen options' prices after shipping discounts (inclusive of tax as the lines
+    /// are).
     pub shipping_total: Money,
+    /// The discounts applied: one per reward, product rewards first, then order, then
+    /// shipping. Lines and shipping name them by index.
+    pub discounts: Vec<Application>,
+    /// Everything they took off: already out of `subtotal` and `shipping_total`.
+    pub discount_total: Money,
+    /// Each code the cart holds, in the order entered, with where it stands.
+    pub discount_codes: Vec<CodeOutcome>,
     /// Tax on the available lines and on shipping: already in `subtotal` and
     /// `shipping_total` if `taxes_included`, otherwise added on top of them.
     pub tax_total: Money,
@@ -141,35 +165,42 @@ impl PricedCart {
     }
 }
 
-/// Unit price of `variant` in the pricing context's market. The product must be active
-/// and own the variant.
+/// Unit price of `quantity` of `variant` in the pricing context's market. The product
+/// must be active and own the variant.
 ///
-/// This is where the cart composes the leaf domains: it pulls the base price out of
-/// the `Product` and hands plain values to `resolve_price`.
+/// This is where the cart composes the leaf domains: it pulls the base and compare-at
+/// prices out of the `Product` and hands plain values to `resolve_price`.
 pub fn price_line(
     product: &Product,
     variant: VariantId,
+    quantity: Quantity,
     pricing: &PricingContext,
-) -> Result<Price, LineError> {
+) -> Result<ResolvedPrice, LineError> {
     if product.status() != ProductStatus::Active {
         return Err(LineError::ProductNotActive(product.id()));
     }
 
-    let base = product
+    let found = product
         .variants()
         .iter()
         .find(|v| v.id() == variant)
         .ok_or(LineError::VariantNotFound {
             product: product.id(),
             variant,
-        })?
-        .base_price();
-
-    Ok(resolve_price(pricing, product.id(), variant, base)?)
+        })?;
+    let prices = VariantPrices {
+        product: product.id(),
+        variant,
+        base: found.base_price(),
+        compare_at: found.compare_at_price(),
+    };
+    Ok(resolve_price(pricing, prices, quantity)?)
 }
 
 /// Prices and taxes every line at current prices and rates, and checks its stock. Lines
 /// that can't be priced or supplied are marked unavailable and left out of the totals.
+/// Then discounts apply (`discounts`, the cart's promotions) to the available lines and the
+/// chosen shipping, and tax is on what's left.
 ///
 /// Never fails: a line that would push a cart total past `Money::MAX_AMOUNT` (lines
 /// that each fit can stop fitting together after a price change) is marked
@@ -180,9 +211,10 @@ pub fn price_line(
 /// lines unavailable with `ProductNotFound`. `pricing`, `tax` and `stock` must have
 /// been built for all of the cart's products and variants.
 ///
-/// The buyer's shipping choice is priced and taxed too. Like lines, a choice that can't be
-/// priced now is reported on its group and left out of the totals. Only products
-/// `published` allows are sold.
+/// The buyer's shipping choice is priced (for the lines' subtotal after discounts) and
+/// taxed too. Like lines, a choice that can't be priced now is reported on its group and
+/// left out of the totals. Only products `published` allows are sold.
+#[allow(clippy::too_many_arguments)]
 pub fn price_cart_with_shipping(
     cart: &Cart,
     products: &[Product],
@@ -191,29 +223,101 @@ pub fn price_cart_with_shipping(
     stock: &StockContext,
     shipping: &ShippingContext,
     published: &Publication,
+    discounts: &impl PromotionReading,
 ) -> PricedCart {
     let currency = pricing.market.currency();
-    let mut totals = Totals::zero(currency);
-    let mut lines = Vec::with_capacity(cart.lines().len());
 
+    // What each line costs before discounts, and whether it can be bought: a line that
+    // wouldn't fit the totals is unavailable. Discounts only lower amounts, so what fits
+    // here fits after them.
+    let mut fit = Totals::zero(currency);
+    let mut bases: Vec<Result<(ResolvedPrice, Money), LineError>> =
+        Vec::with_capacity(cart.lines().len());
     for line in cart.lines() {
         let product = products.iter().find(|p| p.id() == line.product());
-        let status = match line_total(line, product, pricing, tax, stock, published) {
-            Ok((unit_price, total, line_tax)) => {
-                let line_tax_amount = line_tax.map(|t| t.amount);
-                match totals.add(total, line_tax_amount, tax.prices_include_tax) {
-                    Ok(new_totals) => {
-                        totals = new_totals;
-                        LineStatus::Priced {
-                            unit_price,
-                            total,
-                            tax: line_tax,
-                        }
+        let base = match line_total(line, product, pricing, tax, stock, published) {
+            Ok((resolved, total, line_tax)) => {
+                match fit.add(total, line_tax.map(|t| t.amount), tax.prices_include_tax) {
+                    Ok(next) => {
+                        fit = next;
+                        Ok((resolved, total))
                     }
+                    Err(e) => Err(LineError::Money(e)),
+                }
+            }
+            Err(reason) => Err(reason),
+        };
+        bases.push(base);
+    }
+
+    let available: Vec<(usize, &CartLine, &ResolvedPrice)> = cart
+        .lines()
+        .iter()
+        .zip(&bases)
+        .enumerate()
+        .filter_map(|(i, (line, base))| base.as_ref().ok().map(|(r, _)| (i, line, r)))
+        .collect();
+    let basis = group_basis(
+        available
+            .iter()
+            .map(|(_, l, _)| (l.product(), l.variant(), l.quantity())),
+        products,
+    );
+    let rate = |subtotal: Money| {
+        basis
+            .as_ref()
+            .and_then(|b| rate_for(cart, b, subtotal, tax, shipping))
+    };
+    let input_lines: Vec<PromotionLine> = available
+        .iter()
+        .map(|(_, line, resolved)| PromotionLine {
+            product: line.product(),
+            variant: line.variant(),
+            unit_price: resolved.price.money(),
+            quantity: line.quantity().value(),
+            on_sale: resolved.on_sale(),
+        })
+        .collect();
+    let groups = match &basis {
+        Some(b) => vec![PromotionShipping {
+            lines: available
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, l, _))| b.lines.contains(&l.variant()))
+                .map(|(k, _)| k)
+                .collect(),
+            rate: &rate,
+        }],
+        None => Vec::new(),
+    };
+    let input = PromotionInput {
+        market: pricing.market.id(),
+        channel: cart.channel(),
+        currency,
+        lines: input_lines,
+        shipping: groups,
+        codes: cart.discount_codes(),
+    };
+    let outcome = discounts.apply(&input);
+
+    let mut totals = Totals::zero(currency);
+    let mut lines = Vec::with_capacity(cart.lines().len());
+    for (i, (line, base)) in cart.lines().iter().zip(&bases).enumerate() {
+        let product = products.iter().find(|p| p.id() == line.product());
+        let status = match base {
+            Err(reason) => LineStatus::Unavailable(reason.clone()),
+            Ok((resolved, subtotal)) => {
+                let shares = available
+                    .iter()
+                    .position(|(at, _, _)| *at == i)
+                    .and_then(|k| outcome.lines.get(k))
+                    .cloned()
+                    .unwrap_or_default();
+                match discounted_line(line, resolved, *subtotal, shares, tax, &mut totals) {
+                    Ok(status) => status,
                     Err(e) => LineStatus::Unavailable(LineError::Money(e)),
                 }
             }
-            Err(reason) => LineStatus::Unavailable(reason),
         };
         lines.push(PricedLine {
             product: line.product(),
@@ -226,10 +330,20 @@ pub fn price_cart_with_shipping(
     }
 
     let mut shipping_groups = Vec::new();
-    if let Some(mut group) = price_group(cart, currency, &lines, products, tax, shipping) {
+    if let Some(basis) = basis {
+        let after = outcome
+            .shipping
+            .first()
+            .map_or(Money::zero(currency), |g| g.subtotal);
+        let shares = outcome
+            .shipping
+            .first()
+            .map(|g| g.shares.clone())
+            .unwrap_or_default();
+        let mut group = price_group(cart, basis, after, &shares, tax, shipping);
         if let Some(selected) = &group.selected {
             match totals.add_shipping(
-                selected.amount,
+                selected.total,
                 selected.tax.map(|t| t.amount),
                 tax.prices_include_tax,
             ) {
@@ -260,11 +374,107 @@ pub fn price_cart_with_shipping(
         shipping_address: cart.shipping_address().cloned(),
         shipping_groups,
         shipping_total: totals.shipping_total,
+        discounts: outcome.applications,
+        discount_total: outcome.total,
+        discount_codes: outcome.codes,
         tax_total: totals.tax_total,
         total: totals.total,
         payment_method: cart.payment_method(),
         marketing_opt_in: cart.marketing_opt_in(),
     }
+}
+
+/// An available line after its discounts, taxed on what's left, and added to `totals`.
+fn discounted_line(
+    line: &CartLine,
+    resolved: &ResolvedPrice,
+    subtotal: Money,
+    shares: Vec<Share>,
+    tax: &TaxContext,
+    totals: &mut Totals,
+) -> Result<LineStatus, MoneyError> {
+    let mut total = subtotal;
+    for share in &shares {
+        total = total.checked_sub(share.amount)?;
+    }
+    let taxable = TaxableLine {
+        kind: TaxableKind::Item {
+            product: line.product(),
+        },
+        amount: total,
+    };
+    let line_tax = tax_line(tax, &taxable)?;
+    *totals = totals.add(total, line_tax.map(|t| t.amount), tax.prices_include_tax)?;
+    Ok(LineStatus::Priced {
+        unit_price: resolved.price,
+        compare_at: resolved.compare_at,
+        price_list: resolved.price_list,
+        subtotal,
+        discounts: shares,
+        total,
+        tax: line_tax,
+    })
+}
+
+/// What `amount` for the cart's shipping comes to after shipping discounts, as the cart
+/// is now: what a shipping offer shows beside its price ("Free").
+pub fn shipping_after_discounts(
+    cart: &Cart,
+    priced: &PricedCart,
+    discounts: &impl PromotionReading,
+    amount: Money,
+) -> Money {
+    // Without a shipping discount among those weighed nothing comes off: skip applying.
+    if !discounts.reduces_shipping() {
+        return amount;
+    }
+    let mut indexes = Vec::new();
+    let mut input_lines = Vec::new();
+    let shipped: Vec<VariantId> = priced
+        .shipping_groups
+        .first()
+        .map(|g| g.lines.clone())
+        .unwrap_or_default();
+    for line in &priced.lines {
+        let LineStatus::Priced {
+            unit_price,
+            compare_at,
+            ..
+        } = &line.status
+        else {
+            continue;
+        };
+        if shipped.contains(&line.variant) {
+            indexes.push(input_lines.len());
+        }
+        // Built as the cart's pricing builds it, or an offer's amount after discounts
+        // disagrees with the cart.
+        input_lines.push(PromotionLine {
+            product: line.product,
+            variant: line.variant,
+            unit_price: unit_price.money(),
+            quantity: line.quantity.value(),
+            on_sale: compare_at.is_some(),
+        });
+    }
+    let rate = |_: Money| Some(amount);
+    let input = PromotionInput {
+        market: priced.market,
+        channel: cart.channel(),
+        currency: priced.currency,
+        lines: input_lines,
+        shipping: vec![PromotionShipping {
+            lines: indexes,
+            rate: &rate,
+        }],
+        codes: cart.discount_codes(),
+    };
+    let outcome = discounts.apply(&input);
+    let off = outcome
+        .shipping
+        .first()
+        .map_or(0, |g| g.shares.iter().map(|s| s.amount.amount()).sum());
+    Money::new(amount.amount() - off, amount.currency()).unwrap_or(amount)
 }
 
 /// A cart's running totals while its lines are priced.
@@ -349,21 +559,24 @@ fn line_total(
     tax: &TaxContext,
     stock: &StockContext,
     published: &Publication,
-) -> Result<(Price, Money, Option<TaxLine>), LineError> {
+) -> Result<(ResolvedPrice, Money, Option<TaxLine>), LineError> {
     let product = product.ok_or(LineError::ProductNotFound(line.product()))?;
     if !published.allows(product.id()) {
         return Err(LineError::ProductNotPublished(product.id()));
     }
-    let unit_price = price_line(product, line.variant(), pricing)?;
+    let resolved = price_line(product, line.variant(), line.quantity(), pricing)?;
     check_stock(stock, line.variant(), line.quantity())?;
-    let total = unit_price.money().checked_mul(line.quantity().value())?;
+    let total = resolved
+        .price
+        .money()
+        .checked_mul(line.quantity().value())?;
     let taxable = TaxableLine {
         kind: TaxableKind::Item {
             product: line.product(),
         },
         amount: total,
     };
-    Ok((unit_price, total, tax_line(tax, &taxable)?))
+    Ok((resolved, total, tax_line(tax, &taxable)?))
 }
 
 /// Whether the market's locations can supply `quantity` of `variant` right now.
@@ -393,7 +606,7 @@ mod tests {
     };
     use hypha_core::{OptionId, OptionValueId};
     use hypha_inventory::{InventoryItem, Location};
-    use hypha_markets::{Catalog, CatalogContext, Market, PriceList};
+    use hypha_markets::{Catalog, CatalogContext, FixedPrice, Market, PriceList, PriceListDraft};
     use hypha_pricing::PricingError;
     use hypha_products::{Handle, NewVariant, OptionValue, ProductOption};
     use hypha_tax::{TaxRegion, TaxSource};
@@ -418,7 +631,40 @@ mod tests {
             stock,
             &ShippingContext::default(),
             &published,
+            &NoDiscounts,
         )
+    }
+
+    /// Nothing comes off: each shipping group is priced for its lines' subtotal.
+    struct NoDiscounts;
+
+    impl PromotionReading for NoDiscounts {
+        fn apply(&self, input: &PromotionInput<'_>) -> crate::promotions::PromotionOutcome {
+            let zero = Money::zero(input.currency);
+            let base = |k: &usize| {
+                let l = &input.lines[*k];
+                l.unit_price.amount() * i64::from(l.quantity)
+            };
+            crate::promotions::PromotionOutcome {
+                applications: Vec::new(),
+                lines: vec![Vec::new(); input.lines.len()],
+                shipping: input
+                    .shipping
+                    .iter()
+                    .map(|g| crate::promotions::ShippingShares {
+                        subtotal: Money::new(g.lines.iter().map(base).sum(), input.currency)
+                            .unwrap(),
+                        shares: Vec::new(),
+                    })
+                    .collect(),
+                codes: Vec::new(),
+                total: zero,
+            }
+        }
+
+        fn reduces_shipping(&self) -> bool {
+            false
+        }
     }
 
     fn mid() -> MarketId {
@@ -464,9 +710,12 @@ mod tests {
                 CatalogContext::Market(mid()),
                 None,
             )),
-            price_list: None,
+            price_lists: Vec::new(),
             included_products: products.iter().map(|n| pid(*n)).collect::<HashSet<_>>(),
             fixed_prices: HashMap::new(),
+            product_categories: HashMap::new(),
+            at: hypha_core::Timestamp::UNIX_EPOCH,
+            groups: Vec::new(),
         }
     }
 
@@ -524,6 +773,10 @@ mod tests {
     fn priced(unit: i64, total: i64) -> LineStatus {
         LineStatus::Priced {
             unit_price: eur(unit),
+            compare_at: None,
+            price_list: None,
+            subtotal: money(total),
+            discounts: vec![],
             total: money(total),
             tax: None,
         }
@@ -562,18 +815,23 @@ mod tests {
 
     #[test]
     fn uses_price_list_prices() {
+        let list_id = PriceListId::from_uuid(Uuid::from_u128(400));
         let list = PriceList::new(
-            PriceListId::from_uuid(Uuid::from_u128(400)),
-            Currency::EUR,
-            BasisPoints::new(-1000).unwrap(),
-        );
+            list_id,
+            PriceListDraft::new("Sale", Currency::EUR).adjusted(BasisPoints::new(-1000).unwrap()),
+        )
+        .unwrap();
         let mut ctx = pricing(&[1, 2]);
         ctx.catalog
             .as_mut()
             .unwrap()
-            .set_price_list(Some(list.id()));
-        ctx.price_list = Some(list);
-        ctx.fixed_prices.insert(vid(12), eur(100));
+            .set_price_lists(vec![list_id])
+            .unwrap();
+        ctx.price_lists = vec![list];
+        ctx.fixed_prices.insert(
+            list_id,
+            HashMap::from([(vid(12), FixedPrice::plain(eur(100)))]),
+        );
 
         let result = price_cart(
             &cart(&[(1, 1), (2, 1)]),
@@ -584,7 +842,48 @@ mod tests {
         );
 
         // Product 1 gets the -10% adjustment, product 2 its fixed price.
-        assert_eq!(statuses(&result), vec![priced(900, 900), priced(100, 100)]);
+        let from_list = |unit: i64| LineStatus::Priced {
+            unit_price: eur(unit),
+            compare_at: None,
+            price_list: Some(list_id),
+            subtotal: money(unit),
+            discounts: vec![],
+            total: money(unit),
+            tax: None,
+        };
+        assert_eq!(statuses(&result), vec![from_list(900), from_list(100)]);
+    }
+
+    #[test]
+    fn a_line_carries_the_variants_compare_at() {
+        let mut p = product(1, eur(1000));
+        p.update_variant(
+            vid(11),
+            hypha_products::VariantPatch {
+                compare_at_price: Some(Some(eur(1500))),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let result = price_cart(
+            &cart(&[(1, 2)]),
+            &[p],
+            &pricing(&[1]),
+            &no_tax(),
+            &no_stock(),
+        );
+        assert_eq!(
+            statuses(&result),
+            vec![LineStatus::Priced {
+                unit_price: eur(1000),
+                compare_at: Some(eur(1500)),
+                price_list: None,
+                subtotal: money(2000),
+                discounts: vec![],
+                total: money(2000),
+                tax: None,
+            }]
+        );
     }
 
     #[test]
@@ -791,6 +1090,10 @@ mod tests {
     fn taxed(unit: i64, total: i64, tax: i64, class: Option<TaxClassId>) -> LineStatus {
         LineStatus::Priced {
             unit_price: eur(unit),
+            compare_at: None,
+            price_list: None,
+            subtotal: money(total),
+            discounts: vec![],
             total: money(total),
             tax: Some(TaxLine {
                 rate: TaxRate::new(250_000).unwrap(),
@@ -867,7 +1170,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            price_line(&draft, vid(11), &pricing(&[1])),
+            price_line(&draft, vid(11), Quantity::ONE, &pricing(&[1])),
             Err(LineError::ProductNotActive(pid(1)))
         );
     }
@@ -875,7 +1178,12 @@ mod tests {
     #[test]
     fn price_line_rejects_variant_of_another_product() {
         assert_eq!(
-            price_line(&product(1, eur(1000)), vid(99), &pricing(&[1])),
+            price_line(
+                &product(1, eur(1000)),
+                vid(99),
+                Quantity::ONE,
+                &pricing(&[1])
+            ),
             Err(LineError::VariantNotFound {
                 product: pid(1),
                 variant: vid(99),
@@ -886,7 +1194,12 @@ mod tests {
     #[test]
     fn price_line_passes_through_pricing_errors() {
         assert_eq!(
-            price_line(&product(1, eur(1000)), vid(11), &pricing(&[])),
+            price_line(
+                &product(1, eur(1000)),
+                vid(11),
+                Quantity::ONE,
+                &pricing(&[])
+            ),
             Err(LineError::Pricing(PricingError::NotAvailable {
                 product: pid(1),
                 market: mid(),

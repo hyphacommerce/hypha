@@ -68,6 +68,19 @@ async fn catalog_repo() {
 }
 
 #[tokio::test]
+async fn price_list_joins() {
+    let Some(url) = database_url() else { return };
+    contract::price_list_joins(async || fresh_store(&url, "contract_price_list_joins").await).await;
+}
+
+#[tokio::test]
+async fn price_list_schedule() {
+    let Some(url) = database_url() else { return };
+    contract::price_list_schedule(async || fresh_store(&url, "contract_price_list_schedule").await)
+        .await;
+}
+
+#[tokio::test]
 async fn price_list_repo() {
     let Some(url) = database_url() else { return };
     contract::price_list_repo(async || fresh_store(&url, "contract_price_lists").await).await;
@@ -138,6 +151,18 @@ async fn preview_token_repo() {
 async fn agent_repo() {
     let Some(url) = database_url() else { return };
     contract::agent_repo(async || fresh_store(&url, "contract_agents").await).await;
+}
+
+#[tokio::test]
+async fn discount_repo() {
+    let Some(url) = database_url() else { return };
+    contract::discount_repo(async || fresh_store(&url, "contract_discounts").await).await;
+}
+
+#[tokio::test]
+async fn discount_names() {
+    let Some(url) = database_url() else { return };
+    contract::discount_names(async || fresh_store(&url, "contract_discount_names").await).await;
 }
 
 #[tokio::test]
@@ -267,6 +292,13 @@ async fn staff_batch() {
 async fn asset_repo() {
     let Some(url) = database_url() else { return };
     contract::asset_repo(async || fresh_store(&url, "contract_assets").await).await;
+}
+
+#[tokio::test]
+async fn temporary_upload_repo() {
+    let Some(url) = database_url() else { return };
+    contract::temporary_upload_repo(async || fresh_store(&url, "contract_temporary_uploads").await)
+        .await;
 }
 
 #[tokio::test]

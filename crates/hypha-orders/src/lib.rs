@@ -20,8 +20,9 @@ pub use error::OrderError;
 pub use events::{OrderCancelled, OrderFulfillmentStatusChanged, OrderPaid, OrderPlaced};
 pub use filter::{OrderFilter, OrderFilterInput, OrderSort};
 pub use order::{
-    CancelReason, Cancellation, FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderLine,
-    OrderNumber, OrderShippingLine, OrderSnapshot, OrderTax, OrderTaxSource,
+    CancelReason, Cancellation, DiscountClass, DiscountShare, FinancialStatus, FulfillmentStatus,
+    NewOrder, Order, OrderDiscount, OrderLine, OrderNumber, OrderShippingLine, OrderSnapshot,
+    OrderTax, OrderTaxSource,
 };
 pub use repo::{HasOrders, OrderRepo, StageOrders};
 pub use sales::{

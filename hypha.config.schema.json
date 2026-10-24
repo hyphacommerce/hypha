@@ -61,6 +61,10 @@
     "jobs": {
       "$ref": "#/$defs/Jobs",
       "default": {
+        "discount_schedule": {
+          "enabled": true,
+          "interval": "1m"
+        },
         "dispatch": {
           "batch": 100,
           "enabled": true,
@@ -72,6 +76,10 @@
         "media_sweep": {
           "enabled": true,
           "interval": "1h"
+        },
+        "price_list_schedule": {
+          "enabled": true,
+          "interval": "1m"
         },
         "prune": {
           "agent_calls_after": "30d",
@@ -152,6 +160,14 @@
         "customer_login_ip": {
           "burst": 10,
           "per": "30s"
+        },
+        "discount_code_cart": {
+          "burst": 5,
+          "per": "12s"
+        },
+        "discount_code_ip": {
+          "burst": 10,
+          "per": "6s"
         },
         "invite_ip": {
           "burst": 10,
@@ -501,6 +517,14 @@
       "description": "Background jobs. Set `enabled = false` on instances that only serve requests, and\nkeep them on in one. A Workers host runs them from Cron triggers and ignores the\nintervals.",
       "type": "object",
       "properties": {
+        "discount_schedule": {
+          "description": "Announcing discounts' windows opening and closing (`discount.started` /\n`.ended`), so storefront caches and promotion badges follow. Carts themselves\nfollow the clock without it. A Workers host runs it on the minute's ticks that have\nwork.",
+          "$ref": "#/$defs/Job",
+          "default": {
+            "enabled": true,
+            "interval": "1m"
+          }
+        },
         "dispatch": {
           "$ref": "#/$defs/DispatchJob",
           "default": {
@@ -525,6 +549,14 @@
           "default": {
             "enabled": true,
             "interval": "1h"
+          }
+        },
+        "price_list_schedule": {
+          "description": "Announcing price lists' windows opening and closing (`price_list.started` /\n`.ended`), so search and storefront caches follow. Prices themselves follow the\nclock without it. A Workers host runs it on the minute's ticks that have work.",
+          "$ref": "#/$defs/Job",
+          "default": {
+            "enabled": true,
+            "interval": "1m"
           }
         },
         "prune": {
@@ -738,6 +770,22 @@
           "default": {
             "burst": 10,
             "per": "30s"
+          }
+        },
+        "discount_code_cart": {
+          "description": "Entering a discount code, per cart.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 5,
+            "per": "12s"
+          }
+        },
+        "discount_code_ip": {
+          "description": "Entering a discount code on a cart, per client address: single-use codes are\nguessable.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 10,
+            "per": "6s"
           }
         },
         "invite_ip": {

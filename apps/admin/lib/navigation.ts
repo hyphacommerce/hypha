@@ -16,6 +16,7 @@ import {
   MagnifyingGlassIcon,
   PhotoIcon,
   PuzzlePieceIcon,
+  ReceiptPercentIcon,
   ShoppingBagIcon,
   Squares2X2Icon,
   TableCellsIcon,
@@ -111,6 +112,7 @@ export const NAV_SECTIONS: NavSection[] = [
         scope: "markets:read",
         children: [{ label: "Price lists", href: "/markets/price-lists", scope: "pricing:read" }],
       },
+      { label: "Discounts", href: "/discounts", icon: ReceiptPercentIcon, scope: "discounts:read" },
     ],
   },
   {

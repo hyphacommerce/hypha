@@ -28,7 +28,7 @@ use super::{
     auth::session_client,
     custom_fields::{self, CustomFieldValues},
     customers::{AddressRequest, AddressResponse, ConsentResponse},
-    orders::{OrderPage, OrderResponse, OrderSummaryResponse, PlacedOrderResponse},
+    orders::{OrderPage, OrderSummaryResponse, PlacedOrderResponse, StorefrontOrderResponse},
     page::{ListQuery, PageParams, PageResponse, SortedFilters},
     payments::PlacedPaymentResponse,
     rfc3339, stamp_times,
@@ -555,7 +555,7 @@ pub async fn fetch_order<S: Storage>(
     }
     let payment = hypha_payments::newest_payment(&ports, id).await?;
     Ok(Json(PlacedOrderResponse {
-        order: OrderResponse::with_images(&order, &ports, state.media.as_deref()).await?,
+        order: StorefrontOrderResponse::with_images(&order, &ports, state.media.as_deref()).await?,
         access_token: state.env.order_token(id),
         payment: payment.as_ref().map(PlacedPaymentResponse::new),
     }))
@@ -569,7 +569,7 @@ pub struct AccountExportResponse {
     /// When the export was made, RFC 3339 in UTC.
     exported_at: String,
     account: AccountResponse,
-    orders: Vec<OrderResponse>,
+    orders: Vec<StorefrontOrderResponse>,
     payments: Vec<super::payments::PaymentResponse>,
     /// The emails sent about the orders.
     emails: Vec<super::notifications::NotificationResponse>,
@@ -595,7 +595,7 @@ pub async fn export<S: Storage>(
         orders: export
             .orders
             .iter()
-            .map(OrderResponse::new)
+            .map(StorefrontOrderResponse::new)
             .collect::<Result<_, _>>()?,
         payments: export
             .payments

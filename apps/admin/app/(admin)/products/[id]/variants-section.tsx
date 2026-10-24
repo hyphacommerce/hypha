@@ -223,6 +223,22 @@ export function VariantsSection({
       ),
     },
     {
+      key: "compare_at",
+      header: `Compare-at (${currency})`,
+      width: proportional(1, { minWidth: 84 }),
+      renderCell: ({ variant }) => (
+        <TextInput
+          label={`Compare-at price of ${title(variant)} in ${currency}`}
+          isLabelHidden
+          size="sm"
+          value={variant.compareAt}
+          onChange={(compareAt) => update(new Set([variant.key]), { compareAt })}
+          placeholder="—"
+          width="100%"
+        />
+      ),
+    },
+    {
       key: "weight",
       header: "Weight (g)",
       width: proportional(1, { minWidth: 72 }),
@@ -333,7 +349,8 @@ export function VariantsSection({
               Variants{rows.length > 1 ? ` (${rows.length})` : ""}
             </Text>
             <Text type="supporting" color="secondary">
-              Base prices in {currency}, before markets and price lists adjust them.
+              Base prices in {currency}, before markets and price lists adjust them. A compare-at
+              price shows struck through beside the price, when it&apos;s higher.
             </Text>
           </VStack>
           {hasOptions && (
@@ -840,7 +857,7 @@ function AddVariantDialog({
       options: draft.options,
       variants: [
         ...draft.variants,
-        { key: newKey(), sku, price, weight: "", ships: true, selections },
+        { key: newKey(), sku, price, compareAt: "", weight: "", ships: true, selections },
       ],
     });
   };

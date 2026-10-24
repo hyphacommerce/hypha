@@ -1,6 +1,8 @@
 use hypha_cart::{
     Cart, CartError, CartPorts, CartReading, CartRepo, CartStatus, LineStatus, PricedCart,
-    PricedLine, SelectedShipping, ShippingProblem, StageCarts, StoredQuote, group_offers,
+    PricedLine, PromotionReading, ReadingOf, SelectedShipping, ShippingProblem, StageCarts,
+    StoredQuote, group_offers,
+    promotions::{Application, Class, CodeOutcome, Share},
     read_cart,
 };
 use hypha_core::{
@@ -13,12 +15,13 @@ use hypha_customers::{
     Channel, ConsentChange, ConsentSource, ConsentState, Customer, CustomerRepo, OptInLevel,
     StageCustomers, repo::keys as customer_keys,
 };
+use hypha_discounts::{StageDiscounts, UsageClaim, keys as discount_keys};
 use hypha_inventory::{
     InventoryItem, ReservationRef, StageInventoryItems, StockContext, reserve_lines,
 };
 use hypha_orders::{
-    HasOrders, NewOrder, Order, OrderError, OrderLine, OrderRepo, OrderShippingLine, OrderTax,
-    OrderTaxSource, StageOrders, repo::keys as order_keys,
+    DiscountClass, DiscountShare, HasOrders, NewOrder, Order, OrderDiscount, OrderError, OrderLine,
+    OrderRepo, OrderShippingLine, OrderTax, OrderTaxSource, StageOrders, repo::keys as order_keys,
 };
 use hypha_payments::{
     HasPaymentMethods, HasPayments, NewPayment, NextAction, Payment, PaymentError, PaymentMethod,
@@ -106,6 +109,14 @@ pub enum CommandError {
     /// provider hasn't said (it will: checkout completes then).
     #[error("cart {cart}'s payment {payment} isn't committed yet")]
     PaymentPending { cart: CartId, payment: PaymentId },
+    /// A discount's last use (or the buyer's one use) went to another order since the cart
+    /// was priced: nothing was placed. `total` is the cart's total now and `codes` its
+    /// codes' states, for the buyer to see before trying again.
+    #[error("the cart's discounts changed: its total is now {} {}", .total.amount(), .total.currency())]
+    DiscountsChanged {
+        total: Money,
+        codes: Vec<CodeOutcome>,
+    },
     /// The cart's payment was declined or released: start paying again.
     #[error("cart {cart}'s payment {payment} is {status}: start paying again")]
     PaymentFailed {
@@ -144,6 +155,7 @@ impl ErrorCode for CommandError {
             CommandError::PaymentRequired(_) => "payment_required",
             CommandError::PaymentPending { .. } => "payment_pending",
             CommandError::PaymentFailed { .. } => "payment_failed",
+            CommandError::DiscountsChanged { .. } => "discounts_changed",
         }
     }
 }
@@ -162,7 +174,8 @@ pub trait CheckoutPorts:
                    + StageInventoryItems
                    + StageCustomers
                    + StageIdempotency
-                   + StagePayments,
+                   + StagePayments
+                   + StageDiscounts,
     >
 {
 }
@@ -178,7 +191,8 @@ impl<T> CheckoutPorts for T where
                        + StageInventoryItems
                        + StageCustomers
                        + StageIdempotency
-                       + StagePayments,
+                       + StagePayments
+                       + StageDiscounts,
         > + ?Sized
 {
 }
@@ -437,6 +451,7 @@ impl CommandError {
             | CommandError::MissingEmail(_)
             | CommandError::Unavailable { .. }
             | CommandError::TotalChanged { .. }
+            | CommandError::DiscountsChanged { .. }
             | CommandError::ShippingAddressRequired(_)
             | CommandError::ShippingOptionRequired(_)
             | CommandError::PaymentMethodRequired(_)
@@ -506,9 +521,9 @@ fn payer_of(order: &Order) -> Payer {
 
 /// A cart ready to be checked out: every check passed, priced now, with the method that
 /// pays for it (`None`: nothing to pay).
-pub(crate) struct Ready {
+pub(crate) struct Ready<R> {
     pub cart: Cart,
-    pub reading: CartReading,
+    pub reading: CartReading<R>,
     pub method: Option<PaymentMethod>,
 }
 
@@ -526,7 +541,7 @@ pub(crate) async fn ready<S: CheckoutPorts, C: Clock, P: RateProvider, Q: Paymen
     id: CartId,
     expected_total: Option<Money>,
     renewed: &mut Option<Renewal>,
-) -> Result<Ready, CommandError> {
+) -> Result<Ready<ReadingOf<S>>, CommandError> {
     let mut cart = ports
         .carts()
         .get(id)
@@ -700,6 +715,7 @@ async fn attempt<
         .collect::<Result<Vec<_>, _>>()?;
 
     let shipping_lines = shipping_lines(&priced, &lines)?;
+    let order_discounts: Vec<OrderDiscount> = priced.discounts.iter().map(order_discount).collect();
 
     // Reserve before taking a number, so a shortage doesn't use one up.
     let StockContext {
@@ -790,6 +806,8 @@ async fn attempt<
         lines,
         shipping_address: priced.shipping_address.clone(),
         shipping_lines,
+        discounts: order_discounts,
+        discount_total: priced.discount_total,
         subtotal: priced.subtotal,
         shipping_total: priced.shipping_total,
         tax_total: priced.tax_total,
@@ -872,8 +890,31 @@ async fn attempt<
         batch.record_idempotency(record);
     }
 
+    for claim in usage_claims(&priced, order.id(), customer, now) {
+        batch.claim_discount_usage(claim);
+    }
+
     // If another request with the same key committed first, `checkout` replays it.
-    ports.commit(batch).await?;
+    match ports.commit(batch).await {
+        Ok(()) => {}
+        // A discount's last use went elsewhere since this read: the buyer sees the cart
+        // as it is now rather than paying another total.
+        Err(RepoError::Duplicate(
+            discount_keys::DISCOUNT_USAGE_LIMIT | discount_keys::DISCOUNT_PER_CUSTOMER,
+        )) => {
+            let fresh = ports
+                .carts()
+                .get(cart.id())
+                .await?
+                .ok_or(CommandError::CartNotFound(cart.id()))?;
+            let now = read_cart(ports, &fresh).await?.priced;
+            return Err(CommandError::DiscountsChanged {
+                total: now.total,
+                codes: now.discount_codes,
+            });
+        }
+        Err(e) => return Err(e.into()),
+    }
     let settings = method
         .map(|m| m.settings().clone())
         .unwrap_or(serde_json::Value::Null);
@@ -920,10 +961,10 @@ async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
     rates: &P,
     clock: &C,
     cart: &mut Cart,
-    reading: CartReading,
+    reading: CartReading<ReadingOf<S>>,
     expected_total: Option<Money>,
     carried: &mut Option<Renewal>,
-) -> Result<CartReading, CommandError> {
+) -> Result<CartReading<ReadingOf<S>>, CommandError> {
     let now = clock.now();
     let Some(choice) = cart.shipping().cloned() else {
         return Ok(reading);
@@ -967,9 +1008,9 @@ async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
 /// The chosen option's new quote, or `None` when it's built-in now. Only reasons the
 /// option can't be offered become `shipping_option_unavailable` (the buyer picks again);
 /// anything else (storage, money overflow) is reported as itself.
-async fn ask_again<P: RateProvider>(
+async fn ask_again<P: RateProvider, R: PromotionReading>(
     cart: &Cart,
-    reading: &CartReading,
+    reading: &CartReading<R>,
     rates: &P,
     choice: &SelectedShipping,
     now: hypha_core::Timestamp,
@@ -1041,11 +1082,73 @@ fn shipping_lines(
                 service: selected.quote.as_ref().map(|q| q.service.clone()),
                 reference: selected.quote.as_ref().and_then(|q| q.reference.clone()),
                 amount,
+                discounts: order_shares(&selected.discounts),
+                total: selected.total,
                 estimate_days: selected.estimate.map(|e| (e.min_days(), e.max_days())),
                 tax: selected.tax.map(order_tax),
             })
         })
         .collect()
+}
+
+/// A discount applied to the cart as the order keeps it: copies, so the order reads the
+/// same after the discount changes or goes.
+fn order_discount(a: &Application) -> OrderDiscount {
+    OrderDiscount {
+        discount: a.discount,
+        code: a.code.clone(),
+        title: a.title.clone(),
+        summary: a.summary.clone(),
+        class: match a.class {
+            Class::Product => DiscountClass::Product,
+            Class::Order => DiscountClass::Order,
+            Class::Shipping => DiscountClass::Shipping,
+        },
+        value: a.value.clone(),
+        target: a.target.clone(),
+        amount: a.amount,
+    }
+}
+
+fn order_shares(shares: &[Share]) -> Vec<DiscountShare> {
+    shares
+        .iter()
+        .map(|s| DiscountShare {
+            // A cart has a handful of applications: far below `u16::MAX`.
+            application: u16::try_from(s.application).unwrap_or(u16::MAX),
+            amount: s.amount,
+            units: s.units,
+        })
+        .collect()
+}
+
+/// One claim per discount the order got: the discount's counter under its limit, the
+/// code's under its own, and a once-per-customer use. What it took off is the sum of its
+/// rewards' amounts.
+fn usage_claims(
+    priced: &PricedCart,
+    order: OrderId,
+    customer: CustomerId,
+    at: hypha_core::Timestamp,
+) -> Vec<UsageClaim> {
+    let mut claims: Vec<UsageClaim> = Vec::new();
+    for a in &priced.discounts {
+        if let Some(claim) = claims.iter_mut().find(|c| c.discount == a.discount) {
+            claim.amount = claim.amount.checked_add(a.amount).unwrap_or(claim.amount);
+            continue;
+        }
+        let code = a.code.as_ref().map(|c| (c.clone(), a.code_limit));
+        claims.push(UsageClaim {
+            discount: a.discount,
+            code,
+            order,
+            customer,
+            once_per_customer: a.once_per_customer,
+            amount: a.amount,
+            at,
+        });
+    }
+    claims
 }
 
 fn order_tax(t: TaxLine) -> OrderTax {
@@ -1067,6 +1170,10 @@ fn order_line(line: &PricedLine, id: OrderLineId) -> Result<OrderLine, CommandEr
     };
     let LineStatus::Priced {
         unit_price,
+        compare_at,
+        price_list,
+        subtotal,
+        discounts,
         total,
         tax,
     } = &line.status
@@ -1083,9 +1190,13 @@ fn order_line(line: &PricedLine, id: OrderLineId) -> Result<OrderLine, CommandEr
         variant_title: details.variant_title.clone(),
         sku: details.sku.clone(),
         unit_price: *unit_price,
+        subtotal: *subtotal,
+        discounts: order_shares(discounts),
         total: *total,
         tax: tax.map(order_tax),
         fulfilled_quantity: 0,
+        compare_at_price: *compare_at,
+        price_list: *price_list,
     })
 }
 

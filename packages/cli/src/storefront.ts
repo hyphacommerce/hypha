@@ -18,6 +18,12 @@ const EVENTS = [
   // Custom field definitions: one shown to storefronts, or no longer, changes product
   // and category pages.
   "custom_field_definition.*",
+  // Automatic discounts: the promotion badges on product pages and listings.
+  "discount.created",
+  "discount.updated",
+  "discount.deleted",
+  "discount.started",
+  "discount.ended",
 ];
 
 /** `webhookSecret` is `null` without a webhook (on this machine); `orderUrl` is the
@@ -54,17 +60,23 @@ function webhookUrl(d: Deployment): string {
   return `${url(d, d.domains.storefront!)}/api/revalidate`;
 }
 
-/** Points the storefront's webhook at its current domain; answers the new URL when it
- * moved, `null` when it was already right. */
+/** Points the storefront's webhook at its current domain and adds the events it has
+ * come to need since it was connected (keeping any the merchant added); answers the new
+ * URL when it moved, `null` when it was already right. */
 export async function syncWebhook(d: Deployment, staff: Calls): Promise<string | null> {
-  const app = await staff.call<{ webhook: { url: string } | null }>(
+  const app = await staff.call<{ webhook: { url: string } | null; subscriptions: string[] }>(
     "GET",
     "/admin/apps/app_storefront",
   );
   const target = webhookUrl(d);
-  if (app.webhook?.url === target) return null;
-  await staff.call("PATCH", "/admin/apps/app_storefront", { webhook: { url: target } });
-  return target;
+  const moved = app.webhook?.url !== target;
+  const missing = EVENTS.filter((e) => !app.subscriptions.includes(e));
+  if (!moved && missing.length === 0) return null;
+  await staff.call("PATCH", "/admin/apps/app_storefront", {
+    ...(moved ? { webhook: { url: target } } : {}),
+    ...(missing.length > 0 ? { subscriptions: [...app.subscriptions, ...missing] } : {}),
+  });
+  return moved ? target : null;
 }
 
 /**

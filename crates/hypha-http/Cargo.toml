@@ -11,6 +11,7 @@ hypha-core = { workspace = true, features = ["openapi"] }
 hypha-products = { path = "../hypha-products" }
 hypha-markets = { path = "../hypha-markets" }
 hypha-cart = { path = "../hypha-cart" }
+hypha-pricing = { path = "../hypha-pricing" }
 hypha-tax = { path = "../hypha-tax" }
 hypha-inventory = { path = "../hypha-inventory" }
 hypha-customers = { path = "../hypha-customers" }
@@ -23,6 +24,7 @@ hypha-order-actions = { path = "../hypha-order-actions" }
 hypha-privacy = { path = "../hypha-privacy" }
 hypha-payments = { path = "../hypha-payments" }
 hypha-agents = { path = "../hypha-agents" }
+hypha-discounts = { path = "../hypha-discounts" }
 hypha-mcp = { path = "../hypha-mcp" }
 hypha-auth = { path = "../hypha-auth" }
 hypha-users = { path = "../hypha-users" }

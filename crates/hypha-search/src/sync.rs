@@ -38,7 +38,8 @@ use crate::{
 /// Everything the sync job reads: the queue and settings, and what documents are made
 /// of. Anything with all of them is `SyncPorts` (the blanket impl below).
 pub trait SyncPorts:
-    HasSearchQueue
+    hypha_core::HasClock
+    + HasSearchQueue
     + HasSearchSettings
     + HasProducts
     + HasChannels
@@ -54,7 +55,8 @@ pub trait SyncPorts:
 }
 
 impl<T> SyncPorts for T where
-    T: HasSearchQueue
+    T: hypha_core::HasClock
+        + HasSearchQueue
         + HasSearchSettings
         + HasProducts
         + HasChannels
@@ -323,8 +325,9 @@ impl Sources {
         ids: &[ProductId],
     ) -> Result<Vec<SearchDocument>, SyncError> {
         let market_id = market.id();
-        // The market as the caller has it, not read again.
-        let pricing = load_pricing_for(ports, market, ids, &self.variants).await?;
+        // The market as the caller has it, not read again. Every shopper shares a
+        // document, so it carries public prices: no customer groups.
+        let pricing = load_pricing_for(ports, market, ids, &self.variants, &[]).await?;
         self.stock.locations = ports.locations().serving(market_id).await?;
         let none: &[ChannelId] = &[];
         let no_categories: &[CategoryId] = &[];
