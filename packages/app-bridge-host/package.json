@@ -1,6 +1,6 @@
 {
   "name": "@hyphacommerce/app-bridge-host",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "description": "The admin's side of Hypha's app bridge (docs/apps/bridge.md): answers an embedded app page's messages. No framework, so any admin can use it.",
   "homepage": "https://hyphacommerce.com",
   "bugs": "https://github.com/hyphacommerce/hypha/issues",

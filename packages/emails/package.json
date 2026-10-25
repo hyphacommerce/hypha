@@ -1,6 +1,6 @@
 {
   "name": "@hyphacommerce/emails",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "private": true,
   "description": "Hypha's default email templates, written in React Email and built to the Jinja templates crates/hypha-notifications embeds.",
   "type": "module",
