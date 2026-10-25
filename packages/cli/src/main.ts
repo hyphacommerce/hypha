@@ -16,7 +16,7 @@ import { spores } from "./commands/spores.ts";
 const main = defineCommand({
   meta: {
     name: "hypha",
-    version: "0.1.0",
+    version: "0.1.0", // x-release-please-version
     description: "Host Hypha: the API, the admin, the storefront and the apps beside them",
   },
   subCommands: { init, deploy, status, logs, apps, spores },

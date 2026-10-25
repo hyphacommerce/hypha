@@ -1,14 +1,42 @@
 {
   "name": "@hyphacommerce/storefront-elements",
   "version": "0.1.0",
-  "private": true,
   "description": "Loading apps' storefront elements (web components) into any storefront (docs/apps/elements.md): a loader, the documented events, and a React wrapper.",
+  "homepage": "https://hyphacommerce.com",
+  "bugs": "https://github.com/hyphacommerce/hypha/issues",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hyphacommerce/hypha.git",
+    "directory": "packages/storefront-elements"
+  },
+  "files": [
+    "dist",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "README.md"
+  ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
     "./react": "./src/react.ts"
   },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./react": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.js"
+      }
+    },
+    "access": "public"
+  },
   "scripts": {
+    "build": "tsdown",
     "test": "node --test src/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

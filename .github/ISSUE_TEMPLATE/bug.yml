@@ -1,0 +1,30 @@
+name: Bug report
+description: Something doesn't work as documented.
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release tag, or the commit, and where it runs (server, Cloudflare Workers, `pnpm dev`).
+      placeholder: v0.1.0-beta.1 on Workers
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what happened, what you expected. For the API, the request and the response body (its `code`).
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Steps from a fresh store if you can (`pnpm dev` and `pnpm seed` give one).
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The relevant lines with `RUST_LOG=info` (remove anything secret).
+      render: text
