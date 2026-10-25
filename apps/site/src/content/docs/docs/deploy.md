@@ -24,7 +24,7 @@ server, the Docker Compose and Caddy files.
 
 | Target | What you get |
 | --- | --- |
-| `--target vps` | A server you reach over SSH: Postgres, file storage (SeaweedFS), the API, the admin, the storefront and Caddy for HTTPS, in Docker. Images are built on the server, or here with `--build-on here` and copied over. |
+| `--target vps` | A server you reach over SSH: Postgres, file storage (SeaweedFS), the API, the admin, the storefront and Caddy for HTTPS, in Docker. The server pulls the images published with the CLI's version (`ghcr.io/hyphacommerce/hypha-*`); `--from-source` builds them from a checkout instead, on the server or here with `--build-on here`. A deployment with spores always builds its API. |
 | `--target cloudflare` | The API, admin and storefront as Workers, Postgres through Hyperdrive (any Postgres you give it by URL), files in R2, set up with one Cloudflare API token. |
 | `--target local` | The server setup on this machine, under `*.hypha.localhost`. |
 

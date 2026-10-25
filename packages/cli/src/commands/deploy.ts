@@ -1,7 +1,9 @@
-// `hypha deploy`: checks the server, builds the images, copies the deployment's files,
-// starts the stack and waits for it; the first time, also connects the storefront.
-// Run it again after any change (code, `.env`, `hypha.config.toml`): it's the same
-// steps, and Compose restarts only what changed.
+// `hypha deploy`: checks the server, points it at the published images of this CLI's
+// version (or builds them from the checkout: `--build-from-source`, `hypha init
+// --from-source`, or a deployment with spores), copies the deployment's files, starts
+// the stack and waits for it; the first time, also connects the storefront. Run it again
+// after any change (a newer CLI, `.env`, `hypha.config.toml`): it's the same steps, and
+// Compose restarts only what changed.
 
 import { resolve4, resolve6 } from "node:dns/promises";
 import { isIP } from "node:net";
@@ -37,10 +39,11 @@ import {
   saveEnv,
   url,
 } from "../deployment.ts";
-import { appImage, build, images } from "../images.ts";
+import { appImage, build, images, publishedImage, setImageRefs } from "../images.ts";
 import { CommandFailed, type Machine, run } from "../shell.ts";
 import { fetchSpores, writeHostCrate } from "../spores.ts";
-import { appsCaddy } from "../templates.ts";
+import { appsCaddy, requireRepo } from "../templates.ts";
+import { VERSION } from "../version.ts";
 import { ensureEncryptionKeys, offerInstalls, pinUnpinned } from "./apps.ts";
 import { connectStorefront, syncWebhook } from "../storefront.ts";
 import { dirArg, guarded, open } from "./shared.ts";
@@ -65,7 +68,18 @@ export const deploy = defineCommand({
   },
   args: {
     dir: dirArg,
-    "skip-build": { type: "boolean", description: "Use the images already there" },
+    "build-from-source": {
+      type: "boolean",
+      description: "Build the images from this checkout instead of pulling the published ones",
+    },
+    "skip-build": {
+      type: "boolean",
+      description: "When building from source: use the images already there",
+    },
+    images: {
+      type: "string",
+      description: `Pull the published images at this version instead of ${VERSION}`,
+    },
     yes: {
       type: "boolean",
       alias: "y",
@@ -79,6 +93,8 @@ export const deploy = defineCommand({
       await pinUnpinned(dir, deployment);
       if (deployment.target === "cloudflare") {
         p.intro("hypha deploy → Cloudflare");
+        // The Workers are built here: the API with worker-build, the apps with Vite.
+        requireRepo("Deploying to Cloudflare");
         const env = await loadEnv(dir);
         const cf = deployment.cloudflare;
         const known = env.get("CLOUDFLARE_API_TOKEN");
@@ -137,7 +153,11 @@ export const deploy = defineCommand({
       const { d, machine } = await open(dir);
       p.intro(`hypha deploy → ${machine.label}`);
 
-      await preflight(d, machine, Boolean(args.yes), !args["skip-build"]);
+      // Spores make the API the deployment's own: built from source, with its host crate.
+      const spores = d.spores ?? [];
+      const source = Boolean(args["build-from-source"] || d.source || spores.length);
+      const building = source && !args["skip-build"];
+      await preflight(d, machine, Boolean(args.yes), building);
 
       // The co-located apps: cloned, installed and bundled here, their images built
       // where the API's are.
@@ -157,9 +177,8 @@ export const deploy = defineCommand({
         coLocated.push({ entry, clone, profile });
       }
 
-      if (!args["skip-build"]) {
+      if (building) {
         // Spores need a host crate of the deployment's own, git ones cloned here first.
-        const spores = d.spores ?? [];
         const hostCrate = spores.length
           ? await writeHostCrate(dir, spores, await fetchSpores(dir, spores))
           : undefined;
@@ -179,6 +198,14 @@ export const deploy = defineCommand({
         }
       }
       await writeServerApps(resolve(dir), d, coLocated);
+      {
+        const env = await loadEnv(dir);
+        const before = env.toString();
+        setImageRefs(env, source, args.images);
+        if (env.toString() !== before) await saveEnv(dir, env);
+        if (!source)
+          p.log.step(`Using the published images: ${publishedImage("api", args.images)}, …`);
+      }
 
       const spin = p.spinner();
       spin.start("Copying the deployment and starting it");

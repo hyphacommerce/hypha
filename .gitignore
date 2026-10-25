@@ -6,6 +6,8 @@
 # Deployments' own host crates (`hypha deploy` with spores from outside).
 /.hypha-build/
 # TypeScript apps and packages
+# The CLI's build copies the settings schema into its package (templates.ts).
+/packages/cli/templates/hypha.config.schema.json
 node_modules/
 dist/
 .next/

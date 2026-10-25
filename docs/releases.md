@@ -62,15 +62,16 @@ so any release upgrades straight to any later one.
    changelog; `CHANGELOG.md` feeds [hyphacommerce.com/changelog](https://hyphacommerce.com/changelog).
 
 5. The published GitHub Release runs `release.yml`: the npm packages
-   (`@hyphacommerce/sdk`, `app`, `app-bridge`, `app-bridge-host`, `app-blocks`,
+   (`@hyphacommerce/cli`, `sdk`, `app`, `app-bridge`, `app-bridge-host`, `app-blocks`,
    `storefront-elements`) with provenance through npm trusted publishing, dist-tag `next`
    for a pre-release and `latest` otherwise; the images `ghcr.io/hyphacommerce/hypha-api`,
    `hypha-admin` and `hypha-storefront` for amd64 and arm64, tagged `X.Y.Z` plus `next`
    (pre-release) or `X.Y` and `latest`; and the API's Workers bundle
    (`hypha-api-workers-X.Y.Z.tar.gz`) attached to the release.
 
-The CLI (`@hyphacommerce/cli`) isn't published yet: it still builds the images from a
-checkout of this repository. It joins the set once it deploys the published images.
+The CLI (`@hyphacommerce/cli`) is published with them and deploys the images of its own
+version; building from source, spores, co-located apps and the Cloudflare target still
+need a checkout.
 
 ## Publishing from outside the workspace
 

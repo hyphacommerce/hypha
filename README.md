@@ -108,7 +108,7 @@ CLI. The design notes in [`docs/design`](docs/design) explain each decision.
 - **Agentic shopping** through the [Universal Commerce Protocol](https://ucp.dev), with
   [ucphub.ai](https://ucphub.ai): a connector so shopping agents can browse and buy from a
   Hypha store.
-- Published releases: Docker images, npm packages and the CLI ([docs/releases.md](docs/releases.md)).
+- The CLI on npm (`npx @hyphacommerce/cli init`) and starters for the storefront and admin ([docs/releases.md](docs/releases.md)).
 - Gift cards and store credit.
 
 ## Contributing
