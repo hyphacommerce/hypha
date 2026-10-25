@@ -1,0 +1,50 @@
+# Keeps the release pull request open against main: the changelog and every version bump
+# (the workspace version in Cargo.toml, each package.json, the OpenAPI documents' version),
+# from the Conventional Commits since the last tag. Merging it tags the release (v0.1.0-beta.1,
+# …) and publishes a GitHub Release, marked a pre-release while the version is one.
+# Cargo.lock holds each crate's version too, so the second job refreshes it on the release
+# branch after release-please moved Cargo.toml.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      pr: ${{ steps.release.outputs.pr }}
+    steps:
+      - uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5 # v4 (v5.0.0)
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # The lock file names every workspace crate with its version; release-please can't update
+  # it, so it's regenerated offline (no dependency moves) and committed to the release branch.
+  cargo-lock:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.pr }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+      - run: cargo update --workspace --offline
+      - run: |
+          if git diff --quiet Cargo.lock; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: refresh Cargo.lock for the release"
+          git push

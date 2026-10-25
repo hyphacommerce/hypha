@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/hyphacommerce/hypha/discussions
+    about: How do I…? Would Hypha fit…? Feature ideas before they're concrete.
+  - name: Security vulnerability
+    url: https://github.com/hyphacommerce/hypha/security/advisories/new
+    about: Report privately, never as an issue.
