@@ -1,6 +1,6 @@
 {
   "name": "@hyphacommerce/app-bridge",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "description": "The app's side of Hypha's admin bridge (docs/apps/bridge.md): session tokens, navigation, toasts, resource pickers and resizing over postMessage. No dependencies, no framework.",
   "homepage": "https://hyphacommerce.com",
   "bugs": "https://github.com/hyphacommerce/hypha/issues",

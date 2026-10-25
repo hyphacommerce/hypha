@@ -1,6 +1,6 @@
 {
   "name": "@hyphacommerce/sdk",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "description": "Typed clients for the Hypha admin and storefront APIs, generated from openapi/.",
   "homepage": "https://hyphacommerce.com",
   "bugs": "https://github.com/hyphacommerce/hypha/issues",
