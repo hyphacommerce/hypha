@@ -1,14 +1,42 @@
 {
   "name": "@hyphacommerce/app",
   "version": "0.1.0",
-  "private": true,
   "description": "The SDK for Hypha app authors: manifest types, signature checks, the OAuth client with PKCE, extension-point handlers and session tokens. Web APIs only, so it runs on Node and Workers alike.",
+  "homepage": "https://hyphacommerce.com",
+  "bugs": "https://github.com/hyphacommerce/hypha/issues",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hyphacommerce/hypha.git",
+    "directory": "packages/app"
+  },
+  "files": [
+    "dist",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "README.md"
+  ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
     "./signature": "./src/signature.ts"
   },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./signature": {
+        "types": "./dist/signature.d.ts",
+        "default": "./dist/signature.js"
+      }
+    },
+    "access": "public"
+  },
   "scripts": {
+    "build": "tsdown",
     "generate": "node scripts/generate.ts",
     "check": "node scripts/generate.ts --check",
     "test": "node --test src/*.test.ts",

@@ -1,15 +1,47 @@
 {
   "name": "@hyphacommerce/app-bridge",
   "version": "0.1.0",
-  "private": true,
   "description": "The app's side of Hypha's admin bridge (docs/apps/bridge.md): session tokens, navigation, toasts, resource pickers and resizing over postMessage. No dependencies, no framework.",
+  "homepage": "https://hyphacommerce.com",
+  "bugs": "https://github.com/hyphacommerce/hypha/issues",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hyphacommerce/hypha.git",
+    "directory": "packages/app-bridge"
+  },
+  "files": [
+    "dist",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "README.md"
+  ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
     "./protocol": "./src/protocol.ts",
     "./testing": "./src/testing.ts"
   },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./protocol": {
+        "types": "./dist/protocol.d.ts",
+        "default": "./dist/protocol.js"
+      },
+      "./testing": {
+        "types": "./dist/testing.d.ts",
+        "default": "./dist/testing.js"
+      }
+    },
+    "access": "public"
+  },
   "scripts": {
+    "build": "tsdown",
     "test": "node --test src/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

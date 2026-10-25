@@ -61,5 +61,20 @@ so any release upgrades straight to any later one.
 4. Merging that pull request tags the release and publishes the GitHub Release with the
    changelog; `CHANGELOG.md` feeds [hyphacommerce.com/changelog](https://hyphacommerce.com/changelog).
 
-Images on GHCR and the npm packages are published from the tag by `release.yml`, once it
-exists; until then a release is the tag, the changelog and the source.
+5. The published GitHub Release runs `release.yml`: the npm packages
+   (`@hyphacommerce/sdk`, `app`, `app-bridge`, `app-bridge-host`, `app-blocks`,
+   `storefront-elements`) with provenance through npm trusted publishing, dist-tag `next`
+   for a pre-release and `latest` otherwise; the images `ghcr.io/hyphacommerce/hypha-api`,
+   `hypha-admin` and `hypha-storefront` for amd64 and arm64, tagged `X.Y.Z` plus `next`
+   (pre-release) or `X.Y` and `latest`; and the API's Workers bundle
+   (`hypha-api-workers-X.Y.Z.tar.gz`) attached to the release.
+
+The CLI (`@hyphacommerce/cli`) isn't published yet: it still builds the images from a
+checkout of this repository. It joins the set once it deploys the published images.
+
+## Publishing from outside the workspace
+
+Each package's `exports` point at its TypeScript source, which the apps and tests use as
+it is; `publishConfig.exports` (applied by `pnpm publish`) points the published package at
+the tsdown build in `dist/`. `pnpm packages:check` builds, packs and installs every
+package into a temporary project and imports each export, as CI does.

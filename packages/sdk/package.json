@@ -1,15 +1,47 @@
 {
   "name": "@hyphacommerce/sdk",
   "version": "0.1.0",
-  "private": true,
   "description": "Typed clients for the Hypha admin and storefront APIs, generated from openapi/.",
+  "homepage": "https://hyphacommerce.com",
+  "bugs": "https://github.com/hyphacommerce/hypha/issues",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hyphacommerce/hypha.git",
+    "directory": "packages/sdk"
+  },
+  "files": [
+    "dist",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "README.md"
+  ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
     "./admin": "./src/admin.ts",
     "./storefront": "./src/storefront.ts"
   },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./admin": {
+        "types": "./dist/admin.d.ts",
+        "default": "./dist/admin.js"
+      },
+      "./storefront": {
+        "types": "./dist/storefront.d.ts",
+        "default": "./dist/storefront.js"
+      }
+    },
+    "access": "public"
+  },
   "scripts": {
+    "build": "tsdown",
     "generate": "node scripts/generate.mjs",
     "check": "node scripts/generate.mjs --check",
     "typecheck": "tsc --noEmit"
