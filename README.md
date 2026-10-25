@@ -5,7 +5,7 @@ a plain server or on Cloudflare Workers, grows through apps and Rust plugins ins
 forks, and lets AI agents operate a store safely: every change an agent makes can be
 previewed exactly and approved by a person first.
 
-> **Public preview, under active development.** Hypha works end to end (catalog, checkout,
+> **Public beta, under active development.** Hypha works end to end (catalog, checkout,
 > payments, fulfilment, accounts, apps), but it isn't production-proven yet, and its APIs
 > may still change between 0.x releases.
 
@@ -108,23 +108,23 @@ CLI. The design notes in [`docs/design`](docs/design) explain each decision.
 - **Agentic shopping** through the [Universal Commerce Protocol](https://ucp.dev), with
   [ucphub.ai](https://ucphub.ai): a connector so shopping agents can browse and buy from a
   Hypha store.
-- Published releases: Docker images, npm packages and the CLI.
+- Published releases: Docker images, npm packages and the CLI ([docs/releases.md](docs/releases.md)).
 - Gift cards and store credit.
 
 ## Contributing
 
-Hypha isn't taking outside contributions just yet; a contributor license agreement (CLA)
-comes with the first release. Issues and ideas are welcome. Before a change counts as done,
-these pass (with `docker compose up -d` for the tests' Postgres):
+Bug reports, ideas and docs fixes are welcome; code changes start with an issue so we agree
+on the shape first. [CONTRIBUTING.md](CONTRIBUTING.md) has the details and the checks a
+change passes before it's done. Vulnerabilities go through [SECURITY.md](SECURITY.md),
+never an issue.
 
-```bash
-cargo fmt --all
-cargo clippy --workspace --all-targets
-cargo nextest run --workspace
-pnpm fmt && pnpm lint && pnpm typecheck
-```
+## Sponsoring
 
-Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
+Hypha is free and open source, built by one maintainer. If it saves you a platform fee or
+an integration project, [sponsoring it on GitHub](https://github.com/sponsors/hyphacommerce)
+is what keeps it moving: sponsors are named here and on
+[hyphacommerce.com](https://hyphacommerce.com). Companies that want a feature, a
+spore or an integration built should get in touch at hello@hyphacommerce.com.
 
 ## License
 

@@ -1,0 +1,21 @@
+name: Feature request
+description: Something Hypha should do.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you're trying to do as a merchant or developer, and what stops you today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd want
+      description: The behaviour, API or screen you'd expect. Could it be an app or a spore rather than a core change?
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: How other platforms (Shopify, Medusa, Saleor…) handle it, if that helps.

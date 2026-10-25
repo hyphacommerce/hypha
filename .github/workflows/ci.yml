@@ -109,6 +109,9 @@ jobs:
       - run: pnpm --filter @hyphacommerce/app-bridge-host test
       - run: pnpm --filter @hyphacommerce/app-blocks test
       - run: pnpm --filter @hyphacommerce/storefront-elements test
+      # The published packages: built with tsdown, packed, installed into a temporary
+      # project and imported (scripts/check-packages.mjs).
+      - run: pnpm packages:check
       # The deploy CLI, and the apps' plain helpers.
       - run: pnpm --filter @hyphacommerce/cli test
       - run: pnpm --filter admin test
