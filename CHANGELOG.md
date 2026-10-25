@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.0-beta.2](https://github.com/hyphacommerce/hypha/compare/v0.1.0-beta.1...v0.1.0-beta.2) (2026-10-25)
+
+
+### Features
+
+* **cli:** deploy the published images of the CLI's version; the CLI publishable ([39bbf32](https://github.com/hyphacommerce/hypha/commit/39bbf3258b74cf8989658b2b4cac4c9b67d69fb3))
+
+
+### Documentation
+
+* **site:** the 0.1.0-beta.1 release post ([772835e](https://github.com/hyphacommerce/hypha/commit/772835edf9554ff39701e0c80b9250b018a39d3e))
+
 ## [0.1.0-beta.1](https://github.com/hyphacommerce/hypha/compare/v0.1.0-beta.0...v0.1.0-beta.1) (2026-10-25)
 
 

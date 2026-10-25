@@ -1,6 +1,6 @@
 {
   "name": "@hyphacommerce/app",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "The SDK for Hypha app authors: manifest types, signature checks, the OAuth client with PKCE, extension-point handlers and session tokens. Web APIs only, so it runs on Node and Workers alike.",
   "homepage": "https://hyphacommerce.com",
   "bugs": "https://github.com/hyphacommerce/hypha/issues",

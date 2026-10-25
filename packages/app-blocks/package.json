@@ -1,6 +1,6 @@
 {
   "name": "@hyphacommerce/app-blocks",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "Hypha's declarative app blocks, version 1: the JSON Schema, TypeScript types, a validator and the reference React renderer on Astryx.",
   "homepage": "https://hyphacommerce.com",
   "bugs": "https://github.com/hyphacommerce/hypha/issues",
