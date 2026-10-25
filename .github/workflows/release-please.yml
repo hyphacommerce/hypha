@@ -32,7 +32,8 @@ jobs:
           manifest-file: .release-please-manifest.json
 
   # The lock file names every workspace crate with its version; release-please can't update
-  # it, so it's regenerated offline (no dependency moves) and committed to the release branch.
+  # it, so it is re-resolved for the workspace members only (no dependency moves) and
+  # committed to the release branch.
   cargo-lock:
     needs: release-please
     if: ${{ needs.release-please.outputs.pr }}
@@ -41,7 +42,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
-      - run: cargo update --workspace --offline
+      - run: cargo update --workspace
       - run: |
           if git diff --quiet Cargo.lock; then exit 0; fi
           git config user.name "github-actions[bot]"
