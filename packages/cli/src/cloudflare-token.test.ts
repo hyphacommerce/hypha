@@ -108,7 +108,7 @@ test("R2's keys from a token: its ID and the SHA-256 of its value, user or accou
         )
       : new Response("{}", { status: 401 })) as typeof fetch;
   assert.equal((await r2KeysOf("cfat_x", "acc", account)).id, "e".repeat(32));
-  assert.ok(isTokenValue("cfat_YT29kdVxT40Xs2dgDAuYpEDB0XxeH1g9IVZb6XVJeb269004"));
+  assert.ok(isTokenValue("cfat_EXAMPLE_not_a_real_token_0000000000000000000"));
   assert.ok(!isTokenValue("0".repeat(32)));
 });
 
@@ -142,7 +142,7 @@ test("an invalid token is refused before anything else", async () => {
 test("R2's S3 keys are told apart from a token's value", () => {
   assert.equal(checkR2Keys("0".repeat(32), "f".repeat(64)), undefined);
   assert.match(
-    checkR2Keys("cfat_YT29kdVxT40Xs2dgDAuYpEDB0XxeH1g9IVZb6XVJeb269004", "x") ?? "",
+    checkR2Keys("cfat_EXAMPLE_not_a_real_token_0000000000000000000", "x") ?? "",
     /token's value/,
   );
   assert.match(checkR2Keys("0".repeat(31), "f".repeat(64)) ?? "", /32 hexadecimal/);

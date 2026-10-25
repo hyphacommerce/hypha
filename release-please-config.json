@@ -49,7 +49,11 @@
     ".": {
       "component": "hypha",
       "extra-files": [
-        "Cargo.toml",
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$.workspace.package.version"
+        },
         {
           "type": "json",
           "path": "openapi/admin.json",
