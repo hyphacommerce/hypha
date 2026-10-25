@@ -49,7 +49,12 @@ export interface Deployment {
   ssh?: string;
   /** The deployment's folder on the server. */
   remoteDir: string;
+  /** Where the images are built, when they're built from source. */
   buildOn: BuildOn;
+  /** Build the API, admin and storefront images from the checkout the CLI runs in,
+   * rather than pull the published ones at the CLI's version (`hypha init
+   * --from-source`). A deployment with spores builds its API regardless. */
+  source?: boolean;
   /** `https` on a server (Caddy gets certificates); `http` on this machine. */
   scheme: "https" | "http";
   domains: {
@@ -167,6 +172,12 @@ export class EnvFile {
   get(key: string): string | undefined {
     for (const line of this.lines) if ("key" in line && line.key === key) return line.value;
     return undefined;
+  }
+
+  /** Removes `key`, if it's there. */
+  delete(key: string): this {
+    this.lines = this.lines.filter((l) => !("key" in l && l.key === key));
+    return this;
   }
 
   /** Sets `key`, in place if it's there, else at the end. */

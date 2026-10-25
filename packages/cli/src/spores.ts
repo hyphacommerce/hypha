@@ -13,7 +13,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
 
 import { type Runner, cloneAt } from "./apps.ts";
-import { REPO } from "./templates.ts";
+import { REPO, requireRepo } from "./templates.ts";
 
 /** Hypha's repository, as spores outside it name it in their git dependencies. */
 export const HYPHA_GIT = "https://github.com/hyphacommerce/hypha";
@@ -126,7 +126,11 @@ export function normalizeSpores(raw: unknown, where: string): SporeEntry[] {
 /** The deployment's generated crates, in this checkout: git-ignored, named after the
  * deployment's folder. */
 export function buildDir(deploymentDir: string): string {
-  return join(REPO, ".hypha-build", basename(resolve(deploymentDir)));
+  return join(
+    requireRepo("A deployment with spores"),
+    ".hypha-build",
+    basename(resolve(deploymentDir)),
+  );
 }
 
 /** Where a deployment's host crate goes. */

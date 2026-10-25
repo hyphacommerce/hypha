@@ -120,9 +120,13 @@ export const init = defineCommand({
       type: "string",
       description: "For Let's Encrypt's expiry notices (default the owner's; none for none)",
     },
+    "from-source": {
+      type: "boolean",
+      description: "Build the images from this checkout rather than pull the published ones",
+    },
     "build-on": {
       type: "string",
-      description: "server (default) or here: where the images are built",
+      description: "With --from-source: server (default) or here, where the images are built",
     },
     "remote-dir": {
       type: "string",
@@ -275,22 +279,25 @@ export const init = defineCommand({
             ? { storefront: await sub(args["storefront-domain"], "The shop's address", domain) }
             : {}),
         };
-        const buildAnswer = await ask(args["build-on"], "server", () =>
-          p.select<BuildOn>({
-            message: "Where should the images be built?",
-            options: [
-              {
-                value: "server",
-                label: "On the server",
-                hint: "nothing to copy; compiling needs ~4 GB of memory",
-              },
-              { value: "here", label: "Here", hint: "then copied over; for small servers" },
-            ],
-          }),
-        );
-        if (buildAnswer !== "server" && buildAnswer !== "here")
-          throw new Error(`--build-on is server or here, not ${buildAnswer}`);
-        buildOn = buildAnswer;
+        // The published images need no building; the question is for source builds only.
+        if (args["from-source"] || args["build-on"]) {
+          const buildAnswer = await ask(args["build-on"], "server", () =>
+            p.select<BuildOn>({
+              message: "Where should the images be built?",
+              options: [
+                {
+                  value: "server",
+                  label: "On the server",
+                  hint: "nothing to copy; compiling needs ~4 GB of memory",
+                },
+                { value: "here", label: "Here", hint: "then copied over; for small servers" },
+              ],
+            }),
+          );
+          if (buildAnswer !== "server" && buildAnswer !== "here")
+            throw new Error(`--build-on is server or here, not ${buildAnswer}`);
+          buildOn = buildAnswer;
+        }
       } else {
         domains = {
           api: "api.hypha.localhost",
@@ -321,6 +328,7 @@ export const init = defineCommand({
         ...(ssh ? { ssh: ssh.trim() } : {}),
         remoteDir: args["remote-dir"],
         buildOn,
+        ...(args["from-source"] ? { source: true } : {}),
         scheme: target === "vps" ? "https" : "http",
         domains,
         domain: apex,

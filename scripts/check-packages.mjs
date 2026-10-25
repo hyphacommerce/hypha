@@ -65,10 +65,18 @@ try {
   );
   run("pnpm", ["install", "--no-frozen-lockfile"]);
 
-  // Every export of every package is importable by Node and typed.
+  // Every export of every package is importable by Node and typed; a package with a
+  // binary (the CLI) runs it, outside any checkout.
   const imports = [];
   for (const p of packages) {
-    const exports = p.manifest.publishConfig?.exports ?? p.manifest.exports;
+    const bin = p.manifest.publishConfig?.bin ?? p.manifest.bin;
+    for (const name of Object.keys(bin ?? {})) {
+      const out = run("pnpm", ["exec", name, "--version"]);
+      if (!out.includes(p.manifest.version))
+        throw new Error(`${name} --version printed ${out.trim()}`);
+      console.log("ran", name, out.trim());
+    }
+    const exports = p.manifest.publishConfig?.exports ?? p.manifest.exports ?? {};
     for (const sub of Object.keys(exports)) {
       if (sub.endsWith(".json")) continue;
       imports.push(`${p.manifest.name}${sub.slice(1)}`);
