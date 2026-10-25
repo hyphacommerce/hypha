@@ -4,6 +4,12 @@
 # …) and publishes a GitHub Release, marked a pre-release while the version is one.
 # Cargo.lock holds each crate's version too, so the second job refreshes it on the release
 # branch after release-please moved Cargo.toml.
+#
+# With the workflow's own token, nothing release-please does starts another workflow (GitHub's
+# rule for GITHUB_TOKEN): the release PR gets no CI run and the published release doesn't start
+# "Publish release". The secret RELEASE_PLEASE_TOKEN (a fine-grained personal access token on
+# this repository with Contents and Pull requests read and write) lifts that; without it the
+# publish is started by hand (`gh workflow run "Publish release" -f tag=v…`).
 name: Release
 
 on:
@@ -28,6 +34,7 @@ jobs:
       - uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5 # v4 (v5.0.0)
         id: release
         with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
@@ -42,6 +49,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
       - run: cargo update --workspace
       - run: |
           if git diff --quiet Cargo.lock; then exit 0; fi
