@@ -928,7 +928,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-agents"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -941,7 +941,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-apps"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -956,7 +956,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-auth"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "argon2",
  "chacha20poly1305",
@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-cart"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "futures-util",
  "hypha-channels",
@@ -996,7 +996,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-categories"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1009,7 +1009,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-channels"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1022,7 +1022,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-checkout"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-cart",
  "hypha-core",
@@ -1045,7 +1045,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-config"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-agents",
  "hypha-auth",
@@ -1069,7 +1069,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-core"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "ammonia",
  "pollster",
@@ -1083,7 +1083,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-custom-fields"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1099,7 +1099,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-customer-accounts"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-auth",
  "hypha-cart",
@@ -1113,7 +1113,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-customers"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1126,7 +1126,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-discounts"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "futures-util",
  "hypha-core",
@@ -1141,7 +1141,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-dispatch"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-apps",
  "hypha-auth",
@@ -1157,7 +1157,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-extensions"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1172,7 +1172,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-fulfillment"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1184,7 +1184,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-host-axum"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -1236,7 +1236,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-host-workers"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "axum",
  "futures-util",
@@ -1270,7 +1270,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-http"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -1332,7 +1332,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-inventory"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1345,7 +1345,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-mail"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-customer-accounts",
@@ -1368,7 +1368,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-mail-resend"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-notifications",
@@ -1381,7 +1381,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-markets"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1394,7 +1394,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-mcp"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "base64 0.23.1",
  "hypha-core",
@@ -1406,7 +1406,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-media"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1420,7 +1420,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-merchandising"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-categories",
  "hypha-core",
@@ -1435,7 +1435,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-notifications"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1449,7 +1449,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-oauth"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-agents",
  "hypha-apps",
@@ -1466,7 +1466,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-order-actions"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-apps",
  "hypha-core",
@@ -1483,7 +1483,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-orders"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1496,7 +1496,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-payments"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1509,7 +1509,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-pricing"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-markets",
@@ -1519,7 +1519,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-privacy"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-auth",
  "hypha-cart",
@@ -1538,7 +1538,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-products"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1551,7 +1551,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-promotions"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "futures-util",
  "hypha-cart",
@@ -1568,7 +1568,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-search"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-apps",
  "hypha-categories",
@@ -1590,7 +1590,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-search-index"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1602,7 +1602,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-shipping"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "futures-util",
  "hypha-core",
@@ -1634,7 +1634,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-spore-core"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-apps",
  "hypha-core",
@@ -1651,7 +1651,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-store-postgres"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "futures-util",
  "hypha-agents",
@@ -1693,7 +1693,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-store-s3"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "base64 0.23.1",
  "hmac",
@@ -1708,7 +1708,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-stores"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1719,7 +1719,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-tax"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-core",
  "hypha-testkit",
@@ -1732,7 +1732,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-testkit"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-agents",
  "hypha-apps",
@@ -1770,7 +1770,7 @@ dependencies = [
 
 [[package]]
 name = "hypha-users"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "hypha-auth",
  "hypha-core",
