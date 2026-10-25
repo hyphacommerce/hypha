@@ -62,12 +62,24 @@ jobs:
       - run: pnpm packages:check
       - name: Licence files into each package
         run: for d in packages/*/; do cp LICENSE-MIT LICENSE-APACHE "$d"; done
+      # Each publishable package, unless the registry has this version already (a rerun
+      # after a failure, or a package published by hand once so a trusted publisher
+      # could be set on it).
       - name: Publish
         env:
           NPM_CONFIG_PROVENANCE: "true"
           DIST_TAG: ${{ needs.version.outputs.prerelease == 'true' && 'next' || 'latest' }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          pnpm -r --filter './packages/*' publish --access public --no-git-checks --tag "$DIST_TAG"
+          for dir in packages/*/; do
+            name=$(node -p "const m = require('./$dir/package.json'); m.private ? '' : m.name")
+            [ -z "$name" ] && continue
+            if npm view "$name@$VERSION" version >/dev/null 2>&1; then
+              echo "$name@$VERSION is published already"
+              continue
+            fi
+            pnpm --filter "$name" publish --access public --no-git-checks --tag "$DIST_TAG"
+          done
 
   image:
     needs: version
