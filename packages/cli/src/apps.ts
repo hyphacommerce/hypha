@@ -28,7 +28,7 @@ import { join } from "node:path";
 import type { AppEntry, Deployment } from "./deployment.ts";
 import { url } from "./deployment.ts";
 import { run } from "./shell.ts";
-import { REPO } from "./templates.ts";
+import { REPO, requireRepo } from "./templates.ts";
 
 export type { AppEntry } from "./deployment.ts";
 
@@ -439,6 +439,8 @@ export async function checkout(
   runner: Runner = runHere,
 ): Promise<string> {
   if (!a.rev) throw new Error(`app ${a.name} isn't pinned: \`hypha apps update ${a.name}\``);
+  // The app links this checkout's packages.
+  requireRepo(`Building the ${a.name} app`);
   await linkHypha(dir);
   const clone = cloneDir(dir, a);
   await cloneAt(a.git, a.rev, clone, runner);

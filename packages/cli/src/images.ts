@@ -1,14 +1,43 @@
-// The Docker images: the API, and the admin and storefront the deployment includes,
-// built from this repository (`docker/*.Dockerfile`). On a server they're built by its
-// own Docker over SSH (its architecture, no copying), or here for its platform and
-// copied (`docker save | docker load`) when the server is too small to compile Rust.
+// The Docker images: the API, and the admin and storefront the deployment includes.
+// By default the published ones, pinned to this CLI's version (a release publishes the
+// CLI and the images together), which the server pulls. Built from source instead
+// (`docker/*.Dockerfile`, a checkout) when asked, or when the deployment has spores,
+// since its API is then its own: on the server by its own Docker over SSH (its
+// architecture, no copying), or here for its platform and copied (`docker save | docker
+// load`) when the server is too small to compile Rust.
 
 import { join } from "node:path";
 
 import { type AppEntry, imageTag, service } from "./apps.ts";
-import type { App, Deployment } from "./deployment.ts";
+import type { App, Deployment, EnvFile } from "./deployment.ts";
 import { type Machine, pipe, run } from "./shell.ts";
-import { REPO } from "./templates.ts";
+import { requireRepo } from "./templates.ts";
+import { VERSION } from "./version.ts";
+
+/** Where the release workflow publishes the images. */
+export const REGISTRY = "ghcr.io/hyphacommerce";
+
+/** `.env`'s image references, read by `compose.yaml`; without them it runs the
+ * `:current` images a source build leaves in Docker. */
+export const IMAGE_VARS: Record<App | "api", string> = {
+  api: "HYPHA_API_IMAGE",
+  admin: "HYPHA_ADMIN_IMAGE",
+  storefront: "HYPHA_STOREFRONT_IMAGE",
+};
+
+/** The published image for a service at a version: `ghcr.io/hyphacommerce/hypha-api:0.1.0`. */
+export function publishedImage(name: App | "api", version = VERSION): string {
+  return `${REGISTRY}/hypha-${name}:${version}`;
+}
+
+/** Points `.env` at the published images at `version` (every service, so a profile
+ * turned on later gets its image too), or at the source build's. */
+export function setImageRefs(env: EnvFile, source: boolean, version = VERSION): void {
+  for (const name of ["api", "admin", "storefront"] as const) {
+    if (source) env.delete(IMAGE_VARS[name]);
+    else env.set(IMAGE_VARS[name], publishedImage(name, version));
+  }
+}
 
 /** An image: its Dockerfile and build context (absolute paths). */
 export type Image = {
@@ -24,19 +53,20 @@ export type Image = {
 /** The images: the API (from `hostCrate`, the deployment's own host crate, when it has
  * spores), and the apps. */
 export function images(apps: App[], hostCrate?: string): Image[] {
+  const repo = requireRepo("Building the images from source");
   return [
     {
       name: "api",
       tag: "hypha-api:current",
-      dockerfile: join(REPO, "docker/api.Dockerfile"),
-      context: REPO,
+      dockerfile: join(repo, "docker/api.Dockerfile"),
+      context: repo,
       args: hostCrate ? [`HOST_CRATE=${hostCrate}`] : [],
     },
     ...apps.map((app) => ({
       name: app,
       tag: `hypha-${app}:current`,
-      dockerfile: join(REPO, "docker/app.Dockerfile"),
-      context: REPO,
+      dockerfile: join(repo, "docker/app.Dockerfile"),
+      context: repo,
       app,
     })),
   ];

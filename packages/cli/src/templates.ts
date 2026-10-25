@@ -3,6 +3,7 @@
 // and the secrets.
 
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -10,16 +11,37 @@ import { type AppEntry, type AppProfile, appDomain, CADDY_IMPORT, service } from
 import { apps, type Deployment, EnvFile, type Target, url } from "./deployment.ts";
 
 const TEMPLATES = join(import.meta.dirname, "..", "templates");
-/** The repository the CLI is part of: the images are built from it. */
+/** Where a checkout of Hypha would be around this CLI: the repository when it runs from
+ * one (`pnpm hypha …`, or the package built in it), `node_modules` when installed. */
 export const REPO = join(import.meta.dirname, "..", "..", "..");
+
+/** Whether the CLI runs from a checkout of Hypha, which building anything needs: the
+ * images from source, a deployment's host crate for its spores, the Workers. */
+export function inCheckout(): boolean {
+  return (
+    existsSync(join(REPO, "Cargo.toml")) && existsSync(join(REPO, "crates", "hypha-host-axum"))
+  );
+}
+
+/** The checkout, or a clear refusal: the installed CLI deploys the published images and
+ * can't build. */
+export function requireRepo(what: string): string {
+  if (inCheckout()) return REPO;
+  throw new Error(
+    `${what} needs a checkout of Hypha (github.com/hyphacommerce/hypha): clone it and run \`pnpm hypha\` from there`,
+  );
+}
 
 export function composeFile(): Promise<string> {
   return readFile(join(TEMPLATES, "vps", "compose.yaml"), "utf8");
 }
 
-/** The settings file's JSON Schema, for editors. */
-export function configSchema(): Promise<string> {
-  return readFile(join(REPO, "hypha.config.schema.json"), "utf8");
+/** The settings file's JSON Schema, for editors: the copy the package ships (made by its
+ * build), or the checkout's. */
+export async function configSchema(): Promise<string> {
+  const shipped = join(TEMPLATES, "hypha.config.schema.json");
+  if (existsSync(shipped)) return readFile(shipped, "utf8");
+  return readFile(join(requireRepo("The settings schema"), "hypha.config.schema.json"), "utf8");
 }
 
 /** Caddy's configuration: one site per domain, to its service. Over `https`, Caddy gets

@@ -109,8 +109,7 @@
           "type": "json",
           "path": "packages/emails/package.json",
           "jsonpath": "$.version"
-        },
-        "packages/cli/src/main.ts"
+        }
       ]
     }
   }
