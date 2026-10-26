@@ -153,6 +153,7 @@ export default defineConfig({
             { label: "Introduction", slug: "docs" },
             { label: "Run it locally", slug: "docs/getting-started" },
             { label: "Deploy it", slug: "docs/deploy" },
+            { label: "Releases and upgrades", slug: "docs/releases" },
           ],
         },
         { label: "Concepts", items: [{ autogenerate: { directory: "docs/concepts" } }] },

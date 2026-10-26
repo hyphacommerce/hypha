@@ -8,9 +8,10 @@ built on it. It runs on your own server or on Cloudflare Workers, grows through 
 Rust plugins instead of forks, and lets AI agents operate a store with exact previews and
 approvals.
 
-:::caution[Public preview]
+:::caution[Public beta]
 Hypha works end to end: catalog, checkout, payments, fulfilment, accounts, apps and agents.
-It isn't production-proven yet, and its APIs may change between 0.x releases.
+It hasn't carried a real shop's orders yet, and its APIs may change between betas. Each
+change is in the [changelog](/changelog); see [Releases and upgrades](/docs/releases/).
 :::
 
 ## What's included
@@ -46,11 +47,20 @@ Everything you add goes through the same commands the core uses. Every operation
 input, the scopes it requires and typed errors, so an app, a plugin, an agent or your own
 frontend can't skip a rule the core enforces.
 
+## What's published
+
+Every release ships as one set with one version: the source, Docker images for the API,
+the admin and the storefront (`ghcr.io/hyphacommerce/hypha-*`), and the npm packages
+under `@hyphacommerce/`: the `cli` that deploys it, the `sdk` for your own frontends, and
+`app`, `app-bridge`, `app-bridge-host`, `app-blocks` and `storefront-elements` for app
+authors. During the beta they're on npm's `next` tag.
+
 ## Where to start
 
-- [Run it locally](/docs/getting-started/): the API, admin and storefront on your machine,
-  with a demo store.
-- [Deploy it](/docs/deploy/): to your own server or to Cloudflare Workers.
+- [Deploy it](/docs/deploy/): `npx @hyphacommerce/cli@next init`, then `deploy`, to your
+  own server, this machine or Cloudflare Workers. No Rust toolchain needed for a server.
+- [Run it locally](/docs/getting-started/): the API, admin and storefront from the source,
+  with a demo store, for working on Hypha itself.
 - [Concepts](/docs/concepts/stores/): how stores, markets, products, orders and payments
   work.
 - [Build an app](/docs/guides/apps/), [write a spore](/docs/guides/spores/) or
