@@ -28,10 +28,10 @@ edition = "2024"
 [workspace]
 
 [dependencies]
-hypha-spore = { git = "https://github.com/hyphacommerce/hypha", branch = "main", features = ["http"] }
+hypha-spore = { git = "https://github.com/hyphacommerce/hypha", tag = "v0.1.0-beta.2", features = ["http"] }
 
 [dev-dependencies]
-hypha-spore = { git = "https://github.com/hyphacommerce/hypha", branch = "main", features = ["http", "testing"] }
+hypha-spore = { git = "https://github.com/hyphacommerce/hypha", tag = "v0.1.0-beta.2", features = ["http", "testing"] }
 hypha-host-axum = { git = "https://github.com/hyphacommerce/hypha", branch = "main", features = ["testing"] }
 ```
 

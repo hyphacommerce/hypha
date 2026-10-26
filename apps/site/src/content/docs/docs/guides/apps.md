@@ -52,9 +52,10 @@ its own, and `settings` staff fill in.
    refresh token for 30 days. The first exchange also hands over the app's **signing
    secret**, once.
 
-`@hyphacommerce/app` does all of it: `createAuthorizationUrl`, `exchangeCode`, and a
-`HyphaClient` that refreshes tokens on its own (once, even across processes sharing an
-installation) and is typed with the admin API's paths.
+`@hyphacommerce/app` (`pnpm add @hyphacommerce/app@next`) does all of it:
+`createAuthorizationUrl`, `exchangeCode`, and a `HyphaClient` that refreshes tokens on its
+own (once, even across processes sharing an installation) and is typed with the admin
+API's paths.
 
 ## Webhooks
 

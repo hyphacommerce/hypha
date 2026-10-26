@@ -17,13 +17,19 @@ customer accounts and order pages. It's a Next.js app built with Vite,
 running on Node or on Cloudflare Workers.
 
 Copy it and make it yours: its look lives in one theme file, and every page is ordinary
-React. A `create` command that copies it out of the repository for you comes with the first
-release.
+React. A `create` command that copies it out of the repository for you comes in a later
+beta; until then, copy `apps/storefront` and replace its `workspace:*` dependencies with
+the published `@next` versions.
 
 ## Build your own with the SDK
 
 `@hyphacommerce/sdk` has typed clients generated from the API's OpenAPI documents: every
-path, parameter and response is checked by TypeScript.
+path, parameter and response is checked by TypeScript. It matches the API release with the
+same version.
+
+```bash
+pnpm add @hyphacommerce/sdk@next
+```
 
 ```ts
 import { createStorefrontClient } from "@hyphacommerce/sdk";

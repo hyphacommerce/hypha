@@ -3,8 +3,21 @@ title: Run it locally
 description: The API, the admin panel and the storefront on your machine, with a demo store.
 ---
 
-One command starts the API, the admin panel and the storefront, with the database, file
-storage and a mail catcher in Docker. A second fills the store with demo data.
+One command starts the API, the admin panel and the storefront from the source, with the
+database, file storage and a mail catcher in Docker. A second fills the store with demo
+data. This is the setup for working on Hypha itself.
+
+:::tip[Just want a store running?]
+You don't need to build anything. With Docker installed:
+
+```bash
+npx @hyphacommerce/cli@next init --target local
+npx @hyphacommerce/cli@next deploy
+```
+
+That runs the published images on this machine under `*.hypha.localhost`. See
+[Deploy it](/docs/deploy/).
+:::
 
 ## What you need
 

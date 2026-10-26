@@ -16,8 +16,8 @@ changes:
     text: The repository is public, under MIT or Apache-2.0.
 ---
 
-Hypha has been a private repository for about a month. Today it's public, tagged
-`v0.1.0-beta.1`, and anyone can read it, run it or build on it.
+Hypha is public today, tagged `v0.1.0-beta.1`. Anyone can read it, run it or build on
+it.
 
 ## What Hypha is
 
