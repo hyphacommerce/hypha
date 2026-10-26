@@ -118,6 +118,19 @@ The rules:
   element, and keep secrets out of props a storefront might log: a payment's client
   secret is fine, an API key isn't.
 
+### One element, served by an app and by a spore
+
+The same provider may be offered twice: as an app (its own service, installed over
+OAuth) and as a spore (compiled into the API). Both serve the element, and a storefront
+can't tell which it got, so they must behave alike: same tag, props, events and theming.
+Hypha's Stripe integrations keep one source by hand, `src/browser/payment-element.ts`
+in hyphacommerce/app-stripe and `element/payment-element.ts` in
+hyphacommerce/spore-stripe, differing only in the header comment: a fix lands in one
+and is copied to the other in the same change, and each repository's CI holds its built
+bundle to its source. There's no shared package on purpose: a Stripe-specific element
+has no home in Hypha's packages, and a dependency between the two repositories for one
+file would cost more than copying it.
+
 ## Events
 
 Each is a `CustomEvent` dispatched on the element with `bubbles: true` and
