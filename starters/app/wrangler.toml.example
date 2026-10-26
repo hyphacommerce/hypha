@@ -1,0 +1,11 @@
+# The app on Cloudflare Workers. Copy to wrangler.toml (git-ignored) and fill in:
+#   cp wrangler.toml.example wrangler.toml
+#   wrangler deploy
+name = "my-hypha-app"
+main = "src/worker.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Where the Worker is served, without a trailing slash: the manifest is APP_URL/manifest.json.
+APP_URL = "https://my-hypha-app.example.com"
