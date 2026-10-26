@@ -71,7 +71,7 @@ export {
   type WebhookDedupe,
   type WebhookHandlerOptions,
 } from "./webhooks.ts";
-export type { ExtensionPoints } from "./generated/extensions.ts";
+export { EXTENSION_POINT_VERSIONS, type ExtensionPoints } from "./generated/extensions.ts";
 // The points' bodies by name: aliases of the generated contract (`PointRequest<…>`).
 export type {
   Money,

@@ -102,8 +102,11 @@ const rates = defineExtensionHandler("shipping.rates", async (request) => ({
 export default extensionHandler({ handlers: [rates], secret: SECRET });
 ```
 
-The types come from the [extension points reference](/docs/api/extensions/). Every call
-is logged, and staff can see each app's calls in the admin.
+The types come from the [extension points reference](/docs/api/extensions/). A handler
+answers the point's version your `@hyphacommerce/app` was generated from (the one a
+matching Hypha calls); to keep answering an older one too, pass `{ versions: [1, 2] }` and
+branch on `context.version`, since the body is typed by the newest version only.
+Every call is logged, and staff can see each app's calls in the admin.
 
 ## The admin and the storefront
 

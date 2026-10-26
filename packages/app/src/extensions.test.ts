@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { ExtensionError, defineExtensionHandler, extensionHandler } from "./extensions.ts";
+import { EXTENSION_POINT_VERSIONS } from "./generated/extensions.ts";
 import { signRequest } from "./signature.ts";
 
 const SECRET = "hypha_shs_test";
@@ -22,7 +23,11 @@ const handle = extensionHandler({ secret: SECRET, handlers: [start, capture] });
 async function call(
   point: string,
   body: unknown,
-  { secret = SECRET, version = "1", raw }: { secret?: string; version?: string; raw?: string } = {},
+  {
+    secret = SECRET,
+    version = String(EXTENSION_POINT_VERSIONS[point as keyof typeof EXTENSION_POINT_VERSIONS] ?? 1),
+    raw,
+  }: { secret?: string; version?: string; raw?: string } = {},
 ): Promise<Response> {
   const text = raw ?? JSON.stringify(body);
   return handle(
@@ -41,12 +46,15 @@ async function call(
   );
 }
 
+// `payments.start` v2: a cart's payment, before its order exists.
 const startBody = {
   payment: "pay_1",
-  order: "ord_1",
-  order_number: 1001,
+  cart: "cart_1",
   method: "pm_1",
   amount: { amount: 1999, currency: "EUR" },
+  channel: "chan_1",
+  market: "mkt_1",
+  country: "DE",
 };
 
 test("dispatches by Hypha-Extension and passes the context", async () => {
@@ -67,9 +75,44 @@ test("a bad signature is 401 before anything else", async () => {
   });
 });
 
+test("a handler answers the version Hypha calls unless it opts out", async () => {
+  assert.deepEqual(start.versions, [EXTENSION_POINT_VERSIONS["payments.start"]]);
+  assert.deepEqual(capture.versions, [EXTENSION_POINT_VERSIONS["payments.capture"]]);
+  // Listing versions answers each of them, the body as that version sent it.
+  const both = extensionHandler({
+    secret: SECRET,
+    handlers: [
+      defineExtensionHandler(
+        "payments.start",
+        (_body, context) => ({
+          next_action: { type: "instructions" as const, text: `v${context.version}` },
+        }),
+        { versions: [1, 2] },
+      ),
+    ],
+  });
+  for (const version of ["1", "2"]) {
+    const text = JSON.stringify(startBody);
+    const response = await both(
+      new Request("https://app.example/x", {
+        method: "POST",
+        headers: {
+          "Hypha-Signature": await signRequest(SECRET, text),
+          "Hypha-Extension": "payments.start",
+          "Hypha-Extension-Version": version,
+        },
+        body: text,
+      }),
+    );
+    assert.deepEqual(await response.json(), {
+      next_action: { type: "instructions", text: `v${version}` },
+    });
+  }
+});
+
 test("an unknown point is 404, an unsupported version 400", async () => {
   assert.equal((await call("search.query", {})).status, 404);
-  const response = await call("payments.start", startBody, { version: "2" });
+  const response = await call("payments.start", startBody, { version: "1" });
   assert.equal(response.status, 400);
   assert.equal(((await response.json()) as { code: string }).code, "unsupported_version");
 });
@@ -81,18 +124,26 @@ test("a body that isn't JSON is 400 invalid_request", async () => {
 });
 
 test("an ExtensionError answers its code; anything else is 500 without details", async () => {
-  const refused = await call("payments.capture", {
-    payment: "p",
-    order: "o",
-    amount: { amount: 0, currency: "EUR" },
-  });
+  const refused = await call(
+    "payments.capture",
+    {
+      payment: "p",
+      order: "o",
+      amount: { amount: 0, currency: "EUR" },
+    },
+    { version: "1" },
+  );
   assert.equal(refused.status, 422);
   assert.deepEqual(await refused.json(), { code: "zero_amount", error: "nothing to capture" });
-  const failed = await call("payments.capture", {
-    payment: "p",
-    order: "o",
-    amount: { amount: 13, currency: "EUR" },
-  });
+  const failed = await call(
+    "payments.capture",
+    {
+      payment: "p",
+      order: "o",
+      amount: { amount: 13, currency: "EUR" },
+    },
+    { version: "1" },
+  );
   assert.equal(failed.status, 500);
   assert.deepEqual(await failed.json(), { code: "handler_failed", error: "the handler failed" });
 });
