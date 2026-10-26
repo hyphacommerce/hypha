@@ -14,6 +14,21 @@ Choose an app for anything a third party runs as a service, anything not written
 or anything a store should install without rebuilding its API. For code compiled into the
 API itself, see [spores](/docs/guides/spores/).
 
+## Start from the starter
+
+```bash
+npx @hyphacommerce/cli@next create app my-app
+cd my-app && pnpm install && pnpm test
+APP_URL=http://localhost:8787 pnpm dev
+```
+
+The starter is a small Hono app on `@hyphacommerce/app`: the manifest, the install flow,
+a webhook handler, one extension handler (`shipping.rates`, quoting a flat rate) and
+Node and Workers entries. Install it from your admin (Apps → Install app →
+`http://localhost:8787`; a local API needs `outbound.allow_private = true` to call it),
+then change the manifest and the handlers to yours. The rest of this guide is what each
+part does.
+
 ## The manifest
 
 An app describes itself in a JSON **manifest**, served at a public URL. Its URL is the
