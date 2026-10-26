@@ -56,6 +56,10 @@ test("a release's archive is the tag's, in GitHub's folder", () => {
     url: "https://codeload.github.com/hyphacommerce/hypha/tar.gz/main",
     root: "hypha-main",
   });
+  assert.deepEqual(archiveOf("feat/cli-create"), {
+    url: "https://codeload.github.com/hyphacommerce/hypha/tar.gz/feat%2Fcli-create",
+    root: "hypha-feat-cli-create",
+  });
 });
 
 test("what a download assumes of the workspace matches its root package.json", async () => {
@@ -92,6 +96,7 @@ test("creating from a checkout copies the starter without its builds and adapts 
     );
     await writeFile(join(checkout, "starters", "app", "src", "index.ts"), "export {};\n");
     await writeFile(join(checkout, "starters", "app", ".dev.vars"), "SECRET=1\n");
+    await writeFile(join(checkout, "starters", "app", ".env.local"), "SECRET=1\n");
     await writeFile(join(checkout, "starters", "app", "node_modules", "x", "i.js"), "");
     const dir = join(work, "My App");
     const made = await create("app", dir, { from: checkout });

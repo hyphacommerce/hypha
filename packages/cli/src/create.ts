@@ -67,7 +67,7 @@ const SKIPPED = new Set([
 ]);
 
 function skipped(name: string): boolean {
-  return SKIPPED.has(name) || name.endsWith(".tsbuildinfo") || /^\.env\..*\.local$/.test(name);
+  return SKIPPED.has(name) || name.endsWith(".tsbuildinfo") || /^\.env.*\.local$/.test(name);
 }
 
 /** The tag a version was released as. */
@@ -80,8 +80,8 @@ export function archiveOf(ref: string): { url: string; root: string } {
   const tag = ref.startsWith("v") || !/^\d/.test(ref) ? ref : tagOf(ref);
   return {
     url: `https://codeload.github.com/${REPOSITORY}/tar.gz/${encodeURIComponent(tag)}`,
-    // GitHub names the archive's folder `<repo>-<ref>`, the ref without its `v`.
-    root: `hypha-${tag.replace(/^v/, "")}`,
+    // GitHub names the archive's folder `<repo>-<ref>`: the ref without its `v`, each `/` a `-`.
+    root: `hypha-${tag.replace(/^v/, "").replaceAll("/", "-")}`,
   };
 }
 
@@ -95,6 +95,7 @@ dist/
 *.tsbuildinfo
 .env*.local
 .dev.vars
+wrangler.toml
 next-env.d.ts
 .DS_Store
 `;

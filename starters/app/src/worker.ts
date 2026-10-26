@@ -10,11 +10,13 @@ interface Env {
 }
 
 let installations: Installations | undefined;
+let app: ReturnType<typeof createApp> | undefined;
 
 export default {
   fetch(request: Request, env: Env): Response | Promise<Response> {
     installations ??= new MemoryInstallations();
-    const app = createApp({ appUrl: env.APP_URL, installations, log: console.log });
+    // Built once per isolate: the routes and handlers don't change between requests.
+    app ??= createApp({ appUrl: env.APP_URL, installations, log: console.log });
     return app.fetch(request);
   },
 };

@@ -19,8 +19,9 @@ or `HYPHA_ALLOW_PRIVATE_CALLBACKS=true`).
   database before anyone installs the app for real.
 - `src/rates.ts`: the extension handler. Add one `defineExtensionHandler` per point you answer
   and list it in `src/app.ts`.
-- `src/node.ts`, `src/worker.ts`: the hosts. `wrangler.toml.example` and the `Dockerfile` deploy
-  them; `hypha apps add <this repository's URL>` deploys the app beside a Hypha deployment.
+- `src/node.ts`, `src/worker.ts`: the hosts; `wrangler.toml.example` and the `Dockerfile` deploy
+  them. Once it keeps installations in a database (D1 on Workers, a volume on a server),
+  `hypha apps add <this repository's URL>` deploys the app beside a Hypha deployment.
 
 The SDK is `@hyphacommerce/app`; the typed admin API comes with it (`client.admin`). The
 [extension points reference](https://hyphacommerce.com/docs/api/extensions/) lists every

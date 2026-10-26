@@ -114,8 +114,8 @@ jobs:
       - run: pnpm packages:check
       # The starters `hypha create` hands out: created by the CLI from this checkout into a
       # temporary folder, installed against the packed packages, type-checked, tested and
-      # built (scripts/check-starters.mjs).
-      - run: pnpm starters:check
+      # built (scripts/check-starters.mjs; the packages built by the step above).
+      - run: node scripts/check-starters.mjs
       # The deploy CLI, and the apps' plain helpers.
       - run: pnpm --filter @hyphacommerce/cli test
       - run: pnpm --filter admin test

@@ -1,6 +1,8 @@
 # The app on Cloudflare Workers. Copy to wrangler.toml (git-ignored) and fill in:
 #   cp wrangler.toml.example wrangler.toml
 #   wrangler deploy
+# To deploy it beside a Hypha deployment with `hypha apps add`, give it a D1 database
+# (`[[d1_databases]]`, which the CLI creates per deployment) and store installations in it.
 name = "my-hypha-app"
 main = "src/worker.ts"
 compatibility_date = "2026-10-01"

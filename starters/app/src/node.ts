@@ -11,7 +11,8 @@ import { createApp } from "./app.ts";
 import { MemoryInstallations } from "./installations.ts";
 
 const appUrl = process.env.APP_URL ?? "http://localhost:8787";
-const port = Number(process.env.PORT ?? new URL(appUrl).port ?? 8787);
+// `PORT`, else the port in `APP_URL`, else 8787 (a URL without one has an empty `port`).
+const port = Number(process.env.PORT || new URL(appUrl).port || 8787);
 const app = createApp({
   appUrl,
   installations: new MemoryInstallations(),

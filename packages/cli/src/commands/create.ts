@@ -44,10 +44,16 @@ export const createCommand = defineCommand({
           `no starter ${JSON.stringify(starter)}: one of ${Object.keys(STARTERS).join(", ")}`,
         );
       const dir = await ask(args.dir, `my-${starter}`, () =>
-        p.text({ message: "Its folder", placeholder: `my-${starter}` }),
+        p.text({
+          message: "Its folder",
+          placeholder: `my-${starter}`,
+          defaultValue: `my-${starter}`,
+        }),
       );
       const made = await create(starter, dir, { ref: args.ref });
-      p.log.success(`${made.name} in ${made.dir}, from ${made.source}`);
+      p.log.success(
+        `${made.name} in ${made.dir}, from ${made.source}; Hypha's packages at ${VERSION}`,
+      );
       p.note([`cd ${dir}`, ...STARTERS[starter].next].join("\n"), "Next");
       p.outro(`${STARTERS[starter].title}.`);
     }),
