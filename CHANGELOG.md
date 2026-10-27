@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.1.0-beta.3](https://github.com/hyphacommerce/hypha/compare/v0.1.0-beta.2...v0.1.0-beta.3) (2026-10-27)
+
+
+### Features
+
+* **cli:** `hypha create`, a project of your own from a starter ([a71449a](https://github.com/hyphacommerce/hypha/commit/a71449a5a480df30d420ff492239c74faa9075c3))
+* **cli:** `hypha create`: the storefront and an app starter (0036 R6) ([55f4162](https://github.com/hyphacommerce/hypha/commit/55f4162e154dc16edbb302fcd1a81f9f676f7377))
+* **spore:** the facade for storefront-facing spores, and the wishlist tutorial ([a435a6c](https://github.com/hyphacommerce/hypha/commit/a435a6c10f3555806612d93a14c958004172cae7))
+* **spore:** what a storefront-facing spore needs, and the wishlist tutorial ([4436128](https://github.com/hyphacommerce/hypha/commit/443612838688d34703080693a890f570d4622508))
+* **starters:** an app starter ([dc96784](https://github.com/hyphacommerce/hypha/commit/dc9678406c9d84b93d753c51820cd7da7a088e61))
+
+
+### Bug fixes
+
+* **app:** a handler answers the version Hypha calls by default ([ab6be3b](https://github.com/hyphacommerce/hypha/commit/ab6be3b88a93e2405ddf9342a28c9a6652df183d))
+* **cli:** review fixes for `hypha create` and the app starter ([bfb987e](https://github.com/hyphacommerce/hypha/commit/bfb987e70cf3ffaf7dc200eef64a4c7c76d543dc))
+* **storefront:** the dev server needs the webhook secret set; the starter says how rates are asked for ([6fea9f5](https://github.com/hyphacommerce/hypha/commit/6fea9f5a37bbcc77018b2f675173db82874d4d18))
+
+
+### Documentation
+
+* `hypha create` in the CLI's README, the guides and 0036's as-built ([1d1b07b](https://github.com/hyphacommerce/hypha/commit/1d1b07ba44113a5ae79052b432f69b9e970255e3))
+* **apps:** how an element shared by an app and a spore is kept in step ([f95ace1](https://github.com/hyphacommerce/hypha/commit/f95ace1a80e1fce712b11e4ac59031189b772d76))
+* **apps:** how an element shared by an app and a spore is kept in step ([1fb1ec1](https://github.com/hyphacommerce/hypha/commit/1fb1ec121a7adf8e5014cddc951ed2aa9cdec6da))
+* **site:** docs for the published CLI and packages, a releases page, a merchant-facing post; the release post without the project's age ([313f0be](https://github.com/hyphacommerce/hypha/commit/313f0be3a14a713eac0e4a22b2a264d9413e729d))
+
 ## [0.1.0-beta.2](https://github.com/hyphacommerce/hypha/compare/v0.1.0-beta.1...v0.1.0-beta.2) (2026-10-25)
 
 

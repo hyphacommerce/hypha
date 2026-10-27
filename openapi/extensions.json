@@ -1137,7 +1137,7 @@
       "name": "MIT OR Apache-2.0"
     },
     "title": "Hypha Extension Points",
-    "version": "0.1.0-beta.2"
+    "version": "0.1.0-beta.3"
   },
   "openapi": "3.1.0",
   "paths": {},
