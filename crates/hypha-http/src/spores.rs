@@ -273,11 +273,14 @@ macro_rules! spore_routes {
 
         const _: () = {
             $(
+                // The path isn't in the message: a `{param}` in it would read as a format
+                // capture. The failing assertion names its line.
                 assert!(
                     $crate::spores::route_fits($crate::__spore_surface!($surface), $path, $name),
                     concat!(
-                        "spore route ", $path, " isn't under its surface's prefix and the spore's name ",
-                        "(/spores/<name>/, /admin/spores/<name>/, /storefront/spores/<name>/)"
+                        "a route of spore ", stringify!($name), " isn't under its surface's prefix ",
+                        "and the spore's name (/spores/<name>/, /admin/spores/<name>/, ",
+                        "/storefront/spores/<name>/)"
                     ),
                 );
             )*

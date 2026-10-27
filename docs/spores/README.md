@@ -10,6 +10,9 @@ another language, or anything a store should install without rebuilding its API.
 
 The Stripe spore ([hyphacommerce/spore-stripe](https://github.com/hyphacommerce/spore-stripe)) is
 the worked example, built outside this repository as yours will be: read it beside this page.
+The wishlist spore ([hyphacommerce/spore-wishlist](https://github.com/hyphacommerce/spore-wishlist))
+is the tutorial: a table of its own, storefront routes for signed-in shoppers, an operator
+setting and an admin block, walked through on the docs site (`guides/spore-tutorial`).
 
 ## The crate
 
