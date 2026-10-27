@@ -192,3 +192,31 @@ Written up for users in `docs/releases.md`:
 The Stripe spore's move (§6) comes right after R1: the test harness, the repository split
 with its history, then removing it here (hosts, CI, scripts, the CLI's first-party
 spores, the docs).
+
+## As built: R6, `hypha create`
+
+Where it differs from §7 and §10:
+
+- **Two starters, not three:** `storefront` (`apps/storefront` as it is) and `app`
+  (`starters/app`, new: a small Hono app on `@hyphacommerce/app` with the manifest, the
+  install flow, a webhook handler, a `shipping.rates` handler and Node and Workers
+  entries, installations in memory to replace with a database). No `admin` starter: the
+  admin is run from its image, and a fork of it is a maintenance trap; it can be added as
+  another row of `STARTERS` if asked for. The spore template stays R7 (`cargo generate`),
+  and the `app-template` repository of §4's table is dropped: the starter lives here, so
+  it's built, linted and type-checked with the workspace (`starters/*` is a workspace
+  folder) and released with it.
+- **Source:** from the checkout when the CLI runs from one (`pnpm hypha create`, the CI
+  check), else GitHub's archive of the release's tag (`codeload.github.com/…/tar.gz/v<version>`),
+  extracted with the system's `tar`; `--ref` takes another tag or branch. One tag releases
+  the CLI, the packages and the starters, so the three match by construction.
+- **What the copy gets** (`packages/cli/src/create.ts`): `package.json` named after its
+  folder, `workspace:*` dependencies at the CLI's version, the workspace's `packageManager`
+  and `engines`; a `.gitignore`; a `pnpm-workspace.yaml` with pnpm's settings (Hypha's
+  packages never held back as too new, the build scripts pnpm must be told about).
+  Builds, caches and `.dev.vars` are left behind.
+- **The check** (`scripts/check-starters.mjs`, `pnpm starters:check`, in CI after
+  `packages:check`): each starter created by the CLI into a temporary folder, its
+  `@hyphacommerce/*` dependencies overridden with the packages packed from the same commit,
+  then `pnpm install`, `typecheck`, `test` and `build`. The storefront builds outside the
+  workspace as it is: its imports of the packages resolve to their published `dist`.

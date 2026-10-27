@@ -16,10 +16,21 @@ page, discount codes and promotion badges, the cart, checkout with online paymen
 customer accounts and order pages. It's a Next.js app built with Vite,
 running on Node or on Cloudflare Workers.
 
-Copy it and make it yours: its look lives in one theme file, and every page is ordinary
-React. A `create` command that copies it out of the repository for you comes in a later
-beta; until then, copy `apps/storefront` and replace its `workspace:*` dependencies with
-the published `@next` versions.
+Make it yours:
+
+```bash
+npx @hyphacommerce/cli@next create storefront my-shop
+cd my-shop
+cp .env.example .dev.vars   # the API's URL and a publishable key
+pnpm install
+pnpm dev                    # http://localhost:3002
+```
+
+`create` copies the storefront out of the release that matches the CLI, with its
+`@hyphacommerce/*` dependencies at that release's published versions, so the project is
+yours from the first commit: its look lives in one theme file (`theme/shopTheme.ts`), and
+every page is ordinary React. It runs on Node or on Cloudflare Workers
+(`cloudflare.config.ts`), and `hypha deploy` can host it beside the API.
 
 ## Build your own with the SDK
 

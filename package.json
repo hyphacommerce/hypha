@@ -22,7 +22,8 @@
     "fmt:check": "vp fmt --check",
     "lint:react": "react-doctor -y --no-telemetry",
     "packages:build": "pnpm -r --filter './packages/*' run build",
-    "packages:check": "pnpm packages:build && node scripts/check-packages.mjs"
+    "packages:check": "pnpm packages:build && node scripts/check-packages.mjs",
+    "starters:check": "pnpm packages:build && node scripts/check-starters.mjs"
   },
   "devDependencies": {
     "react-doctor": "0.9.18",

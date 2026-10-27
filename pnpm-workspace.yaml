@@ -3,6 +3,9 @@
 packages:
   - "apps/*"
   - "packages/*"
+  # Starters `hypha create` copies out (packages/cli/src/create.ts); in the workspace so
+  # they're built, linted and type-checked with it.
+  - "starters/*"
 # pnpm holds back packages published very recently (a supply-chain guard). These exact
 # versions are the ones the TypeScript apps pin, newer than that window when chosen;
 # listing them is a deliberate exception, to drop as they age.
