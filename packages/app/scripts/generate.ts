@@ -7,7 +7,8 @@
 // operation has it; otherwise the name is the webhook's key, or the path without its
 // slashes and a trailing `/v<n>`, and the version that `/v<n>` (1 without one). The
 // request is the operation's JSON request body, the response its 200's JSON body; when a
-// point has several versions, the newest is the one handlers are typed with.
+// point has several versions, the newest is the one handlers are typed with, and the one
+// `EXTENSION_POINT_VERSIONS` names, so a handler answers it unless it opts out.
 //
 // The document is committed (`cargo run -p hypha-host-axum -- openapi` writes it):
 // without it, generating fails.
@@ -78,7 +79,8 @@ async function render(): Promise<string> {
   const document: unknown = JSON.parse(text);
   if (!isRecord(document)) throw new Error("openapi/extensions.json isn't a JSON object");
   const ast = await openapiTS(new URL(source));
-  const map = points(document)
+  const found = points(document);
+  const map = found
     .map(
       ({ name, version, access }) =>
         `  ${JSON.stringify(name)}: {\n` +
@@ -88,10 +90,15 @@ async function render(): Promise<string> {
         `  };\n`,
     )
     .join("");
+  const versions = found
+    .map(({ name, version }) => `  ${JSON.stringify(name)}: ${version},\n`)
+    .join("");
   return (
     HEADER +
     astToString(ast) +
-    `\n/** Each point's newest version and bodies. */\nexport interface ExtensionPoints {\n${map}}\n`
+    `\n/** Each point's newest version and bodies. */\nexport interface ExtensionPoints {\n${map}}\n` +
+    `\n/** The version of each point this build of Hypha calls: what a handler answers by default. */\n` +
+    `export const EXTENSION_POINT_VERSIONS: { [P in keyof ExtensionPoints]: ExtensionPoints[P]["version"] } = {\n${versions}};\n`
   );
 }
 

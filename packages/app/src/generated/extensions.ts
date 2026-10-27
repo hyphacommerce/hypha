@@ -984,3 +984,15 @@ export interface ExtensionPoints {
     response: webhooks["shipping.rates"]["post"]["responses"][200]["content"]["application/json"];
   };
 }
+
+/** The version of each point this build of Hypha calls: what a handler answers by default. */
+export const EXTENSION_POINT_VERSIONS: { [P in keyof ExtensionPoints]: ExtensionPoints[P]["version"] } = {
+  "admin.action": 1,
+  "payments.capture": 1,
+  "payments.refund": 1,
+  "payments.start": 2,
+  "payments.status": 1,
+  "payments.void": 1,
+  "search.query": 1,
+  "shipping.rates": 1,
+};
