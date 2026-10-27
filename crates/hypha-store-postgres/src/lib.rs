@@ -63,3 +63,5 @@ pub use migrate::{CORE, MigrateError, Migration, MigrationSet, migrate};
 pub use store::{
     Db, PREVIEW_LEFT_OPEN, PgConnection, PgPreview, PgStore, Queries, StatementCache, StoreConn,
 };
+/// The driver, for a spore's repositories: `types::{Type, ToSql}`, `Row`.
+pub use tokio_postgres;

@@ -144,7 +144,17 @@ impl ApiError {
         self.status
     }
 
-    pub(crate) fn with_details(mut self, details: Option<serde_json::Value>) -> Self {
+    /// An error of a spore's own: its `ErrorCode` as the code, its `Display` as the message.
+    /// A 5xx hides the message like `internal` does.
+    pub fn of(status: StatusCode, error: &(impl ErrorCode + std::fmt::Display)) -> Self {
+        if status.is_server_error() {
+            return Self::internal(error);
+        }
+        Self::new(status, error.code(), error)
+    }
+
+    /// With `details`: the data a client acts on, for the codes that have any.
+    pub fn with_details(mut self, details: Option<serde_json::Value>) -> Self {
         self.details = details;
         self
     }
@@ -607,6 +617,13 @@ impl From<CurrencyError> for ApiError {
 }
 
 /// A read outside a command (loading a product's assets for its response).
+/// A scope a spore's handler required of the caller and found missing: 403.
+impl From<hypha_core::AuthError> for ApiError {
+    fn from(e: hypha_core::AuthError) -> Self {
+        Self::of(StatusCode::FORBIDDEN, &e)
+    }
+}
+
 impl From<RepoError> for ApiError {
     fn from(e: RepoError) -> Self {
         match e {
