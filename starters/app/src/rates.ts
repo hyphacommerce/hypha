@@ -1,7 +1,8 @@
-// The `shipping.rates` extension point: Hypha asks for quotes while a shopper checks out,
-// and shows what's answered beside its own zones' rates. This one quotes a flat rate per
-// currency; a real carrier integration would call the carrier here (within the point's
-// timeout, 3 seconds by default).
+// The `shipping.rates` extension point: Hypha asks for a quote while a shopper checks out,
+// for each shipping option whose rate names one of this app's services (see the README),
+// and shows the answer beside the zone's other offers. This one quotes a flat rate in the
+// cart's currency; a real carrier integration would call the carrier here (within the
+// point's timeout, 3 seconds by default).
 
 import { type ShippingRatesResponse, defineExtensionHandler } from "@hyphacommerce/app";
 

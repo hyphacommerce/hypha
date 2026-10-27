@@ -18,7 +18,12 @@ or `HYPHA_ALLOW_PRIVATE_CALLBACKS=true`).
 - `src/installations.ts`: where each store's tokens and secret live. In memory here: give it a
   database before anyone installs the app for real.
 - `src/rates.ts`: the extension handler. Add one `defineExtensionHandler` per point you answer
-  and list it in `src/app.ts`.
+  and list it in `src/app.ts`. Hypha asks an app for rates only for shipping options that name
+  one of its services: register the app as a provider (`POST /admin/shipping-providers` with
+  `{"key": "app_starter", "callback_url": "<app_url>/hypha/extensions", "services": [{"code":
+  "starter_flat", "name": "Flat rate"}]}`) and add an option with `rate: {"type": "provider",
+  "provider": "app_starter", "service": "starter_flat"}` to a shipping zone; the quote then
+  shows among the zone's offers, and every call is in the app's call log in the admin.
 - `src/node.ts`, `src/worker.ts`: the hosts; `wrangler.toml.example` and the `Dockerfile` deploy
   them. Once it keeps installations in a database (D1 on Workers, a volume on a server),
   `hypha apps add <this repository's URL>` deploys the app beside a Hypha deployment.
