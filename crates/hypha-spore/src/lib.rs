@@ -98,6 +98,17 @@ pub mod payments {
     };
 }
 
+/// Products: reading them (a spore that keeps data beside a product, or shows one).
+pub mod products {
+    pub use hypha_products::{HasProducts, Product, ProductRepo, ProductStatus};
+}
+
+/// Customer accounts: the signed-in shopper a storefront route of the spore serves
+/// (`http::CustomerCaller` authenticates one), and `own`, the context that acts as them.
+pub mod customer_accounts {
+    pub use hypha_customer_accounts::{CustomerSession, Owned, own};
+}
+
 /// Orders: reading them.
 pub mod orders {
     pub use hypha_orders::{
@@ -126,12 +137,15 @@ pub mod order_actions {
 /// `spore_repo_error` maps its unique constraints to `RepoError::Duplicate`.
 #[cfg(feature = "postgres")]
 pub mod postgres {
+    /// The driver's types a query takes and answers (`types::Type`, `types::ToSql`, `Row`).
+    pub use hypha_store_postgres::tokio_postgres;
     pub use hypha_store_postgres::{Db, PgConnection, PgStore, Queries, spore_repo_error};
 }
 
 /// The HTTP kit (feature `http`): a spore's handlers take `State<SharedState<S>>` and a
-/// `Caller` like core's, and call `caller.authenticate(&state)` for their ports and
-/// `Ctx`.
+/// `Caller` like core's (`CustomerCaller` for a storefront route that needs the shopper
+/// signed in), and call `caller.authenticate(&state)` for their ports and `Ctx`. A
+/// spore's own errors are answered with `ApiError::of(status, &error)`.
 #[cfg(feature = "http")]
 pub mod http {
     /// The web framework handlers are written with (extractors such as the raw body and
@@ -141,7 +155,11 @@ pub mod http {
     /// DTOs (`use hypha_spore::http::utoipa;`), which the host's `openapi` command reads.
     pub use hypha_http::__private::utoipa;
     pub use hypha_http::error::ApiError;
-    pub use hypha_http::extract::{Admin, Caller, JsonBody, PathId, Query, Storefront};
+    pub use hypha_http::extract::{
+        Admin, Caller, CustomerCaller, JsonBody, PathId, Query, Storefront,
+    };
+    /// A time as every API response writes one (RFC 3339, UTC).
+    pub use hypha_http::routes::rfc3339;
     pub use hypha_http::spore_routes;
     pub use hypha_http::spores::{SporeSurface, spore};
     pub use hypha_http::state::{AppState, SharedState, Storage};

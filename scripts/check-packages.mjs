@@ -5,33 +5,24 @@
 // type-checks against the shipped declarations. Run by CI; `pnpm packages:check` locally.
 
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const repo = fileURLToPath(new URL("..", import.meta.url));
-const packagesDir = join(repo, "packages");
+import {
+  cleanLicenses,
+  overridesYaml,
+  packPackages,
+  publishablePackages,
+} from "./lib/pack-packages.mjs";
+
 const work = mkdtempSync(join(tmpdir(), "hypha-packages-"));
 const run = (cmd, args, cwd = work) =>
   execFileSync(cmd, args, { cwd, stdio: ["ignore", "pipe", "inherit"], encoding: "utf8" });
 
 try {
-  // Publishable packages: not `private`.
-  const packages = readdirSync(packagesDir)
-    .map((dir) => ({ dir: join(packagesDir, dir), manifest: null }))
-    .map((p) => ({ ...p, manifest: JSON.parse(readFileSync(join(p.dir, "package.json"), "utf8")) }))
-    .filter((p) => !p.manifest.private);
-
-  const tarballs = new Map();
-  for (const p of packages) {
-    // The licence files travel with each package (listed in its `files`).
-    for (const name of ["LICENSE-MIT", "LICENSE-APACHE"])
-      cpSync(join(repo, name), join(p.dir, name));
-    const out = run("pnpm", ["pack", "--pack-destination", work, "--json"], p.dir);
-    const { filename } = JSON.parse(out.slice(out.indexOf("{")));
-    tarballs.set(p.manifest.name, `file:${filename}`);
-  }
+  const packages = publishablePackages();
+  const tarballs = packPackages(work);
 
   // Peer dependencies the exports need at import time.
   const peers = {
@@ -58,10 +49,8 @@ try {
   // (pnpm reads overrides from pnpm-workspace.yaml).
   writeFileSync(
     join(work, "pnpm-workspace.yaml"),
-    'minimumReleaseAge: 0\n# Astryx\'s install script only prints a hint.\nallowBuilds:\n  "@astryxdesign/core": false\noverrides:\n' +
-      [...tarballs]
-        .map(([name, spec]) => `  ${JSON.stringify(name)}: ${JSON.stringify(spec)}\n`)
-        .join(""),
+    'minimumReleaseAge: 0\n# Astryx\'s install script only prints a hint.\nallowBuilds:\n  "@astryxdesign/core": false\n' +
+      overridesYaml(tarballs),
   );
   run("pnpm", ["install", "--no-frozen-lockfile"]);
 
@@ -110,8 +99,5 @@ try {
   console.log(`ok: ${packages.length} packages, ${imports.length} exports`);
 } finally {
   rmSync(work, { recursive: true, force: true });
-  for (const dir of readdirSync(packagesDir)) {
-    for (const name of ["LICENSE-MIT", "LICENSE-APACHE"])
-      rmSync(join(packagesDir, dir, name), { force: true });
-  }
+  cleanLicenses();
 }

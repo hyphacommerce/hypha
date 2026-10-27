@@ -5,7 +5,7 @@
 // Node through any Request/Response adapter) that checks the signature and dispatches by
 // `Hypha-Extension` to the handlers defined with `defineExtensionHandler`.
 
-import type { ExtensionPoints } from "./generated/extensions.ts";
+import { EXTENSION_POINT_VERSIONS, type ExtensionPoints } from "./generated/extensions.ts";
 import { DEFAULT_TOLERANCE_SECONDS, SIGNATURE_HEADER, verifySignature } from "./signature.ts";
 
 export type PointName = keyof ExtensionPoints;
@@ -36,18 +36,23 @@ export type ExtensionHandlerFn<P extends PointName> = (
 
 export interface ExtensionHandler<P extends PointName = PointName> {
   point: P;
-  /** The versions this handler answers. */
+  /** The versions this handler answers; by default the one this SDK's Hypha calls. */
   versions: readonly number[];
   handle: ExtensionHandlerFn<P>;
 }
 
-/** One point's handler, typed by the point's request and response. */
+/**
+ * One point's handler, typed by the point's request and response. Without `versions` it
+ * answers the version the SDK's types describe (`EXTENSION_POINT_VERSIONS`), which is the
+ * one the matching Hypha calls; an app that keeps answering an older one lists both and
+ * branches on `context.version`, since `body` is typed by the newest version only.
+ */
 export function defineExtensionHandler<P extends PointName>(
   point: P,
   handle: ExtensionHandlerFn<P>,
   options: { versions?: readonly number[] } = {},
 ): ExtensionHandler<P> {
-  return { point, versions: options.versions ?? [1], handle };
+  return { point, versions: options.versions ?? [EXTENSION_POINT_VERSIONS[point]], handle };
 }
 
 /** Thrown from a handler to answer a specific error instead of a 500. */
@@ -122,7 +127,9 @@ export function extensionHandler(
     const handler = byPoint.get(point);
     if (!handler)
       return failure(404, "unknown_extension", `no handler for ${JSON.stringify(point)}`);
-    const version = Number(request.headers.get(EXTENSION_VERSION_HEADER) ?? "1");
+    // Hypha always names the version; without the header, the handler's first stands.
+    const header = request.headers.get(EXTENSION_VERSION_HEADER);
+    const version = header === null ? (handler.versions[0] ?? 1) : Number(header);
     if (!handler.versions.includes(version))
       return failure(400, "unsupported_version", `${point} v${version} isn't supported`);
 
