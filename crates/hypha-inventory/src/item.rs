@@ -187,7 +187,7 @@ impl InventoryItem {
     /// Sets the count at `location`, e.g. after counting the shelf.
     ///
     /// With `expected`, the change only happens if `on_hand` is still what the caller
-    /// last saw (Shopify's `changeFromQuantity`, I10): a sale in between isn't silently
+    /// last saw (Shopify's `changeFromQuantity`): a sale in between isn't silently
     /// overwritten. A location without a level counts as 0.
     pub fn set_on_hand(
         &mut self,
@@ -713,6 +713,11 @@ mod tests {
     }
 
     #[test]
+    fn max_stock_is_the_largest_exact_json_number() {
+        assert_eq!(MAX_STOCK, hypha_core::Money::MAX_AMOUNT);
+    }
+
+    #[test]
     fn adjust_reports_overflow_instead_of_wrapping() {
         let mut i = item(&[(1, -MAX_STOCK)]);
         assert_eq!(
@@ -947,13 +952,22 @@ mod tests {
 
     #[test]
     fn fulfilling_a_split_line_takes_here_first_then_elsewhere() {
-        // 2 reserved at 1 and 2 at 2 (I9 split); 3 leave from location 2.
+        // 2 reserved at 1 and 2 at 2 (a split line); 3 leave from location 2.
         let mut item = item(&[(1, 2), (2, 2)]);
         item.reserve(&reference("a"), qty(4), &[location(1, 0), location(2, 1)])
             .unwrap();
         item.fulfil(&reference("a"), loc_id(2), qty(3)).unwrap();
         assert_eq!(held_by(&item, "a"), [(loc_id(1), 1)]);
         assert_eq!(item.on_hand(loc_id(2)), -1);
+    }
+
+    #[test]
+    fn fulfilling_a_whole_split_line_here_releases_the_rest_elsewhere() {
+        let mut item = item(&[(1, 2), (2, 3)]);
+        item.reserve(&reference("a"), qty(5), &[location(1, 0), location(2, 1)])
+            .unwrap();
+        item.fulfil(&reference("a"), loc_id(1), qty(5)).unwrap();
+        assert_eq!(held_by(&item, "a"), []);
     }
 
     #[test]
