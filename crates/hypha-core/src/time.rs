@@ -48,6 +48,10 @@ impl Timestamp {
 }
 
 /// A duration's whole microseconds, capped at `i64::MAX`.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "checked against `i64::MAX` first"
+)]
 const fn micros(duration: Duration) -> i64 {
     let micros = duration.as_micros();
     if micros > i64::MAX as u128 {

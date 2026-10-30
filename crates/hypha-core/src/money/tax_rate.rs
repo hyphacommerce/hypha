@@ -162,6 +162,6 @@ mod tests {
         assert_eq!(
             rate(200_000).tax_on_net(rsd),
             Ok(Money::new(200, Currency::RSD).unwrap())
-        )
+        );
     }
 }

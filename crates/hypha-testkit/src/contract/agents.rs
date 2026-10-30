@@ -371,16 +371,16 @@ async fn proposal_round_trip<S: HasAgents + HasProposals>(ports: &S) {
     let decisions: [(u128, Decide); 5] = [
         (3, |p| {
             p.start_applying(user(1), at(4)).unwrap();
-            p.applied(user(1), at(5), response()).unwrap()
+            p.applied(user(1), at(5), response()).unwrap();
         }),
         (4, |p| {
             p.start_applying(user(1), at(4)).unwrap();
-            p.failed(user(1), at(5), response()).unwrap()
+            p.failed(user(1), at(5), response()).unwrap();
         }),
         (8, |p| p.start_applying(user(1), at(4)).unwrap()),
         (5, |p| {
             p.reject(user(2), at(5), Some("Not now".to_string()))
-                .unwrap()
+                .unwrap();
         }),
         (6, |p| p.expire(at(100)).unwrap()),
     ];

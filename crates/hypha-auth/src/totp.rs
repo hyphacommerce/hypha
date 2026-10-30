@@ -21,7 +21,7 @@ pub fn step_at(now: Timestamp) -> u64 {
 
 /// The code for `step` (HOTP, RFC 4226 section 5.3).
 pub fn code_at(secret: &[u8], step: u64) -> u32 {
-    // HMAC takes keys of any length, so this can't fail.
+    #[expect(clippy::expect_used, reason = "HMAC takes keys of any length")]
     let mut mac = Hmac::<Sha1>::new_from_slice(secret).expect("HMAC accepts any key length");
     mac.update(&step.to_be_bytes());
     let digest = mac.finalize().into_bytes();

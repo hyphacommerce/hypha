@@ -125,7 +125,7 @@ pub trait ActingAs {
 
 impl<T: ActingAs + ?Sized> ActingAs for &T {
     fn act_as(&self, actor: Actor) {
-        (**self).act_as(actor)
+        (**self).act_as(actor);
     }
 }
 
@@ -144,7 +144,7 @@ pub trait SignalsDispatch {
 
 impl<T: SignalsDispatch + ?Sized> SignalsDispatch for &T {
     fn on_dispatch_work(&self, hook: DispatchHook) {
-        (**self).on_dispatch_work(hook)
+        (**self).on_dispatch_work(hook);
     }
 }
 

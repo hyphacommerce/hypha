@@ -142,11 +142,11 @@ pub(crate) struct Prefixed<'a> {
 }
 
 impl<'a> Prefixed<'a> {
-    pub fn plain(row: &'a Row) -> Self {
+    pub(crate) fn plain(row: &'a Row) -> Self {
         Prefixed { row, prefix: "" }
     }
 
-    pub fn col<T: FromSql<'a>>(&self, name: &str) -> Result<T, RepoError> {
+    pub(crate) fn col<T: FromSql<'a>>(&self, name: &str) -> Result<T, RepoError> {
         if self.prefix.is_empty() {
             col(self.row, name)
         } else {

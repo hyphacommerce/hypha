@@ -241,7 +241,7 @@ mod tests {
             id: ApiKeyId::from_uuid(Uuid::from_u128(1)),
             kind,
             name: " Importer ".to_string(),
-            scopes: scopes.clone(),
+            scopes,
             channel: (kind == ApiKeyKind::Publishable)
                 .then(|| hypha_core::ChannelId::from_uuid(Uuid::from_u128(9))),
             created_by: Actor::System,

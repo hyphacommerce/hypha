@@ -4,7 +4,10 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    reason = "a failing test panics"
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
 )]
 use hypha_channels::ChannelRepo;
 use hypha_channels::{
@@ -84,7 +87,7 @@ fn publishing_records_only_what_changed() {
     let w = World::new();
     let web = w.create("Web").unwrap();
     let publish = |products: Vec<ProductId>| {
-        block_on(publish_products(&w.ctx, &w.ports, web, products)).unwrap()
+        block_on(publish_products(&w.ctx, &w.ports, web, products)).unwrap();
     };
     publish(vec![pid(1), pid(2), pid(1)]);
     publish(vec![pid(2), pid(3)]);

@@ -56,7 +56,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
                 match (&after.key, sort) {
                     (SortKey::Id, OrderSort::Newest | OrderSort::Oldest) => {}
                     (SortKey::Int(n), OrderSort::TotalDesc | OrderSort::TotalAsc) => {
-                        total_key = Some(*n)
+                        total_key = Some(*n);
                     }
                     (key, sort) => {
                         return Err(RepoError::Backend(format!(

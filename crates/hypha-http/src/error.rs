@@ -560,18 +560,18 @@ impl IntoResponse for ApiError {
 
 // ---------- details shared by several crates' errors ----------
 
-fn shortages(lines: impl IntoIterator<Item = (VariantId, u32, i64)>) -> Option<Value> {
+fn shortages(lines: impl IntoIterator<Item = (VariantId, u32, i64)>) -> Value {
     let lines: Vec<_> = lines
         .into_iter()
         .map(|(variant, requested, available)| {
             json!({ "variant": variant, "requested": requested, "available": available })
         })
         .collect();
-    Some(json!({ "lines": lines }))
+    json!({ "lines": lines })
 }
 
-fn completed(order: OrderId) -> Option<Value> {
-    Some(json!({ "order": order }))
+fn completed(order: OrderId) -> Value {
+    json!({ "order": order })
 }
 
 // ---------- axum's own rejections (bad JSON, bad path IDs) ----------
@@ -984,8 +984,8 @@ impl From<hypha_cart::CommandError> for ApiError {
                 variant,
                 requested,
                 available,
-            }) => shortages([(*variant, *requested, *available)]),
-            E::Cart(CartError::Completed { order }) => completed(*order),
+            }) => Some(shortages([(*variant, *requested, *available)])),
+            E::Cart(CartError::Completed { order }) => Some(completed(*order)),
             E::ShippingOptionNotOffered { reason, .. } => Some(json!({ "reason": reason.code() })),
             _ => None,
         };
@@ -1046,9 +1046,9 @@ impl From<hypha_inventory::CommandError> for ApiError {
             ) => StatusCode::CONFLICT,
         };
         let details = match &e {
-            E::OutOfStock { lines } => {
-                shortages(lines.iter().map(|l| (l.variant, l.requested, l.available)))
-            }
+            E::OutOfStock { lines } => Some(shortages(
+                lines.iter().map(|l| (l.variant, l.requested, l.available)),
+            )),
             _ => None,
         };
         Self::domain(status, e).with_details(details)
@@ -1478,7 +1478,7 @@ impl From<hypha_checkout::CommandError> for ApiError {
             ) => StatusCode::CONFLICT,
         };
         let details = match &e {
-            E::CartCompleted { order, .. } => completed(*order),
+            E::CartCompleted { order, .. } => Some(completed(*order)),
             E::Unavailable { lines } => Some(json!({ "lines": lines })),
             E::ShippingUnavailable(problem) => Some(json!({ "reason": problem.code() })),
             E::TotalChanged { expected, actual } => {

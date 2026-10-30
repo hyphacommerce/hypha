@@ -870,15 +870,14 @@ mod tests {
 
     #[test]
     fn a_note_is_at_most_max_note_len_characters() {
-        let p = pending();
+        let mut p = pending();
         assert!(
             p.clone()
                 .reject(user(), at(1), Some("é".repeat(MAX_NOTE_LEN)))
                 .is_ok()
         );
         assert_eq!(
-            p.clone()
-                .reject(user(), at(1), Some("é".repeat(MAX_NOTE_LEN + 1))),
+            p.reject(user(), at(1), Some("é".repeat(MAX_NOTE_LEN + 1))),
             Err(ProposalError::NoteTooLong { max: MAX_NOTE_LEN })
         );
     }

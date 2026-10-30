@@ -90,10 +90,10 @@ impl<C: PgConnection> ProductRepo for PgStore<C> {
                 match (&after.key, sort) {
                     (SortKey::Id, ProductSort::Newest | ProductSort::Oldest) => {}
                     (SortKey::Text(t), ProductSort::TitleAsc | ProductSort::TitleDesc) => {
-                        text_key = Some(t.clone())
+                        text_key = Some(t.clone());
                     }
                     (SortKey::Time(t), ProductSort::UpdatedDesc | ProductSort::UpdatedAsc) => {
-                        time_key = Some(t.unix_micros())
+                        time_key = Some(t.unix_micros());
                     }
                     (key, sort) => {
                         return Err(RepoError::Backend(format!(

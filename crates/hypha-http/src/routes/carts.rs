@@ -464,7 +464,7 @@ impl From<&hypha_cart::promotions::CodeOutcome> for CartDiscountCodeResponse {
                         subtotal: None,
                         quantity: Some(n),
                     },
-                })
+                });
             }
             CodeState::BlockedByOther { discount } => response.discount = Some(discount),
             CodeState::Applied

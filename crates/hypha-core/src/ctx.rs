@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn require_accepts_granted_scope() {
-        assert_eq!(reader().require(Scope::ProductsRead), Ok(()))
+        assert_eq!(reader().require(Scope::ProductsRead), Ok(()));
     }
 
     #[test]
@@ -181,7 +181,7 @@ mod tests {
     fn system_has_every_scope() {
         let ctx = Ctx::system();
         for scope in Scope::ALL {
-            assert_eq!(ctx.require(scope), Ok(()), "{scope:?}")
+            assert_eq!(ctx.require(scope), Ok(()), "{scope:?}");
         }
     }
 }

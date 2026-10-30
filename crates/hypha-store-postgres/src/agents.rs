@@ -180,6 +180,10 @@ pub(crate) async fn update_agent(
 
 /// `WHERE …` for a newest-first page after `after`, given the conditions so far and their
 /// parameters; appends the cursor and the limit (one more than the page, to see past it).
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "the query borrows its parameters for `'a`"
+)]
 fn paged<'a>(
     mut conditions: Vec<String>,
     params: &mut Vec<Param<'a>>,

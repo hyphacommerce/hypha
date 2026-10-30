@@ -597,6 +597,10 @@ impl Evaluation {
 }
 
 /// `round(amount × bp / 10000)`, half away from zero; `amount` is never negative.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "a percentage is at most 100%, so the result is at most `amount`"
+)]
 fn percent_of(amount: i64, bp: i32) -> i64 {
     let n = i128::from(amount) * i128::from(bp);
     let mut q = n / 10_000;
@@ -610,6 +614,11 @@ fn percent_of(amount: i64, bp: i32) -> i64 {
 /// part rounded down, and the units left go to the largest fractional parts, ties to the
 /// earlier index, so the shares sum to `total` exactly. `total` is at most the weights'
 /// sum, so no share passes its weight; with no weight, nothing is shared.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "each share is at most its weight, and fewer units are left than weights"
+)]
 pub fn spread(total: i64, weights: &[i64]) -> Vec<i64> {
     let sum: i128 = weights.iter().map(|w| i128::from(*w)).sum();
     if sum <= 0 || total <= 0 {
@@ -677,7 +686,9 @@ fn minimums(d: &Discount, input: &DiscountInput<'_>, amounts: &[i64]) -> Result<
                     .sum();
                 if have < u64::from(*n) {
                     return Err(CodeState::MinimumNotMet {
-                        needed: Needed::Quantity((u64::from(*n) - have) as u32),
+                        needed: Needed::Quantity(
+                            u32::try_from(have).map_or(0, |have| n.saturating_sub(have)),
+                        ),
                     });
                 }
             }
@@ -780,7 +791,9 @@ fn evaluate(input: &DiscountInput<'_>, candidates: &[Live<'_>], set: &[usize]) -
                             Threshold::Quantity(n) => {
                                 let units: u64 =
                                     eligible.iter().map(|i| u64::from(lines[*i].quantity)).sum();
-                                Needed::Quantity((u64::from(*n).saturating_sub(units)) as u32)
+                                Needed::Quantity(
+                                    u32::try_from(units).map_or(0, |units| n.saturating_sub(units)),
+                                )
                             }
                             Threshold::Amount(a) => {
                                 let spent: i64 = eligible.iter().map(|i| bases[*i]).sum();
@@ -888,7 +901,7 @@ fn evaluate(input: &DiscountInput<'_>, candidates: &[Live<'_>], set: &[usize]) -
             .then_with(|| x.reward.cmp(&y.reward))
             .then_with(|| a.line.cmp(&b.line))
     });
-    let mut left: Vec<i64> = bases.clone();
+    let mut left: Vec<i64> = bases;
     for p in &proposals {
         let take = p.amount.min(left[p.line]).max(0);
         left[p.line] -= take;

@@ -154,7 +154,7 @@ impl TaxRegion {
             if region.class_rates.iter().any(|r| r.class == rate.class) {
                 return Err(RestoreError::DuplicateClassRate(rate.class));
             }
-            region.class_rates.push(rate)
+            region.class_rates.push(rate);
         }
         region.version = s.version;
         region.stamps = s.stamps;
@@ -216,7 +216,7 @@ mod tests {
                 class: class(2),
                 rate: rate(130_000)
             }]
-        )
+        );
     }
 
     #[test]

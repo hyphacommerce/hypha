@@ -7,7 +7,10 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    reason = "a failing test panics"
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
 )]
 use futures_util::future::join_all;
 use hypha_core::{CustomFieldDefinitionId, CustomerId, Version};

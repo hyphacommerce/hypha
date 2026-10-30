@@ -13,10 +13,12 @@ use governor::{
 use hypha_config::RateLimits;
 use hypha_http::rate_limit::{Decision, RateLimiter, Rule};
 
+#[expect(
+    clippy::panic,
+    reason = "the configuration's checks keep every period and burst above zero (`hypha_config::Config::load`)"
+)]
 fn governor_quota(rule: Rule, limits: &RateLimits) -> Quota {
     let (burst, every) = rule.quota(limits);
-    // The configuration's checks keep every period and burst above zero
-    // (`hypha_config::Config::load`).
     Quota::with_period(every)
         .and_then(|q| NonZeroU32::new(burst).map(|b| q.allow_burst(b)))
         .unwrap_or_else(|| panic!("invalid quota for {rule:?}"))
@@ -28,7 +30,7 @@ type Keyed<C> =
 /// Counts in this process: right for one instance (0006's model A on a VPS). Its keyed
 /// state grows with every new key, so `forget_idle` must run every so often (the host
 /// does it once a minute); otherwise rotating addresses would grow memory without bound.
-pub struct MemoryRateLimiter<C: Clock = DefaultClock> {
+pub(crate) struct MemoryRateLimiter<C: Clock = DefaultClock> {
     clock: C,
     /// One per rule, at `rule as usize`.
     limiters: [Keyed<C>; Rule::ALL.len()],
@@ -36,14 +38,14 @@ pub struct MemoryRateLimiter<C: Clock = DefaultClock> {
 
 impl MemoryRateLimiter {
     /// With `limits`' quotas, on the real clock.
-    pub fn new(limits: &RateLimits) -> Self {
+    pub(crate) fn new(limits: &RateLimits) -> Self {
         Self::with_clock(limits, DefaultClock::default())
     }
 }
 
 impl<C: Clock + Clone> MemoryRateLimiter<C> {
     /// With another clock: tests use `governor::clock::FakeRelativeClock` and step it.
-    pub fn with_clock(limits: &RateLimits, clock: C) -> Self {
+    pub(crate) fn with_clock(limits: &RateLimits, clock: C) -> Self {
         let limiters = Rule::ALL
             .map(|rule| Governor::dashmap_with_clock(governor_quota(rule, limits), clock.clone()));
         Self { clock, limiters }
@@ -54,7 +56,7 @@ impl<C: Clock + Clone> MemoryRateLimiter<C> {
     }
 
     /// Drops the keys whose state is back to fresh, and frees the memory they held.
-    pub fn forget_idle(&self) {
+    pub(crate) fn forget_idle(&self) {
         for limiter in &self.limiters {
             limiter.retain_recent();
             limiter.shrink_to_fit();
@@ -63,7 +65,7 @@ impl<C: Clock + Clone> MemoryRateLimiter<C> {
 
     /// How many keys `rule` is tracking.
     #[cfg(test)]
-    pub fn tracked(&self, rule: Rule) -> usize {
+    pub(crate) fn tracked(&self, rule: Rule) -> usize {
         self.limiter(rule).len()
     }
 }

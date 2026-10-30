@@ -14,7 +14,7 @@ use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 /// Builds the sender `config` names, reading its secret through `env`
 /// (`HYPHA_SMTP_PASSWORD`, `HYPHA_RESEND_API_KEY`), and says which is in effect. An
 /// error names what's missing, for startup to stop on.
-pub fn email_sender(
+pub(crate) fn email_sender(
     config: &EmailConfig,
     env: impl Fn(&str) -> Option<String>,
 ) -> Result<HostMail, String> {
@@ -59,17 +59,17 @@ pub fn email_sender(
 /// Sends over SMTP: any provider's server, or Mailpit locally. Connections are pooled
 /// and reused between emails.
 #[derive(Clone)]
-pub struct SmtpSender {
+pub(crate) struct SmtpSender {
     transport: AsyncSmtpTransport<Tokio1Executor>,
 }
 
 impl SmtpSender {
     /// How long connecting and each command may take.
-    pub const TIMEOUT: Duration = hypha_notifications::SEND_TIMEOUT;
+    pub(crate) const TIMEOUT: Duration = hypha_notifications::SEND_TIMEOUT;
 
     /// `password` is `HYPHA_SMTP_PASSWORD`, needed with `username` and only with it.
     /// Call it inside the Tokio runtime: the connection pool runs (and is dropped) there.
-    pub fn new(config: &SmtpConfig, password: Option<String>) -> Result<Self, String> {
+    pub(crate) fn new(config: &SmtpConfig, password: Option<String>) -> Result<Self, String> {
         let host = config.host.as_str();
         let builder = match config.tls {
             SmtpTls::None => AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(host),
@@ -103,7 +103,7 @@ impl SmtpSender {
 
 /// `email` as a MIME message: text and HTML as alternatives, the shop's name with its
 /// address. An address `lettre` can't write is refused for good.
-pub fn message(email: &OutgoingEmail) -> Result<Message, SendError> {
+pub(crate) fn message(email: &OutgoingEmail) -> Result<Message, SendError> {
     let address = |a: &str| {
         a.parse::<lettre::Address>()
             .map_err(|e| SendError::Permanent(format!("{a:?} can't be sent to: {e}")))

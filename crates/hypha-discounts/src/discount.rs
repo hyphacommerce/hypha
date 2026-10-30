@@ -1021,7 +1021,7 @@ fn check_conditions(conditions: &[Condition], p: &mut Problems) {
             Condition::Customers(ids) => check_ids(ids, &format!("{path}.customers"), p),
             Condition::SignedIn => {}
             Condition::MinSubtotal(amounts) => {
-                check_amounts(amounts, &format!("{path}.amounts"), false, p)
+                check_amounts(amounts, &format!("{path}.amounts"), false, p);
             }
             Condition::MinQuantity(n) => {
                 if *n == 0 {
@@ -1184,7 +1184,7 @@ fn check_kind(kind: &Kind, p: &mut Problems) {
                     ),
                     (Threshold::Quantity(_), Measure::Quantity) => {}
                     (Threshold::Amount(amounts), Measure::Subtotal) => {
-                        check_amounts(amounts, &format!("{path}.threshold.amounts"), false, p)
+                        check_amounts(amounts, &format!("{path}.threshold.amounts"), false, p);
                     }
                     _ => p.add(
                         format!("{path}.threshold"),
@@ -1194,7 +1194,7 @@ fn check_kind(kind: &Kind, p: &mut Problems) {
                 }
                 match &tier.value {
                     Value::Percent(bp) => {
-                        check_percent(*bp, &format!("{path}.value.basis_points"), p)
+                        check_percent(*bp, &format!("{path}.value.basis_points"), p);
                     }
                     Value::Amount {
                         amounts,

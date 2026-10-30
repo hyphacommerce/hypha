@@ -580,6 +580,10 @@ fn a_rate_sees_the_subtotal_after_discounts() {
 }
 
 /// Free shipping from 50.00, else 5.00.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the shape of a shipping rate function"
+)]
 fn free_over_fifty(subtotal: Money) -> Option<Money> {
     Some(eur(if subtotal.amount() >= 5000 { 0 } else { 500 }))
 }

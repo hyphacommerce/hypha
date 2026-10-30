@@ -9,7 +9,10 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    reason = "test support: a broken fixture panics the test using it"
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "test support: a broken fixture panics the test using it, and fixtures cast small counters"
 )]
 use std::time::Duration;
 

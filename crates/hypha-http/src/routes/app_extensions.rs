@@ -1174,12 +1174,12 @@ fn percent_decode(segment: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        let hex = |b: u8| (b as char).to_digit(16);
+        let hex = |b: u8| (b as char).to_digit(16).and_then(|d| u8::try_from(d).ok());
         if bytes[i] == b'%'
             && i + 2 < bytes.len()
             && let (Some(h), Some(l)) = (hex(bytes[i + 1]), hex(bytes[i + 2]))
         {
-            out.push((h * 16 + l) as u8);
+            out.push(h * 16 + l);
             i += 3;
             continue;
         }
@@ -1513,7 +1513,7 @@ mod tests {
             match target.surface() {
                 Surface::Admin => assert_eq!(Target::from(admin_target(target).unwrap()), target),
                 Surface::Storefront => {
-                    assert_eq!(Target::from(storefront_target(target).unwrap()), target)
+                    assert_eq!(Target::from(storefront_target(target).unwrap()), target);
                 }
             }
         }

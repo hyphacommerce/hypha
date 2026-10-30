@@ -212,6 +212,6 @@ mod tests {
     #[test]
     fn deserialize_rejects_wrong_prefix() {
         let json = format!("\"{}\"", VariantId::from_uuid(Uuid::from_u128(1)));
-        assert!(serde_json::from_str::<ProductId>(&json).is_err())
+        assert!(serde_json::from_str::<ProductId>(&json).is_err());
     }
 }

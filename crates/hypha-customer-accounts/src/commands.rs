@@ -172,9 +172,8 @@ pub async fn request_login_code<S: AccountPorts>(
     }
     let settings = *env.account_settings();
     for _ in 0..ROUNDS {
-        let mut identity = match find_identity(ports, env, &email).await? {
-            Some(identity) => identity,
-            None => continue,
+        let Some(mut identity) = find_identity(ports, env, &email).await? else {
+            continue;
         };
         let now = env.now();
         if let Some(issued) = identity.code_issued_at(settings.login_code_lifetime)

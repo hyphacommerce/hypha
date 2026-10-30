@@ -162,6 +162,7 @@ pub fn rows() -> Vec<Row> {
     crate::route_table!([openapi_rows]())
 }
 
+#[expect(clippy::panic, reason = "the route table only uses these five methods")]
 fn http_method(method: &str) -> HttpMethod {
     match method {
         "GET" => HttpMethod::Get,
@@ -169,7 +170,6 @@ fn http_method(method: &str) -> HttpMethod {
         "PUT" => HttpMethod::Put,
         "PATCH" => HttpMethod::Patch,
         "DELETE" => HttpMethod::Delete,
-        // The route table only uses the five above.
         other => panic!("route table method {other} has no OpenAPI mapping"),
     }
 }
@@ -464,6 +464,10 @@ fn add_preview_components(components: &mut utoipa::openapi::Components) {
 }
 
 /// `document_with` as JSON, as the committed file holds it (open enums marked).
+#[expect(
+    clippy::panic,
+    reason = "a document is plain data; serializing it can't fail"
+)]
 pub(crate) fn document_value_with(doc: Doc, extra: Vec<Row>) -> Value {
     let mut value = serde_json::to_value(document_with(doc, extra))
         .unwrap_or_else(|e| panic!("cannot serialize the OpenAPI document: {e}"));
@@ -482,8 +486,11 @@ pub fn document_json_with(doc: Doc, extra: Vec<Row>) -> String {
 }
 
 /// `api` as a committed file: open enums marked, pretty JSON and a final newline.
+#[expect(
+    clippy::panic,
+    reason = "a document is plain data; serializing it can't fail"
+)]
 fn pretty(api: OpenApi) -> String {
-    // A document is plain data; serializing it can't fail.
     let mut value = serde_json::to_value(api)
         .unwrap_or_else(|e| panic!("cannot serialize the OpenAPI document: {e}"));
     mark_open_enums(&mut value);
@@ -781,11 +788,13 @@ fn serve(doc: Doc) -> impl IntoResponse {
 }
 
 /// `GET /admin/openapi.json`.
+#[expect(clippy::unused_async, reason = "axum takes only async handlers")]
 pub async fn admin_document<S>(State(_): State<SharedState<S>>) -> impl IntoResponse {
     serve(Doc::Admin)
 }
 
 /// `GET /storefront/openapi.json`.
+#[expect(clippy::unused_async, reason = "axum takes only async handlers")]
 pub async fn storefront_document<S>(State(_): State<SharedState<S>>) -> impl IntoResponse {
     serve(Doc::Storefront)
 }

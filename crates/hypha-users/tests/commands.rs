@@ -2,7 +2,10 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    reason = "a failing test panics"
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
 )]
 
 use hypha_auth::SessionRepo;
@@ -1160,11 +1163,11 @@ fn an_unusable_invite_token_looks_up_nothing() {
     let invalid = Err(CommandError::Login(hypha_auth::CommandError::InvalidToken));
     assert_eq!(
         block_on(lookup_invite(&ports, &env, "hypha_inv_00")).map(|d| d.invite.id()),
-        invalid.clone()
+        invalid
     );
     assert_eq!(
         block_on(lookup_invite(&ports, &env, "hypha_sess_00")).map(|d| d.invite.id()),
-        invalid.clone()
+        invalid
     );
     env.advance_by(hypha_auth::AuthSettings::default().invite_lifetime);
     assert_eq!(

@@ -103,7 +103,7 @@ impl Catalog {
     /// Replaces the catalog's price lists with `lists`: each once, at most
     /// `MAX_PRICE_LISTS`. Records which were added and removed.
     pub fn set_price_lists(&mut self, lists: Vec<PriceListId>) -> Result<(), MarketError> {
-        let mut sorted = lists.clone();
+        let mut sorted = lists;
         sorted.sort();
         if let Some(twice) = sorted.windows(2).find(|w| w[0] == w[1]) {
             return Err(MarketError::DuplicatePriceList(twice[0]));

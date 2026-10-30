@@ -79,7 +79,7 @@ mod tests {
         assert_eq!(set.codes.len(), 10);
         assert_eq!(set.hashes.len(), 10);
         assert_eq!(set.codes[0], "AAAQ-EAYE-AUDA-OCAJ");
-        let mut unique = set.codes.clone();
+        let mut unique = set.codes;
         unique.dedup();
         assert_eq!(unique.len(), 10);
     }

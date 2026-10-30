@@ -23,7 +23,7 @@ use crate::storage::PgStorage;
 
 /// The running jobs. Dropping it without `stop` leaves them running until the process
 /// exits.
-pub struct Jobs {
+pub(crate) struct Jobs {
     stop: watch::Sender<bool>,
     tasks: Vec<JoinHandle<()>>,
 }
@@ -31,7 +31,7 @@ pub struct Jobs {
 impl Jobs {
     /// Tells every job to stop after the step it's in, and waits up to `limit` for them;
     /// `false` if some didn't finish in time.
-    pub async fn stop(self, limit: Duration) -> bool {
+    pub(crate) async fn stop(self, limit: Duration) -> bool {
         let _ = self.stop.send(true);
         let all = async {
             for task in self.tasks {
@@ -45,7 +45,7 @@ impl Jobs {
 
 /// What wakes the jobs before their timers.
 #[derive(Default, Clone)]
-pub struct Wake {
+pub(crate) struct Wake {
     pub dispatch: Arc<Notify>,
     pub search_sync: Arc<Notify>,
     pub send_notifications: Arc<Notify>,
@@ -54,20 +54,20 @@ pub struct Wake {
 impl Wake {
     /// The host's `AfterWrites`: a write that gave it work wakes the dispatcher. A wake while it works
     /// isn't lost: `Notify` keeps it for its next wait.
-    pub fn after_writes(&self) -> AfterWrites {
+    pub(crate) fn after_writes(&self) -> AfterWrites {
         let dispatch = Arc::clone(&self.dispatch);
         AfterWrites::new(move || dispatch.notify_one())
     }
 
     /// The mail host's `MailQueued`: queueing an email wakes the send job.
-    pub fn mail_queued(&self) -> MailQueued {
+    pub(crate) fn mail_queued(&self) -> MailQueued {
         let send = Arc::clone(&self.send_notifications);
         MailQueued::new(move || send.notify_one())
     }
 }
 
 /// Starts the jobs for a Postgres host built with `D`'s spores.
-pub fn start<D: Deployment>(
+pub(crate) fn start<D: Deployment>(
     state: SharedState<PgStorage<D>>,
     wake: Wake,
     limiter: Arc<MemoryRateLimiter>,

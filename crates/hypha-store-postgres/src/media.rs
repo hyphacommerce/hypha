@@ -80,7 +80,7 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
                 match (&after.key, sort) {
                     (SortKey::Id, AssetSort::Newest | AssetSort::Oldest) => {}
                     (SortKey::Text(t), AssetSort::NameAsc | AssetSort::NameDesc) => {
-                        name_key = Some(t.clone())
+                        name_key = Some(t.clone());
                     }
                     (key, sort) => {
                         return Err(RepoError::Backend(format!(

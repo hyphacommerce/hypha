@@ -710,7 +710,7 @@ mod tests {
                 schema: json!({"allOf": [{"$ref": "#/$defs/Update"}],
                     "$defs": {"Update": {"type": "object",
                         "properties": {"item": {"$ref": "#/$defs/Item"}}},
-                        "Item": item.clone(), "Id": {"type": "string"}}}),
+                        "Item": item, "Id": {"type": "string"}}}),
                 required: true,
             }),
             output: None,

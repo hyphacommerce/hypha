@@ -30,9 +30,8 @@ panic = "warn"
 cast_possible_truncation = "warn"
 cast_possible_wrap = "warn"
 cast_sign_loss = "warn"
-# Ownership: small `Copy` values by value, values a function only reads by reference.
+# Ownership: small `Copy` values by value, no clone of a value about to be dropped.
 trivially_copy_pass_by_ref = "warn"
-needless_pass_by_value = "warn"
 redundant_clone = "warn"
 # Signatures that promise more than the body does.
 unused_async = "warn"

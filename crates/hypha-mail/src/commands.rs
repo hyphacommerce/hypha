@@ -444,16 +444,16 @@ where
         return Err(CommandError::RecipientErased);
     }
     let not_resendable = CommandError::NotResendable { template };
-    let order = match (template, earlier.order()) {
-        (
-            TemplateKey::OrderConfirmation
-            | TemplateKey::OrderShipped
-            | TemplateKey::OrderTrackingUpdated
-            | TemplateKey::OrderCancelled
-            | TemplateKey::StaffNewOrder,
-            Some(order),
-        ) => order,
-        _ => return Err(not_resendable),
+    let (
+        TemplateKey::OrderConfirmation
+        | TemplateKey::OrderShipped
+        | TemplateKey::OrderTrackingUpdated
+        | TemplateKey::OrderCancelled
+        | TemplateKey::StaffNewOrder,
+        Some(order),
+    ) = (template, earlier.order())
+    else {
+        return Err(not_resendable);
     };
     let branding = branding(env, ports).await?;
     let order = load_order(ports, order).await?;

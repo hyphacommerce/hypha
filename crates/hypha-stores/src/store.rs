@@ -206,8 +206,11 @@ impl Store {
 }
 
 /// `en`: the language a new store's content is written in.
+#[expect(
+    clippy::expect_used,
+    reason = "a literal `Language::new` always accepts (a test checks it)"
+)]
 fn english() -> Language {
-    // A literal that `Language::new` always accepts (a test checks it).
     Language::new("en").expect("\"en\" is a valid language tag")
 }
 

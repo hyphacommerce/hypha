@@ -353,7 +353,7 @@ mod tests {
             Err(RepoError::Duplicate(keys::HANDLE))
         );
         // Product 3 reuses product 1's variant ID (1001).
-        let reused_variant = Product::new_simple(
+        let mut reused_variant = Product::new_simple(
             ProductId::from_uuid(Uuid::from_u128(3)),
             Handle::new("cup").unwrap(),
             "Cup".to_string(),
@@ -362,7 +362,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            block_on(repo.insert(&mut reused_variant.clone())),
+            block_on(repo.insert(&mut reused_variant)),
             Err(RepoError::Duplicate(keys::VARIANT_ID))
         );
     }
