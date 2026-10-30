@@ -968,13 +968,10 @@ fn evaluate(input: &DiscountInput<'_>, candidates: &[Live<'_>], set: &[usize]) -
             })
             .then_with(|| x.reward.cmp(&y.reward))
     });
-    let mut pool: i64 = after_product.iter().sum();
     for (application, amount) in order_rewards {
-        let take = amount.min(pool).max(0);
-        pool -= take;
         // Spread over what each line has left, so no line goes below zero however many
-        // order rewards share it.
-        let shares = spread(take, &left);
+        // order rewards share it (`spread` caps the amount at what's left).
+        let shares = spread(amount, &left);
         for (line, share) in shares.into_iter().enumerate() {
             if share > 0 {
                 left[line] -= share;
