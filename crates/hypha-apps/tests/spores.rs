@@ -1,6 +1,12 @@
 //! Spores as apps: registered by the host at startup, changed by staff only by enabling or
 //! disabling them.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use hypha_apps::{
     AppError, AppKey, AppKind, CommandError, SporeRegistration, UpdateApp, WebhookInput,
     delete_app, register_spore, rotate_app_secret, spore_registered, update_app,

@@ -1,6 +1,12 @@
 //! A spore's settings: checked against its schema and by the spore, secret fields sealed
 //! and never answered, read back unsealed by the spore.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use hypha_apps::{
     AppKey, CommandError, SettingsProblem, SettingsSchema, SporeRegistration, SporeSettingsRepo,
     get_spore_settings, read_spore_settings, register_spore, save_spore_settings,

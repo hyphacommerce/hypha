@@ -1,5 +1,11 @@
 //! Deleting a customer.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use hypha_auth::{IdentityRepo as _, SessionRepo as _};
 use hypha_cart::{Cart, CartRepo};
 use hypha_core::Clock as _;

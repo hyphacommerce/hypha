@@ -7,6 +7,12 @@
 //! the address book, `restore` would reject it, and the load would fail with
 //! `RepoError::Backend`.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use hypha_core::{Address, AddressId, AddressParts, CustomerId, Email, RepoError};
 use hypha_customers::{Customer, CustomerRepo};
 use hypha_store_postgres::{CORE, PgStore, migrate};

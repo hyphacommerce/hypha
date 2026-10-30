@@ -2,6 +2,12 @@
 //! documents priced and stocked per market, and the commands search them and keep the
 //! merchant's settings.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use std::cell::Cell;
 
 use hypha_core::{

@@ -1,5 +1,11 @@
 //! The server end to end over a fake `Operations`, in both protocol eras.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use std::cell::RefCell;
 
 use hypha_mcp::*;

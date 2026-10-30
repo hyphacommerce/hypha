@@ -1,5 +1,11 @@
 //! The in-memory repos must pass the same contract as every storage adapter.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use hypha_core::Timestamp;
 use hypha_testkit::{
     InMemoryAppRepo, InMemoryAssetRepo, InMemoryBlobStore, InMemoryCartRepo, InMemoryCustomerRepo,

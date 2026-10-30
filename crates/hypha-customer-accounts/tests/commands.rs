@@ -1,3 +1,10 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
+
 use core::time::Duration;
 
 use hypha_auth::{IdentityRepo, Session, SessionClient, SessionRepo, TokenKind};

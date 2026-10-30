@@ -1,5 +1,11 @@
 //! Customer groups and their members over a store in memory: what each write records.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use hypha_core::{Actor, AuthError, Ctx, CustomerGroupId, CustomerId, Handle, Scope, UserId};
 use hypha_customers::{
     CommandError, CreateCustomer, CreateCustomerGroup, UpdateCustomerGroup, add_group_members,

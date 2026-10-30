@@ -2,6 +2,12 @@
 //! document, the person's approval with the agent, the code, tokens bound to the agent and
 //! refused elsewhere, rotation, theft detection and revocation.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use std::collections::HashMap;
 
 use hypha_agents::{Agent, AgentClient, AgentKind, Grant, NewAgent, StageAgents};

@@ -1,5 +1,11 @@
 //! Erasing a customer's personal data and exporting it.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use hypha_auth::{IdentityRepo as _, SessionRepo as _};
 use std::time::Duration;
 

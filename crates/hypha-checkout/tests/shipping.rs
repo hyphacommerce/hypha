@@ -1,5 +1,11 @@
 //! Checkout with shipping.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use std::sync::Mutex;
 
 use hypha_cart::{

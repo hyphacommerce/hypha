@@ -1,6 +1,12 @@
 //! Where an app answers an extension point: an app made by hand where staff set, one
 //! installed through OAuth where its manifest says, while its grant has the point's scope.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use hypha_apps::{
     App, AppError, AppManifest, AppRepo, CommandError, EndpointInput, ExtensionEndpoint,
     ExtensionEndpointRepo, Grant, InstalledManifest, KnownPoint, NewApp, find_endpoint,

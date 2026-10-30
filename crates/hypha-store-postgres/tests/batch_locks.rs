@@ -5,6 +5,12 @@
 //!
 //! Needs `DATABASE_URL` like the contract tests; skips itself without it.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use futures_util::future::join;
 use hypha_core::{HasBatch, InventoryItemId, RepoError, VariantId};
 use hypha_inventory::{InventoryItem, InventoryItemRepo, StageInventoryItems};

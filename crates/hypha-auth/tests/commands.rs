@@ -1,3 +1,10 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
+
 use hypha_auth::{
     ApiKeyError, ApiKeyKind, CommandError, CreateApiKey, Identity, IdentityError, IdentityRepo,
     LoginStep, MfaMethod, Password, PasswordError, Principal, PrincipalKind, SessionRepo,

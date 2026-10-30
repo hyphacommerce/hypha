@@ -4,6 +4,12 @@
 //! gives back the events the kept writes recorded. Needs `HYPHA_TEST_DATABASE_URL` (or
 //! `DATABASE_URL`) like the contract tests; skips itself without it.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;

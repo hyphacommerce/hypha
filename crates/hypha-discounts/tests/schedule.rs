@@ -1,5 +1,11 @@
 //! The schedule job announcing discount windows.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use hypha_core::{BasisPoints, DiscountId, HasBatch, RepoError, Timestamp, schedule::Announced};
 use hypha_discounts::{
     Discount, DiscountDraft, DiscountRepo, HasDiscounts, Kind, Method, Reward, StageDiscounts,

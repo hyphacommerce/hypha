@@ -1,5 +1,11 @@
 //! The mailer and the mail commands on the in-memory world.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use hypha_core::{
     Actor, Address, AddressParts, ApiKeyId, AssetId, AuthError, CartId, ChannelId, CountryCode,
     Ctx, Currency, CustomerId, Email, EventHandler, EventId, FulfillmentId, LocationId, MarketId,

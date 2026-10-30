@@ -1,5 +1,11 @@
 //! `call::<P>`: what it sends, how it judges each answer, and what it records.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use std::{cell::RefCell, time::Duration};
 
 use hypha_core::{

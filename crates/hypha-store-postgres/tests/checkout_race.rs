@@ -5,6 +5,12 @@
 //!
 //! Needs `DATABASE_URL` like the contract tests; skips itself without it.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use futures_util::future::join_all;
 use hypha_cart::{AddLine, CreateCart, add_line, create_cart, set_cart_email};
 use hypha_channels::{Channel, ChannelKind, ChannelRepo};

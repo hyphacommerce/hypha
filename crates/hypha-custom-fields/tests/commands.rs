@@ -1,5 +1,11 @@
 //! Custom field commands over a store in memory.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use std::{
     cell::RefCell,
     collections::{BTreeMap, HashSet},

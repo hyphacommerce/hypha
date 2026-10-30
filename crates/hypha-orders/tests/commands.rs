@@ -1,3 +1,10 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
+
 use hypha_core::{
     Actor, AuthError, CartId, CountryCode, Ctx, Currency, CustomerId, Email, MarketId, Money,
     OrderId, OrderLineId, Page, PageRequest, Price, ProductId, Quantity, Scope, Timestamp, UserId,

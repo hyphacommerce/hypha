@@ -1,3 +1,10 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
+
 use hypha_cart::{
     AddLine, CartError, CartRepo, CommandError, CreateCart, LineError, LineStatus, PricedCart,
     SetLineQuantity, add_discount_code, add_line, create_cart, get_cart, remove_cart_line,

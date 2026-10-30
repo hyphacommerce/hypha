@@ -3,6 +3,12 @@
 //! writes without events (a cart's) cost no dispatch run. Needs `DATABASE_URL` like the
 //! contract tests; skips itself without it.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

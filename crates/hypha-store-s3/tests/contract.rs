@@ -4,6 +4,12 @@
 //! browser's, so the server's own checks (signature, size, type, checksum, expiry) are
 //! what's tested.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hypha_core::{Clock, Timestamp};

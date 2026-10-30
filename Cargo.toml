@@ -16,9 +16,29 @@ serde_json = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+# `pub` on an item nothing outside its crate can reach reads as API it isn't.
+unreachable_pub = "warn"
 
 [workspace.lints.clippy]
-all = "warn"
+all = { level = "warn", priority = -1 }
+# Panics: tests may (clippy.toml); elsewhere only a documented invariant, with an
+# `#[expect(…, reason = "…")]` naming it.
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+# Silent truncation and sign loss: say why a cast fits, or convert with `try_from`.
+cast_possible_truncation = "warn"
+cast_possible_wrap = "warn"
+cast_sign_loss = "warn"
+# Ownership: small `Copy` values by value, values a function only reads by reference.
+trivially_copy_pass_by_ref = "warn"
+needless_pass_by_value = "warn"
+redundant_clone = "warn"
+# Signatures that promise more than the body does.
+unused_async = "warn"
+unnecessary_wraps = "warn"
+manual_let_else = "warn"
+semicolon_if_nothing_returned = "warn"
 # Password hashing is slow on purpose, and unoptimized it is many times slower still,
 # which would make logins in dev builds and tests crawl. Optimize just these crates.
 # Debug info is most of what a build writes (on macOS it stays in an object file per

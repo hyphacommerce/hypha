@@ -1,5 +1,11 @@
 //! The migration runner against a real Postgres (needs `DATABASE_URL`, like contract.rs).
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use hypha_store_postgres::{CORE, MigrateError, Migration, MigrationSet, migrate};
 use tokio_postgres::{Client, NoTls};
 

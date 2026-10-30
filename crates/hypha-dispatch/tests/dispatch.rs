@@ -1,5 +1,11 @@
 //! The dispatcher in memory.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use std::cell::RefCell;
 
 use hypha_apps::{App, AppKey, AppRepo, NewApp, Webhook};

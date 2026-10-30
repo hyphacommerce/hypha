@@ -1,5 +1,11 @@
 //! The OAuth flow's commands on the in-memory repos.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use std::collections::HashMap;
 use std::time::Duration;
 

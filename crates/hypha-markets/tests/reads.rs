@@ -1,5 +1,11 @@
 //! The admin's reads of its setup.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use hypha_core::{
     Actor, AuthError, BasisPoints, CatalogId, CountryCode, Ctx, Currency, MarketId, Money, Page,
     PageLimit, PageRequest, Price, PriceListId, ProductId, Scope, Timestamp, UserId, VariantId,

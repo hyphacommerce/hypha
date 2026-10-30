@@ -1,3 +1,10 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test support: a broken fixture panics the test using it"
+)]
+
 #[cfg(feature = "contract")]
 pub mod contract;
 

@@ -1,3 +1,10 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
+
 use hypha_auth::SessionRepo;
 use hypha_auth::{LoginStep, PasswordError, SessionClient};
 use hypha_core::{

@@ -1,5 +1,11 @@
 //! Channels and publishing over a store in memory.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use hypha_channels::ChannelRepo;
 use hypha_channels::{
     ChannelKind, CommandError, CreateChannel, UpdateChannel, create_channel, list_channels,

@@ -132,7 +132,7 @@ impl Generation {
         let mut drawn = 0;
         // Bytes past the alphabet's largest multiple are dropped, so every character is
         // equally likely.
-        let cutoff = (256 / ALPHABET.len() * ALPHABET.len()) as u8;
+        let cutoff = 256 / ALPHABET.len() * ALPHABET.len();
         while drawn < wanted {
             let mut bytes = [0u8; 32];
             random.fill(&mut bytes);
@@ -140,7 +140,7 @@ impl Generation {
                 if drawn == wanted {
                     break;
                 }
-                if b < cutoff {
+                if usize::from(b) < cutoff {
                     code.push(ALPHABET[usize::from(b) % ALPHABET.len()] as char);
                     drawn += 1;
                 }

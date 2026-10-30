@@ -3,6 +3,12 @@
 //!
 //! Needs `DATABASE_URL` like the contract tests; skips itself without it.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use futures_util::future::join_all;
 use hypha_core::{CustomFieldDefinitionId, CustomerId, Version};
 use hypha_custom_fields::{

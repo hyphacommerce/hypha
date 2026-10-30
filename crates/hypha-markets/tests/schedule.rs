@@ -1,5 +1,11 @@
 //! The schedule job announcing price list windows.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use hypha_core::{CatalogId, Currency, HasBatch, MarketId, PriceListId, RepoError, Timestamp};
 use hypha_markets::{
     Announced, Catalog, CatalogContext, CatalogRepo, HasCatalogs, HasPriceLists, PriceList,

@@ -1,5 +1,11 @@
 //! App commands.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a failing test panics"
+)]
 use hypha_apps::{
     AppError, AppKey, CommandError, CreateApp, SECRET_PREFIX, UpdateApp, WebhookInput, create_app,
     delete_app, get_app, get_event, list_apps, list_deliveries, open_secret, retry_delivery,
