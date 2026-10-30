@@ -248,6 +248,14 @@ mod tests {
     }
 
     #[test]
+    fn a_free_rate_delivered_on_one_day_is_fine() {
+        let parsed = rates(
+            r#"{"rates":[{"service":"x","name":"X","amount":{"amount":0,"currency":"EUR"},"estimate":{"min_days":2,"max_days":2}}]}"#,
+        );
+        assert_eq!(ShippingRates::check(&request(), &parsed), Ok(()));
+    }
+
+    #[test]
     fn a_rate_in_another_currency_is_refused() {
         let parsed = rates(
             r#"{"rates":[{"service":"x","name":"X","amount":{"amount":1,"currency":"USD"}}]}"#,

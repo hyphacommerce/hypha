@@ -244,6 +244,25 @@ mod tests {
     }
 
     #[test]
+    fn a_batch_is_told_why() {
+        let error = parse(br#"[{"jsonrpc":"2.0","id":1,"method":"ping"}]"#).unwrap_err();
+        assert!(
+            error.message.contains("batches are not supported"),
+            "{}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn a_negative_or_huge_whole_id_is_kept_on_an_error() {
+        for id in ["-1", "18446744073709551615"] {
+            let body = format!(r#"{{"jsonrpc":"2.0","id":{id}}}"#);
+            let error = parse(body.as_bytes()).unwrap_err();
+            assert_eq!(error.id.map(|id| id.to_string()), Some(id.to_string()));
+        }
+    }
+
+    #[test]
     fn a_non_object_is_refused() {
         assert_eq!(code_of("42"), INVALID_REQUEST);
     }

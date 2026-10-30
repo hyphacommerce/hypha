@@ -958,6 +958,32 @@ mod tests {
     }
 
     #[test]
+    fn restore_refuses_a_blank_or_overlong_note() {
+        for note in ["  ".to_string(), "x".repeat(MAX_NOTE_LEN + 1)] {
+            let mut s = pending().snapshot();
+            s.note = Some(note);
+            assert_eq!(Proposal::restore(s), Err(ProposalError::Inconsistent));
+        }
+    }
+
+    #[test]
+    fn a_preview_may_weigh_exactly_its_bound() {
+        // A JSON string's quotes count.
+        let full = NewProposal {
+            preview: json!("x".repeat(MAX_PREVIEW_BYTES - 2)),
+            ..new()
+        };
+        assert!(Proposal::new(id(), full).is_ok());
+    }
+
+    #[test]
+    fn the_bounds_are_a_megabyte_four_and_five_minutes() {
+        assert_eq!(MAX_REQUEST_BYTES, 1 << 20);
+        assert_eq!(MAX_PREVIEW_BYTES, 4 << 20);
+        assert_eq!(APPLYING_LEASE, Duration::from_secs(300));
+    }
+
+    #[test]
     fn a_stale_proposal_is_previewed_again_and_is_pending_again() {
         let mut p = applying();
         p.refresh(

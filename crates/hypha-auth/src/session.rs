@@ -382,6 +382,49 @@ mod tests {
     }
 
     #[test]
+    fn a_used_session_is_extended_once_enough_of_its_life_has_gone() {
+        let day = Duration::from_secs(86_400);
+        let mut s = Session::active(
+            SessionId::from_uuid(Uuid::from_u128(1)),
+            IdentityId::from_uuid(Uuid::from_u128(2)),
+            Principal::Staff(UserId::from_uuid(Uuid::from_u128(3))),
+            TokenHash::from_bytes([1; 32]),
+            NOW,
+            None,
+            LIFETIME,
+        );
+        let a_day_on = NOW.plus(day);
+        assert!(
+            !s.extend(a_day_on, LIFETIME, day),
+            "a day's extension is due after a day"
+        );
+        assert_eq!(s.expires_at(), NOW.plus(LIFETIME));
+        let later = a_day_on.plus_secs(1);
+        assert!(s.extend(later, LIFETIME, day));
+        assert_eq!(s.expires_at(), later.plus(LIFETIME));
+
+        let mut waiting = pending();
+        assert!(
+            !waiting.extend(NOW.plus(LIFETIME), LIFETIME, day),
+            "not logged in"
+        );
+        assert_eq!(waiting.expires_at(), NOW.plus(WINDOW));
+    }
+
+    #[test]
+    fn a_use_is_recorded_at_most_every_fifteen_minutes() {
+        assert_eq!(Session::USE_RESOLUTION, Duration::from_secs(15 * 60));
+    }
+
+    #[test]
+    fn a_session_keeps_the_client_it_was_given() {
+        let mut s = pending();
+        let client = SessionClient::new(Some("10.0.0.1"), Some("Firefox"));
+        s.set_client(client.clone());
+        assert_eq!(s.client(), &client);
+    }
+
+    #[test]
     fn revoking_keeps_the_first_time() {
         let mut s = pending();
         s.revoke(NOW);

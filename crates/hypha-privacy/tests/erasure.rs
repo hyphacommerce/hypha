@@ -539,3 +539,25 @@ fn the_job_erases_the_others_when_one_erasure_fails() {
     assert!(erased(bo_id));
     assert!(!erased(ana_id()));
 }
+
+#[test]
+fn erasing_reaches_every_page_of_the_customers_orders_and_only_theirs() {
+    let (ports, clock) = world();
+    // A page holds 100: Ana has 101 orders, Bob one.
+    for n in 2..=101 {
+        let mut order = order_for(ana_id(), n, CartId::from_uuid(Uuid::from_u128(7000 + n)));
+        block_on(ports.orders.insert(&mut order)).unwrap();
+    }
+    let bob = CustomerId::from_uuid(Uuid::from_u128(4242));
+    let bobs = OrderId::from_uuid(Uuid::from_u128(1500));
+    let mut order = order_for(bob, 500, CartId::from_uuid(Uuid::from_u128(7500)));
+    block_on(ports.orders.insert(&mut order)).unwrap();
+
+    let erased = block_on(erase_customer(&ports, clock.now(), ana_id()))
+        .unwrap()
+        .expect("erased");
+    assert_eq!(erased.orders.len(), 101);
+    assert!(!erased.orders.contains(&bobs));
+    let kept = block_on(ports.orders.get(bobs)).unwrap().unwrap();
+    assert!(!kept.email().is_placeholder());
+}

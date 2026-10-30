@@ -308,6 +308,22 @@ mod tests {
     }
 
     #[test]
+    fn kinds_read_back_their_names() {
+        for kind in [ApiKeyKind::Secret, ApiKeyKind::Publishable] {
+            assert_eq!(ApiKeyKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(ApiKeyKind::Secret.as_str(), "secret");
+        assert_eq!(ApiKeyKind::Publishable.as_str(), "publishable");
+        assert_eq!(ApiKeyKind::parse("Secret"), None);
+        assert_eq!(
+            key(ApiKeyKind::Secret, Some(vec![Scope::OrdersRead]))
+                .unwrap()
+                .last_four(),
+            "a1b2"
+        );
+    }
+
+    #[test]
     fn snapshot_round_trips() {
         for k in [
             key(ApiKeyKind::Publishable, None).unwrap(),

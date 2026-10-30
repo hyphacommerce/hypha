@@ -1004,3 +1004,21 @@ fn calls_are_logged_listed_newest_first_and_pruned_by_age() {
         Some(CommandError::AgentNotFound(missing))
     );
 }
+
+#[test]
+fn changing_only_a_write_mode_needs_the_whole_grant() {
+    let w = World::new();
+    let agent = w.agent();
+    let manager = key(vec![Scope::AgentsWrite]);
+    let promoted = UpdateAgent {
+        grant: Some(grant(
+            &["orders:read"],
+            &[("products:write", "apply"), ("inventory:write", "apply")],
+        )),
+        ..UpdateAgent::default()
+    };
+    assert!(matches!(
+        block_on(update_agent(&manager, &w.ports, agent.id(), promoted)),
+        Err(CommandError::CannotGrant(_))
+    ));
+}

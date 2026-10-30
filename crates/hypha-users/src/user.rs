@@ -179,6 +179,18 @@ mod tests {
     }
 
     #[test]
+    fn statuses_read_back_their_names() {
+        for (status, name) in [
+            (UserStatus::Active, "active"),
+            (UserStatus::Disabled, "disabled"),
+        ] {
+            assert_eq!(status.as_str(), name);
+            assert_eq!(UserStatus::parse(name), Some(status));
+        }
+        assert_eq!(UserStatus::parse("deleted"), None);
+    }
+
+    #[test]
     fn snapshot_round_trips() {
         let mut u = user("Ana").unwrap();
         u.set_status(UserStatus::Disabled);

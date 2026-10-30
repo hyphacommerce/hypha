@@ -205,7 +205,7 @@ mod tests {
     fn refuses_codes_that_are_not_six_digits() {
         let now = at(59);
         assert_eq!(check(RFC_SECRET, " 287082 ", now, None), Check::Valid(1));
-        for bad in ["28708", "2870820", "28708a", "", "+87082"] {
+        for bad in ["28708", "2870820", "0287082", "28708a", "", "+87082"] {
             assert_eq!(check(RFC_SECRET, bad, now, None), Check::Wrong, "{bad:?}");
         }
     }

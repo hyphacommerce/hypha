@@ -557,6 +557,24 @@ fn search_finds_listings_in_the_shoppers_market() {
 }
 
 #[test]
+fn values_of_one_filter_add_up_and_a_repeated_one_counts_once() {
+    let w = World::new();
+    w.settle();
+    let variants = |filters: &[&str]| {
+        w.search(SearchInput {
+            filters: filters.iter().map(|f| f.to_string()).collect(),
+            group: Group::Variant,
+            ..input("HR")
+        })
+        .unwrap()
+        .results
+        .total
+    };
+    assert_eq!(variants(&["option.Color:Red", "option.Color:Blue"]), 3);
+    assert_eq!(variants(&["option.Color:Red", "option.Color: Red "]), 2);
+}
+
+#[test]
 fn default_facets_are_type_vendor_the_markets_options_and_tags() {
     let w = World::new();
     w.settle();
@@ -638,6 +656,18 @@ fn bad_searches_say_what_is_wrong() {
     assert_eq!(
         with(&|i| i.limit = 0),
         err(SearchError::InvalidLimit { max: 100 })
+    );
+    assert_eq!(
+        with(&|i| i.limit = 101),
+        err(SearchError::InvalidLimit { max: 100 })
+    );
+    assert_eq!(with(&|i| i.limit = 100), Ok(()));
+    assert_eq!(
+        with(&|i| {
+            i.price_min = Some(10);
+            i.price_max = Some(10);
+        }),
+        Ok(())
     );
     assert_eq!(
         with(&|i| i.offset = 1000),
@@ -1149,6 +1179,27 @@ fn a_product_only_in_a_hidden_subcategory_isnt_listed_under_its_parent() {
         };
         assert_eq!(doc.categories, expected, "{}", doc.title);
     }
+
+    // Staff may search a hidden category; a storefront only a shown one.
+    let in_category = |ctx: &Ctx, n| {
+        block_on(search(
+            ctx,
+            &w.ports,
+            &w.index,
+            SearchInput {
+                category: Some(cid(n)),
+                ..input("HR")
+            },
+        ))
+        .map(|_| ())
+    };
+    let storefront = w.ports.storefront();
+    assert_eq!(in_category(&Ctx::system(), 901), Ok(()));
+    assert_eq!(in_category(&storefront, 900), Ok(()));
+    assert_eq!(
+        in_category(&storefront, 901),
+        Err(CommandError::CategoryNotFound(cid(901)))
+    );
 }
 
 // ---------- the search app ----------

@@ -15,7 +15,7 @@ use hypha_auth::{
     confirm_totp, create_api_key, disable_mfa, finish_login, get_api_key, hash_new_password,
     list_sessions, logout, open_session, record_session_use, regenerate_recovery_codes,
     reset_password, revoke_api_key, revoke_other_sessions, revoke_session, start_password_reset,
-    start_totp, totp,
+    start_totp, totp, withdraw_password_resets,
 };
 use hypha_core::{
     Actor, ApiKeyId, AuthError, ChannelId, Clock, Ctx, Email, IdentityId, Scope, Timestamp, UserId,
@@ -1273,4 +1273,47 @@ fn an_agent_key_names_its_agent_and_nothing_else_does() {
         .unwrap()
         .unwrap();
     assert_eq!(stored, identity, "the key survives storage");
+}
+
+#[test]
+fn without_recovery_codes_left_only_the_app_is_offered() {
+    let (ports, env) = world();
+    let (_, codes) = enable_mfa(&ports, &env);
+    for code in &codes {
+        let challenge = token_of(&login(&ports, &env));
+        block_on(finish_login(&ports, &env, &challenge, code)).unwrap();
+    }
+    let LoginStep::MfaRequired { methods, .. } = login(&ports, &env) else {
+        panic!("expected a second factor");
+    };
+    assert_eq!(methods, vec![MfaMethod::Totp]);
+}
+
+#[test]
+fn a_withdrawn_link_does_not_hold_back_the_next() {
+    let (ports, env) = world();
+    let start = || {
+        block_on(start_password_reset(
+            &ports,
+            &env,
+            PrincipalKind::Staff,
+            "ana@example.com",
+        ))
+        .unwrap()
+        .is_some()
+    };
+    assert!(start());
+    assert!(!start());
+    block_on(withdraw_password_resets(&ports, &env.clock, identity_id())).unwrap();
+    assert!(start());
+}
+
+#[test]
+fn each_password_hash_gets_its_own_salt() {
+    let env = TestEnv::default();
+    let password = Password::new(PASSWORD).unwrap();
+    assert_ne!(
+        block_on(hash_new_password(&env, &password)).unwrap(),
+        block_on(hash_new_password(&env, &password)).unwrap()
+    );
 }

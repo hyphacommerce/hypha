@@ -800,12 +800,13 @@ mod tests {
             Some(&[op("admin.products.fetch"), op("admin.products.list")][..])
         );
         i.operations = Some(vec!["products".to_string()]);
+        let refused = Grant::new(i).unwrap_err();
         assert_eq!(
-            Grant::new(i),
-            Err(GrantError::Operation(OperationIdError(
-                "products".to_string()
-            )))
+            refused,
+            GrantError::Operation(OperationIdError("products".to_string()))
         );
+        assert_eq!(refused.operation(), Some("products"));
+        assert_eq!(GrantError::TooManyOperations { max: 1 }.operation(), None);
         let many = |n: usize| (0..n).map(|k| op(&format!("admin.ops.op{k}"))).collect();
         assert!(
             Grant::default()

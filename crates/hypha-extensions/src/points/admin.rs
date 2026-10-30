@@ -154,6 +154,11 @@ mod tests {
     fn a_message_is_plain_and_short() {
         let ok = answer(Some("Captured"), None);
         assert_eq!(RunAdminAction::check(&request(), &ok), Ok(()));
+        let full = "x".repeat(MAX_ACTION_MESSAGE);
+        assert_eq!(
+            RunAdminAction::check(&request(), &answer(Some(&full), None)),
+            Ok(())
+        );
         let long = "x".repeat(MAX_ACTION_MESSAGE + 1);
         assert!(RunAdminAction::check(&request(), &answer(Some(&long), None)).is_err());
         assert!(RunAdminAction::check(&request(), &answer(Some(" "), None)).is_err());
@@ -165,6 +170,12 @@ mod tests {
             RunAdminAction::check(&request(), &answer(None, Some("/orders/1"))),
             Ok(())
         );
+        let path = |len: usize| format!("/{}", "x".repeat(len - 1));
+        assert_eq!(
+            RunAdminAction::check(&request(), &answer(None, Some(&path(2048)))),
+            Ok(())
+        );
+        assert!(RunAdminAction::check(&request(), &answer(None, Some(&path(2049)))).is_err());
         for bad in ["https://evil.example", "//evil.example", "orders"] {
             assert!(
                 RunAdminAction::check(&request(), &answer(None, Some(bad))).is_err(),

@@ -82,6 +82,23 @@ mod tests {
     }
 
     #[test]
+    fn a_challenge_is_43_base64url_characters() {
+        assert!(is_challenge(&"A_-z".repeat(11)[..43]));
+        assert!(!is_challenge(&CHALLENGE[1..]));
+        assert!(!is_challenge(&format!("{CHALLENGE}A")));
+        assert!(!is_challenge(&format!("{}+", &CHALLENGE[..42])));
+        assert!(!is_challenge(&format!("{}=", &CHALLENGE[..42])));
+    }
+
+    #[test]
+    fn differences_that_cancel_out_still_differ() {
+        // `E`/`D` and `9`/`8` differ in the same bit: XOR-ing the differences together
+        // would cancel them, so they're OR-ed.
+        let twice = format!("D8{}", &CHALLENGE[2..]);
+        assert!(!verify(VERIFIER, &twice));
+    }
+
+    #[test]
     fn verifiers_are_43_to_128_unreserved_characters() {
         assert!(is_verifier(&"a".repeat(43)));
         assert!(is_verifier(&"a".repeat(128)));

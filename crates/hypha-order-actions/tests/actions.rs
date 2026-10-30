@@ -1349,6 +1349,9 @@ fn a_report_with_its_key_replays() {
     let done = world.report(K::Refunded, None, None).unwrap().value;
     assert_eq!(done.payments[0].refunded(), eur(2000));
     assert_eq!(done.order.financial_status(), FinancialStatus::Refunded);
+    // Refunded wholly, a repeated `refunded` without a reference is nothing.
+    let repeated = world.report(K::Refunded, None, None).unwrap().value;
+    assert_eq!(repeated.payments[0].refunded(), eur(2000));
 }
 
 #[test]

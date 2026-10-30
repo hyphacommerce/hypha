@@ -279,3 +279,91 @@ impl AuthorizationRequest {
         Ok(request)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use hypha_core::UserId;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    use super::*;
+
+    const APP: &str = "https://shop-app.example/hypha-app.json";
+    const MCP: &str = "https://client.example/oauth/metadata.json";
+
+    fn request(client_id: &str, client: RequestClient) -> AuthorizationRequest {
+        AuthorizationRequest::new(NewRequest {
+            id: OAuthRequestId::from_uuid(Uuid::from_u128(1)),
+            client_id: client_id.to_string(),
+            client,
+            redirect_uri: "https://client.example/callback".to_string(),
+            state: Some("st4te".to_string()),
+            code_challenge: None,
+            scopes: vec![Scope::OrdersRead],
+            previous_scopes: None,
+            created_at: Timestamp::UNIX_EPOCH,
+            expires_at: Timestamp::UNIX_EPOCH.plus_secs(600),
+        })
+    }
+
+    fn an_apps() -> AuthorizationRequest {
+        let manifest = json!({
+            "key": "app_shop",
+            "name": "Shop helper",
+            "version": "1.0.0",
+            "app_url": "https://shop-app.example",
+            "redirect_uris": ["/callback"],
+            "scopes": ["orders:read"],
+            "privacy_url": "/privacy"
+        });
+        let manifest =
+            AppManifest::from_value_of(manifest, ManifestSource::of_client(APP)).unwrap();
+        request(APP, RequestClient::App(Box::new(manifest)))
+    }
+
+    fn an_mcp_clients() -> AuthorizationRequest {
+        let document = json!({
+            "client_id": MCP,
+            "client_name": "Example client",
+            "redirect_uris": ["https://client.example/callback"],
+        });
+        let metadata = ClientMetadata::parse(MCP, document.to_string().as_bytes()).unwrap();
+        request(MCP, RequestClient::Agent(metadata))
+    }
+
+    #[test]
+    fn statuses_read_back_their_names() {
+        for (status, name) in [
+            (RequestStatus::Pending, "pending"),
+            (RequestStatus::Approved, "approved"),
+            (RequestStatus::Denied, "denied"),
+        ] {
+            assert_eq!(status.as_str(), name);
+            assert_eq!(RequestStatus::parse(name), Some(status));
+        }
+        assert_eq!(RequestStatus::parse("expired"), None);
+    }
+
+    #[test]
+    fn an_apps_and_an_mcp_clients_request_read_back() {
+        let mut decided = an_apps();
+        let by = Actor::User(UserId::from_uuid(Uuid::from_u128(2)));
+        decided.decide(true, by, Timestamp::UNIX_EPOCH).unwrap();
+        for request in [decided, an_mcp_clients()] {
+            assert_eq!(
+                AuthorizationRequest::restore(request.snapshot()),
+                Ok(request)
+            );
+        }
+    }
+
+    #[test]
+    fn a_stored_request_belongs_to_the_app_its_manifest_names() {
+        let mut s = an_apps().snapshot();
+        s.app = Some("app_other".to_string());
+        assert!(AuthorizationRequest::restore(s).is_err());
+        let mut s = an_mcp_clients().snapshot();
+        s.app = Some("app_shop".to_string());
+        assert!(AuthorizationRequest::restore(s).is_err());
+    }
+}

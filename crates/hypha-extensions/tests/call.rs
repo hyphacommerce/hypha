@@ -272,6 +272,21 @@ fn an_answer_breaking_the_points_rules_is_invalid() {
 }
 
 #[test]
+fn an_answer_at_the_cap_is_read() {
+    assert_eq!(MAX_ANSWER_BYTES, 256 * 1024);
+    let empty = r#"{"n": 2, "pad": ""}"#.len();
+    let full = format!(
+        r#"{{"n": 2, "pad": "{}"}}"#,
+        "x".repeat(MAX_ANSWER_BYTES - empty)
+    );
+    let fake = FakeApp::ok(200, &full);
+    assert_eq!(
+        run(&fake, &InMemoryExtensionCallRepo::default(), None),
+        Ok(Reply { n: 2 })
+    );
+}
+
+#[test]
 fn an_answer_over_the_cap_is_invalid() {
     let huge = format!(r#"{{"n": 2, "pad": "{}"}}"#, "x".repeat(MAX_ANSWER_BYTES));
     let fake = FakeApp::ok(200, &huge);

@@ -17,8 +17,9 @@ use hypha_testkit::{InMemoryPorts, TestEnv};
 use hypha_users::{
     AcceptInvite, CommandError, Invite, InviteUser, NewOwner, Role, RoleRepo, StaffEmail,
     StaffSettings, UpdateRole, UpdateUser, User, UserRepo, UserStatus, accept_invite,
-    authenticate_staff, bootstrap_owner, create_role, get_user, invite_user, login, lookup_invite,
-    rename_me, request_password_reset, require_unlocked, revoke_invite, update_role, update_user,
+    authenticate_staff, bootstrap_owner, create_role, get_user, invite_user, list_invites,
+    list_roles, list_users, login, lookup_invite, rename_me, request_password_reset,
+    require_unlocked, revoke_invite, update_role, update_user,
 };
 use pollster::block_on;
 use uuid::Uuid;
@@ -1308,4 +1309,57 @@ fn a_staff_request_records_the_sessions_use_now_and_then() {
         .unwrap()
         .unwrap();
     assert_eq!(stored.last_used_at(), env.now());
+}
+
+#[test]
+fn changing_someones_status_needs_their_roles_scopes_and_keeping_it_doesnt() {
+    let (ports, env, owner) = world();
+    let role = support_role(&ports, &env, &owner);
+    let (bob, _) = join(&ports, &env, &owner, role.id());
+    let limited = Ctx::new(Actor::System, vec![Scope::UsersWrite]);
+    let status = |status| UpdateUser {
+        status: Some(status),
+        ..UpdateUser::default()
+    };
+    assert_eq!(
+        block_on(update_user(
+            &limited,
+            &ports,
+            &env,
+            bob.id(),
+            status(UserStatus::Active)
+        ))
+        .map(|u| u.status()),
+        Ok(UserStatus::Active)
+    );
+    assert_eq!(
+        block_on(update_user(
+            &limited,
+            &ports,
+            &env,
+            bob.id(),
+            status(UserStatus::Disabled)
+        ))
+        .map(|u| u.id()),
+        Err(CommandError::Login(hypha_auth::CommandError::CannotGrant(
+            Scope::CustomersRead
+        )))
+    );
+}
+
+#[test]
+fn staff_lists_roles_users_and_open_invites() {
+    let (ports, env, owner) = world();
+    let role = support_role(&ports, &env, &owner);
+    invite_bob(&ports, &env, &owner, role.id());
+    let ctx = owner_ctx(&owner);
+    assert_eq!(block_on(list_roles(&ctx, &ports.roles)).unwrap().len(), 2);
+    assert_eq!(
+        block_on(list_users(&ctx, &ports.users)).unwrap(),
+        vec![owner]
+    );
+    assert_eq!(
+        block_on(list_invites(&ctx, &ports.invites)).unwrap().len(),
+        1
+    );
 }
