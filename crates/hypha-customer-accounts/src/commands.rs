@@ -308,7 +308,7 @@ pub struct LoggedIn {
 }
 
 /// Signs in with the code emailed to `email`: the code is used up (right or wrong, so every
-/// guess counts, AC1) and an active session starts, lasting `session_lifetime`. `cart` (the
+/// guess counts) and an active session starts, lasting `session_lifetime`. `cart` (the
 /// request's, in `channel`) is linked to the customer in the same batch; a cart that isn't
 /// theirs to use is left alone.
 pub async fn login_with_code<S: AccountPorts>(

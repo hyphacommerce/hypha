@@ -20,7 +20,7 @@ impl ExtensionPoint for ShippingRates {
     /// regular option is left.
     const ON_FAILURE: OnFailure = OnFailure::Fallback;
     /// The rate settings it answers for are shipping's. The destination's street and
-    /// postal code are personal data besides (`customer_data:address`, AP10).
+    /// postal code are personal data besides (`customer_data:address`).
     const SCOPE: Scope = Scope::ShippingRead;
     const READ_ONLY: bool = true;
     type Request = RateCallbackRequest;

@@ -992,7 +992,7 @@ fn set_cart_customer_rejects_an_unknown_customer() {
 
 // ---- review fixes (docs/plans/2026-10-14-review-cleanup.md) ----
 
-/// B1: a line whose total overflows used to be stored (and then shown as unavailable).
+/// A line whose total overflows used to be stored (and then shown as unavailable).
 #[test]
 fn add_line_refuses_a_line_whose_total_overflows_and_stores_nothing() {
     let world = World::new();
@@ -1008,7 +1008,7 @@ fn add_line_refuses_a_line_whose_total_overflows_and_stores_nothing() {
     assert_eq!(world.stored_line_count(cart), 0);
 }
 
-/// B2: lines that each fit can stop fitting together after a price change; the cart
+/// Lines that each fit can stop fitting together after a price change; the cart
 /// must stay readable, with the line that doesn't fit marked unavailable.
 #[test]
 fn a_cart_whose_total_overflows_stays_readable() {
@@ -1030,7 +1030,7 @@ fn a_cart_whose_total_overflows_stays_readable() {
     assert_eq!(priced.total, eur(6_000_030_000_000_000));
 }
 
-/// B4: linking copies the customer's email onto the cart and reveals whether a
+/// Linking copies the customer's email onto the cart and reveals whether a
 /// `cus_…` exists, so it needs `customers:read` too, checked before any lookup.
 #[test]
 fn set_cart_customer_requires_customers_read_to_link() {
