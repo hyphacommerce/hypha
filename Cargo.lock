@@ -1502,8 +1502,11 @@ dependencies = [
 name = "hypha-pricing"
 version = "0.1.0-beta.2"
 dependencies = [
+ "hypha-categories",
  "hypha-core",
  "hypha-markets",
+ "hypha-testkit",
+ "pollster",
  "thiserror",
  "uuid",
 ]

@@ -190,4 +190,15 @@ mod tests {
         assert_eq!(AppKey::new(&long), Err(AppKeyError::Invalid(long.clone())));
         assert!(AppKey::new(&long[..AppKey::MAX_LEN]).is_ok());
     }
+
+    #[test]
+    fn only_spore_keys_are_spores() {
+        assert!(AppKey::new("spore_stripe").unwrap().is_spore());
+        assert!(!AppKey::new("app_stripe").unwrap().is_spore());
+    }
+
+    #[test]
+    fn an_apps_deliveries_go_to_its_key() {
+        assert_eq!(AppKey::new("app_erp").unwrap().destination(), "app:app_erp");
+    }
 }

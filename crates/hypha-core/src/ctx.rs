@@ -184,4 +184,22 @@ mod tests {
             assert_eq!(ctx.require(scope), Ok(()), "{scope:?}");
         }
     }
+
+    #[test]
+    fn only_a_customer_actor_is_a_customer() {
+        let id = CustomerId::from_uuid(Uuid::from_u128(2));
+        assert_eq!(Ctx::new(Actor::Customer(id), vec![]).customer(), Some(id));
+        assert_eq!(reader().customer(), None);
+    }
+
+    #[test]
+    fn a_channel_comes_only_from_a_channel_context() {
+        let channel = ChannelId::from_uuid(Uuid::from_u128(3));
+        let actor = Actor::User(UserId::from_uuid(Uuid::from_u128(1)));
+        assert_eq!(
+            Ctx::in_channel(actor, vec![], channel).channel(),
+            Some(channel)
+        );
+        assert_eq!(reader().channel(), None);
+    }
 }
