@@ -988,6 +988,16 @@ mod tests {
     }
 
     #[test]
+    fn fulfilling_part_of_an_untracked_items_reservation_gives_that_part_back() {
+        let mut item = item(&[(1, 5)]);
+        item.reserve(&reference("a"), qty(3), &[location(1, 0)])
+            .unwrap();
+        item.set_tracked(false);
+        assert_eq!(item.fulfil(&reference("a"), loc_id(1), qty(1)), Ok(true));
+        assert_eq!(held_by(&item, "a"), [(loc_id(1), 2)]);
+    }
+
+    #[test]
     fn fulfilling_past_the_stock_range_changes_nothing() {
         let mut item = item(&[(1, -MAX_STOCK)]);
         let before = item.clone();
@@ -1007,6 +1017,19 @@ mod tests {
         assert_eq!(item.restock(&reference("a"), loc_id(1), qty(2)), Ok(()));
         assert_eq!(item.on_hand(loc_id(1)), 5);
         assert_eq!(held_by(&item, "a"), [(loc_id(1), 3)]);
+    }
+
+    #[test]
+    fn restocking_leaves_another_references_reservation_alone() {
+        let mut item = item(&[(1, 5)]);
+        item.reserve(&reference("a"), qty(1), &[location(1, 0)])
+            .unwrap();
+        item.reserve(&reference("b"), qty(1), &[location(1, 0)])
+            .unwrap();
+        item.fulfil(&reference("a"), loc_id(1), qty(1)).unwrap();
+        item.restock(&reference("a"), loc_id(1), qty(1)).unwrap();
+        assert_eq!(held_by(&item, "a"), [(loc_id(1), 1)]);
+        assert_eq!(held_by(&item, "b"), [(loc_id(1), 1)]);
     }
 
     #[test]
@@ -1054,6 +1077,16 @@ mod tests {
         assert!(!item.is_spent());
         item.fulfil(&reference("a"), loc_id(1), qty(1)).unwrap();
         assert!(item.is_spent());
+    }
+
+    #[test]
+    fn an_item_with_reservations_cant_be_deleted() {
+        let mut item = item(&[(1, 5)]);
+        item.reserve(&reference("a"), qty(1), &[location(1, 0)])
+            .unwrap();
+        assert_eq!(item.delete(), Err(InventoryError::StillReserved));
+        item.release(&reference("a"));
+        assert_eq!(item.delete(), Ok(()));
     }
 
     #[test]

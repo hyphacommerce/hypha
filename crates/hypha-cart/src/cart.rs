@@ -697,6 +697,8 @@ mod tests {
         assert_eq!(c.set_email(None), completed);
         assert_eq!(c.set_customer(None), completed);
         assert_eq!(c.complete(order()), completed);
+        assert_eq!(c.set_marketing_opt_in(true), completed);
+        assert_eq!(c.set_payment_method(None), completed);
         assert_eq!(c.lines().len(), 1);
     }
 
@@ -731,5 +733,85 @@ mod tests {
         let mut s = c.snapshot();
         s.lines.push(s.lines[0].clone());
         assert_eq!(Cart::restore(s), Err(RestoreError::DuplicateLine(vid(1))));
+    }
+
+    fn hr_address(country: &str) -> AddressParts {
+        AddressParts {
+            first_name: None,
+            last_name: "Horvat".to_string(),
+            company: None,
+            line1: "Ilica 1".to_string(),
+            line2: None,
+            city: "Zagreb".to_string(),
+            province: None,
+            postal_code: None,
+            country: country.to_string(),
+            phone: None,
+        }
+    }
+
+    #[test]
+    fn a_quote_holds_for_fifteen_minutes() {
+        let quote = StoredQuote {
+            amount: Price::new(hypha_core::Money::new(500, hypha_core::Currency::EUR).unwrap())
+                .unwrap(),
+            provider: ProviderKey::new("app_rates").unwrap(),
+            service: "standard".to_string(),
+            reference: None,
+            quoted_at: Timestamp::from_unix_micros(0),
+        };
+        assert_eq!(quote.expires_at(), Timestamp::from_unix_micros(900_000_000));
+    }
+
+    #[test]
+    fn redacting_replaces_the_email_once() {
+        let mut c = cart();
+        c.set_email(Some(Email::new("ana@example.hr").unwrap()))
+            .unwrap();
+        let placeholder = Email::placeholder(Uuid::from_u128(7));
+        assert!(c.redact(placeholder.clone()));
+        assert_eq!(c.email(), Some(&placeholder));
+        assert!(!c.redact(placeholder));
+    }
+
+    #[test]
+    fn restore_holds_up_to_the_most_codes_and_no_more() {
+        let mut s = cart().snapshot();
+        s.discount_codes = (0..MAX_CODES_PER_CART)
+            .map(|n| format!("CODE{n}"))
+            .collect();
+        assert!(Cart::restore(s.clone()).is_ok());
+        s.discount_codes.push("ONEMORE".to_string());
+        assert_eq!(
+            Cart::restore(s),
+            Err(RestoreError::Cart(CartError::TooManyDiscountCodes {
+                max: MAX_CODES_PER_CART
+            }))
+        );
+    }
+
+    #[test]
+    fn restore_rejects_a_code_held_twice() {
+        let mut s = cart().snapshot();
+        s.discount_codes = vec!["SAVE".to_string(), "SAVE".to_string()];
+        assert_eq!(
+            Cart::restore(s),
+            Err(RestoreError::DuplicateDiscountCode("SAVE".to_string()))
+        );
+    }
+
+    #[test]
+    fn restore_rejects_an_address_in_another_country() {
+        let mut s = cart().snapshot();
+        s.shipping_address = Some(hr_address("HR"));
+        assert!(Cart::restore(s.clone()).is_ok());
+        s.shipping_address = Some(hr_address("RS"));
+        assert_eq!(
+            Cart::restore(s),
+            Err(RestoreError::Cart(CartError::AddressCountryMismatch {
+                address: CountryCode::new("RS").unwrap(),
+                cart: CountryCode::new("HR").unwrap(),
+            }))
+        );
     }
 }

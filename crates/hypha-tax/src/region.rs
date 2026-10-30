@@ -280,4 +280,13 @@ mod tests {
         r.set_default_rate(rate(250_000));
         assert_eq!(event_types(&mut r), Vec::<&str>::new());
     }
+
+    #[test]
+    fn setting_a_class_its_same_rate_records_nothing() {
+        let mut r = region();
+        r.set_class_rate(class(2), rate(50_000));
+        let mut r = TaxRegion::restore(r.snapshot()).unwrap();
+        r.set_class_rate(class(2), rate(50_000));
+        assert_eq!(event_types(&mut r), Vec::<&str>::new());
+    }
 }

@@ -585,6 +585,33 @@ fn a_disabled_option_shows_as_a_problem_until_chosen_again() {
 }
 
 #[test]
+fn a_quote_for_another_service_than_the_options_isnt_used() {
+    let w = World::new();
+    let cart = w.cart_with(mug(), 1);
+    w.ship_to(cart, "HR").unwrap();
+    w.select(&Dhl::quoting(1290), cart, express()).unwrap();
+    let mut zone = block_on(w.ports.shipping_zones.get(zone_id()))
+        .unwrap()
+        .unwrap();
+    zone.update_option(
+        express(),
+        hypha_shipping::OptionPatch {
+            rate: Some(OptionRate::Provider {
+                provider: dhl(),
+                service: "economy".to_string(),
+            }),
+            ..hypha_shipping::OptionPatch::default()
+        },
+    )
+    .unwrap();
+    block_on(w.ports.shipping_zones.update(&mut zone)).unwrap();
+    assert_eq!(
+        w.get(cart).shipping_groups[0].problem,
+        Some(ShippingProblem::OptionUnavailable(express()))
+    );
+}
+
+#[test]
 fn a_cart_of_things_never_shipped_has_no_groups() {
     let w = World::new();
     let cart = w.cart_with(ebook(), 1);
