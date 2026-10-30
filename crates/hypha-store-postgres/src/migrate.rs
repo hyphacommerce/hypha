@@ -607,7 +607,7 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
     check_sets(sets)?;
 
     // Creating or upgrading the bookkeeping table happens under the same lock as every
-    // migration, so two hosts starting at once can't race on it (review plan B8).
+    // migration, so two hosts starting at once can't race on it.
     let tx = client.transaction().await?;
     let prepared: Result<(), MigrateError> = async {
         lock(&tx).await?;

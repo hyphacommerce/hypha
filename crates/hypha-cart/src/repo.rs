@@ -36,7 +36,7 @@ pub trait StageCarts {
 }
 
 /// Whatever holds the `CartRepo`: a host's per-request ports, a test world. Commands
-/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// bind just the accessors they use; `hypha_cart::CartPorts` is
 /// the union of all of them.
 pub trait HasCarts {
     type Carts: CartRepo;

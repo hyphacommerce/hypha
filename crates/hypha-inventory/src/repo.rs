@@ -67,7 +67,7 @@ pub trait StageInventoryItems {
 }
 
 /// Whatever holds the `LocationRepo`: a host's per-request ports, a test world. Commands
-/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// bind just the accessors they use; `hypha_cart::CartPorts` is
 /// the union of all of them.
 pub trait HasLocations {
     type Locations: LocationRepo;
@@ -83,7 +83,7 @@ impl<T: HasLocations + ?Sized> HasLocations for &T {
 }
 
 /// Whatever holds the `InventoryItemRepo`: a host's per-request ports, a test world. Commands
-/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// bind just the accessors they use; `hypha_cart::CartPorts` is
 /// the union of all of them.
 pub trait HasInventoryItems {
     type InventoryItems: InventoryItemRepo;

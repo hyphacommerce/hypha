@@ -4,7 +4,7 @@ use crate::{CountryCode, CountryError, TextError, optional_text, required_text};
 
 /// The fields of an address as plain data: what callers fill in to build an `Address`,
 /// and what storage and hosts read back out of one. Unvalidated, so the country is a
-/// `String` like every other field: `Address::new` checks it (review plan D6).
+/// `String` like every other field: `Address::new` checks it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddressParts {
     pub first_name: Option<String>,

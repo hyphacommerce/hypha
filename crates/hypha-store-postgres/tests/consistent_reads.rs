@@ -1,4 +1,4 @@
-//! Multi-query loads read one consistent snapshot (review plan B3), against a real
+//! Multi-query loads read one consistent snapshot, against a real
 //! Postgres. Needs `DATABASE_URL` like the contract tests; skips itself without it.
 //!
 //! A writer keeps moving a customer's default address to a new address and removing

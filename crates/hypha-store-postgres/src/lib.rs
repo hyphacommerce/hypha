@@ -5,7 +5,7 @@
 //! a VPS, Lambda; pooled connections) and on Cloudflare Workers through Hyperdrive (one
 //! connection per request; Hyperdrive pools).
 //!
-//! Rules, from the design note:
+//! Rules:
 //! - queries go through `Queries` (`store.rs`): unprepared (`query_typed*`) unless the
 //!   host's connection keeps a `StatementCache`, which only a host connected straight to
 //!   Postgres should: named prepared statements don't survive transaction pooling

@@ -860,7 +860,7 @@ mod tests {
         assert!(i.reservations().is_empty());
     }
 
-    /// Review plan B9: a location listed twice must not count its stock twice.
+    /// A location listed twice must not count its stock twice.
     #[test]
     fn a_location_listed_twice_counts_once() {
         let i = item(&[(1, 1)]);

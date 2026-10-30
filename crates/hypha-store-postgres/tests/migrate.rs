@@ -134,7 +134,7 @@ async fn an_edited_migration_is_an_error() {
     );
 }
 
-/// Review plan B8: two hosts starting at once used to race on creating
+/// Two hosts starting at once used to race on creating
 /// `schema_migrations` before any lock was taken.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn two_runners_starting_at_once_both_succeed() {
