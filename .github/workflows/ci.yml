@@ -40,6 +40,8 @@ jobs:
         run: docker compose up -d --wait
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # The Workers host compiles some of its code only for wasm.
+      - run: cargo clippy -p hypha-host-workers --target wasm32-unknown-unknown -- -D warnings
       - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
         with:
           tool: nextest,cargo-shear

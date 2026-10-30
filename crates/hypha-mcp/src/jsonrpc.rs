@@ -122,7 +122,7 @@ pub fn parse(body: &[u8]) -> Result<Message, RpcError> {
                 Some(Value::Object(params)) => params.clone(),
                 Some(_) => {
                     let error = RpcError::new(
-                        id.clone(),
+                        id,
                         INVALID_PARAMS,
                         "Invalid params: \"params\" must be an object",
                     );

@@ -24,7 +24,7 @@ use hypha_http::handlers::CoreHandlers;
 use hypha_http::payments::CoreProviders;
 
 /// The Hyperdrive binding's name in `wrangler.toml`.
-pub const HYPERDRIVE: &str = "HYPERDRIVE";
+pub(crate) const HYPERDRIVE: &str = "HYPERDRIVE";
 
 /// A request's ports: a store on its own connection.
 pub type WorkersPorts = PgStore<Client>;
@@ -85,7 +85,7 @@ impl<D: Deployment> WorkersStorage<D> {
 
 /// A store on a new connection: what `WorkersStorage` serves from, and what setup reads
 /// the store from before the handlers (which need it) exist.
-pub async fn store(env: &Env, clock: &HostClock) -> Result<PgStore<Client>, ApiError> {
+pub(crate) async fn store(env: &Env, clock: &HostClock) -> Result<PgStore<Client>, ApiError> {
     let client = SendFuture::new(connect(env))
         .await
         .map_err(ApiError::internal)?;
