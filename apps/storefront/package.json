@@ -20,8 +20,8 @@
     "theme:check": "astryx theme build theme/shopTheme.ts --out theme/shop.css --check"
   },
   "dependencies": {
-    "@astryxdesign/core": "0.7.1",
-    "@astryxdesign/theme-neutral": "0.7.1",
+    "@astryxdesign/core": "0.7.3",
+    "@astryxdesign/theme-neutral": "0.7.3",
     "@heroicons/react": "2.2.0",
     "@hyphacommerce/app": "workspace:*",
     "@hyphacommerce/sdk": "workspace:*",
@@ -34,7 +34,7 @@
     "vinext": "1.2.1"
   },
   "devDependencies": {
-    "@astryxdesign/cli": "0.7.1",
+    "@astryxdesign/cli": "0.7.3",
     "@cloudflare/vite-plugin": "2.0.0-beta.sha-67fa336fd",
     "@types/node": "26.6.5",
     "@types/react": "19.3.0",
