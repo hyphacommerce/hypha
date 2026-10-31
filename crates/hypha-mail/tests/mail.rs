@@ -1,5 +1,14 @@
 //! The mailer and the mail commands on the in-memory world.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use hypha_core::{
     Actor, Address, AddressParts, ApiKeyId, AssetId, AuthError, CartId, ChannelId, CountryCode,
     Ctx, Currency, CustomerId, Email, EventHandler, EventId, FulfillmentId, LocationId, MarketId,
@@ -9,9 +18,9 @@ use hypha_core::{
 };
 use hypha_fulfillment::{Fulfillment, FulfillmentLine, FulfillmentRepo, NewFulfillment, Tracking};
 use hypha_mail::{
-    CommandError, MailContext, MailEnv, Mailer, Sources, TemplateInput, UpdateSettings,
-    order_context, preview, queue_event, render_for_sending, resend, save_template, send_due,
-    send_staff, send_test, update_settings,
+    CommandError, MailContext, MailEnv, Mailer, Sources, StaffMailer, TemplateInput,
+    UpdateSettings, order_context, preview, queue_event, render_for_sending, resend, save_template,
+    send_customer, send_due, send_staff, send_test, update_settings,
 };
 use hypha_media::{
     Asset, AssetRepo, AssetUsage, AssetUsageRepo, FileFacts, HasAssetUsages, MimeType, NewUpload,
@@ -1763,4 +1772,47 @@ fn the_futures_are_send_on_send_ports() {
         hypha_core::NotificationId::from_uuid(uuid(1)),
     ));
     send(send_staff(&env, &ports, invite_email()));
+}
+
+#[test]
+fn a_login_code_email_says_how_many_minutes_it_works() {
+    let ports = world();
+    let env = TestEnv::new();
+    let now = hypha_core::Clock::now(env.clock());
+    let code = hypha_customer_accounts::CustomerEmail::LoginCode {
+        to: email("ana@example.hr"),
+        code: "481516".to_string(),
+        expires_at: now.plus_secs(600),
+    };
+    let record = block_on(send_customer(&env, &ports, code)).unwrap();
+    assert_eq!(record.status(), NotificationStatus::Sent);
+    let text = &env.sender.sent()[0].text;
+    assert!(text.contains("It works for 10 minutes"), "{text}");
+}
+
+#[test]
+fn a_customer_or_staff_email_that_fails_is_an_error() {
+    use hypha_core::Notifier;
+    let ports = world();
+    let env = TestEnv::new();
+    env.sender
+        .fail_next(SendError::Permanent("address refused".to_string()));
+    let erasure = hypha_customer_accounts::CustomerEmail::ErasureRequested {
+        to: email("ana@example.hr"),
+        due_at: hypha_core::Clock::now(env.clock()),
+    };
+    assert_eq!(
+        block_on(send_customer(&env, &ports, erasure)).map(|r| r.status()),
+        Err(hypha_core::NotifyError("address refused".to_string()))
+    );
+    env.sender
+        .fail_next(SendError::Permanent("address refused".to_string()));
+    let staff = StaffMailer {
+        env: &env,
+        ports: &ports,
+    };
+    assert_eq!(
+        block_on(staff.notify(invite_email())),
+        Err(hypha_core::NotifyError("address refused".to_string()))
+    );
 }

@@ -11,6 +11,9 @@ thiserror.workspace = true
 
 [dev-dependencies]
 uuid.workspace = true
+hypha-categories = { path = "../hypha-categories" }
+hypha-testkit = { path = "../hypha-testkit" }
+pollster = "1.0"
 
 [lints]
 workspace = true

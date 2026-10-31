@@ -633,7 +633,7 @@ impl<C: PgConnection> PriceListRepo for PgStore<C> {
                 match (&after.key, sort) {
                     (SortKey::Id, PriceListSort::Newest | PriceListSort::Oldest) => {}
                     (SortKey::Text(t), PriceListSort::NameAsc | PriceListSort::NameDesc) => {
-                        name_key = Some(t.clone())
+                        name_key = Some(t.clone());
                     }
                     (key, sort) => {
                         return Err(RepoError::Backend(format!(

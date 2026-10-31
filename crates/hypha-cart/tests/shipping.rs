@@ -1,5 +1,14 @@
 //! Shipping on carts: the address, the offers, the choice, and shipping in the totals.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use std::sync::Mutex;
 
 use hypha_cart::{
@@ -573,6 +582,33 @@ fn a_disabled_option_shows_as_a_problem_until_chosen_again() {
     );
     assert_eq!((priced.shipping_total, priced.total), (eur(0), eur(1000)));
     assert!(!priced.is_shipping_ready());
+}
+
+#[test]
+fn a_quote_for_another_service_than_the_options_isnt_used() {
+    let w = World::new();
+    let cart = w.cart_with(mug(), 1);
+    w.ship_to(cart, "HR").unwrap();
+    w.select(&Dhl::quoting(1290), cart, express()).unwrap();
+    let mut zone = block_on(w.ports.shipping_zones.get(zone_id()))
+        .unwrap()
+        .unwrap();
+    zone.update_option(
+        express(),
+        hypha_shipping::OptionPatch {
+            rate: Some(OptionRate::Provider {
+                provider: dhl(),
+                service: "economy".to_string(),
+            }),
+            ..hypha_shipping::OptionPatch::default()
+        },
+    )
+    .unwrap();
+    block_on(w.ports.shipping_zones.update(&mut zone)).unwrap();
+    assert_eq!(
+        w.get(cart).shipping_groups[0].problem,
+        Some(ShippingProblem::OptionUnavailable(express()))
+    );
 }
 
 #[test]

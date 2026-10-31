@@ -534,7 +534,7 @@ pub(crate) async fn all_orders<R: OrderRepo>(
                 after = Some(Keyset {
                     key: sort.key(last),
                     id: last.id,
-                })
+                });
             }
             _ => return found,
         }

@@ -60,3 +60,17 @@ pub const KNOWN: &[Known] = &[
 pub fn known_point(name: &str) -> Option<Known> {
     KNOWN.iter().copied().find(|k| k.name == name)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_point_is_known_by_its_name() {
+        assert_eq!(
+            known_point("shipping.rates").map(|k| k.name),
+            Some("shipping.rates")
+        );
+        assert_eq!(known_point("shipping.labels").map(|k| k.name), None);
+    }
+}

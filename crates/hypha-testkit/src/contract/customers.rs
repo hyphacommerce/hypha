@@ -145,7 +145,7 @@ pub(crate) async fn all_customers<R: CustomerRepo>(
                 after = Some(Keyset {
                     key: sort.key(last),
                     id: last.id,
-                })
+                });
             }
             _ => return found,
         }

@@ -638,10 +638,10 @@ pub async fn list<S: Storage>(
     }
     match sort {
         CustomerSort::EmailAsc | CustomerSort::EmailDesc => {
-            redact::require_fields(&ctx, &[Scope::CustomerDataEmail])?
+            redact::require_fields(&ctx, &[Scope::CustomerDataEmail])?;
         }
         CustomerSort::NameAsc | CustomerSort::NameDesc => {
-            redact::require_fields(&ctx, &[Scope::CustomerDataName])?
+            redact::require_fields(&ctx, &[Scope::CustomerDataName])?;
         }
         CustomerSort::Newest | CustomerSort::Oldest => {}
     }

@@ -710,14 +710,14 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                         update_settings(&db, &s).await?;
                     }
                     Staged::AssetUsages(owner, usages) => {
-                        replace_usages(&db, &owner, &usages).await?
+                        replace_usages(&db, &owner, &usages).await?;
                     }
                     Staged::NewCustomer(s) => insert_customer(&db, &s).await?,
                     Staged::Customer(s) => {
                         update_customer(&db, &s).await?;
                     }
                     Staged::DeletedCustomer(id, version) => {
-                        delete_customer(&db, id, version).await?
+                        delete_customer(&db, id, version).await?;
                     }
                     Staged::Idempotency(record) => records.push(record),
                     Staged::NewRole(s) => insert_role(&db, &s).await?,
@@ -736,36 +736,36 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                         update_identity(&db, &s).await?;
                     }
                     Staged::DeletedIdentity(id, version) => {
-                        delete_identity(&db, id, version).await?
+                        delete_identity(&db, id, version).await?;
                     }
                     Staged::NewSession(s) => insert_session(&db, &s).await?,
                     Staged::Session(s) => {
                         update_session(&db, &s).await?;
                     }
                     Staged::SessionRevocation(identity, keep, at) => {
-                        revoke_sessions(&db, identity, keep, at).await?
+                        revoke_sessions(&db, identity, keep, at).await?;
                     }
                     Staged::NewPasswordReset(s) => insert_password_reset(&db, &s).await?,
                     Staged::PasswordReset(s) => update_password_reset(&db, &s).await?,
                     Staged::UsedUpResets(identity, at) => {
-                        use_up_password_resets(&db, identity, at).await?
+                        use_up_password_resets(&db, identity, at).await?;
                     }
                     Staged::InventoryItem(s) => items.push(s),
                     Staged::DeletedInventoryItem(s) => deleted.push(s),
                     Staged::TaxAssignment(products, class) => {
-                        assign_tax_class(&db, &products, class).await?
+                        assign_tax_class(&db, &products, class).await?;
                     }
                     Staged::CatalogProducts(catalog, products, true) => {
-                        add_catalog_products(&db, catalog, &products).await?
+                        add_catalog_products(&db, catalog, &products).await?;
                     }
                     Staged::CatalogProducts(catalog, products, false) => {
-                        remove_catalog_products(&db, catalog, &products).await?
+                        remove_catalog_products(&db, catalog, &products).await?;
                     }
                     Staged::Publications(channel, products, true) => {
-                        crate::channels::publish(&db, channel, &products).await?
+                        crate::channels::publish(&db, channel, &products).await?;
                     }
                     Staged::Publications(channel, products, false) => {
-                        crate::channels::unpublish(&db, channel, &products).await?
+                        crate::channels::unpublish(&db, channel, &products).await?;
                     }
                     Staged::NewCategory(s) => insert_category(&db, &s).await?,
                     Staged::Category(s) => {
@@ -773,10 +773,10 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     }
                     Staged::DeletedCategory(id) => delete_category(&db, id).await?,
                     Staged::CategoryProducts(category, products, true) => {
-                        add_category_products(&db, category, &products).await?
+                        add_category_products(&db, category, &products).await?;
                     }
                     Staged::CategoryProducts(category, products, false) => {
-                        remove_category_products(&db, category, &products).await?
+                        remove_category_products(&db, category, &products).await?;
                     }
                     Staged::NewCustomerGroup(s) => insert_group(&db, &s).await?,
                     Staged::CustomerGroup(s) => {
@@ -784,13 +784,13 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     }
                     Staged::DeletedCustomerGroup(id) => delete_group(&db, id).await?,
                     Staged::CustomerGroupMembers(group, customers, true) => {
-                        add_group_members(&db, group, &customers).await?
+                        add_group_members(&db, group, &customers).await?;
                     }
                     Staged::CustomerGroupMembers(group, customers, false) => {
-                        remove_group_members(&db, group, &customers).await?
+                        remove_group_members(&db, group, &customers).await?;
                     }
                     Staged::PriceListSchedule(from, to) => {
-                        crate::markets::advance_price_list_schedule(&db, from, to).await?
+                        crate::markets::advance_price_list_schedule(&db, from, to).await?;
                     }
                     Staged::FixedPrices(list, changes) => {
                         let set: Vec<(VariantId, FixedPrice)> = changes
@@ -810,7 +810,7 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                         }
                     }
                     Staged::Events(events, version) => {
-                        insert_events(&db, &events, version, self.event_stamp()).await?
+                        insert_events(&db, &events, version, self.event_stamp()).await?;
                     }
                     Staged::NewApp(s) => crate::apps::insert_app(&db, &s).await?,
                     Staged::App(s) => {
@@ -826,35 +826,36 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                         crate::oauth::revoke_app_tokens(&db, &app, at).await?;
                     }
                     Staged::NewCustomFieldDefinition(s) => {
-                        crate::custom_fields::insert_definition(&db, &s).await?
+                        crate::custom_fields::insert_definition(&db, &s).await?;
                     }
                     Staged::CustomFieldDefinition(s) => {
                         crate::custom_fields::update_definition(&db, &s).await?;
                     }
                     Staged::DeletedCustomFieldDefinition(id, version) => {
-                        crate::custom_fields::delete_definition(&db, id, version).await?
+                        crate::custom_fields::delete_definition(&db, id, version).await?;
                     }
                     Staged::CustomFieldValue(row, expected) => {
-                        crate::custom_fields::set_value(&db, &row, expected, now).await?
+                        crate::custom_fields::set_value(&db, &row, expected, now).await?;
                     }
                     Staged::ReindexedCustomFieldValue(row, at) => {
-                        crate::custom_fields::reindex_value(&db, &row, at).await?
+                        crate::custom_fields::reindex_value(&db, &row, at).await?;
                     }
                     Staged::RemovedCustomFieldValue(definition, owner, expected) => {
-                        crate::custom_fields::remove_value(&db, definition, owner, expected).await?
+                        crate::custom_fields::remove_value(&db, definition, owner, expected)
+                            .await?;
                     }
                     Staged::NewAgent(s) => crate::agents::insert_agent(&db, &s).await?,
                     Staged::NewDiscount(s, classes) => insert_discount(&db, &s, classes).await?,
                     Staged::DiscountCodes(codes) => add_codes(&db, &codes).await?,
                     Staged::RemovedDiscountCodes(discount, selection) => {
-                        remove_codes(&db, discount, &selection).await?
+                        remove_codes(&db, discount, &selection).await?;
                     }
                     Staged::DiscountUsage(claim) => claim_usage(&db, &claim).await?,
                     Staged::DiscountCodesActive(discount, selection, active) => {
-                        set_codes_active(&db, discount, &selection, active).await?
+                        set_codes_active(&db, discount, &selection, active).await?;
                     }
                     Staged::DiscountSchedule(from, to) => {
-                        crate::discounts::advance_discount_schedule(&db, from, to).await?
+                        crate::discounts::advance_discount_schedule(&db, from, to).await?;
                     }
                 }
             }

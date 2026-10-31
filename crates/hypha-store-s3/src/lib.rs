@@ -403,7 +403,9 @@ mod tests {
 
     impl HttpClient for FakeHttp {
         async fn send(&self, request: HttpRequest) -> Result<HttpResponse, String> {
-            let limit = request.body_limit.map_or(usize::MAX, |l| l as usize);
+            let limit = request
+                .body_limit
+                .map_or(usize::MAX, |l| usize::try_from(l).unwrap());
             self.requests.borrow_mut().push(request);
             Ok(HttpResponse {
                 status: self.status,

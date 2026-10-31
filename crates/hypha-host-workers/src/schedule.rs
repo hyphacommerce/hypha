@@ -11,7 +11,7 @@ pub const TICK: Duration = Duration::from_secs(60);
 
 /// Whether the tick scheduled at `at_millis` (since the epoch) starts a new `interval`.
 pub fn due(at_millis: u64, interval: Duration) -> bool {
-    let tick = TICK.as_millis() as u64;
+    let tick = u64::try_from(TICK.as_millis()).unwrap_or(u64::MAX);
     let interval = u64::try_from(interval.as_millis())
         .unwrap_or(u64::MAX)
         .max(1);

@@ -1044,6 +1044,58 @@ mod tests {
     }
 
     #[test]
+    fn principal_kinds_read_back_their_names() {
+        for (kind, name) in [
+            (PrincipalKind::Staff, "staff"),
+            (PrincipalKind::Customer, "customer"),
+            (PrincipalKind::Agent, "agent"),
+        ] {
+            assert_eq!(kind.as_str(), name);
+            assert_eq!(PrincipalKind::parse(name), Some(kind));
+        }
+        assert_eq!(PrincipalKind::parse("app"), None);
+    }
+
+    #[test]
+    fn a_new_code_email_voids_the_live_code() {
+        let mut i = customer_identity();
+        i.set_email_code(h(1), at(600)).unwrap();
+        i.set_code_email(Email::new("new@example.com").unwrap())
+            .unwrap();
+        assert_eq!(i.code_email().map(Email::as_str), Some("new@example.com"));
+        assert_eq!(i.use_email_code(h(1), at(10)), CodeCheck::None);
+        assert_eq!(
+            identity().set_code_email(Email::new("new@example.com").unwrap()),
+            Err(IdentityError::NoEmailCode)
+        );
+    }
+
+    struct Sevens;
+
+    impl hypha_core::Random for Sevens {
+        fn fill(&self, bytes: &mut [u8]) {
+            bytes.fill(7);
+        }
+    }
+
+    #[test]
+    fn an_agent_key_identity_round_trips_and_its_lookup_is_a_hex_hash() {
+        let token = NewToken::generate(crate::token::TokenKind::AgentKey, &Sevens);
+        let agent = hypha_core::AgentId::from_uuid(Uuid::from_u128(5));
+        let i = Identity::with_agent_key(IdentityId::from_uuid(Uuid::from_u128(6)), agent, &token);
+        assert_eq!(Identity::restore(i.snapshot()), Ok(i.clone()));
+
+        for lookup in [None, Some("ab".to_string()), Some("G".repeat(64))] {
+            let mut s = i.snapshot();
+            s.credentials[0].lookup = lookup.clone();
+            assert!(
+                matches!(Identity::restore(s), Err(RestoreError::BadCredential(_))),
+                "{lookup:?}"
+            );
+        }
+    }
+
+    #[test]
     fn restore_refuses_unknown_kinds_and_bad_data() {
         let mut s = identity().snapshot();
         s.credentials[0].kind = "carrier_pigeon".to_string();

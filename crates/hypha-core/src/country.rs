@@ -58,7 +58,11 @@ impl CountryCode {
     }
 
     /// This code's row in the table.
-    fn entry(&self) -> &'static (&'static str, &'static str) {
+    fn entry(self) -> &'static (&'static str, &'static str) {
+        #[expect(
+            clippy::expect_used,
+            reason = "constructors only accept codes from the table"
+        )]
         let i = COUNTRIES
             .binary_search_by(|entry| entry.0.as_bytes().cmp(&self.0[..]))
             .expect("every CountryCode holds a code from the table");

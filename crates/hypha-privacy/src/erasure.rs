@@ -146,7 +146,7 @@ async fn orders_of<S: HasOrders>(ports: &S, customer: CustomerId) -> Result<Vec<
                 after = Some(Keyset {
                     key: OrderSort::Newest.key(last),
                     id: last.id,
-                })
+                });
             }
             _ => return Ok(orders),
         }

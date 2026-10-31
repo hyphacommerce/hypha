@@ -1,3 +1,13 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
+
 use hypha_cart::{
     AddLine, CartRepo, CartStatus, CreateCart, add_line, create_cart, set_cart_customer,
     set_cart_email,
@@ -310,6 +320,64 @@ fn a_customer_with_the_email_is_reused() {
     block_on(world.customers.insert(&mut Customer::new(id, ana()))).unwrap();
     let order = world.checkout(world.cart()).unwrap();
     assert_eq!(order.customer(), id);
+}
+
+/// Ticks the cart's marketing box.
+fn tick_marketing(world: &World, cart: CartId) {
+    block_on(hypha_cart::set_cart_marketing(
+        &Ctx::system(),
+        &world.ports,
+        cart,
+        true,
+    ))
+    .unwrap();
+}
+
+fn email_consent(world: &World, id: CustomerId) -> hypha_customers::MarketingConsent {
+    block_on(world.customers.get(id))
+        .unwrap()
+        .unwrap()
+        .marketing_consent(hypha_customers::Channel::Email)
+}
+
+#[test]
+fn ticking_the_box_subscribes_a_known_customer() {
+    let world = World::new();
+    let id = CustomerId::from_uuid(Uuid::from_u128(1500));
+    block_on(world.customers.insert(&mut Customer::new(id, ana()))).unwrap();
+    let cart = world.cart();
+    tick_marketing(&world, cart);
+    world.checkout(cart).unwrap();
+    let consent = email_consent(&world, id);
+    assert_eq!(
+        (consent.state, consent.source),
+        (
+            hypha_customers::ConsentState::Subscribed,
+            Some(hypha_customers::ConsentSource::Checkout)
+        )
+    );
+}
+
+#[test]
+fn an_erased_customer_ticking_the_box_orders_but_isnt_subscribed() {
+    let world = World::new();
+    let id = CustomerId::from_uuid(Uuid::from_u128(1500));
+    block_on(world.customers.insert(&mut Customer::new(id, ana()))).unwrap();
+    let cart = world.cart();
+    block_on(set_cart_customer(
+        &Ctx::system(),
+        &world.ports,
+        cart,
+        Some(id),
+    ))
+    .unwrap();
+    let mut customer = block_on(world.customers.get(id)).unwrap().unwrap();
+    customer.erase(world.clock.now());
+    block_on(world.customers.update(&mut customer)).unwrap();
+    tick_marketing(&world, cart);
+    let before = email_consent(&world, id);
+    assert_eq!(world.checkout(cart).map(|o| o.customer()), Ok(id));
+    assert_eq!(email_consent(&world, id), before);
 }
 
 #[test]
@@ -1906,6 +1974,40 @@ fn used_elsewhere(world: &World, discount: hypha_core::DiscountId, customer: Cus
         at: world.clock.now(),
     });
     block_on(world.ports.commit(batch)).unwrap();
+}
+
+#[test]
+fn two_discounts_on_one_order_each_count_a_use() {
+    use hypha_discounts::{
+        ClassSet, Discount, DiscountDraft, DiscountRepo, ItemSet, Kind, Method, Reward, Target,
+        Value,
+    };
+    let world = World::new();
+    let offer = |n: u128, target: Target| {
+        let kind = Kind::Standard {
+            rewards: vec![Reward {
+                target,
+                value: Value::Percent(hypha_core::BasisPoints::new(1000).unwrap()),
+            }],
+        };
+        let mut draft = DiscountDraft::new(&format!("Offer {n}"), Method::Automatic, kind);
+        draft.combines_with = ClassSet::ALL;
+        let id = hypha_core::DiscountId::from_uuid(Uuid::from_u128(n));
+        block_on(
+            world
+                .discounts
+                .insert(&mut Discount::new(id, draft).unwrap()),
+        )
+        .unwrap();
+        id
+    };
+    let items = offer(9000, Target::Items(ItemSet::all()));
+    let order = offer(9001, Target::Subtotal);
+    world.checkout(world.cart()).unwrap();
+    assert_eq!(
+        block_on(world.discounts.usage_counts(&[items, order])),
+        Ok([(items, 1), (order, 1)].into())
+    );
 }
 
 #[test]

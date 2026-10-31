@@ -39,7 +39,7 @@ impl KeyCache {
         // The host's clock is the wall clock: one set back makes the age negative, and
         // that entry counts as expired rather than as fresh for as long as it's behind.
         let age = now.unix_micros().saturating_sub(at.unix_micros());
-        (0..Self::TTL.as_micros() as i64)
+        (0..i64::try_from(Self::TTL.as_micros()).unwrap_or(i64::MAX))
             .contains(&age)
             .then(|| ctx.clone())
     }

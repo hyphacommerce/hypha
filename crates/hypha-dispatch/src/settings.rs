@@ -37,3 +37,17 @@ impl Default for DispatchSettings {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_is_kept_thirty_days_and_keys_one() {
+        let days = |n: u64| Duration::from_secs(n * 86_400);
+        let defaults = DispatchSettings::default();
+        assert_eq!(defaults.keep_events, days(30));
+        assert_eq!(defaults.keep_idempotency_keys, days(1));
+        assert_eq!(defaults.keep_ended_sessions, days(30));
+    }
+}

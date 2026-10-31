@@ -1,3 +1,13 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
+
 use std::ops::Deref;
 
 use hypha_core::{
@@ -226,6 +236,10 @@ fn user_with(scopes: Vec<Scope>) -> Ctx {
     Ctx::new(Actor::User(UserId::from_uuid(Uuid::from_u128(9))), scopes)
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "commands take the key as an `Option`"
+)]
 fn key(key: &str, fingerprint: u8) -> Option<IdempotencyRequest> {
     Some(IdempotencyRequest {
         key: key.to_string(),
@@ -1335,6 +1349,9 @@ fn a_report_with_its_key_replays() {
     let done = world.report(K::Refunded, None, None).unwrap().value;
     assert_eq!(done.payments[0].refunded(), eur(2000));
     assert_eq!(done.order.financial_status(), FinancialStatus::Refunded);
+    // Refunded wholly, a repeated `refunded` without a reference is nothing.
+    let repeated = world.report(K::Refunded, None, None).unwrap().value;
+    assert_eq!(repeated.payments[0].refunded(), eur(2000));
 }
 
 #[test]

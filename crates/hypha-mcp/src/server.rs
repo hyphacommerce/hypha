@@ -414,15 +414,12 @@ async fn describe_operation<O: Operations>(ops: &O, args: Map<String, Value>) ->
 }
 
 async fn call<O: Operations>(ops: &O, mut args: Map<String, Value>) -> Outcome {
-    let operation = match args.remove("operation") {
-        Some(Value::String(operation)) => operation,
-        _ => {
-            return Ok(tools::tool_error(
-                "invalid_arguments",
-                "Invalid arguments: operation is a string, the operation's ID".to_string(),
-                Value::Null,
-            ));
-        }
+    let Some(Value::String(operation)) = args.remove("operation") else {
+        return Ok(tools::tool_error(
+            "invalid_arguments",
+            "Invalid arguments: operation is a string, the operation's ID".to_string(),
+            Value::Null,
+        ));
     };
     let inputs: DirectArgs = args!(args);
     let operation = match operation_id(operation) {

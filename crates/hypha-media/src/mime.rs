@@ -213,7 +213,7 @@ mod tests {
 
     /// An `ftyp` box with a major brand and compatible brands.
     fn ftyp_box(major: &[u8], compatible: &[&[u8]]) -> Vec<u8> {
-        let size = (16 + 4 * compatible.len()) as u32;
+        let size = u32::try_from(16 + 4 * compatible.len()).unwrap();
         let mut boxed = size.to_be_bytes().to_vec();
         boxed.extend_from_slice(b"ftyp");
         boxed.extend_from_slice(major);

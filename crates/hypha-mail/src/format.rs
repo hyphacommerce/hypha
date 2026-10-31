@@ -72,7 +72,7 @@ fn symbol(currency: Currency) -> Option<&'static str> {
 }
 
 /// `€12.50`, `$1,234.00`, `1,234.00 RSD`, `-€0.05`, `1,000 JPY`: the currency's minor
-/// units after a `.`, thousands grouped with `,` (the store-wide format for now, Q3).
+/// units after a `.`, thousands grouped with `,` (the store-wide format for now).
 pub fn format_money(money: Money) -> String {
     let currency = money.currency();
     let digits = currency.minor_units() as u32;

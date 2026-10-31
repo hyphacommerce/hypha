@@ -542,6 +542,7 @@ impl<S: Storage> FromRequestParts<SharedState<S>> for Issuer {
     responses((status = 200, description = "OK", body = ServerMetadata)),
     security(()),
 )]
+#[expect(clippy::unused_async, reason = "axum takes only async handlers")]
 pub async fn metadata<S: Storage>(Issuer(base): Issuer) -> Json<ServerMetadata> {
     Json(ServerMetadata {
         authorization_endpoint: format!("{base}/oauth/authorize"),
@@ -681,7 +682,7 @@ impl CustomFieldChangesDto {
             match find(field) {
                 None => dto.added.push(of_manifest(field)),
                 Some(d) if d.field_type().to_string() == field.field_type.to_string() => {
-                    dto.kept.push(of_manifest(field))
+                    dto.kept.push(of_manifest(field));
                 }
                 Some(_) => dto.retyped.push(of_manifest(field)),
             }
@@ -1023,6 +1024,10 @@ mod tests {
         server
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "a request's peer address is optional"
+    )]
     fn ip(s: &str) -> Option<IpAddr> {
         Some(s.parse().unwrap())
     }

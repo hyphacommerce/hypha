@@ -736,7 +736,7 @@ accessors! {
 /// Runs a load that takes several queries (a root row, then its children) in one
 /// consistent snapshot: `REPEATABLE READ READ ONLY`. Without it, a write committing
 /// between the queries could pair a new root with old children, `restore` would reject
-/// the mix, and the reader would get a 500 (review plan B3). One query is consistent on
+/// the mix, and the reader would get a 500. One query is consistent on
 /// its own; single-query reads don't need this. In a preview the snapshot can't be
 /// taken (the isolation of a transaction is fixed by its first query): the load reads the
 /// preview's own view, in a savepoint.

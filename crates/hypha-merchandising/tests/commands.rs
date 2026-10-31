@@ -1,3 +1,13 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
+
 use hypha_core::{
     Actor, AssetId, AuthError, Ctx, Currency, Money, PageLimit, PageRequest, Price, ProductId,
     Scope, UserId, VariantId,
@@ -370,6 +380,8 @@ fn a_product_reads_with_its_assets_without_media_read() {
     let reader = user_with(vec![Scope::ProductsRead]);
     let view = block_on(get_product_view(&reader, &ports, pid(1))).unwrap();
     assert_eq!(ids(&view.media), vec![aid(3), aid(1)]);
+    assert_eq!(view.asset(aid(1)).map(|a| a.id()), Some(aid(1)));
+    assert_eq!(view.asset(aid(2)).map(|a| a.id()), None);
     assert_eq!(
         block_on(get_product_view(
             &user_with(vec![Scope::MediaRead]),
@@ -439,8 +451,14 @@ fn a_category_image_is_an_asset_in_use_until_it_changes() {
             role: UsageRole::image(),
         }]
     );
-    set(Some(aid(2))).unwrap();
+    let shown = set(Some(aid(2))).unwrap();
     assert_eq!(usages(&ports, 1), []);
+    assert_eq!(
+        block_on(hypha_merchandising::category_image(&ctx, &ports, &shown))
+            .unwrap()
+            .map(|a| a.id()),
+        Some(aid(2))
+    );
     assert_eq!(set(None).unwrap().image(), None);
     assert_eq!(usages(&ports, 2), []);
 }
@@ -490,6 +508,14 @@ fn a_deleted_categorys_image_is_released() {
     block_on(hypha_categories::delete_category(&ctx, &ports, id)).unwrap();
     let deleted = ports.outbox.events().pop().unwrap();
     let cleanup = hypha_merchandising::CategoryImageCleanup;
+    assert!(EventHandler::<hypha_testkit::InMemoryPorts>::wants(
+        &cleanup,
+        &deleted.event_type
+    ));
+    assert!(!EventHandler::<hypha_testkit::InMemoryPorts>::wants(
+        &cleanup,
+        "category.updated"
+    ));
     block_on(cleanup.handle(&ports, &deleted)).unwrap();
     block_on(cleanup.handle(&ports, &deleted)).unwrap();
     assert_eq!(usages(&ports, 1), []);

@@ -1198,17 +1198,13 @@ dependencies = [
  "hypha-config",
  "hypha-core",
  "hypha-custom-fields",
- "hypha-dispatch",
  "hypha-http",
  "hypha-inventory",
- "hypha-mail",
  "hypha-mail-resend",
  "hypha-markets",
- "hypha-merchandising",
  "hypha-notifications",
  "hypha-payments",
  "hypha-products",
- "hypha-search",
  "hypha-search-index",
  "hypha-spore-core",
  "hypha-store-postgres",
@@ -1244,15 +1240,10 @@ dependencies = [
  "hypha-apps",
  "hypha-config",
  "hypha-core",
- "hypha-custom-fields",
- "hypha-dispatch",
  "hypha-http",
- "hypha-mail",
  "hypha-mail-resend",
- "hypha-merchandising",
  "hypha-notifications",
  "hypha-payments",
- "hypha-search",
  "hypha-spore-core",
  "hypha-store-postgres",
  "hypha-store-s3",
@@ -1511,8 +1502,11 @@ dependencies = [
 name = "hypha-pricing"
 version = "0.1.0-beta.2"
 dependencies = [
+ "hypha-categories",
  "hypha-core",
  "hypha-markets",
+ "hypha-testkit",
+ "pollster",
  "thiserror",
  "uuid",
 ]
@@ -1610,7 +1604,6 @@ dependencies = [
  "pollster",
  "serde",
  "thiserror",
- "url",
  "uuid",
 ]
 

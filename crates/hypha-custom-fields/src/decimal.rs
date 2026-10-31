@@ -63,13 +63,13 @@ impl Decimal {
             return Err(invalid());
         }
         let fraction = fraction.unwrap_or("");
-        let scale = fraction.len() as u32;
+        let scale = u32::try_from(fraction.len()).unwrap_or(u32::MAX);
         if scale > MAX_DECIMAL_SCALE {
             return Err(DecimalError::TooManyDecimals(text.to_string()));
         }
         let significant = format!("{whole}{fraction}");
         let significant = significant.trim_start_matches('0');
-        if significant.len() as u32 > MAX_DECIMAL_DIGITS {
+        if u32::try_from(significant.len()).unwrap_or(u32::MAX) > MAX_DECIMAL_DIGITS {
             return Err(DecimalError::TooManyDigits(text.to_string()));
         }
         let magnitude: i128 = if significant.is_empty() {

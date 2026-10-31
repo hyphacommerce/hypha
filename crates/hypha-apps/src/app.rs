@@ -258,7 +258,7 @@ impl App {
     }
 
     /// A spore, with its declared scopes as its grant (approved by the host: the
-    /// operator chose it by building it in, SP2), recording `app.installed`.
+    /// operator chose it by building it in), recording `app.installed`.
     pub fn spore(new: NewSpore<'_>) -> Result<Self, AppError> {
         let mut app = App::new(NewApp {
             key: AppKey::of_spore(new.name)?,

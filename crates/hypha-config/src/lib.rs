@@ -1584,6 +1584,33 @@ mod tests {
     }
 
     #[test]
+    fn a_preview_token_lives_at_most_a_day() {
+        assert!(load("[agents]\npreview_token_lifetime = \"1d\"").is_ok());
+        assert_eq!(
+            problems(load("[agents]\npreview_token_lifetime = \"86401s\"")),
+            ["agents.preview_token_lifetime: is 86401s, at most 1d"]
+        );
+    }
+
+    #[test]
+    fn retry_schedules_hold_twenty_waits() {
+        let waits = |n: usize| vec!["\"1m\""; n].join(", ");
+        for section in ["webhooks", "jobs.send_notifications"] {
+            assert!(load(&format!("[{section}]\nretry = [{}]", waits(20))).is_ok());
+            assert_eq!(
+                problems(load(&format!("[{section}]\nretry = [{}]", waits(21)))),
+                [format!("{section}.retry: has 21 waits, at most 20")],
+            );
+        }
+    }
+
+    #[test]
+    fn an_invalid_file_lists_each_problem_on_its_own_line() {
+        let error = load("[jobs.dispatch]\nbatch = 0\nlease = \"30s\"").unwrap_err();
+        assert_eq!(error.to_string().lines().count(), 2, "{error}");
+    }
+
+    #[test]
     fn a_flag_is_true_or_false() {
         let found = problems(Config::load(
             None,

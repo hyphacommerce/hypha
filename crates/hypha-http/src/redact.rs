@@ -138,7 +138,7 @@ impl Redaction {
     /// Removes the personal fields among `only` from `object`, listing what it removed
     /// in its `redacted`. Fields that aren't there (or are `null`) are listed all the
     /// same, so the list doesn't tell which ones had a value.
-    fn strip(&self, object: &mut Fields, only: &[&[&str]]) {
+    fn strip(self, object: &mut Fields, only: &[&[&str]]) {
         let removed: Vec<&str> = self
             .removed()
             .filter(|field| only.iter().any(|group| group.contains(field)))
@@ -157,14 +157,14 @@ impl Redaction {
 
     /// A postal address (an order's, a cart's, an address-book entry): names, phone and
     /// street, postal code, city, province.
-    fn address(&self, node: &mut Node) {
+    fn address(self, node: &mut Node) {
         if let Node::Object(object) = node {
             self.strip(object, &[NAME, PHONE, ADDRESS]);
         }
     }
 
     /// A customer: names, email, phone, and the address book.
-    fn customer(&self, node: &mut Node) {
+    fn customer(self, node: &mut Node) {
         if let Node::Object(object) = node {
             if let Some(Node::Array(addresses)) = field(object, "addresses") {
                 addresses.iter_mut().for_each(|a| self.address(a));
@@ -174,7 +174,7 @@ impl Redaction {
     }
 
     /// An order or a cart: the buyer's email and the addresses.
-    fn order(&self, node: &mut Node) {
+    fn order(self, node: &mut Node) {
         if let Node::Object(object) = node {
             for key in ["shipping_address", "billing_address"] {
                 if let Some(address) = field(object, key) {
@@ -186,7 +186,7 @@ impl Redaction {
     }
 
     /// An email's record: who it went to.
-    fn notification(&self, node: &mut Node) {
+    fn notification(self, node: &mut Node) {
         if let Node::Object(object) = node
             && self.email
         {
@@ -199,7 +199,7 @@ impl Redaction {
     }
 
     /// Any value (a webhook payload): every personal field anywhere in it.
-    fn deep(&self, value: &mut Value) {
+    fn deep(self, value: &mut Value) {
         match value {
             Value::Object(object) => {
                 object.values_mut().for_each(|v| self.deep(v));
@@ -334,7 +334,7 @@ pub enum Family {
 }
 
 impl Family {
-    fn apply(self, r: &Redaction, node: &mut Node) {
+    fn apply(self, r: Redaction, node: &mut Node) {
         match self {
             Family::Customer => r.customer(node),
             Family::Order => r.order(node),
@@ -377,7 +377,7 @@ pub fn one_with_fields(
     let mut node = Node::of(dto)?;
     let r = Redaction::of(ctx);
     if !r.is_none() {
-        family.apply(&r, &mut node);
+        family.apply(r, &mut node);
     }
     hide_fields(&mut node, hidden);
     Ok(Redacted(node))
@@ -398,7 +398,7 @@ pub fn page_with_fields(
     {
         for item in items.iter_mut() {
             if !r.is_none() {
-                family.apply(&r, item);
+                family.apply(r, item);
             }
             hide_fields(item, hidden);
         }

@@ -387,6 +387,68 @@ mod tests {
     }
 
     #[test]
+    fn a_document_weighs_at_most_five_kilobytes() {
+        assert_eq!(MAX_CLIENT_METADATA_BYTES, 5120);
+    }
+
+    #[test]
+    fn a_document_may_reach_each_limit_but_not_pass_it() {
+        let padded = |len: usize| {
+            let mut doc = document(json!({}));
+            doc.pop();
+            doc.extend(std::iter::repeat_n(b' ', len - doc.len() - 1));
+            doc.push(b'}');
+            doc
+        };
+        assert!(ClientMetadata::parse(ID, &padded(MAX_CLIENT_METADATA_BYTES)).is_ok());
+        assert!(invalid(&padded(MAX_CLIENT_METADATA_BYTES + 1)).contains("larger than"));
+
+        let named = |len: usize| document(json!({"client_name": "é".repeat(len)}));
+        assert!(ClientMetadata::parse(ID, &named(MAX_CLIENT_NAME_LEN)).is_ok());
+        assert!(invalid(&named(MAX_CLIENT_NAME_LEN + 1)).contains("longer than"));
+
+        let listing = |count: usize| {
+            let uris: Vec<String> = (0..count)
+                .map(|i| format!("https://client.example/cb/{i}"))
+                .collect();
+            document(json!({"redirect_uris": uris}))
+        };
+        assert!(ClientMetadata::parse(ID, &listing(MAX_REDIRECT_URIS)).is_ok());
+        assert!(invalid(&listing(MAX_REDIRECT_URIS + 1)).contains("more than"));
+    }
+
+    #[test]
+    fn grant_and_response_types_may_list_more_than_the_code_flow() {
+        let doc = document(json!({
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+        }));
+        assert!(ClientMetadata::parse(ID, &doc).is_ok());
+    }
+
+    #[test]
+    fn a_client_on_this_machine_alone_is_loopback_only() {
+        let doc =
+            document(json!({"redirect_uris": ["http://127.0.0.1/cb", "http://localhost:8/cb"]}));
+        assert!(ClientMetadata::parse(ID, &doc).unwrap().loopback_only());
+    }
+
+    #[test]
+    fn a_stored_record_names_one_app_or_one_agent() {
+        let agent = AgentId::from_uuid(uuid::Uuid::from_u128(1));
+        assert_eq!(
+            OAuthClient::from_parts(Some("app_shop".to_string()), None),
+            Ok(OAuthClient::App(AppKey::new("app_shop").unwrap()))
+        );
+        assert_eq!(
+            OAuthClient::from_parts(None, Some(agent)),
+            Ok(OAuthClient::Agent(agent))
+        );
+        assert!(OAuthClient::from_parts(Some("app_shop".to_string()), Some(agent)).is_err());
+        assert!(OAuthClient::from_parts(None, None).is_err());
+    }
+
+    #[test]
     fn redirect_uris_are_https_or_loopback_http() {
         for bad in [
             "http://client.example/cb",
@@ -425,9 +487,15 @@ mod tests {
     fn links_shown_to_staff_are_https() {
         let doc = document(json!({"logo_uri": "http://client.example/logo.png"}));
         assert!(invalid(&doc).contains("logo_uri"));
-        let doc = document(json!({"logo_uri": "https://client.example/logo.png"}));
+        let doc = document(json!({"client_uri": "http://client.example"}));
+        assert!(invalid(&doc).contains("client_uri"));
+        let doc = document(json!({
+            "logo_uri": "https://client.example/logo.png",
+            "client_uri": "https://client.example",
+        }));
         let parsed = ClientMetadata::parse(ID, &doc).unwrap();
         assert_eq!(parsed.logo_uri(), Some("https://client.example/logo.png"));
+        assert_eq!(parsed.client_uri(), Some("https://client.example"));
     }
 
     #[test]
@@ -455,6 +523,7 @@ mod tests {
             "https://client.example",
             "https://client.example/",
             "https://user:pw@client.example/m.json",
+            "https://user@client.example/m.json",
             "https://client.example/m.json#x",
             "https://client.example/a/../m.json",
             "client.example/m.json",
@@ -466,6 +535,8 @@ mod tests {
     #[test]
     fn stored_metadata_reads_back() {
         let parsed = ClientMetadata::parse(ID, &document(json!({}))).unwrap();
+        assert_eq!(parsed.client_id(), ID);
+        assert_eq!(parsed.redirect_uris().len(), 2);
         assert_eq!(
             ClientMetadata::from_value(ID, &parsed.to_value()),
             Ok(parsed)

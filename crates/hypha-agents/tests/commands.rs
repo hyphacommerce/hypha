@@ -1,5 +1,14 @@
 //! Agents, proposals and the call log over a store in memory.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use core::time::Duration;
 
 use hypha_agents::{
@@ -994,4 +1003,22 @@ fn calls_are_logged_listed_newest_first_and_pruned_by_age() {
         .err(),
         Some(CommandError::AgentNotFound(missing))
     );
+}
+
+#[test]
+fn changing_only_a_write_mode_needs_the_whole_grant() {
+    let w = World::new();
+    let agent = w.agent();
+    let manager = key(vec![Scope::AgentsWrite]);
+    let promoted = UpdateAgent {
+        grant: Some(grant(
+            &["orders:read"],
+            &[("products:write", "apply"), ("inventory:write", "apply")],
+        )),
+        ..UpdateAgent::default()
+    };
+    assert!(matches!(
+        block_on(update_agent(&manager, &w.ports, agent.id(), promoted)),
+        Err(CommandError::CannotGrant(_))
+    ));
 }

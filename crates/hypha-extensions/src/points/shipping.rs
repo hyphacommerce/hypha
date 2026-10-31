@@ -20,7 +20,7 @@ impl ExtensionPoint for ShippingRates {
     /// regular option is left.
     const ON_FAILURE: OnFailure = OnFailure::Fallback;
     /// The rate settings it answers for are shipping's. The destination's street and
-    /// postal code are personal data besides (`customer_data:address`, AP10).
+    /// postal code are personal data besides (`customer_data:address`).
     const SCOPE: Scope = Scope::ShippingRead;
     const READ_ONLY: bool = true;
     type Request = RateCallbackRequest;
@@ -245,6 +245,14 @@ mod tests {
             ShippingRates::check(&request(), &parsed),
             Err("the rate for \"x\" is negative".to_string())
         );
+    }
+
+    #[test]
+    fn a_free_rate_delivered_on_one_day_is_fine() {
+        let parsed = rates(
+            r#"{"rates":[{"service":"x","name":"X","amount":{"amount":0,"currency":"EUR"},"estimate":{"min_days":2,"max_days":2}}]}"#,
+        );
+        assert_eq!(ShippingRates::check(&request(), &parsed), Ok(()));
     }
 
     #[test]

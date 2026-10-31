@@ -590,7 +590,7 @@ impl<const RETYPED: bool> hypha_spore_core::Spore for Rebuilt<RETYPED> {
         let mut fields = <TestSpore as hypha_spore_core::Spore>::custom_fields();
         match RETYPED {
             true => {
-                fields[0].field_type = hypha_custom_fields::FieldType::parse("integer").unwrap()
+                fields[0].field_type = hypha_custom_fields::FieldType::parse("integer").unwrap();
             }
             false => fields.clear(),
         }

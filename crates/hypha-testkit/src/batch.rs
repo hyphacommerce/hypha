@@ -652,7 +652,7 @@ impl HasBatch for InMemoryPorts {
                         &unique_order,
                     )?,
                     Staged::Order(mut order) => {
-                        update_row(&mut orders, order.id(), &mut order, &unique_order)?
+                        update_row(&mut orders, order.id(), &mut order, &unique_order)?;
                     }
                     Staged::NewFulfillment(mut fulfillment) => insert_row(
                         &mut fulfillments,
@@ -675,7 +675,7 @@ impl HasBatch for InMemoryPorts {
                         &no_unique_keys,
                     )?,
                     Staged::Payment(mut payment) => {
-                        update_row(&mut payments, payment.id(), &mut payment, &no_unique_keys)?
+                        update_row(&mut payments, payment.id(), &mut payment, &no_unique_keys)?;
                     }
                     Staged::NewCart(mut cart) => insert_row(
                         &mut carts,
@@ -685,7 +685,7 @@ impl HasBatch for InMemoryPorts {
                         &no_unique_keys,
                     )?,
                     Staged::Cart(mut cart) => {
-                        update_row(&mut carts, cart.id(), &mut cart, &no_unique_keys)?
+                        update_row(&mut carts, cart.id(), &mut cart, &no_unique_keys)?;
                     }
                     Staged::DeletedCart(cart) => {
                         match carts.get(&cart.id()) {
@@ -695,7 +695,7 @@ impl HasBatch for InMemoryPorts {
                         carts.remove(&cart.id());
                     }
                     Staged::Product(mut product) => {
-                        update_row(&mut products, product.id(), &mut product, &unique_product)?
+                        update_row(&mut products, product.id(), &mut product, &unique_product)?;
                     }
                     Staged::DeletedProduct(product) => {
                         match products.get(&product.id()) {
@@ -717,10 +717,10 @@ impl HasBatch for InMemoryPorts {
                         tax_classes.remove(&id);
                     }
                     Staged::AssetUsages(owner, replacement) => {
-                        replace_usages(&assets, &mut usages, &owner, &replacement)?
+                        replace_usages(&assets, &mut usages, &owner, &replacement)?;
                     }
                     Staged::InventoryItem(mut item) => {
-                        update_row(&mut items, item.id(), &mut item, &inventory_items::unique)?
+                        update_row(&mut items, item.id(), &mut item, &inventory_items::unique)?;
                     }
                     Staged::DeletedInventoryItem(item) => {
                         match items.get(&item.id()) {
@@ -761,7 +761,7 @@ impl HasBatch for InMemoryPorts {
                         &unique_group,
                     )?,
                     Staged::CustomerGroup(mut group) => {
-                        update_row(&mut groups, group.id(), &mut group, &unique_group)?
+                        update_row(&mut groups, group.id(), &mut group, &unique_group)?;
                     }
                     Staged::DeletedCustomerGroup(id) => {
                         if self.price_lists.names_group(id) {
@@ -799,7 +799,7 @@ impl HasBatch for InMemoryPorts {
                         &unique_role,
                     )?,
                     Staged::Role(mut role) => {
-                        update_row(&mut roles, role.id(), &mut role, &unique_role)?
+                        update_row(&mut roles, role.id(), &mut role, &unique_role)?;
                     }
                     Staged::NewUser(mut user) => insert_row(
                         &mut users,
@@ -809,10 +809,10 @@ impl HasBatch for InMemoryPorts {
                         &unique_user,
                     )?,
                     Staged::User(mut user) => {
-                        update_row(&mut users, user.id(), &mut user, &unique_user)?
+                        update_row(&mut users, user.id(), &mut user, &unique_user)?;
                     }
                     Staged::Invite(mut invite) => {
-                        update_row(&mut invites, invite.id(), &mut invite, &unique_invite)?
+                        update_row(&mut invites, invite.id(), &mut invite, &unique_invite)?;
                     }
                     Staged::NewIdentity(mut identity) => insert_row(
                         &mut identities,
@@ -843,7 +843,7 @@ impl HasBatch for InMemoryPorts {
                     )?,
                     Staged::Session(mut session) => {
                         keep_recorded_use(&sessions, &mut session);
-                        update_row(&mut sessions, session.id(), &mut session, &unique_session)?
+                        update_row(&mut sessions, session.id(), &mut session, &unique_session)?;
                     }
                     Staged::SessionRevocation(identity, keep, at) => {
                         for session in sessions.values_mut().filter(|s| {
@@ -863,7 +863,7 @@ impl HasBatch for InMemoryPorts {
                         &unique_reset,
                     )?,
                     Staged::PasswordReset(mut reset) => {
-                        update_row(&mut resets, reset.id(), &mut reset, &unique_reset)?
+                        update_row(&mut resets, reset.id(), &mut reset, &unique_reset)?;
                     }
                     Staged::UsedUpResets(identity, at) => {
                         for reset in resets
@@ -908,7 +908,7 @@ impl HasBatch for InMemoryPorts {
                             &mut category,
                             category_keys::CATEGORY_ID,
                             &unique_category,
-                        )?
+                        )?;
                     }
                     Staged::Category(mut category) => {
                         check_parent(&categories, &category)?;
@@ -917,7 +917,7 @@ impl HasBatch for InMemoryPorts {
                             category.id(),
                             &mut category,
                             &unique_category,
-                        )?
+                        )?;
                     }
                     Staged::DeletedCategory(id) => {
                         // What the parent's foreign key enforces: no orphaned children.
@@ -995,10 +995,10 @@ impl HasBatch for InMemoryPorts {
                         &no_unique_keys,
                     )?,
                     Staged::NewOAuthCode(mut code) => {
-                        crate::oauth::insert_code(&mut oauth, &mut code)?
+                        crate::oauth::insert_code(&mut oauth, &mut code)?;
                     }
                     Staged::OAuthCode(mut code) => {
-                        update_row(&mut oauth.codes, code.hash(), &mut code, &no_unique_keys)?
+                        update_row(&mut oauth.codes, code.hash(), &mut code, &no_unique_keys)?;
                     }
                     Staged::NewOAuthToken(mut token) => {
                         match token.client() {
@@ -1019,7 +1019,7 @@ impl HasBatch for InMemoryPorts {
                             &mut token,
                             oauth_keys::OAUTH_TOKEN_ID,
                             &crate::oauth::unique_token,
-                        )?
+                        )?;
                     }
                     Staged::OAuthToken(mut token) => update_row(
                         &mut oauth.tokens,
@@ -1062,7 +1062,7 @@ impl HasBatch for InMemoryPorts {
                             &mut field_values,
                             row,
                             at,
-                        )?
+                        )?;
                     }
                     Staged::RemovedCustomFieldValue(definition, owner, expected) => {
                         crate::custom_fields::remove_value(
@@ -1070,7 +1070,7 @@ impl HasBatch for InMemoryPorts {
                             definition,
                             owner,
                             expected,
-                        )?
+                        )?;
                     }
                     Staged::Events(staged, version) => events.push((staged, version)),
                     Staged::NewAgent(mut agent) => insert_row(
@@ -1099,13 +1099,13 @@ impl HasBatch for InMemoryPorts {
                         discount_rows.add_codes(&codes, now)?;
                     }
                     Staged::RemovedDiscountCodes(discount, selection) => {
-                        discount_rows.remove_codes(discount, &selection)
+                        discount_rows.remove_codes(discount, &selection);
                     }
                     Staged::DiscountUsage(claim) => {
-                        discount_rows.claim(&claim, discounts.get(&claim.discount))?
+                        discount_rows.claim(&claim, discounts.get(&claim.discount))?;
                     }
                     Staged::DiscountCodesActive(discount, selection, active) => {
-                        discount_rows.set_active(discount, &selection, active)
+                        discount_rows.set_active(discount, &selection, active);
                     }
                     Staged::DiscountSchedule(from, to) => {
                         if discount_rows.schedule != from {

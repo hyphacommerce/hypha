@@ -55,7 +55,11 @@ impl Currency {
     }
 
     /// This currency's row in the table.
-    fn entry(&self) -> &'static (&'static str, u8, &'static str) {
+    fn entry(self) -> &'static (&'static str, u8, &'static str) {
+        #[expect(
+            clippy::expect_used,
+            reason = "constructors only accept codes from the table"
+        )]
         let i = CURRENCIES
             .binary_search_by(|entry| entry.0.as_bytes().cmp(&self.0[..]))
             .expect("every Currency holds a code from the table");

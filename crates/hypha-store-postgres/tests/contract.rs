@@ -5,6 +5,15 @@
 //! Without either URL the tests print a notice and pass, so `cargo test --workspace`
 //! still works on machines without Docker.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use hypha_store_postgres::testing::{TestDatabase, test_database_url};
 use hypha_store_postgres::{CORE, PgStore};
 use hypha_testkit::contract;

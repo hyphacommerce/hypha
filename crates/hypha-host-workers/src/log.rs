@@ -6,7 +6,7 @@ use std::io::Write;
 use tracing_subscriber::fmt::MakeWriter;
 
 /// One event's line, written to the console when it's done.
-pub struct Line(Vec<u8>);
+pub(crate) struct Line(Vec<u8>);
 
 impl Write for Line {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
@@ -38,7 +38,7 @@ impl<'a> MakeWriter<'a> for Console {
 
 /// Sends events at `level` and above to the console; once per isolate (later calls do
 /// nothing).
-pub fn init(level: tracing::Level) {
+pub(crate) fn init(level: tracing::Level) {
     let _ = tracing_subscriber::fmt()
         .with_writer(Console)
         .with_max_level(level)

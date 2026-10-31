@@ -363,6 +363,20 @@ fn cheapest_ties_go_to_the_earlier_line() {
 }
 
 #[test]
+fn cheapest_takes_several_units_of_one_line() {
+    let d = discount(
+        1,
+        items(
+            ItemSet::all(),
+            amount(100, Allocation::Cheapest { units: 2 }),
+        ),
+        ClassSet::NONE,
+    );
+    let outcome = apply(&input(vec![line(1, 500, 3)]), &[auto(&d)]);
+    assert_eq!(shares(&outcome), vec![vec![(0, 200)]]);
+}
+
+#[test]
 fn a_fixed_price_reduces_only_units_above_it() {
     let d = discount(
         1,
@@ -580,6 +594,10 @@ fn a_rate_sees_the_subtotal_after_discounts() {
 }
 
 /// Free shipping from 50.00, else 5.00.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the shape of a shipping rate function"
+)]
 fn free_over_fifty(subtotal: Money) -> Option<Money> {
     Some(eur(if subtotal.amount() >= 5000 { 0 } else { 500 }))
 }
@@ -1032,6 +1050,15 @@ fn a_code_short_of_its_quantity_says_how_many_are_missing() {
 }
 
 #[test]
+fn a_code_at_exactly_its_quantity_applies() {
+    let d = conditioned(Condition::MinQuantity(3));
+    assert_eq!(
+        state_of(&d, &with_code(vec![line(1, 1000, 3)])),
+        CodeState::Applied
+    );
+}
+
+#[test]
 fn a_code_with_its_uses_taken_has_reached_its_limit() {
     let d = coded(1, percent_off_all(1000));
     let live = Live {
@@ -1060,6 +1087,41 @@ fn a_code_without_an_amount_in_the_market_isnt_available_there() {
         state_of(&d, &with_code(vec![line(1, 1000, 1)])),
         CodeState::NotAvailableInMarket
     );
+}
+
+#[test]
+fn a_code_without_a_shipping_cap_in_the_market_isnt_available_there() {
+    let d = coded(
+        1,
+        reward(
+            Target::Shipping {
+                max_amount: Some(PerMarket::of(other_market(), eur(500))),
+            },
+            Value::Percent(bp(10_000)),
+        ),
+    );
+    let rate = free_over_fifty;
+    let i = DiscountInput {
+        codes: vec!["CODE".to_string()],
+        ..shipped(vec![line(1, 1000, 1)], &rate)
+    };
+    assert_eq!(state_of(&d, &i), CodeState::NotAvailableInMarket);
+}
+
+#[test]
+fn a_code_without_its_spend_in_the_market_isnt_available_there() {
+    let elsewhere = || Threshold::Amount(PerMarket::of(other_market(), eur(100)));
+    let deal = coded(1, bxgy(elsewhere(), 1, free(), None));
+    let tiered = coded(
+        1,
+        tiers(
+            Measure::Subtotal,
+            vec![(elsewhere(), Value::Percent(bp(1000)))],
+        ),
+    );
+    let lines = || with_code(vec![line(1, 1000, 1), line(2, 500, 1)]);
+    assert_eq!(state_of(&deal, &lines()), CodeState::NotAvailableInMarket);
+    assert_eq!(state_of(&tiered, &lines()), CodeState::NotAvailableInMarket);
 }
 
 #[test]
@@ -1233,6 +1295,73 @@ fn an_amount_off_each_unit_got_stops_at_its_price() {
     );
     let outcome = apply(&input(vec![line(1, 1000, 1), line(2, 500, 1)]), &[auto(&d)]);
     assert_eq!(outcome.total, eur(500));
+}
+
+#[test]
+fn an_amount_off_each_unit_got_counts_every_unit() {
+    let d = discount(
+        1,
+        bxgy(
+            Threshold::Quantity(1),
+            1,
+            amount(300, Allocation::Each),
+            None,
+        ),
+        ClassSet::NONE,
+    );
+    // Two bought at 10.00, two got at 5.00: 3.00 off each of them.
+    let outcome = apply(&input(vec![line(1, 1000, 2), line(2, 500, 2)]), &[auto(&d)]);
+    assert_eq!(outcome.total, eur(600));
+}
+
+#[test]
+fn buy_x_get_y_by_amount_needs_its_spend() {
+    let d = discount(
+        1,
+        bxgy(Threshold::Amount(here(1500)), 1, free(), None),
+        ClassSet::NONE,
+    );
+    // 10.00 + 3.00 is short of 15.00 even with the cheap unit bought.
+    let outcome = apply(&input(vec![line(1, 1000, 1), line(2, 300, 1)]), &[auto(&d)]);
+    assert_eq!(outcome.total, eur(0));
+}
+
+#[test]
+fn buy_x_get_y_by_amount_is_met_at_exactly_its_spend() {
+    let d = discount(
+        1,
+        bxgy(Threshold::Amount(here(1500)), 1, free(), None),
+        ClassSet::NONE,
+    );
+    let outcome = apply(
+        &input(vec![line(1, 1000, 1), line(2, 500, 1), line(3, 300, 1)]),
+        &[auto(&d)],
+    );
+    assert_eq!(outcome.total, eur(300));
+}
+
+#[test]
+fn buy_x_get_y_buys_only_units_in_the_cart() {
+    let d = discount(
+        1,
+        bxgy(Threshold::Quantity(3), 1, free(), None),
+        ClassSet::NONE,
+    );
+    // Three units in all: buying three leaves none to get.
+    let outcome = apply(&input(vec![line(1, 1000, 2), line(2, 500, 1)]), &[auto(&d)]);
+    assert_eq!(outcome.total, eur(0));
+}
+
+#[test]
+fn buy_x_get_y_needs_every_unit_it_gives() {
+    let d = discount(
+        1,
+        bxgy(Threshold::Quantity(2), 2, free(), None),
+        ClassSet::NONE,
+    );
+    // Two bought, but only one left to get of the two it gives.
+    let outcome = apply(&input(vec![line(1, 1000, 2), line(2, 500, 1)]), &[auto(&d)]);
+    assert_eq!(outcome.total, eur(0));
 }
 
 #[test]

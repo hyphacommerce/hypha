@@ -1,9 +1,20 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
+
 use core::time::Duration;
 
 use hypha_auth::{IdentityRepo, Session, SessionClient, SessionRepo, TokenKind};
 use hypha_cart::{Cart, CartRepo};
 use hypha_core::{
     Actor, CartId, ChannelId, CountryCode, CustomerId, Email, MarketId, NotifyError, Scope,
+    Versioned,
 };
 use hypha_customer_accounts::{
     CommandError, CustomerEmail, LoggedIn, authenticate_customer, login_with_code, logout,
@@ -272,6 +283,14 @@ fn signing_in_links_the_request_cart_but_not_another_channels() {
     let cart = block_on(ports.carts.get(mine)).unwrap().unwrap();
     assert_eq!(cart.customer(), Some(me.customer.id()));
     assert_eq!(cart.email().map(Email::as_str), Some(NINA));
+
+    // Already hers: signing in again leaves it as it was.
+    env.advance(60);
+    request(&ports, &env, NINA).unwrap();
+    let code = env.last_code().unwrap();
+    login(&ports, &env, NINA, &code, Some(mine)).unwrap();
+    let again = block_on(ports.carts.get(mine)).unwrap().unwrap();
+    assert_eq!(again.version(), cart.version());
 
     env.advance(60);
     request(&ports, &env, NINA).unwrap();

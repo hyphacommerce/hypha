@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn require_accepts_granted_scope() {
-        assert_eq!(reader().require(Scope::ProductsRead), Ok(()))
+        assert_eq!(reader().require(Scope::ProductsRead), Ok(()));
     }
 
     #[test]
@@ -181,7 +181,25 @@ mod tests {
     fn system_has_every_scope() {
         let ctx = Ctx::system();
         for scope in Scope::ALL {
-            assert_eq!(ctx.require(scope), Ok(()), "{scope:?}")
+            assert_eq!(ctx.require(scope), Ok(()), "{scope:?}");
         }
+    }
+
+    #[test]
+    fn only_a_customer_actor_is_a_customer() {
+        let id = CustomerId::from_uuid(Uuid::from_u128(2));
+        assert_eq!(Ctx::new(Actor::Customer(id), vec![]).customer(), Some(id));
+        assert_eq!(reader().customer(), None);
+    }
+
+    #[test]
+    fn a_channel_comes_only_from_a_channel_context() {
+        let channel = ChannelId::from_uuid(Uuid::from_u128(3));
+        let actor = Actor::User(UserId::from_uuid(Uuid::from_u128(1)));
+        assert_eq!(
+            Ctx::in_channel(actor, vec![], channel).channel(),
+            Some(channel)
+        );
+        assert_eq!(reader().channel(), None);
     }
 }

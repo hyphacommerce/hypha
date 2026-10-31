@@ -122,7 +122,7 @@ pub fn parse(body: &[u8]) -> Result<Message, RpcError> {
                 Some(Value::Object(params)) => params.clone(),
                 Some(_) => {
                     let error = RpcError::new(
-                        id.clone(),
+                        id,
                         INVALID_PARAMS,
                         "Invalid params: \"params\" must be an object",
                     );
@@ -241,6 +241,25 @@ mod tests {
             code_of(r#"[{"jsonrpc":"2.0","id":1,"method":"ping"}]"#),
             INVALID_REQUEST
         );
+    }
+
+    #[test]
+    fn a_batch_is_told_why() {
+        let error = parse(br#"[{"jsonrpc":"2.0","id":1,"method":"ping"}]"#).unwrap_err();
+        assert!(
+            error.message.contains("batches are not supported"),
+            "{}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn a_negative_or_huge_whole_id_is_kept_on_an_error() {
+        for id in ["-1", "18446744073709551615"] {
+            let body = format!(r#"{{"jsonrpc":"2.0","id":{id}}}"#);
+            let error = parse(body.as_bytes()).unwrap_err();
+            assert_eq!(error.id.map(|id| id.to_string()), Some(id.to_string()));
+        }
     }
 
     #[test]

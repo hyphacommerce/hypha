@@ -44,7 +44,7 @@ impl OrderStats {
                 Some(sum) => {
                     *sum = sum.checked_add(total).unwrap_or_else(|_| {
                         Money::new(Money::MAX_AMOUNT, sum.currency()).unwrap_or(*sum)
-                    })
+                    });
                 }
                 None => stats.amount_spent.push(total),
             }

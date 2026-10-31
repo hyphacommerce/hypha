@@ -1,5 +1,14 @@
 //! The migration runner against a real Postgres (needs `DATABASE_URL`, like contract.rs).
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use hypha_store_postgres::{CORE, MigrateError, Migration, MigrationSet, migrate};
 use tokio_postgres::{Client, NoTls};
 
@@ -125,7 +134,7 @@ async fn an_edited_migration_is_an_error() {
     );
 }
 
-/// Review plan B8: two hosts starting at once used to race on creating
+/// Two hosts starting at once used to race on creating
 /// `schema_migrations` before any lock was taken.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn two_runners_starting_at_once_both_succeed() {

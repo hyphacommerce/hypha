@@ -147,6 +147,7 @@ mod tests {
         assert!(!r.is_usable(now.plus_secs(3600)));
         r.mark_used(now);
         assert!(!r.is_usable(now));
+        assert_eq!(r.used_at(), Some(now));
     }
 
     fn reset(now: Timestamp, lifetime_secs: u64) -> PasswordReset {

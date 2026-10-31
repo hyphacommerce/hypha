@@ -43,3 +43,24 @@ impl Default for AuthSettings {
 pub trait HasAuthSettings {
     fn auth_settings(&self) -> &AuthSettings;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_defaults_are_the_documented_lifetimes() {
+        let hours = |h: u64| Duration::from_secs(h * 3600);
+        assert_eq!(
+            AuthSettings::default(),
+            AuthSettings {
+                session_lifetime: hours(7 * 24),
+                second_factor_window: Duration::from_secs(300),
+                second_factor_lock: Duration::from_secs(900),
+                password_reset_lifetime: hours(1),
+                password_reset_resend_after: Duration::from_secs(300),
+                invite_lifetime: hours(7 * 24),
+            }
+        );
+    }
+}

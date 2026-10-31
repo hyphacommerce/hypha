@@ -5,6 +5,15 @@
 //! The server is `HYPHA_TEST_DATABASE_URL` (the compose `postgres-test`, tuned for
 //! throwaway data), else `DATABASE_URL`. Native only: it opens its own connections.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "test support: a broken fixture panics the test using it, and fixtures cast small counters"
+)]
 use std::time::Duration;
 
 use tokio_postgres::{Client, Config, NoTls};

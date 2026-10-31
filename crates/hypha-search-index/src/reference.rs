@@ -125,7 +125,7 @@ pub fn search(documents: &[SearchDocument], query: &SearchQuery) -> SearchResult
         .values_mut()
         .map(|docs| {
             docs.sort_by(|a, b| within_group(a, b, sort, &query.terms));
-            (docs[0], docs.len() as u32)
+            (docs[0], u32::try_from(docs.len()).unwrap_or(u32::MAX))
         })
         .collect();
     representatives.sort_by(|(a, _), (b, _)| between_groups(a, b, sort, &query.terms));

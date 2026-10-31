@@ -21,21 +21,16 @@ url = "2.5"
 # The Worker itself: `cargo build --target wasm32-unknown-unknown -p hypha-host-workers`
 # and `worker-build` build it.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-hypha-dispatch = { path = "../hypha-dispatch" }
 hypha-apps = { path = "../hypha-apps" }
 hypha-payments = { path = "../hypha-payments" }
 # The spores a deployment is built with (`worker!`).
 hypha-spore-core = { path = "../hypha-spore-core" }
 # Spores' configuration sections (`[spores.<name>]`).
 toml = "1.1"
-hypha-merchandising = { path = "../hypha-merchandising" }
-hypha-custom-fields = { path = "../hypha-custom-fields" }
-hypha-search = { path = "../hypha-search" }
 hypha-store-postgres = { path = "../hypha-store-postgres" }
 hypha-store-s3 = { path = "../hypha-store-s3" }
 hypha-stores = { path = "../hypha-stores" }
 hypha-notifications = { path = "../hypha-notifications" }
-hypha-mail = { path = "../hypha-mail" }
 hypha-mail-resend = { path = "../hypha-mail-resend" }
 worker = { version = "=0.8.7", features = ["http", "axum", "tokio-postgres"] }
 axum = { version = "0.8", default-features = false, features = ["json", "query", "form", "matched-path", "original-uri"] }

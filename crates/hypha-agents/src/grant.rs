@@ -149,10 +149,10 @@ fn kind(scope: Scope) -> Kind {
     }
 }
 
-fn position(scope: &Scope) -> usize {
+fn position(scope: Scope) -> usize {
     Scope::ALL
         .iter()
-        .position(|s| s == scope)
+        .position(|s| *s == scope)
         .unwrap_or(Scope::ALL.len())
 }
 
@@ -223,7 +223,7 @@ impl GrantError {
 }
 
 fn sorted_once(mut scopes: Vec<Scope>) -> Vec<Scope> {
-    scopes.sort_by_key(position);
+    scopes.sort_by_key(|s| position(*s));
     scopes.dedup();
     scopes
 }
@@ -301,7 +301,7 @@ impl Grant {
             return Err(GrantError::ProposeOnly(*s));
         }
         let mut write = write;
-        write.sort_by_key(|(s, _)| position(s));
+        write.sort_by_key(|(s, _)| position(*s));
         if let Some(pair) = write.windows(2).find(|w| w[0].0 == w[1].0) {
             return Err(GrantError::DuplicateWrite(pair[0].0));
         }
@@ -800,12 +800,13 @@ mod tests {
             Some(&[op("admin.products.fetch"), op("admin.products.list")][..])
         );
         i.operations = Some(vec!["products".to_string()]);
+        let refused = Grant::new(i).unwrap_err();
         assert_eq!(
-            Grant::new(i.clone()),
-            Err(GrantError::Operation(OperationIdError(
-                "products".to_string()
-            )))
+            refused,
+            GrantError::Operation(OperationIdError("products".to_string()))
         );
+        assert_eq!(refused.operation(), Some("products"));
+        assert_eq!(GrantError::TooManyOperations { max: 1 }.operation(), None);
         let many = |n: usize| (0..n).map(|k| op(&format!("admin.ops.op{k}"))).collect();
         assert!(
             Grant::default()

@@ -237,6 +237,7 @@ mod tests {
     #[test]
     fn sizes_read_both_kinds_of_unit_and_print_in_binary_ones() {
         assert_eq!("2MiB".parse(), Ok(Size(2 << 20)));
+        assert_eq!("1GiB".parse(), Ok(Size(1_073_741_824)));
         assert_eq!("2MB".parse(), Ok(Size(2_000_000)));
         assert_eq!("10B".parse(), Ok(Size(10)));
         assert!("2mb".parse::<Size>().is_err());
