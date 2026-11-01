@@ -1313,14 +1313,15 @@ BACKROOM=$(id)
 RECEIPT_BODY="{\"location\":\"$BACKROOM\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":5,\"rejected\":1}],\"note\":\"pallet 1\"}"
 step "5 lamps arrive, 1 broken" 201 - -X POST "$BASE/admin/purchase-orders/$PO/receipts" -H "$JSON" \
     -H "Idempotency-Key: e2e-receipt-1" -d "$RECEIPT_BODY"
-RECEIPT=$(id)
+# The answer is {receipt, purchase_order, new_items}: the receipt's own ID.
+RECEIPT=$(grep -o '"id":"rcpt_[0-9a-f]*"' <<<"$BODY" | head -1 | sed -E 's/.*"(rcpt_[0-9a-f]+)"/\1/')
 contains "at their landed cost" '"landed_unit_cost":{"amount":"1266.6667","currency":"EUR"}'
 contains "the order is partly received" '"receipt_status":"partial"'
 replayed "the same key answers with the same receipt" -X POST "$BASE/admin/purchase-orders/$PO/receipts" \
     -H "$JSON" -H "Idempotency-Key: e2e-receipt-1" -d "$RECEIPT_BODY"
 step "more than is outstanding" 409 over_received -X POST "$BASE/admin/purchase-orders/$PO/receipts" -H "$JSON" \
     -d "{\"location\":\"$BACKROOM\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":7}]}"
-contains "6 are still to come" "\"variant\":\"$LAMP_VAR\",\"outstanding\":6"
+contains "6 are still to come" "\"outstanding\":6,\"variant\":\"$LAMP_VAR\""
 step "the lamps in the back room" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?location=$BACKROOM"
 contains "received there" '"reason":"received"'
 step "the order's receipts" 200 - "$BASE/admin/purchase-orders/$PO/receipts"
