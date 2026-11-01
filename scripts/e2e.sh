@@ -1203,7 +1203,7 @@ step "lamp has no stock set up" 200 - "$BASE/admin/variants/$LAMP_VAR/inventory"
 contains "so it is untracked" '"id":null,'
 contains "reported as tracked: false" '"tracked":false'
 step "the lamp's stock, every variant at once" 200 - "$BASE/admin/products/$LAMP/inventory"
-contains "one untracked variant" "\"items\":[{\"id\":null,\"variant\":\"$LAMP_VAR\",\"tracked\":false"
+contains "one untracked variant, naming its product" "\"items\":[{\"id\":null,\"variant\":\"$LAMP_VAR\",\"product\":\"$LAMP\",\"tracked\":false"
 step "the setup checklist" 200 - "$BASE/admin/setup/checklist"
 contains "a market exists by now" '"market":true'
 step "create warehouse for the market" 201 - -X POST "$BASE/admin/locations" -H "$JSON" \

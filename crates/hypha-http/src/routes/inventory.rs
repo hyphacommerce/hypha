@@ -284,6 +284,8 @@ impl From<AdjustmentReasonDto> for AdjustmentReason {
 pub struct InventoryResponse {
     id: Option<InventoryItemId>,
     variant: VariantId,
+    /// The product the variant belongs to; `null` if it was removed a moment ago.
+    product: Option<ProductId>,
     tracked: bool,
     continue_selling: bool,
     levels: Vec<LevelResponse>,
@@ -399,7 +401,11 @@ fn with_incoming(
 }
 
 impl InventoryResponse {
-    fn new(i: &InventoryItem, incoming: &[IncomingStock]) -> Result<Self, ApiError> {
+    fn new(
+        i: &InventoryItem,
+        product: Option<ProductId>,
+        incoming: &[IncomingStock],
+    ) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(i.stamps())?;
         // Every location with a count or a reservation, counts first.
         let mut locations: Vec<LocationId> = i.levels().iter().map(|l| l.location).collect();
@@ -413,6 +419,7 @@ impl InventoryResponse {
             updated_at: Some(updated_at),
             id: Some(i.id()),
             variant: i.variant(),
+            product,
             tracked: i.tracked(),
             continue_selling: i.continue_selling(),
             unit_cost: i.unit_cost(),
@@ -437,25 +444,40 @@ impl InventoryResponse {
 
 /// An item as `ctx` may see it, with what's incoming: its cost only with
 /// `purchasing:read`.
-async fn item_view<P: HasPurchaseOrders + HasTransfers>(
+async fn item_view<P: HasPurchaseOrders + HasTransfers + HasProducts>(
     ports: &P,
     ctx: &Ctx,
     item: &InventoryItem,
 ) -> Result<Json<Redacted>, ApiError> {
     let incoming = incoming_of(ports, &[item.variant()]).await?;
     let incoming = incoming.get(&item.variant()).map_or(&[][..], Vec::as_slice);
+    let product = product_of(ports, item.variant()).await?;
     Ok(Json(redact::one(
         ctx,
         Family::InventoryItem,
-        InventoryResponse::new(item, incoming)?,
+        InventoryResponse::new(item, product, incoming)?,
     )?))
 }
 
+/// The product `variant` belongs to, if it still exists.
+async fn product_of<P: HasProducts>(
+    ports: &P,
+    variant: VariantId,
+) -> Result<Option<ProductId>, ApiError> {
+    let ids = ports.products().ids_of_variants(&[variant]).await?;
+    Ok(ids.first().copied())
+}
+
 impl InventoryResponse {
-    fn untracked(variant: VariantId, incoming: &[IncomingStock]) -> Result<Self, ApiError> {
+    fn untracked(
+        variant: VariantId,
+        product: Option<ProductId>,
+        incoming: &[IncomingStock],
+    ) -> Result<Self, ApiError> {
         Ok(Self {
             id: None,
             variant,
+            product,
             tracked: false,
             continue_selling: false,
             levels: with_incoming(Vec::new(), incoming)?,
@@ -650,9 +672,10 @@ pub async fn fetch_variant_inventory<S: Storage>(
     let found = get_variant_inventory(&ctx, ports.inventory_items(), variant).await?;
     let incoming = incoming_of(&ports, &[variant]).await?;
     let incoming = incoming.get(&variant).map_or(&[][..], Vec::as_slice);
+    let product = product_of(&ports, variant).await?;
     let response = match found {
-        Some(item) => InventoryResponse::new(&item, incoming)?,
-        None => InventoryResponse::untracked(variant, incoming)?,
+        Some(item) => InventoryResponse::new(&item, product, incoming)?,
+        None => InventoryResponse::untracked(variant, product, incoming)?,
     };
     Ok(Json(redact::one(&ctx, Family::InventoryItem, response)?))
 }
@@ -693,8 +716,8 @@ pub async fn fetch_product_inventory<S: Storage>(
         .map(|variant| {
             let incoming = incoming.get(&variant).map_or(&[][..], Vec::as_slice);
             match found.remove(&variant) {
-                Some(item) => InventoryResponse::new(&item, incoming),
-                None => InventoryResponse::untracked(variant, incoming),
+                Some(item) => InventoryResponse::new(&item, Some(id), incoming),
+                None => InventoryResponse::untracked(variant, Some(id), incoming),
             }
         })
         .collect::<Result<_, ApiError>>()?;

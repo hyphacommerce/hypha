@@ -7209,6 +7209,17 @@
             },
             "type": "array"
           },
+          "product": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProductId",
+                "description": "The product the variant belongs to; `null` if it was removed a moment ago."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "redacted": {
             "description": "Fields left out for this caller: `unit_cost` without `purchasing:read`, staff\nincluded. Absent when nothing was.",
             "items": {

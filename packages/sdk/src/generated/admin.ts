@@ -6677,6 +6677,7 @@ export interface components {
             created_at?: string | null;
             id?: components["schemas"]["InventoryItemId"] | null;
             levels: components["schemas"]["LevelResponse"][];
+            product?: components["schemas"]["ProductId"] | null;
             /**
              * @description Fields left out for this caller: `unit_cost` without `purchasing:read`, staff
              *     included. Absent when nothing was.

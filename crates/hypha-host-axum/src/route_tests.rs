@@ -816,6 +816,13 @@ async fn a_unit_cost_is_kept_in_the_base_currency_and_fixes_it() {
     )
     .await;
     let item = stock["id"].as_str().unwrap().to_string();
+    let (_, products) = send(&app, "GET", "/admin/products?limit=1", None).await;
+    let (_, read) = send(&app, "GET", &format!("/admin/inventory-items/{item}"), None).await;
+    assert_eq!(
+        (&stock["product"], &read["product"]),
+        (&products["items"][0]["id"], &products["items"][0]["id"]),
+        "an item names its product, so its page can"
+    );
     let cost = format!("/admin/inventory-items/{item}/cost");
     let eur = json!({"unit_cost": {"amount": "412.5", "currency": "EUR"}, "note": "invoice 7"})
         .to_string();

@@ -29,7 +29,8 @@ const BACK: Crumb = { label: "Inventory", href: "/inventory" };
 
 /**
  * One variant's stock: its counts per location, adjusting them for a reason, and its
- * history. `?product=` (from the links that know it) names the variant in the header.
+ * history. `?product=` (from the links that know it) names the variant in the header
+ * without waiting for the item; otherwise the item's own product does.
  */
 export default async function InventoryItemPage({
   params,
@@ -65,7 +66,13 @@ async function ItemDetails({ id, product }: { id: string; product?: string }) {
       ? client.GET("/admin/products/{id}", { params: { path: { id: product } } })
       : Promise.resolve(undefined),
   ]);
-  const found = owner?.data;
+  // Opened without `?product=` (a history link, a bookmark): the item names its product.
+  const named =
+    owner ??
+    (item.product
+      ? await client.GET("/admin/products/{id}", { params: { path: { id: item.product } } })
+      : undefined);
+  const found = named?.data;
   const variant = found?.variants.find((v) => v.id === item.variant);
   const title = found && variant ? found.title : "Stock";
   const back: Crumb[] =
