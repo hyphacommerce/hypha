@@ -22,6 +22,7 @@ import { useEffect, useState, useTransition } from "react";
 
 import { VariantFieldsCell } from "@/components/custom-fields/variant-fields";
 import type { Definition } from "@/lib/custom-fields";
+import { incomingLabel } from "@/lib/inventory";
 
 import {
   type Stock,
@@ -704,9 +705,14 @@ function StockDialog({
                     key={location.id}
                     label={`On hand at ${location.name}`}
                     description={
-                      level && level.reserved > 0
-                        ? `${level.reserved} reserved for orders, ${level.available} available.`
-                        : undefined
+                      [
+                        level && level.reserved > 0
+                          ? `${level.reserved} reserved for orders, ${level.available} available.`
+                          : null,
+                        level && incomingLabel(level) ? `${incomingLabel(level)}.` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" ") || undefined
                     }
                     value={
                       form.counts[location.id] === "" ? undefined : Number(form.counts[location.id])

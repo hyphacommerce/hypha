@@ -7337,8 +7337,21 @@
             "format": "int64",
             "type": "integer"
           },
+          "incoming": {
+            "description": "Units on their way here: what ordered purchase orders to this location still\nbring. Not sellable until received. A location with only incoming units is listed\nwith zero counts.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "location": {
             "$ref": "#/components/schemas/LocationId"
+          },
+          "next_expected_at": {
+            "description": "The soonest an order bringing some of `incoming` is expected, RFC 3339 in UTC;\n`null` when nothing is coming or no order says.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "on_hand": {
             "format": "int64",
@@ -7354,7 +7367,8 @@
           "location",
           "on_hand",
           "reserved",
-          "available"
+          "available",
+          "incoming"
         ],
         "type": "object"
       },

@@ -47,3 +47,23 @@ export const ADJUSTMENT_REASONS = [
 ] as const;
 
 export type AdjustmentReason = (typeof ADJUSTMENT_REASONS)[number];
+
+/**
+ * What a level has on its way: "5 incoming", or "5 incoming, expected 1 Mar 2027" when an
+ * order says when. `null` when nothing is coming. Expected dates are days, chosen as noon
+ * UTC, so they're read in UTC.
+ */
+export function incomingLabel(level: {
+  incoming: number;
+  next_expected_at?: string | null;
+}): string | null {
+  if (level.incoming <= 0) return null;
+  if (!level.next_expected_at) return `${level.incoming} incoming`;
+  const day = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(level.next_expected_at));
+  return `${level.incoming} incoming, expected ${day}`;
+}

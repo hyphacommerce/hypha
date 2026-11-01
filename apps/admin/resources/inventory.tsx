@@ -39,6 +39,13 @@ function countsAt(item: Item, location: string | undefined) {
   );
 }
 
+/** Units on their way to `location`, or to every location. */
+function incomingAt(item: Item, location: string | undefined): number {
+  return item.levels
+    .filter((l) => !location || l.location === location)
+    .reduce((n, l) => n + l.incoming, 0);
+}
+
 export function InventoryTable({
   page,
   locations = NO_NAMES,
@@ -110,6 +117,20 @@ export function InventoryTable({
       width: pixel(100),
       align: "end",
       renderCell: (item) => <Text hasTabularNumbers>{countsAt(item, location).reserved}</Text>,
+    },
+    {
+      key: "incoming",
+      header: "Incoming",
+      width: pixel(100),
+      align: "end",
+      renderCell: (item) => {
+        const incoming = incomingAt(item, location);
+        return incoming > 0 ? (
+          <Text hasTabularNumbers>{incoming}</Text>
+        ) : (
+          <Text color="secondary">—</Text>
+        );
+      },
     },
     {
       key: "available",

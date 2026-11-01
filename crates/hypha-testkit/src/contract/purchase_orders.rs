@@ -168,6 +168,8 @@ where
     sorts(&make().await).await;
     scenario("purchase order: a variant's last line from a supplier skips cancelled orders");
     last_line(&make().await).await;
+    scenario("purchase order: incoming sums what ordered orders still bring, per place");
+    incoming(&make().await).await;
     scenario("purchase order: a batch writes it with its events; a stale copy fails it");
     batches(&make().await).await;
 }
@@ -454,6 +456,76 @@ async fn last_line<S: HasSuppliers + HasPurchaseOrders>(ports: &S) {
         Some("50".to_string())
     );
     assert_eq!(cost(repo.last_line(sid(1), vid(12)).await.unwrap()), None);
+}
+
+/// An order to `destination`, expected at `expected` seconds, ordered unless `draft`.
+fn incoming_po(
+    n: u128,
+    lines: Vec<LineDraft>,
+    destination: u128,
+    expected: Option<i64>,
+) -> PurchaseOrder {
+    let mut order = po(n, 1000 + i64::try_from(n).unwrap(), 1, lines);
+    let mut d = order.draft();
+    d.destination = Some(lid(destination));
+    d.expected_at = expected.map(at);
+    order.update(d, None, at(1)).unwrap();
+    order
+        .order(Some(Currency::EUR), "Spore Labs", None, at(2))
+        .unwrap();
+    order
+}
+
+async fn incoming<S: HasSuppliers + HasPurchaseOrders>(ports: &S) {
+    with_suppliers(ports, &[1]).await;
+    let repo = ports.purchase_orders();
+    // 5 of variant 10 ordered for place 50, 2 arrived and 1 refused: 2 still to come.
+    let mut partly = incoming_po(1, vec![line(10, 5, "1"), line(11, 2, "1")], 50, Some(500));
+    partly
+        .record_receipt(
+            &[ReceivedQuantities {
+                variant: vid(10),
+                accepted: 2,
+                rejected: 1,
+            }],
+            false,
+            at(3),
+        )
+        .unwrap();
+    let mut sooner = incoming_po(2, vec![line(10, 3, "1")], 50, Some(300));
+    let mut elsewhere = incoming_po(3, vec![line(10, 4, "1")], 60, None);
+    // Neither a draft nor a closed order brings anything.
+    let mut draft = po(4, 1004, 1, vec![line(10, 100, "1")]);
+    let mut closed = incoming_po(5, vec![line(10, 7, "1")], 50, Some(100));
+    closed.close(at(4)).unwrap();
+    let mut other = incoming_po(6, vec![line(12, 1, "1")], 50, Some(100));
+    for order in [
+        &mut partly,
+        &mut sooner,
+        &mut elsewhere,
+        &mut draft,
+        &mut closed,
+        &mut other,
+    ] {
+        repo.insert(order).await.unwrap();
+    }
+    let found: Vec<_> = repo
+        .incoming(&[vid(11), vid(10)])
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|i| (i.variant, i.location, i.quantity, i.next_expected_at))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            (vid(10), lid(50), 5, Some(at(300))),
+            (vid(10), lid(60), 4, None),
+            (vid(11), lid(50), 2, Some(at(500))),
+        ]
+    );
+    assert_eq!(repo.incoming(&[]).await, Ok(vec![]));
+    assert_eq!(repo.incoming(&[vid(99)]).await, Ok(vec![]));
 }
 
 async fn batches<S>(ports: &S)

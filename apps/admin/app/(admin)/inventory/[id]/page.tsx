@@ -18,7 +18,7 @@ import {
   requireStaff,
   sessionClient,
 } from "@/lib/hypha";
-import { STOCK_REASONS } from "@/lib/inventory";
+import { STOCK_REASONS, incomingLabel } from "@/lib/inventory";
 import { hasScope } from "@/lib/navigation";
 
 import { AdjustStock } from "./adjust-stock";
@@ -98,6 +98,7 @@ async function ItemDetails({ id, product }: { id: string; product?: string }) {
               >
                 <Text hasTabularNumbers>
                   {level.on_hand} on hand · {level.reserved} reserved · {level.available} available
+                  {incomingLabel(level) && ` · ${incomingLabel(level)}`}
                 </Text>
               </MetadataListItem>
             ))

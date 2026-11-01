@@ -120,3 +120,14 @@ are at `GET /admin/purchase-orders/{id}/receipts`. A receipt recorded by mistake
 count may go below zero if some were sold since), its value comes out of the average
 cost, and a closed order opens again. Events `receipt.created` and `receipt.cancelled`
 reach apps whose grant holds `purchasing:read`.
+
+## Incoming stock
+
+What's on its way is read from your open orders, never stored: each level of an item in
+the admin API (`GET /admin/inventory-items/{id}`, `/admin/variants/{id}/inventory`,
+`/admin/products/{id}/inventory` and the inventory list) carries **`incoming`**, the units
+that ordered purchase orders to that location still bring (ordered, less what arrived,
+was refused or cancelled), and **`next_expected_at`**, the soonest of those orders'
+expected dates. A location with units coming but none yet is listed with zero counts.
+Drafts, closed and cancelled orders bring nothing. Incoming units can't be sold, and
+storefronts don't see them.

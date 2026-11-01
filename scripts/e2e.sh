@@ -1300,6 +1300,8 @@ contains "ordered" '"status":"ordered"'
 step "order more lamps" 200 - -X PATCH "$BASE/admin/purchase-orders/$PO" -H "$JSON" \
     -d "{\"lines\":[{\"variant\":\"$LAMP_VAR\",\"quantity\":12}]}"
 contains "a revision" '"revision":1'
+step "the lamps on their way" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
+contains "12 incoming at the warehouse" '"incoming":12'
 step "an ordered one isn't deleted" 409 purchase_order_not_draft -X DELETE "$BASE/admin/purchase-orders/$PO"
 step "open orders for lamps" 200 - "$BASE/admin/purchase-orders?status=ordered&variant=$LAMP_VAR&sort=expected_at"
 contains "this one" "\"id\":\"$PO\""
@@ -1324,6 +1326,8 @@ step "more than is outstanding" 409 over_received -X POST "$BASE/admin/purchase-
 contains "6 are still to come" "\"outstanding\":6,\"variant\":\"$LAMP_VAR\""
 step "the lamps in the back room" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?location=$BACKROOM"
 contains "received there" '"reason":"received"'
+step "fewer on their way" 200 - "$BASE/admin/variants/$LAMP_VAR/inventory"
+contains "6 still incoming" '"incoming":6'
 step "the order's receipts" 200 - "$BASE/admin/purchase-orders/$PO/receipts"
 contains "this one" "\"id\":\"$RECEIPT\""
 step "take the receipt back" 200 - -X POST "$BASE/admin/receipts/$RECEIPT/cancel"

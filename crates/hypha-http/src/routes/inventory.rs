@@ -1,5 +1,7 @@
 //! Locations, inventory items and their stock (all live in `hypha-inventory`).
 
+use std::collections::HashMap;
+
 use hypha_core::Stamped;
 
 use super::stamp_times;
@@ -18,6 +20,9 @@ use hypha_inventory::{
     update_location,
 };
 use hypha_products::{CommandError as ProductsError, HasProducts, ProductRepo, get_product};
+use hypha_purchasing::{
+    CommandError as PurchasingError, HasPurchaseOrders, IncomingStock, PurchaseOrderRepo,
+};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -305,10 +310,85 @@ pub struct LevelResponse {
     reserved: i64,
     /// `on_hand - reserved`; negative when more is reserved than is there.
     available: i64,
+    /// Units on their way here: what ordered purchase orders to this location still
+    /// bring. Not sellable until received. A location with only incoming units is listed
+    /// with zero counts.
+    incoming: u64,
+    /// The soonest an order bringing some of `incoming` is expected, RFC 3339 in UTC;
+    /// `null` when nothing is coming or no order says.
+    next_expected_at: Option<String>,
+}
+
+impl LevelResponse {
+    fn counted(location: LocationId, on_hand: i64, reserved: i64, available: i64) -> Self {
+        Self {
+            location,
+            on_hand,
+            reserved,
+            available,
+            incoming: 0,
+            next_expected_at: None,
+        }
+    }
+}
+
+/// What's on its way, per variant: each variant's incoming units by location, from every
+/// source of them (open purchase orders).
+pub(crate) type Incoming = HashMap<VariantId, Vec<IncomingStock>>;
+
+/// The incoming units of `variants`, read once for them all. Derived on every read, never
+/// stored on the items, so ordering stock never touches what checkouts lock.
+pub(crate) async fn incoming_of<P: HasPurchaseOrders>(
+    ports: &P,
+    variants: &[VariantId],
+) -> Result<Incoming, ApiError> {
+    let found = ports
+        .purchase_orders()
+        .incoming(variants)
+        .await
+        .map_err(PurchasingError::from)?;
+    let mut incoming = Incoming::new();
+    for stock in found {
+        let at = incoming.entry(stock.variant).or_default();
+        match at.iter_mut().find(|s| s.location == stock.location) {
+            Some(same) => {
+                same.quantity += stock.quantity;
+                same.next_expected_at = match (same.next_expected_at, stock.next_expected_at) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (a, b) => a.or(b),
+                };
+            }
+            None => at.push(stock),
+        }
+    }
+    Ok(incoming)
+}
+
+/// `levels` with `incoming`'s units beside them, adding a level for each location with
+/// only incoming units, after the counted ones.
+fn with_incoming(
+    mut levels: Vec<LevelResponse>,
+    incoming: &[IncomingStock],
+) -> Result<Vec<LevelResponse>, ApiError> {
+    for stock in incoming {
+        let expected = stock.next_expected_at.map(rfc3339).transpose()?;
+        match levels.iter_mut().find(|l| l.location == stock.location) {
+            Some(level) => {
+                level.incoming = stock.quantity;
+                level.next_expected_at = expected;
+            }
+            None => levels.push(LevelResponse {
+                incoming: stock.quantity,
+                next_expected_at: expected,
+                ..LevelResponse::counted(stock.location, 0, 0, 0)
+            }),
+        }
+    }
+    Ok(levels)
 }
 
 impl InventoryResponse {
-    fn new(i: &InventoryItem) -> Result<Self, ApiError> {
+    fn new(i: &InventoryItem, incoming: &[IncomingStock]) -> Result<Self, ApiError> {
         let (created_at, updated_at) = stamp_times(i.stamps())?;
         // Every location with a count or a reservation, counts first.
         let mut locations: Vec<LocationId> = i.levels().iter().map(|l| l.location).collect();
@@ -326,41 +406,53 @@ impl InventoryResponse {
             continue_selling: i.continue_selling(),
             unit_cost: i.unit_cost(),
             redacted: None,
-            levels: locations
-                .into_iter()
-                .map(|location| LevelResponse {
-                    location,
-                    on_hand: i.on_hand(location),
-                    reserved: i.reserved(location),
-                    available: i.available(location),
-                })
-                .collect(),
+            levels: with_incoming(
+                locations
+                    .into_iter()
+                    .map(|location| {
+                        LevelResponse::counted(
+                            location,
+                            i.on_hand(location),
+                            i.reserved(location),
+                            i.available(location),
+                        )
+                    })
+                    .collect(),
+                incoming,
+            )?,
         })
     }
 }
 
-/// An item as `ctx` may see it: its cost only with `purchasing:read`.
-fn item_view(ctx: &Ctx, item: &InventoryItem) -> Result<Json<Redacted>, ApiError> {
+/// An item as `ctx` may see it, with what's incoming: its cost only with
+/// `purchasing:read`.
+async fn item_view<P: HasPurchaseOrders>(
+    ports: &P,
+    ctx: &Ctx,
+    item: &InventoryItem,
+) -> Result<Json<Redacted>, ApiError> {
+    let incoming = incoming_of(ports, &[item.variant()]).await?;
+    let incoming = incoming.get(&item.variant()).map_or(&[][..], Vec::as_slice);
     Ok(Json(redact::one(
         ctx,
         Family::InventoryItem,
-        InventoryResponse::new(item)?,
+        InventoryResponse::new(item, incoming)?,
     )?))
 }
 
 impl InventoryResponse {
-    fn untracked(variant: VariantId) -> Self {
-        Self {
+    fn untracked(variant: VariantId, incoming: &[IncomingStock]) -> Result<Self, ApiError> {
+        Ok(Self {
             id: None,
             variant,
             tracked: false,
             continue_selling: false,
-            levels: Vec::new(),
+            levels: with_incoming(Vec::new(), incoming)?,
             unit_cost: None,
             redacted: None,
             created_at: None,
             updated_at: None,
-        }
+        })
     }
 }
 
@@ -385,7 +477,7 @@ pub async fn create_item<S: Storage>(
         continue_selling: req.continue_selling,
     };
     let item = create_inventory_item(&ctx, ports.inventory_items(), &state.ids, input).await?;
-    Ok((StatusCode::CREATED, item_view(&ctx, &item)?))
+    Ok((StatusCode::CREATED, item_view(&ports, &ctx, &item).await?))
 }
 
 /// An inventory item with its levels per location.
@@ -403,7 +495,7 @@ pub async fn fetch_item<S: Storage>(
 ) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let item = get_inventory_item(&ctx, ports.inventory_items(), id).await?;
-    item_view(&ctx, &item)
+    item_view(&ports, &ctx, &item).await
 }
 
 /// Changes how an inventory item is tracked.
@@ -428,7 +520,7 @@ pub async fn update_item<S: Storage>(
         continue_selling: req.continue_selling,
     };
     let item = update_inventory_item(&ctx, ports.inventory_items(), id, input).await?;
-    item_view(&ctx, &item)
+    item_view(&ports, &ctx, &item).await
 }
 
 /// Sets the stock on hand at a location: a `counted` movement in its history.
@@ -458,7 +550,7 @@ pub async fn set_level<S: Storage>(
     let item = set_on_hand(&ctx, ports.inventory_items(), ports.locations(), input)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("location_not_found"))?;
-    item_view(&ctx, &item)
+    item_view(&ports, &ctx, &item).await
 }
 
 /// Adjusts the stock on hand at a location by a delta, for a reason kept in its history.
@@ -488,7 +580,7 @@ pub async fn adjust_level<S: Storage>(
     let item = adjust_on_hand(&ctx, ports.inventory_items(), ports.locations(), input)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("location_not_found"))?;
-    item_view(&ctx, &item)
+    item_view(&ports, &ctx, &item).await
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -527,7 +619,7 @@ pub async fn set_cost<S: Storage>(
         note: req.note,
     };
     let item = set_unit_cost(&ctx, ports.inventory_items(), store_currency, input).await?;
-    item_view(&ctx, &item)
+    item_view(&ports, &ctx, &item).await
 }
 
 /// A variant's stock, whether or not it has an item.
@@ -544,9 +636,12 @@ pub async fn fetch_variant_inventory<S: Storage>(
     PathId(variant): PathId<VariantId>,
 ) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let response = match get_variant_inventory(&ctx, ports.inventory_items(), variant).await? {
-        Some(item) => InventoryResponse::new(&item)?,
-        None => InventoryResponse::untracked(variant),
+    let found = get_variant_inventory(&ctx, ports.inventory_items(), variant).await?;
+    let incoming = incoming_of(&ports, &[variant]).await?;
+    let incoming = incoming.get(&variant).map_or(&[][..], Vec::as_slice);
+    let response = match found {
+        Some(item) => InventoryResponse::new(&item, incoming)?,
+        None => InventoryResponse::untracked(variant, incoming)?,
     };
     Ok(Json(redact::one(&ctx, Family::InventoryItem, response)?))
 }
@@ -575,7 +670,8 @@ pub async fn fetch_product_inventory<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let product = get_product(&ctx, ports.products(), id).await?;
     let variants: Vec<VariantId> = product.variants().iter().map(|v| v.id()).collect();
-    let mut found: std::collections::HashMap<VariantId, InventoryItem> =
+    let incoming = incoming_of(&ports, &variants).await?;
+    let mut found: HashMap<VariantId, InventoryItem> =
         get_variants_inventory(&ctx, ports.inventory_items(), &variants)
             .await?
             .into_iter()
@@ -583,9 +679,12 @@ pub async fn fetch_product_inventory<S: Storage>(
             .collect();
     let items = variants
         .into_iter()
-        .map(|variant| match found.remove(&variant) {
-            Some(item) => InventoryResponse::new(&item),
-            None => Ok(InventoryResponse::untracked(variant)),
+        .map(|variant| {
+            let incoming = incoming.get(&variant).map_or(&[][..], Vec::as_slice);
+            match found.remove(&variant) {
+                Some(item) => InventoryResponse::new(&item, incoming),
+                None => InventoryResponse::untracked(variant, incoming),
+            }
         })
         .collect::<Result<_, ApiError>>()?;
     // `items`, like a page's: each one redacted.
@@ -911,6 +1010,7 @@ pub async fn list_items<S: Storage>(
 
     // The page's products, in two reads however many items.
     let page_variants: Vec<VariantId> = page.items.iter().map(|i| i.variant).collect();
+    let incoming = incoming_of(&ports, &page_variants).await?;
     let catalog = ports.products();
     let owners = catalog
         .ids_of_variants(&page_variants)
@@ -929,7 +1029,7 @@ pub async fn list_items<S: Storage>(
                 .find(|p| p.variants().iter().any(|v| v.id() == item.variant));
             let variant =
                 product.and_then(|p| p.variants().iter().find(|v| v.id() == item.variant));
-            InventoryItemSummaryResponse {
+            Ok(InventoryItemSummaryResponse {
                 id: item.id,
                 variant: item.variant,
                 product: product.map(|p| p.id()),
@@ -938,22 +1038,21 @@ pub async fn list_items<S: Storage>(
                 sku: variant.and_then(|v| v.sku()).map(str::to_string),
                 tracked: item.tracked,
                 continue_selling: item.continue_selling,
-                levels: item
-                    .levels
-                    .iter()
-                    .map(|l| LevelResponse {
-                        location: l.location,
-                        on_hand: l.on_hand,
-                        reserved: l.reserved,
-                        available: l.available,
-                    })
-                    .collect(),
+                levels: with_incoming(
+                    item.levels
+                        .iter()
+                        .map(|l| {
+                            LevelResponse::counted(l.location, l.on_hand, l.reserved, l.available)
+                        })
+                        .collect(),
+                    incoming.get(&item.variant).map_or(&[][..], Vec::as_slice),
+                )?,
                 on_hand: item.on_hand(),
                 reserved: item.reserved(),
                 available: item.available,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, ApiError>>()?;
     let response = PageResponse::sorted(
         &page,
         &scope,

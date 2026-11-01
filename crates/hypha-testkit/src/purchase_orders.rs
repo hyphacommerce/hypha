@@ -8,8 +8,9 @@ use hypha_core::{
     VariantId, Versioned, stamp_insert, stamp_update,
 };
 use hypha_purchasing::{
-    PurchaseOrder, PurchaseOrderFilter, PurchaseOrderLine, PurchaseOrderNumber, PurchaseOrderRepo,
-    PurchaseOrderSort, PurchaseOrderStatus, PurchaseOrderSummary, Receipt, ReceiptRepo, keys,
+    IncomingStock, PurchaseOrder, PurchaseOrderFilter, PurchaseOrderLine, PurchaseOrderNumber,
+    PurchaseOrderRepo, PurchaseOrderSort, PurchaseOrderStatus, PurchaseOrderSummary, Receipt,
+    ReceiptRepo, keys,
 };
 
 use crate::{InMemoryOutbox, InMemorySuppliers, table::Table};
@@ -141,6 +142,13 @@ impl PurchaseOrderRepo for InMemoryPurchaseOrders {
             .filter_map(|po| po.line(variant).cloned().map(|line| (po.number(), line)))
             .max_by_key(|(number, _)| *number)
             .map(|(_, line)| line))
+    }
+
+    async fn incoming(&self, variants: &[VariantId]) -> Result<Vec<IncomingStock>, RepoError> {
+        Ok(hypha_purchasing::incoming(
+            self.orders.all().iter(),
+            variants,
+        ))
     }
 }
 

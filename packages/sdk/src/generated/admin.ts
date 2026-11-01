@@ -6579,7 +6579,19 @@ export interface components {
              * @description `on_hand - reserved`; negative when more is reserved than is there.
              */
             available: number;
+            /**
+             * Format: int64
+             * @description Units on their way here: what ordered purchase orders to this location still
+             *     bring. Not sellable until received. A location with only incoming units is listed
+             *     with zero counts.
+             */
+            incoming: number;
             location: components["schemas"]["LocationId"];
+            /**
+             * @description The soonest an order bringing some of `incoming` is expected, RFC 3339 in UTC;
+             *     `null` when nothing is coming or no order says.
+             */
+            next_expected_at?: string | null;
             /** Format: int64 */
             on_hand: number;
             /**

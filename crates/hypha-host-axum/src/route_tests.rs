@@ -1066,7 +1066,14 @@ async fn inventory_items_are_listed_across_products_lowest_first() {
     );
     assert_eq!(
         first["levels"],
-        json!([{ "location": location, "on_hand": 2, "reserved": 0, "available": 2 }])
+        json!([{
+            "location": location,
+            "on_hand": 2,
+            "reserved": 0,
+            "available": 2,
+            "incoming": 0,
+            "next_expected_at": null
+        }])
     );
     assert_eq!(page["items"][1]["variant_title"], Value::Null);
 
@@ -7605,6 +7612,105 @@ async fn suppliers_keep_contacts_terms_and_a_catalogue() {
         (status, code(&body)),
         (StatusCode::NOT_FOUND, "supplier_not_found")
     );
+}
+
+#[tokio::test]
+async fn incoming_stock_is_what_ordered_purchase_orders_still_bring() {
+    let app = app().await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let stock_of = format!("/admin/variants/{mug}/inventory");
+    let (_, locations) = send(&app, "GET", "/admin/locations", None).await;
+    let location = locations["items"][0]["id"].as_str().unwrap().to_string();
+    send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    let supplier = json!({"name": "Spore Labs", "currency": "EUR"});
+    let (_, supplier) = send(
+        &app,
+        "POST",
+        "/admin/suppliers",
+        Some(&supplier.to_string()),
+    )
+    .await;
+    let draft = json!({
+        "supplier": supplier["id"],
+        "destination": location,
+        "expected_at": "2027-03-01T12:00:00Z",
+        "lines": [{"variant": mug, "quantity": 10, "unit_cost": {"amount": "100", "currency": "EUR"}}]
+    });
+    let (status, po) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&draft.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{po}");
+    let path = format!("/admin/purchase-orders/{}", po["id"].as_str().unwrap());
+    let level = |stock: &Value| {
+        let level = &stock["levels"][0];
+        (
+            level["location"].clone(),
+            level["on_hand"].as_i64().unwrap_or(0),
+            level["incoming"].as_u64().unwrap_or(0),
+            level["next_expected_at"].clone(),
+        )
+    };
+
+    // A draft brings nothing yet.
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(stock["levels"], json!([]), "{stock}");
+
+    // Ordered, its units are incoming at its destination, though the mug has no stock
+    // record: the level is listed with nothing on hand.
+    send(&app, "POST", &format!("{path}/order"), None).await;
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(stock["id"], Value::Null);
+    let expected = json!("2027-03-01T12:00:00Z");
+    assert_eq!(level(&stock), (json!(location), 0, 10, expected.clone()));
+
+    // What arrives or is refused is no longer incoming.
+    let auth = format!("Bearer {}", app.admin_key);
+    let headers = [
+        ("authorization", auth.as_str()),
+        ("idempotency-key", "incoming-1"),
+    ];
+    let receipt = json!({"lines": [{"variant": mug, "accepted": 4, "rejected": 1}]});
+    let (status, received) = send_with(
+        &app,
+        &headers,
+        "POST",
+        &format!("{path}/receipts"),
+        Some(&receipt.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{received}");
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(level(&stock), (json!(location), 4, 5, expected.clone()));
+    let item = stock["id"].as_str().unwrap().to_string();
+    let (_, read) = send(&app, "GET", &format!("/admin/inventory-items/{item}"), None).await;
+    assert_eq!(level(&read), (json!(location), 4, 5, expected.clone()));
+
+    // The product's stock and the inventory list say the same.
+    let (_, products) = send(&app, "GET", "/admin/products?limit=1", None).await;
+    let product = products["items"][0]["id"].as_str().unwrap();
+    let (_, all) = send(
+        &app,
+        "GET",
+        &format!("/admin/products/{product}/inventory"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        level(&all["items"][0]),
+        (json!(location), 4, 5, expected.clone())
+    );
+    let (_, list) = send(&app, "GET", "/admin/inventory-items", None).await;
+    assert_eq!(level(&list["items"][0]), (json!(location), 4, 5, expected));
+
+    // Closing the order cancels the rest: nothing is coming any more.
+    let (status, _) = send(&app, "POST", &format!("{path}/close"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(level(&stock), (json!(location), 4, 0, Value::Null));
 }
 
 #[tokio::test]

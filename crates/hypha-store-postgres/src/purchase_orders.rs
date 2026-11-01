@@ -10,9 +10,10 @@ use hypha_core::{
     stamp_update,
 };
 use hypha_purchasing::{
-    CostAllocation, CostDraft, CostKind, LineSnapshot, PurchaseOrder, PurchaseOrderFilter,
-    PurchaseOrderLine, PurchaseOrderNumber, PurchaseOrderRepo, PurchaseOrderSnapshot,
-    PurchaseOrderSort, PurchaseOrderStatus, PurchaseOrderSummary, ReceiptStatus,
+    CostAllocation, CostDraft, CostKind, IncomingStock, LineSnapshot, PurchaseOrder,
+    PurchaseOrderFilter, PurchaseOrderLine, PurchaseOrderNumber, PurchaseOrderRepo,
+    PurchaseOrderSnapshot, PurchaseOrderSort, PurchaseOrderStatus, PurchaseOrderSummary,
+    ReceiptStatus,
 };
 use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
@@ -670,5 +671,43 @@ impl<C: PgConnection> PurchaseOrderRepo for PgStore<C> {
             let orders = load(tx, "po.id = $1", col(&row, "id")?).await?;
             Ok(orders.first().and_then(|po| po.line(variant).cloned()))
         })
+    }
+
+    async fn incoming(&self, variants: &[VariantId]) -> Result<Vec<IncomingStock>, RepoError> {
+        if variants.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<Uuid> = variants.iter().map(|v| v.as_uuid()).collect();
+        let mut conn = self.conn().await;
+        let rows = conn
+            .db()
+            .query_typed(
+                "SELECT l.variant_id, po.destination_id,
+                        sum(l.quantity - l.received - l.rejected - l.cancelled)::bigint
+                            AS quantity,
+                        (extract(epoch FROM min(po.expected_at)) * 1000000)::bigint
+                            AS next_expected_at
+                 FROM purchase_order_lines l
+                 JOIN purchase_orders po ON po.id = l.purchase_order_id
+                 WHERE po.status = 'ordered' AND po.destination_id IS NOT NULL
+                   AND l.variant_id = ANY($1)
+                   AND l.quantity - l.received - l.rejected - l.cancelled > 0
+                 GROUP BY l.variant_id, po.destination_id
+                 ORDER BY l.variant_id, po.destination_id",
+                &[(&ids, Type::UUID_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?;
+        rows.iter()
+            .map(|row| {
+                let quantity: i64 = col(row, "quantity")?;
+                Ok(IncomingStock {
+                    variant: VariantId::from_uuid(col(row, "variant_id")?),
+                    location: LocationId::from_uuid(col(row, "destination_id")?),
+                    quantity: u64::try_from(quantity).map_err(corrupt)?,
+                    next_expected_at: opt_ts(col(row, "next_expected_at")?),
+                })
+            })
+            .collect()
     }
 }

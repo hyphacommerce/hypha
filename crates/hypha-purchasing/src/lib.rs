@@ -8,6 +8,7 @@ pub mod commands;
 pub mod costs;
 pub mod error;
 pub mod events;
+pub mod incoming;
 pub mod purchase_order;
 pub mod receipt;
 pub mod repo;
@@ -30,6 +31,7 @@ pub use events::{
     ReceiptCancelled, ReceiptCreated, ReceiptLineEvent, SUPPLIER, SupplierCreated, SupplierDeleted,
     SupplierUpdated,
 };
+pub use incoming::{IncomingStock, incoming};
 pub use purchase_order::{
     CostDraft, CostKind, ExtraCost, LineDraft, LineSnapshot, MAX_COSTS, MAX_LINES, PurchaseOrder,
     PurchaseOrderDraft, PurchaseOrderLine, PurchaseOrderNumber, PurchaseOrderSnapshot,

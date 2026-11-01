@@ -4,7 +4,7 @@ use hypha_core::{
 };
 
 use crate::{
-    PurchaseOrder, PurchaseOrderLine, PurchaseOrderNumber, PurchaseOrderStatus,
+    IncomingStock, PurchaseOrder, PurchaseOrderLine, PurchaseOrderNumber, PurchaseOrderStatus,
     PurchaseOrderSummary, Receipt, ReceiptStatus, Supplier, SupplierVariant,
 };
 
@@ -194,6 +194,9 @@ pub trait PurchaseOrderRepo {
         supplier: SupplierId,
         variant: VariantId,
     ) -> Result<Option<PurchaseOrderLine>, RepoError>;
+    /// What ordered orders still bring of `variants`, per variant and destination
+    /// (`incoming::incoming`'s rule), in its order.
+    async fn incoming(&self, variants: &[VariantId]) -> Result<Vec<IncomingStock>, RepoError>;
 }
 
 /// Stages purchase order writes in a `hypha_core::HasBatch` batch, with their events.
