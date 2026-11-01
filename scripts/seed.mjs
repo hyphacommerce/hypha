@@ -37,6 +37,13 @@
 // the search filters and the discounts, and gives the "Demo (read-only)" staff role, if
 // there is one, every `:read` scope it lacks. It skips what exists (price lists by name,
 // discounts by title, the group by handle), so a second run adds nothing.
+//
+// `pnpm seed --purchasing` on a store this script seeded before purchasing adds the base
+// currency (EUR) if it has none, three suppliers with their catalogues, purchase orders in
+// every state (received with a late fee, partly received in dollars, ordered and still to
+// come, a draft), a transfer in transit between the warehouses and a few costs set by hand,
+// and widens the "Demo (read-only)" role. Suppliers are skipped by name with their orders,
+// so a second run adds nothing.
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -1736,6 +1743,246 @@ async function addPricing() {
   for (const line of added) console.log(`  ${line}`);
 }
 
+// ---------- purchasing (the run, and `--purchasing`) ----------
+
+const DAY = 24 * 60 * 60 * 1000;
+const daysFromNow = (days) => new Date(Date.now() + days * DAY).toISOString();
+
+/** Who the store buys from, what each sells it, and at what share of the shelf price. */
+const SUPPLIERS = [
+  {
+    name: "Fungi Forge",
+    currency: "EUR",
+    payment_terms: { type: "net", days: 30, note: "2% off within 10 days" },
+    lead_time_days: 14,
+    contact: { name: "Ines Varga", email: "orders@fungiforge.example", phone: "+36 1 555 0142" },
+    tax_number: "HU12345678",
+    notes: "Makes our grow kits to our spec; one pallet a fortnight in season.",
+    products: ["oyster-grow-kit", "lions-mane-grow-kit", "reishi-antler-kit"],
+    factor: 0.4,
+    sku: "FF",
+    min_order_quantity: 12,
+  },
+  {
+    name: "Northlab Scientific",
+    currency: "USD",
+    payment_terms: { type: "in_advance", note: "Pro forma invoice first" },
+    lead_time_days: 21,
+    contact: { name: "Dana Brooks", email: "sales@northlab.example", phone: "+1 201 555 0187" },
+    notes: "Lab equipment. Ships from New Jersey; duties paid on arrival in the EU.",
+    products: ["agar-plates", "pressure-sterilizer", "still-air-box", "inoculation-kit"],
+    factor: 0.45,
+    sku: "NL",
+    min_order_quantity: 2,
+  },
+  {
+    name: "Bloom Packaging",
+    currency: "EUR",
+    payment_terms: { type: "on_receipt" },
+    lead_time_days: 7,
+    contact: { name: "Tomás Ruiz", email: "hola@bloompack.example" },
+    notes: "Spawn bags and the moulds for our packaging inserts.",
+    products: ["grain-spawn-bag", "packaging-inserts"],
+    factor: 0.3,
+    sku: "BP",
+    min_order_quantity: 50,
+  },
+];
+
+/** What `supplier` charges for `variant` (EUR cents on the shelf), in minor units as text. */
+function supplierCost(supplier, variant) {
+  const euros = (variant.price.amount * supplier.factor) / 100;
+  const amount = supplier.currency === "USD" ? euros * 1.08 : euros;
+  return { amount: String(Math.round(amount * 100)), currency: supplier.currency };
+}
+
+/**
+ * Purchasing: the store's base currency, three suppliers with their catalogues, a
+ * received purchase order (so stock has costs and history, and a duty that came late),
+ * a partly received one in dollars, an open one still to arrive (incoming stock), a
+ * draft, a transfer in transit between the warehouses, and a few costs set by hand.
+ * Suppliers are skipped by name, with their orders, the transfer when there is one, and
+ * costs where an item has one, so running it again adds nothing. What it added.
+ */
+async function seedPurchasing() {
+  const added = [];
+  const store = await admin.get("/admin/store");
+  if (!store.currency) {
+    await admin.patch("/admin/store", { currency: "EUR" });
+    added.push("base currency EUR");
+  }
+  const locations = (await admin.get("/admin/locations")).items;
+  const farm = locations.find((place) => place.name === "Lab and farm");
+  const newJersey = locations.find((place) => place.name === "New Jersey fulfilment");
+  if (!farm || !newJersey) throw new Error("the store has no Lab and farm or New Jersey warehouse");
+
+  const wanted = new Set([
+    ...SUPPLIERS.flatMap((s) => s.products),
+    "mycelium-leather",
+    "acoustic-panel",
+  ]);
+  const products = {};
+  for (const summary of await all("/admin/products?status=active")) {
+    if (wanted.has(summary.handle))
+      products[summary.handle] = await admin.get(`/admin/products/${summary.id}`);
+  }
+  const variantsOf = (handles) => handles.flatMap((h) => products[h]?.variants ?? []);
+
+  const existing = new Set((await all("/admin/suppliers")).map((s) => s.name));
+  const made = {};
+  for (const spec of SUPPLIERS) {
+    if (existing.has(spec.name)) continue;
+    const supplier = await admin.post("/admin/suppliers", {
+      name: spec.name,
+      currency: spec.currency,
+      contacts: [{ ...spec.contact, primary: true }],
+      payment_terms: spec.payment_terms,
+      lead_time_days: spec.lead_time_days,
+      ...(spec.tax_number ? { tax_number: spec.tax_number } : {}),
+      notes: spec.notes,
+    });
+    let n = 0;
+    for (const variant of variantsOf(spec.products)) {
+      n += 1;
+      await admin.put(`/admin/suppliers/${supplier.id}/variants/${variant.id}`, {
+        supplier_sku: `${spec.sku}-${String(n).padStart(3, "0")}`,
+        unit_cost: supplierCost(spec, variant),
+        min_order_quantity: spec.min_order_quantity,
+      });
+    }
+    made[spec.name] = supplier;
+    added.push(`supplier ${spec.name} (${n} in its catalogue)`);
+  }
+
+  const firstOf = (handles) => handles.map((h) => products[h]?.variants?.[0]).filter(Boolean);
+  const receiveAll = async (po, rejected = 0) => {
+    const lines = po.lines.map((line, i) => ({
+      variant: line.variant,
+      accepted: line.quantity - (i === 0 ? rejected : 0),
+      rejected: i === 0 ? rejected : 0,
+    }));
+    return admin.post(`/admin/purchase-orders/${po.id}/receipts`, { lines, note: "Pallet 1" });
+  };
+
+  const forge = made["Fungi Forge"];
+  if (forge) {
+    // Received in full (one kit came crushed), then the carrier's bill came late.
+    const kits = firstOf(["oyster-grow-kit", "lions-mane-grow-kit", "reishi-antler-kit"]);
+    const received = await admin.post("/admin/purchase-orders", {
+      supplier: forge.id,
+      destination: farm.id,
+      supplier_reference: "FF-SO-2211",
+      lines: kits.map((variant) => ({ variant: variant.id, quantity: 24 })),
+      costs: [{ kind: "shipping", description: "Pallet freight", amount: eur(45) }],
+    });
+    await admin.post(`/admin/purchase-orders/${received.id}/order`);
+    const done = await receiveAll(received, 1);
+    await admin.patch(`/admin/purchase-orders/${received.id}`, {
+      costs: [
+        ...done.purchase_order.costs,
+        { kind: "fees", description: "Pallet handling, billed late", amount: eur(18) },
+      ],
+    });
+    // A draft for the next season.
+    await admin.post("/admin/purchase-orders", {
+      supplier: forge.id,
+      destination: farm.id,
+      note: "Holiday restock: confirm quantities with the farm first.",
+      lines: kits.slice(0, 2).map((variant) => ({ variant: variant.id, quantity: 48 })),
+    });
+    added.push("Fungi Forge: a received purchase order with a late fee, and a draft");
+  }
+
+  const northlab = made["Northlab Scientific"];
+  if (northlab) {
+    // In dollars, half of it here so far; the EU duties paid on arrival in euros.
+    const lab = firstOf(["agar-plates", "still-air-box"]);
+    const po = await admin.post("/admin/purchase-orders", {
+      supplier: northlab.id,
+      destination: farm.id,
+      currency: "USD",
+      exchange_rate: "0.92",
+      lines: lab.map((variant) => ({ variant: variant.id, quantity: 10 })),
+      costs: [
+        { kind: "shipping", amount: { amount: 6000, currency: "USD" } },
+        { kind: "duties", amount: eur(25), allocation: "by_quantity" },
+      ],
+    });
+    await admin.post(`/admin/purchase-orders/${po.id}/order`);
+    await admin.post(`/admin/purchase-orders/${po.id}/receipts`, {
+      lines: [{ variant: lab[0].id, accepted: 5, rejected: 0 }],
+      note: "First box; the rest is back-ordered.",
+    });
+    added.push("Northlab Scientific: a partly received purchase order in dollars");
+  }
+
+  const bloom = made["Bloom Packaging"];
+  if (bloom) {
+    // Ordered, on its way to New Jersey: incoming stock.
+    const bags = firstOf(["grain-spawn-bag", "packaging-inserts"]);
+    const po = await admin.post("/admin/purchase-orders", {
+      supplier: bloom.id,
+      destination: newJersey.id,
+      expected_at: daysFromNow(10),
+      note_to_supplier: "Please label each carton with our PO number.",
+      lines: bags.map((variant) => ({ variant: variant.id, quantity: 200 })),
+    });
+    await admin.post(`/admin/purchase-orders/${po.id}/order`);
+    added.push("Bloom Packaging: an ordered purchase order still to arrive");
+  }
+
+  // A transfer in transit from the farm to New Jersey, of what the farm has enough of.
+  const transfers = await admin.get("/admin/transfers?limit=1");
+  if (transfers.items.length === 0) {
+    const lines = [];
+    for (const variant of variantsOf(["oyster-grow-kit", "lions-mane-grow-kit"])) {
+      const stock = await admin.get(`/admin/variants/${variant.id}/inventory`);
+      const here = stock.levels?.find((level) => level.location === farm.id)?.on_hand ?? 0;
+      if (stock.tracked && here >= 6) lines.push({ variant: variant.id, quantity: 4 });
+      if (lines.length === 2) break;
+    }
+    if (lines.length > 0) {
+      const transfer = await admin.post("/admin/transfers", {
+        origin: farm.id,
+        destination: newJersey.id,
+        expected_at: daysFromNow(5),
+        reference: "DHL 4471 2290",
+        lines,
+      });
+      await admin.post(`/admin/transfers/${transfer.id}/ship`);
+      added.push("a transfer in transit to New Jersey");
+    }
+  }
+
+  // Costs by hand for what the store makes itself.
+  let costed = 0;
+  for (const variant of variantsOf(["mycelium-leather", "acoustic-panel"])) {
+    const stock = await admin.get(`/admin/variants/${variant.id}/inventory`);
+    if (!stock.id || stock.unit_cost) continue;
+    const cents = Math.round(variant.price.amount * 0.35);
+    await admin.put(`/admin/inventory-items/${stock.id}/cost`, {
+      unit_cost: { amount: String(cents), currency: "EUR" },
+      note: "Our own production cost",
+    });
+    costed += 1;
+  }
+  if (costed > 0) added.push(`${costed} cost(s) set by hand`);
+  return added;
+}
+
+/**
+ * `--purchasing`, on a store this script seeded before purchasing: adds the suppliers,
+ * purchase orders, transfer and costs (`seedPurchasing`) and widens the demo's read-only
+ * role. Running it again adds nothing.
+ */
+async function addPurchasing() {
+  const added = await seedPurchasing();
+  const scopes = await widenDemoRole();
+  if (scopes.length > 0) added.push(`${DEMO_ROLE}: ${scopes.join(", ")}`);
+  console.log(added.length > 0 ? "\nAdded:" : "\nNothing to add: the store has it all.");
+  for (const line of added) console.log(`  ${line}`);
+}
+
 async function main() {
   console.log(`Seeding ${BASE} as ${EMAIL}`);
   const login = await call("POST", "/admin/auth/login", { email: EMAIL, password: PASSWORD });
@@ -1745,6 +1992,7 @@ async function main() {
 
   if (process.argv.includes("--images")) return replaceImages();
   if (process.argv.includes("--pricing")) return addPricing();
+  if (process.argv.includes("--purchasing")) return addPurchasing();
 
   const existing = await admin.get("/admin/products?limit=1");
   if (existing.items.length > 0 && !process.argv.includes("--force")) {
@@ -1760,6 +2008,8 @@ async function main() {
     // No address or home country: the demo is deliberately nowhere in particular.
     legal_name: "Mycelium Works Ltd.",
     default_language: "en",
+    // What costs are kept in: purchase orders, stock value, each order line's cost.
+    currency: "EUR",
     setup_finished: true,
   });
 
@@ -2337,11 +2587,15 @@ async function main() {
     have: new Set(),
   });
 
+  console.log("Purchasing");
+  const purchasing = await seedPurchasing();
+
   const variantCount = sellable.reduce((n, p) => n + p.variants.length, 0);
   console.log("\nDone: Mycelium Works is set up.");
   console.log(
     `  ${sellable.length} products for sale (${variantCount} variants), 1 draft · ${FIELDS.length} custom fields · ${MARKETS.length} markets · ${orders.length} orders · ${discounts.length} discounts`,
   );
+  for (const line of purchasing) console.log(`  ${line}`);
   console.log("\nFor the storefront (apps/storefront/.dev.vars):");
   console.log(`  STOREFRONT_KEY=${key.token}`);
   if (webhookSecret) console.log(`  HYPHA_WEBHOOK_SECRET=${webhookSecret}`);
