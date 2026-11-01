@@ -47,6 +47,8 @@ pub enum InventoryError {
     DuplicateTransferLine(VariantId),
     #[error("variant {0}'s line needs at least one unit")]
     InvalidTransferQuantity(VariantId),
+    #[error("variant {variant}'s units are at most {max}")]
+    TransferQuantityTooLarge { variant: VariantId, max: u32 },
     #[error("a transfer's note can be at most {max} characters")]
     TransferNoteTooLong { max: usize },
     /// Only a draft changes, ships, is cancelled or deleted.
@@ -111,6 +113,7 @@ impl ErrorCode for InventoryError {
             InventoryError::TooManyTransferLines { .. } => "too_many_lines",
             InventoryError::DuplicateTransferLine(_) => "duplicate_line",
             InventoryError::InvalidTransferQuantity(_) => "invalid_quantity",
+            InventoryError::TransferQuantityTooLarge { .. } => "quantity_too_large",
             InventoryError::TransferNoteTooLong { .. } => "notes_too_long",
             InventoryError::TransferNotDraft { .. } => "transfer_not_draft",
             InventoryError::TransferNotInTransit { .. } => "transfer_not_in_transit",

@@ -8,7 +8,7 @@ import { type TableColumn, pixel, proportional } from "@astryxdesign/core/Table"
 import { Text } from "@astryxdesign/core/Text";
 import { ArrowsRightLeftIcon } from "@heroicons/react/24/outline";
 
-import { DateTime } from "@/components/date-time";
+import { CalendarDate } from "@/components/date-time";
 import {
   type FilterDef,
   ResourceTable,
@@ -84,7 +84,11 @@ export function TransfersTable({
       header: "Expected",
       width: pixel(140),
       renderCell: (t) =>
-        t.expected_at ? <DateTime value={t.expected_at} short /> : <Text color="secondary">—</Text>,
+        t.expected_at ? (
+          <CalendarDate value={t.expected_at} short />
+        ) : (
+          <Text color="secondary">—</Text>
+        ),
     },
     {
       key: "units",

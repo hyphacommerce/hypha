@@ -10,16 +10,17 @@
     reason = "a failing test panics, and fixtures cast small counters"
 )]
 use hypha_core::{
-    Actor, AuthError, Ctx, Currency, ExchangeRate, LocationId, PageLimit, PageRequest,
+    Actor, AuthError, Clock, Ctx, Currency, ExchangeRate, LocationId, PageLimit, PageRequest,
     PurchaseOrderId, Scope, SupplierId, Timestamp, UnitCost, UserId, VariantId,
 };
 use hypha_purchasing::{
     CommandError, LineInput, NewPurchaseOrder, PaymentDue, PaymentTermsDraft, PurchaseOrder,
-    PurchaseOrderFilter, PurchaseOrderSort, PurchaseOrderStatus, PurchasingError, SupplierDraft,
-    SupplierVariantDraft, UpdatePurchaseOrder, UpdateSupplier, VariantInfo, cancel_purchase_order,
-    close_purchase_order, create_purchase_order, create_supplier, delete_purchase_order,
-    delete_supplier, get_purchase_order, list_purchase_orders, order_purchase_order,
-    set_supplier_variant, update_purchase_order, update_supplier,
+    PurchaseOrderFilter, PurchaseOrderRepo, PurchaseOrderSort, PurchaseOrderStatus,
+    PurchasingError, SupplierDraft, SupplierVariantDraft, UpdatePurchaseOrder, UpdateSupplier,
+    VariantInfo, cancel_purchase_order, close_purchase_order, create_purchase_order,
+    create_supplier, delete_purchase_order, delete_supplier, get_purchase_order,
+    list_purchase_orders, order_purchase_order, set_supplier_variant, update_purchase_order,
+    update_supplier,
 };
 use hypha_testkit::{FixedClock, InMemoryPorts, SequentialIds};
 use pollster::block_on;
@@ -403,6 +404,52 @@ fn changing_the_currency_needs_lines_in_it() {
         )
         .unwrap();
     assert_eq!(usd.currency(), Currency::USD);
+}
+
+#[test]
+fn an_order_goods_arrived_on_changes_only_through_receiving() {
+    let w = World::new();
+    let supplier = w.supplier();
+    let po = w.draft(supplier, vec![line(10, 2, Some("100"))]);
+    w.order(po.id()).unwrap();
+    // Goods arrive (receiving's work, done by hand here).
+    let mut arrived = block_on(w.ports.purchase_orders.get(po.id()))
+        .unwrap()
+        .unwrap();
+    arrived
+        .record_receipt(
+            &[hypha_purchasing::ReceivedQuantities {
+                variant: vid(10),
+                accepted: 1,
+                rejected: 0,
+            }],
+            false,
+            w.clock.now(),
+        )
+        .unwrap();
+    block_on(w.ports.purchase_orders.update(&mut arrived)).unwrap();
+    // Changing or closing it may revalue that stock, which only receiving writes.
+    assert_eq!(
+        block_on(close_purchase_order(&w.ctx, &w.ports, &w.clock, po.id())).map(|_| ()),
+        Err(CommandError::ReceivedStock(po.id()))
+    );
+    let note = UpdatePurchaseOrder {
+        note: Some(Some("rush".to_string())),
+        ..UpdatePurchaseOrder::default()
+    };
+    assert_eq!(
+        block_on(update_purchase_order(
+            &w.ctx,
+            &w.ports,
+            &w.clock,
+            Some(Currency::EUR),
+            &[],
+            po.id(),
+            note
+        ))
+        .map(|_| ()),
+        Err(CommandError::ReceivedStock(po.id()))
+    );
 }
 
 #[test]

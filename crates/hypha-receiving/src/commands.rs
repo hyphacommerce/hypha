@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
     Attempts, AuthError, Clock, Ctx, Currency, ErrorCode, HasBatch, HasIdempotency, IdGenerator,
     IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, InventoryItemId,
-    LocationId, PurchaseOrderId, Quantity, QuantityError, ReceiptId, RepoError, Scope,
-    StageIdempotency, Timestamp, UnitCost, VariantId, earlier_id,
+    LocationId, MoneyError, PurchaseOrderId, Quantity, QuantityError, ReceiptId, RepoError, Scope,
+    StageIdempotency, Timestamp, UnitCost, VariantId, earlier_id, money::div_round,
 };
 use hypha_inventory::{
     HasInventoryItems, HasLocations, InventoryError, InventoryItem, InventoryItemRepo,
@@ -110,6 +110,10 @@ pub struct Receive {
     pub lines: Vec<ReceiveLine>,
     /// Take more than a line has outstanding (a supplier's extra units).
     pub allow_over: bool,
+    /// The lines' variants the catalogue no longer has (the host reads its products):
+    /// their units are counted on the order and the receipt but go into no stock, so no
+    /// stock record is made for a variant that's gone.
+    pub removed_variants: Vec<VariantId>,
     pub note: Option<String>,
     /// A retry with the same key returns the receipt the first request recorded.
     pub idempotency: Option<IdempotencyRequest>,
@@ -142,7 +146,9 @@ pub struct CancelledReceipt {
 /// unit cost in the store's currency, at the order's rate), the order with its counts
 /// (closed once every line is accounted for), each accepted variant's stock with its
 /// moving average and a `received` row (a variant with no stock record gets one,
-/// untracked), and the idempotency key.
+/// untracked; a removed variant's units go into no stock), and the idempotency key.
+/// Units over what a line spreads its extra costs over come in at their unit cost
+/// alone, so the stock never carries more of them than was paid.
 ///
 /// When another request changed the order or an item in between, it runs again on fresh
 /// data, up to `MAX_ATTEMPTS` times, so a concurrent receipt of the same units shows up
@@ -190,12 +196,19 @@ async fn receive_once<S: ReceivingPorts>(
     let mut po = load_order(ports, input.purchase_order).await?;
     // What each line's units cost landed, before the counts change: the extra costs are
     // spread over what was ordered, not over what has arrived.
-    let landed: HashMap<VariantId, Option<UnitCost>> = po
+    let landed_per_line: HashMap<VariantId, Option<UnitCost>> = po
         .lines()
         .iter()
         .map(|l| l.variant())
         .zip(po.landed_costs(store, po.exchange_rate())?)
         .collect();
+    let mut landed = HashMap::new();
+    for line in &input.lines {
+        let full = landed_per_line.get(&line.variant).copied().flatten();
+        let bare = po.bare_landed_cost(line.variant, store, po.exchange_rate())?;
+        let bearing = po.extra_bearing(line.variant, line.accepted);
+        landed.insert(line.variant, blended(full, bare, bearing, line.accepted)?);
+    }
     let extras = po.extras_per_unit(store, po.exchange_rate())?;
     let counted: Vec<ReceivedQuantities> = input
         .lines
@@ -241,7 +254,11 @@ async fn receive_once<S: ReceivingPorts>(
         purchase_order: po.id(),
         receipt: id,
     };
-    let arriving: Vec<&ReceiptLine> = receipt.lines().iter().filter(|l| l.accepted > 0).collect();
+    let arriving: Vec<&ReceiptLine> = receipt
+        .lines()
+        .iter()
+        .filter(|l| l.accepted > 0 && !input.removed_variants.contains(&l.variant))
+        .collect();
     let variants: Vec<VariantId> = arriving.iter().map(|l| l.variant).collect();
     let mut items: HashMap<VariantId, InventoryItem> = ports
         .inventory_items()
@@ -375,24 +392,29 @@ async fn cancel_receipt_once<S: ReceivingPorts>(
         .into_iter()
         .map(|item| (item.variant(), item))
         .collect();
+    let mut touched = HashSet::new();
     for line in &taken {
         if let Some(item) = items.get_mut(&line.variant) {
             let quantity = Quantity::new(line.accepted)?;
             item.unreceive(receipt.location(), quantity, line.landed_unit_cost, source)?;
+            touched.insert(line.variant);
         }
     }
     if let Some(store) = store {
         let changes = po.revalue(store, &others, &before)?;
         load_more(ports, &mut items, &changes).await?;
         let late = StockSource::PurchaseOrder(po.id());
-        revalue_stock(&mut items, &changes, store, late)?;
+        touched.extend(revalue_stock(&mut items, &changes, store, late)?);
     }
 
     let mut batch = ports.batch();
     batch.update_purchase_order(&mut po);
     batch.update_receipt(&mut receipt);
-    for item in items.values_mut() {
-        batch.update_inventory_item(item);
+    // Only what changed: staging the rest would bump versions checkouts race on.
+    for (variant, item) in &mut items {
+        if touched.contains(variant) {
+            batch.update_inventory_item(item);
+        }
     }
     ports.commit(batch).await?;
     Ok(CancelledReceipt {
@@ -489,18 +511,22 @@ async fn revaluing<S: ReceivingPorts + HasSupplierVariants>(
     }
     let kept = kept_values(&po);
     let mut items = HashMap::new();
+    let mut touched = HashSet::new();
     if let Some(store) = arrived {
         let changes = po.revalue(store, &receipts, &before)?;
         load_more(ports, &mut items, &changes).await?;
-        revalue_stock(&mut items, &changes, store, StockSource::PurchaseOrder(id))?;
+        touched = revalue_stock(&mut items, &changes, store, StockSource::PurchaseOrder(id))?;
     }
-    if !po.is_changed() && items.is_empty() && kept == kept_values(&po) {
+    if !po.is_changed() && touched.is_empty() && kept == kept_values(&po) {
         return Ok(po);
     }
     let mut batch = ports.batch();
     batch.update_purchase_order(&mut po);
-    for item in items.values_mut() {
-        batch.update_inventory_item(item);
+    // Only the items revalued: an unchanged one keeps its version for checkouts.
+    for (variant, item) in &mut items {
+        if touched.contains(variant) {
+            batch.update_inventory_item(item);
+        }
     }
     ports.commit(batch).await?;
     Ok(po)
@@ -533,19 +559,46 @@ async fn load_more<S: HasInventoryItems>(
 }
 
 /// Puts each revaluation on its variant's stock (loaded into `items`); a variant whose
-/// stock record is gone has nothing left to value.
+/// stock record is gone has nothing left to value. The variants whose cost changed.
 fn revalue_stock(
     items: &mut HashMap<VariantId, InventoryItem>,
     changes: &[Revaluation],
     store: Currency,
     source: StockSource,
-) -> Result<(), CommandError> {
+) -> Result<HashSet<VariantId>, CommandError> {
+    let mut changed = HashSet::new();
     for change in changes {
-        if let Some(item) = items.get_mut(&change.variant) {
-            item.revalue(change.value, store, source)?;
+        if let Some(item) = items.get_mut(&change.variant)
+            && item.revalue(change.value, store, source)?
+        {
+            changed.insert(change.variant);
         }
     }
-    Ok(())
+    Ok(changed)
+}
+
+/// The cost `accepted` units come in at when only `bearing` of them carry the extra
+/// costs (`full`, the landed cost) and the rest their unit cost alone (`bare`): one
+/// average per receipt line, so its stock value is what was paid.
+fn blended(
+    full: Option<UnitCost>,
+    bare: Option<UnitCost>,
+    bearing: u32,
+    accepted: u32,
+) -> Result<Option<UnitCost>, CommandError> {
+    let (Some(full), Some(bare)) = (full, bare) else {
+        return Ok(full);
+    };
+    if bearing >= accepted {
+        return Ok(Some(full));
+    }
+    let value = i128::from(bearing) * i128::from(full.scaled())
+        + i128::from(accepted - bearing) * i128::from(bare.scaled());
+    let scaled = div_round(value, i128::from(accepted));
+    let scaled = i64::try_from(scaled).map_err(|_| PurchasingError::from(MoneyError::Overflow))?;
+    Ok(Some(
+        UnitCost::new(scaled, full.currency()).map_err(PurchasingError::from)?,
+    ))
 }
 
 /// The order's receipts that weren't taken back.

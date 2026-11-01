@@ -449,6 +449,10 @@ where
     }
     let not_resendable = CommandError::NotResendable { template };
     if template == TemplateKey::SupplierPurchaseOrder {
+        // Emailing a supplier takes what sending the order takes, so `notifications:write`
+        // alone (an agent's, say) never reaches a supplier.
+        ctx.require(Scope::PurchasingWrite)?;
+        ctx.require(Scope::PurchasingSend)?;
         return resend_supplier_order(env, ports, &earlier).await;
     }
     let (

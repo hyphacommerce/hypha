@@ -35,7 +35,8 @@ fn columns() -> String {
         "po.id, po.version, po.number, po.supplier_id, po.supplier_name, po.destination_id,
          po.currency, po.exchange_rate, po.payment_terms_due, po.payment_terms_days,
          po.payment_terms_note, {}, po.supplier_reference, po.note_to_supplier, po.note,
-         po.tax, po.status, po.receipt_status, {}, {}, {}, {}, po.revision, po.line_count,
+         po.tax, po.status, po.receipt_status, {}, {}, {}, {}, po.revision, po.sent_revision,
+         po.line_count,
          po.total, {}",
         micros("po.expected_at"),
         micros("po.ordered_at"),
@@ -95,6 +96,9 @@ fn order_from_row(
             .ok_or_else(|| corrupt(format!("receipt status {receipt_status:?}")))?,
         ordered_at: opt_ts(col(row, "ordered_at")?),
         sent_at: opt_ts(col(row, "sent_at")?),
+        sent_revision: col::<Option<i32>>(row, "sent_revision")?
+            .map(count_from_db)
+            .transpose()?,
         closed_at: opt_ts(col(row, "closed_at")?),
         cancelled_at: opt_ts(col(row, "cancelled_at")?),
         revision: count_from_db(col(row, "revision")?)?,
@@ -203,6 +207,7 @@ struct Values<'a> {
     closed_at: Option<i64>,
     cancelled_at: Option<i64>,
     revision: i32,
+    sent_revision: Option<i32>,
     line_count: i32,
     total: Option<i64>,
 }
@@ -230,6 +235,7 @@ impl<'a> Values<'a> {
             closed_at: opt_micros(s.closed_at),
             cancelled_at: opt_micros(s.cancelled_at),
             revision: count_to_db(s.revision)?,
+            sent_revision: s.sent_revision.map(count_to_db).transpose()?,
             line_count: i32::try_from(summary.line_count)
                 .map_err(|_| corrupt(format!("{} lines", summary.line_count)))?,
             total: summary.total.map(|t| t.amount()),
@@ -261,6 +267,7 @@ impl<'a> Values<'a> {
             (&self.closed_at, Type::INT8),
             (&self.cancelled_at, Type::INT8),
             (&self.revision, Type::INT4),
+            (&self.sent_revision, Type::INT4),
             (&self.line_count, Type::INT4),
             (&self.total, Type::INT8),
         ]
@@ -268,7 +275,7 @@ impl<'a> Values<'a> {
 }
 
 /// The written columns, in `Values::params` order after the ID; the times as microseconds.
-const COLUMNS: [&str; 23] = [
+const COLUMNS: [&str; 24] = [
     "number",
     "supplier_id",
     "supplier_name",
@@ -290,6 +297,7 @@ const COLUMNS: [&str; 23] = [
     "closed_at",
     "cancelled_at",
     "revision",
+    "sent_revision",
     "line_count",
     "total",
 ];
@@ -712,5 +720,22 @@ impl<C: PgConnection> PurchaseOrderRepo for PgStore<C> {
                 })
             })
             .collect()
+    }
+
+    async fn store_currency_named(&self) -> Result<bool, RepoError> {
+        let mut conn = self.conn().await;
+        let row = conn
+            .db()
+            .query_typed_one(
+                "SELECT EXISTS (
+                     SELECT 1 FROM purchase_orders
+                     WHERE status IN ('ordered', 'closed')
+                        OR (status = 'draft' AND exchange_rate IS NOT NULL)
+                 ) AS named",
+                &[],
+            )
+            .await
+            .map_err(repo_error)?;
+        col(&row, "named")
     }
 }

@@ -43,10 +43,10 @@ pub use repo::{
 pub use stock::{Availability, StockContext};
 pub use summary::{InventoryFilter, InventoryItemSummary, LevelSummary, stock_by_location};
 pub use transfer::{
-    InTransit, IncomingTransfer, MAX_TRANSFER_LINES, MAX_TRANSFER_NOTE_CHARS, Transfer,
-    TransferArrival, TransferDraft, TransferFilter, TransferLine, TransferLineDraft,
-    TransferLineSnapshot, TransferNumber, TransferSnapshot, TransferStatus, TransferSummary,
-    incoming_transfers,
+    InTransit, IncomingTransfer, MAX_TRANSFER_LINES, MAX_TRANSFER_NOTE_CHARS,
+    MAX_TRANSFER_QUANTITY, Transfer, TransferArrival, TransferDraft, TransferFilter, TransferLine,
+    TransferLineDraft, TransferLineSnapshot, TransferNumber, TransferSnapshot, TransferStatus,
+    TransferSummary, incoming_transfers,
 };
 pub use transfer_commands::{
     CreateTransfer, RECEIVE_TRANSFER, SHIP_TRANSFER, TransferPorts, UpdateTransfer,

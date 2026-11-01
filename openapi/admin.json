@@ -11426,6 +11426,15 @@
               "null"
             ]
           },
+          "sent_revision": {
+            "description": "The revision last emailed to the supplier; below `revision`, they hold an older\ncopy. `null` until it's sent.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "status": {
             "$ref": "#/components/schemas/PurchaseOrderStatusDto"
           },
@@ -37944,7 +37953,7 @@
             "bearer": []
           }
         ],
-        "summary": "Sends an order's email again (\"the customer didn't get it\"), rendered from the order\nas it is now with the templates in effect, even if the template is off: a new record\n(201), `queued` for the send job, which goes at once (read the record again for how\nit went). Invites and resets can't be resent (`notification_not_resendable`: their\ntoken isn't kept).",
+        "summary": "Sends an order's email again (\"the customer didn't get it\"), rendered from the order\nas it is now with the templates in effect, even if the template is off: a new record\n(201), `queued` for the send job, which goes at once (read the record again for how\nit went). Invites and resets can't be resent (`notification_not_resendable`: their\ntoken isn't kept). A purchase order's email to its supplier also takes\n`purchasing:write` and `purchasing:send`, as sending it does.",
         "tags": [
           "notifications"
         ],
@@ -45709,7 +45718,7 @@
             "bearer": []
           }
         ],
-        "summary": "Records goods arriving against an ordered purchase order: accepted units go on hand at\nthe location (the order's destination unless the body names another) at their landed\ncost, which joins each item's moving average; rejected ones are only counted. A\nvariant with no stock record gets one, untracked (listed in `new_items`). The order\ncloses once every line is accounted for. More than a line has outstanding is\n`409 over_received` (with each line's outstanding in `details.lines`) unless\n`allow_over`; the store needs its base currency (`409 store_currency_required`).\nTakes an `Idempotency-Key` header: a retry returns the receipt the first request\nrecorded.",
+        "summary": "Records goods arriving against an ordered purchase order: accepted units go on hand at\nthe location (the order's destination unless the body names another) at their landed\ncost, which joins each item's moving average; rejected ones are only counted. A\nvariant with no stock record gets one, untracked (listed in `new_items`); a variant\nremoved from the catalogue since is counted but goes into no stock. Units over what a\nline ordered come in at their unit cost alone, without a share of the extra costs. The\norder closes once every line is accounted for. More than a line has outstanding is\n`409 over_received` (with each line's outstanding in `details.lines`) unless\n`allow_over`; the store needs its base currency (`409 store_currency_required`).\nTakes an `Idempotency-Key` header: a retry returns the receipt the first request\nrecorded.",
         "tags": [
           "receipts"
         ],

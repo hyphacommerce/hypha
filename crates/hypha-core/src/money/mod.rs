@@ -11,6 +11,7 @@ mod unit_cost;
 
 pub use basis_points::BasisPoints;
 pub use currency::{Currency, CurrencyError};
+pub use decimal::div_round;
 pub use exchange_rate::ExchangeRate;
 pub use price::Price;
 pub use tax_rate::TaxRate;

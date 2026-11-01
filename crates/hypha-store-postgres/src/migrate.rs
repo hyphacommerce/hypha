@@ -504,6 +504,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "purchase_order_extra_applied",
             sql: include_str!("../migrations/0096_purchase_order_extra_applied.sql"),
         },
+        Migration {
+            version: 97,
+            name: "purchase_order_sent_revision",
+            sql: include_str!("../migrations/0097_purchase_order_sent_revision.sql"),
+        },
     ],
 };
 

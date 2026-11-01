@@ -815,7 +815,8 @@ pub async fn fetch<S: Storage>(
 /// as it is now with the templates in effect, even if the template is off: a new record
 /// (201), `queued` for the send job, which goes at once (read the record again for how
 /// it went). Invites and resets can't be resent (`notification_not_resendable`: their
-/// token isn't kept).
+/// token isn't kept). A purchase order's email to its supplier also takes
+/// `purchasing:write` and `purchasing:send`, as sending it does.
 #[utoipa::path(
     post,
     path = "/admin/notifications/{id}/resend",

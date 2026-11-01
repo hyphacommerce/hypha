@@ -150,6 +150,14 @@ impl PurchaseOrderRepo for InMemoryPurchaseOrders {
             variants,
         ))
     }
+
+    async fn store_currency_named(&self) -> Result<bool, RepoError> {
+        Ok(self
+            .orders
+            .all()
+            .iter()
+            .any(PurchaseOrder::names_store_currency))
+    }
 }
 
 /// Receipts. Written only through a batch, with their order, like the database's.

@@ -46,8 +46,9 @@ pub(crate) fn format(value: i64, places: u32) -> String {
     format!("{whole}.{}", digits.trim_end_matches('0'))
 }
 
-/// `numerator / denominator` rounded half away from zero; `denominator` is positive.
-pub(crate) fn div_round(numerator: i128, denominator: i128) -> i128 {
+/// `numerator / denominator` rounded half away from zero, as every money division here
+/// rounds; `denominator` is positive.
+pub fn div_round(numerator: i128, denominator: i128) -> i128 {
     let quotient = numerator / denominator;
     let remainder = numerator % denominator;
     if remainder.abs() * 2 >= denominator {

@@ -26,6 +26,9 @@ use crate::{
 /// The most lines an order holds, and the most extra costs.
 pub const MAX_LINES: usize = 1000;
 pub const MAX_COSTS: usize = 20;
+/// The most units a line orders, or counts as received or rejected: storage keeps the
+/// counts as 32-bit integers, and no order comes near it.
+pub const MAX_QUANTITY: u32 = 1_000_000_000;
 /// The most addresses one send goes to, `to` and `cc` together, and the longest message.
 pub const MAX_RECIPIENTS: usize = 10;
 pub const MAX_MESSAGE_CHARS: usize = 2000;
@@ -246,6 +249,12 @@ impl PurchaseOrderLine {
     fn new(draft: LineDraft) -> Result<Self, PurchasingError> {
         if draft.quantity == 0 {
             return Err(PurchasingError::InvalidLineQuantity(draft.variant));
+        }
+        if draft.quantity > MAX_QUANTITY {
+            return Err(PurchasingError::QuantityTooLarge {
+                variant: draft.variant,
+                max: MAX_QUANTITY,
+            });
         }
         Ok(Self {
             variant: draft.variant,
@@ -583,6 +592,8 @@ pub struct PurchaseOrder {
     receipt_status: ReceiptStatus,
     ordered_at: Option<Timestamp>,
     sent_at: Option<Timestamp>,
+    /// The revision last sent: one below `revision` means the supplier has an older copy.
+    sent_revision: Option<u32>,
     closed_at: Option<Timestamp>,
     cancelled_at: Option<Timestamp>,
     /// Edits since it was ordered.
@@ -741,6 +752,7 @@ impl PurchaseOrder {
             receipt_status: ReceiptStatus::None,
             ordered_at: None,
             sent_at: None,
+            sent_revision: None,
             closed_at: None,
             cancelled_at: None,
             revision: 0,
@@ -786,8 +798,10 @@ impl PurchaseOrder {
         for old in &self.lines {
             match lines.iter_mut().find(|l| l.variant == old.variant) {
                 Some(new) => {
+                    // A line received over what it ordered keeps that quantity: only
+                    // lowering it below what arrived is refused.
                     let minimum = old.received.saturating_add(old.rejected);
-                    if new.quantity < minimum {
+                    if new.quantity < minimum && new.quantity != old.quantity {
                         return Err(PurchasingError::BelowReceived {
                             variant: old.variant,
                             minimum,
@@ -795,7 +809,7 @@ impl PurchaseOrder {
                     }
                     new.received = old.received;
                     new.rejected = old.rejected;
-                    new.cancelled = old.cancelled.min(new.quantity - minimum);
+                    new.cancelled = old.cancelled.min(new.quantity.saturating_sub(minimum));
                     new.extra_applied = old.extra_applied;
                 }
                 None if old.arrived() > 0 => {
@@ -913,6 +927,7 @@ impl PurchaseOrder {
             }
         }
         self.sent_at = Some(now);
+        self.sent_revision = Some(self.revision);
         self.changes.sent = Some(sending);
         Ok(())
     }
@@ -1036,8 +1051,8 @@ impl PurchaseOrder {
                     outstanding: line.outstanding(),
                 });
             }
-            line.received = add_count(line.received, received.accepted)?;
-            line.rejected = add_count(line.rejected, received.rejected)?;
+            line.received = add_count(line.variant, line.received, received.accepted)?;
+            line.rejected = add_count(line.variant, line.rejected, received.rejected)?;
         }
         if !over.is_empty() && !allow_over {
             return Err(PurchasingError::OverReceived(over));
@@ -1237,25 +1252,44 @@ impl PurchaseOrder {
         )?)
     }
 
-    /// The extra costs' value the stock received on each line should carry now: every
-    /// accepted unit of `receipts` (the recorded ones) at the extra per unit the order
-    /// spreads now, at its receipt's rate.
+    /// The extra costs' value the stock received on each line should carry now: the
+    /// accepted units of `receipts` (the recorded ones, oldest first) at the extra per
+    /// unit the order spreads now, at each receipt's rate. Only as many units as the line
+    /// spreads over carry it (`extra_bearing`): units received over the order came in at
+    /// their unit cost alone, or the stock would carry more than was paid.
     pub fn extra_due(
         &self,
         store: Currency,
         receipts: &[ReceiptBasis],
     ) -> Result<HashMap<VariantId, i128>, PurchasingError> {
         let mut due: HashMap<VariantId, i128> = HashMap::new();
+        let mut counted_before: HashMap<VariantId, u32> = HashMap::new();
         for receipt in receipts {
             let extras = self.extras_per_unit(store, receipt.exchange_rate)?;
             for counted in receipt.lines.iter().filter(|l| l.accepted > 0) {
+                let before = counted_before.entry(counted.variant).or_default();
+                let bearing = self.bearing_after(counted.variant, *before, counted.accepted);
+                *before = before.saturating_add(counted.accepted);
                 let Some(Some(extra)) = extras.get(&counted.variant) else {
                     continue;
                 };
-                *due.entry(counted.variant).or_default() += i128::from(counted.accepted) * extra;
+                *due.entry(counted.variant).or_default() += i128::from(bearing) * extra;
             }
         }
         Ok(due)
+    }
+
+    /// How many of `accepted` units of `variant` arriving now carry the extra costs: no
+    /// more than its line spreads them over (ordered less cancelled) less what arrived
+    /// before. Call it before `record_receipt`.
+    pub fn extra_bearing(&self, variant: VariantId, accepted: u32) -> u32 {
+        let before = self.line(variant).map_or(0, |l| l.received);
+        self.bearing_after(variant, before, accepted)
+    }
+
+    fn bearing_after(&self, variant: VariantId, before: u32, accepted: u32) -> u32 {
+        let spread = self.line(variant).map_or(0, |l| l.effective_quantity());
+        accepted.min(spread.saturating_sub(before))
     }
 
     /// Brings the extra value each line's received stock carries to what's due now
@@ -1292,18 +1326,23 @@ impl PurchaseOrder {
     }
 
     /// Counts the extra value `accepted` units of `variant` brought in at `per_unit`
-    /// (what each carried of the extra costs): call it after `record_receipt`. A line
-    /// without a kept value starts one only when these are its first units.
+    /// (what each carried of the extra costs; units over what the line spreads over
+    /// carried none): call it after `record_receipt`. A line without a kept value starts
+    /// one only when these are its first units.
     pub fn add_extra_applied(
         &mut self,
         variant: VariantId,
         accepted: u32,
         per_unit: i128,
     ) -> Result<(), PurchasingError> {
+        let before = self
+            .line(variant)
+            .map_or(0, |l| l.received.saturating_sub(accepted));
+        let bearing = self.bearing_after(variant, before, accepted);
         let Some(line) = self.lines.iter_mut().find(|l| l.variant == variant) else {
             return Ok(());
         };
-        let value = i128::from(accepted) * per_unit;
+        let value = i128::from(bearing) * per_unit;
         line.extra_applied = match line.extra_applied {
             Some(applied) => Some(scaled_value(i128::from(applied) + value)?),
             None if line.received == accepted => Some(scaled_value(value)?),
@@ -1432,6 +1471,22 @@ impl PurchaseOrder {
         self.sent_at
     }
 
+    /// Whether it's priced against the store's base currency: ordered or closed (its
+    /// landed costs are in it), or a draft with a rate to it. While any is, that currency
+    /// stays as it is.
+    pub fn names_store_currency(&self) -> bool {
+        match self.status {
+            PurchaseOrderStatus::Ordered | PurchaseOrderStatus::Closed => true,
+            PurchaseOrderStatus::Draft => self.fields.exchange_rate.is_some(),
+            PurchaseOrderStatus::Cancelled => false,
+        }
+    }
+
+    /// The revision the supplier was last sent; `None` before it was sent.
+    pub fn sent_revision(&self) -> Option<u32> {
+        self.sent_revision
+    }
+
     pub fn closed_at(&self) -> Option<Timestamp> {
         self.closed_at
     }
@@ -1450,10 +1505,15 @@ fn scaled_value(value: i128) -> Result<i64, PurchasingError> {
     i64::try_from(value).map_err(|_| PurchasingError::Money(hypha_core::MoneyError::Overflow))
 }
 
-fn add_count(count: u32, more: u32) -> Result<u32, PurchasingError> {
+/// `count + more`, refused past `MAX_QUANTITY`.
+fn add_count(variant: VariantId, count: u32, more: u32) -> Result<u32, PurchasingError> {
     count
         .checked_add(more)
-        .ok_or(PurchasingError::Money(hypha_core::MoneyError::Overflow))
+        .filter(|sum| *sum <= MAX_QUANTITY)
+        .ok_or(PurchasingError::QuantityTooLarge {
+            variant,
+            max: MAX_QUANTITY,
+        })
 }
 
 /// A line as storage keeps it.
@@ -1497,6 +1557,7 @@ pub struct PurchaseOrderSnapshot {
     pub receipt_status: ReceiptStatus,
     pub ordered_at: Option<Timestamp>,
     pub sent_at: Option<Timestamp>,
+    pub sent_revision: Option<u32>,
     pub closed_at: Option<Timestamp>,
     pub cancelled_at: Option<Timestamp>,
     pub revision: u32,
@@ -1543,6 +1604,7 @@ impl PurchaseOrder {
             receipt_status: self.receipt_status,
             ordered_at: self.ordered_at,
             sent_at: self.sent_at,
+            sent_revision: self.sent_revision,
             closed_at: self.closed_at,
             cancelled_at: self.cancelled_at,
             revision: self.revision,
@@ -1602,6 +1664,7 @@ impl PurchaseOrder {
             receipt_status: s.receipt_status,
             ordered_at: s.ordered_at,
             sent_at: s.sent_at,
+            sent_revision: s.sent_revision,
             closed_at: s.closed_at,
             cancelled_at: s.cancelled_at,
             revision: s.revision,
@@ -2286,11 +2349,95 @@ mod tests {
         let most = UnitCost::new(UnitCost::MAX_SCALED, Currency::EUR).unwrap();
         let po = po(vec![LineDraft {
             unit_cost: most,
-            ..line(10, 4_000_000_000, "1")
+            ..line(10, MAX_QUANTITY, "1")
         }]);
         assert_eq!(
             po.totals(None),
             Err(PurchasingError::Money(MoneyError::Overflow))
+        );
+    }
+
+    #[test]
+    fn a_line_holds_at_most_max_quantity_units() {
+        let too_many = PurchaseOrder::new(
+            PurchaseOrderId::from_uuid(id(1)),
+            PurchaseOrderNumber::new(1001).unwrap(),
+            SupplierId::from_uuid(id(2)),
+            draft(vec![line(10, MAX_QUANTITY + 1, "1")]),
+        );
+        assert_eq!(
+            too_many.map(|_| ()),
+            Err(PurchasingError::QuantityTooLarge {
+                variant: variant(10),
+                max: MAX_QUANTITY
+            })
+        );
+        // Received counts stop there too, however far over a receipt is allowed.
+        let mut po = ordered(vec![line(10, MAX_QUANTITY, "1")]);
+        po.record_receipt(&[got(10, MAX_QUANTITY - 1, 0)], false, at(3))
+            .unwrap();
+        assert_eq!(
+            po.record_receipt(&[got(10, 2, 0)], true, at(4)),
+            Err(PurchasingError::QuantityTooLarge {
+                variant: variant(10),
+                max: MAX_QUANTITY
+            })
+        );
+    }
+
+    #[test]
+    fn a_line_received_over_its_quantity_still_takes_other_edits() {
+        let mut po = ordered(vec![line(10, 3, "100")]);
+        po.record_receipt(&[got(10, 5, 0)], true, at(3)).unwrap();
+        // Closed by the receipt, its extra costs still change.
+        let mut d = po.draft();
+        d.costs = vec![CostDraft {
+            kind: CostKind::Shipping,
+            description: None,
+            amount: Money::new(300, Currency::EUR).unwrap(),
+            allocation: CostAllocation::ByQuantity,
+        }];
+        assert_eq!(po.update(d, Some(Currency::EUR), at(4)), Ok(()));
+        let mut d = po.draft();
+        d.lines[0].quantity = 4;
+        assert_eq!(
+            po.update(d, Some(Currency::EUR), at(5)),
+            Err(PurchasingError::BelowReceived {
+                variant: variant(10),
+                minimum: 5
+            })
+        );
+    }
+
+    #[test]
+    fn extra_costs_reach_only_the_units_a_line_spreads_them_over() {
+        let mut po = ordered(vec![line(10, 3, "100")]);
+        assert_eq!(po.extra_bearing(variant(10), 2), 2);
+        po.record_receipt(&[got(10, 2, 0)], false, at(3)).unwrap();
+        // One of 3 left to carry them, whatever arrives.
+        assert_eq!(po.extra_bearing(variant(10), 4), 1);
+        let receipts = [
+            ReceiptBasis {
+                exchange_rate: None,
+                lines: vec![got(10, 2, 0)],
+            },
+            ReceiptBasis {
+                exchange_rate: None,
+                lines: vec![got(10, 4, 0)],
+            },
+        ];
+        let mut d = po.draft();
+        d.costs = vec![CostDraft {
+            kind: CostKind::Shipping,
+            description: None,
+            amount: Money::new(300, Currency::EUR).unwrap(),
+            allocation: CostAllocation::ByQuantity,
+        }];
+        po.update(d, Some(Currency::EUR), at(4)).unwrap();
+        // €1.00 a unit, on 3 units of the 6 that came.
+        assert_eq!(
+            po.extra_due(Currency::EUR, &receipts).unwrap()[&variant(10)],
+            3 * 1_000_000
         );
     }
 
@@ -2387,6 +2534,12 @@ mod tests {
         assert_eq!(events[0].data["revision"], 1);
         assert_eq!(events[0].data["cc"], serde_json::json!(["b@spore.example"]));
         assert_eq!(po.sent_at(), Some(at(300)));
+        assert_eq!(po.sent_revision(), Some(1));
+        // An edit after sending leaves the supplier an older revision.
+        let mut d = po.draft();
+        d.lines[0].quantity = 9;
+        po.update(d, Some(Currency::EUR), at(400)).unwrap();
+        assert_eq!((po.revision(), po.sent_revision()), (2, Some(1)));
     }
 
     #[test]

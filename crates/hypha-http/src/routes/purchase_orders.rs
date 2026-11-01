@@ -249,6 +249,9 @@ pub struct PurchaseOrderResponse {
     cancelled_at: Option<String>,
     /// Edits since it was ordered.
     revision: u32,
+    /// The revision last emailed to the supplier; below `revision`, they hold an older
+    /// copy. `null` until it's sent.
+    sent_revision: Option<u32>,
     created_at: String,
     updated_at: String,
 }
@@ -332,6 +335,7 @@ impl PurchaseOrderResponse {
             closed_at: times(po.closed_at())?,
             cancelled_at: times(po.cancelled_at())?,
             revision: po.revision(),
+            sent_revision: po.sent_revision(),
             created_at,
             updated_at,
         })

@@ -53,6 +53,10 @@ pub enum CommandError {
     /// Sent without addresses, and the supplier has no primary contact with an email.
     #[error("supplier {0} has no primary contact email: say who to send it to")]
     SupplierEmailRequired(SupplierId),
+    /// Goods arrived on it, so a change may move what their stock is worth, which this
+    /// crate can't write: `hypha_receiving`'s command of the same name does both.
+    #[error("goods arrived on purchase order {0}: change it through receiving")]
+    ReceivedStock(PurchaseOrderId),
 }
 
 impl ErrorCode for CommandError {
@@ -71,6 +75,7 @@ impl ErrorCode for CommandError {
             CommandError::UnknownVariant(_) => "unknown_variant",
             CommandError::UnitCostRequired(_) => "unit_cost_required",
             CommandError::SupplierEmailRequired(_) => "supplier_email_required",
+            CommandError::ReceivedStock(_) => "purchase_order_received",
         }
     }
 }
@@ -529,11 +534,12 @@ pub async fn list_purchase_orders<S: HasPurchaseOrders>(
     Ok(ports.purchase_orders().list(&filter, sort, page).await?)
 }
 
-/// Changes a draft or ordered purchase order (`PurchaseOrder::update`'s rules), or a
-/// closed one's extra costs. `store` is the store's base currency.
+/// Changes a draft or ordered purchase order nothing arrived on (`PurchaseOrder::update`'s
+/// rules). `store` is the store's base currency.
 ///
-/// An order goods arrived on whose extra costs change revalues that stock too, which
-/// this command can't write: `hypha_receiving::update_purchase_order` does both.
+/// Once goods arrived, a change may revalue their stock, which this crate can't write:
+/// refused (`ReceivedStock`) for `hypha_receiving::update_purchase_order`, which does
+/// both and is what hosts call.
 pub async fn update_purchase_order<S: HasSupplierVariants + HasPurchaseOrders>(
     ctx: &Ctx,
     ports: &S,
@@ -545,6 +551,7 @@ pub async fn update_purchase_order<S: HasSupplierVariants + HasPurchaseOrders>(
 ) -> Result<PurchaseOrder, CommandError> {
     ctx.require(Scope::PurchasingWrite)?;
     let mut po = load_po(ports, id).await?;
+    refuse_received(&po)?;
     apply_update(ports, clock.now(), store, variants, &mut po, input).await?;
     if po.is_changed() {
         ports.purchase_orders().update(&mut po).await?;
@@ -730,7 +737,10 @@ pub async fn send_purchase_order<S: HasSuppliers + HasPurchaseOrders>(
     Ok(po)
 }
 
-/// Ends an ordered purchase order early: what's outstanding is cancelled.
+/// Ends an ordered purchase order nothing arrived on early: what's outstanding is
+/// cancelled. Once goods arrived, closing respreads the extra costs over them:
+/// `hypha_receiving::close_purchase_order` revalues their stock too (`ReceivedStock`
+/// here).
 pub async fn close_purchase_order<S: HasPurchaseOrders>(
     ctx: &Ctx,
     ports: &S,
@@ -739,9 +749,18 @@ pub async fn close_purchase_order<S: HasPurchaseOrders>(
 ) -> Result<PurchaseOrder, CommandError> {
     ctx.require(Scope::PurchasingWrite)?;
     let mut po = load_po(ports, id).await?;
+    refuse_received(&po)?;
     po.close(clock.now())?;
     ports.purchase_orders().update(&mut po).await?;
     Ok(po)
+}
+
+/// Refuses an order goods arrived on: its changes go through receiving.
+fn refuse_received(po: &PurchaseOrder) -> Result<(), CommandError> {
+    if po.lines().iter().any(|l| l.received() > 0) {
+        return Err(CommandError::ReceivedStock(po.id()));
+    }
+    Ok(())
 }
 
 /// Calls off a draft or ordered purchase order nothing arrived on.

@@ -43,6 +43,8 @@ pub enum PurchasingError {
     DuplicateLine(VariantId),
     #[error("a line's quantity is at least 1")]
     InvalidLineQuantity(VariantId),
+    #[error("variant {variant}'s units are at most {max}")]
+    QuantityTooLarge { variant: VariantId, max: u32 },
     /// A line's unit cost is in the order's currency.
     #[error(
         "the unit cost of variant {variant} must be in {expected}, the order's currency, not {got}"
@@ -131,6 +133,7 @@ impl ErrorCode for PurchasingError {
             PurchasingError::TooManyLines { .. } => "too_many_lines",
             PurchasingError::DuplicateLine(_) => "duplicate_line",
             PurchasingError::InvalidLineQuantity(_) => "invalid_quantity",
+            PurchasingError::QuantityTooLarge { .. } => "quantity_too_large",
             PurchasingError::LineCurrencyMismatch { .. }
             | PurchasingError::ExtraCostCurrency { .. }
             | PurchasingError::TaxCurrencyMismatch { .. } => "cost_currency_mismatch",

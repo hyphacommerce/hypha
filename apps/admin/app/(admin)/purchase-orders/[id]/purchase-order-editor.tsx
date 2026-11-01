@@ -33,7 +33,7 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { type ReactNode, useState, useTransition } from "react";
 
 import { useCurrencies } from "@/components/currencies";
-import { DateTime } from "@/components/date-time";
+import { CalendarDate, DateTime } from "@/components/date-time";
 import { ProductPicker } from "@/components/product-picker";
 import { type PickerVariant, pickerVariants } from "@/components/product-picker-actions";
 import {
@@ -375,7 +375,9 @@ function LineDialog({
       variant: editing.variant,
       quantity: count,
       ...(parsedCost !== null ? { unit_cost: { amount: parsedCost, currency: po.currency } } : {}),
-      supplier_sku: sku.trim() || null,
+      // Blank on a new line leaves it to the server, which takes the supplier's code from
+      // its catalogue or last order; on a line that has one, blank clears it.
+      ...(sku.trim() ? { supplier_sku: sku.trim() } : line ? { supplier_sku: null } : {}),
     };
     const lines = linesOf(po).filter((l) => l.variant !== editing.variant);
     const at = po.lines.findIndex((l) => l.variant === editing.variant);
@@ -826,7 +828,7 @@ function DetailsCard({
           </Fact>
           <Fact label="Goes to">{po.destination ? plain(place?.name ?? "A location") : null}</Fact>
           <Fact label="Expected">
-            {po.expected_at ? <DateTime value={po.expected_at} /> : null}
+            {po.expected_at ? <CalendarDate value={po.expected_at} /> : null}
           </Fact>
           <Fact label="Currency">
             <Text>{po.currency}</Text>

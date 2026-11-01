@@ -11,7 +11,7 @@
 )]
 use hypha_core::{
     Actor, AuthError, Ctx, Currency, ExchangeRate, IdempotencyRequest, LocationId, Money,
-    PurchaseOrderId, ReceiptId, Scope, Timestamp, UnitCost, UserId, VariantId,
+    PurchaseOrderId, ReceiptId, Scope, Timestamp, UnitCost, UserId, VariantId, Versioned,
 };
 use hypha_inventory::{
     CreateLocation, InventoryItem, InventoryItemRepo, StockReason, StockSource, create_location,
@@ -155,6 +155,7 @@ impl World {
                 location: None,
                 lines,
                 allow_over,
+                removed_variants: Vec::new(),
                 note: None,
                 idempotency: key,
             },
@@ -438,6 +439,7 @@ fn unknown_lines_and_places_are_refused() {
             location: Some(elsewhere),
             lines: vec![line(10, 1, 0)],
             allow_over: false,
+            removed_variants: Vec::new(),
             note: None,
             idempotency: None,
         },
@@ -454,6 +456,7 @@ fn receiving_needs_the_scope_and_a_base_currency() {
         location: None,
         lines: vec![line(10, 1, 0)],
         allow_over: false,
+        removed_variants: Vec::new(),
         note: None,
         idempotency: None,
     };
@@ -686,11 +689,90 @@ fn units_already_sold_keep_their_cost() {
     let mut item = w.item(10).unwrap();
     item.set_on_hand(w.location, 0, None, None).unwrap();
     block_on(w.ports.inventory_items.update(&mut item)).unwrap();
+    let version = w.item(10).unwrap().version();
     let po = w
         .set_costs(po.id(), vec![shipping(2000, Currency::EUR)])
         .unwrap();
     assert_eq!(w.item(10).unwrap().unit_cost(), Some(eur("1000")));
     assert_eq!(po.lines()[0].extra_applied(), Some(20_000_000));
+    assert_eq!(
+        w.item(10).unwrap().version(),
+        version,
+        "an item nothing happened to isn't written, so checkouts don't lose races to it"
+    );
+}
+
+#[test]
+fn units_over_the_order_carry_no_extra_cost() {
+    let w = World::new();
+    // €10.00 shipping over 10 ordered: €1.00 a unit.
+    let po = w.ordered(
+        Currency::EUR,
+        None,
+        &[(10, 10, "500")],
+        vec![shipping(1000, Currency::EUR)],
+    );
+    // 12 arrive: the 10 ordered at €6.00, the 2 extra at €5.00, €70.00 in all.
+    let received = w
+        .receive_with(po.id(), vec![line(10, 12, 0)], true, None)
+        .unwrap();
+    assert_eq!(
+        received.receipt.lines()[0].landed_unit_cost,
+        Some(eur("583.3333"))
+    );
+    assert_eq!(w.item(10).unwrap().unit_cost(), Some(eur("583.3333")));
+    // The order counts only the €10.00 paid, so a later change measures from it.
+    assert_eq!(
+        received.purchase_order.lines()[0].extra_applied(),
+        Some(10_000_000)
+    );
+    let rows = w.ports.outbox.movements().len();
+    let po = w
+        .set_costs(po.id(), vec![shipping(1000, Currency::EUR)])
+        .unwrap();
+    assert_eq!(po.lines()[0].extra_applied(), Some(10_000_000));
+    assert_eq!(w.ports.outbox.movements().len(), rows, "nothing to revalue");
+}
+
+#[test]
+fn a_removed_variants_units_are_counted_but_go_into_no_stock() {
+    let w = World::new();
+    let po = w.ordered(
+        Currency::EUR,
+        None,
+        &[(10, 3, "100"), (11, 2, "100")],
+        vec![],
+    );
+    let received = block_on(receive(
+        &w.ctx,
+        &w.ports,
+        &w.ids,
+        &w.clock,
+        Some(Currency::EUR),
+        Receive {
+            purchase_order: po.id(),
+            location: None,
+            lines: vec![line(10, 3, 0), line(11, 2, 0)],
+            allow_over: false,
+            removed_variants: vec![vid(10)],
+            note: None,
+            idempotency: None,
+        },
+    ))
+    .unwrap()
+    .value;
+    assert_eq!(
+        received.new_items,
+        [vid(11)],
+        "no record for the removed one"
+    );
+    assert_eq!(w.item(10), None);
+    assert_eq!(received.purchase_order.lines()[0].received(), 3);
+    assert_eq!(received.receipt.lines()[0].accepted, 3);
+    assert_eq!(
+        received.purchase_order.status(),
+        PurchaseOrderStatus::Closed
+    );
 }
 
 #[test]

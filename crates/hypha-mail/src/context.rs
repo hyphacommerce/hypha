@@ -574,7 +574,7 @@ impl PurchaseOrderContext {
             number: po.number().to_string(),
             revision: po.revision(),
             ordered_at: po.ordered_at().map(|at| TimeValue::of(at, zone)),
-            expected_at: po.expected_at().map(|at| TimeValue::date(at, zone)),
+            expected_at: po.expected_at().map(TimeValue::date),
             supplier_reference: po.supplier_reference().map(str::to_string),
             payment_terms: po.payment_terms().map(|t| TermsContext {
                 summary: terms_summary(t.due()),
@@ -917,10 +917,7 @@ fn sample_supplier_order() -> SupplierOrderMail {
             number: "PO-1001".to_string(),
             revision: 1,
             ordered_at: Some(TimeValue::of(SAMPLE_PLACED_AT, None)),
-            expected_at: Some(TimeValue::date(
-                SAMPLE_PLACED_AT.plus_secs(14 * 24 * 3600),
-                None,
-            )),
+            expected_at: Some(TimeValue::date(SAMPLE_PLACED_AT.plus_secs(14 * 24 * 3600))),
             supplier_reference: Some("SO-778".to_string()),
             payment_terms: Some(TermsContext {
                 summary: "Net 30 days".to_string(),

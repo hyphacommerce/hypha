@@ -5,7 +5,7 @@
 //! gets its share without waiting for the rest. Every division rounds half away from
 //! zero at `UnitCost`'s precision, with `i128` intermediates.
 
-use hypha_core::{Currency, ExchangeRate, Money, MoneyError, UnitCost};
+use hypha_core::{Currency, ExchangeRate, Money, MoneyError, UnitCost, money::div_round};
 
 /// How an extra cost is spread over the lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -65,6 +65,7 @@ pub fn extra_per_unit(
 ) -> Result<Vec<UnitCost>, MoneyError> {
     let mut extra = vec![0_i128; lines.len()];
     let quantities: Vec<i128> = lines.iter().map(|l| i128::from(l.quantity)).collect();
+    // Each fits: at most u32::MAX × 2⁵³ per line, a thousand lines.
     let values: Vec<i128> = lines
         .iter()
         .map(|l| i128::from(l.quantity) * i128::from(l.unit_cost.scaled()))
@@ -85,8 +86,14 @@ pub fn extra_per_unit(
             if line.quantity == 0 {
                 continue;
             }
-            // The line's share, per unit: amount × weight ÷ (total × quantity).
-            extra[i] += div_round(amount * weights[i], total * i128::from(line.quantity));
+            // The line's share, per unit: amount × weight ÷ (total × quantity). A large
+            // cost on a large line can pass i128: refused, never wrapped.
+            let share = amount
+                .checked_mul(weights[i])
+                .zip(total.checked_mul(i128::from(line.quantity)))
+                .map(|(numerator, denominator)| div_round(numerator, denominator))
+                .ok_or(MoneyError::Overflow)?;
+            extra[i] = extra[i].checked_add(share).ok_or(MoneyError::Overflow)?;
         }
     }
     extra
@@ -118,17 +125,6 @@ pub fn landed_unit_cost(
     converted.checked_add(extra_in_store_currency).map(Some)
 }
 
-/// `numerator / denominator` rounded half away from zero; `denominator` is positive.
-fn div_round(numerator: i128, denominator: i128) -> i128 {
-    let quotient = numerator / denominator;
-    let remainder = numerator % denominator;
-    if remainder.abs() * 2 >= denominator {
-        quotient + numerator.signum()
-    } else {
-        quotient
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,6 +153,26 @@ mod tests {
             .iter()
             .map(UnitCost::minor_units)
             .collect()
+    }
+
+    #[test]
+    fn a_spread_past_i128_is_an_overflow_not_a_wrap() {
+        let most = UnitCost::new(UnitCost::MAX_SCALED, Currency::EUR).unwrap();
+        let lines = [
+            LineBasis {
+                quantity: 1_000_000_000,
+                unit_cost: most,
+            },
+            line(1, "100"),
+        ];
+        let huge = CostShare {
+            amount: Money::new(Money::MAX_AMOUNT, Currency::EUR).unwrap(),
+            allocation: CostAllocation::ByValue,
+        };
+        assert_eq!(
+            extra_per_unit(&lines, &[huge], Currency::EUR),
+            Err(MoneyError::Overflow)
+        );
     }
 
     #[test]

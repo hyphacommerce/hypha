@@ -197,6 +197,9 @@ pub trait PurchaseOrderRepo {
     /// What ordered orders still bring of `variants`, per variant and destination
     /// (`incoming::incoming`'s rule), in its order.
     async fn incoming(&self, variants: &[VariantId]) -> Result<Vec<IncomingStock>, RepoError>;
+    /// Whether any order is priced against the store's currency
+    /// (`PurchaseOrder::names_store_currency`): changing that currency would misread it.
+    async fn store_currency_named(&self) -> Result<bool, RepoError>;
 }
 
 /// Stages purchase order writes in a `hypha_core::HasBatch` batch, with their events.

@@ -10,7 +10,7 @@ use hypha_core::{
 };
 
 use crate::{
-    MAX_LINES, PurchasingError, ReceiptBasis, ReceivedQuantities,
+    MAX_LINES, MAX_QUANTITY, PurchasingError, ReceiptBasis, ReceivedQuantities,
     events::{RECEIPT, ReceiptCancelled, ReceiptCreated, ReceiptLineEvent},
     purchase_order::long_text,
 };
@@ -169,6 +169,12 @@ fn check_lines(lines: &[ReceiptLine]) -> Result<(), PurchasingError> {
         }
         if line.accepted == 0 && line.rejected == 0 {
             return Err(PurchasingError::EmptyReceiptLine(line.variant));
+        }
+        if u64::from(line.accepted) + u64::from(line.rejected) > u64::from(MAX_QUANTITY) {
+            return Err(PurchasingError::QuantityTooLarge {
+                variant: line.variant,
+                max: MAX_QUANTITY,
+            });
         }
     }
     Ok(())

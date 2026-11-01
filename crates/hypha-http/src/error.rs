@@ -1058,6 +1058,7 @@ impl From<hypha_inventory::CommandError> for ApiError {
                 | I::TooManyTransferLines { .. }
                 | I::DuplicateTransferLine(_)
                 | I::InvalidTransferQuantity(_)
+                | I::TransferQuantityTooLarge { .. }
                 | I::TransferNoteTooLong { .. }
                 | I::UnknownTransferLine(_)
                 | I::EmptyArrival(_)
@@ -1320,6 +1321,7 @@ impl From<hypha_order_actions::CommandError> for ApiError {
                 | I::TooManyTransferLines { .. }
                 | I::DuplicateTransferLine(_)
                 | I::InvalidTransferQuantity(_)
+                | I::TransferQuantityTooLarge { .. }
                 | I::TransferNoteTooLong { .. }
                 | I::TransferNotDraft { .. }
                 | I::TransferNotInTransit { .. }
@@ -1709,9 +1711,10 @@ impl From<hypha_purchasing::CommandError> for ApiError {
             | E::SupplierVariantNotFound { .. }
             | E::PurchaseOrderNotFound(_)
             | E::ReceiptNotFound(_) => StatusCode::NOT_FOUND,
-            E::SupplierCurrencyInUse(_) | E::SupplierInUse(_) | E::SupplierArchived(_) => {
-                StatusCode::CONFLICT
-            }
+            E::SupplierCurrencyInUse(_)
+            | E::SupplierInUse(_)
+            | E::SupplierArchived(_)
+            | E::ReceivedStock(_) => StatusCode::CONFLICT,
             E::UnknownVariant(_) | E::UnitCostRequired(_) | E::SupplierEmailRequired(_) => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
@@ -1745,6 +1748,7 @@ impl From<hypha_purchasing::CommandError> for ApiError {
                 | P::TooManyLines { .. }
                 | P::DuplicateLine(_)
                 | P::InvalidLineQuantity(_)
+                | P::QuantityTooLarge { .. }
                 | P::LineCurrencyMismatch { .. }
                 | P::TooManyCosts { .. }
                 | P::NegativeCost
@@ -1780,6 +1784,9 @@ impl From<hypha_purchasing::CommandError> for ApiError {
             }
             E::Purchasing(P::BelowReceived { variant, minimum }) => {
                 Some(json!({ "variant": variant, "minimum": minimum }))
+            }
+            E::Purchasing(P::QuantityTooLarge { variant, max }) => {
+                Some(json!({ "variant": variant, "max": max }))
             }
             E::Purchasing(
                 P::DuplicateLine(variant)

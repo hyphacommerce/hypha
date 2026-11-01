@@ -876,10 +876,10 @@ fn same_currency(average: UnitCost, cost: UnitCost) -> Result<(), InventoryError
     }
 }
 
-/// `value / units` (both positive, `value` in `UnitCost`'s scaled units) as a cost in
+/// `value / units` (`units` positive, `value` in `UnitCost`'s scaled units) as a cost in
 /// `like`'s currency, rounded half away from zero.
 fn weighted(value: i128, units: i128, like: UnitCost) -> Result<UnitCost, InventoryError> {
-    let rounded = (2 * value + units) / (2 * units);
+    let rounded = hypha_core::money::div_round(value, units);
     let scaled = i64::try_from(rounded).map_err(|_| hypha_core::MoneyError::Overflow)?;
     Ok(UnitCost::new(scaled, like.currency())?)
 }

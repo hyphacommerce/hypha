@@ -2442,7 +2442,8 @@ export interface paths {
          *     as it is now with the templates in effect, even if the template is off: a new record
          *     (201), `queued` for the send job, which goes at once (read the record again for how
          *     it went). Invites and resets can't be resent (`notification_not_resendable`: their
-         *     token isn't kept).
+         *     token isn't kept). A purchase order's email to its supplier also takes
+         *     `purchasing:write` and `purchasing:send`, as sending it does.
          */
         post: operations["admin.notifications.resend"];
         delete?: never;
@@ -3284,8 +3285,10 @@ export interface paths {
          * Records goods arriving against an ordered purchase order: accepted units go on hand at
          *     the location (the order's destination unless the body names another) at their landed
          *     cost, which joins each item's moving average; rejected ones are only counted. A
-         *     variant with no stock record gets one, untracked (listed in `new_items`). The order
-         *     closes once every line is accounted for. More than a line has outstanding is
+         *     variant with no stock record gets one, untracked (listed in `new_items`); a variant
+         *     removed from the catalogue since is counted but goes into no stock. Units over what a
+         *     line ordered come in at their unit cost alone, without a share of the extra costs. The
+         *     order closes once every line is accounted for. More than a line has outstanding is
          *     `409 over_received` (with each line's outstanding in `details.lines`) unless
          *     `allow_over`; the store needs its base currency (`409 store_currency_required`).
          *     Takes an `Idempotency-Key` header: a retry returns the receipt the first request
@@ -8164,6 +8167,12 @@ export interface components {
             revision: number;
             /** @description RFC 3339: when it was last emailed to the supplier. */
             sent_at?: string | null;
+            /**
+             * Format: int32
+             * @description The revision last emailed to the supplier; below `revision`, they hold an older
+             *     copy. `null` until it's sent.
+             */
+            sent_revision?: number | null;
             status: components["schemas"]["PurchaseOrderStatusDto"];
             store_currency?: components["schemas"]["Currency"] | null;
             /** @description The lines, in the order's currency. */

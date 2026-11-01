@@ -7680,6 +7680,10 @@ async fn a_purchase_order_is_emailed_to_its_supplier() {
     assert_eq!(status, StatusCode::OK, "{sent}");
     assert_eq!(sent["status"], json!("ordered"));
     assert!(sent["sent_at"].is_string(), "{sent}");
+    assert_eq!(
+        (&sent["revision"], &sent["sent_revision"]),
+        (&json!(0), &json!(0))
+    );
     hypha_http::jobs::dispatch(&app.state).await.unwrap();
     hypha_http::jobs::send_notifications(&app.state)
         .await
@@ -7719,6 +7723,26 @@ async fn a_purchase_order_is_emailed_to_its_supplier() {
             )
         );
     }
+
+    // Sending it again from its email record takes what sending takes:
+    // `notifications:write` alone never reaches a supplier.
+    let resend = format!(
+        "/admin/notifications/{}/resend",
+        items[0]["id"].as_str().unwrap()
+    );
+    let mailer = key(
+        &app,
+        json!({"kind": "secret", "name": "mailer", "scopes": ["notifications:write"]}),
+    )
+    .await;
+    let (status, body) = send_as(&app, &mailer, "POST", &resend, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "missing_scope"),
+        "{body}"
+    );
+    let (status, again) = send(&app, "POST", &resend, None).await;
+    assert_eq!(status, StatusCode::CREATED, "{again}");
 
     // A supplier with no address to send to needs one named.
     let quiet = json!({"name": "Quiet Fungi", "currency": "EUR"});
@@ -8219,6 +8243,12 @@ async fn purchase_orders_are_drafted_ordered_edited_and_closed() {
     assert_eq!(ordered["status"], json!("ordered"));
     assert!(ordered["ordered_at"].is_string());
     assert!(ordered["expected_at"].is_string(), "from the lead time");
+    // Its landed costs are in the store's currency now, though nothing arrived yet.
+    let (status, body) = send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"USD"}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "store_currency_locked")
+    );
 
     // An ordered order still changes, counting revisions.
     let edit = json!({"lines": [{"variant": mug, "quantity": 120}], "note": "Rush"});

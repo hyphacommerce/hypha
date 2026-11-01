@@ -9,7 +9,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { ClipboardDocumentListIcon } from "@heroicons/react/24/outline";
 
 import { useCurrencies } from "@/components/currencies";
-import { DateTime } from "@/components/date-time";
+import { CalendarDate } from "@/components/date-time";
 import {
   type FilterDef,
   ResourceTable,
@@ -121,7 +121,7 @@ export function PurchaseOrdersTable({
       width: pixel(140),
       renderCell: (po) =>
         po.expected_at ? (
-          <DateTime value={po.expected_at} short />
+          <CalendarDate value={po.expected_at} short />
         ) : (
           <Text color="secondary">—</Text>
         ),

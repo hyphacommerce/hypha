@@ -9,7 +9,7 @@ use hypha_receiving::{Receive, ReceiveLine, cancel_receipt, receive};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    purchase_orders::{PurchaseOrderResponse, respond},
+    purchase_orders::{PurchaseOrderResponse, respond, variant_infos},
     rfc3339, stamp_times,
     stores::store_currency,
 };
@@ -144,8 +144,10 @@ pub struct ReceiveRequest {
 /// Records goods arriving against an ordered purchase order: accepted units go on hand at
 /// the location (the order's destination unless the body names another) at their landed
 /// cost, which joins each item's moving average; rejected ones are only counted. A
-/// variant with no stock record gets one, untracked (listed in `new_items`). The order
-/// closes once every line is accounted for. More than a line has outstanding is
+/// variant with no stock record gets one, untracked (listed in `new_items`); a variant
+/// removed from the catalogue since is counted but goes into no stock. Units over what a
+/// line ordered come in at their unit cost alone, without a share of the extra costs. The
+/// order closes once every line is accounted for. More than a line has outstanding is
 /// `409 over_received` (with each line's outstanding in `details.lines`) unless
 /// `allow_over`; the store needs its base currency (`409 store_currency_required`).
 /// Takes an `Idempotency-Key` header: a retry returns the receipt the first request
@@ -168,6 +170,15 @@ pub async fn create<S: Storage>(
     let req = req.parse()?;
     let body = req.body;
     let store = store_currency(&state, &ports).await?;
+    // A line's variant may have been removed since it was ordered: its units are counted
+    // but go into no stock.
+    let asked: Vec<VariantId> = body.lines.iter().map(|l| l.variant).collect();
+    let still: Vec<VariantId> = variant_infos(&ports, &asked)
+        .await?
+        .into_iter()
+        .map(|info| info.variant)
+        .collect();
+    let removed_variants = asked.into_iter().filter(|v| !still.contains(v)).collect();
     let input = Receive {
         purchase_order: id,
         location: body.location,
@@ -181,6 +192,7 @@ pub async fn create<S: Storage>(
             })
             .collect(),
         allow_over: body.allow_over,
+        removed_variants,
         note: body.note,
         idempotency: req.idempotency,
     };

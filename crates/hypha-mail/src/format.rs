@@ -44,10 +44,11 @@ impl TimeValue {
 }
 
 impl TimeValue {
-    /// The day `at` falls on in `zone`, without a time: `iso` "2027-03-01", `formatted`
-    /// "1 Mar 2027". For dates chosen as days (a purchase order's expected date).
-    pub fn date(at: Timestamp, zone: Option<Timezone>) -> Self {
-        let zoned = zoned(at, zone);
+    /// A calendar date kept as noon UTC (a purchase order's expected date), without a
+    /// time: `iso` "2027-03-01", `formatted` "1 Mar 2027". Read in UTC, never the store's
+    /// zone, which would move it to the next day east of UTC+12.
+    pub fn date(at: Timestamp) -> Self {
+        let zoned = zoned(at, None);
         Self {
             iso: zoned.strftime("%Y-%m-%d").to_string(),
             formatted: zoned.strftime("%-d %b %Y").to_string(),
@@ -186,10 +187,10 @@ mod tests {
     }
 
     #[test]
-    fn a_date_is_the_day_in_the_zone() {
-        // Noon UTC on 1 March 2027.
+    fn a_date_is_the_utc_day_whatever_the_stores_zone() {
+        // Noon UTC on 1 March 2027: already 2 March in Auckland, still 1 March here.
         let noon = Timestamp::from_unix_micros(1_803_902_400_000_000);
-        let day = TimeValue::date(noon, None);
+        let day = TimeValue::date(noon);
         assert_eq!(
             (day.iso.as_str(), day.formatted.as_str()),
             ("2027-03-01", "1 Mar 2027")

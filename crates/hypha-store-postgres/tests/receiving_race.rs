@@ -148,6 +148,7 @@ fn receipt_of(lines: &[(u128, u32)]) -> Receive {
             })
             .collect(),
         allow_over: false,
+        removed_variants: Vec::new(),
         note: None,
         idempotency: None,
     }

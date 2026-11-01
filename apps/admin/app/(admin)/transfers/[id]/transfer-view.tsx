@@ -31,7 +31,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
-import { DateTime } from "@/components/date-time";
+import { CalendarDate, DateTime } from "@/components/date-time";
 import { ProductPicker } from "@/components/product-picker";
 import { type PickerVariant, pickerVariants } from "@/components/product-picker-actions";
 import {
@@ -365,7 +365,7 @@ function Details({
           </MetadataListItem>
           <MetadataListItem label="Expected">
             {transfer.expected_at ? (
-              <DateTime value={transfer.expected_at} />
+              <CalendarDate value={transfer.expected_at} />
             ) : (
               <Text color="secondary">—</Text>
             )}

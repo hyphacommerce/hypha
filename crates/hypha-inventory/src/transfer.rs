@@ -18,6 +18,8 @@ use crate::{
 
 /// The most lines a transfer holds.
 pub const MAX_TRANSFER_LINES: usize = 1000;
+/// The most units a line moves: storage keeps the counts as 32-bit integers.
+pub const MAX_TRANSFER_QUANTITY: u32 = 1_000_000_000;
 /// The longest internal note.
 pub const MAX_TRANSFER_NOTE_CHARS: usize = 5000;
 
@@ -107,6 +109,12 @@ impl TransferLine {
     fn new(draft: TransferLineDraft) -> Result<Self, InventoryError> {
         if draft.quantity == 0 {
             return Err(InventoryError::InvalidTransferQuantity(draft.variant));
+        }
+        if draft.quantity > MAX_TRANSFER_QUANTITY {
+            return Err(InventoryError::TransferQuantityTooLarge {
+                variant: draft.variant,
+                max: MAX_TRANSFER_QUANTITY,
+            });
         }
         Ok(Self {
             variant: draft.variant,
@@ -899,6 +907,14 @@ mod tests {
         assert_eq!(
             new(draft(&[(1, 0)])),
             Err(InventoryError::InvalidTransferQuantity(var(1)))
+        );
+        assert!(new(draft(&[(1, MAX_TRANSFER_QUANTITY)])).is_ok());
+        assert_eq!(
+            new(draft(&[(1, MAX_TRANSFER_QUANTITY + 1)])),
+            Err(InventoryError::TransferQuantityTooLarge {
+                variant: var(1),
+                max: MAX_TRANSFER_QUANTITY
+            })
         );
         assert_eq!(
             new(draft(&[(1, 2), (1, 3)])),

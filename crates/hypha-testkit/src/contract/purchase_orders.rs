@@ -172,6 +172,8 @@ where
     last_line(&make().await).await;
     scenario("purchase order: incoming sums what ordered orders still bring, per place");
     incoming(&make().await).await;
+    scenario("purchase order: the store's currency is named once one is ordered or rated");
+    store_currency(&make().await).await;
     scenario("purchase order: a batch writes it with its events; a stale copy fails it");
     batches(&make().await).await;
 }
@@ -220,6 +222,17 @@ async fn round_trip<S: HasSuppliers + HasPurchaseOrders>(ports: &S) {
     repo.insert(&mut unkept).await.unwrap();
     let stored = repo.get(poid(5)).await.unwrap().unwrap();
     assert_eq!(stored.lines()[0].extra_applied(), None);
+
+    // Sent at an earlier revision than it's at now.
+    let mut snapshot = full(6, 1006, 1).snapshot();
+    snapshot.revision = 3;
+    snapshot.sent_at = Some(at(6_000));
+    snapshot.sent_revision = Some(2);
+    let mut sent = PurchaseOrder::restore(snapshot).unwrap();
+    repo.insert(&mut sent).await.unwrap();
+    let stored = repo.get(poid(6)).await.unwrap().unwrap();
+    assert_eq!((stored.revision(), stored.sent_revision()), (3, Some(2)));
+    assert_eq!(stored, sent);
 }
 
 async fn refusals<S: HasSuppliers + HasPurchaseOrders>(ports: &S) {
@@ -295,6 +308,59 @@ async fn updates<S: HasSuppliers + HasPurchaseOrders + HasOutbox>(ports: &S) {
             "purchase_order.updated",
             "purchase_order.ordered",
         ]
+    );
+}
+
+async fn store_currency<S: HasSuppliers + HasPurchaseOrders>(ports: &S) {
+    with_suppliers(ports, &[1]).await;
+    let repo = ports.purchase_orders();
+    assert_eq!(repo.store_currency_named().await, Ok(false), "no orders");
+    let mut plain = po(1, 1001, 1, vec![line(10, 1, "1")]);
+    repo.insert(&mut plain).await.unwrap();
+    assert_eq!(
+        repo.store_currency_named().await,
+        Ok(false),
+        "a draft at no rate"
+    );
+
+    let rated = |n: u128, number: i64| {
+        let mut d = draft(vec![line(10, 1, "1")]);
+        d.exchange_rate = Some(ExchangeRate::parse("1.17").unwrap());
+        PurchaseOrder::new(
+            poid(n),
+            PurchaseOrderNumber::new(number).unwrap(),
+            sid(1),
+            d,
+        )
+        .unwrap()
+    };
+    let mut cancelled = rated(2, 1002);
+    cancelled.cancel(at(10)).unwrap();
+    repo.insert(&mut cancelled).await.unwrap();
+    assert_eq!(
+        repo.store_currency_named().await,
+        Ok(false),
+        "a cancelled one"
+    );
+
+    let mut draft_at_rate = rated(3, 1003);
+    repo.insert(&mut draft_at_rate).await.unwrap();
+    assert_eq!(
+        repo.store_currency_named().await,
+        Ok(true),
+        "a draft at a rate"
+    );
+    repo.delete(&mut draft_at_rate).await.unwrap();
+    assert_eq!(repo.store_currency_named().await, Ok(false));
+
+    plain
+        .order(Some(Currency::EUR), "Spore Labs", None, at(20))
+        .unwrap();
+    repo.update(&mut plain).await.unwrap();
+    assert_eq!(
+        repo.store_currency_named().await,
+        Ok(true),
+        "an ordered one"
     );
 }
 

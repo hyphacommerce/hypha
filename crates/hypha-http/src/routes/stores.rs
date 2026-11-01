@@ -1,6 +1,7 @@
 use axum::{Json, extract::State};
 use hypha_core::{Ctx, Currency, Email, Language, StoreId, Timezone};
 use hypha_inventory::{HasStockMovements, StockMovementRepo};
+use hypha_purchasing::{HasPurchaseOrders, PurchaseOrderRepo};
 use hypha_stores::{Store, UpdateStore, get_store, update_store};
 use serde::{Deserialize, Serialize};
 
@@ -160,10 +161,15 @@ pub async fn update<S: Storage>(
 ) -> Result<Json<StoreResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
-    // Recorded costs fix the currency. Checked before the write, not in its transaction:
-    // a cost recorded at the same instant as a currency change can slip through.
+    // Recorded costs fix the currency, and so does a purchase order priced against it
+    // (ordered, or a draft with a rate to it). Checked before the write, not in its
+    // transaction: a cost recorded at the same instant as a currency change can slip
+    // through.
     let currency_locked = match req.currency {
-        Some(_) => ports.stock_movements().cost_recorded().await?,
+        Some(_) => {
+            ports.stock_movements().cost_recorded().await?
+                || ports.purchase_orders().store_currency_named().await?
+        }
         None => false,
     };
     let input = UpdateStore {

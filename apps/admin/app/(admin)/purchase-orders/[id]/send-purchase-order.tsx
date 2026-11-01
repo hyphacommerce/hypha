@@ -29,12 +29,12 @@ function addresses(text: string): string[] {
 }
 
 /**
- * "Send" for a draft (it's ordered too), "Send again" for an ordered one, "Send updated
- * PO" once it changed since it was last sent.
+ * "Send to supplier" for one never sent (a draft is ordered too), "Send again" for one
+ * sent as it is, "Send updated PO" once it was edited past the revision sent.
  */
 function sendLabel(po: PurchaseOrder): string {
-  if (po.status === "draft" || !po.sent_at) return "Send to supplier";
-  return po.updated_at > po.sent_at ? "Send updated PO" : "Send again";
+  if (po.status === "draft" || po.sent_revision == null) return "Send to supplier";
+  return po.revision > po.sent_revision ? "Send updated PO" : "Send again";
 }
 
 export function SendButton({ po, contacts }: { po: PurchaseOrder; contacts: Recipient[] }) {
@@ -89,9 +89,11 @@ function SendDialog({
         subtitle={
           po.status === "draft"
             ? "It's marked as ordered and emailed to the supplier."
-            : po.revision > 0
-              ? `Revision ${po.revision} is emailed: what the order says now.`
-              : "The order is emailed again as it is now."
+            : po.sent_revision == null
+              ? "The order is emailed to the supplier as it is now."
+              : po.revision > po.sent_revision
+                ? `Revision ${po.revision} is emailed: what the order says now.`
+                : "The order is emailed again as it is now."
         }
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
