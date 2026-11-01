@@ -660,6 +660,122 @@ async fn a_products_inventory_is_one_call_in_variant_order() {
 }
 
 #[tokio::test]
+async fn every_stock_change_is_in_the_items_history() {
+    let app = app().await;
+    let mug = create_product(&app, "mug").await;
+    let (_, read) = send(&app, "GET", &format!("/admin/products/{mug}"), None).await;
+    let variant = read["variants"][0]["id"].as_str().unwrap().to_string();
+    let body = json!({ "variant": variant }).to_string();
+    let (_, item) = send(&app, "POST", "/admin/inventory-items", Some(&body)).await;
+    let item = item["id"].as_str().unwrap().to_string();
+    let body = json!({ "name": "Warehouse" }).to_string();
+    let (_, location) = send(&app, "POST", "/admin/locations", Some(&body)).await;
+    let location = location["id"].as_str().unwrap().to_string();
+    let level = format!("/admin/inventory-items/{item}/levels/{location}");
+
+    let body = json!({ "on_hand": 10, "note": "opening count" }).to_string();
+    let (status, json) = send(&app, "PUT", &level, Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let body = json!({ "delta": -2, "reason": "damaged", "note": "dropped" }).to_string();
+    let (status, json) = send(&app, "POST", &format!("{level}/adjustments"), Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let (status, json) = send(
+        &app,
+        "POST",
+        &format!("{level}/adjustments"),
+        Some(r#"{"delta":1}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let (status, body) = send(
+        &app,
+        "POST",
+        &format!("{level}/adjustments"),
+        Some(r#"{"delta":1,"reason":"counted"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_body"),
+        "counting is the level's PUT"
+    );
+
+    let history = format!("/admin/inventory-items/{item}/movements");
+    let (status, page) = send(&app, "GET", &format!("{history}?limit=2"), None).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["has_more"], json!(true));
+    let newest = &page["items"][0];
+    assert_eq!(
+        (
+            &newest["location"],
+            &newest["delta"],
+            &newest["after"],
+            &newest["reason"],
+            &newest["source"],
+            &newest["note"],
+            &newest["actor"]["type"]
+        ),
+        (
+            &json!(location),
+            &json!(1),
+            &json!(9),
+            &json!("correction"),
+            &json!({"type": "manual"}),
+            &Value::Null,
+            &json!("user")
+        )
+    );
+    assert!(newest["at"].is_string());
+    let cursor = page["next_cursor"].as_str().unwrap();
+    let (_, rest) = send(&app, "GET", &format!("{history}?cursor={cursor}"), None).await;
+    let rest: Vec<_> = rest["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| (m["delta"].clone(), m["reason"].clone(), m["note"].clone()))
+        .collect();
+    assert_eq!(
+        rest,
+        [(json!(10), json!("counted"), json!("opening count"))],
+        "the page after the cursor"
+    );
+
+    let (_, damaged) = send(&app, "GET", &format!("{history}?reason=damaged"), None).await;
+    assert_eq!(damaged["items"].as_array().unwrap().len(), 1);
+    assert_eq!(damaged["items"][0]["note"], json!("dropped"));
+    let (_, none) = send(
+        &app,
+        "GET",
+        &format!("{history}?to=2000-01-01T00:00:00Z"),
+        None,
+    )
+    .await;
+    assert_eq!(none["items"], json!([]));
+    let (status, body) = send(&app, "GET", &format!("{history}?from=yesterday"), None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+    let (status, body) = send(
+        &app,
+        "GET",
+        "/admin/inventory-items/invi_00000000000000000000000000000000/movements",
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "inventory_item_not_found")
+    );
+    let body = json!({ "delta": 1, "note": "x".repeat(501) }).to_string();
+    let (status, body) = send(&app, "POST", &format!("{level}/adjustments"), Some(&body)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "movement_note_too_long")
+    );
+}
+
+#[tokio::test]
 async fn inventory_items_are_listed_across_products_lowest_first() {
     let app = app().await;
     let shirt = create_product(&app, "shirt").await;

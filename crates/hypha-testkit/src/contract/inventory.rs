@@ -3,8 +3,8 @@ use hypha_core::{
     SortKey, VariantId, Version, Versioned,
 };
 use hypha_inventory::{
-    InventoryFilter, InventoryItem, InventoryItemRepo, Location, LocationRepo, MAX_STOCK,
-    ReservationRef, repo::keys,
+    AdjustmentReason, InventoryFilter, InventoryItem, InventoryItemRepo, Location, LocationRepo,
+    MAX_STOCK, ReservationRef, repo::keys,
 };
 use uuid::Uuid;
 
@@ -211,17 +211,17 @@ async fn item_list<R: InventoryItemRepo>(repo: &R) {
 
     // 1: 5 at location 1.
     let mut a = item(1, 10);
-    a.set_on_hand(location_id(1), 5, None).unwrap();
+    a.set_on_hand(location_id(1), 5, None, None).unwrap();
     // 2: 1 at location 1, 10 at location 2 with 3 of them reserved: 8 in all.
     let mut b = item(2, 20);
-    b.set_on_hand(location_id(1), 1, None).unwrap();
-    b.set_on_hand(location_id(2), 10, None).unwrap();
+    b.set_on_hand(location_id(1), 1, None, None).unwrap();
+    b.set_on_hand(location_id(2), 10, None, None).unwrap();
     b.reserve(&reference("order-1"), qty(3), &[location(2, &[1], 0)])
         .unwrap();
     // 3: untracked, nothing counted, but a level at location 1.
     let mut c = item(3, 30);
     c.set_tracked(false);
-    c.set_on_hand(location_id(1), 0, None).unwrap();
+    c.set_on_hand(location_id(1), 0, None, None).unwrap();
     // 4: sold past zero at location 3, with nothing on hand there: -2.
     let mut d = item(4, 40);
     d.set_continue_selling(true);
@@ -229,10 +229,10 @@ async fn item_list<R: InventoryItemRepo>(repo: &R) {
         .unwrap();
     // 5: ties with 1 on 5 available.
     let mut e = item(5, 50);
-    e.set_on_hand(location_id(2), 5, None).unwrap();
+    e.set_on_hand(location_id(2), 5, None, None).unwrap();
     // 6: retired: never listed.
     let mut f = item(6, 60);
-    f.set_on_hand(location_id(1), 0, None).unwrap();
+    f.set_on_hand(location_id(1), 0, None, None).unwrap();
     f.retire();
     // Inserted out of order.
     for i in [&mut e, &mut c, &mut a, &mut f, &mut d, &mut b] {
@@ -324,9 +324,9 @@ async fn item_list<R: InventoryItemRepo>(repo: &R) {
 
 async fn item_list_follows_writes<R: InventoryItemRepo>(repo: &R) {
     let mut a = item(1, 10);
-    a.set_on_hand(location_id(1), 5, None).unwrap();
+    a.set_on_hand(location_id(1), 5, None, None).unwrap();
     let mut b = item(2, 20);
-    b.set_on_hand(location_id(1), 3, None).unwrap();
+    b.set_on_hand(location_id(1), 3, None, None).unwrap();
     repo.insert(&mut a).await.unwrap();
     repo.insert(&mut b).await.unwrap();
     let all = InventoryFilter::default();
@@ -335,7 +335,8 @@ async fn item_list_follows_writes<R: InventoryItemRepo>(repo: &R) {
     // A reservation and a new location move 1 below 2; a release and a move put it back.
     a.reserve(&reference("order-1"), qty(4), &[location(1, &[1], 0)])
         .unwrap();
-    a.set_on_hand(location_id(2), -MAX_STOCK, None).unwrap();
+    a.set_on_hand(location_id(2), -MAX_STOCK, None, None)
+        .unwrap();
     repo.update(&mut a).await.unwrap();
     assert_eq!(listed(repo, &all, None, 10).await, (vec![1, 2], false));
     let at_one = InventoryFilter {
@@ -350,9 +351,11 @@ async fn item_list_follows_writes<R: InventoryItemRepo>(repo: &R) {
     );
 
     a.release(&reference("order-1"));
-    a.set_on_hand(location_id(2), 0, None).unwrap();
+    a.set_on_hand(location_id(2), 0, None, None).unwrap();
     let mut both = [a.clone(), b.clone()];
-    both[1].adjust_on_hand(location_id(1), 10).unwrap();
+    both[1]
+        .adjust_on_hand(location_id(1), 10, AdjustmentReason::Correction, None)
+        .unwrap();
     repo.update_many(&mut both).await.unwrap();
     assert_eq!(listed(repo, &all, None, 10).await, (vec![1, 2], false));
     assert_eq!(
@@ -369,7 +372,7 @@ async fn item_list_follows_writes<R: InventoryItemRepo>(repo: &R) {
 
 async fn item_delete<R: InventoryItemRepo>(repo: &R) {
     let mut gone = item(1, 10);
-    gone.set_on_hand(location_id(1), 5, None).unwrap();
+    gone.set_on_hand(location_id(1), 5, None, None).unwrap();
     repo.insert(&mut gone).await.unwrap();
     let mut kept = item(2, 20);
     repo.insert(&mut kept).await.unwrap();
@@ -387,10 +390,12 @@ async fn item_delete<R: InventoryItemRepo>(repo: &R) {
 fn stocked_item(n: u128, variant: u128) -> InventoryItem {
     let mut i = item(n, variant);
     i.set_continue_selling(true);
-    i.set_on_hand(location_id(2), 3, None).unwrap();
-    i.set_on_hand(location_id(1), 1, None).unwrap();
-    i.set_on_hand(location_id(3), MAX_STOCK, None).unwrap();
-    i.set_on_hand(location_id(4), -MAX_STOCK, None).unwrap();
+    i.set_on_hand(location_id(2), 3, None, None).unwrap();
+    i.set_on_hand(location_id(1), 1, None, None).unwrap();
+    i.set_on_hand(location_id(3), MAX_STOCK, None, None)
+        .unwrap();
+    i.set_on_hand(location_id(4), -MAX_STOCK, None, None)
+        .unwrap();
     // Location 2 has the whole line; then location 1 runs short and continues selling.
     let near = location(2, &[1], 0);
     let small = location(1, &[1], 0);
@@ -420,8 +425,9 @@ async fn item_update<R: InventoryItemRepo>(repo: &R) {
 
     i.set_tracked(false);
     i.set_continue_selling(false);
-    i.adjust_on_hand(location_id(2), -2).unwrap();
-    i.set_on_hand(location_id(5), 7, None).unwrap();
+    i.adjust_on_hand(location_id(2), -2, AdjustmentReason::Correction, None)
+        .unwrap();
+    i.set_on_hand(location_id(5), 7, None, None).unwrap();
     i.release(&reference("order-1"));
     repo.update(&mut i).await.unwrap();
 
@@ -450,10 +456,10 @@ async fn item_stale<R: InventoryItemRepo>(repo: &R) {
     let mut i = item(1, 1);
     repo.insert(&mut i).await.unwrap();
     let mut stale = i.clone();
-    i.set_on_hand(location_id(1), 5, None).unwrap();
+    i.set_on_hand(location_id(1), 5, None, None).unwrap();
     repo.update(&mut i).await.unwrap();
 
-    stale.set_on_hand(location_id(1), 9, None).unwrap();
+    stale.set_on_hand(location_id(1), 9, None, None).unwrap();
     assert_eq!(repo.update(&mut stale).await, Err(RepoError::StaleVersion));
     assert_eq!(repo.get(i.id()).await, Ok(Some(i)));
 
@@ -485,8 +491,8 @@ async fn item_update_many<R: InventoryItemRepo>(repo: &R) {
     repo.insert(&mut b).await.unwrap();
 
     // Both written, both versions bumped.
-    a.set_on_hand(location_id(1), 1, None).unwrap();
-    b.set_on_hand(location_id(1), 2, None).unwrap();
+    a.set_on_hand(location_id(1), 1, None, None).unwrap();
+    b.set_on_hand(location_id(1), 2, None, None).unwrap();
     let mut batch = vec![a, b];
     repo.update_many(&mut batch).await.unwrap();
     assert!(batch.iter().all(|i| i.version() == Version::new(2)));
@@ -498,12 +504,14 @@ async fn item_update_many<R: InventoryItemRepo>(repo: &R) {
     let [a, b] = <[InventoryItem; 2]>::try_from(batch).unwrap();
     let mut stale_b = b.clone();
     let mut newer_b = b;
-    newer_b.set_on_hand(location_id(1), 20, None).unwrap();
+    newer_b.set_on_hand(location_id(1), 20, None, None).unwrap();
     repo.update(&mut newer_b).await.unwrap();
 
     let mut changed_a = a.clone();
-    changed_a.set_on_hand(location_id(1), 10, None).unwrap();
-    stale_b.set_on_hand(location_id(1), 30, None).unwrap();
+    changed_a
+        .set_on_hand(location_id(1), 10, None, None)
+        .unwrap();
+    stale_b.set_on_hand(location_id(1), 30, None, None).unwrap();
     let mut batch = vec![changed_a, stale_b];
     assert_eq!(
         repo.update_many(&mut batch).await,

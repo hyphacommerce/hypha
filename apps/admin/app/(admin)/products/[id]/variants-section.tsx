@@ -661,6 +661,7 @@ function StockDialog({
         tracked: form.tracked,
         continueSelling: form.continueSelling,
         levels,
+        note: form.note,
       });
       if (result.stock) {
         setStock(result.stock);
@@ -727,9 +728,23 @@ function StockDialog({
                 );
               })
             )}
+            <TextInput
+              label="Note"
+              isOptional
+              description="Why the counts changed, for the stock history."
+              value={form.note}
+              onChange={(note) => setForm((before) => ({ ...before, note }))}
+            />
           </>
         )}
         <HStack gap={2} hAlign="end">
+          {stock?.id != null && (
+            <Button
+              label="History"
+              variant="ghost"
+              href={`/inventory/${stock.id}?product=${productId}`}
+            />
+          )}
           <Button label="Cancel" variant="ghost" onClick={onClose} />
           <Button
             label="Save stock"
@@ -746,6 +761,7 @@ function StockDialog({
 
 function formOf(stock: Stock | undefined, locations: Location[]) {
   return {
+    note: "",
     tracked: stock ? stock.id != null && stock.tracked : false,
     continueSelling: stock?.continue_selling ?? false,
     counts: Object.fromEntries(

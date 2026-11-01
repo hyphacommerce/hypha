@@ -145,6 +145,12 @@ async fn batch() {
 }
 
 #[tokio::test]
+async fn stock_movements() {
+    let Some(url) = database_url() else { return };
+    contract::stock_movements(async || fresh_store(&url, "contract_stock_movements").await).await;
+}
+
+#[tokio::test]
 async fn idempotency_repo() {
     let Some(url) = database_url() else { return };
     contract::idempotency_repo(async || fresh_store(&url, "contract_idempotency").await).await;

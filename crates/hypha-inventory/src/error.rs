@@ -26,6 +26,8 @@ pub enum InventoryError {
     /// Deleting an item open orders have units reserved on.
     #[error("units are still reserved")]
     StillReserved,
+    #[error("a stock movement's note can be at most {max} characters")]
+    NoteTooLong { max: usize },
 }
 
 /// Why stored data can't be rebuilt into an inventory item. Only
@@ -57,6 +59,7 @@ impl ErrorCode for InventoryError {
             InventoryError::ReferenceInUse(_) => "reservation_reference_in_use",
             InventoryError::OutOfStock { .. } => "out_of_stock",
             InventoryError::StillReserved => "inventory_still_reserved",
+            InventoryError::NoteTooLong { .. } => "movement_note_too_long",
         }
     }
 }

@@ -122,7 +122,7 @@ async fn shop(url: &str, schema: &str) -> PgStore<Client> {
     OrderRepo::insert(&store, &mut order).await.unwrap();
 
     let mut item = InventoryItem::new(mug_item(), variant, true, false);
-    item.set_on_hand(warehouse(), 10, None).unwrap();
+    item.set_on_hand(warehouse(), 10, None, None).unwrap();
     let reference = ReservationRef::new(&mugs().to_string()).unwrap();
     item.reserve(&reference, Quantity::new(3).unwrap(), &[location])
         .unwrap();

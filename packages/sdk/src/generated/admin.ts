@@ -1868,7 +1868,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Sets the stock on hand at a location. */
+        /** Sets the stock on hand at a location: a `counted` movement in its history. */
         put: operations["admin.inventory.set_level"];
         post?: never;
         delete?: never;
@@ -1886,8 +1886,28 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Adjusts the stock on hand at a location by a delta. */
+        /** Adjusts the stock on hand at a location by a delta, for a reason kept in its history. */
         post: operations["admin.inventory.adjust_level"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/inventory-items/{id}/movements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An item's stock history, newest first: every change to a count, why, what caused it
+         *     and who made it. Kept for good.
+         */
+        get: operations["admin.inventory.list_movements"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3801,6 +3821,10 @@ export interface components {
              * @description Negative to remove stock.
              */
             delta: number;
+            /** @description At most 500 characters. */
+            note?: string | null;
+            /** @description Why, for the stock history; `correction` when absent. */
+            reason?: components["schemas"]["AdjustmentReason"];
         };
         /** @description A percentage applied to base prices, for the products it applies to. */
         AdjustmentDto: {
@@ -3812,6 +3836,13 @@ export interface components {
              */
             percent_bps: number;
         };
+        /**
+         * @description Why units were added or removed by hand.
+         *
+         *     Known values: `correction`, `damaged`, `shrinkage`, `promotion`, `other`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        AdjustmentReason: string;
         /** @description Every installed app's admin contributions to a target. */
         AdminExtensionsResponse: {
             actions: components["schemas"]["ActionExtension"][];
@@ -7484,6 +7515,11 @@ export interface components {
             summary?: string | null;
             updated_at: string;
         };
+        /**
+         * @description A PurchaseOrderId: `po_` and 32 hex digits.
+         * @example po_0190f1a2b3c47d8e9f00112233445566
+         */
+        PurchaseOrderId: string;
         /** @description How an option's price is found: one of a provider's services, or a built-in rate. */
         RateDto: {
             basis: components["schemas"]["BasisDto"];
@@ -7501,6 +7537,11 @@ export interface components {
             /** @description Ascending; the last has no `up_to`. */
             tiers: components["schemas"]["TierDto"][];
         };
+        /**
+         * @description A ReceiptId: `rcpt_` and 32 hex digits.
+         * @example rcpt_0190f1a2b3c47d8e9f00112233445566
+         */
+        ReceiptId: string;
         RecoveryCodesResponse: {
             /** @description Shown only now: each works once if the authenticator is lost. */
             recovery_codes: string[];
@@ -7868,6 +7909,8 @@ export interface components {
              *     fails with `on_hand_changed` instead of overwriting it.
              */
             expected_on_hand?: number | null;
+            /** @description Why, for the stock history (recorded as `counted`): at most 500 characters. */
+            note?: string | null;
             /** Format: int64 */
             on_hand: number;
         };
@@ -8054,6 +8097,73 @@ export interface components {
         };
         /** @enum {string} */
         StatusRequest: "active" | "disabled";
+        /** @description A page of a list, newest first. */
+        StockMovementPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["StockMovementResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        /** @description One change to a count, as the stock history keeps it. */
+        StockMovementResponse: {
+            /** @description Who made the change. */
+            actor: components["schemas"]["EventActor"];
+            /**
+             * Format: int64
+             * @description On hand at the location after it.
+             */
+            after?: number | null;
+            /** @description When it was written, RFC 3339. */
+            at: string;
+            /**
+             * Format: int64
+             * @description Units added (positive) or removed (negative).
+             */
+            delta: number;
+            location?: components["schemas"]["LocationId"] | null;
+            note?: string | null;
+            /**
+             * Format: int64
+             * @description Its place in the ledger: an item's later changes have higher positions.
+             */
+            position: number;
+            reason: components["schemas"]["StockReason"];
+            source: components["schemas"]["StockSource"];
+        };
+        /**
+         * @description Why stock moved.
+         *
+         *     Known values: `received`, `transfer_out`, `transfer_in`, `sold`, `restocked`, `counted`, `correction`, `damaged`, `shrinkage`, `promotion`, `other`, `cost_adjustment`, `opening`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        StockReason: string;
+        /** @description What caused a movement, by the documents behind it. */
+        StockSource: {
+            /** @enum {string} */
+            type: "manual";
+        } | {
+            fulfillment: components["schemas"]["FulfillmentId"];
+            order: components["schemas"]["OrderId"];
+            /** @enum {string} */
+            type: "fulfillment";
+        } | {
+            purchase_order: components["schemas"]["PurchaseOrderId"];
+            receipt: components["schemas"]["ReceiptId"];
+            /** @enum {string} */
+            type: "receipt";
+        } | {
+            purchase_order: components["schemas"]["PurchaseOrderId"];
+            /** @enum {string} */
+            type: "purchase_order";
+        } | {
+            transfer: components["schemas"]["TransferId"];
+            /** @enum {string} */
+            type: "transfer";
+        } | {
+            /** @enum {string} */
+            type: "migration";
+        };
         /**
          * @description A StoreId: `store_` and 32 hex digits.
          * @example store_0190f1a2b3c47d8e9f00112233445566
@@ -8197,6 +8307,11 @@ export interface components {
             /** @description `http://` or `https://`, at most 2048 characters. */
             url?: string | null;
         };
+        /**
+         * @description A TransferId: `trf_` and 32 hex digits.
+         * @example trf_0190f1a2b3c47d8e9f00112233445566
+         */
+        TransferId: string;
         /** @description Units of a line still to ship, and where they wait. */
         UnfulfilledDto: {
             line: components["schemas"]["OrderLineId"];
@@ -21421,6 +21536,95 @@ export interface operations {
                 };
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.inventory.list_movements": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+                /** @description Only movements at this location. */
+                location?: components["schemas"]["LocationId"];
+                /** @description Only movements for this reason. */
+                reason?: "received" | "transfer_out" | "transfer_in" | "sold" | "restocked" | "counted" | "correction" | "damaged" | "shrinkage" | "promotion" | "other" | "cost_adjustment" | "opening";
+                /** @description Only movements at or after this instant (RFC 3339). */
+                from?: string;
+                /** @description Only movements before this instant (RFC 3339). */
+                to?: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InventoryItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockMovementPage"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
             422: {
                 headers: {
                     [name: string]: unknown;

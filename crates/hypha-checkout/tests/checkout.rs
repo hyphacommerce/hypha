@@ -133,7 +133,7 @@ impl World {
             true,
             false,
         );
-        item.set_on_hand(warehouse(), 5, None).unwrap();
+        item.set_on_hand(warehouse(), 5, None, None).unwrap();
         block_on(world.inventory_items.insert(&mut item)).unwrap();
 
         let mut vat = TaxRegion::new(region(), hr(), TaxRate::new(250_000).unwrap());
@@ -1572,7 +1572,7 @@ fn money_is_given_back_when_the_order_cant_be_placed() {
     let mut item = block_on(world.inventory_items.get_by_variant(vid("mug")))
         .unwrap()
         .unwrap();
-    item.set_on_hand(warehouse(), 0, None).unwrap();
+    item.set_on_hand(warehouse(), 0, None, None).unwrap();
     block_on(world.inventory_items.update(&mut item)).unwrap();
     assert!(matches!(
         check_out_by(&world, cart, &app),
@@ -1615,7 +1615,7 @@ fn money_given_back_is_not_committed_and_paying_starts_again() {
     let mut item = block_on(world.inventory_items.get_by_variant(vid("mug")))
         .unwrap()
         .unwrap();
-    item.set_on_hand(warehouse(), 0, None).unwrap();
+    item.set_on_hand(warehouse(), 0, None, None).unwrap();
     block_on(world.inventory_items.update(&mut item)).unwrap();
     assert!(check_out_by(&world, cart, &app).is_err());
     let refunded = block_on(world.payments.get(payment.id())).unwrap().unwrap();
@@ -1626,7 +1626,7 @@ fn money_given_back_is_not_committed_and_paying_starts_again() {
     );
     // Restocked: the shopper pays again, a new payment (the refunded one counts for
     // nothing).
-    item.set_on_hand(warehouse(), 5, None).unwrap();
+    item.set_on_hand(warehouse(), 5, None, None).unwrap();
     block_on(world.inventory_items.update(&mut item)).unwrap();
     app.state.set(ProviderState::Open);
     let again = start_paying(&world, cart, &app).unwrap();

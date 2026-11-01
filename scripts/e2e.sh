@@ -1226,13 +1226,28 @@ contains "lamps are available" '"fully_available":true'
 step "count with a stale expected" 409 on_hand_changed -X PUT \
     "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" -d '{"on_hand":1,"expected_on_hand":5}'
 step "a lamp broke (1 left)" 200 - -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" \
-    -H "$JSON" -d '{"on_hand":1,"expected_on_hand":2}'
+    -H "$JSON" -d '{"on_hand":1,"expected_on_hand":2,"note":"one broke"}'
 step "get stock cart" 200 - "$BASE/storefront/carts/$STOCK_CART"
 contains "lamp line ran out" '"status":"unavailable","reason_code":"out_of_stock"'
 contains "and is left out of the total" '"total":{"amount":0,"currency":"EUR"},"fully_available":false'
 step "delivery of 4" 200 - -X POST "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" \
     -H "$JSON" -d '{"delta":4}'
 contains "5 on hand" '"on_hand":5'
+step "a lamp given away" 200 - -X POST "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" \
+    -H "$JSON" -d '{"delta":-1,"reason":"promotion","note":"for a review"}'
+step "a reason that isn't one" 422 invalid_body -X POST \
+    "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" -H "$JSON" -d '{"delta":1,"reason":"sold"}'
+step "put it back" 200 - -X POST "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" \
+    -H "$JSON" -d '{"delta":1}'
+step "the lamp's stock history" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?limit=3"
+contains "newest first, by hand" "\"location\":\"$WAREHOUSE\",\"delta\":1,\"after\":5,\"reason\":\"correction\",\"source\":{\"type\":\"manual\"}"
+contains "the gift with its note" '"delta":-1,"after":4,"reason":"promotion","source":{"type":"manual"},"note":"for a review"'
+contains "more to come" '"has_more":true'
+step "only what was counted" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?reason=counted"
+contains "the count with its note" '"delta":-1,"after":1,"reason":"counted","source":{"type":"manual"},"note":"one broke"'
+contains "and the first one" '"delta":2,"after":2,"reason":"counted"'
+step "history of an unknown item" 404 inventory_item_not_found \
+    "$BASE/admin/inventory-items/invi_00000000000000000000000000000063/movements"
 step "what runs low at the warehouse" 200 - "$BASE/admin/inventory-items?below=6&location=$WAREHOUSE"
 contains "the lamp runs low" "\"id\":\"$LAMP_ITEM\",\"variant\":\"$LAMP_VAR\",\"product\":\"$LAMP\""
 step "no lamp below zero" 200 - "$BASE/admin/inventory-items?below=0&product=$LAMP"

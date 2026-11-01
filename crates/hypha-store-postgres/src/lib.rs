@@ -49,6 +49,7 @@ mod search;
 mod shipping;
 pub mod spore_check;
 mod spore_settings;
+mod stock_movements;
 mod store;
 mod stores;
 mod tax;

@@ -24,5 +24,15 @@ When a shopper checks out, the order **reserves** the stock it takes, in the sam
 that creates the order, so two shoppers can't buy the last unit twice. Fulfilling the
 order takes the units out of the location they ship from; cancelling gives them back.
 
+## Stock history
+
+Every change to a count leaves a row in the item's **history**
+(`GET /admin/inventory-items/{id}/movements`), written in the same transaction as the
+change, so no change goes unrecorded. Each row says how many units moved and how many were
+left, why (`counted`, `sold`, `restocked`, `damaged`, `shrinkage`, `promotion`,
+`correction`, `other`), what caused it (a fulfilment, a person) and who made it. Setting a
+count records `counted`; an adjustment takes a `reason` and a `note`. At each location, the
+rows add up to what's on hand.
+
 Stock changes are events like any other: apps and the storefront's cached pages follow
 them through webhooks.

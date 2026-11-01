@@ -5,7 +5,7 @@ use hypha_cart::HasCarts;
 use hypha_core::{ActingAs, Actor, HasIdempotency, HasOutbox, RepoError};
 use hypha_customers::{HasCustomerGroups, HasCustomers};
 use hypha_fulfillment::HasFulfillments;
-use hypha_inventory::{HasInventoryItems, HasLocations};
+use hypha_inventory::{HasInventoryItems, HasLocations, HasStockMovements};
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
 use hypha_media::{HasAssetUsages, HasAssets};
 use hypha_orders::HasOrders;
@@ -347,6 +347,13 @@ impl HasInventoryItems for InMemoryPorts {
     type InventoryItems = InMemoryInventoryItemRepo;
     fn inventory_items(&self) -> &InMemoryInventoryItemRepo {
         &self.inventory_items
+    }
+}
+
+impl HasStockMovements for InMemoryPorts {
+    type StockMovements = InMemoryOutbox;
+    fn stock_movements(&self) -> &InMemoryOutbox {
+        &self.outbox
     }
 }
 

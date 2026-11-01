@@ -474,6 +474,17 @@
             "description": "Negative to remove stock.",
             "format": "int64",
             "type": "integer"
+          },
+          "note": {
+            "description": "At most 500 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "$ref": "#/components/schemas/AdjustmentReason",
+            "description": "Why, for the stock history; `correction` when absent."
           }
         },
         "required": [
@@ -499,6 +510,18 @@
           "percent_bps"
         ],
         "type": "object"
+      },
+      "AdjustmentReason": {
+        "description": "Why units were added or removed by hand.\n\nKnown values: `correction`, `damaged`, `shrinkage`, `promotion`, `other`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "correction",
+          "damaged",
+          "shrinkage",
+          "promotion",
+          "other"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "AdminExtensionsResponse": {
         "description": "Every installed app's admin contributions to a target.",
@@ -10669,6 +10692,14 @@
         ],
         "type": "object"
       },
+      "PurchaseOrderId": {
+        "description": "A PurchaseOrderId: `po_` and 32 hex digits.",
+        "examples": [
+          "po_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^po_[0-9a-f]{32}$",
+        "type": "string"
+      },
       "RateDto": {
         "description": "How an option's price is found: one of a provider's services, or a built-in rate.",
         "oneOf": [
@@ -10742,6 +10773,14 @@
           "tiers"
         ],
         "type": "object"
+      },
+      "ReceiptId": {
+        "description": "A ReceiptId: `rcpt_` and 32 hex digits.",
+        "examples": [
+          "rcpt_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^rcpt_[0-9a-f]{32}$",
+        "type": "string"
       },
       "RecoveryCodesResponse": {
         "properties": {
@@ -11737,6 +11776,13 @@
               "null"
             ]
           },
+          "note": {
+            "description": "Why, for the stock history (recorded as `counted`): at most 500 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "on_hand": {
             "format": "int64",
             "type": "integer"
@@ -12209,6 +12255,232 @@
         ],
         "type": "string"
       },
+      "StockMovementPage": {
+        "description": "A page of a list, newest first.",
+        "properties": {
+          "has_more": {
+            "description": "Whether there are more after these.",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StockMovementResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "StockMovementResponse": {
+        "description": "One change to a count, as the stock history keeps it.",
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/EventActor",
+            "description": "Who made the change."
+          },
+          "after": {
+            "description": "On hand at the location after it.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "at": {
+            "description": "When it was written, RFC 3339.",
+            "type": "string"
+          },
+          "delta": {
+            "description": "Units added (positive) or removed (negative).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "location": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LocationId",
+                "description": "`null` for a change that moved no units (a cost)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "position": {
+            "description": "Its place in the ledger: an item's later changes have higher positions.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/StockReason"
+          },
+          "source": {
+            "$ref": "#/components/schemas/StockSource"
+          }
+        },
+        "required": [
+          "position",
+          "delta",
+          "reason",
+          "source",
+          "actor",
+          "at"
+        ],
+        "type": "object"
+      },
+      "StockReason": {
+        "description": "Why stock moved.\n\nKnown values: `received`, `transfer_out`, `transfer_in`, `sold`, `restocked`, `counted`, `correction`, `damaged`, `shrinkage`, `promotion`, `other`, `cost_adjustment`, `opening`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "received",
+          "transfer_out",
+          "transfer_in",
+          "sold",
+          "restocked",
+          "counted",
+          "correction",
+          "damaged",
+          "shrinkage",
+          "promotion",
+          "other",
+          "cost_adjustment",
+          "opening"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "StockSource": {
+        "description": "What caused a movement, by the documents behind it.",
+        "oneOf": [
+          {
+            "description": "Someone set or adjusted the count.",
+            "properties": {
+              "type": {
+                "enum": [
+                  "manual"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "fulfillment": {
+                "$ref": "#/components/schemas/FulfillmentId"
+              },
+              "order": {
+                "$ref": "#/components/schemas/OrderId"
+              },
+              "type": {
+                "enum": [
+                  "fulfillment"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "order",
+              "fulfillment",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "purchase_order": {
+                "$ref": "#/components/schemas/PurchaseOrderId"
+              },
+              "receipt": {
+                "$ref": "#/components/schemas/ReceiptId"
+              },
+              "type": {
+                "enum": [
+                  "receipt"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "purchase_order",
+              "receipt",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A cost added to a purchase order after its goods arrived.",
+            "properties": {
+              "purchase_order": {
+                "$ref": "#/components/schemas/PurchaseOrderId"
+              },
+              "type": {
+                "enum": [
+                  "purchase_order"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "purchase_order",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "transfer": {
+                "$ref": "#/components/schemas/TransferId"
+              },
+              "type": {
+                "enum": [
+                  "transfer"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "transfer",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Written when the history started.",
+            "properties": {
+              "type": {
+                "enum": [
+                  "migration"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "StoreId": {
         "description": "A StoreId: `store_` and 32 hex digits.",
         "examples": [
@@ -12645,6 +12917,14 @@
           "number"
         ],
         "type": "object"
+      },
+      "TransferId": {
+        "description": "A TransferId: `trf_` and 32 hex digits.",
+        "examples": [
+          "trf_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^trf_[0-9a-f]{32}$",
+        "type": "string"
       },
       "UnfulfilledDto": {
         "description": "Units of a line still to ship, and where they wait.",
@@ -30908,7 +31188,7 @@
             "bearer": []
           }
         ],
-        "summary": "Sets the stock on hand at a location.",
+        "summary": "Sets the stock on hand at a location: a `counted` movement in its history.",
         "tags": [
           "inventory"
         ],
@@ -31064,7 +31344,7 @@
             "bearer": []
           }
         ],
-        "summary": "Adjusts the stock on hand at a location by a delta.",
+        "summary": "Adjusts the stock on hand at a location by a delta, for a reason kept in its history.",
         "tags": [
           "inventory"
         ],
@@ -31073,6 +31353,179 @@
         },
         "x-hypha-scopes": [
           "inventory:write"
+        ]
+      }
+    },
+    "/admin/inventory-items/{id}/movements": {
+      "get": {
+        "operationId": "admin.inventory.list_movements",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/InventoryItemId"
+            }
+          },
+          {
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 100 (default 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only movements at this location.",
+            "in": "query",
+            "name": "location",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/LocationId"
+            }
+          },
+          {
+            "description": "Only movements for this reason.",
+            "in": "query",
+            "name": "reason",
+            "required": false,
+            "schema": {
+              "description": "Why stock moved.\n\nKnown values: `received`, `transfer_out`, `transfer_in`, `sold`, `restocked`, `counted`, `correction`, `damaged`, `shrinkage`, `promotion`, `other`, `cost_adjustment`, `opening`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "received",
+                "transfer_out",
+                "transfer_in",
+                "sold",
+                "restocked",
+                "counted",
+                "correction",
+                "damaged",
+                "shrinkage",
+                "promotion",
+                "other",
+                "cost_adjustment",
+                "opening"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          },
+          {
+            "description": "Only movements at or after this instant (RFC 3339).",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only movements before this instant (RFC 3339).",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockMovementPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "An item's stock history, newest first: every change to a count, why, what caused it\nand who made it. Kept for good.",
+        "tags": [
+          "inventory"
+        ],
+        "x-hypha-scopes": [
+          "inventory:read"
         ]
       }
     },

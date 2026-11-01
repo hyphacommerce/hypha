@@ -922,3 +922,75 @@ async fn a_store_selling_in_several_currencies_or_none_chooses_later() {
     let none = store_currency_after("migrate_0088_none", &[]).await;
     assert_eq!(none, Some(None));
 }
+
+/// Core before the stock ledger: migrations 0001 to 0088.
+const BEFORE_STOCK_MOVEMENTS: MigrationSet = MigrationSet {
+    module: "core",
+    migrations: CORE.migrations.split_at(88).0,
+};
+
+#[tokio::test]
+async fn every_counted_level_opens_the_ledger() {
+    let Some(mut client) = fresh_schema("migrate_0089_stock_movements").await else {
+        return;
+    };
+    migrate(&mut client, &[BEFORE_STOCK_MOVEMENTS])
+        .await
+        .unwrap();
+    client
+        .batch_execute(
+            "INSERT INTO inventory_items (id, version, variant_id, tracked, continue_selling)
+             VALUES ('00000000-0000-0000-0000-000000000001', 1,
+                     '00000000-0000-0000-0000-000000000011', true, false);
+             INSERT INTO inventory_levels (item_id, position, location_id, on_hand) VALUES
+                 ('00000000-0000-0000-0000-000000000001', 0,
+                  '00000000-0000-0000-0000-000000000021', 7),
+                 ('00000000-0000-0000-0000-000000000001', 1,
+                  '00000000-0000-0000-0000-000000000022', -2),
+                 ('00000000-0000-0000-0000-000000000001', 2,
+                  '00000000-0000-0000-0000-000000000023', 0);",
+        )
+        .await
+        .unwrap();
+    migrate(&mut client, &[CORE]).await.unwrap();
+
+    let rows = client
+        .query(
+            "SELECT variant_id::text, location_id::text, delta, after, reason, source_kind,
+                 actor_kind
+             FROM stock_movements ORDER BY position",
+            &[],
+        )
+        .await
+        .unwrap();
+    let read: Vec<(String, String, i64, i64, String, String, String)> = rows
+        .iter()
+        .map(|r| {
+            (
+                r.get(0),
+                r.get(1),
+                r.get(2),
+                r.get(3),
+                r.get(4),
+                r.get(5),
+                r.get(6),
+            )
+        })
+        .collect();
+    let row = |location: &str, n: i64| {
+        (
+            "00000000-0000-0000-0000-000000000011".to_string(),
+            format!("00000000-0000-0000-0000-0000000000{location}"),
+            n,
+            n,
+            "opening".to_string(),
+            "migration".to_string(),
+            "system".to_string(),
+        )
+    };
+    assert_eq!(
+        read,
+        [row("21", 7), row("22", -2)],
+        "an empty level opens nothing"
+    );
+}

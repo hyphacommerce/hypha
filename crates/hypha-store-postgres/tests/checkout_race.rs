@@ -125,7 +125,7 @@ async fn shop(url: &str, schema: &str, on_hand: i64) -> (PgStore<Client>, Client
     let mut location = Location::new(warehouse(), "Zagreb".to_string(), vec![market()], 0).unwrap();
     LocationRepo::insert(&store, &mut location).await.unwrap();
     let mut item = InventoryItem::new(mug_item(), mug(), true, false);
-    item.set_on_hand(warehouse(), on_hand, None).unwrap();
+    item.set_on_hand(warehouse(), on_hand, None, None).unwrap();
     InventoryItemRepo::insert(&store, &mut item).await.unwrap();
 
     let mut method = PaymentMethod::new(NewPaymentMethod {

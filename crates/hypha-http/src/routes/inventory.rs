@@ -4,13 +4,17 @@ use hypha_core::Stamped;
 
 use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{InventoryItemId, Keyset, LocationId, MarketId, ProductId, SortKey, VariantId};
+use hypha_core::{
+    FulfillmentId, InventoryItemId, Keyset, LocationId, MarketId, OrderId, ProductId,
+    PurchaseOrderId, ReceiptId, SortKey, Timestamp, TransferId, VariantId,
+};
 use hypha_inventory::{
-    AdjustOnHand, CreateInventoryItem, CreateLocation, HasInventoryItems, HasLocations,
-    InventoryFilter, InventoryItem, Location, SetOnHand, UpdateInventoryItem, UpdateLocation,
+    AdjustOnHand, AdjustmentReason, CreateInventoryItem, CreateLocation, HasInventoryItems,
+    HasLocations, HasStockMovements, InventoryFilter, InventoryItem, Location, MovementFilter,
+    SetOnHand, StockMovementEntry, StockReason, StockSource, UpdateInventoryItem, UpdateLocation,
     adjust_on_hand, create_inventory_item, create_location, get_inventory_item, get_location,
     get_variant_inventory, get_variants_inventory, list_inventory_items, list_locations,
-    set_on_hand, update_inventory_item, update_location,
+    list_stock_movements, set_on_hand, update_inventory_item, update_location,
 };
 use hypha_products::{CommandError as ProductsError, HasProducts, ProductRepo, get_product};
 use serde::{Deserialize, Serialize};
@@ -18,7 +22,10 @@ use serde::{Deserialize, Serialize};
 use super::{
     address::{PostalAddressRequest, PostalAddressResponse},
     page::{ListQuery, PageParams, PageResponse, SortedFilters},
+    payments::instant,
+    rfc3339,
 };
+use crate::webhooks::{EventActor, actor_of};
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId},
@@ -220,6 +227,8 @@ pub struct SetOnHandRequest {
     /// The count last seen. If it moved since (a sale, another count), the request
     /// fails with `on_hand_changed` instead of overwriting it.
     expected_on_hand: Option<i64>,
+    /// Why, for the stock history (recorded as `counted`): at most 500 characters.
+    note: Option<String>,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -227,6 +236,38 @@ pub struct SetOnHandRequest {
 pub struct AdjustOnHandRequest {
     /// Negative to remove stock.
     delta: i64,
+    /// Why, for the stock history; `correction` when absent.
+    #[serde(default)]
+    reason: AdjustmentReasonDto,
+    /// At most 500 characters.
+    note: Option<String>,
+}
+
+/// Why units were added or removed by hand.
+#[derive(Debug, Clone, Copy, Default, Deserialize, utoipa::ToSchema)]
+#[schema(as = AdjustmentReason)]
+#[serde(rename_all = "snake_case")]
+pub enum AdjustmentReasonDto {
+    #[default]
+    Correction,
+    Damaged,
+    /// Theft or loss.
+    Shrinkage,
+    /// Samples and gifts.
+    Promotion,
+    Other,
+}
+
+impl From<AdjustmentReasonDto> for AdjustmentReason {
+    fn from(r: AdjustmentReasonDto) -> Self {
+        match r {
+            AdjustmentReasonDto::Correction => AdjustmentReason::Correction,
+            AdjustmentReasonDto::Damaged => AdjustmentReason::Damaged,
+            AdjustmentReasonDto::Shrinkage => AdjustmentReason::Shrinkage,
+            AdjustmentReasonDto::Promotion => AdjustmentReason::Promotion,
+            AdjustmentReasonDto::Other => AdjustmentReason::Other,
+        }
+    }
 }
 
 /// A variant's stock. `id` is `null` when stock was never set up for the variant,
@@ -365,7 +406,7 @@ pub async fn update_item<S: Storage>(
     Ok(Json(InventoryResponse::new(&item)?))
 }
 
-/// Sets the stock on hand at a location.
+/// Sets the stock on hand at a location: a `counted` movement in its history.
 #[utoipa::path(
     put,
     path = "/admin/inventory-items/{id}/levels/{location_id}",
@@ -387,6 +428,7 @@ pub async fn set_level<S: Storage>(
         location,
         quantity: req.on_hand,
         expected: req.expected_on_hand,
+        note: req.note,
     };
     let item = set_on_hand(&ctx, ports.inventory_items(), ports.locations(), input)
         .await
@@ -394,7 +436,7 @@ pub async fn set_level<S: Storage>(
     Ok(Json(InventoryResponse::new(&item)?))
 }
 
-/// Adjusts the stock on hand at a location by a delta.
+/// Adjusts the stock on hand at a location by a delta, for a reason kept in its history.
 #[utoipa::path(
     post,
     path = "/admin/inventory-items/{id}/levels/{location_id}/adjustments",
@@ -415,6 +457,8 @@ pub async fn adjust_level<S: Storage>(
         item,
         location,
         delta: req.delta,
+        reason: req.reason.into(),
+        note: req.note,
     };
     let item = adjust_on_hand(&ctx, ports.inventory_items(), ports.locations(), input)
         .await
@@ -481,6 +525,225 @@ pub async fn fetch_product_inventory<S: Storage>(
         })
         .collect::<Result<_, ApiError>>()?;
     Ok(Json(ProductInventoryResponse { items }))
+}
+
+// ---------- stock history ----------
+
+/// Why stock moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = StockReason)]
+#[serde(rename_all = "snake_case")]
+pub enum StockReasonDto {
+    /// Goods arrived from a supplier (negative when a receipt is taken back).
+    Received,
+    TransferOut,
+    TransferIn,
+    /// Units left in a fulfilment.
+    Sold,
+    /// A cancelled fulfilment's units came back.
+    Restocked,
+    /// The count was set: the delta is the new count less the old.
+    Counted,
+    Correction,
+    Damaged,
+    /// Theft, loss, or lost in transit.
+    Shrinkage,
+    /// Samples and gifts.
+    Promotion,
+    Other,
+    /// The unit cost changed; no units moved.
+    CostAdjustment,
+    /// What the location held when the history started.
+    Opening,
+}
+
+impl From<StockReason> for StockReasonDto {
+    fn from(r: StockReason) -> Self {
+        match r {
+            StockReason::Received => StockReasonDto::Received,
+            StockReason::TransferOut => StockReasonDto::TransferOut,
+            StockReason::TransferIn => StockReasonDto::TransferIn,
+            StockReason::Sold => StockReasonDto::Sold,
+            StockReason::Restocked => StockReasonDto::Restocked,
+            StockReason::Counted => StockReasonDto::Counted,
+            StockReason::Correction => StockReasonDto::Correction,
+            StockReason::Damaged => StockReasonDto::Damaged,
+            StockReason::Shrinkage => StockReasonDto::Shrinkage,
+            StockReason::Promotion => StockReasonDto::Promotion,
+            StockReason::Other => StockReasonDto::Other,
+            StockReason::CostAdjustment => StockReasonDto::CostAdjustment,
+            StockReason::Opening => StockReasonDto::Opening,
+        }
+    }
+}
+
+impl From<StockReasonDto> for StockReason {
+    fn from(r: StockReasonDto) -> Self {
+        match r {
+            StockReasonDto::Received => StockReason::Received,
+            StockReasonDto::TransferOut => StockReason::TransferOut,
+            StockReasonDto::TransferIn => StockReason::TransferIn,
+            StockReasonDto::Sold => StockReason::Sold,
+            StockReasonDto::Restocked => StockReason::Restocked,
+            StockReasonDto::Counted => StockReason::Counted,
+            StockReasonDto::Correction => StockReason::Correction,
+            StockReasonDto::Damaged => StockReason::Damaged,
+            StockReasonDto::Shrinkage => StockReason::Shrinkage,
+            StockReasonDto::Promotion => StockReason::Promotion,
+            StockReasonDto::Other => StockReason::Other,
+            StockReasonDto::CostAdjustment => StockReason::CostAdjustment,
+            StockReasonDto::Opening => StockReason::Opening,
+        }
+    }
+}
+
+/// What caused a movement, by the documents behind it.
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = StockSource)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum StockSourceDto {
+    /// Someone set or adjusted the count.
+    Manual,
+    Fulfillment {
+        order: OrderId,
+        fulfillment: FulfillmentId,
+    },
+    Receipt {
+        purchase_order: PurchaseOrderId,
+        receipt: ReceiptId,
+    },
+    /// A cost added to a purchase order after its goods arrived.
+    PurchaseOrder {
+        purchase_order: PurchaseOrderId,
+    },
+    Transfer {
+        transfer: TransferId,
+    },
+    /// Written when the history started.
+    Migration,
+}
+
+impl From<StockSource> for StockSourceDto {
+    fn from(s: StockSource) -> Self {
+        match s {
+            StockSource::Manual => StockSourceDto::Manual,
+            StockSource::Fulfillment { order, fulfillment } => {
+                StockSourceDto::Fulfillment { order, fulfillment }
+            }
+            StockSource::Receipt {
+                purchase_order,
+                receipt,
+            } => StockSourceDto::Receipt {
+                purchase_order,
+                receipt,
+            },
+            StockSource::PurchaseOrder(purchase_order) => {
+                StockSourceDto::PurchaseOrder { purchase_order }
+            }
+            StockSource::Transfer(transfer) => StockSourceDto::Transfer { transfer },
+            StockSource::Migration => StockSourceDto::Migration,
+        }
+    }
+}
+
+/// One change to a count, as the stock history keeps it.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct StockMovementResponse {
+    /// Its place in the ledger: an item's later changes have higher positions.
+    position: i64,
+    /// `null` for a change that moved no units (a cost).
+    location: Option<LocationId>,
+    /// Units added (positive) or removed (negative).
+    delta: i64,
+    /// On hand at the location after it.
+    after: Option<i64>,
+    reason: StockReasonDto,
+    source: StockSourceDto,
+    note: Option<String>,
+    /// Who made the change.
+    actor: EventActor,
+    /// When it was written, RFC 3339.
+    at: String,
+}
+
+impl StockMovementResponse {
+    fn new(m: StockMovementEntry) -> Result<Self, ApiError> {
+        Ok(Self {
+            position: m.position,
+            location: m.location,
+            delta: m.delta,
+            after: m.after,
+            reason: m.reason.into(),
+            source: m.source.into(),
+            note: m.note,
+            actor: actor_of(m.actor),
+            at: rfc3339(m.at)?,
+        })
+    }
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct StockMovementFilters {
+    /// Only movements at this location.
+    #[param(value_type = Option<LocationId>)]
+    location: Option<LocationId>,
+    /// Only movements for this reason.
+    #[param(inline)]
+    reason: Option<StockReasonDto>,
+    /// Only movements at or after this instant (RFC 3339).
+    #[serde(default, deserialize_with = "instant")]
+    #[param(value_type = Option<String>)]
+    from: Option<Timestamp>,
+    /// Only movements before this instant (RFC 3339).
+    #[serde(default, deserialize_with = "instant")]
+    #[param(value_type = Option<String>)]
+    to: Option<Timestamp>,
+}
+
+/// A page of stock movements (named for the documents: utoipa's `body =` takes a plain
+/// name).
+type StockMovementPage = PageResponse<StockMovementResponse>;
+
+/// An item's stock history, newest first: every change to a count, why, what caused it
+/// and who made it. Kept for good.
+#[utoipa::path(
+    get,
+    path = "/admin/inventory-items/{id}/movements",
+    params(("id" = InventoryItemId, Path), PageParams, StockMovementFilters),
+    responses((status = 200, description = "OK", body = StockMovementPage)),
+    extensions(("x-hypha-scopes" = json!(["inventory:read"]))),
+)]
+pub async fn list_movements<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(item): PathId<InventoryItemId>,
+    query: ListQuery<StockMovementFilters>,
+) -> Result<Json<StockMovementPage>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let (page, filters, scope) = query.parse()?;
+    let filter = MovementFilter {
+        location: filters.location,
+        reason: filters.reason.map(Into::into),
+        from: filters.from,
+        to: filters.to,
+    };
+    let page = list_stock_movements(
+        &ctx,
+        ports.inventory_items(),
+        ports.stock_movements(),
+        item,
+        &filter,
+        page,
+    )
+    .await?;
+    Ok(Json(PageResponse::new(
+        page,
+        &scope,
+        |m| m.position,
+        StockMovementResponse::new,
+    )?))
 }
 
 // ---------- across products ----------

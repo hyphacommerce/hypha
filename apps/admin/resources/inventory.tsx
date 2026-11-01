@@ -140,7 +140,9 @@ export function InventoryTable({
       isLoading={!page}
       columns={columns}
       idKey="id"
-      rowHref={(item) => (item.product ? `/products/${item.product}` : "/inventory")}
+      rowHref={(item) =>
+        item.product ? `/inventory/${item.id}?product=${item.product}` : `/inventory/${item.id}`
+      }
       isSelectable={false}
       views={VIEWS}
       filters={filters}

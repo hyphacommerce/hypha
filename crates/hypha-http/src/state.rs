@@ -569,6 +569,7 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_shipping::HasShippingZones
         + hypha_shipping::HasAppProviders
         + hypha_core::HasOutbox
+        + hypha_inventory::HasStockMovements
         + hypha_core::ActingAs
         + hypha_core::SignalsDispatch
         + hypha_apps::HasApps

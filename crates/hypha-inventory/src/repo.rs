@@ -2,7 +2,10 @@ use hypha_core::{
     InventoryItemId, Keyset, LocationId, MarketId, Page, PageRequest, RepoError, VariantId,
 };
 
-use crate::{InventoryFilter, InventoryItem, InventoryItemSummary, Location};
+use crate::{
+    InventoryFilter, InventoryItem, InventoryItemSummary, Location, MovementFilter,
+    StockMovementEntry,
+};
 
 pub mod keys {
     pub const LOCATION_ID: &str = "location_id";
@@ -52,8 +55,22 @@ pub trait InventoryItemRepo {
     async fn delete(&self, item: &mut InventoryItem) -> Result<(), RepoError>;
 }
 
+/// The stock ledger, read back. Rows are written only by the adapter as it writes items
+/// (`InventoryItem::take_movements`), never through this port.
+#[allow(async_fn_in_trait)]
+pub trait StockMovementRepo {
+    /// A page of `item`'s rows that `filter` matches (`MovementFilter::matches`), newest
+    /// first: descending `position`, those below `page.after`.
+    async fn list(
+        &self,
+        item: InventoryItemId,
+        filter: &MovementFilter,
+        page: PageRequest<i64>,
+    ) -> Result<Page<StockMovementEntry>, RepoError>;
+}
+
 /// Stages inventory item writes in a `hypha_core::HasBatch` batch; the adapter's batch
-/// type implements it.
+/// type implements it. Like the repo, it writes the item's movements with it.
 pub trait StageInventoryItems {
     /// Stages what `InventoryItemRepo::update` would write, and moves `item` to the
     /// version it has once the batch commits. If the commit fails, `item` is stale: load
@@ -95,5 +112,19 @@ impl<T: HasInventoryItems + ?Sized> HasInventoryItems for &T {
     type InventoryItems = T::InventoryItems;
     fn inventory_items(&self) -> &Self::InventoryItems {
         (**self).inventory_items()
+    }
+}
+
+/// Whatever holds the `StockMovementRepo`.
+pub trait HasStockMovements {
+    type StockMovements: StockMovementRepo;
+    fn stock_movements(&self) -> &Self::StockMovements;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasStockMovements + ?Sized> HasStockMovements for &T {
+    type StockMovements = T::StockMovements;
+    fn stock_movements(&self) -> &Self::StockMovements {
+        (**self).stock_movements()
     }
 }

@@ -236,7 +236,7 @@ fn an_item_with_reservations_is_retired_until_its_orders_are_done() {
         0,
     )
     .unwrap();
-    item.set_on_hand(location.id(), 5, None).unwrap();
+    item.set_on_hand(location.id(), 5, None, None).unwrap();
     let order_line = ReservationRef::new("line-1").unwrap();
     item.reserve(&order_line, Quantity::new(1).unwrap(), &[location])
         .unwrap();

@@ -5,6 +5,10 @@ use hypha_core::{
     LocationId, MarketId, Page, PageRequest, Quantity, RepoError, Scope, VariantId,
     report_duplicate, retry_on_conflict,
 };
+
+use crate::{
+    AdjustmentReason, MovementFilter, MovementNote, StockMovementEntry, repo::StockMovementRepo,
+};
 use thiserror::Error;
 
 use crate::{
@@ -301,6 +305,8 @@ pub struct SetOnHand {
     pub quantity: i64,
     /// The count the caller last saw; the change is refused if it moved since.
     pub expected: Option<i64>,
+    /// Why, for the stock history: at most 500 characters; blank is none.
+    pub note: Option<String>,
 }
 
 /// Sets the count at a location. Retried on a concurrent change (a checkout reserving
@@ -312,13 +318,14 @@ pub async fn set_on_hand<R: InventoryItemRepo, L: LocationRepo>(
     input: SetOnHand,
 ) -> Result<InventoryItem, CommandError> {
     ctx.require(Scope::InventoryWrite)?;
+    let note = note(input.note.as_deref())?;
 
     load_location(locations, input.location).await?;
-    let input = &input;
+    let (input, note) = (&input, &note);
     retry_on_conflict(
         move || async move {
             let mut item = load_item(items, input.item).await?;
-            item.set_on_hand(input.location, input.quantity, input.expected)?;
+            item.set_on_hand(input.location, input.quantity, input.expected, note.clone())?;
             items.update(&mut item).await?;
             Ok(item)
         },
@@ -332,6 +339,9 @@ pub struct AdjustOnHand {
     pub location: LocationId,
     /// Negative to remove stock.
     pub delta: i64,
+    pub reason: AdjustmentReason,
+    /// At most 500 characters; blank is none.
+    pub note: Option<String>,
 }
 
 /// Adds to (or removes from) the count at a location, e.g. a delivery arrived.
@@ -343,19 +353,39 @@ pub async fn adjust_on_hand<R: InventoryItemRepo, L: LocationRepo>(
     input: AdjustOnHand,
 ) -> Result<InventoryItem, CommandError> {
     ctx.require(Scope::InventoryWrite)?;
+    let note = note(input.note.as_deref())?;
 
     load_location(locations, input.location).await?;
-    let input = &input;
+    let (input, note) = (&input, &note);
     retry_on_conflict(
         move || async move {
             let mut item = load_item(items, input.item).await?;
-            item.adjust_on_hand(input.location, input.delta)?;
+            item.adjust_on_hand(input.location, input.delta, input.reason, note.clone())?;
             items.update(&mut item).await?;
             Ok(item)
         },
         lost_a_race,
     )
     .await
+}
+
+fn note(text: Option<&str>) -> Result<Option<MovementNote>, CommandError> {
+    Ok(text.map(MovementNote::new).transpose()?.flatten())
+}
+
+/// A page of an item's stock history, newest first. The rows outlive their item, but
+/// they're read through it: an item that's gone is `InventoryItemNotFound`.
+pub async fn list_stock_movements<R: InventoryItemRepo, M: StockMovementRepo>(
+    ctx: &Ctx,
+    items: &R,
+    movements: &M,
+    item: InventoryItemId,
+    filter: &MovementFilter,
+    page: PageRequest<i64>,
+) -> Result<Page<StockMovementEntry>, CommandError> {
+    ctx.require(Scope::InventoryRead)?;
+    load_item(items, item).await?;
+    Ok(movements.list(item, filter, page).await?)
 }
 
 async fn load_item<R: InventoryItemRepo>(
@@ -448,7 +478,8 @@ mod tests {
                 let id = InventoryItemId::from_uuid(Uuid::from_u128(300 + n));
                 let mut item = InventoryItem::new(id, vid(*n), true, false);
                 for (location, on_hand) in *levels {
-                    item.set_on_hand(loc(*location), *on_hand, None).unwrap();
+                    item.set_on_hand(loc(*location), *on_hand, None, None)
+                        .unwrap();
                 }
                 (vid(*n), item)
             })

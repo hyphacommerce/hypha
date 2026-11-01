@@ -312,6 +312,7 @@ macro_rules! route_table {
             [admin, PATCH, "/admin/inventory-items/{id}", inventory::update_item],
             [admin, PUT, "/admin/inventory-items/{id}/levels/{location_id}", inventory::set_level],
             [admin, POST, "/admin/inventory-items/{id}/levels/{location_id}/adjustments", inventory::adjust_level],
+            [admin, GET, "/admin/inventory-items/{id}/movements", inventory::list_movements],
             [admin, GET, "/admin/variants/{id}/inventory", inventory::fetch_variant_inventory],
             [admin, GET, "/admin/products/{id}/inventory", inventory::fetch_product_inventory],
             [admin, GET, "/admin/setup/checklist", setup::checklist],

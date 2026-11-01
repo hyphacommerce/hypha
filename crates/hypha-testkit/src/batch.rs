@@ -24,7 +24,7 @@ use hypha_discounts::{
     CodeSelection, Discount, DiscountCode, StageDiscounts, UsageClaim, keys as discount_keys,
 };
 use hypha_fulfillment::{Fulfillment, StageFulfillments, keys as fulfillment_keys};
-use hypha_inventory::{InventoryItem, StageInventoryItems};
+use hypha_inventory::{InventoryItem, StageInventoryItems, StockMovement};
 use hypha_markets::{FixedPrice, StageCatalogProducts, StageFixedPrices, StagePriceListSchedule};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_notifications::{
@@ -80,6 +80,8 @@ enum Staged {
     AssetUsages(UsageOwner, Vec<(hypha_core::AssetId, UsageRole)>),
     InventoryItem(InventoryItem),
     DeletedInventoryItem(InventoryItem),
+    /// What the item staged just before recorded, written if the batch commits.
+    StockMovements(Vec<StockMovement>),
     NewCustomer(Customer),
     Customer(Customer),
     /// A customer removed at the version it was loaded at.
@@ -406,14 +408,18 @@ impl StageInventoryItems for InMemoryBatch {
         stamp_update(item, self.now);
         let version = item.version().next();
         self.stage_events_of(item, version);
+        let movements = item.take_movements();
         self.stage(Staged::InventoryItem(item.clone()));
+        self.stage(Staged::StockMovements(movements));
         item.set_version(version);
     }
 
     fn delete_inventory_item(&mut self, item: &mut InventoryItem) {
         let events = item.take_events();
+        let movements = item.take_movements();
         self.stage(Staged::DeletedInventoryItem(item.clone()));
         self.stage(Staged::Events(events, None));
+        self.stage(Staged::StockMovements(movements));
     }
 }
 
@@ -641,6 +647,7 @@ impl HasBatch for InMemoryPorts {
 
         // Written only if everything else is: an event exists iff its change committed.
         let mut events = Vec::new();
+        let mut movements = Vec::new();
         let written = (|| {
             for write in batch.staged {
                 match write {
@@ -1073,6 +1080,7 @@ impl HasBatch for InMemoryPorts {
                         )?;
                     }
                     Staged::Events(staged, version) => events.push((staged, version)),
+                    Staged::StockMovements(staged) => movements.extend(staged),
                     Staged::NewAgent(mut agent) => insert_row(
                         &mut agents,
                         agent.id(),
@@ -1125,6 +1133,7 @@ impl HasBatch for InMemoryPorts {
             for (staged, version) in events {
                 self.outbox.write(staged, version);
             }
+            self.outbox.write_movements(movements);
         }
         if written.is_err() {
             (*orders, *carts, *products, *items, *customers, *records) = before;

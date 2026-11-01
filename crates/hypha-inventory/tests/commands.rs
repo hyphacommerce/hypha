@@ -9,14 +9,16 @@
 )]
 
 use hypha_core::{
-    Actor, AuthError, Ctx, InventoryItemId, LocationId, MarketId, Scope, UserId, VariantId,
+    Actor, AuthError, Ctx, InventoryItemId, LocationId, MarketId, PageRequest, Scope, UserId,
+    VariantId,
 };
 use hypha_inventory::{
-    AdjustOnHand, CommandError, CreateInventoryItem, CreateLocation, DEFAULT_LOCATION_NAME,
-    InventoryError, InventoryItem, InventoryItemRepo, Location, LocationRepo, SetOnHand,
-    UpdateInventoryItem, UpdateLocation, adjust_on_hand, create_inventory_item, create_location,
+    AdjustOnHand, AdjustmentReason, CommandError, CreateInventoryItem, CreateLocation,
+    DEFAULT_LOCATION_NAME, InventoryError, InventoryItem, InventoryItemRepo, Location,
+    LocationRepo, MovementFilter, SetOnHand, StockReason, StockSource, UpdateInventoryItem,
+    UpdateLocation, adjust_on_hand, create_inventory_item, create_location,
     ensure_default_location, get_inventory_item, get_variant_inventory, get_variants_inventory,
-    list_locations, set_on_hand, update_inventory_item, update_location,
+    list_locations, list_stock_movements, set_on_hand, update_inventory_item, update_location,
 };
 use hypha_testkit::{InMemoryInventoryItemRepo, InMemoryLocationRepo, SequentialIds};
 use pollster::block_on;
@@ -106,6 +108,7 @@ impl World {
             location,
             quantity,
             expected,
+            note: None,
         };
         block_on(set_on_hand(
             &Ctx::system(),
@@ -125,6 +128,8 @@ impl World {
             item,
             location,
             delta,
+            reason: AdjustmentReason::Correction,
+            note: None,
         };
         block_on(adjust_on_hand(
             &Ctx::system(),
@@ -132,6 +137,26 @@ impl World {
             &self.locations,
             input,
         ))
+    }
+
+    /// The item's stock history, newest first, as (delta, after, reason, note).
+    fn history(
+        &self,
+        item: InventoryItemId,
+    ) -> Vec<(i64, Option<i64>, StockReason, Option<String>)> {
+        block_on(list_stock_movements(
+            &reader(),
+            &self.items,
+            self.items.outbox(),
+            item,
+            &MovementFilter::default(),
+            PageRequest::default(),
+        ))
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|m| (m.delta, m.after, m.reason, m.note))
+        .collect()
     }
 
     fn stored(&self, item: InventoryItemId) -> InventoryItem {
@@ -436,6 +461,8 @@ fn stock_writes_require_write_scope() {
         item,
         location,
         delta: 1,
+        reason: AdjustmentReason::Correction,
+        note: None,
     };
     assert_eq!(
         block_on(adjust_on_hand(
@@ -495,5 +522,121 @@ fn listing_locations_needs_inventory_read() {
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::InventoryRead
         )))
+    );
+}
+
+#[test]
+fn counts_and_adjustments_leave_a_history_with_their_reasons() {
+    let world = World::new();
+    let (item, location) = (world.item(), world.location());
+    world.set(item, location, 10, None).unwrap();
+    let input = AdjustOnHand {
+        item,
+        location,
+        delta: -2,
+        reason: AdjustmentReason::Damaged,
+        note: Some("  dropped a box ".to_string()),
+    };
+    block_on(adjust_on_hand(
+        &Ctx::system(),
+        &world.items,
+        &world.locations,
+        input,
+    ))
+    .unwrap();
+    let input = SetOnHand {
+        item,
+        location,
+        quantity: 7,
+        expected: None,
+        note: Some("cycle count".to_string()),
+    };
+    block_on(set_on_hand(
+        &Ctx::system(),
+        &world.items,
+        &world.locations,
+        input,
+    ))
+    .unwrap();
+
+    assert_eq!(
+        world.history(item),
+        [
+            (
+                -1,
+                Some(7),
+                StockReason::Counted,
+                Some("cycle count".to_string())
+            ),
+            (
+                -2,
+                Some(8),
+                StockReason::Damaged,
+                Some("dropped a box".to_string())
+            ),
+            (10, Some(10), StockReason::Counted, None),
+        ]
+    );
+    let sources: Vec<StockSource> = world
+        .items
+        .outbox()
+        .movements()
+        .iter()
+        .map(|m| m.source)
+        .collect();
+    assert_eq!(sources, [StockSource::Manual; 3]);
+}
+
+#[test]
+fn a_note_too_long_changes_nothing() {
+    let world = World::new();
+    let (item, location) = (world.item(), world.location());
+    let input = AdjustOnHand {
+        item,
+        location,
+        delta: 1,
+        reason: AdjustmentReason::Other,
+        note: Some("x".repeat(501)),
+    };
+    assert_eq!(
+        block_on(adjust_on_hand(
+            &Ctx::system(),
+            &world.items,
+            &world.locations,
+            input
+        )),
+        Err(CommandError::Inventory(InventoryError::NoteTooLong {
+            max: 500
+        }))
+    );
+    assert_eq!(world.stored(item).on_hand(location), 0);
+    assert_eq!(world.history(item), []);
+}
+
+#[test]
+fn the_history_needs_the_read_scope_and_an_item() {
+    let world = World::new();
+    let item = world.item();
+    let list = |ctx: Ctx, item| {
+        block_on(list_stock_movements(
+            &ctx,
+            &world.items,
+            world.items.outbox(),
+            item,
+            &MovementFilter::default(),
+            PageRequest::default(),
+        ))
+    };
+    let nobody = Ctx::new(Actor::User(UserId::from_uuid(Uuid::from_u128(1))), vec![]);
+    assert_eq!(
+        list(nobody, item).map(|p| p.items.len()),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::InventoryRead
+        )))
+    );
+    let unknown = InventoryItemId::from_uuid(Uuid::from_u128(999));
+    assert_eq!(
+        list(reader(), unknown).map(|p| p.items.len()),
+        Err(CommandError::InventoryItemNotFound(unknown))
     );
 }

@@ -192,8 +192,8 @@ mod tests {
     #[test]
     fn a_summary_counts_each_location_and_the_total() {
         let mut i = item();
-        i.set_on_hand(location(2), 5, None).unwrap();
-        i.set_on_hand(location(1), 3, None).unwrap();
+        i.set_on_hand(location(2), 5, None, None).unwrap();
+        i.set_on_hand(location(1), 3, None, None).unwrap();
         reserve(&mut i, 2, 2);
         let s = i.summary();
         assert_eq!(
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn below_is_strict_and_skips_untracked_items() {
         let mut i = item();
-        i.set_on_hand(location(1), 3, None).unwrap();
+        i.set_on_hand(location(1), 3, None, None).unwrap();
         let below = |n| InventoryFilter {
             below: Some(n),
             ..InventoryFilter::default()
@@ -258,8 +258,8 @@ mod tests {
     #[test]
     fn a_location_counts_alone_and_lists_only_what_it_stocks() {
         let mut i = item();
-        i.set_on_hand(location(1), 1, None).unwrap();
-        i.set_on_hand(location(2), 10, None).unwrap();
+        i.set_on_hand(location(1), 1, None, None).unwrap();
+        i.set_on_hand(location(2), 10, None, None).unwrap();
         let at = |n, below| InventoryFilter {
             location: Some(location(n)),
             below,

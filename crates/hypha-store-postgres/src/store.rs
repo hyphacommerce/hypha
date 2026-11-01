@@ -689,6 +689,7 @@ accessors! {
     hypha_tax::HasTaxRegions => TaxRegions, tax_regions;
     hypha_inventory::HasInventoryItems => InventoryItems, inventory_items;
     hypha_inventory::HasLocations => Locations, locations;
+    hypha_inventory::HasStockMovements => StockMovements, stock_movements;
     hypha_customers::HasCustomers => Customers, customers;
     hypha_customers::HasCustomerGroups => CustomerGroups, customer_groups;
     hypha_core::HasIdempotency => Idempotency, idempotency;

@@ -8,7 +8,7 @@ use hypha_core::{
 use hypha_inventory::{
     InventoryFilter, InventoryItem, InventoryItemRepo, InventoryItemSnapshot, InventoryItemSummary,
     Level, LevelSummary, Location, LocationRepo, LocationSnapshot, Reservation, ReservationRef,
-    stock_by_location,
+    StockMovement, stock_by_location,
 };
 use tokio_postgres::types::{ToSql, Type};
 use uuid::Uuid;
@@ -21,6 +21,7 @@ use crate::{
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
+    stock_movements::insert_movements,
     store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
@@ -360,10 +361,12 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
         stamp_insert(item, self.now());
         let s = item.snapshot();
         let events = item.take_events();
+        let movements = item.take_movements();
         let stamp = self.event_stamp();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             insert_item(tx, &s).await?;
+            insert_movements(tx, &movements, &stamp).await?;
             insert_events(tx, &events, Some(version), stamp).await
         })?;
         item.set_version(version);
@@ -373,15 +376,17 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
     async fn delete(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
         let id = item.id().as_uuid();
         let events = item.take_events();
+        let movements = item.take_movements();
         let stamp = self.event_stamp();
         in_transaction!(self, |tx| {
-            // Levels and reservations go with it (ON DELETE CASCADE).
+            // Levels and reservations go with it (ON DELETE CASCADE); its movements stay.
             tx.query_typed(
                 "DELETE FROM inventory_items WHERE id = $1",
                 &[(&id, Type::UUID)],
             )
             .await
             .map_err(repo_error)?;
+            insert_movements(tx, &movements, &stamp).await?;
             insert_events(tx, &events, None, stamp).await
         })
     }
@@ -405,9 +410,12 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
             .iter_mut()
             .map(|i| (i.id().as_uuid(), i.take_events()))
             .collect();
+        let movements: Vec<StockMovement> =
+            items.iter_mut().flat_map(|i| i.take_movements()).collect();
         let stamp = self.event_stamp();
         let new_versions = in_transaction!(self, |tx| {
             let versions = update_items(tx, snapshots).await?;
+            insert_movements(tx, &movements, &stamp).await?;
             for (id, events) in &events {
                 insert_events(tx, events, versions.get(id).copied(), stamp).await?;
             }

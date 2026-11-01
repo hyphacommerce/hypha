@@ -6,7 +6,8 @@ use hypha_core::{
 };
 
 use crate::{
-    InventoryError, Location, ReservationRef, RestoreError,
+    AdjustmentReason, Cause, InventoryError, Location, MovementNote, ReservationRef, RestoreError,
+    StockMovement, StockReason, StockSource,
     events::{Available, INVENTORY_ITEM, InventoryItemChanged, InventoryItemDeleted},
 };
 
@@ -54,7 +55,22 @@ pub struct InventoryItem {
     changed: Changed,
     /// Its deletion, once `delete` was called.
     deleted: Recorder,
+    /// Changes to its counts not written yet: the adapter writes them with the item.
+    movements: Unwritten,
 }
+
+/// Movements waiting to be written. Like `Changed`, they never make two items unequal: an
+/// item compares by its state.
+#[derive(Debug, Clone, Default)]
+struct Unwritten(Vec<StockMovement>);
+
+impl PartialEq for Unwritten {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for Unwritten {}
 
 /// A flag that compares as always equal, so it never makes two items unequal.
 #[derive(Debug, Clone, Copy, Default)]
@@ -144,7 +160,15 @@ impl InventoryItem {
             retired: false,
             changed: Changed(true),
             deleted: Recorder::default(),
+            movements: Unwritten::default(),
         }
+    }
+
+    /// The movements recorded since the last call, oldest first: an adapter takes them as
+    /// it writes the item, in the same transaction, as it takes its events. Take them
+    /// before copying the item into a batch, so the stored copy carries none.
+    pub fn take_movements(&mut self) -> Vec<StockMovement> {
+        std::mem::take(&mut self.movements.0)
     }
 
     /// Untracked stock is always available and never reserved. Existing levels and
@@ -184,7 +208,8 @@ impl InventoryItem {
         self.on_hand(location) - self.reserved(location)
     }
 
-    /// Sets the count at `location`, e.g. after counting the shelf.
+    /// Sets the count at `location`, e.g. after counting the shelf: a `counted` movement
+    /// by hand, with `note`.
     ///
     /// With `expected`, the change only happens if `on_hand` is still what the caller
     /// last saw (Shopify's `changeFromQuantity`): a sale in between isn't silently
@@ -194,6 +219,7 @@ impl InventoryItem {
         location: LocationId,
         quantity: i64,
         expected: Option<i64>,
+        note: Option<MovementNote>,
     ) -> Result<(), InventoryError> {
         check_range(i128::from(quantity))?;
         let actual = self.on_hand(location);
@@ -202,28 +228,51 @@ impl InventoryItem {
         {
             return Err(InventoryError::OnHandChanged { expected, actual });
         }
-        self.write_level(location, quantity);
+        let cause = Cause::new(StockReason::Counted, StockSource::Manual).with_note(note);
+        self.write_level(location, quantity, cause);
         Ok(())
     }
 
-    /// Adds `delta` (negative to remove) to the count at `location`.
+    /// Adds `delta` (negative to remove) to the count at `location`, by hand, for
+    /// `reason`.
     pub fn adjust_on_hand(
         &mut self,
         location: LocationId,
         delta: i64,
+        reason: AdjustmentReason,
+        note: Option<MovementNote>,
     ) -> Result<(), InventoryError> {
         let quantity = check_range(i128::from(self.on_hand(location)) + i128::from(delta))?;
-        self.write_level(location, quantity);
+        let cause = Cause::new(reason.reason(), StockSource::Manual).with_note(note);
+        self.write_level(location, quantity, cause);
         Ok(())
     }
 
-    fn write_level(&mut self, location: LocationId, on_hand: i64) {
-        match self.levels.iter_mut().find(|l| l.location == location) {
+    /// The one place a count changes: it records the movement, so none goes unrecorded.
+    fn write_level(&mut self, location: LocationId, on_hand: i64, cause: Cause) {
+        let before = match self.levels.iter_mut().find(|l| l.location == location) {
             Some(level) if level.on_hand == on_hand => return,
-            Some(level) => level.on_hand = on_hand,
-            None => self.levels.push(Level { location, on_hand }),
-        }
+            Some(level) => std::mem::replace(&mut level.on_hand, on_hand),
+            None => {
+                self.levels.push(Level { location, on_hand });
+                0
+            }
+        };
         self.changed = Changed(true);
+        // Both counts are within ±MAX_STOCK, so their difference fits.
+        let delta = on_hand - before;
+        if delta != 0 {
+            self.movements.0.push(StockMovement {
+                item: self.id,
+                variant: self.variant,
+                location,
+                delta,
+                after: on_hand,
+                reason: cause.reason,
+                source: cause.source,
+                note: cause.note,
+            });
+        }
     }
 
     /// Where `quantity` would be reserved from `locations`: `Ok` with the allocation, or
@@ -385,12 +434,15 @@ impl InventoryItem {
     /// past zero). Untracked items change no counts, but stale reservations are still given
     /// back.
     ///
+    /// Units leaving are `sold` movements caused by `source` (the fulfilment).
+    ///
     /// All or nothing; returns whether anything changed.
     pub fn fulfil(
         &mut self,
         reference: &ReservationRef,
         location: LocationId,
         quantity: Quantity,
+        source: StockSource,
     ) -> Result<bool, InventoryError> {
         let on_hand = match self.tracked {
             true => Some(check_range(
@@ -433,7 +485,7 @@ impl InventoryItem {
         }
         // A tracked count always moves: `quantity` is at least 1.
         if let Some(on_hand) = on_hand {
-            self.write_level(location, on_hand);
+            self.write_level(location, on_hand, Cause::new(StockReason::Sold, source));
         }
         Ok(released || on_hand.is_some())
     }
@@ -444,12 +496,15 @@ impl InventoryItem {
     /// when it's turned on again. While tracked, the units are reserved there for
     /// `reference` again; untracked items reserve nothing.
     ///
+    /// The units coming back are a `restocked` movement caused by `source`.
+    ///
     /// All or nothing: a count or reservation past its range changes nothing.
     pub fn restock(
         &mut self,
         reference: &ReservationRef,
         location: LocationId,
         quantity: Quantity,
+        source: StockSource,
     ) -> Result<(), InventoryError> {
         let on_hand =
             check_range(i128::from(self.on_hand(location)) + i128::from(quantity.value()))?;
@@ -468,7 +523,11 @@ impl InventoryItem {
             }
             self.changed = Changed(true);
         }
-        self.write_level(location, on_hand);
+        self.write_level(
+            location,
+            on_hand,
+            Cause::new(StockReason::Restocked, source),
+        );
         Ok(())
     }
 
@@ -592,16 +651,25 @@ impl InventoryItem {
             retired: s.retired,
             changed: Changed(false),
             deleted: Recorder::default(),
+            movements: Unwritten::default(),
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use hypha_core::{MarketId, QuantityError};
+    use hypha_core::{FulfillmentId, MarketId, OrderId, QuantityError};
     use uuid::Uuid;
 
     use super::*;
+
+    /// What units left or came back for, in the fulfilment tests.
+    fn source() -> StockSource {
+        StockSource::Fulfillment {
+            order: OrderId::from_uuid(Uuid::from_u128(80)),
+            fulfillment: FulfillmentId::from_uuid(Uuid::from_u128(81)),
+        }
+    }
 
     fn loc_id(n: u128) -> LocationId {
         LocationId::from_uuid(Uuid::from_u128(n))
@@ -635,7 +703,8 @@ mod tests {
             false,
         );
         for (location, on_hand) in stock {
-            item.set_on_hand(loc_id(*location), *on_hand, None).unwrap();
+            item.set_on_hand(loc_id(*location), *on_hand, None, None)
+                .unwrap();
         }
         item
     }
@@ -657,7 +726,7 @@ mod tests {
     #[test]
     fn set_on_hand_replaces_the_count() {
         let mut i = item(&[(1, 5)]);
-        i.set_on_hand(loc_id(1), 2, None).unwrap();
+        i.set_on_hand(loc_id(1), 2, None, None).unwrap();
         assert_eq!(i.on_hand(loc_id(1)), 2);
         assert_eq!(i.levels().len(), 1);
     }
@@ -665,7 +734,7 @@ mod tests {
     #[test]
     fn set_on_hand_with_the_expected_count_succeeds() {
         let mut i = item(&[(1, 5)]);
-        assert_eq!(i.set_on_hand(loc_id(1), 7, Some(5)), Ok(()));
+        assert_eq!(i.set_on_hand(loc_id(1), 7, Some(5), None), Ok(()));
         assert_eq!(i.on_hand(loc_id(1)), 7);
     }
 
@@ -673,7 +742,7 @@ mod tests {
     fn set_on_hand_refuses_when_the_count_moved() {
         let mut i = item(&[(1, 4)]);
         assert_eq!(
-            i.set_on_hand(loc_id(1), 10, Some(5)),
+            i.set_on_hand(loc_id(1), 10, Some(5), None),
             Err(InventoryError::OnHandChanged {
                 expected: 5,
                 actual: 4
@@ -685,29 +754,31 @@ mod tests {
     #[test]
     fn expected_count_of_a_new_level_is_zero() {
         let mut i = item(&[]);
-        assert_eq!(i.set_on_hand(loc_id(1), 3, Some(0)), Ok(()));
+        assert_eq!(i.set_on_hand(loc_id(1), 3, Some(0), None), Ok(()));
     }
 
     #[test]
     fn adjust_adds_and_removes() {
         let mut i = item(&[(1, 5)]);
-        i.adjust_on_hand(loc_id(1), -7).unwrap();
+        i.adjust_on_hand(loc_id(1), -7, AdjustmentReason::Correction, None)
+            .unwrap();
         assert_eq!(i.on_hand(loc_id(1)), -2);
-        i.adjust_on_hand(loc_id(2), 4).unwrap();
+        i.adjust_on_hand(loc_id(2), 4, AdjustmentReason::Correction, None)
+            .unwrap();
         assert_eq!(i.on_hand(loc_id(2)), 4);
     }
 
     #[test]
     fn stock_is_capped_at_max_stock_either_way() {
         let mut i = item(&[]);
-        assert_eq!(i.set_on_hand(loc_id(1), MAX_STOCK, None), Ok(()));
+        assert_eq!(i.set_on_hand(loc_id(1), MAX_STOCK, None, None), Ok(()));
         assert_eq!(
-            i.adjust_on_hand(loc_id(1), 1),
+            i.adjust_on_hand(loc_id(1), 1, AdjustmentReason::Correction, None),
             Err(InventoryError::StockOutOfRange(i128::from(MAX_STOCK) + 1))
         );
-        assert_eq!(i.set_on_hand(loc_id(2), -MAX_STOCK, None), Ok(()));
+        assert_eq!(i.set_on_hand(loc_id(2), -MAX_STOCK, None, None), Ok(()));
         assert_eq!(
-            i.set_on_hand(loc_id(2), -MAX_STOCK - 1, None),
+            i.set_on_hand(loc_id(2), -MAX_STOCK - 1, None, None),
             Err(InventoryError::StockOutOfRange(-i128::from(MAX_STOCK) - 1))
         );
     }
@@ -721,7 +792,7 @@ mod tests {
     fn adjust_reports_overflow_instead_of_wrapping() {
         let mut i = item(&[(1, -MAX_STOCK)]);
         assert_eq!(
-            i.adjust_on_hand(loc_id(1), i64::MIN),
+            i.adjust_on_hand(loc_id(1), i64::MIN, AdjustmentReason::Correction, None),
             Err(InventoryError::StockOutOfRange(
                 -i128::from(MAX_STOCK) + i128::from(i64::MIN)
             ))
@@ -931,11 +1002,17 @@ mod tests {
         let mut item = item(&[(1, 5)]);
         item.reserve(&reference("a"), qty(3), &[location(1, 0)])
             .unwrap();
-        assert_eq!(item.fulfil(&reference("a"), loc_id(1), qty(2)), Ok(true));
+        assert_eq!(
+            item.fulfil(&reference("a"), loc_id(1), qty(2), source()),
+            Ok(true)
+        );
         assert_eq!(item.on_hand(loc_id(1)), 3);
         assert_eq!(held_by(&item, "a"), [(loc_id(1), 1)]);
         assert_eq!(item.available(loc_id(1)), 2);
-        assert_eq!(item.fulfil(&reference("a"), loc_id(1), qty(1)), Ok(true));
+        assert_eq!(
+            item.fulfil(&reference("a"), loc_id(1), qty(1), source()),
+            Ok(true)
+        );
         assert_eq!(held_by(&item, "a"), []);
         assert_eq!(item.on_hand(loc_id(1)), 2);
     }
@@ -945,7 +1022,8 @@ mod tests {
         let mut item = item(&[(1, 5), (2, 5)]);
         item.reserve(&reference("a"), qty(2), &[location(1, 0)])
             .unwrap();
-        item.fulfil(&reference("a"), loc_id(2), qty(2)).unwrap();
+        item.fulfil(&reference("a"), loc_id(2), qty(2), source())
+            .unwrap();
         assert_eq!(held_by(&item, "a"), []);
         assert_eq!((item.on_hand(loc_id(1)), item.on_hand(loc_id(2))), (5, 3));
     }
@@ -956,7 +1034,8 @@ mod tests {
         let mut item = item(&[(1, 2), (2, 2)]);
         item.reserve(&reference("a"), qty(4), &[location(1, 0), location(2, 1)])
             .unwrap();
-        item.fulfil(&reference("a"), loc_id(2), qty(3)).unwrap();
+        item.fulfil(&reference("a"), loc_id(2), qty(3), source())
+            .unwrap();
         assert_eq!(held_by(&item, "a"), [(loc_id(1), 1)]);
         assert_eq!(item.on_hand(loc_id(2)), -1);
     }
@@ -966,7 +1045,8 @@ mod tests {
         let mut item = item(&[(1, 2), (2, 3)]);
         item.reserve(&reference("a"), qty(5), &[location(1, 0), location(2, 1)])
             .unwrap();
-        item.fulfil(&reference("a"), loc_id(1), qty(5)).unwrap();
+        item.fulfil(&reference("a"), loc_id(1), qty(5), source())
+            .unwrap();
         assert_eq!(held_by(&item, "a"), []);
     }
 
@@ -977,7 +1057,8 @@ mod tests {
             .unwrap();
         item.reserve(&reference("b"), qty(2), &[location(1, 0)])
             .unwrap();
-        item.fulfil(&reference("a"), loc_id(1), qty(1)).unwrap();
+        item.fulfil(&reference("a"), loc_id(1), qty(1), source())
+            .unwrap();
         assert_eq!(held_by(&item, "b"), [(loc_id(1), 2)]);
     }
 
@@ -985,7 +1066,10 @@ mod tests {
     fn fulfilling_unreserved_units_still_counts_them_out() {
         // Tracking was turned on after the order was placed: nothing was reserved.
         let mut item = item(&[(1, 1)]);
-        assert_eq!(item.fulfil(&reference("a"), loc_id(1), qty(3)), Ok(true));
+        assert_eq!(
+            item.fulfil(&reference("a"), loc_id(1), qty(3), source()),
+            Ok(true)
+        );
         assert_eq!(item.on_hand(loc_id(1)), -2);
     }
 
@@ -995,10 +1079,16 @@ mod tests {
         item.reserve(&reference("a"), qty(1), &[location(1, 0)])
             .unwrap();
         item.set_tracked(false);
-        assert_eq!(item.fulfil(&reference("a"), loc_id(1), qty(1)), Ok(true));
+        assert_eq!(
+            item.fulfil(&reference("a"), loc_id(1), qty(1), source()),
+            Ok(true)
+        );
         assert_eq!(item.on_hand(loc_id(1)), 5);
         assert_eq!(held_by(&item, "a"), []);
-        assert_eq!(item.fulfil(&reference("a"), loc_id(1), qty(1)), Ok(false));
+        assert_eq!(
+            item.fulfil(&reference("a"), loc_id(1), qty(1), source()),
+            Ok(false)
+        );
     }
 
     #[test]
@@ -1007,7 +1097,10 @@ mod tests {
         item.reserve(&reference("a"), qty(3), &[location(1, 0)])
             .unwrap();
         item.set_tracked(false);
-        assert_eq!(item.fulfil(&reference("a"), loc_id(1), qty(1)), Ok(true));
+        assert_eq!(
+            item.fulfil(&reference("a"), loc_id(1), qty(1), source()),
+            Ok(true)
+        );
         assert_eq!(held_by(&item, "a"), [(loc_id(1), 2)]);
     }
 
@@ -1016,7 +1109,7 @@ mod tests {
         let mut item = item(&[(1, -MAX_STOCK)]);
         let before = item.clone();
         assert_eq!(
-            item.fulfil(&reference("a"), loc_id(1), qty(1)),
+            item.fulfil(&reference("a"), loc_id(1), qty(1), source()),
             Err(InventoryError::StockOutOfRange(-i128::from(MAX_STOCK) - 1))
         );
         assert_eq!(item, before);
@@ -1027,8 +1120,12 @@ mod tests {
         let mut item = item(&[(1, 5)]);
         item.reserve(&reference("a"), qty(3), &[location(1, 0)])
             .unwrap();
-        item.fulfil(&reference("a"), loc_id(1), qty(2)).unwrap();
-        assert_eq!(item.restock(&reference("a"), loc_id(1), qty(2)), Ok(()));
+        item.fulfil(&reference("a"), loc_id(1), qty(2), source())
+            .unwrap();
+        assert_eq!(
+            item.restock(&reference("a"), loc_id(1), qty(2), source()),
+            Ok(())
+        );
         assert_eq!(item.on_hand(loc_id(1)), 5);
         assert_eq!(held_by(&item, "a"), [(loc_id(1), 3)]);
     }
@@ -1040,8 +1137,10 @@ mod tests {
             .unwrap();
         item.reserve(&reference("b"), qty(1), &[location(1, 0)])
             .unwrap();
-        item.fulfil(&reference("a"), loc_id(1), qty(1)).unwrap();
-        item.restock(&reference("a"), loc_id(1), qty(1)).unwrap();
+        item.fulfil(&reference("a"), loc_id(1), qty(1), source())
+            .unwrap();
+        item.restock(&reference("a"), loc_id(1), qty(1), source())
+            .unwrap();
         assert_eq!(held_by(&item, "a"), [(loc_id(1), 1)]);
         assert_eq!(held_by(&item, "b"), [(loc_id(1), 1)]);
     }
@@ -1051,8 +1150,10 @@ mod tests {
         let mut item = item(&[(1, 5), (2, 5)]);
         item.reserve(&reference("a"), qty(1), &[location(1, 0)])
             .unwrap();
-        item.fulfil(&reference("a"), loc_id(2), qty(1)).unwrap();
-        item.restock(&reference("a"), loc_id(2), qty(1)).unwrap();
+        item.fulfil(&reference("a"), loc_id(2), qty(1), source())
+            .unwrap();
+        item.restock(&reference("a"), loc_id(2), qty(1), source())
+            .unwrap();
         assert_eq!(held_by(&item, "a"), [(loc_id(2), 1)]);
         assert_eq!(item.on_hand(loc_id(2)), 5);
     }
@@ -1062,7 +1163,10 @@ mod tests {
         // Shipped while tracked (4 left), then tracking was turned off.
         let mut item = item(&[(1, 4)]);
         item.set_tracked(false);
-        assert_eq!(item.restock(&reference("a"), loc_id(1), qty(1)), Ok(()));
+        assert_eq!(
+            item.restock(&reference("a"), loc_id(1), qty(1), source()),
+            Ok(())
+        );
         assert_eq!(item.on_hand(loc_id(1)), 5);
         assert_eq!(held_by(&item, "a"), []);
     }
@@ -1075,7 +1179,7 @@ mod tests {
         item.reserve(&reference("a"), qty(u32::MAX), &at).unwrap();
         let before = item.clone();
         assert_eq!(
-            item.restock(&reference("a"), loc_id(1), qty(1)),
+            item.restock(&reference("a"), loc_id(1), qty(1), source()),
             Err(InventoryError::Quantity(QuantityError::Overflow))
         );
         assert_eq!(item, before);
@@ -1089,7 +1193,8 @@ mod tests {
         assert!(!item.is_spent());
         item.retire();
         assert!(!item.is_spent());
-        item.fulfil(&reference("a"), loc_id(1), qty(1)).unwrap();
+        item.fulfil(&reference("a"), loc_id(1), qty(1), source())
+            .unwrap();
         assert!(item.is_spent());
     }
 
@@ -1116,6 +1221,124 @@ mod tests {
     }
 
     // ---- storage ----
+
+    /// Each recorded movement as (location, delta, after, reason), taking them.
+    fn moved(item: &mut InventoryItem) -> Vec<(LocationId, i64, i64, StockReason)> {
+        item.take_movements()
+            .into_iter()
+            .map(|m| (m.location, m.delta, m.after, m.reason))
+            .collect()
+    }
+
+    fn note(text: &str) -> Option<MovementNote> {
+        MovementNote::new(text).unwrap()
+    }
+
+    #[test]
+    fn a_count_records_the_difference_by_hand() {
+        let mut i = item(&[(1, 4)]);
+        assert_eq!(moved(&mut i), [(loc_id(1), 4, 4, StockReason::Counted)]);
+        i.set_on_hand(loc_id(1), 1, None, note("shelf count"))
+            .unwrap();
+        let movements = i.take_movements();
+        assert_eq!(movements.len(), 1);
+        let m = &movements[0];
+        assert_eq!(
+            (m.item, m.variant, m.delta, m.after, m.source),
+            (i.id(), i.variant(), -3, 1, StockSource::Manual)
+        );
+        assert_eq!(
+            m.note.as_ref().map(MovementNote::as_str),
+            Some("shelf count")
+        );
+    }
+
+    #[test]
+    fn a_count_that_changes_nothing_records_nothing() {
+        let mut i = item(&[(1, 4)]);
+        i.take_movements();
+        i.set_on_hand(loc_id(1), 4, None, None).unwrap();
+        i.set_on_hand(loc_id(2), 0, None, None).unwrap();
+        i.adjust_on_hand(loc_id(1), 0, AdjustmentReason::Other, None)
+            .unwrap();
+        assert_eq!(moved(&mut i), []);
+    }
+
+    #[test]
+    fn an_adjustment_records_its_reason() {
+        let mut i = item(&[(1, 4)]);
+        i.take_movements();
+        i.adjust_on_hand(loc_id(1), -2, AdjustmentReason::Damaged, None)
+            .unwrap();
+        i.adjust_on_hand(loc_id(2), 6, AdjustmentReason::Correction, None)
+            .unwrap();
+        assert_eq!(
+            moved(&mut i),
+            [
+                (loc_id(1), -2, 2, StockReason::Damaged),
+                (loc_id(2), 6, 6, StockReason::Correction)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_refused_change_records_nothing() {
+        let mut i = item(&[(1, 4)]);
+        i.take_movements();
+        assert!(i.set_on_hand(loc_id(1), 9, Some(5), None).is_err());
+        assert!(
+            i.adjust_on_hand(loc_id(1), MAX_STOCK, AdjustmentReason::Other, None)
+                .is_err()
+        );
+        assert_eq!(moved(&mut i), []);
+    }
+
+    #[test]
+    fn fulfilling_and_restocking_record_sold_and_restocked_by_their_fulfilment() {
+        let mut i = item(&[(1, 5)]);
+        i.reserve(&reference("a"), qty(3), &[location(1, 0)])
+            .unwrap();
+        i.take_movements();
+        i.fulfil(&reference("a"), loc_id(1), qty(3), source())
+            .unwrap();
+        i.restock(&reference("a"), loc_id(1), qty(1), source())
+            .unwrap();
+        let movements = i.take_movements();
+        assert_eq!(
+            movements
+                .iter()
+                .map(|m| (m.delta, m.after, m.reason, m.source))
+                .collect::<Vec<_>>(),
+            [
+                (-3, 2, StockReason::Sold, source()),
+                (1, 3, StockReason::Restocked, source())
+            ]
+        );
+    }
+
+    #[test]
+    fn an_untracked_items_fulfilment_records_nothing_but_its_restock_counts() {
+        let mut i = item(&[(1, 5)]);
+        i.set_tracked(false);
+        i.take_movements();
+        i.fulfil(&reference("a"), loc_id(1), qty(2), source())
+            .unwrap();
+        assert_eq!(moved(&mut i), []);
+        i.restock(&reference("a"), loc_id(1), qty(2), source())
+            .unwrap();
+        assert_eq!(moved(&mut i), [(loc_id(1), 2, 7, StockReason::Restocked)]);
+    }
+
+    #[test]
+    fn movements_are_taken_once_and_never_stored() {
+        let mut i = item(&[(1, 4)]);
+        assert_eq!(i.take_movements().len(), 1);
+        assert_eq!(i.take_movements(), []);
+        i.adjust_on_hand(loc_id(1), 1, AdjustmentReason::Other, None)
+            .unwrap();
+        let mut restored = InventoryItem::restore(i.snapshot()).unwrap();
+        assert_eq!(restored.take_movements(), []);
+    }
 
     #[test]
     fn restore_round_trips() {

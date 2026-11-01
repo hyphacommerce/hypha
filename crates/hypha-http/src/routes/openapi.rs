@@ -880,6 +880,7 @@ mod tests {
                 "get /admin/discounts/{id}/codes",
                 "get /admin/discounts/{id}/usage",
                 "get /admin/inventory-items",
+                "get /admin/inventory-items/{id}/movements",
                 "get /admin/notifications",
                 "get /admin/orders",
                 "get /admin/price-lists",

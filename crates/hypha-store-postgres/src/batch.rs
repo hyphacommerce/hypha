@@ -26,7 +26,7 @@ use hypha_discounts::{
     ClassSet, CodeSelection, Discount, DiscountCode, DiscountSnapshot, StageDiscounts, UsageClaim,
 };
 use hypha_fulfillment::{Fulfillment, FulfillmentSnapshot, StageFulfillments};
-use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
+use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems, StockMovement};
 use hypha_markets::{FixedPrice, StageCatalogProducts, StageFixedPrices, StagePriceListSchedule};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_notifications::{
@@ -73,6 +73,7 @@ use crate::{
     outbox::insert_events,
     payments::{insert_payment, update_payment},
     products::{delete_product, update_product},
+    stock_movements::insert_movements,
     store::{Db, Tx, end_transaction},
     store::{PgConnection, PgStore},
     tax::assign_tax_class,
@@ -130,6 +131,8 @@ enum Staged {
     InventoryItem(InventoryItemSnapshot),
     /// An item removed at the version it was loaded at.
     DeletedInventoryItem(InventoryItemSnapshot),
+    /// What the items staged recorded: written after them, once their rows are locked.
+    StockMovements(Vec<StockMovement>),
     /// Products' tax class (`None`: the default rate).
     TaxAssignment(Vec<ProductId>, Option<TaxClassId>),
     /// Catalog membership: added (`true`) or removed.
@@ -236,6 +239,8 @@ impl Staged {
             Staged::Idempotency(_) => 33,
             Staged::InventoryItem(_) => 34,
             Staged::DeletedInventoryItem(_) => 35,
+            // Gathered and written after the items, like them.
+            Staged::StockMovements(_) => 35,
             // Inserts into a table nothing else locks: anywhere would do.
             Staged::Events(..) => 36,
             // An app before what refers to it (its tokens), a request before its codes.
@@ -371,6 +376,14 @@ fn value_key(write: &Staged) -> Option<(CustomFieldDefinitionId, uuid::Uuid)> {
 impl PgBatch {
     fn stage(&mut self, write: Staged) {
         self.staged.push(write);
+    }
+
+    /// Stages the movements `item` recorded, to write with it.
+    fn stage_movements_of(&mut self, item: &mut InventoryItem) {
+        let movements = item.take_movements();
+        if !movements.is_empty() {
+            self.stage(Staged::StockMovements(movements));
+        }
     }
 
     /// Stages the events `aggregate` recorded, about the write staged with them, which
@@ -522,6 +535,7 @@ impl StageInventoryItems for PgBatch {
         self.stage(Staged::InventoryItem(item.snapshot()));
         let version = item.version().next();
         self.stage_events_of(item, version);
+        self.stage_movements_of(item);
         item.set_version(version);
     }
 
@@ -531,6 +545,7 @@ impl StageInventoryItems for PgBatch {
         if !events.is_empty() {
             self.stage(Staged::Events(events, None));
         }
+        self.stage_movements_of(item);
     }
 }
 
@@ -673,6 +688,7 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         let now = batch.now;
         let mut items = Vec::new();
         let mut deleted = Vec::new();
+        let mut movements = Vec::new();
         let mut records = Vec::new();
 
         let mut conn = self.conn().await;
@@ -752,6 +768,7 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     }
                     Staged::InventoryItem(s) => items.push(s),
                     Staged::DeletedInventoryItem(s) => deleted.push(s),
+                    Staged::StockMovements(staged) => movements.extend(staged),
                     Staged::TaxAssignment(products, class) => {
                         assign_tax_class(&db, &products, class).await?;
                     }
@@ -869,6 +886,7 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
             lock_items(&db, &ids).await?;
             update_items(&db, items).await?;
             delete_items(&db, &deleted).await?;
+            insert_movements(&db, &movements, &self.event_stamp()).await?;
             Ok(())
         }
         .await;

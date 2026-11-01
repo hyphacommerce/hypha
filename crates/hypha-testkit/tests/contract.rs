@@ -135,6 +135,11 @@ fn batch() {
 }
 
 #[test]
+fn stock_movements() {
+    block_on(contract::stock_movements(async || InMemoryPorts::default()));
+}
+
+#[test]
 fn preview_token_repo() {
     block_on(contract::preview_token_repo(async || {
         InMemoryPorts::default()
