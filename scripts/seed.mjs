@@ -1842,21 +1842,18 @@ async function seedPurchasing() {
   for (const spec of SUPPLIERS) {
     const earlier = existing.get(spec.name);
     if (earlier) {
-      // Its orders are what a finished run left; without any, that run stopped early.
-      const orders = await admin.get(`/admin/purchase-orders?supplier=${earlier.id}&limit=1`);
-      if (orders.items.length > 0) continue;
+      made[spec.name] = earlier;
+      continue;
     }
-    const supplier =
-      earlier ??
-      (await admin.post("/admin/suppliers", {
-        name: spec.name,
-        currency: spec.currency,
-        contacts: [{ ...spec.contact, primary: true }],
-        payment_terms: spec.payment_terms,
-        lead_time_days: spec.lead_time_days,
-        tax_number: spec.tax_number,
-        notes: spec.notes,
-      }));
+    const supplier = await admin.post("/admin/suppliers", {
+      name: spec.name,
+      currency: spec.currency,
+      contacts: [{ ...spec.contact, primary: true }],
+      payment_terms: spec.payment_terms,
+      lead_time_days: spec.lead_time_days,
+      tax_number: spec.tax_number,
+      notes: spec.notes,
+    });
     let n = 0;
     for (const variant of variantsOf(spec.products)) {
       n += 1;
@@ -1870,51 +1867,73 @@ async function seedPurchasing() {
     added.push(`supplier ${spec.name} (${n} in its catalogue)`);
   }
 
+  // Each order is known by its supplier's reference, and brought to the state it's meant
+  // to be in step by step, so a run that stopped halfway is finished by the next.
   const firstOf = (handles) => handles.map((h) => products[h]?.variants?.[0]).filter(Boolean);
-  const receiveAll = async (po, rejected = 0) => {
-    const lines = po.lines.map((line, i) => ({
-      variant: line.variant,
-      accepted: line.quantity - (i === 0 ? rejected : 0),
-      rejected: i === 0 ? rejected : 0,
-    }));
-    return admin.post(`/admin/purchase-orders/${po.id}/receipts`, { lines, note: "Pallet 1" });
+  // A listed order has no reference: the supplier's few orders are read whole.
+  const ordersOf = async (supplier) =>
+    Promise.all(
+      (await all(`/admin/purchase-orders?supplier=${supplier.id}`)).map((po) =>
+        admin.get(`/admin/purchase-orders/${po.id}`),
+      ),
+    );
+  const ensure = async (supplier, reference, body) => {
+    const found = (await ordersOf(supplier)).find((po) => po.supplier_reference === reference);
+    if (found) return { po: found, made: false };
+    const po = await admin.post("/admin/purchase-orders", {
+      supplier: supplier.id,
+      supplier_reference: reference,
+      ...body,
+    });
+    return { po, made: true };
   };
+  const ordered = async (po) =>
+    po.status === "draft" ? await admin.post(`/admin/purchase-orders/${po.id}/order`) : po;
 
   const forge = made["Fungi Forge"];
   if (forge) {
     // Received in full (one kit came crushed), then the carrier's bill came late.
     const kits = firstOf(["oyster-grow-kit", "lions-mane-grow-kit", "reishi-antler-kit"]);
-    const received = await admin.post("/admin/purchase-orders", {
-      supplier: forge.id,
+    let { po, made: fresh } = await ensure(forge, "FF-SO-2211", {
       destination: farm.id,
-      supplier_reference: "FF-SO-2211",
       lines: kits.map((variant) => ({ variant: variant.id, quantity: 24 })),
       costs: [{ kind: "shipping", description: "Pallet freight", amount: eur(45) }],
     });
-    await admin.post(`/admin/purchase-orders/${received.id}/order`);
-    const done = await receiveAll(received, 1);
-    await admin.patch(`/admin/purchase-orders/${received.id}`, {
-      costs: [
-        ...done.purchase_order.costs,
-        { kind: "fees", description: "Pallet handling, billed late", amount: eur(18) },
-      ],
-    });
+    po = await ordered(po);
+    if (po.receipt_status === "none") {
+      const lines = po.lines.map((line, i) => ({
+        variant: line.variant,
+        accepted: line.quantity - (i === 0 ? 1 : 0),
+        rejected: i === 0 ? 1 : 0,
+      }));
+      po = (
+        await admin.post(`/admin/purchase-orders/${po.id}/receipts`, { lines, note: "Pallet 1" })
+      ).purchase_order;
+    }
+    if (!po.costs.some((cost) => cost.kind === "fees")) {
+      await admin.patch(`/admin/purchase-orders/${po.id}`, {
+        costs: [
+          ...po.costs,
+          { kind: "fees", description: "Pallet handling, billed late", amount: eur(18) },
+        ],
+      });
+      fresh = true;
+    }
     // A draft for the next season.
-    await admin.post("/admin/purchase-orders", {
-      supplier: forge.id,
+    const draft = await ensure(forge, "FF-SO-2240", {
       destination: farm.id,
       note: "Holiday restock: confirm quantities with the farm first.",
       lines: kits.slice(0, 2).map((variant) => ({ variant: variant.id, quantity: 48 })),
     });
-    added.push("Fungi Forge: a received purchase order with a late fee, and a draft");
+    if (fresh || draft.made)
+      added.push("Fungi Forge: a received purchase order with a late fee, and a draft");
   }
 
   const northlab = made["Northlab Scientific"];
   if (northlab) {
     // In dollars, half of it here so far; the EU duties paid on arrival in euros.
     const lab = firstOf(["agar-plates", "still-air-box"]);
-    const po = await admin.post("/admin/purchase-orders", {
-      supplier: northlab.id,
+    let { po, made: fresh } = await ensure(northlab, "NL-Q-88412", {
       destination: farm.id,
       exchange_rate: (1 / USD_PER_EUR).toFixed(8),
       lines: lab.map((variant) => ({ variant: variant.id, quantity: 10 })),
@@ -1923,27 +1942,30 @@ async function seedPurchasing() {
         { kind: "duties", amount: eur(25), allocation: "by_quantity" },
       ],
     });
-    await admin.post(`/admin/purchase-orders/${po.id}/order`);
-    await admin.post(`/admin/purchase-orders/${po.id}/receipts`, {
-      lines: [{ variant: lab[0].id, accepted: 5, rejected: 0 }],
-      note: "First box; the rest is back-ordered.",
-    });
-    added.push("Northlab Scientific: a partly received purchase order in dollars");
+    po = await ordered(po);
+    if (po.receipt_status === "none") {
+      await admin.post(`/admin/purchase-orders/${po.id}/receipts`, {
+        lines: [{ variant: lab[0].id, accepted: 5, rejected: 0 }],
+        note: "First box; the rest is back-ordered.",
+      });
+      fresh = true;
+    }
+    if (fresh) added.push("Northlab Scientific: a partly received purchase order in dollars");
   }
 
   const bloom = made["Bloom Packaging"];
   if (bloom) {
     // Ordered, on its way to New Jersey: incoming stock.
     const bags = firstOf(["grain-spawn-bag", "packaging-inserts"]);
-    const po = await admin.post("/admin/purchase-orders", {
-      supplier: bloom.id,
+    const { po, made: fresh } = await ensure(bloom, "BP-7731", {
       destination: newJersey.id,
       expected_at: daysFromNow(10),
       note_to_supplier: "Please label each carton with our PO number.",
       lines: bags.map((variant) => ({ variant: variant.id, quantity: 200 })),
     });
-    await admin.post(`/admin/purchase-orders/${po.id}/order`);
-    added.push("Bloom Packaging: an ordered purchase order still to arrive");
+    const sent = po.status === "draft";
+    await ordered(po);
+    if (fresh || sent) added.push("Bloom Packaging: an ordered purchase order still to arrive");
   }
 
   // A transfer in transit from the farm to New Jersey, of what the farm has enough of.
