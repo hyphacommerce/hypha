@@ -10,7 +10,7 @@ use hypha_core::{
 };
 
 use crate::{
-    MAX_LINES, PurchasingError, ReceivedQuantities,
+    MAX_LINES, PurchasingError, ReceiptBasis, ReceivedQuantities,
     events::{RECEIPT, ReceiptCancelled, ReceiptCreated, ReceiptLineEvent},
     purchase_order::long_text,
 };
@@ -241,6 +241,14 @@ impl Receipt {
     /// Its counts, to record on or take back off its order.
     pub fn quantities(&self) -> Vec<ReceivedQuantities> {
         self.lines.iter().map(ReceiptLine::quantities).collect()
+    }
+
+    /// What revaluing its order counts of it: its rate and what it took in.
+    pub fn basis(&self) -> ReceiptBasis {
+        ReceiptBasis {
+            exchange_rate: self.exchange_rate,
+            lines: self.quantities(),
+        }
     }
 }
 

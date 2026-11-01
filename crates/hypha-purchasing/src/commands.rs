@@ -529,8 +529,11 @@ pub async fn list_purchase_orders<S: HasPurchaseOrders>(
     Ok(ports.purchase_orders().list(&filter, sort, page).await?)
 }
 
-/// Changes a draft or ordered purchase order (`PurchaseOrder::update`'s rules). `store`
-/// is the store's base currency.
+/// Changes a draft or ordered purchase order (`PurchaseOrder::update`'s rules), or a
+/// closed one's extra costs. `store` is the store's base currency.
+///
+/// An order goods arrived on whose extra costs change revalues that stock too, which
+/// this command can't write: `hypha_receiving::update_purchase_order` does both.
 pub async fn update_purchase_order<S: HasSupplierVariants + HasPurchaseOrders>(
     ctx: &Ctx,
     ports: &S,
@@ -542,6 +545,24 @@ pub async fn update_purchase_order<S: HasSupplierVariants + HasPurchaseOrders>(
 ) -> Result<PurchaseOrder, CommandError> {
     ctx.require(Scope::PurchasingWrite)?;
     let mut po = load_po(ports, id).await?;
+    apply_update(ports, clock.now(), store, variants, &mut po, input).await?;
+    if po.is_changed() {
+        ports.purchase_orders().update(&mut po).await?;
+    }
+    Ok(po)
+}
+
+/// `input` applied to `po` (`PurchaseOrder::update`'s rules), not written: what
+/// `update_purchase_order` and the receiving workflow's update share. The caller has
+/// checked the scope.
+pub async fn apply_update<S: HasSupplierVariants + HasPurchaseOrders>(
+    ports: &S,
+    now: Timestamp,
+    store: Option<Currency>,
+    variants: &[VariantInfo],
+    po: &mut PurchaseOrder,
+    input: UpdatePurchaseOrder,
+) -> Result<(), CommandError> {
     let mut draft = po.draft();
     if let Some(destination) = input.destination {
         draft.destination = destination;
@@ -572,7 +593,7 @@ pub async fn update_purchase_order<S: HasSupplierVariants + HasPurchaseOrders>(
             ports,
             po.supplier(),
             draft.currency,
-            Some(&po),
+            Some(po),
             variants,
             lines,
         )
@@ -597,11 +618,8 @@ pub async fn update_purchase_order<S: HasSupplierVariants + HasPurchaseOrders>(
     if let Some(tax) = input.tax {
         draft.tax = tax;
     }
-    po.update(draft, store, clock.now())?;
-    if po.is_changed() {
-        ports.purchase_orders().update(&mut po).await?;
-    }
-    Ok(po)
+    po.update(draft, store, now)?;
+    Ok(())
 }
 
 /// Deletes a draft purchase order (`purchase_order_not_draft` otherwise).

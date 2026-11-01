@@ -7858,6 +7858,110 @@ async fn incoming_stock_is_what_ordered_purchase_orders_still_bring() {
 }
 
 #[tokio::test]
+async fn a_late_cost_revalues_the_stock_that_arrived() {
+    let app = app().await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let (_, locations) = send(&app, "GET", "/admin/locations", None).await;
+    let location = locations["items"][0]["id"].as_str().unwrap().to_string();
+    send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    let supplier = json!({"name": "Spore Labs", "currency": "EUR"});
+    let (_, supplier) = send(
+        &app,
+        "POST",
+        "/admin/suppliers",
+        Some(&supplier.to_string()),
+    )
+    .await;
+    let draft = json!({
+        "supplier": supplier["id"],
+        "destination": location,
+        "lines": [{"variant": mug, "quantity": 4, "unit_cost": {"amount": "500", "currency": "EUR"}}]
+    });
+    let (_, po) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&draft.to_string()),
+    )
+    .await;
+    let path = format!("/admin/purchase-orders/{}", po["id"].as_str().unwrap());
+    send(&app, "POST", &format!("{path}/order"), None).await;
+    let receipt = json!({"lines": [{"variant": mug, "accepted": 4, "rejected": 0}]});
+    let (status, received) = send(
+        &app,
+        "POST",
+        &format!("{path}/receipts"),
+        Some(&receipt.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{received}");
+    assert_eq!(received["purchase_order"]["status"], json!("closed"));
+    let stock_of = format!("/admin/variants/{mug}/inventory");
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(
+        stock["unit_cost"],
+        json!({"amount": "500", "currency": "EUR"})
+    );
+
+    // The carrier's bill comes after the goods: €8.00 over the 4, €2.00 more each.
+    let costs =
+        json!({"costs": [{"kind": "shipping", "amount": {"amount": 800, "currency": "EUR"}}]});
+    let (status, closed) = send(&app, "PATCH", &path, Some(&costs.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(
+        (&closed["status"], &closed["revision"]),
+        (&json!("closed"), &json!(1))
+    );
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(
+        stock["unit_cost"],
+        json!({"amount": "700", "currency": "EUR"})
+    );
+    let item = stock["id"].as_str().unwrap();
+    let (_, history) = send(
+        &app,
+        "GET",
+        &format!("/admin/inventory-items/{item}/movements?limit=1"),
+        None,
+    )
+    .await;
+    let row = &history["items"][0];
+    assert_eq!(
+        (
+            &row["reason"],
+            &row["delta"],
+            &row["location"],
+            &row["source"],
+            &row["unit_cost"],
+            &row["average_after"]
+        ),
+        (
+            &json!("cost_adjustment"),
+            &json!(0),
+            &Value::Null,
+            &json!({"type": "purchase_order", "purchase_order": closed["id"]}),
+            &json!({"amount": "500", "currency": "EUR"}),
+            &json!({"amount": "700", "currency": "EUR"})
+        )
+    );
+
+    // Anything but the costs stays as it was on a closed order.
+    let (status, body) = send(&app, "PATCH", &path, Some(r#"{"note":"late"}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "purchase_order_not_open")
+    );
+    // Removing the cost takes the value back off.
+    let (status, _) = send(&app, "PATCH", &path, Some(r#"{"costs":[]}"#)).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(
+        stock["unit_cost"],
+        json!({"amount": "500", "currency": "EUR"})
+    );
+}
+
+#[tokio::test]
 async fn receiving_brings_stock_in_at_its_landed_cost_and_can_be_taken_back() {
     let app = app().await;
     let (_, mug) = market_selling_a_mug(&app).await;

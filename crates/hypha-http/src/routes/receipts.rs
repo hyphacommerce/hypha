@@ -255,7 +255,8 @@ pub async fn cancel<S: Storage>(
     PathId(id): PathId<ReceiptId>,
 ) -> Result<Json<CancelledReceiptResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let taken = cancel_receipt(&ctx, &ports, &state.clock, id).await?;
+    let store = store_currency(&state, &ports).await?;
+    let taken = cancel_receipt(&ctx, &ports, &state.clock, store, id).await?;
     Ok(Json(CancelledReceiptResponse {
         receipt: ReceiptResponse::new(&taken.receipt)?,
         purchase_order: respond(&state, &ports, &taken.purchase_order).await?,

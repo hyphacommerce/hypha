@@ -17,7 +17,7 @@ pub mod supplier;
 pub use catalogue::{SupplierVariant, SupplierVariantDraft};
 pub use commands::{
     CommandError, LineInput, NewPurchaseOrder, SendPurchaseOrder, UpdatePurchaseOrder,
-    UpdateSupplier, VariantInfo, cancel_purchase_order, close_purchase_order,
+    UpdateSupplier, VariantInfo, apply_update, cancel_purchase_order, close_purchase_order,
     create_purchase_order, create_supplier, delete_purchase_order, delete_supplier,
     get_purchase_order, get_receipt, get_supplier, list_purchase_orders, list_receipts,
     list_supplier_variants, list_suppliers, order_purchase_order, remove_supplier_variant,
@@ -37,7 +37,7 @@ pub use purchase_order::{
     CostDraft, CostKind, ExtraCost, LineDraft, LineSnapshot, MAX_COSTS, MAX_LINES,
     MAX_MESSAGE_CHARS, MAX_RECIPIENTS, PurchaseOrder, PurchaseOrderDraft, PurchaseOrderLine,
     PurchaseOrderNumber, PurchaseOrderSnapshot, PurchaseOrderStatus, PurchaseOrderSummary,
-    PurchaseOrderTotals, ReceiptStatus, ReceivedQuantities, Sending,
+    PurchaseOrderTotals, ReceiptBasis, ReceiptStatus, ReceivedQuantities, Revaluation, Sending,
 };
 pub use receipt::{NewReceipt, Receipt, ReceiptLine, ReceiptSnapshot, ReceiptState};
 pub use repo::{

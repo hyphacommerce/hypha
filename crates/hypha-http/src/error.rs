@@ -1809,6 +1809,7 @@ impl From<hypha_receiving::CommandError> for ApiError {
         // The order's and the stock's own rules answer as they do on their routes.
         let e = match e {
             E::Purchasing(p) => return hypha_purchasing::CommandError::Purchasing(p).into(),
+            E::PurchaseOrder(p) => return p.into(),
             E::Inventory(i) => return hypha_inventory::CommandError::Inventory(i).into(),
             other => other,
         };
@@ -1821,7 +1822,10 @@ impl From<hypha_receiving::CommandError> for ApiError {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
             E::StoreCurrencyRequired => StatusCode::CONFLICT,
-            E::Purchasing(_) | E::Inventory(_) | E::Repo(RepoError::Backend(_)) => {
+            E::Purchasing(_)
+            | E::PurchaseOrder(_)
+            | E::Inventory(_)
+            | E::Repo(RepoError::Backend(_)) => {
                 return Self::internal(e);
             }
             E::Repo(

@@ -14,10 +14,10 @@ use hypha_purchasing::{
     CostAllocation, CostDraft, CostKind, HasSuppliers, LineInput, NewPurchaseOrder, PurchaseOrder,
     PurchaseOrderFilter, PurchaseOrderSort, PurchaseOrderStatus, PurchaseOrderSummary,
     ReceiptStatus, SendPurchaseOrder, ShipTo, SupplierRepo, UpdatePurchaseOrder, VariantInfo,
-    cancel_purchase_order, close_purchase_order, create_purchase_order, delete_purchase_order,
-    get_purchase_order, list_purchase_orders, order_purchase_order, send_purchase_order,
-    update_purchase_order,
+    cancel_purchase_order, create_purchase_order, delete_purchase_order, get_purchase_order,
+    list_purchase_orders, order_purchase_order, send_purchase_order,
 };
+use hypha_receiving::{close_purchase_order, update_purchase_order};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -760,8 +760,12 @@ pub struct UpdatePurchaseOrderRequest {
     tax: Option<Option<Money>>,
 }
 
-/// Changes a draft or ordered purchase order (JSON Merge Patch). Each change to an ordered
-/// one counts a revision; one whose lines are all accounted for after it closes.
+/// Changes a draft or ordered purchase order (JSON Merge Patch), or a closed one's
+/// extra costs (anything else on it is `409 purchase_order_not_open`). Each change to an
+/// ordered or closed one counts a revision; one whose lines are all accounted for after
+/// it closes. When goods arrived on it, a change to what its extra costs put on each unit
+/// revalues that stock: each item's cost moves by its share of the difference over the
+/// units on hand, with a `cost_adjustment` row in its history.
 #[utoipa::path(
     patch,
     path = "/admin/purchase-orders/{id}",
@@ -902,6 +906,8 @@ pub async fn send<S: Storage>(
 }
 
 /// Ends an ordered purchase order early: what's outstanding on each line is cancelled.
+/// The extra costs then spread over fewer units, so the stock that arrived is revalued
+/// for its bigger share.
 #[utoipa::path(
     post,
     path = "/admin/purchase-orders/{id}/close",
@@ -915,7 +921,8 @@ pub async fn close<S: Storage>(
     PathId(id): PathId<PurchaseOrderId>,
 ) -> Result<Json<PurchaseOrderResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let po = close_purchase_order(&ctx, &ports, &state.clock, id).await?;
+    let store = store_currency(&state, &ports).await?;
+    let po = close_purchase_order(&ctx, &ports, &state.clock, store, id).await?;
     Ok(Json(respond(&state, &ports, &po).await?))
 }
 

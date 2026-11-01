@@ -1,7 +1,10 @@
 //! A purchase order: what the store orders from one supplier, to one of its locations,
 //! and how much of it has arrived.
 
-use std::{collections::HashSet, fmt};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+};
 
 use hypha_core::{
     Currency, Email, ExchangeRate, LocationId, Money, PendingEvent, PurchaseOrderId, Recorded,
@@ -232,6 +235,11 @@ pub struct PurchaseOrderLine {
     received: u32,
     rejected: u32,
     cancelled: u32,
+    /// The extra costs' value the stock received on this line carries, in the store's
+    /// currency in `UnitCost`'s scaled units: what a later change to the extra costs is
+    /// measured against. `None` for a line received before it was kept, which is then
+    /// measured against the order as it was before the change.
+    extra_applied: Option<i64>,
 }
 
 impl PurchaseOrderLine {
@@ -250,6 +258,7 @@ impl PurchaseOrderLine {
             received: 0,
             rejected: 0,
             cancelled: 0,
+            extra_applied: Some(0),
         })
     }
 
@@ -291,6 +300,11 @@ impl PurchaseOrderLine {
 
     pub fn cancelled(&self) -> u32 {
         self.cancelled
+    }
+
+    /// The extra costs' value the stock received on this line carries (see the field).
+    pub fn extra_applied(&self) -> Option<i64> {
+        self.extra_applied
     }
 
     /// Received or rejected: what receipts accounted for.
@@ -523,6 +537,22 @@ pub struct ReceivedQuantities {
     pub rejected: u32,
 }
 
+/// A recorded receipt as revaluing sees it: the rate it used and what it took in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReceiptBasis {
+    pub exchange_rate: Option<ExchangeRate>,
+    pub lines: Vec<ReceivedQuantities>,
+}
+
+/// The value one variant's stock gains (or loses, negative) when what the extra costs
+/// spread over its received units changes: in the store's currency, in `UnitCost`'s
+/// scaled units.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Revaluation {
+    pub variant: VariantId,
+    pub value: i128,
+}
+
 /// What an order adds up to, in its currency, plus the extra costs paid in the store's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PurchaseOrderTotals {
@@ -728,17 +758,19 @@ impl PurchaseOrder {
     /// (`purchase_order_line_received`), with a quantity no lower than what arrived
     /// (`below_received`); it must still be orderable (`store` is the store's currency),
     /// and each edit counts a revision. One whose lines are all accounted for after the
-    /// edit closes. A closed or cancelled order doesn't change (`purchase_order_not_open`).
+    /// edit closes. A closed order takes changes to its extra costs only, and a cancelled
+    /// one none (`purchase_order_not_open`).
     pub fn update(
         &mut self,
         draft: PurchaseOrderDraft,
         store: Option<Currency>,
         now: Timestamp,
     ) -> Result<(), PurchasingError> {
-        let ordered = match self.status {
-            PurchaseOrderStatus::Draft => false,
-            PurchaseOrderStatus::Ordered => true,
-            status @ (PurchaseOrderStatus::Closed | PurchaseOrderStatus::Cancelled) => {
+        let (ordered, closed) = match self.status {
+            PurchaseOrderStatus::Draft => (false, false),
+            PurchaseOrderStatus::Ordered => (true, false),
+            PurchaseOrderStatus::Closed => (true, true),
+            status @ PurchaseOrderStatus::Cancelled => {
                 return Err(PurchasingError::NotOpen {
                     status: status.as_str(),
                 });
@@ -764,6 +796,7 @@ impl PurchaseOrder {
                     new.received = old.received;
                     new.rejected = old.rejected;
                     new.cancelled = old.cancelled.min(new.quantity - minimum);
+                    new.extra_applied = old.extra_applied;
                 }
                 None if old.arrived() > 0 => {
                     return Err(PurchasingError::LineReceived(old.variant));
@@ -799,6 +832,13 @@ impl PurchaseOrder {
         if changed.is_empty() {
             return Ok(());
         }
+        // A closed order is done but for what its goods cost: its extra costs may still
+        // change (a carrier's bill that came late).
+        if closed && changed != ["costs"] {
+            return Err(PurchasingError::NotOpen {
+                status: self.status.as_str(),
+            });
+        }
         let mut next = self.clone();
         next.fields = fields;
         next.lines = lines;
@@ -810,7 +850,7 @@ impl PurchaseOrder {
             next.changes.field(field);
         }
         next.refresh_receipt_status();
-        if ordered && next.all_accounted_for() {
+        if ordered && !closed && next.all_accounted_for() {
             next.close_now(now);
         }
         *self = next;
@@ -1152,6 +1192,144 @@ impl PurchaseOrder {
             .collect()
     }
 
+    /// Per variant, what each unit carries of the extra costs, in `store`, at `rate`:
+    /// its landed cost less the landed cost of its unit cost alone, in `UnitCost`'s
+    /// scaled units. `None` for every line when the order needs a rate and has none.
+    pub fn extras_per_unit(
+        &self,
+        store: Currency,
+        rate: Option<ExchangeRate>,
+    ) -> Result<HashMap<VariantId, Option<i128>>, PurchasingError> {
+        let landed = self.landed_costs(store, rate)?;
+        self.lines
+            .iter()
+            .zip(landed)
+            .map(|(line, landed)| {
+                let bare = self.bare_landed_cost(line.variant, store, rate)?;
+                let extra = match (landed, bare) {
+                    (Some(landed), Some(bare)) => {
+                        Some(i128::from(landed.scaled()) - i128::from(bare.scaled()))
+                    }
+                    _ => None,
+                };
+                Ok((line.variant, extra))
+            })
+            .collect()
+    }
+
+    /// A line's unit cost alone in `store`, at `rate`, without any extra cost: `None`
+    /// for a variant not on the order, or when a rate is needed and missing.
+    pub fn bare_landed_cost(
+        &self,
+        variant: VariantId,
+        store: Currency,
+        rate: Option<ExchangeRate>,
+    ) -> Result<Option<UnitCost>, PurchasingError> {
+        let Some(line) = self.line(variant) else {
+            return Ok(None);
+        };
+        Ok(landed_unit_cost(
+            line.unit_cost,
+            UnitCost::zero(self.fields.currency),
+            UnitCost::zero(store),
+            rate,
+            store,
+        )?)
+    }
+
+    /// The extra costs' value the stock received on each line should carry now: every
+    /// accepted unit of `receipts` (the recorded ones) at the extra per unit the order
+    /// spreads now, at its receipt's rate.
+    pub fn extra_due(
+        &self,
+        store: Currency,
+        receipts: &[ReceiptBasis],
+    ) -> Result<HashMap<VariantId, i128>, PurchasingError> {
+        let mut due: HashMap<VariantId, i128> = HashMap::new();
+        for receipt in receipts {
+            let extras = self.extras_per_unit(store, receipt.exchange_rate)?;
+            for counted in receipt.lines.iter().filter(|l| l.accepted > 0) {
+                let Some(Some(extra)) = extras.get(&counted.variant) else {
+                    continue;
+                };
+                *due.entry(counted.variant).or_default() += i128::from(counted.accepted) * extra;
+            }
+        }
+        Ok(due)
+    }
+
+    /// Brings the extra value each line's received stock carries to what's due now
+    /// (`extra_due` over `receipts`, the recorded ones) and returns the differences for
+    /// the caller to put on the stock: an extra cost added, changed or removed after
+    /// goods arrived, or a spread that changed (closing cancels what's outstanding, so
+    /// fewer units share the costs). A line without a kept value is measured against
+    /// `before` (what was due before the change), or taken as already right.
+    pub fn revalue(
+        &mut self,
+        store: Currency,
+        receipts: &[ReceiptBasis],
+        before: &HashMap<VariantId, i128>,
+    ) -> Result<Vec<Revaluation>, PurchasingError> {
+        let due = self.extra_due(store, receipts)?;
+        let mut next = self.lines.clone();
+        let mut changes = Vec::new();
+        for line in &mut next {
+            let now = due.get(&line.variant).copied().unwrap_or(0);
+            let applied = match line.extra_applied {
+                Some(applied) => i128::from(applied),
+                None => before.get(&line.variant).copied().unwrap_or(now),
+            };
+            line.extra_applied = Some(scaled_value(now)?);
+            if now != applied {
+                changes.push(Revaluation {
+                    variant: line.variant,
+                    value: now - applied,
+                });
+            }
+        }
+        self.lines = next;
+        Ok(changes)
+    }
+
+    /// Counts the extra value `accepted` units of `variant` brought in at `per_unit`
+    /// (what each carried of the extra costs): call it after `record_receipt`. A line
+    /// without a kept value starts one only when these are its first units.
+    pub fn add_extra_applied(
+        &mut self,
+        variant: VariantId,
+        accepted: u32,
+        per_unit: i128,
+    ) -> Result<(), PurchasingError> {
+        let Some(line) = self.lines.iter_mut().find(|l| l.variant == variant) else {
+            return Ok(());
+        };
+        let value = i128::from(accepted) * per_unit;
+        line.extra_applied = match line.extra_applied {
+            Some(applied) => Some(scaled_value(i128::from(applied) + value)?),
+            None if line.received == accepted => Some(scaled_value(value)?),
+            None => None,
+        };
+        Ok(())
+    }
+
+    /// Takes off the extra value `accepted` units of `variant` carried at `per_unit`,
+    /// for a receipt taken back.
+    pub fn take_extra_applied(
+        &mut self,
+        variant: VariantId,
+        accepted: u32,
+        per_unit: i128,
+    ) -> Result<(), PurchasingError> {
+        let Some(line) = self.lines.iter_mut().find(|l| l.variant == variant) else {
+            return Ok(());
+        };
+        if let Some(applied) = line.extra_applied {
+            let value = i128::from(applied) - i128::from(accepted) * per_unit;
+            line.extra_applied = Some(scaled_value(value)?);
+        }
+        Ok(())
+    }
+
     /// The order's editable fields as a draft, to change some and `update`.
     pub fn draft(&self) -> PurchaseOrderDraft {
         let f = &self.fields;
@@ -1267,6 +1445,11 @@ impl PurchaseOrder {
     }
 }
 
+/// A value in `UnitCost`'s scaled units as stored.
+fn scaled_value(value: i128) -> Result<i64, PurchasingError> {
+    i64::try_from(value).map_err(|_| PurchasingError::Money(hypha_core::MoneyError::Overflow))
+}
+
 fn add_count(count: u32, more: u32) -> Result<u32, PurchasingError> {
     count
         .checked_add(more)
@@ -1286,6 +1469,8 @@ pub struct LineSnapshot {
     pub received: u32,
     pub rejected: u32,
     pub cancelled: u32,
+    /// The extra costs' value its received stock carries (`PurchaseOrderLine`'s field).
+    pub extra_applied: Option<i64>,
 }
 
 /// Plain-data form of a `PurchaseOrder` for storage adapters.
@@ -1349,6 +1534,7 @@ impl PurchaseOrder {
                     received: l.received,
                     rejected: l.rejected,
                     cancelled: l.cancelled,
+                    extra_applied: l.extra_applied,
                 })
                 .collect(),
             costs: draft.costs,
@@ -1366,10 +1552,10 @@ impl PurchaseOrder {
     /// Rebuilds an order from storage, checked like a draft (lines, costs, texts), its
     /// counts as stored.
     pub fn restore(s: PurchaseOrderSnapshot) -> Result<PurchaseOrder, PurchasingError> {
-        let counts: Vec<(u32, u32, u32)> = s
+        let counts: Vec<(u32, u32, u32, Option<i64>)> = s
             .lines
             .iter()
-            .map(|l| (l.received, l.rejected, l.cancelled))
+            .map(|l| (l.received, l.rejected, l.cancelled, l.extra_applied))
             .collect();
         let draft = PurchaseOrderDraft {
             destination: s.destination,
@@ -1397,10 +1583,11 @@ impl PurchaseOrder {
             tax: s.tax,
         };
         let (fields, mut lines) = check(draft)?;
-        for (line, (received, rejected, cancelled)) in lines.iter_mut().zip(counts) {
+        for (line, (received, rejected, cancelled, extra)) in lines.iter_mut().zip(counts) {
             line.received = received;
             line.rejected = rejected;
             line.cancelled = cancelled;
+            line.extra_applied = extra;
         }
         Ok(PurchaseOrder {
             id: s.id,
@@ -1844,8 +2031,10 @@ mod tests {
     fn closed_and_cancelled_orders_dont_change() {
         let mut po = ordered(vec![line(10, 5, "100")]);
         po.close(at(5)).unwrap();
+        let mut noted = po.draft();
+        noted.note = Some("late".into());
         assert_eq!(
-            po.update(po.draft(), Some(Currency::EUR), at(6)),
+            po.update(noted, Some(Currency::EUR), at(6)),
             Err(PurchasingError::NotOpen { status: "closed" })
         );
         assert_eq!(
@@ -2278,5 +2467,272 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    // ---- late costs ----
+
+    fn shipping(amount: i64, currency: Currency) -> CostDraft {
+        CostDraft {
+            kind: CostKind::Shipping,
+            description: None,
+            amount: Money::new(amount, currency).unwrap(),
+            allocation: CostAllocation::ByQuantity,
+        }
+    }
+
+    fn basis(rate: Option<ExchangeRate>, lines: Vec<ReceivedQuantities>) -> ReceiptBasis {
+        ReceiptBasis {
+            exchange_rate: rate,
+            lines,
+        }
+    }
+
+    fn with_costs(po: &PurchaseOrder, costs: Vec<CostDraft>) -> PurchaseOrderDraft {
+        PurchaseOrderDraft {
+            costs,
+            ..po.draft()
+        }
+    }
+
+    #[test]
+    fn new_lines_start_with_no_extra_value() {
+        let po = ordered(vec![line(10, 5, "100")]);
+        assert_eq!(po.lines()[0].extra_applied(), Some(0));
+    }
+
+    #[test]
+    fn a_closed_order_takes_changes_to_its_extra_costs_only() {
+        let mut po = ordered(vec![line(10, 5, "100")]);
+        po.close(at(5)).unwrap();
+        po.take_events();
+        let costs = with_costs(&po, vec![shipping(1000, Currency::EUR)]);
+        assert_eq!(po.update(costs, Some(Currency::EUR), at(6)), Ok(()));
+        assert_eq!(
+            (po.status(), po.costs().len(), po.revision()),
+            (PurchaseOrderStatus::Closed, 1, 1)
+        );
+        assert_eq!(event_types(&mut po), ["purchase_order.updated"]);
+        let mut both = with_costs(&po, vec![]);
+        both.note = Some("and a note".into());
+        assert_eq!(
+            po.update(both, Some(Currency::EUR), at(7)),
+            Err(PurchasingError::NotOpen { status: "closed" })
+        );
+    }
+
+    #[test]
+    fn extras_per_unit_is_the_landed_cost_less_the_unit_cost_alone() {
+        let mut po = ordered(vec![line(10, 4, "100"), line(11, 6, "300")]);
+        po.update(
+            with_costs(&po, vec![shipping(1000, Currency::EUR)]),
+            Some(Currency::EUR),
+            at(5),
+        )
+        .unwrap();
+        let extras = po.extras_per_unit(Currency::EUR, None).unwrap();
+        // €10.00 over 10 units by quantity: 100 cents, 1,000,000 scaled, each.
+        assert_eq!(extras[&variant(10)], Some(1_000_000));
+        assert_eq!(extras[&variant(11)], Some(1_000_000));
+    }
+
+    #[test]
+    fn extras_need_a_rate_in_another_currency() {
+        let po = ordered(vec![line(10, 4, "100")]);
+        let extras = po.extras_per_unit(Currency::USD, None).unwrap();
+        assert_eq!(extras[&variant(10)], None);
+    }
+
+    #[test]
+    fn a_cost_added_after_a_receipt_revalues_what_arrived() {
+        let mut po = ordered(vec![line(10, 10, "100")]);
+        po.record_receipt(&[got(10, 4, 0)], false, at(5)).unwrap();
+        po.add_extra_applied(variant(10), 4, 0).unwrap();
+        let receipts = [basis(None, vec![got(10, 4, 0)])];
+        let before = po.extra_due(Currency::EUR, &receipts).unwrap();
+        po.update(
+            with_costs(&po, vec![shipping(1000, Currency::EUR)]),
+            Some(Currency::EUR),
+            at(6),
+        )
+        .unwrap();
+        // €10.00 over the 10 ordered: 100 cents a unit, 4 arrived: 400 cents.
+        assert_eq!(
+            po.revalue(Currency::EUR, &receipts, &before),
+            Ok(vec![Revaluation {
+                variant: variant(10),
+                value: 4_000_000
+            }])
+        );
+        assert_eq!(po.lines()[0].extra_applied(), Some(4_000_000));
+        // Nothing changed since: nothing more to apply.
+        assert_eq!(po.revalue(Currency::EUR, &receipts, &before), Ok(vec![]));
+    }
+
+    #[test]
+    fn a_cost_lowered_or_removed_takes_value_back() {
+        let mut po = ordered(vec![line(10, 10, "100")]);
+        po.update(
+            with_costs(&po, vec![shipping(1000, Currency::EUR)]),
+            Some(Currency::EUR),
+            at(4),
+        )
+        .unwrap();
+        po.record_receipt(&[got(10, 4, 0)], false, at(5)).unwrap();
+        po.add_extra_applied(variant(10), 4, 1_000_000).unwrap();
+        let receipts = [basis(None, vec![got(10, 4, 0)])];
+        po.update(
+            with_costs(&po, vec![shipping(500, Currency::EUR)]),
+            Some(Currency::EUR),
+            at(6),
+        )
+        .unwrap();
+        assert_eq!(
+            po.revalue(Currency::EUR, &receipts, &HashMap::new()),
+            Ok(vec![Revaluation {
+                variant: variant(10),
+                value: -2_000_000
+            }])
+        );
+        po.update(with_costs(&po, vec![]), Some(Currency::EUR), at(7))
+            .unwrap();
+        assert_eq!(
+            po.revalue(Currency::EUR, &receipts, &HashMap::new()),
+            Ok(vec![Revaluation {
+                variant: variant(10),
+                value: -2_000_000
+            }])
+        );
+        assert_eq!(po.lines()[0].extra_applied(), Some(0));
+    }
+
+    #[test]
+    fn each_receipt_counts_at_its_own_rate() {
+        // An order in USD for a EUR store: a €10.00 duty is in the store's currency and
+        // needs no rate; $10.00 shipping converts at each receipt's rate.
+        let mut po = PurchaseOrder::new(
+            PurchaseOrderId::from_uuid(id(1)),
+            PurchaseOrderNumber::new(1001).unwrap(),
+            SupplierId::from_uuid(id(2)),
+            PurchaseOrderDraft {
+                destination: Some(LocationId::from_uuid(id(50))),
+                exchange_rate: Some(ExchangeRate::parse("0.5").unwrap()),
+                lines: vec![LineDraft {
+                    unit_cost: UnitCost::parse("100", Currency::USD).unwrap(),
+                    ..line(10, 10, "100")
+                }],
+                ..PurchaseOrderDraft::new(Currency::USD)
+            },
+        )
+        .unwrap();
+        po.order(Some(Currency::EUR), "Spore Supply", None, at(1))
+            .unwrap();
+        po.record_receipt(&[got(10, 2, 0)], false, at(2)).unwrap();
+        po.record_receipt(&[got(10, 2, 0)], false, at(3)).unwrap();
+        let receipts = [
+            basis(
+                Some(ExchangeRate::parse("0.5").unwrap()),
+                vec![got(10, 2, 0)],
+            ),
+            basis(Some(ExchangeRate::parse("1").unwrap()), vec![got(10, 2, 0)]),
+        ];
+        po.update(
+            with_costs(
+                &po,
+                vec![shipping(1000, Currency::USD), shipping(1000, Currency::EUR)],
+            ),
+            Some(Currency::EUR),
+            at(4),
+        )
+        .unwrap();
+        // Per unit: $1.00 shipping (€0.50 at 0.5, €1.00 at 1) and €1.00 duty.
+        // 2 × (50 + 100) + 2 × (100 + 100) = 700 cents.
+        assert_eq!(
+            po.revalue(Currency::EUR, &receipts, &HashMap::new()),
+            Ok(vec![Revaluation {
+                variant: variant(10),
+                value: 7_000_000
+            }])
+        );
+    }
+
+    #[test]
+    fn closing_early_spreads_the_costs_over_fewer_units() {
+        let mut po = ordered(vec![line(10, 10, "100")]);
+        po.update(
+            with_costs(&po, vec![shipping(1000, Currency::EUR)]),
+            Some(Currency::EUR),
+            at(4),
+        )
+        .unwrap();
+        po.record_receipt(&[got(10, 5, 0)], false, at(5)).unwrap();
+        po.add_extra_applied(variant(10), 5, 1_000_000).unwrap();
+        po.close(at(6)).unwrap();
+        // 10 euros over the 5 that came: 200 cents each, 100 more for 5 units.
+        let receipts = [basis(None, vec![got(10, 5, 0)])];
+        assert_eq!(
+            po.revalue(Currency::EUR, &receipts, &HashMap::new()),
+            Ok(vec![Revaluation {
+                variant: variant(10),
+                value: 5_000_000
+            }])
+        );
+    }
+
+    #[test]
+    fn a_line_without_a_kept_value_is_measured_against_before() {
+        let mut snapshot = ordered(vec![line(10, 10, "100")]).snapshot();
+        snapshot.lines[0].received = 4;
+        snapshot.lines[0].extra_applied = None;
+        let mut po = PurchaseOrder::restore(snapshot).unwrap();
+        let receipts = [basis(None, vec![got(10, 4, 0)])];
+        let before = po.extra_due(Currency::EUR, &receipts).unwrap();
+        po.update(
+            with_costs(&po, vec![shipping(1000, Currency::EUR)]),
+            Some(Currency::EUR),
+            at(6),
+        )
+        .unwrap();
+        assert_eq!(
+            po.revalue(Currency::EUR, &receipts, &before),
+            Ok(vec![Revaluation {
+                variant: variant(10),
+                value: 4_000_000
+            }])
+        );
+        // Without `before`, it's taken as right and only starts being kept.
+        let mut snapshot = po.snapshot();
+        snapshot.lines[0].extra_applied = None;
+        let mut po = PurchaseOrder::restore(snapshot).unwrap();
+        assert_eq!(
+            po.revalue(Currency::EUR, &receipts, &HashMap::new()),
+            Ok(vec![])
+        );
+        assert_eq!(po.lines()[0].extra_applied(), Some(4_000_000));
+    }
+
+    #[test]
+    fn extra_value_is_added_and_taken_back_per_receipt() {
+        let mut po = ordered(vec![line(10, 10, "100")]);
+        po.record_receipt(&[got(10, 4, 0)], false, at(5)).unwrap();
+        po.add_extra_applied(variant(10), 4, 250).unwrap();
+        assert_eq!(po.lines()[0].extra_applied(), Some(1_000));
+        po.take_extra_applied(variant(10), 4, 250).unwrap();
+        assert_eq!(po.lines()[0].extra_applied(), Some(0));
+        // A line that arrived before values were kept starts none until revalued.
+        let mut snapshot = po.snapshot();
+        snapshot.lines[0].extra_applied = None;
+        let mut po = PurchaseOrder::restore(snapshot).unwrap();
+        po.record_receipt(&[got(10, 2, 0)], false, at(6)).unwrap();
+        po.add_extra_applied(variant(10), 2, 250).unwrap();
+        assert_eq!(po.lines()[0].extra_applied(), None);
+    }
+
+    #[test]
+    fn the_kept_value_survives_storage() {
+        let mut po = ordered(vec![line(10, 10, "100")]);
+        po.record_receipt(&[got(10, 4, 0)], false, at(5)).unwrap();
+        po.add_extra_applied(variant(10), 4, -3).unwrap();
+        let restored = PurchaseOrder::restore(po.snapshot()).unwrap();
+        assert_eq!(restored.lines()[0].extra_applied(), Some(-12));
     }
 }

@@ -4,15 +4,17 @@ use hypha_core::{
     Attempts, AuthError, Clock, Ctx, Currency, ErrorCode, HasBatch, HasIdempotency, IdGenerator,
     IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, InventoryItemId,
     LocationId, PurchaseOrderId, Quantity, QuantityError, ReceiptId, RepoError, Scope,
-    StageIdempotency, UnitCost, VariantId, earlier_id,
+    StageIdempotency, Timestamp, UnitCost, VariantId, earlier_id,
 };
 use hypha_inventory::{
     HasInventoryItems, HasLocations, InventoryError, InventoryItem, InventoryItemRepo,
     LocationRepo, StageInventoryItems, StockSource, repo::keys as inventory_keys,
 };
 use hypha_purchasing::{
-    HasPurchaseOrders, HasReceipts, NewReceipt, PurchaseOrder, PurchaseOrderRepo, PurchasingError,
-    Receipt, ReceiptLine, ReceiptRepo, ReceivedQuantities, StagePurchaseOrders, StageReceipts,
+    HasPurchaseOrders, HasReceipts, HasSupplierVariants, NewReceipt, PurchaseOrder,
+    PurchaseOrderRepo, PurchasingError, Receipt, ReceiptBasis, ReceiptLine, ReceiptRepo,
+    ReceiptState, ReceivedQuantities, Revaluation, StagePurchaseOrders, StageReceipts,
+    UpdatePurchaseOrder, VariantInfo,
 };
 use thiserror::Error;
 
@@ -27,6 +29,9 @@ pub enum CommandError {
     Repo(#[from] RepoError),
     #[error(transparent)]
     Purchasing(#[from] PurchasingError),
+    /// The order's own command refused (an update's lines or costs).
+    #[error(transparent)]
+    PurchaseOrder(#[from] hypha_purchasing::CommandError),
     #[error(transparent)]
     Inventory(#[from] InventoryError),
     #[error(transparent)]
@@ -51,6 +56,7 @@ impl ErrorCode for CommandError {
             CommandError::Auth(e) => e.code(),
             CommandError::Repo(e) => e.code(),
             CommandError::Purchasing(e) => e.code(),
+            CommandError::PurchaseOrder(e) => e.code(),
             CommandError::Inventory(e) => e.code(),
             CommandError::Quantity(e) => e.code(),
             CommandError::Idempotency(e) => e.code(),
@@ -190,6 +196,7 @@ async fn receive_once<S: ReceivingPorts>(
         .map(|l| l.variant())
         .zip(po.landed_costs(store, po.exchange_rate())?)
         .collect();
+    let extras = po.extras_per_unit(store, po.exchange_rate())?;
     let counted: Vec<ReceivedQuantities> = input
         .lines
         .iter()
@@ -201,6 +208,11 @@ async fn receive_once<S: ReceivingPorts>(
         .collect();
     let now = clock.now();
     po.record_receipt(&counted, input.allow_over, now)?;
+    for line in &counted {
+        if let Some(Some(extra)) = extras.get(&line.variant) {
+            po.add_extra_applied(line.variant, line.accepted, *extra)?;
+        }
+    }
     let Some(location) = input.location.or(po.destination()) else {
         return Err(PurchasingError::DestinationRequired.into());
     };
@@ -282,19 +294,22 @@ async fn receive_once<S: ReceivingPorts>(
 
 /// Takes back a receipt recorded by mistake: its counts come off the order's lines (a
 /// closed order opens again), and its accepted units come off stock at its location
-/// (which may go below zero), their value out of each item's moving average. One batch,
-/// retried like `receive`. Refused for a receipt taken back already (`receipt_cancelled`)
-/// or on a cancelled order.
+/// (which may go below zero), their value out of each item's moving average. When the
+/// extra costs changed since it arrived, what the rest of the order's stock carries of
+/// them is brought up to date too (`store_currency` is the store's). One batch, retried
+/// like `receive`. Refused for a receipt taken back already (`receipt_cancelled`) or on
+/// a cancelled order.
 pub async fn cancel_receipt<S: ReceivingPorts>(
     ctx: &Ctx,
     ports: &S,
     clock: &impl Clock,
+    store_currency: Option<Currency>,
     id: ReceiptId,
 ) -> Result<CancelledReceipt, CommandError> {
     ctx.require(Scope::PurchasingWrite)?;
     let mut attempts = Attempts::first();
     loop {
-        match cancel_receipt_once(ports, clock, id).await {
+        match cancel_receipt_once(ports, clock, store_currency, id).await {
             Err(e) if lost_a_race(&e) && attempts.another() => continue,
             done => return done,
         }
@@ -304,6 +319,7 @@ pub async fn cancel_receipt<S: ReceivingPorts>(
 async fn cancel_receipt_once<S: ReceivingPorts>(
     ports: &S,
     clock: &impl Clock,
+    store: Option<Currency>,
     id: ReceiptId,
 ) -> Result<CancelledReceipt, CommandError> {
     let mut receipt = ports
@@ -313,6 +329,31 @@ async fn cancel_receipt_once<S: ReceivingPorts>(
         .ok_or(CommandError::ReceiptNotFound(id))?;
     receipt.cancel(clock.now())?;
     let mut po = load_order(ports, receipt.purchase_order()).await?;
+    // What the order's stock carries of the extra costs, before and after this
+    // receipt's units go: they leave at the receipt's own landed cost.
+    let others: Vec<ReceiptBasis> = recorded(ports, po.id())
+        .await?
+        .into_iter()
+        .filter(|r| r.id() != id)
+        .map(|r| r.basis())
+        .collect();
+    let mut before = HashMap::new();
+    if let Some(store) = store {
+        let mut all = others.clone();
+        all.push(receipt.basis());
+        before = po.extra_due(store, &all)?;
+        for line in receipt.lines().iter().filter(|l| l.accepted > 0) {
+            let bare = po.bare_landed_cost(line.variant, store, receipt.exchange_rate())?;
+            let (Some(landed), Some(bare)) = (line.landed_unit_cost, bare) else {
+                continue;
+            };
+            let extra = i128::from(landed.scaled()) - i128::from(bare.scaled());
+            po.take_extra_applied(line.variant, line.accepted, extra)?;
+            if let Some(due) = before.get_mut(&line.variant) {
+                *due -= i128::from(line.accepted) * extra;
+            }
+        }
+    }
     po.take_back_receipt(&receipt.quantities())?;
 
     let source = StockSource::Receipt {
@@ -340,6 +381,12 @@ async fn cancel_receipt_once<S: ReceivingPorts>(
             item.unreceive(receipt.location(), quantity, line.landed_unit_cost, source)?;
         }
     }
+    if let Some(store) = store {
+        let changes = po.revalue(store, &others, &before)?;
+        load_more(ports, &mut items, &changes).await?;
+        let late = StockSource::PurchaseOrder(po.id());
+        revalue_stock(&mut items, &changes, store, late)?;
+    }
 
     let mut batch = ports.batch();
     batch.update_purchase_order(&mut po);
@@ -352,6 +399,167 @@ async fn cancel_receipt_once<S: ReceivingPorts>(
         receipt,
         purchase_order: po,
     })
+}
+
+/// Changes a purchase order (`hypha_purchasing::update_purchase_order`'s rules) and,
+/// when goods arrived on it, revalues their stock for what the change does to the extra
+/// costs they carry (a cost added, changed or removed, a line's quantity or cost that
+/// changes how they're spread): each item's cost moves by its share of the difference
+/// over the units on hand (`InventoryItem::revalue`, a `cost_adjustment` row caused by
+/// the order). A closed order takes changes to its extra costs only. One batch, retried
+/// on a lost race. `store_currency` is the store's; without one no stock arrived.
+pub async fn update_purchase_order<S: ReceivingPorts + HasSupplierVariants>(
+    ctx: &Ctx,
+    ports: &S,
+    clock: &impl Clock,
+    store_currency: Option<Currency>,
+    variants: &[VariantInfo],
+    id: PurchaseOrderId,
+    input: UpdatePurchaseOrder,
+) -> Result<PurchaseOrder, CommandError> {
+    ctx.require(Scope::PurchasingWrite)?;
+    let mut attempts = Attempts::first();
+    loop {
+        let change = Change::Update {
+            variants,
+            input: Box::new(input.clone()),
+        };
+        match revaluing(ports, clock.now(), store_currency, id, change).await {
+            Err(e) if lost_a_race(&e) && attempts.another() => continue,
+            done => return done,
+        }
+    }
+}
+
+/// Ends an ordered purchase order early (`PurchaseOrder::close`): what's outstanding is
+/// cancelled, so the extra costs spread over fewer units and the stock that arrived is
+/// revalued for its bigger share, in the same batch. Retried on a lost race.
+pub async fn close_purchase_order<S: ReceivingPorts + HasSupplierVariants>(
+    ctx: &Ctx,
+    ports: &S,
+    clock: &impl Clock,
+    store_currency: Option<Currency>,
+    id: PurchaseOrderId,
+) -> Result<PurchaseOrder, CommandError> {
+    ctx.require(Scope::PurchasingWrite)?;
+    let mut attempts = Attempts::first();
+    loop {
+        match revaluing(ports, clock.now(), store_currency, id, Change::Close).await {
+            Err(e) if lost_a_race(&e) && attempts.another() => continue,
+            done => return done,
+        }
+    }
+}
+
+/// What `revaluing` does to the order.
+enum Change<'a> {
+    Update {
+        variants: &'a [VariantInfo],
+        input: Box<UpdatePurchaseOrder>,
+    },
+    Close,
+}
+
+/// Loads the order, applies `change` and writes it, with its stock revalued for the
+/// extra costs its received units carry now, in one batch.
+async fn revaluing<S: ReceivingPorts + HasSupplierVariants>(
+    ports: &S,
+    now: Timestamp,
+    store: Option<Currency>,
+    id: PurchaseOrderId,
+    change: Change<'_>,
+) -> Result<PurchaseOrder, CommandError> {
+    let mut po = load_order(ports, id).await?;
+    let arrived = store.filter(|_| po.lines().iter().any(|l| l.received() > 0));
+    let mut receipts = Vec::new();
+    let mut before = HashMap::new();
+    if let Some(store) = arrived {
+        receipts = recorded(ports, id)
+            .await?
+            .iter()
+            .map(Receipt::basis)
+            .collect();
+        before = po.extra_due(store, &receipts)?;
+    }
+    match change {
+        Change::Update { variants, input } => {
+            hypha_purchasing::apply_update(ports, now, store, variants, &mut po, *input).await?;
+        }
+        Change::Close => po.close(now)?,
+    }
+    let kept = kept_values(&po);
+    let mut items = HashMap::new();
+    if let Some(store) = arrived {
+        let changes = po.revalue(store, &receipts, &before)?;
+        load_more(ports, &mut items, &changes).await?;
+        revalue_stock(&mut items, &changes, store, StockSource::PurchaseOrder(id))?;
+    }
+    if !po.is_changed() && items.is_empty() && kept == kept_values(&po) {
+        return Ok(po);
+    }
+    let mut batch = ports.batch();
+    batch.update_purchase_order(&mut po);
+    for item in items.values_mut() {
+        batch.update_inventory_item(item);
+    }
+    ports.commit(batch).await?;
+    Ok(po)
+}
+
+/// What each line keeps of the extra costs' value: revaluing may start one where there
+/// was none, which the order's row must store though nothing else changed.
+fn kept_values(po: &PurchaseOrder) -> Vec<Option<i64>> {
+    po.lines().iter().map(|l| l.extra_applied()).collect()
+}
+
+/// Loads into `items` the stock records of the variants `changes` name that it lacks.
+async fn load_more<S: HasInventoryItems>(
+    ports: &S,
+    items: &mut HashMap<VariantId, InventoryItem>,
+    changes: &[Revaluation],
+) -> Result<(), CommandError> {
+    let missing: Vec<VariantId> = changes
+        .iter()
+        .map(|c| c.variant)
+        .filter(|v| !items.contains_key(v))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    for item in ports.inventory_items().for_variants(&missing).await? {
+        items.insert(item.variant(), item);
+    }
+    Ok(())
+}
+
+/// Puts each revaluation on its variant's stock (loaded into `items`); a variant whose
+/// stock record is gone has nothing left to value.
+fn revalue_stock(
+    items: &mut HashMap<VariantId, InventoryItem>,
+    changes: &[Revaluation],
+    store: Currency,
+    source: StockSource,
+) -> Result<(), CommandError> {
+    for change in changes {
+        if let Some(item) = items.get_mut(&change.variant) {
+            item.revalue(change.value, store, source)?;
+        }
+    }
+    Ok(())
+}
+
+/// The order's receipts that weren't taken back.
+async fn recorded<S: HasReceipts>(
+    ports: &S,
+    po: PurchaseOrderId,
+) -> Result<Vec<Receipt>, CommandError> {
+    Ok(ports
+        .receipts()
+        .for_purchase_order(po)
+        .await?
+        .into_iter()
+        .filter(|r| r.state() == ReceiptState::Recorded)
+        .collect())
 }
 
 /// Lost a race: the order, the receipt or an item changed since it was read, or another

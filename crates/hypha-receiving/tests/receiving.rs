@@ -19,9 +19,12 @@ use hypha_inventory::{
 use hypha_purchasing::{
     CostAllocation, CostDraft, CostKind, LineInput, NewPurchaseOrder, Outstanding, PurchaseOrder,
     PurchaseOrderStatus, PurchasingError, ReceiptRepo, ReceiptState, ReceiptStatus, SupplierDraft,
-    VariantInfo, create_purchase_order, create_supplier, order_purchase_order,
+    UpdatePurchaseOrder, VariantInfo, create_purchase_order, create_supplier, order_purchase_order,
 };
-use hypha_receiving::{CommandError, Receive, ReceiveLine, Received, cancel_receipt, receive};
+use hypha_receiving::{
+    CommandError, Receive, ReceiveLine, Received, cancel_receipt, close_purchase_order, receive,
+    update_purchase_order,
+};
 use hypha_testkit::{FixedClock, InMemoryPorts, SequentialIds};
 use pollster::block_on;
 use uuid::Uuid;
@@ -514,6 +517,7 @@ fn taking_a_receipt_back_undoes_it() {
         &w.ctx,
         &w.ports,
         &w.clock,
+        Some(Currency::EUR),
         received.receipt.id(),
     ))
     .unwrap();
@@ -539,13 +543,289 @@ fn taking_a_receipt_back_undoes_it() {
             &w.ctx,
             &w.ports,
             &w.clock,
+            Some(Currency::EUR),
             received.receipt.id()
         )),
         Err(CommandError::Purchasing(PurchasingError::ReceiptCancelled))
     );
     let missing = ReceiptId::from_uuid(Uuid::from_u128(66));
     assert_eq!(
-        block_on(cancel_receipt(&w.ctx, &w.ports, &w.clock, missing)),
+        block_on(cancel_receipt(
+            &w.ctx,
+            &w.ports,
+            &w.clock,
+            Some(Currency::EUR),
+            missing
+        )),
         Err(CommandError::ReceiptNotFound(missing))
+    );
+}
+
+// ---- late costs ----
+
+fn shipping(amount: i64, currency: Currency) -> CostDraft {
+    CostDraft {
+        kind: CostKind::Shipping,
+        description: Some("Carrier".to_string()),
+        amount: Money::new(amount, currency).unwrap(),
+        allocation: CostAllocation::ByQuantity,
+    }
+}
+
+impl World {
+    fn set_costs(
+        &self,
+        po: PurchaseOrderId,
+        costs: Vec<CostDraft>,
+    ) -> Result<PurchaseOrder, CommandError> {
+        block_on(update_purchase_order(
+            &self.ctx,
+            &self.ports,
+            &self.clock,
+            Some(Currency::EUR),
+            &[],
+            po,
+            UpdatePurchaseOrder {
+                costs: Some(costs),
+                ..UpdatePurchaseOrder::default()
+            },
+        ))
+    }
+}
+
+#[test]
+fn a_cost_added_after_goods_arrived_revalues_the_stock_on_hand() {
+    let w = World::new();
+    let po = w.ordered(Currency::EUR, None, &[(10, 10, "500")], vec![]);
+    w.receive(po.id(), vec![line(10, 4, 0)]).unwrap();
+    assert_eq!(w.item(10).unwrap().unit_cost(), Some(eur("500")));
+
+    // €10.00 shipping over the 10 ordered: €1.00 a unit, €4.00 for the 4 that came,
+    // spread over the 4 on hand.
+    let po = w
+        .set_costs(po.id(), vec![shipping(1000, Currency::EUR)])
+        .unwrap();
+    assert_eq!(po.lines()[0].extra_applied(), Some(4_000_000));
+    let item = w.item(10).unwrap();
+    assert_eq!(item.unit_cost(), Some(eur("600")));
+    let row = w.ports.outbox.movements().pop().unwrap();
+    assert_eq!(
+        (row.reason, row.delta, row.location, row.source),
+        (
+            StockReason::CostAdjustment,
+            0,
+            None,
+            StockSource::PurchaseOrder(po.id())
+        )
+    );
+    // The rest arrives at the new landed cost: 6 at €6.00, the average stays €6.00.
+    w.receive(po.id(), vec![line(10, 6, 0)]).unwrap();
+    assert_eq!(w.item(10).unwrap().unit_cost(), Some(eur("600")));
+    // Saving the same costs again changes nothing on the stock.
+    let rows = w.ports.outbox.movements().len();
+    w.set_costs(po.id(), vec![shipping(1000, Currency::EUR)])
+        .unwrap();
+    assert_eq!(w.ports.outbox.movements().len(), rows);
+}
+
+#[test]
+fn a_cost_on_a_closed_order_still_revalues_and_only_costs_change() {
+    let w = World::new();
+    let po = w.ordered(Currency::EUR, None, &[(10, 4, "500")], vec![]);
+    let received = w.receive(po.id(), vec![line(10, 4, 0)]).unwrap();
+    assert_eq!(
+        received.purchase_order.status(),
+        PurchaseOrderStatus::Closed
+    );
+    let po = w
+        .set_costs(po.id(), vec![shipping(800, Currency::EUR)])
+        .unwrap();
+    assert_eq!(po.status(), PurchaseOrderStatus::Closed);
+    // €8.00 over 4: €2.00 more each.
+    assert_eq!(w.item(10).unwrap().unit_cost(), Some(eur("700")));
+    // Lowering it takes value back off.
+    w.set_costs(po.id(), vec![shipping(400, Currency::EUR)])
+        .unwrap();
+    assert_eq!(w.item(10).unwrap().unit_cost(), Some(eur("600")));
+    let refused = block_on(update_purchase_order(
+        &w.ctx,
+        &w.ports,
+        &w.clock,
+        Some(Currency::EUR),
+        &[],
+        po.id(),
+        UpdatePurchaseOrder {
+            note: Some(Some("too late".to_string())),
+            ..UpdatePurchaseOrder::default()
+        },
+    ));
+    assert_eq!(
+        refused.map(|_| ()),
+        Err(CommandError::PurchaseOrder(
+            hypha_purchasing::CommandError::Purchasing(PurchasingError::NotOpen {
+                status: "closed"
+            })
+        ))
+    );
+}
+
+#[test]
+fn units_already_sold_keep_their_cost() {
+    let w = World::new();
+    let po = w.ordered(Currency::EUR, None, &[(10, 10, "500")], vec![]);
+    w.receive(po.id(), vec![line(10, 10, 0)]).unwrap();
+    // 8 of the 10 are gone: the €10.00 the 10 carry lands on the 2 left (Odoo's rule:
+    // the 8 sold aren't revalued after the fact).
+    let mut item = w.item(10).unwrap();
+    item.set_on_hand(w.location, 2, None, None).unwrap();
+    block_on(w.ports.inventory_items.update(&mut item)).unwrap();
+    w.set_costs(po.id(), vec![shipping(1000, Currency::EUR)])
+        .unwrap();
+    assert_eq!(w.item(10).unwrap().unit_cost(), Some(eur("1000")));
+    // With nothing on hand nothing moves, but the order keeps what's due.
+    let mut item = w.item(10).unwrap();
+    item.set_on_hand(w.location, 0, None, None).unwrap();
+    block_on(w.ports.inventory_items.update(&mut item)).unwrap();
+    let po = w
+        .set_costs(po.id(), vec![shipping(2000, Currency::EUR)])
+        .unwrap();
+    assert_eq!(w.item(10).unwrap().unit_cost(), Some(eur("1000")));
+    assert_eq!(po.lines()[0].extra_applied(), Some(20_000_000));
+}
+
+#[test]
+fn a_late_cost_in_another_currency_converts_at_each_receipts_rate() {
+    let w = World::new();
+    let po = w.ordered(Currency::USD, Some("0.5"), &[(10, 4, "1000")], vec![]);
+    w.receive(po.id(), vec![line(10, 2, 0)]).unwrap();
+    // The rate changes before the second arrival.
+    block_on(update_purchase_order(
+        &w.ctx,
+        &w.ports,
+        &w.clock,
+        Some(Currency::EUR),
+        &[],
+        po.id(),
+        UpdatePurchaseOrder {
+            exchange_rate: Some(Some(ExchangeRate::parse("1").unwrap())),
+            ..UpdatePurchaseOrder::default()
+        },
+    ))
+    .unwrap();
+    w.receive(po.id(), vec![line(10, 2, 0)]).unwrap();
+    // 2 at €5.00 and 2 at €10.00: €7.50.
+    assert_eq!(w.item(10).unwrap().unit_cost(), Some(eur("750")));
+    // $4.00 shipping is $1.00 a unit: €0.50 for the first two, €1.00 for the others,
+    // €3.00 over 4 units, €0.75 more each.
+    w.set_costs(po.id(), vec![shipping(400, Currency::USD)])
+        .unwrap();
+    assert_eq!(w.item(10).unwrap().unit_cost(), Some(eur("825")));
+}
+
+#[test]
+fn closing_early_revalues_for_the_bigger_share() {
+    let w = World::new();
+    let po = w.ordered(
+        Currency::EUR,
+        None,
+        &[(10, 10, "500")],
+        vec![shipping(1000, Currency::EUR)],
+    );
+    // 5 arrive at €5.00 + €1.00 shipping.
+    w.receive(po.id(), vec![line(10, 5, 0)]).unwrap();
+    assert_eq!(w.item(10).unwrap().unit_cost(), Some(eur("600")));
+    // Closed, the €10.00 is over the 5 that came: €2.00 each.
+    let closed = block_on(close_purchase_order(
+        &w.ctx,
+        &w.ports,
+        &w.clock,
+        Some(Currency::EUR),
+        po.id(),
+    ))
+    .unwrap();
+    assert_eq!(closed.status(), PurchaseOrderStatus::Closed);
+    assert_eq!(w.item(10).unwrap().unit_cost(), Some(eur("700")));
+}
+
+#[test]
+fn taking_a_receipt_back_after_a_late_cost_leaves_the_rest_right() {
+    let w = World::new();
+    let po = w.ordered(Currency::EUR, None, &[(10, 10, "500")], vec![]);
+    let first = w.receive(po.id(), vec![line(10, 4, 0)]).unwrap();
+    w.receive(po.id(), vec![line(10, 4, 0)]).unwrap();
+    // €10.00 shipping: €1.00 a unit, €8.00 over the 8 here.
+    w.set_costs(po.id(), vec![shipping(1000, Currency::EUR)])
+        .unwrap();
+    assert_eq!(w.item(10).unwrap().unit_cost(), Some(eur("600")));
+    // The first 4 leave at the €5.00 they came in at, and the €4.00 of shipping they
+    // carried since comes off too: the 4 left are €6.00 each, as they should be.
+    let taken = block_on(cancel_receipt(
+        &w.ctx,
+        &w.ports,
+        &w.clock,
+        Some(Currency::EUR),
+        first.receipt.id(),
+    ))
+    .unwrap();
+    let item = w.item(10).unwrap();
+    assert_eq!(
+        (item.on_hand(w.location), item.unit_cost()),
+        (4, Some(eur("600")))
+    );
+    assert_eq!(
+        taken.purchase_order.lines()[0].extra_applied(),
+        Some(4_000_000)
+    );
+}
+
+#[test]
+fn an_order_nothing_arrived_on_changes_without_touching_stock() {
+    let w = World::new();
+    tracked(&w, 10, 3, Some("500"));
+    let po = w.ordered(Currency::EUR, None, &[(10, 10, "500")], vec![]);
+    let rows = w.ports.outbox.movements().len();
+    let po = w
+        .set_costs(po.id(), vec![shipping(1000, Currency::EUR)])
+        .unwrap();
+    assert_eq!(po.costs().len(), 1);
+    assert_eq!(w.item(10).unwrap().unit_cost(), Some(eur("500")));
+    assert_eq!(w.ports.outbox.movements().len(), rows);
+}
+
+#[test]
+fn changing_an_order_needs_the_scope() {
+    let w = World::new();
+    let po = w.ordered(Currency::EUR, None, &[(10, 10, "500")], vec![]);
+    let reader = Ctx::new(
+        Actor::User(UserId::from_uuid(Uuid::from_u128(5))),
+        vec![Scope::PurchasingRead],
+    );
+    let refused = block_on(update_purchase_order(
+        &reader,
+        &w.ports,
+        &w.clock,
+        Some(Currency::EUR),
+        &[],
+        po.id(),
+        UpdatePurchaseOrder::default(),
+    ));
+    assert_eq!(
+        refused.map(|_| ()),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::PurchasingWrite
+        )))
+    );
+    let refused = block_on(close_purchase_order(
+        &reader,
+        &w.ports,
+        &w.clock,
+        Some(Currency::EUR),
+        po.id(),
+    ));
+    assert_eq!(
+        refused.map(|_| ()),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::PurchasingWrite
+        )))
     );
 }

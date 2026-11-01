@@ -116,6 +116,7 @@ fn line_from_row(row: &Row) -> Result<LineSnapshot, RepoError> {
         received: count_from_db(col(row, "received")?)?,
         rejected: count_from_db(col(row, "rejected")?)?,
         cancelled: count_from_db(col(row, "cancelled")?)?,
+        extra_applied: col(row, "extra_applied")?,
     })
 }
 
@@ -408,15 +409,16 @@ async fn insert_children(tx: &impl Queries, s: &PurchaseOrderSnapshot) -> Result
         let received = counts(s.lines.iter().map(|l| l.received))?;
         let rejected = counts(s.lines.iter().map(|l| l.rejected))?;
         let cancelled = counts(s.lines.iter().map(|l| l.cancelled))?;
+        let extra_applied: Vec<Option<i64>> = s.lines.iter().map(|l| l.extra_applied).collect();
         tx.query_typed(
             "INSERT INTO purchase_order_lines (purchase_order_id, position, variant_id,
                  product_title, variant_title, sku, supplier_sku, quantity, unit_cost,
-                 unit_cost_currency, received, rejected, cancelled)
-             SELECT $1, (n - 1)::integer, v, p, t, s, ss, q, c, cc, r, rj, x
+                 unit_cost_currency, received, rejected, cancelled, extra_applied)
+             SELECT $1, (n - 1)::integer, v, p, t, s, ss, q, c, cc, r, rj, x, e
              FROM unnest($2::uuid[], $3::text[], $4::text[], $5::text[], $6::text[],
                          $7::integer[], $8::bigint[], $9::text[], $10::integer[],
-                         $11::integer[], $12::integer[])
-                  WITH ORDINALITY AS l (v, p, t, s, ss, q, c, cc, r, rj, x, n)",
+                         $11::integer[], $12::integer[], $13::bigint[])
+                  WITH ORDINALITY AS l (v, p, t, s, ss, q, c, cc, r, rj, x, e, n)",
             &[
                 (&id, Type::UUID),
                 (&variants, Type::UUID_ARRAY),
@@ -430,6 +432,7 @@ async fn insert_children(tx: &impl Queries, s: &PurchaseOrderSnapshot) -> Result
                 (&received, Type::INT4_ARRAY),
                 (&rejected, Type::INT4_ARRAY),
                 (&cancelled, Type::INT4_ARRAY),
+                (&extra_applied, Type::INT8_ARRAY),
             ],
         )
         .await

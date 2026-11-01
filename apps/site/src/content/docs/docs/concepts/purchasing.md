@@ -121,6 +121,25 @@ count may go below zero if some were sold since), its value comes out of the ave
 cost, and a closed order opens again. Events `receipt.created` and `receipt.cancelled`
 reach apps whose grant holds `purchasing:read`.
 
+### Costs that come late
+
+A carrier's bill or the duties often arrive after the goods. Add or change the order's
+extra costs then, even on a **closed** order (whose costs are all that still change),
+with the same `PATCH /admin/purchase-orders/{id}`:
+
+- **What arrived is revalued.** Each line's share of the extra costs per unit changes,
+  and the difference for the units already received (each receipt at its own exchange
+  rate) is spread over what's on hand now: the item's cost moves by it, with a
+  `cost_adjustment` row in its history whose source is the order. A lower cost takes
+  value back off, never below zero.
+- **Units already sold keep their cost.** Only the stock on hand is revalued; with none
+  left, nothing moves.
+- **Only the difference counts.** The order keeps what its stock carries already, so
+  saving the same costs again changes nothing.
+- **Closing early** cancels what didn't come, so the costs spread over fewer units and
+  the stock that arrived is revalued for its bigger share. Taking a receipt back keeps
+  the rest right the same way.
+
 ## Incoming stock
 
 What's on its way is read from your open orders, never stored: each level of an item in

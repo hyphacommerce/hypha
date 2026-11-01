@@ -45100,7 +45100,7 @@
             "bearer": []
           }
         ],
-        "summary": "Changes a draft or ordered purchase order (JSON Merge Patch). Each change to an ordered\none counts a revision; one whose lines are all accounted for after it closes.",
+        "summary": "Changes a draft or ordered purchase order (JSON Merge Patch), or a closed one's\nextra costs (anything else on it is `409 purchase_order_not_open`). Each change to an\nordered or closed one counts a revision; one whose lines are all accounted for after\nit closes. When goods arrived on it, a change to what its extra costs put on each unit\nrevalues that stock: each item's cost moves by its share of the difference over the\nunits on hand, with a `cost_adjustment` row in its history.",
         "tags": [
           "purchase_orders"
         ],
@@ -45336,7 +45336,7 @@
             "bearer": []
           }
         ],
-        "summary": "Ends an ordered purchase order early: what's outstanding on each line is cancelled.",
+        "summary": "Ends an ordered purchase order early: what's outstanding on each line is cancelled.\nThe extra costs then spread over fewer units, so the stock that arrived is revalued\nfor its bigger share.",
         "tags": [
           "purchase_orders"
         ],

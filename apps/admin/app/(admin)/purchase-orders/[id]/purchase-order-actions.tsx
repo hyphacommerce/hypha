@@ -16,7 +16,7 @@ const CONFIRMS: Record<Confirm, { title: string; description: string; action: st
   close: {
     title: "Close this purchase order?",
     description:
-      "What hasn't arrived is cancelled: nothing more is expected. Received goods stay received.",
+      "What hasn't arrived is cancelled: nothing more is expected. Received goods stay received, and carry the extra costs between them.",
     action: "Close",
   },
   cancel: {

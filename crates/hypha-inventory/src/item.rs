@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use hypha_core::{
-    InventoryItemId, LocationId, PendingEvent, Quantity, Recorded, Recorder, Stamped, Stamps,
-    Subject, UnitCost, VariantId, Version, Versioned,
+    Currency, InventoryItemId, LocationId, PendingEvent, Quantity, Recorded, Recorder, Stamped,
+    Stamps, Subject, UnitCost, VariantId, Version, Versioned,
 };
 
 use crate::{
@@ -319,6 +319,39 @@ impl InventoryItem {
         let cause = Cause::new(StockReason::CostAdjustment, StockSource::Manual).with_note(note);
         self.change_cost(cost, cause, CostChange::Manual);
         true
+    }
+
+    /// A cost that came late (an extra cost added to, changed on or removed from a
+    /// purchase order after its goods arrived): `value` in the store's `currency`, in
+    /// `UnitCost`'s scaled units and of either sign, spread over the units on hand across
+    /// every location. The part that belongs to units already gone isn't recovered: with
+    /// nothing on hand, or nothing to change, nothing happens. The cost never goes below
+    /// zero. A `cost_adjustment` row caused by `source` and `inventory_item.cost_changed`
+    /// (`late_cost`). Returns whether the cost changed.
+    pub fn revalue(
+        &mut self,
+        value: i128,
+        currency: Currency,
+        source: StockSource,
+    ) -> Result<bool, InventoryError> {
+        let held = self.total_on_hand();
+        if value == 0 || held <= 0 {
+            return Ok(false);
+        }
+        let before = self.unit_cost.unwrap_or_else(|| UnitCost::zero(currency));
+        if before.currency() != currency {
+            return Err(InventoryError::CostCurrency {
+                expected: before.currency(),
+                got: currency,
+            });
+        }
+        let after = before.revalued(value, held)?;
+        if Some(after) == self.unit_cost || (self.unit_cost.is_none() && after.scaled() == 0) {
+            return Ok(false);
+        }
+        let cause = Cause::new(StockReason::CostAdjustment, source);
+        self.change_cost(Some(after), cause, CostChange::LateCost);
+        Ok(true)
     }
 
     /// The one place the unit cost changes: it records the row and the event, so no
@@ -2080,5 +2113,117 @@ mod tests {
         i.transfer_out(loc_id(1), qty(2), transfer_source())
             .unwrap();
         assert_eq!(i.on_hand(loc_id(1)), 3);
+    }
+
+    // ---- late costs ----
+
+    fn late() -> StockSource {
+        StockSource::PurchaseOrder(hypha_core::PurchaseOrderId::from_uuid(Uuid::from_u128(90)))
+    }
+
+    #[test]
+    fn a_late_cost_is_spread_over_every_unit_on_hand() {
+        // €10.00 (10,000,000 scaled) over 6 + 4 units: €1.00 more each.
+        let mut i = costed(&[(1, 6), (2, 4)], Some("500"));
+        assert_eq!(
+            i.revalue(10_000_000, hypha_core::Currency::EUR, late()),
+            Ok(true)
+        );
+        assert_eq!(i.unit_cost(), Some(eur("600")));
+        let row = i.take_movements().remove(0);
+        assert_eq!(
+            (
+                row.reason,
+                row.delta,
+                row.location,
+                row.source,
+                row.unit_cost,
+                row.average_after
+            ),
+            (
+                StockReason::CostAdjustment,
+                0,
+                None,
+                late(),
+                Some(eur("500")),
+                Some(eur("600"))
+            )
+        );
+        assert_eq!(cost_whys(&mut i), ["late_cost"]);
+    }
+
+    #[test]
+    fn a_late_cost_can_lower_the_cost_but_never_below_zero() {
+        let mut i = costed(&[(1, 10)], Some("500"));
+        assert_eq!(
+            i.revalue(-20_000_000, hypha_core::Currency::EUR, late()),
+            Ok(true)
+        );
+        assert_eq!(i.unit_cost(), Some(eur("300")));
+        assert_eq!(
+            i.revalue(-1_000_000_000, hypha_core::Currency::EUR, late()),
+            Ok(true)
+        );
+        assert_eq!(i.unit_cost(), Some(eur("0")));
+    }
+
+    #[test]
+    fn a_late_cost_rounds_half_away_from_zero() {
+        // 1 scaled unit over 2 is 0.5 → 1; −1 over 2 → −1.
+        let mut i = costed(&[(1, 2)], Some("0.001"));
+        i.revalue(1, hypha_core::Currency::EUR, late()).unwrap();
+        assert_eq!(i.unit_cost(), Some(eur("0.0011")));
+        i.revalue(-1, hypha_core::Currency::EUR, late()).unwrap();
+        assert_eq!(i.unit_cost(), Some(eur("0.001")));
+    }
+
+    #[test]
+    fn a_late_cost_with_nothing_on_hand_changes_nothing() {
+        let mut i = costed(&[(1, 0), (2, -3)], Some("500"));
+        assert_eq!(
+            i.revalue(10_000_000, hypha_core::Currency::EUR, late()),
+            Ok(false)
+        );
+        assert_eq!(i.unit_cost(), Some(eur("500")));
+        assert!(i.take_movements().is_empty());
+        assert!(cost_whys(&mut i).is_empty());
+    }
+
+    #[test]
+    fn a_late_cost_too_small_to_show_changes_nothing() {
+        // 1 scaled unit over 3 is 0.33… → 0.
+        let mut i = costed(&[(1, 3)], Some("500"));
+        assert_eq!(i.revalue(1, hypha_core::Currency::EUR, late()), Ok(false));
+        assert!(i.take_movements().is_empty());
+    }
+
+    #[test]
+    fn a_late_cost_gives_an_item_without_one_a_cost() {
+        let mut i = costed(&[(1, 4)], None);
+        assert_eq!(
+            i.revalue(4_000_000, hypha_core::Currency::EUR, late()),
+            Ok(true)
+        );
+        assert_eq!(i.unit_cost(), Some(eur("100")));
+        // Taking value off an item without a cost leaves it without one.
+        let mut i = costed(&[(1, 4)], None);
+        assert_eq!(
+            i.revalue(-4_000_000, hypha_core::Currency::EUR, late()),
+            Ok(false)
+        );
+        assert_eq!(i.unit_cost(), None);
+    }
+
+    #[test]
+    fn a_late_cost_in_another_currency_is_refused() {
+        let mut i = costed(&[(1, 4)], Some("500"));
+        assert_eq!(
+            i.revalue(1_000, hypha_core::Currency::USD, late()),
+            Err(InventoryError::CostCurrency {
+                expected: hypha_core::Currency::EUR,
+                got: hypha_core::Currency::USD
+            })
+        );
+        assert_eq!(i.unit_cost(), Some(eur("500")));
     }
 }

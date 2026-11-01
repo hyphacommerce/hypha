@@ -127,6 +127,8 @@ fn full(n: u128, number: i64, supplier: u128) -> PurchaseOrder {
         at(2_000),
     )
     .unwrap();
+    // A negative value: an extra cost lowered after the goods arrived.
+    po.add_extra_applied(vid(10), 2, -12_345).unwrap();
     po
 }
 
@@ -186,6 +188,8 @@ async fn round_trip<S: HasSuppliers + HasPurchaseOrders>(ports: &S) {
     assert_eq!(stored.supplier_name(), Some("Spore Labs"));
     assert_eq!(stored.receipt_status(), ReceiptStatus::Partial);
     assert_eq!(stored.lines()[0].rejected(), 1);
+    assert_eq!(stored.lines()[0].extra_applied(), Some(-24_690));
+    assert_eq!(stored.lines()[1].extra_applied(), Some(0));
 
     // A bare draft: no destination, lines or anything optional.
     let mut bare = PurchaseOrder::new(
@@ -208,6 +212,14 @@ async fn round_trip<S: HasSuppliers + HasPurchaseOrders>(ports: &S) {
     cancelled.cancel(at(4_000)).unwrap();
     repo.insert(&mut cancelled).await.unwrap();
     assert_eq!(repo.get(poid(4)).await, Ok(Some(cancelled)));
+
+    // A line received before its extra value was kept has none.
+    let mut snapshot = full(5, 1005, 1).snapshot();
+    snapshot.lines[0].extra_applied = None;
+    let mut unkept = PurchaseOrder::restore(snapshot).unwrap();
+    repo.insert(&mut unkept).await.unwrap();
+    let stored = repo.get(poid(5)).await.unwrap().unwrap();
+    assert_eq!(stored.lines()[0].extra_applied(), None);
 }
 
 async fn refusals<S: HasSuppliers + HasPurchaseOrders>(ports: &S) {

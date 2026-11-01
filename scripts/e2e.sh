@@ -1345,6 +1345,17 @@ contains "nothing received any more" '"receipt_status":"none"'
 step "not twice" 409 receipt_cancelled -X POST "$BASE/admin/receipts/$RECEIPT/cancel"
 step "an unknown receipt" 404 receipt_not_found "$BASE/admin/receipts/rcpt_00000000000000000000000000000063"
 
+# --- late costs (a bill that comes after the goods revalues what arrived) ---
+step "5 lamps arrive again" 201 - -X POST "$BASE/admin/purchase-orders/$PO/receipts" -H "$JSON" \
+    -d "{\"location\":\"$BACKROOM\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":5}]}"
+RECEIPT2=$(grep -o '"id":"rcpt_[0-9a-f]*"' <<<"$BODY" | head -1 | sed -E 's/.*"(rcpt_[0-9a-f]+)"/\1/')
+step "the duties come later" 200 - -X PATCH "$BASE/admin/purchase-orders/$PO" -H "$JSON" \
+    -d '{"costs":[{"kind":"shipping","amount":{"amount":2000,"currency":"EUR"}},
+        {"kind":"duties","amount":{"amount":600,"currency":"EUR"},"allocation":"by_quantity"}]}'
+step "the lamp's cost changes" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?reason=cost_adjustment&limit=1"
+contains "revalued by the order" "\"reason\":\"cost_adjustment\",\"source\":{\"type\":\"purchase_order\",\"purchase_order\":\"$PO\"}"
+step "take those back too" 200 - -X POST "$BASE/admin/receipts/$RECEIPT2/cancel"
+
 # --- transfers (from the back room to a pop-up; neither serves a market, so the lamp's
 # counts below stay) ---
 step "a pop-up shop" 201 - -X POST "$BASE/admin/locations" -H "$JSON" -d '{"name":"Pop-up"}'

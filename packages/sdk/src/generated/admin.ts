@@ -3197,8 +3197,12 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Changes a draft or ordered purchase order (JSON Merge Patch). Each change to an ordered
-         *     one counts a revision; one whose lines are all accounted for after it closes.
+         * Changes a draft or ordered purchase order (JSON Merge Patch), or a closed one's
+         *     extra costs (anything else on it is `409 purchase_order_not_open`). Each change to an
+         *     ordered or closed one counts a revision; one whose lines are all accounted for after
+         *     it closes. When goods arrived on it, a change to what its extra costs put on each unit
+         *     revalues that stock: each item's cost moves by its share of the difference over the
+         *     units on hand, with a `cost_adjustment` row in its history.
          */
         patch: operations["admin.purchase_orders.update"];
         trace?: never;
@@ -3232,7 +3236,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Ends an ordered purchase order early: what's outstanding on each line is cancelled. */
+        /**
+         * Ends an ordered purchase order early: what's outstanding on each line is cancelled.
+         *     The extra costs then spread over fewer units, so the stock that arrived is revalued
+         *     for its bigger share.
+         */
         post: operations["admin.purchase_orders.close"];
         delete?: never;
         options?: never;

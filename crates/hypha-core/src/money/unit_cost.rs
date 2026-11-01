@@ -139,6 +139,18 @@ impl UnitCost {
         Money::new(amount, self.currency)
     }
 
+    /// This cost with `value` (in 1/`SCALE` of a minor unit, either sign) spread over
+    /// `units`: `value / units` added per unit, rounded half away from zero, and never
+    /// below zero (a cost can't be negative, so a reduction larger than the cost leaves
+    /// none). `units` 0 or less changes nothing.
+    pub fn revalued(self, value: i128, units: i128) -> Result<UnitCost, MoneyError> {
+        if units <= 0 {
+            return Ok(self);
+        }
+        let shifted = i128::from(self.scaled) + div_round(value, units);
+        Self::from_i128(shifted.max(0), self.currency)
+    }
+
     pub(crate) fn from_i128(scaled: i128, currency: Currency) -> Result<Self, MoneyError> {
         let scaled = i64::try_from(scaled).map_err(|_| MoneyError::Overflow)?;
         Self::new(scaled, currency)
@@ -282,6 +294,43 @@ mod tests {
         );
         assert_eq!(
             eur(UnitCost::MAX_SCALED).checked_add(eur(1)),
+            Err(MoneyError::Overflow)
+        );
+    }
+
+    #[test]
+    fn revalued_spreads_a_value_over_the_units() {
+        // €10.00 (10,000,000 scaled) over 4 units adds 250 cents each.
+        assert_eq!(eur(1_000_000).revalued(10_000_000, 4), Ok(eur(3_500_000)));
+        // A negative value takes it off.
+        assert_eq!(eur(3_500_000).revalued(-10_000_000, 4), Ok(eur(1_000_000)));
+    }
+
+    #[test]
+    fn revalued_rounds_half_away_from_zero_both_ways() {
+        // 1 over 2 is 0.5 → 1; −1 over 2 is −0.5 → −1.
+        assert_eq!(eur(10).revalued(1, 2), Ok(eur(11)));
+        assert_eq!(eur(10).revalued(-1, 2), Ok(eur(9)));
+        // 1 over 3 is 0.33… → 0.
+        assert_eq!(eur(10).revalued(1, 3), Ok(eur(10)));
+        assert_eq!(eur(10).revalued(-1, 3), Ok(eur(10)));
+    }
+
+    #[test]
+    fn revalued_never_goes_below_zero() {
+        assert_eq!(eur(100).revalued(-1_000, 2), Ok(eur(0)));
+    }
+
+    #[test]
+    fn revalued_over_no_units_changes_nothing() {
+        assert_eq!(eur(100).revalued(5_000, 0), Ok(eur(100)));
+        assert_eq!(eur(100).revalued(5_000, -3), Ok(eur(100)));
+    }
+
+    #[test]
+    fn revalued_overflows_instead_of_panicking() {
+        assert_eq!(
+            eur(UnitCost::MAX_SCALED).revalued(2, 1),
             Err(MoneyError::Overflow)
         );
     }

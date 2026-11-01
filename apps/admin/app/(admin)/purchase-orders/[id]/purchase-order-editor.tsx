@@ -1,8 +1,9 @@
 "use client";
 
 // A purchase order's body: its lines, extra costs, totals and details, each changed in
-// place through a dialog while the order is a draft or ordered. Every change is one
-// PATCH of what it touches (lines and costs are sent whole), and the page reloads with it.
+// place through a dialog while the order is a draft or ordered (a closed one's extra
+// costs too). Every change is one PATCH of what it touches (lines and costs are sent
+// whole), and the page reloads with it.
 
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -102,11 +103,13 @@ export function PurchaseOrderEditor({
   isReadOnly: boolean;
 }) {
   const canEdit = !isReadOnly && isOpen(po);
+  // A closed order's extra costs still change: a bill that comes after the goods.
+  const canEditCosts = !isReadOnly && (isOpen(po) || po.status === "closed");
   return (
     <div className="detail-columns">
       <div>
         <LinesCard po={po} canEdit={canEdit} />
-        <CostsCard po={po} canEdit={canEdit} />
+        <CostsCard po={po} canEdit={canEditCosts} />
       </div>
       <div>
         <SummaryCard po={po} canEdit={canEdit} />
@@ -447,6 +450,9 @@ function CostsCard({ po, canEdit }: { po: PurchaseOrder; canEdit: boolean }) {
   const [editing, setEditing] = useState<{ index: number | null }>();
   const [removing, setRemoving] = useState<number>();
   const { error, isPending, save } = usePatch(po.id);
+  // Units already in stock: a change to the costs revalues them.
+  const arrived = po.lines.reduce((sum, l) => sum + l.received, 0);
+  const revalues = canEdit && arrived > 0;
   return (
     <Card>
       <VStack gap={3}>
@@ -469,6 +475,13 @@ function CostsCard({ po, canEdit }: { po: PurchaseOrder; canEdit: boolean }) {
           )}
         </HStack>
         {error && <Banner status="error" title={error} />}
+        {revalues && (
+          <Banner
+            status="info"
+            title={`${arrived} ${arrived === 1 ? "unit has" : "units have"} arrived`}
+            description="Changing these costs revalues what's in stock: each item's cost moves by its share of the difference, shown in its history. Units already sold keep their cost."
+          />
+        )}
         {po.costs.length === 0 ? (
           <Text type="supporting" color="secondary">
             None.
@@ -546,7 +559,11 @@ function CostsCard({ po, canEdit }: { po: PurchaseOrder; canEdit: boolean }) {
         isOpen={removing !== undefined}
         onOpenChange={(open) => !open && setRemoving(undefined)}
         title="Remove this cost?"
-        description="Its share comes out of the lines' landed costs."
+        description={
+          revalues
+            ? "Its share comes out of the lines' landed costs, and out of the cost of the units in stock."
+            : "Its share comes out of the lines' landed costs."
+        }
         actionLabel="Remove"
         isActionLoading={isPending}
         onAction={() =>
