@@ -366,10 +366,8 @@ pub(crate) async fn incoming_of<P: HasPurchaseOrders + HasTransfers>(
         match at.iter_mut().find(|s| s.location == stock.location) {
             Some(same) => {
                 same.quantity += stock.quantity;
-                same.next_expected_at = match (same.next_expected_at, stock.next_expected_at) {
-                    (Some(a), Some(b)) => Some(a.min(b)),
-                    (a, b) => a.or(b),
-                };
+                same.next_expected_at =
+                    Timestamp::earliest(same.next_expected_at, stock.next_expected_at);
             }
             None => at.push(stock),
         }

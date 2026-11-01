@@ -50,10 +50,7 @@ pub fn incoming<'a>(
                     next_expected_at: None,
                 });
             entry.quantity += u64::from(outstanding);
-            entry.next_expected_at = match (entry.next_expected_at, po.expected_at()) {
-                (Some(a), Some(b)) => Some(a.min(b)),
-                (a, b) => a.or(b),
-            };
+            entry.next_expected_at = Timestamp::earliest(entry.next_expected_at, po.expected_at());
         }
     }
     found.into_values().collect()
