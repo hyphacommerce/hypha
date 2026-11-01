@@ -866,3 +866,59 @@ async fn backfills_give_stripe_payments_their_intent_as_their_attempt() {
         ]
     );
 }
+
+/// Core before the store's base currency: migrations 0001 to 0087.
+const BEFORE_STORE_CURRENCY: MigrationSet = MigrationSet {
+    module: "core",
+    migrations: CORE.migrations.split_at(87).0,
+};
+
+/// The base currency 0088 gives a store whose markets charge in `currencies`.
+async fn store_currency_after(schema: &str, currencies: &[&str]) -> Option<Option<String>> {
+    let mut client = fresh_schema(schema).await?;
+    migrate(&mut client, &[BEFORE_STORE_CURRENCY])
+        .await
+        .unwrap();
+    client
+        .batch_execute(
+            "INSERT INTO stores (id, version, name) VALUES (gen_random_uuid(), 1, 'Shop')",
+        )
+        .await
+        .unwrap();
+    for currency in currencies {
+        client
+            .execute(
+                "INSERT INTO markets (id, version, name, currency)
+                 VALUES (gen_random_uuid(), 1, 'Market', $1)",
+                &[currency],
+            )
+            .await
+            .unwrap();
+    }
+    migrate(&mut client, &[CORE]).await.unwrap();
+    Some(
+        client
+            .query_one("SELECT currency FROM stores", &[])
+            .await
+            .unwrap()
+            .get(0),
+    )
+}
+
+#[tokio::test]
+async fn a_store_selling_in_one_currency_keeps_its_costs_in_it() {
+    let Some(currency) = store_currency_after("migrate_0088_one", &["EUR", "EUR"]).await else {
+        return;
+    };
+    assert_eq!(currency.as_deref(), Some("EUR"));
+}
+
+#[tokio::test]
+async fn a_store_selling_in_several_currencies_or_none_chooses_later() {
+    let Some(mixed) = store_currency_after("migrate_0088_mixed", &["EUR", "USD"]).await else {
+        return;
+    };
+    assert_eq!(mixed, None);
+    let none = store_currency_after("migrate_0088_none", &[]).await;
+    assert_eq!(none, Some(None));
+}

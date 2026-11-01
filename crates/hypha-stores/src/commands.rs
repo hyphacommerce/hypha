@@ -1,6 +1,7 @@
 use hypha_core::{
-    Address, AddressError, AddressParts, AuthError, Clock, Ctx, Email, EmailError, ErrorCode,
-    IdGenerator, Language, LanguageError, RepoError, Scope, StoreId, Timezone, TimezoneError,
+    Address, AddressError, AddressParts, AuthError, Clock, Ctx, Currency, CurrencyError, Email,
+    EmailError, ErrorCode, IdGenerator, Language, LanguageError, RepoError, Scope, StoreId,
+    Timezone, TimezoneError,
 };
 use thiserror::Error;
 
@@ -22,6 +23,8 @@ pub enum CommandError {
     Timezone(#[from] TimezoneError),
     #[error(transparent)]
     Language(#[from] LanguageError),
+    #[error(transparent)]
+    Currency(#[from] CurrencyError),
     #[error("store {0} not found")]
     StoreNotFound(StoreId),
     /// One store per deployment (model A) found more than one.
@@ -39,6 +42,7 @@ impl ErrorCode for CommandError {
             CommandError::Address(e) => e.code(),
             CommandError::Timezone(e) => e.code(),
             CommandError::Language(e) => e.code(),
+            CommandError::Currency(e) => e.code(),
             CommandError::StoreNotFound(_) => "store_not_found",
             CommandError::MultipleStores(_) => "multiple_stores",
         }
@@ -79,6 +83,8 @@ pub struct UpdateStore {
     pub timezone: Option<Option<String>>,
     /// A BCP 47 tag (`en`, `sr-Latn`).
     pub default_language: Option<String>,
+    /// An ISO 4217 code: the base currency costs are kept in.
+    pub currency: Option<Option<String>>,
     /// The setup guide's step the merchant is on.
     pub setup_step: Option<Option<String>>,
     /// `true` marks the guide done (now, the first time); `false` shows it again.
@@ -126,6 +132,9 @@ pub async fn update_store<R: StoreRepo>(
     }
     if let Some(language) = &input.default_language {
         store.set_default_language(Language::new(language)?);
+    }
+    if let Some(currency) = &input.currency {
+        store.set_currency(currency.as_deref().map(Currency::new).transpose()?);
     }
     if let Some(step) = &input.setup_step {
         store.set_setup_step(step.as_deref().map(SetupStep::new).transpose()?);

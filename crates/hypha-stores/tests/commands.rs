@@ -9,8 +9,8 @@
 )]
 
 use hypha_core::{
-    Actor, AddressParts, AuthError, CountryError, Ctx, EmailError, LanguageError, Scope, StoreId,
-    TimezoneError, UserId,
+    Actor, AddressParts, AuthError, CountryError, Ctx, Currency, CurrencyError, EmailError,
+    LanguageError, Scope, StoreId, TimezoneError, UserId,
 };
 use hypha_stores::{
     CommandError, Store, StoreError, StoreRepo, UpdateStore, create_store, ensure_single_store,
@@ -313,6 +313,59 @@ fn update_store_rejects_bad_details_and_changes_nothing() {
     assert_eq!(
         block_on(get_store(&Ctx::system(), &repo, store.id())),
         Ok(store)
+    );
+}
+
+#[test]
+fn a_new_store_has_no_currency_until_one_is_chosen() {
+    let repo = InMemoryStoreRepo::default();
+    let ids = SequentialIds::default();
+    let store = block_on(create_store(&Ctx::system(), &repo, &ids, "Acme")).unwrap();
+    assert_eq!(store.currency(), None);
+    let update = |currency: Option<&str>| {
+        let input = UpdateStore {
+            currency: Some(currency.map(str::to_string)),
+            ..UpdateStore::default()
+        };
+        block_on(update_store(
+            &Ctx::system(),
+            &repo,
+            &clock(),
+            store.id(),
+            input,
+        ))
+    };
+
+    assert_eq!(update(Some("EUR")).unwrap().currency(), Some(Currency::EUR));
+    assert_eq!(
+        block_on(get_store(&Ctx::system(), &repo, store.id()))
+            .unwrap()
+            .currency(),
+        Some(Currency::EUR)
+    );
+    assert_eq!(update(None).unwrap().currency(), None);
+}
+
+#[test]
+fn update_store_refuses_an_unknown_currency() {
+    let repo = InMemoryStoreRepo::default();
+    let ids = SequentialIds::default();
+    let store = block_on(create_store(&Ctx::system(), &repo, &ids, "Acme")).unwrap();
+    let input = UpdateStore {
+        currency: Some(Some("eur".to_string())),
+        ..UpdateStore::default()
+    };
+    assert_eq!(
+        block_on(update_store(
+            &Ctx::system(),
+            &repo,
+            &clock(),
+            store.id(),
+            input
+        )),
+        Err(CommandError::Currency(CurrencyError::Unknown(
+            "eur".to_string()
+        )))
     );
 }
 

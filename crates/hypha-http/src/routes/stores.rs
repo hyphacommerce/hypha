@@ -1,5 +1,5 @@
 use axum::{Json, extract::State};
-use hypha_core::{Ctx, Email, Language, StoreId, Timezone};
+use hypha_core::{Ctx, Currency, Email, Language, StoreId, Timezone};
 use hypha_stores::{Store, UpdateStore, get_store, update_store};
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +30,9 @@ pub struct StoreResponse {
     /// The language the store's content (titles, descriptions, option labels) is written
     /// in.
     default_language: Language,
+    /// The base currency every cost (purchase orders, stock value, an order line's cost)
+    /// is kept in; `null` until it's chosen, and it must be before any cost is recorded.
+    currency: Option<Currency>,
     /// How far the admin's setup guide got.
     setup: SetupProgressResponse,
 }
@@ -63,6 +66,7 @@ impl From<&Store> for StoreResponse {
             legal_address: s.legal_address().map(PostalAddressResponse::from),
             timezone: s.timezone(),
             default_language: s.default_language().clone(),
+            currency: s.currency(),
             setup: SetupProgressResponse {
                 step: s
                     .setup()
@@ -124,6 +128,10 @@ pub struct UpdateStoreRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = String, required = false)]
     default_language: Option<String>,
+    /// An ISO 4217 code: the base currency costs are kept in. `null` clears it.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    #[schema(value_type = Option<String>, required = false)]
+    currency: Option<Option<String>>,
     /// The setup guide step the merchant is on: 1 to 40 lowercase letters, digits, `-` or
     /// `_`, named by the admin. `null` clears it.
     #[serde(default, deserialize_with = "patch::nullable")]
@@ -159,6 +167,7 @@ pub async fn update<S: Storage>(
         legal_address: req.legal_address.map(|a| a.map(Into::into)),
         timezone: req.timezone,
         default_language: req.default_language,
+        currency: req.currency,
         setup_step: req.setup_step,
         setup_finished: req.setup_finished,
     };

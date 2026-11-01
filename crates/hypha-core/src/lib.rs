@@ -60,11 +60,14 @@ pub use ids::{
     EventId, ExtensionCallId, FulfillmentId, IdError, IdentityId, InventoryItemId, InviteId,
     LocationId, MarketId, NotificationId, OAuthRequestId, OptionId, OptionValueId, OrderId,
     OrderLineId, PasswordResetId, PaymentId, PaymentMethodId, PriceListId, ProductId, ProposalId,
-    RoleId, SessionId, ShippingGroupId, ShippingOptionId, ShippingZoneId, StoreId, TaxClassId,
-    TaxRegionId, UploadId, UserId, VariantId,
+    PurchaseOrderId, ReceiptId, RoleId, SessionId, ShippingGroupId, ShippingOptionId,
+    ShippingZoneId, StoreId, SupplierId, TaxClassId, TaxRegionId, TransferId, UploadId, UserId,
+    VariantId,
 };
 pub use language::{Language, LanguageError};
-pub use money::{BasisPoints, Currency, CurrencyError, Money, MoneyError, Price, TaxRate};
+pub use money::{
+    BasisPoints, Currency, CurrencyError, ExchangeRate, Money, MoneyError, Price, TaxRate, UnitCost,
+};
 pub use operation_id::{OperationId, OperationIdError};
 pub use page::{Direction, Keyset, Page, PageError, PageLimit, PageRequest, SortKey};
 pub use ports::{

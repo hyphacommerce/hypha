@@ -323,6 +323,34 @@ async fn the_store_remembers_the_setup_guide() {
 }
 
 #[tokio::test]
+async fn the_store_keeps_a_base_currency_for_costs() {
+    let app = app().await;
+    let (_, store) = send(&app, "GET", "/admin/store", None).await;
+    assert_eq!(store["currency"], Value::Null, "no markets, so none yet");
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    assert_eq!(
+        (status, &store["currency"]),
+        (StatusCode::OK, &json!("EUR"))
+    );
+    let (status, body) = send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"eur"}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "unknown_currency")
+    );
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(r#"{"currency":null}"#)).await;
+    assert_eq!((status, &store["currency"]), (StatusCode::OK, &Value::Null));
+    let (_, public) = send_as(
+        &app,
+        &publishable(&app).await,
+        "GET",
+        "/storefront/store",
+        None,
+    )
+    .await;
+    assert!(public.get("currency").is_none(), "storefronts don't see it");
+}
+
+#[tokio::test]
 async fn the_store_details_are_set_cleared_and_partly_public() {
     let app = app().await;
     let (_, store) = send(&app, "GET", "/admin/store", None).await;

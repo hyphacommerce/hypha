@@ -11252,7 +11252,7 @@
         "type": "object"
       },
       "Scope": {
-        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `customers:erase`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `agents:read`, `agents:write`, `discounts:read`, `discounts:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `customers:erase`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `agents:read`, `agents:write`, `discounts:read`, `discounts:write`, `purchasing:read`, `purchasing:write`, `purchasing:send`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "products:read",
           "products:write",
@@ -11298,6 +11298,9 @@
           "agents:write",
           "discounts:read",
           "discounts:write",
+          "purchasing:read",
+          "purchasing:write",
+          "purchasing:send",
           "customer_data:name",
           "customer_data:email",
           "customer_data:phone",
@@ -12221,6 +12224,17 @@
               {
                 "$ref": "#/components/schemas/Email",
                 "description": "Where shoppers and agents can write to the store."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Currency",
+                "description": "The base currency every cost (purchase orders, stock value, an order line's cost)\nis kept in; `null` until it's chosen, and it must be before any cost is recorded."
               },
               {
                 "type": "null"
@@ -13354,6 +13368,13 @@
         "properties": {
           "contact_email": {
             "description": "`null` clears it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "description": "An ISO 4217 code: the base currency costs are kept in. `null` clears it.",
             "type": [
               "string",
               "null"

@@ -281,6 +281,9 @@ step "an unknown time zone" 422 unknown_timezone -X PATCH "$BASE/admin/store" -H
 step "a malformed language" 422 invalid_language -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"default_language":"en_GB"}'
 step "clear the legal address" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"legal_address":null}'
 contains "it is gone" '"legal_address":null'
+step "choose the base currency costs are kept in" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"currency":"EUR"}'
+contains "the currency is kept" '"currency":"EUR"'
+step "an unknown currency" 422 unknown_currency -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"currency":"eur"}'
 step "create mug" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"mug","title":"Mug","price":{"amount":1000,"currency":"EUR"}}'
 if [[ $BODY == *'"code":"handle_taken"'* ]]; then

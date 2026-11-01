@@ -10,8 +10,10 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { startTransition, useActionState, useState } from "react";
 
+import { useCurrencies } from "@/components/currencies";
 import { SaveBar } from "@/components/save-bar";
-import { type Country, countryOptions } from "@/lib/regions";
+import { currencyCodes } from "@/lib/format";
+import { type Country, countryOptions, currencyOptions } from "@/lib/regions";
 
 import { type StorePatch, updateStore } from "./actions";
 
@@ -103,6 +105,8 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
   const [address, setAddress] = useState(() => addressDraft(store.legal_address));
   const [timezone, setTimezone] = useState(store.timezone ?? "");
   const [language, setLanguage] = useState(store.default_language);
+  const [currency, setCurrency] = useState(store.currency ?? "");
+  const currencies = useCurrencies();
   const [state, save, isPending] = useActionState(updateStore, {});
 
   // Only what changed goes in the patch, so a save never rewrites what it didn't touch.
@@ -116,6 +120,7 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
     patch.legal_address = addressValue(address);
   if (timezone !== (store.timezone ?? "")) patch.timezone = orNull(timezone);
   if (language.trim() !== store.default_language) patch.default_language = language;
+  if (currency !== (store.currency ?? "")) patch.currency = orNull(currency);
   const isChanged = Object.keys(patch).length > 0;
 
   const submit = () => {
@@ -130,6 +135,7 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
     setAddress(addressDraft(store.legal_address));
     setTimezone(store.timezone ?? "");
     setLanguage(store.default_language);
+    setCurrency(store.currency ?? "");
   };
   const field = (key: keyof AddressDraft) => (value: string) =>
     setAddress({ ...address, [key]: value });
@@ -199,6 +205,30 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
               hasSearch
             />
           </div>
+        </VStack>
+      </Card>
+      <Card>
+        <VStack gap={4}>
+          <VStack gap={1}>
+            <Text type="display-3" as="h2">
+              Costs
+            </Text>
+            <Text type="supporting" color="secondary">
+              What you pay suppliers is converted to one currency, so stock value and margins add up
+              across markets.
+            </Text>
+          </VStack>
+          <Selector
+            label="Base currency"
+            description="Purchase orders, unit costs and stock value are kept in it. It can't change once a cost is recorded."
+            options={[
+              { value: "", label: "None yet" },
+              ...currencyOptions(currencyCodes(currencies)),
+            ]}
+            value={currency}
+            onChange={setCurrency}
+            hasSearch
+          />
         </VStack>
       </Card>
       <Card>

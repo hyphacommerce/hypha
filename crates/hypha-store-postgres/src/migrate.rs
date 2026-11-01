@@ -459,6 +459,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "discount_usages_by_code",
             sql: include_str!("../migrations/0087_discount_usages_by_code.sql"),
         },
+        Migration {
+            version: 88,
+            name: "store_currency",
+            sql: include_str!("../migrations/0088_store_currency.sql"),
+        },
     ],
 };
 
