@@ -722,7 +722,7 @@ async fn every_stock_change_is_in_the_items_history() {
             &json!("correction"),
             &json!({"type": "manual"}),
             &Value::Null,
-            &json!("user")
+            &json!("api_key")
         )
     );
     assert!(newest["at"].is_string());
