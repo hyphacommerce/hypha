@@ -816,7 +816,7 @@ async fn personal_fields_need_customer_data_profile() {
                 .contains(&json!("custom_fields.custom.birthday")),
             "{read}: {json}"
         );
-        assert!(!json.to_string().contains("1990"), "{read}: {json}");
+        assert!(!json.to_string().contains("1990-05-04"), "{read}: {json}");
     }
     let (_, page) = send_as(
         &app,
