@@ -2,7 +2,7 @@
 //! format, times in the store's time zone. Templates get the formatted text next to the raw
 //! value, so one that wants its own format can build it.
 
-use hypha_core::{Currency, Money, Timestamp, Timezone};
+use hypha_core::{Currency, Money, Timestamp, Timezone, UnitCost};
 use serde::Serialize;
 
 /// Money as templates see it: `{{ order.total.formatted }}`, or the raw `amount` (minor
@@ -40,6 +40,64 @@ impl TimeValue {
             iso: zoned.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string(),
             formatted: zoned.strftime("%-d %b %Y, %H:%M").to_string(),
         }
+    }
+}
+
+impl TimeValue {
+    /// The day `at` falls on in `zone`, without a time: `iso` "2027-03-01", `formatted`
+    /// "1 Mar 2027". For dates chosen as days (a purchase order's expected date).
+    pub fn date(at: Timestamp, zone: Option<Timezone>) -> Self {
+        let zoned = zoned(at, zone);
+        Self {
+            iso: zoned.strftime("%Y-%m-%d").to_string(),
+            formatted: zoned.strftime("%-d %b %Y").to_string(),
+        }
+    }
+}
+
+/// A unit cost as templates see it: `formatted` in the currency's major units with up to
+/// four more decimals than it has ("€0.0035", "€12.50"), `amount` the API's decimal
+/// string of minor units ("0.35"), and the currency's code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CostValue {
+    pub amount: String,
+    pub currency: &'static str,
+    pub formatted: String,
+}
+
+impl CostValue {
+    pub fn of(cost: UnitCost) -> Self {
+        Self {
+            amount: cost.minor_units(),
+            currency: cost.currency().as_str(),
+            formatted: format_unit_cost(cost),
+        }
+    }
+}
+
+/// `€0.0035`, `€12.50`, `1,000 JPY`: like `format_money`, with the extra decimals a unit
+/// cost has kept only where they aren't zero.
+pub fn format_unit_cost(cost: UnitCost) -> String {
+    let currency = cost.currency();
+    let digits = u32::from(currency.minor_units());
+    let places = digits + UnitCost::PLACES;
+    let scaled = cost.scaled().unsigned_abs();
+    let scale = 10u64.pow(places);
+    let (whole, fraction) = (scaled / scale, scaled % scale);
+    let mut number = group_thousands(whole);
+    let width = usize::try_from(places).unwrap_or(0);
+    let fraction = format!("{fraction:0width$}");
+    // Keep the currency's own digits, and the extra ones up to the last that isn't zero.
+    let keep = usize::try_from(digits).unwrap_or(0);
+    let trimmed = fraction.trim_end_matches('0');
+    let shown = &fraction[..trimmed.len().max(keep)];
+    if !shown.is_empty() {
+        number.push('.');
+        number.push_str(shown);
+    }
+    match symbol(currency) {
+        Some(symbol) => format!("{symbol}{number}"),
+        None => format!("{number} {currency}"),
     }
 }
 
@@ -110,6 +168,32 @@ mod tests {
 
     fn money(amount: i64, code: &str) -> String {
         format_money(Money::new(amount, Currency::new(code).unwrap()).unwrap())
+    }
+
+    fn cost(minor: &str, code: &str) -> String {
+        format_unit_cost(UnitCost::parse(minor, Currency::new(code).unwrap()).unwrap())
+    }
+
+    #[test]
+    fn unit_costs_keep_their_extra_decimals_only_when_they_matter() {
+        assert_eq!(cost("0.35", "EUR"), "€0.0035");
+        assert_eq!(cost("1050", "EUR"), "€10.50");
+        assert_eq!(cost("1266.6667", "EUR"), "€12.666667");
+        assert_eq!(cost("0", "USD"), "$0.00");
+        assert_eq!(cost("123456789", "RSD"), "1,234,567.89 RSD");
+        assert_eq!(cost("1000", "JPY"), "1,000 JPY");
+        assert_eq!(cost("1000.5", "JPY"), "1,000.5 JPY");
+    }
+
+    #[test]
+    fn a_date_is_the_day_in_the_zone() {
+        // Noon UTC on 1 March 2027.
+        let noon = Timestamp::from_unix_micros(1_803_902_400_000_000);
+        let day = TimeValue::date(noon, None);
+        assert_eq!(
+            (day.iso.as_str(), day.formatted.as_str()),
+            ("2027-03-01", "1 Mar 2027")
+        );
     }
 
     #[test]

@@ -52,6 +52,29 @@ export async function movePurchaseOrder(
   return {};
 }
 
+/**
+ * Emails a purchase order to its supplier (a draft is ordered first): `to` blank sends to
+ * the supplier's primary contact.
+ */
+export async function sendPurchaseOrder(
+  id: string,
+  input: { to: string[]; cc: string[]; message: string },
+): Promise<Result> {
+  const client = await sessionClient();
+  const { error } = await client.POST("/admin/purchase-orders/{id}/send", {
+    params: { path: { id } },
+    body: {
+      ...(input.to.length > 0 ? { to: input.to } : {}),
+      cc: input.cc,
+      ...(input.message.trim() ? { message: input.message } : {}),
+    },
+  });
+  if (error) return { error: describe(error) };
+  revalidatePath(`/purchase-orders/${id}`);
+  revalidatePath("/purchase-orders");
+  return {};
+}
+
 /** Deletes a draft and goes back to the list. */
 export async function deletePurchaseOrder(id: string): Promise<Result> {
   const client = await sessionClient();

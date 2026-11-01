@@ -1428,6 +1428,7 @@ export interface components {
             provider?: string | null;
             /** @description The provider's ID for it, when it gives one. */
             provider_message_id?: string | null;
+            purchase_order_id?: components["schemas"]["PurchaseOrderId"] | null;
             /**
              * @description Personal fields left out for this caller: an API key or app without the matching
              *     `customer_data:*` scope. They are absent from the object then, whatever the schema
@@ -1451,7 +1452,7 @@ export interface components {
         /**
          * @description One of the store's templates. The names are stable.
          *
-         *     Known values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         *     Known values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`, `supplier_purchase_order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         NotificationTemplateKey: string;
@@ -1730,6 +1731,11 @@ export interface components {
         ProxyExtension: {
             app: string;
         };
+        /**
+         * @description A PurchaseOrderId: `po_` and 32 hex digits.
+         * @example po_0190f1a2b3c47d8e9f00112233445566
+         */
+        PurchaseOrderId: string;
         /**
          * @description One result: a listing, a product or a variant (the request's `group`), shown by
          *     its best match.

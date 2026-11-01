@@ -105,6 +105,12 @@ pub enum PurchasingError {
     EmptyReceipt,
     #[error("the receipt was taken back already")]
     ReceiptCancelled,
+    #[error("a purchase order is sent to at least one address")]
+    NoRecipients,
+    #[error("a purchase order is sent to at most {max} addresses")]
+    TooManyRecipients { max: usize },
+    #[error("the message is longer than {max} characters")]
+    MessageTooLong { max: usize },
 }
 
 impl ErrorCode for PurchasingError {
@@ -147,6 +153,9 @@ impl ErrorCode for PurchasingError {
             PurchasingError::TakeBackMismatch(_) => "receipt_mismatch",
             PurchasingError::EmptyReceipt => "receipt_empty",
             PurchasingError::ReceiptCancelled => "receipt_cancelled",
+            PurchasingError::NoRecipients => "recipients_required",
+            PurchasingError::TooManyRecipients { .. } => "too_many_recipients",
+            PurchasingError::MessageTooLong { .. } => "message_too_long",
         }
     }
 }

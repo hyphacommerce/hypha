@@ -7995,10 +7995,11 @@
         "type": "object"
       },
       "NotificationAudience": {
-        "description": "Who a template's messages go to.\n\nKnown values: `buyer`, `staff`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "Who a template's messages go to.\n\nKnown values: `buyer`, `staff`, `supplier`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "buyer",
-          "staff"
+          "staff",
+          "supplier"
         ],
         "type": "string",
         "x-hypha-open-enum": true
@@ -8107,6 +8108,17 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "purchase_order_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PurchaseOrderId",
+                "description": "The purchase order an email to a supplier sent; `null` for every other email."
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "redacted": {
@@ -8248,7 +8260,7 @@
         "x-hypha-open-enum": true
       },
       "NotificationTemplateKey": {
-        "description": "One of the store's templates. The names are stable.\n\nKnown values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "One of the store's templates. The names are stable.\n\nKnown values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`, `supplier_purchase_order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "layout",
           "order_confirmation",
@@ -8259,7 +8271,8 @@
           "staff_invite",
           "staff_password_reset",
           "customer_login_code",
-          "customer_erasure_requested"
+          "customer_erasure_requested",
+          "supplier_purchase_order"
         ],
         "type": "string",
         "x-hypha-open-enum": true
@@ -12591,6 +12604,36 @@
           "discounts",
           "total"
         ],
+        "type": "object"
+      },
+      "SendPurchaseOrderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cc": {
+            "description": "Copied in, each sent their own email. At most 10 addresses with `to`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "message": {
+            "description": "A note for this send, shown above the order: at most 2,000 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "to": {
+            "description": "Who gets it; the supplier's primary contact when absent\n(`422 supplier_email_required` when it has no email).",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "ServiceDto": {
@@ -37172,12 +37215,21 @@
             }
           },
           {
+            "description": "Only the emails sending this purchase order to its supplier.",
+            "in": "query",
+            "name": "purchase_order",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PurchaseOrderId"
+            }
+          },
+          {
             "description": "Only messages of this template.",
             "in": "query",
             "name": "template",
             "required": false,
             "schema": {
-              "description": "One of the store's templates. The names are stable.\n\nKnown values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "description": "One of the store's templates. The names are stable.\n\nKnown values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`, `supplier_purchase_order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
               "enum": [
                 "layout",
                 "order_confirmation",
@@ -37188,7 +37240,8 @@
                 "staff_invite",
                 "staff_password_reset",
                 "customer_login_code",
-                "customer_erasure_requested"
+                "customer_erasure_requested",
+                "supplier_purchase_order"
               ],
               "type": "string",
               "x-hypha-open-enum": true
@@ -45260,6 +45313,155 @@
         },
         "x-hypha-scopes": [
           "purchasing:write"
+        ]
+      }
+    },
+    "/admin/purchase-orders/{id}/send": {
+      "post": {
+        "operationId": "admin.purchase_orders.send",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PurchaseOrderId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendPurchaseOrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Emails the purchase order to its supplier: one email per address, queued and sent\nlike the store's other emails (the `supplier_purchase_order` template), with where\nthe goods go. A draft is ordered first (the same rules as `…/order`); an ordered one\nis sent again as it is now, with its revision. Sets `sent_at` and records\n`purchase_order.sent`. Needs `purchasing:send` as well: an agent may only propose it.",
+        "tags": [
+          "purchase_orders"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "purchasing:write",
+          "purchasing:send"
         ]
       }
     },

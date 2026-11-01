@@ -13,9 +13,10 @@ use hypha_products::{HasProducts, ProductRepo};
 use hypha_purchasing::{
     CostAllocation, CostDraft, CostKind, HasSuppliers, LineInput, NewPurchaseOrder, PurchaseOrder,
     PurchaseOrderFilter, PurchaseOrderSort, PurchaseOrderStatus, PurchaseOrderSummary,
-    ReceiptStatus, SupplierRepo, UpdatePurchaseOrder, VariantInfo, cancel_purchase_order,
-    close_purchase_order, create_purchase_order, delete_purchase_order, get_purchase_order,
-    list_purchase_orders, order_purchase_order, update_purchase_order,
+    ReceiptStatus, SendPurchaseOrder, ShipTo, SupplierRepo, UpdatePurchaseOrder, VariantInfo,
+    cancel_purchase_order, close_purchase_order, create_purchase_order, delete_purchase_order,
+    get_purchase_order, list_purchase_orders, order_purchase_order, send_purchase_order,
+    update_purchase_order,
 };
 use serde::{Deserialize, Serialize};
 
@@ -837,6 +838,66 @@ pub async fn order<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let store = store_currency(&state, &ports).await?;
     let po = order_purchase_order(&ctx, &ports, &state.clock, store, id).await?;
+    Ok(Json(respond(&state, &ports, &po).await?))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SendPurchaseOrderRequest {
+    /// Who gets it; the supplier's primary contact when absent
+    /// (`422 supplier_email_required` when it has no email).
+    #[serde(default)]
+    #[schema(required = false)]
+    to: Option<Vec<String>>,
+    /// Copied in, each sent their own email. At most 10 addresses with `to`.
+    #[serde(default)]
+    #[schema(required = false)]
+    cc: Vec<String>,
+    /// A note for this send, shown above the order: at most 2,000 characters.
+    #[serde(default)]
+    #[schema(required = false)]
+    message: Option<String>,
+}
+
+/// Emails the purchase order to its supplier: one email per address, queued and sent
+/// like the store's other emails (the `supplier_purchase_order` template), with where
+/// the goods go. A draft is ordered first (the same rules as `…/order`); an ordered one
+/// is sent again as it is now, with its revision. Sets `sent_at` and records
+/// `purchase_order.sent`. Needs `purchasing:send` as well: an agent may only propose it.
+#[utoipa::path(
+    post,
+    path = "/admin/purchase-orders/{id}/send",
+    params(("id" = PurchaseOrderId, Path)),
+    request_body = SendPurchaseOrderRequest,
+    responses((status = 200, description = "OK", body = PurchaseOrderResponse)),
+    extensions(("x-hypha-scopes" = json!(["purchasing:write", "purchasing:send"]))),
+)]
+pub async fn send<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<PurchaseOrderId>,
+    body: JsonBody<SendPurchaseOrderRequest>,
+) -> Result<Json<PurchaseOrderResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let store = store_currency(&state, &ports).await?;
+    // Where the goods go, as the supplier is told now.
+    let current = get_purchase_order(&ctx, &ports, id).await?;
+    let ship_to = match current.destination() {
+        Some(location) => ports
+            .locations()
+            .get(location)
+            .await
+            .map_err(ApiError::internal)?
+            .map(|l| ShipTo::of(l.name(), l.address())),
+        None => None,
+    };
+    let input = SendPurchaseOrder {
+        to: req.to,
+        cc: req.cc,
+        message: req.message,
+    };
+    let po = send_purchase_order(&ctx, &ports, &state.clock, store, id, ship_to, input).await?;
     Ok(Json(respond(&state, &ports, &po).await?))
 }
 

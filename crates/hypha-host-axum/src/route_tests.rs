@@ -6322,7 +6322,7 @@ async fn templates_are_listed_read_saved_checked_and_reverted() {
     let (status, list) = send(&app, "GET", "/admin/notification-templates", None).await;
     assert_eq!(status, StatusCode::OK, "{list}");
     let items = list["items"].as_array().unwrap();
-    assert_eq!(items.len(), 10);
+    assert_eq!(items.len(), 11);
     assert_eq!(
         (
             &items[0]["key"],
@@ -6330,6 +6330,19 @@ async fn templates_are_listed_read_saved_checked_and_reverted() {
             &items[0]["can_disable"]
         ),
         (&json!("layout"), &Value::Null, &json!(false))
+    );
+    // Purchase orders are emailed only when sent: that template stays on.
+    assert_eq!(
+        (
+            &items[10]["key"],
+            &items[10]["audience"],
+            &items[10]["can_disable"]
+        ),
+        (
+            &json!("supplier_purchase_order"),
+            &json!("supplier"),
+            &json!(false)
+        )
     );
 
     let path = "/admin/notification-templates/order_confirmation";
@@ -7611,6 +7624,137 @@ async fn suppliers_keep_contacts_terms_and_a_catalogue() {
     assert_eq!(
         (status, code(&body)),
         (StatusCode::NOT_FOUND, "supplier_not_found")
+    );
+}
+
+#[tokio::test]
+async fn a_purchase_order_is_emailed_to_its_supplier() {
+    let app = app().await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let (_, locations) = send(&app, "GET", "/admin/locations", None).await;
+    let location = locations["items"][0]["id"].as_str().unwrap().to_string();
+    send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    let supplier = json!({
+        "name": "Spore Labs",
+        "currency": "EUR",
+        "contacts": [{"name": "Ana", "email": "ana@sporelabs.example", "primary": true}]
+    });
+    let (_, supplier) = send(
+        &app,
+        "POST",
+        "/admin/suppliers",
+        Some(&supplier.to_string()),
+    )
+    .await;
+    let draft = json!({
+        "supplier": supplier["id"],
+        "destination": location,
+        "lines": [{"variant": mug, "quantity": 12, "unit_cost": {"amount": "450", "currency": "EUR"}}]
+    });
+    let (_, po) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&draft.to_string()),
+    )
+    .await;
+    let id = po["id"].as_str().unwrap().to_string();
+    let path = format!("/admin/purchase-orders/{id}/send");
+
+    // Sending takes `purchasing:send` too.
+    let writer = key(
+        &app,
+        json!({"kind": "secret", "name": "buyer", "scopes": ["purchasing:write"]}),
+    )
+    .await;
+    let (status, body) = send_as(&app, &writer, "POST", &path, Some("{}")).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "missing_scope"),
+        "{body}"
+    );
+
+    // A draft is ordered and sent to the supplier's primary contact.
+    let body = json!({"cc": ["boss@sporelabs.example"], "message": "Before Friday, please."});
+    let (status, sent) = send(&app, "POST", &path, Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    assert_eq!(sent["status"], json!("ordered"));
+    assert!(sent["sent_at"].is_string(), "{sent}");
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    hypha_http::jobs::send_notifications(&app.state)
+        .await
+        .unwrap();
+    let emails: Vec<(String, String, String)> = app
+        .emails
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|e| (e.to.to_string(), e.subject.clone(), e.text.clone()))
+        .collect();
+    let number = format!("PO-{}", sent["number"]);
+    let to: Vec<&str> = emails.iter().map(|(to, _, _)| to.as_str()).collect();
+    assert_eq!(to, ["ana@sporelabs.example", "boss@sporelabs.example"]);
+    for (_, subject, text) in &emails {
+        assert!(subject.contains(&number), "{subject}");
+        assert!(text.contains("Before Friday, please."), "{text}");
+        assert!(text.contains("12 × Mug: €4.50 each, €54.00"), "{text}");
+    }
+    let (status, records) = send(
+        &app,
+        "GET",
+        &format!("/admin/notifications?purchase_order={id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{records}");
+    let items = records["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "{records}");
+    for n in items {
+        assert_eq!(
+            (&n["template"], &n["purchase_order_id"], &n["status"]),
+            (
+                &json!("supplier_purchase_order"),
+                &json!(id),
+                &json!("sent")
+            )
+        );
+    }
+
+    // A supplier with no address to send to needs one named.
+    let quiet = json!({"name": "Quiet Fungi", "currency": "EUR"});
+    let (_, quiet) = send(&app, "POST", "/admin/suppliers", Some(&quiet.to_string())).await;
+    let draft = json!({
+        "supplier": quiet["id"],
+        "destination": location,
+        "lines": [{"variant": mug, "quantity": 1, "unit_cost": {"amount": "450", "currency": "EUR"}}]
+    });
+    let (_, other) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&draft.to_string()),
+    )
+    .await;
+    let other_path = format!(
+        "/admin/purchase-orders/{}/send",
+        other["id"].as_str().unwrap()
+    );
+    let (status, body) = send(&app, "POST", &other_path, Some("{}")).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "supplier_email_required")
+    );
+    let named = json!({"to": ["orders@quietfungi.example"]});
+    let (status, _) = send(&app, "POST", &other_path, Some(&named.to_string())).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // A closed order isn't sent.
+    let close = format!("/admin/purchase-orders/{id}/close");
+    send(&app, "POST", &close, None).await;
+    let (status, body) = send(&app, "POST", &path, Some("{}")).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "purchase_order_not_open")
     );
 }
 

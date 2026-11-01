@@ -1,8 +1,10 @@
 //! What happens to suppliers and purchase orders, as events. Contract types: a reshaped field is a new
 //! `VERSION`, never an edit.
 
-use hypha_core::{Event, LocationId, PurchaseOrderId, ReceiptId, SupplierId, VariantId};
-use serde::Serialize;
+use hypha_core::{
+    Address, Email, Event, LocationId, PurchaseOrderId, ReceiptId, SupplierId, VariantId,
+};
+use serde::{Deserialize, Serialize};
 
 pub const SUPPLIER: &str = "supplier";
 pub const PURCHASE_ORDER: &str = "purchase_order";
@@ -81,6 +83,77 @@ pub struct PurchaseOrderOrdered {
 
 impl Event for PurchaseOrderOrdered {
     const TYPE: &'static str = "purchase_order.ordered";
+    const VERSION: u16 = 1;
+}
+
+/// Where a sent order's goods go, as it was when sent: the destination's name and
+/// address. A snapshot, so the email and its resends say what the supplier was told.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShipTo {
+    /// The location's name.
+    pub name: String,
+    /// `null` for a location without an address.
+    pub address: Option<ShipToAddress>,
+}
+
+/// A ship-to address's lines; `country` is the ISO 3166-1 alpha-2 code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShipToAddress {
+    /// The person to ask for: the address's first and last name.
+    pub contact: Option<String>,
+    pub company: Option<String>,
+    pub line1: String,
+    pub line2: Option<String>,
+    pub city: String,
+    pub province: Option<String>,
+    pub postal_code: Option<String>,
+    pub country: String,
+    pub phone: Option<String>,
+}
+
+impl ShipTo {
+    /// The location named `name`, at `address` when it has one.
+    pub fn of(name: &str, address: Option<&Address>) -> Self {
+        Self {
+            name: name.to_string(),
+            address: address.map(|a| {
+                let parts = a.parts();
+                let contact = match &parts.first_name {
+                    Some(first) => format!("{first} {}", parts.last_name),
+                    None => parts.last_name.clone(),
+                };
+                ShipToAddress {
+                    contact: Some(contact).filter(|c| !c.trim().is_empty()),
+                    company: parts.company.clone(),
+                    line1: parts.line1.clone(),
+                    line2: parts.line2.clone(),
+                    city: parts.city.clone(),
+                    province: parts.province.clone(),
+                    postal_code: parts.postal_code.clone(),
+                    country: a.country().as_str().to_string(),
+                    phone: parts.phone.clone(),
+                }
+            }),
+        }
+    }
+}
+
+/// `purchase_order.sent`: emailed to the supplier. Each of `to` and `cc` gets the
+/// order as it was at `revision`, with `message` and `ship_to`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PurchaseOrderSent {
+    pub purchase_order: PurchaseOrderId,
+    pub supplier: SupplierId,
+    pub revision: u32,
+    pub to: Vec<Email>,
+    pub cc: Vec<Email>,
+    /// A note for this send, above the order.
+    pub message: Option<String>,
+    pub ship_to: Option<ShipTo>,
+}
+
+impl Event for PurchaseOrderSent {
+    const TYPE: &'static str = "purchase_order.sent";
     const VERSION: u16 = 1;
 }
 

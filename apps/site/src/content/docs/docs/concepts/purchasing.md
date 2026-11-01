@@ -131,3 +131,28 @@ was refused or cancelled), and **`next_expected_at`**, the soonest of those orde
 expected dates. A location with units coming but none yet is listed with zero counts.
 Drafts, closed and cancelled orders bring nothing. Incoming units can't be sold, and
 storefronts don't see them.
+
+## Sending a purchase order
+
+`POST /admin/purchase-orders/{id}/send` emails the order to the supplier, one email per
+address, through the store's email settings like every other email (the editable
+**Purchase order** template, `supplier_purchase_order`):
+
+```json
+{ "cc": ["accounts@supplier.example"], "message": "Before the spring sale, please." }
+```
+
+- **`to`** defaults to the supplier's primary contact; a supplier without an email needs
+  the addresses named (`422 supplier_email_required`). At most 10 addresses in all.
+- **A draft is ordered as it's sent**, by the same rules as `…/order`. An ordered one is
+  sent again as it is now, with its revision: after editing an order, send it again.
+- The email lists the lines (with the supplier's own codes), the extra costs in the
+  order's currency, the totals, the payment terms, where to ship and your note.
+- It sets `sent_at` and records `purchase_order.sent`. The emails are listed with
+  `GET /admin/notifications?purchase_order={id}`, and can be resent from there.
+- **Sending needs `purchasing:send`** as well as `purchasing:write`. An agent may draft
+  purchase orders, but only proposes sending one: a person approves every email to a
+  supplier.
+
+The admin's purchase order page also has a print view, which the browser can save as a
+PDF.

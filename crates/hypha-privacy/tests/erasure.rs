@@ -407,6 +407,7 @@ fn erasing_redacts_the_orders_email_records() {
             subject: "Order #1001 confirmed".to_string(),
             event: None,
             order: Some(ana_order()),
+            purchase_order: None,
         },
         QueuedEmail {
             sender_name: None,

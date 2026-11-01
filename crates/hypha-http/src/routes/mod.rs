@@ -250,6 +250,7 @@ macro_rules! route_table {
             [admin, PATCH, "/admin/purchase-orders/{id}", purchase_orders::update],
             [admin, DELETE, "/admin/purchase-orders/{id}", purchase_orders::remove],
             [admin, POST, "/admin/purchase-orders/{id}/order", purchase_orders::order],
+            [admin, POST, "/admin/purchase-orders/{id}/send", purchase_orders::send],
             [admin, POST, "/admin/purchase-orders/{id}/close", purchase_orders::close],
             [admin, POST, "/admin/purchase-orders/{id}/cancel", purchase_orders::cancel],
             [admin, POST, "/admin/purchase-orders/{id}/receipts", receipts::create],

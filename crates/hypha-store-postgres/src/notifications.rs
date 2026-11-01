@@ -2,8 +2,8 @@
 //! messages. One row each, no child tables.
 
 use hypha_core::{
-    AssetId, Email, EventId, Language, NotificationId, OrderId, Page, PageRequest, RepoError,
-    Timestamp, Version, Versioned, stamp_insert, stamp_update,
+    AssetId, Email, EventId, Language, NotificationId, OrderId, Page, PageRequest, PurchaseOrderId,
+    RepoError, Timestamp, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_notifications::{
     Colour, Notification, NotificationFilter, NotificationRepo, NotificationSettings,
@@ -375,7 +375,7 @@ fn notification_columns(prefix: &str) -> String {
     format!(
         "{p}id, {p}version, {p}template, {p}recipient, {p}subject, {p}status, {p}attempts,
          {p}provider, {p}provider_message_id, {p}error, {p}note, {p}event_id, {p}order_id,
-         {p}email_sender_name, {p}email_reply_to, {p}email_html, {p}email_text, {}, {}, {}, {}",
+         {p}purchase_order_id, {p}email_sender_name, {p}email_reply_to, {p}email_html, {p}email_text, {}, {}, {}, {}",
         micros(&format!("{p}sent_at")),
         micros(&format!("{p}next_attempt_at")),
         micros(&format!("{p}lease_until")),
@@ -389,6 +389,7 @@ fn notification_from_row(row: &Row) -> Result<Notification, RepoError> {
     let attempts: i32 = col(row, "attempts")?;
     let event: Option<Uuid> = col(row, "event_id")?;
     let order: Option<Uuid> = col(row, "order_id")?;
+    let purchase_order: Option<Uuid> = col(row, "purchase_order_id")?;
     let html: Option<String> = col(row, "email_html")?;
     let text: Option<String> = col(row, "email_text")?;
     let reply_to: Option<String> = col(row, "email_reply_to")?;
@@ -419,6 +420,7 @@ fn notification_from_row(row: &Row) -> Result<Notification, RepoError> {
         note: col(row, "note")?,
         event: event.map(EventId::from_uuid),
         order: order.map(OrderId::from_uuid),
+        purchase_order: purchase_order.map(PurchaseOrderId::from_uuid),
         sent_at: opt_ts(col(row, "sent_at")?),
         next_attempt_at: opt_ts(col(row, "next_attempt_at")?),
         lease_until: opt_ts(col(row, "lease_until")?),
@@ -436,6 +438,7 @@ struct NotificationColumns<'a> {
     attempts: i32,
     event: Option<Uuid>,
     order: Option<Uuid>,
+    purchase_order: Option<Uuid>,
     sent_at: Option<i64>,
     next_attempt_at: Option<i64>,
     lease_until: Option<i64>,
@@ -446,7 +449,7 @@ struct NotificationColumns<'a> {
 }
 
 /// The columns `INSERT` and `UPDATE` write after `id` and `version`, in this order.
-const NOTIFICATION_FIELDS: [&str; 18] = [
+const NOTIFICATION_FIELDS: [&str; 19] = [
     "template",
     "recipient",
     "subject",
@@ -458,6 +461,7 @@ const NOTIFICATION_FIELDS: [&str; 18] = [
     "note",
     "event_id",
     "order_id",
+    "purchase_order_id",
     "email_sender_name",
     "email_reply_to",
     "email_html",
@@ -482,6 +486,7 @@ impl<'a> NotificationColumns<'a> {
                 .map_err(|_| corrupt(format!("{} attempts too many", s.id)))?,
             event: s.event.map(|e| e.as_uuid()),
             order: s.order.map(|o| o.as_uuid()),
+            purchase_order: s.purchase_order.map(|o| o.as_uuid()),
             sent_at: opt_micros(s.sent_at),
             next_attempt_at: opt_micros(s.next_attempt_at),
             lease_until: opt_micros(s.lease_until),
@@ -506,6 +511,7 @@ impl<'a> NotificationColumns<'a> {
             (&self.s.note, Type::TEXT),
             (&self.event, Type::UUID),
             (&self.order, Type::UUID),
+            (&self.purchase_order, Type::UUID),
             (&self.sender_name, Type::TEXT),
             (&self.reply_to, Type::TEXT),
             (&self.html, Type::TEXT),
@@ -577,6 +583,7 @@ impl<C: PgConnection> NotificationRepo for PgStore<C> {
     ) -> Result<Page<Notification>, RepoError> {
         let after = page.after.map(|id| id.as_uuid());
         let order = filter.order.map(|o| o.as_uuid());
+        let purchase_order = filter.purchase_order.map(|o| o.as_uuid());
         let template = filter.template.map(TemplateKey::as_str);
         let status = filter.status.map(|s| s.as_str());
         let fetch = i64::from(page.limit.get()) + 1;
@@ -592,6 +599,10 @@ impl<C: PgConnection> NotificationRepo for PgStore<C> {
         if let Some(order) = &order {
             params.push((order, Type::UUID));
             conditions.push(format!("order_id = ${}", params.len()));
+        }
+        if let Some(purchase_order) = &purchase_order {
+            params.push((purchase_order, Type::UUID));
+            conditions.push(format!("purchase_order_id = ${}", params.len()));
         }
         if let Some(template) = &template {
             params.push((template, Type::TEXT));

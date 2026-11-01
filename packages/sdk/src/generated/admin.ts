@@ -3290,6 +3290,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/purchase-orders/{id}/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Emails the purchase order to its supplier: one email per address, queued and sent
+         *     like the store's other emails (the `supplier_purchase_order` template), with where
+         *     the goods go. A draft is ordered first (the same rules as `…/order`); an ordered one
+         *     is sent again as it is now, with its revision. Sets `sent_at` and records
+         *     `purchase_order.sent`. Needs `purchasing:send` as well: an agent may only propose it.
+         */
+        post: operations["admin.purchase_orders.send"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/receipts/{id}": {
         parameters: {
             query?: never;
@@ -6799,7 +6822,7 @@ export interface components {
         /**
          * @description Who a template's messages go to.
          *
-         *     Known values: `buyer`, `staff`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         *     Known values: `buyer`, `staff`, `supplier`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         NotificationAudience: string;
@@ -6844,6 +6867,7 @@ export interface components {
             provider?: string | null;
             /** @description The provider's ID for it, when it gives one. */
             provider_message_id?: string | null;
+            purchase_order_id?: components["schemas"]["PurchaseOrderId"] | null;
             /**
              * @description Personal fields left out for this caller: an API key or app without the matching
              *     `customer_data:*` scope. They are absent from the object then, whatever the schema
@@ -6895,7 +6919,7 @@ export interface components {
         /**
          * @description One of the store's templates. The names are stable.
          *
-         *     Known values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         *     Known values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`, `supplier_purchase_order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         NotificationTemplateKey: string;
@@ -8411,6 +8435,17 @@ export interface components {
             tax?: components["schemas"]["TaxLineResponse"] | null;
             /** @description What the buyer pays for it: `amount` less the discounts. Tax is on this. */
             total: components["schemas"]["Money"];
+        };
+        SendPurchaseOrderRequest: {
+            /** @description Copied in, each sent their own email. At most 10 addresses with `to`. */
+            cc?: string[];
+            /** @description A note for this send, shown above the order: at most 2,000 characters. */
+            message?: string | null;
+            /**
+             * @description Who gets it; the supplier's primary contact when absent
+             *     (`422 supplier_email_required` when it has no email).
+             */
+            to?: string[] | null;
         };
         ServiceDto: {
             code: string;
@@ -25516,8 +25551,10 @@ export interface operations {
                 limit?: number;
                 /** @description Only this order's emails. */
                 order?: components["schemas"]["OrderId"];
+                /** @description Only the emails sending this purchase order to its supplier. */
+                purchase_order?: components["schemas"]["PurchaseOrderId"];
                 /** @description Only messages of this template. */
-                template?: "layout" | "order_confirmation" | "order_shipped" | "order_tracking_updated" | "order_cancelled" | "staff_new_order" | "staff_invite" | "staff_password_reset" | "customer_login_code" | "customer_erasure_requested";
+                template?: "layout" | "order_confirmation" | "order_shipped" | "order_tracking_updated" | "order_cancelled" | "staff_new_order" | "staff_invite" | "staff_password_reset" | "customer_login_code" | "customer_erasure_requested" | "supplier_purchase_order";
                 /** @description Only messages in this status. */
                 status?: "queued" | "sending" | "sent" | "failed" | "skipped";
             };
@@ -31224,6 +31261,118 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReceivedResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.purchase_orders.send": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendPurchaseOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderResponse"];
                 };
             };
             /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */

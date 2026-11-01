@@ -1302,6 +1302,15 @@ step "order more lamps" 200 - -X PATCH "$BASE/admin/purchase-orders/$PO" -H "$JS
 contains "a revision" '"revision":1'
 step "the lamps on their way" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
 contains "12 incoming at the warehouse" '"incoming":12'
+forget_mail "ana@lampworks.example"
+step "send it to the supplier" 200 - -X POST "$BASE/admin/purchase-orders/$PO/send" -H "$JSON" \
+    -d '{"message":"Lamps before the sale, please."}'
+contains "sent" '"sent_at":"'
+step "too many words for a note" 422 message_too_long -X POST "$BASE/admin/purchase-orders/$PO/send" -H "$JSON" \
+    -d "{\"message\":\"$(printf 'x%.0s' $(seq 1 2001))\"}"
+mail "the supplier gets the order" "ana@lampworks.example" "Purchase order PO-"
+step "the order's emails" 200 - "$BASE/admin/notifications?purchase_order=$PO"
+contains "to the supplier" '"template":"supplier_purchase_order"'
 step "an ordered one isn't deleted" 409 purchase_order_not_draft -X DELETE "$BASE/admin/purchase-orders/$PO"
 step "open orders for lamps" 200 - "$BASE/admin/purchase-orders?status=ordered&variant=$LAMP_VAR&sort=expected_at"
 contains "this one" "\"id\":\"$PO\""

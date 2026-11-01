@@ -45,6 +45,10 @@ export const TEMPLATES: Record<string, { name: string; description: string }> = 
     description:
       "Sent to a customer who asked from their account to have their data erased, with the date it runs.",
   },
+  supplier_purchase_order: {
+    name: "Purchase order",
+    description: "Sent to a supplier when you send them a purchase order.",
+  },
 };
 
 /** A template key as people read it; an unknown one as it is. */

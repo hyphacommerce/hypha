@@ -2,7 +2,7 @@
 //! defaults), previews and test sends, and the record of every message with resending.
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{AssetId, EventId, NotificationId, OrderId, Scope, Stamped};
+use hypha_core::{AssetId, EventId, NotificationId, OrderId, PurchaseOrderId, Scope, Stamped};
 use hypha_mail::{MailContext, MailEnv, TemplateInput, UpdateSettings};
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_notifications::{
@@ -44,6 +44,8 @@ pub enum TemplateKeyDto {
     StaffPasswordReset,
     CustomerLoginCode,
     CustomerErasureRequested,
+    /// A purchase order emailed to its supplier.
+    SupplierPurchaseOrder,
 }
 
 impl From<TemplateKey> for TemplateKeyDto {
@@ -59,6 +61,7 @@ impl From<TemplateKey> for TemplateKeyDto {
             TemplateKey::StaffPasswordReset => Self::StaffPasswordReset,
             TemplateKey::CustomerLoginCode => Self::CustomerLoginCode,
             TemplateKey::CustomerErasureRequested => Self::CustomerErasureRequested,
+            TemplateKey::SupplierPurchaseOrder => Self::SupplierPurchaseOrder,
         }
     }
 }
@@ -76,6 +79,7 @@ impl From<TemplateKeyDto> for TemplateKey {
             TemplateKeyDto::StaffPasswordReset => Self::StaffPasswordReset,
             TemplateKeyDto::CustomerLoginCode => Self::CustomerLoginCode,
             TemplateKeyDto::CustomerErasureRequested => Self::CustomerErasureRequested,
+            TemplateKeyDto::SupplierPurchaseOrder => Self::SupplierPurchaseOrder,
         }
     }
 }
@@ -99,6 +103,8 @@ pub enum AudienceDto {
     Buyer,
     /// Staff: the settings' recipients, an invitee, someone resetting a password.
     Staff,
+    /// A supplier's addresses: those a purchase order is sent to.
+    Supplier,
 }
 
 impl From<Audience> for AudienceDto {
@@ -106,6 +112,7 @@ impl From<Audience> for AudienceDto {
         match a {
             Audience::Buyer => Self::Buyer,
             Audience::Staff => Self::Staff,
+            Audience::Supplier => Self::Supplier,
         }
     }
 }
@@ -699,6 +706,8 @@ pub struct NotificationResponse {
     /// The event it answered; `null` for resends and staff account emails.
     event_id: Option<EventId>,
     order_id: Option<OrderId>,
+    /// The purchase order an email to a supplier sent; `null` for every other email.
+    purchase_order_id: Option<PurchaseOrderId>,
     sent_at: Option<String>,
     /// When a queued message is next tried.
     next_attempt_at: Option<String>,
@@ -723,6 +732,7 @@ impl NotificationResponse {
             note: n.note().map(str::to_string),
             event_id: n.event(),
             order_id: n.order(),
+            purchase_order_id: n.purchase_order(),
             sent_at: n.sent_at().map(rfc3339).transpose()?,
             next_attempt_at: n.next_attempt_at().map(rfc3339).transpose()?,
             created_at,
@@ -738,6 +748,9 @@ pub struct NotificationFilters {
     /// Only this order's emails.
     #[param(value_type = Option<OrderId>)]
     order: Option<OrderId>,
+    /// Only the emails sending this purchase order to its supplier.
+    #[param(value_type = Option<PurchaseOrderId>)]
+    purchase_order: Option<PurchaseOrderId>,
     /// Only messages of this template.
     #[param(inline)]
     template: Option<TemplateKeyDto>,
@@ -767,6 +780,7 @@ pub async fn list<S: Storage>(
     let (page, filters, scope) = query.parse()?;
     let filter = NotificationFilter {
         order: filters.order,
+        purchase_order: filters.purchase_order,
         template: filters.template.map(Into::into),
         status: filters.status.map(Into::into),
     };

@@ -1293,3 +1293,87 @@ async fn an_agents_token_applies_nothing_after_a_hand_edit() {
     let (_, now) = send(&app, "GET", &path, None).await;
     assert_eq!(now["title"], "Mug, blue");
 }
+
+#[tokio::test]
+async fn an_agent_drafts_purchase_orders_but_only_proposes_sending_them() {
+    let app = app().await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let (_, locations) = send(&app, "GET", "/admin/locations", None).await;
+    let location = locations["items"][0]["id"].as_str().unwrap().to_string();
+    send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    let supplier = json!({
+        "name": "Spore Labs",
+        "currency": "EUR",
+        "contacts": [{"name": "Ana", "email": "ana@sporelabs.example", "primary": true}]
+    });
+    let (_, supplier) = send(
+        &app,
+        "POST",
+        "/admin/suppliers",
+        Some(&supplier.to_string()),
+    )
+    .await;
+    // Sending can't be granted to apply: a person approves every send.
+    let session = owner_session(&app).await;
+    let body = json!({
+        "name": "Buyer",
+        "grant": {"write": {"purchasing:send": "apply"}}
+    })
+    .to_string();
+    let (status, json) = send_as(&app, &session, "POST", "/admin/agents", Some(&body)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "agent_scope_not_grantable"
+        ),
+        "{json}"
+    );
+    let agent = agent_with(
+        &app,
+        json!({"write": {"purchasing:write": "apply", "purchasing:send": "propose"}}),
+    )
+    .await;
+
+    // The agent drafts an order directly...
+    let draft = json!({
+        "supplier": supplier["id"],
+        "destination": location,
+        "lines": [{"variant": mug, "quantity": 12, "unit_cost": {"amount": "450", "currency": "EUR"}}]
+    });
+    let created = call(
+        &app,
+        &agent,
+        op(
+            "admin.purchase_orders.create",
+            json!({}),
+            Some(draft),
+            Mode::Apply,
+        ),
+    )
+    .await;
+    assert_eq!(created.status, 201, "{:?}", created.body);
+    let id = created.body["id"].as_str().unwrap().to_string();
+
+    // ...but sending it waits for a person.
+    let sent = call(
+        &app,
+        &agent,
+        op(
+            "admin.purchase_orders.send",
+            json!({"id": id}),
+            Some(json!({})),
+            Mode::Apply,
+        ),
+    )
+    .await;
+    assert_eq!(sent.status, 202, "{:?}", sent.body);
+    assert!(sent.body["proposal"].is_object(), "{:?}", sent.body);
+    let (_, po) = send(&app, "GET", &format!("/admin/purchase-orders/{id}"), None).await;
+    assert_eq!(
+        (&po["status"], &po["sent_at"]),
+        (&json!("draft"), &Value::Null),
+        "not sent: {po}"
+    );
+    assert_eq!(calls_of(&app, &agent).await[0].1, "propose");
+}

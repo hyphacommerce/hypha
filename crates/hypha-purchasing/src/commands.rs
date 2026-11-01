@@ -1,14 +1,14 @@
 use hypha_core::{
-    AddressParts, AuthError, Clock, Ctx, Currency, ErrorCode, ExchangeRate, IdGenerator, Keyset,
-    LocationId, Money, Page, PageRequest, PurchaseOrderId, ReceiptId, RepoError, Scope, SupplierId,
-    Timestamp, UnitCost, VariantId,
+    AddressParts, AuthError, Clock, Ctx, Currency, Email, ErrorCode, ExchangeRate, IdGenerator,
+    Keyset, LocationId, Money, Page, PageRequest, PurchaseOrderId, ReceiptId, RepoError, Scope,
+    SupplierId, Timestamp, UnitCost, VariantId,
 };
 use thiserror::Error;
 
 use crate::{
     ContactDraft, CostDraft, LineDraft, PaymentTermsDraft, PurchaseOrder, PurchaseOrderDraft,
-    PurchaseOrderStatus, PurchaseOrderSummary, PurchasingError, Receipt, Supplier, SupplierDraft,
-    SupplierVariant, SupplierVariantDraft,
+    PurchaseOrderStatus, PurchaseOrderSummary, PurchasingError, Receipt, Sending, ShipTo, Supplier,
+    SupplierDraft, SupplierVariant, SupplierVariantDraft,
     repo::{
         HasPurchaseOrders, HasReceipts, HasSupplierVariants, HasSuppliers, PurchaseOrderFilter,
         PurchaseOrderRepo, PurchaseOrderSort, ReceiptRepo, SupplierFilter, SupplierRepo,
@@ -50,6 +50,9 @@ pub enum CommandError {
     /// one in the order's currency.
     #[error("variant {0}'s line needs a unit cost")]
     UnitCostRequired(VariantId),
+    /// Sent without addresses, and the supplier has no primary contact with an email.
+    #[error("supplier {0} has no primary contact email: say who to send it to")]
+    SupplierEmailRequired(SupplierId),
 }
 
 impl ErrorCode for CommandError {
@@ -67,6 +70,7 @@ impl ErrorCode for CommandError {
             CommandError::ReceiptNotFound(_) => "receipt_not_found",
             CommandError::UnknownVariant(_) => "unknown_variant",
             CommandError::UnitCostRequired(_) => "unit_cost_required",
+            CommandError::SupplierEmailRequired(_) => "supplier_email_required",
         }
     }
 }
@@ -630,6 +634,75 @@ pub async fn order_purchase_order<S: HasSuppliers + HasPurchaseOrders>(
         return Err(CommandError::SupplierArchived(supplier.id()));
     }
     po.order(
+        store,
+        supplier.name(),
+        supplier.lead_time_days(),
+        clock.now(),
+    )?;
+    ports.purchase_orders().update(&mut po).await?;
+    Ok(po)
+}
+
+/// Who a purchase order is sent to, as asked: `to` defaults to the supplier's primary
+/// contact.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SendPurchaseOrder {
+    pub to: Option<Vec<String>>,
+    pub cc: Vec<String>,
+    pub message: Option<String>,
+}
+
+/// Emails a draft or ordered purchase order to its supplier (`PurchaseOrder::send`),
+/// ordering a draft first: `purchase_order.sent` is what the mailer answers, one email per
+/// address. Without `to`, the supplier's primary contact gets it
+/// (`supplier_email_required` when it has none with an address). `ship_to` is the
+/// destination as the host read it. Needs `purchasing:send` as well as
+/// `purchasing:write`: an agent may draft orders but only propose sending them.
+pub async fn send_purchase_order<S: HasSuppliers + HasPurchaseOrders>(
+    ctx: &Ctx,
+    ports: &S,
+    clock: &impl Clock,
+    store: Option<Currency>,
+    id: PurchaseOrderId,
+    ship_to: Option<ShipTo>,
+    input: SendPurchaseOrder,
+) -> Result<PurchaseOrder, CommandError> {
+    ctx.require(Scope::PurchasingWrite)?;
+    ctx.require(Scope::PurchasingSend)?;
+    let mut po = load_po(ports, id).await?;
+    let supplier = load(ports, po.supplier()).await?;
+    if po.status() == PurchaseOrderStatus::Draft && supplier.archived() {
+        return Err(CommandError::SupplierArchived(supplier.id()));
+    }
+    let to = match input.to {
+        Some(to) => to
+            .iter()
+            .map(|e| Email::new(e))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(PurchasingError::from)?,
+        None => supplier
+            .primary_contact()
+            .and_then(|c| c.email().cloned())
+            .into_iter()
+            .collect(),
+    };
+    if to.is_empty() {
+        return Err(CommandError::SupplierEmailRequired(supplier.id()));
+    }
+    let cc = input
+        .cc
+        .iter()
+        .map(|e| Email::new(e))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(PurchasingError::from)?;
+    let sending = Sending {
+        to,
+        cc,
+        message: input.message,
+        ship_to,
+    };
+    po.send(
+        sending,
         store,
         supplier.name(),
         supplier.lead_time_days(),

@@ -4,9 +4,9 @@
 use std::{collections::HashSet, fmt};
 
 use hypha_core::{
-    Currency, ExchangeRate, LocationId, Money, PendingEvent, PurchaseOrderId, Recorded, Stamped,
-    Stamps, Subject, SupplierId, Timestamp, UnitCost, VariantId, Version, Versioned, optional_text,
-    required_text,
+    Currency, Email, ExchangeRate, LocationId, Money, PendingEvent, PurchaseOrderId, Recorded,
+    Stamped, Stamps, Subject, SupplierId, Timestamp, UnitCost, VariantId, Version, Versioned,
+    optional_text, required_text,
 };
 
 use crate::{
@@ -14,7 +14,8 @@ use crate::{
     costs::{CostShare, LineBasis, extra_per_unit, landed_unit_cost},
     events::{
         PURCHASE_ORDER, PurchaseOrderCancelled, PurchaseOrderClosed, PurchaseOrderCreated,
-        PurchaseOrderOrdered, PurchaseOrderReceiptStatusChanged, PurchaseOrderUpdated,
+        PurchaseOrderOrdered, PurchaseOrderReceiptStatusChanged, PurchaseOrderSent,
+        PurchaseOrderUpdated, ShipTo,
     },
     supplier::MAX_NOTES_CHARS,
 };
@@ -22,6 +23,64 @@ use crate::{
 /// The most lines an order holds, and the most extra costs.
 pub const MAX_LINES: usize = 1000;
 pub const MAX_COSTS: usize = 20;
+/// The most addresses one send goes to, `to` and `cc` together, and the longest message.
+pub const MAX_RECIPIENTS: usize = 10;
+pub const MAX_MESSAGE_CHARS: usize = 2000;
+
+/// One send of an order to its supplier: who gets it, what's said with it, where the
+/// goods go.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sending {
+    pub to: Vec<Email>,
+    pub cc: Vec<Email>,
+    pub message: Option<String>,
+    pub ship_to: Option<ShipTo>,
+}
+
+impl Sending {
+    /// Repeats dropped (a `cc` already in `to` too), the message trimmed (blank is none),
+    /// each rule checked: at least one `to`, at most `MAX_RECIPIENTS` in all, at most
+    /// `MAX_MESSAGE_CHARS` of message.
+    fn checked(self) -> Result<Self, PurchasingError> {
+        let mut seen = HashSet::new();
+        let to: Vec<Email> = self
+            .to
+            .into_iter()
+            .filter(|e| seen.insert(e.clone()))
+            .collect();
+        let cc: Vec<Email> = self
+            .cc
+            .into_iter()
+            .filter(|e| seen.insert(e.clone()))
+            .collect();
+        if to.is_empty() {
+            return Err(PurchasingError::NoRecipients);
+        }
+        if to.len() + cc.len() > MAX_RECIPIENTS {
+            return Err(PurchasingError::TooManyRecipients {
+                max: MAX_RECIPIENTS,
+            });
+        }
+        let message = self
+            .message
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty());
+        if message
+            .as_ref()
+            .is_some_and(|m| m.chars().count() > MAX_MESSAGE_CHARS)
+        {
+            return Err(PurchasingError::MessageTooLong {
+                max: MAX_MESSAGE_CHARS,
+            });
+        }
+        Ok(Self {
+            to,
+            cc,
+            message,
+            ship_to: self.ship_to,
+        })
+    }
+}
 
 /// A purchase order's human number (`PO-1001`): unique and increasing, possibly with gaps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -510,6 +569,7 @@ struct Changes {
     receipt_status: Option<(ReceiptStatus, ReceiptStatus)>,
     closed: bool,
     cancelled: bool,
+    sent: Option<Sending>,
 }
 
 impl Changes {
@@ -526,6 +586,7 @@ impl Changes {
             || self.receipt_status.is_some()
             || self.closed
             || self.cancelled
+            || self.sent.is_some()
     }
 }
 
@@ -574,6 +635,18 @@ impl Recorded for PurchaseOrder {
                 supplier,
                 from: from.as_str(),
                 to: to.as_str(),
+            };
+            events.push(PendingEvent::new(subject, &event));
+        }
+        if let Some(sending) = changes.sent {
+            let event = PurchaseOrderSent {
+                purchase_order,
+                supplier,
+                revision: self.revision,
+                to: sending.to,
+                cc: sending.cc,
+                message: sending.message,
+                ship_to: sending.ship_to,
             };
             events.push(PendingEvent::new(subject, &event));
         }
@@ -774,6 +847,33 @@ impl PurchaseOrder {
         self.status = PurchaseOrderStatus::Ordered;
         self.ordered_at = Some(now);
         self.changes.ordered = true;
+        Ok(())
+    }
+
+    /// Emails it to its supplier: a draft is ordered first (`order`'s rules, with the
+    /// same arguments), then `purchase_order.sent` records `sending` for the mailer and
+    /// `sent_at` is now. A closed or cancelled order isn't sent
+    /// (`purchase_order_not_open`). All or nothing.
+    pub fn send(
+        &mut self,
+        sending: Sending,
+        store: Option<Currency>,
+        supplier_name: &str,
+        lead_time_days: Option<u32>,
+        now: Timestamp,
+    ) -> Result<(), PurchasingError> {
+        let sending = sending.checked()?;
+        match self.status {
+            PurchaseOrderStatus::Draft => self.order(store, supplier_name, lead_time_days, now)?,
+            PurchaseOrderStatus::Ordered => {}
+            status @ (PurchaseOrderStatus::Closed | PurchaseOrderStatus::Cancelled) => {
+                return Err(PurchasingError::NotOpen {
+                    status: status.as_str(),
+                });
+            }
+        }
+        self.sent_at = Some(now);
+        self.changes.sent = Some(sending);
         Ok(())
     }
 
@@ -2027,5 +2127,156 @@ mod tests {
             assert_eq!(CostKind::parse(kind.as_str()), Some(kind));
         }
         assert_eq!(PurchaseOrderStatus::parse("sent"), None);
+    }
+
+    fn email(s: &str) -> Email {
+        Email::new(s).unwrap()
+    }
+
+    fn sending(to: &[&str], cc: &[&str], message: Option<&str>) -> Sending {
+        Sending {
+            to: to.iter().map(|e| email(e)).collect(),
+            cc: cc.iter().map(|e| email(e)).collect(),
+            message: message.map(str::to_string),
+            ship_to: Some(ShipTo {
+                name: "Warehouse".into(),
+                address: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn sending_a_draft_orders_it_first() {
+        let mut po = po(vec![line(10, 5, "100")]);
+        po.take_events();
+        po.send(
+            sending(&["orders@spore.example"], &[], Some("  Rush please  ")),
+            Some(Currency::EUR),
+            "Spore Supply",
+            None,
+            at(200),
+        )
+        .unwrap();
+        assert_eq!(
+            (po.status(), po.ordered_at(), po.sent_at()),
+            (PurchaseOrderStatus::Ordered, Some(at(200)), Some(at(200)))
+        );
+        let events = po.take_events();
+        let types: Vec<_> = events.iter().map(|e| e.event_type.to_string()).collect();
+        assert_eq!(types, ["purchase_order.ordered", "purchase_order.sent"]);
+        assert_eq!(
+            events[1].data,
+            serde_json::json!({
+                "purchase_order": po.id(),
+                "supplier": po.supplier(),
+                "revision": 0,
+                "to": ["orders@spore.example"],
+                "cc": [],
+                "message": "Rush please",
+                "ship_to": {"name": "Warehouse", "address": null}
+            })
+        );
+    }
+
+    #[test]
+    fn sending_an_ordered_order_again_names_its_revision() {
+        let mut po = ordered(vec![line(10, 5, "100")]);
+        let mut d = po.draft();
+        d.lines[0].quantity = 8;
+        po.update(d, Some(Currency::EUR), at(150)).unwrap();
+        po.take_events();
+        po.send(
+            sending(&["a@spore.example"], &["b@spore.example"], None),
+            Some(Currency::EUR),
+            "Spore Supply",
+            None,
+            at(300),
+        )
+        .unwrap();
+        let events = po.take_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].data["revision"], 1);
+        assert_eq!(events[0].data["cc"], serde_json::json!(["b@spore.example"]));
+        assert_eq!(po.sent_at(), Some(at(300)));
+    }
+
+    #[test]
+    fn a_send_needs_an_address_and_holds_at_most_ten() {
+        let mut po = ordered(vec![line(10, 5, "100")]);
+        let send = |po: &mut PurchaseOrder, s: Sending| {
+            po.send(s, Some(Currency::EUR), "Spore Supply", None, at(300))
+        };
+        assert_eq!(
+            send(&mut po, sending(&[], &["b@x.example"], None)),
+            Err(PurchasingError::NoRecipients)
+        );
+        let many: Vec<String> = (0..11).map(|n| format!("p{n}@x.example")).collect();
+        let many: Vec<&str> = many.iter().map(String::as_str).collect();
+        assert_eq!(
+            send(&mut po, sending(&many[..1], &many[1..], None)),
+            Err(PurchasingError::TooManyRecipients { max: 10 })
+        );
+        // Repeats count once: a cc already in `to` is dropped.
+        assert_eq!(
+            send(
+                &mut po,
+                sending(&many[..10], &["p0@x.example", "p1@x.example"], None)
+            ),
+            Ok(())
+        );
+        assert_eq!(po.take_events()[0].data["cc"], serde_json::json!([]));
+        let long = "é".repeat(2001);
+        assert_eq!(
+            send(&mut po, sending(&["a@x.example"], &[], Some(&long))),
+            Err(PurchasingError::MessageTooLong { max: 2000 })
+        );
+    }
+
+    #[test]
+    fn a_closed_or_cancelled_order_isnt_sent_and_nothing_changes() {
+        let mut po = ordered(vec![line(10, 5, "100")]);
+        po.close(at(150)).unwrap();
+        po.take_events();
+        assert_eq!(
+            po.send(
+                sending(&["a@x.example"], &[], None),
+                Some(Currency::EUR),
+                "Spore Supply",
+                None,
+                at(300)
+            ),
+            Err(PurchasingError::NotOpen { status: "closed" })
+        );
+        assert_eq!(po.sent_at(), None);
+        assert!(po.take_events().is_empty());
+        // A draft that can't be ordered isn't sent either.
+        let mut draft = po_without_destination();
+        assert_eq!(
+            draft.send(
+                sending(&["a@x.example"], &[], None),
+                Some(Currency::EUR),
+                "Spore Supply",
+                None,
+                at(300)
+            ),
+            Err(PurchasingError::DestinationRequired)
+        );
+        assert_eq!(
+            (draft.status(), draft.sent_at()),
+            (PurchaseOrderStatus::Draft, None)
+        );
+    }
+
+    fn po_without_destination() -> PurchaseOrder {
+        PurchaseOrder::new(
+            PurchaseOrderId::from_uuid(id(1)),
+            PurchaseOrderNumber::new(1001).unwrap(),
+            SupplierId::from_uuid(id(2)),
+            PurchaseOrderDraft {
+                lines: vec![line(10, 1, "1")],
+                ..PurchaseOrderDraft::new(Currency::EUR)
+            },
+        )
+        .unwrap()
     }
 }

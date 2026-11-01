@@ -1675,7 +1675,9 @@ impl From<hypha_purchasing::CommandError> for ApiError {
             E::SupplierCurrencyInUse(_) | E::SupplierInUse(_) | E::SupplierArchived(_) => {
                 StatusCode::CONFLICT
             }
-            E::UnknownVariant(_) | E::UnitCostRequired(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::UnknownVariant(_) | E::UnitCostRequired(_) | E::SupplierEmailRequired(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
             // The order in the URL isn't in a state that allows it.
             E::Purchasing(
                 P::NotDraft { .. }
@@ -1716,7 +1718,10 @@ impl From<hypha_purchasing::CommandError> for ApiError {
                 | P::UnknownLine(_)
                 | P::EmptyReceiptLine(_)
                 | P::TakeBackMismatch(_)
-                | P::EmptyReceipt,
+                | P::EmptyReceipt
+                | P::NoRecipients
+                | P::TooManyRecipients { .. }
+                | P::MessageTooLong { .. },
             ) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
@@ -2016,14 +2021,18 @@ impl From<hypha_mail::CommandError> for ApiError {
             | E::AssetNotReady(_)
             | E::AssetNotPublic(_)
             | E::AssetKindNotAllowed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
-            // Message IDs only ever arrive in URLs.
-            E::NotificationNotFound(_) => StatusCode::NOT_FOUND,
+            // Message IDs only ever arrive in URLs; a resent message's purchase order is
+            // its own (only drafts are deleted, and a sent order isn't one).
+            E::NotificationNotFound(_) | E::PurchaseOrderNotFound(_) => StatusCode::NOT_FOUND,
             // The deployment, not the request: a test send with the `log` sender.
             E::EmailNotConfigured => StatusCode::CONFLICT,
             // The message in the URL is an invite or a reset, or its customer was erased.
             E::NotResendable { .. } | E::RecipientErased => StatusCode::CONFLICT,
-            // A host set up wrongly, or an event the store wrote itself.
-            E::StoreNotFound(_) | E::BadEvent { .. } => return Self::internal(e),
+            // A host set up wrongly, an event the store wrote itself, or a purchase order
+            // whose totals overflow (its writes check them).
+            E::StoreNotFound(_) | E::BadEvent { .. } | E::Purchasing(_) => {
+                return Self::internal(e);
+            }
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),

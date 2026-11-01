@@ -1348,6 +1348,7 @@ dependencies = [
  "hypha-notifications",
  "hypha-orders",
  "hypha-payments",
+ "hypha-purchasing",
  "hypha-stores",
  "hypha-testkit",
  "hypha-users",
