@@ -1,8 +1,8 @@
 # 0039: Purchasing: suppliers, purchase orders, receiving, transfers, stock history and cost
 
 - **Status:** Accepted (2026-10-31). Danilo accepted every recommendation of the research
-  (§1), which became PU1–PU16. §14 lists the details filled in while writing this note,
-  to confirm before building.
+  (§1), which became PU1–PU16. §14's details and §15's edges were confirmed on
+  2026-11-01, with unit costs sent as decimal strings of minor units.
 - **Scope:**
   - Suppliers, and each supplier's codes and prices for the variants it sells.
   - Purchase orders: drafting, ordering, sending to the supplier, editing, closing,
@@ -700,13 +700,15 @@ Each payload is a contract type, version 1:
 - **Status and reason enum values; scope names; event types.** These are contracts.
 - **`OrderLine::unit_cost` (PU14):** it can't be backfilled.
 
-**Filled in while writing (to confirm):**
+**Filled in while writing (confirmed 2026-11-01):**
 - **`UnitCost`, a new core type: a cost per unit carries 4 decimals beyond the
   currency's minor unit.**
   - Why: a screw bought at €0.0035, or an average after mixed receipts, isn't a whole
     cent. Rounding every average to cents drifts on cheap, high-volume items.
   - Storage: `i64` in 1/10,000 of a minor unit, within ±(2⁵³ − 1).
-  - The API: decimal strings (`"0.0035"`) with the currency.
+  - The API: `{ amount, currency }` like `Money`, with `amount` a decimal string of
+    **minor units**, up to 4 places (`"0.35"` is €0.0035, `"1050"` is €10.50), so it
+    reads in the same unit as every other amount.
   - Line totals and stock values are rounded to `Money` half away from zero.
   - **Hard to reverse:** storage and API shape.
 - **`ExchangeRate`, a new core type:** a positive decimal with 8 places, stored as
@@ -727,14 +729,14 @@ Each payload is a contract type, version 1:
 - **`hypha-purchasing` is a leaf:** core only. It names variants and locations by their
   core IDs, and takes the store's currency and the variants' titles as plain values.
 - **`hypha-receiving` is a workflow:** `hypha-purchasing`, `hypha-inventory`, core.
-  **New edges, to approve:** receiving → purchasing, receiving → inventory.
-- **`hypha-mail` → `hypha-purchasing`** for the template's context. **A new edge, to
-  approve** (workflow → leaf, as mail → orders).
+  New edges (approved): receiving → purchasing, receiving → inventory.
+- **`hypha-mail` → `hypha-purchasing`** for the template's context. A new edge
+  (approved; workflow → leaf, as mail → orders).
 - **`hypha-inventory`** gains transfers, the ledger and cost. Its own crate, no new
   edge.
 - **`hypha-dispatch`'s** variant cleanup also removes supplier catalogue rows (dispatch
-  → purchasing: a workflow → leaf edge, **to approve**). The alternative is a handler in
-  `hypha-purchasing` itself; I'd rather keep cleanups together.
+  → purchasing: a workflow → leaf edge, approved), keeping cleanups together rather than
+  adding a handler to `hypha-purchasing` itself.
 - **`hypha-orders`** gains `OrderLine::unit_cost`, and **`hypha-checkout`** copies it.
   No new edge: checkout already depends on inventory.
 - **`hypha-stores`** gains `currency`. **`hypha-http`** composes incoming, redacts cost,
