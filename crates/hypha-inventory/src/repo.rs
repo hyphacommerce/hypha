@@ -67,6 +67,9 @@ pub trait StockMovementRepo {
         filter: &MovementFilter,
         page: PageRequest<i64>,
     ) -> Result<Page<StockMovementEntry>, RepoError>;
+    /// Whether any row ever carried a cost (`unit_cost` or `average_after`): from then
+    /// on, the store's base currency is fixed.
+    async fn cost_recorded(&self) -> Result<bool, RepoError>;
 }
 
 /// Stages inventory item writes in a `hypha_core::HasBatch` batch; the adapter's batch

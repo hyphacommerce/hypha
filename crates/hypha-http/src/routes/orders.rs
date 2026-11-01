@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use hypha_core::{
     AssetId, CartId, ChannelId, CountryCode, Currency, CustomerId, DiscountId, Email, Keyset,
     LocationId, MarketId, Money, OrderId, OrderLineId, PaymentId, PriceListId, ProductId, Scope,
-    ShippingGroupId, ShippingOptionId, SortKey, TaxClassId, TaxRate, Timestamp, VariantId,
+    ShippingGroupId, ShippingOptionId, SortKey, TaxClassId, TaxRate, Timestamp, UnitCost,
+    VariantId,
 };
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_order_actions::{
@@ -290,6 +291,16 @@ pub struct OrderLineResponse {
     subtotal: Money,
     /// What discounts took off the line.
     discounts: Vec<DiscountShareResponse>,
+    /// What one unit cost the store when the order was placed, in its base currency:
+    /// for the line's margin. `null` without a cost, and for lines placed before costs
+    /// were kept. Absent without `purchasing:read` (staff included), and listed in the
+    /// line's `redacted`.
+    unit_cost: Option<UnitCost>,
+    /// Fields left out for this caller: `unit_cost` without `purchasing:read`, staff
+    /// included. Absent when nothing was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    redacted: Option<Vec<String>>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -403,6 +414,8 @@ impl From<&OrderLine> for OrderLineResponse {
                 .iter()
                 .map(DiscountShareResponse::from)
                 .collect(),
+            unit_cost: l.unit_cost,
+            redacted: None,
         }
     }
 }

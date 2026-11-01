@@ -9,12 +9,21 @@ import { type Crumb, PageHeader } from "@/components/page-header";
 import { type SearchParams, one, oneOf } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { DetailSkeleton } from "@/components/skeletons";
-import { loaded, locationNames, requireStaff, sessionClient } from "@/lib/hypha";
+import { formatUnitCost } from "@/lib/format";
+import {
+  loadCurrencies,
+  loadStore,
+  loaded,
+  locationNames,
+  requireStaff,
+  sessionClient,
+} from "@/lib/hypha";
 import { STOCK_REASONS } from "@/lib/inventory";
 import { hasScope } from "@/lib/navigation";
 
 import { AdjustStock } from "./adjust-stock";
 import { HistoryTable } from "./history-table";
+import { SetCost } from "./set-cost";
 
 const BACK: Crumb = { label: "Inventory", href: "/inventory" };
 
@@ -46,10 +55,12 @@ export default async function InventoryItemPage({
 
 async function ItemDetails({ id, product }: { id: string; product?: string }) {
   const client = await sessionClient();
-  const [item, locations, me, owner] = await Promise.all([
+  const [item, locations, me, store, currencies, owner] = await Promise.all([
     client.GET("/admin/inventory-items/{id}", { params: { path: { id } } }).then(loaded),
     locationNames(client),
     requireStaff(),
+    loadStore(),
+    loadCurrencies(),
     product
       ? client.GET("/admin/products/{id}", { params: { path: { id: product } } })
       : Promise.resolve(undefined),
@@ -93,13 +104,33 @@ async function ItemDetails({ id, product }: { id: string; product?: string }) {
           )}
         </MetadataList>
       </Card>
+      {/* Absent without purchasing:read: cost is for those who buy. */}
+      {item.unit_cost !== undefined && (
+        <Card>
+          <MetadataList title="Cost">
+            <MetadataListItem label="Unit cost">
+              <Text hasTabularNumbers>
+                {item.unit_cost ? formatUnitCost(item.unit_cost, currencies) : "Not set"}
+              </Text>
+            </MetadataListItem>
+          </MetadataList>
+          {hasScope(me.scopes, "purchasing:write") &&
+            (store?.currency ? (
+              <SetCost item={id} cost={item.unit_cost} currency={store.currency} />
+            ) : (
+              <Text type="supporting" color="secondary">
+                Choose the store's base currency in Settings → Store to record costs.
+              </Text>
+            ))}
+        </Card>
+      )}
     </>
   );
 }
 
 async function History({ id, params }: { id: string; params: SearchParams }) {
   const client = await sessionClient();
-  const [result, locations] = await Promise.all([
+  const [result, locations, me] = await Promise.all([
     client.GET("/admin/inventory-items/{id}/movements", {
       params: {
         path: { id },
@@ -111,6 +142,7 @@ async function History({ id, params }: { id: string; params: SearchParams }) {
       },
     }),
     locationNames(client),
+    requireStaff(),
   ]);
   return (
     <VStack gap={3}>
@@ -120,6 +152,7 @@ async function History({ id, params }: { id: string; params: SearchParams }) {
       <HistoryTable
         page={listPage(result, `/inventory/${id}`, params)}
         locations={Object.fromEntries(locations)}
+        showCost={hasScope(me.scopes, "purchasing:read")}
       />
     </VStack>
   );

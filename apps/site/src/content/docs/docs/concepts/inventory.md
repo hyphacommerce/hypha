@@ -36,3 +36,22 @@ rows add up to what's on hand.
 
 Stock changes are events like any other: apps and the storefront's cached pages follow
 them through webhooks.
+
+## Unit cost
+
+An item can keep what one unit cost you (`unit_cost`), in the store's **base currency**
+(`PATCH /admin/store` with `currency`, or the setup wizard). Set it by hand with
+`PUT /admin/inventory-items/{id}/cost` (`purchasing:write`); receiving purchase orders keeps
+it as a moving average. Costs go to 4 decimals past the minor unit, as a decimal string of
+minor units: `{"amount": "0.35", "currency": "EUR"}` is €0.0035.
+
+- Every row of the history carries the cost of its units then, so the cost of goods sold
+  and the stock's value never move when the cost changes later. A cost change is a row of
+  its own (`cost_adjustment`, no location) with the cost before and after.
+- Each order line keeps the cost of its units when the order was placed, for the order's
+  margin.
+- Once a cost is recorded, the base currency can't change (`409 store_currency_locked`).
+- Cost is shown only to callers holding `purchasing:read`, staff included; elsewhere the
+  fields are absent and listed in the object's `redacted`. Apps get
+  `inventory_item.cost_changed` only with `purchasing:read`.
+

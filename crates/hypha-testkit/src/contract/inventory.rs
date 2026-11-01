@@ -1,6 +1,6 @@
 use hypha_core::{
-    InventoryItemId, Keyset, LocationId, MarketId, PageLimit, PageRequest, Quantity, RepoError,
-    SortKey, VariantId, Version, Versioned,
+    Currency, InventoryItemId, Keyset, LocationId, MarketId, PageLimit, PageRequest, Quantity,
+    RepoError, SortKey, UnitCost, VariantId, Version, Versioned,
 };
 use hypha_inventory::{
     AdjustmentReason, InventoryFilter, InventoryItem, InventoryItemRepo, Location, LocationRepo,
@@ -396,6 +396,11 @@ fn stocked_item(n: u128, variant: u128) -> InventoryItem {
         .unwrap();
     i.set_on_hand(location_id(4), -MAX_STOCK, None, None)
         .unwrap();
+    // A cost below a cent, so the extra decimals are kept.
+    i.set_unit_cost(
+        Some(UnitCost::parse("0.0035", Currency::EUR).unwrap()),
+        None,
+    );
     // Location 2 has the whole line; then location 1 runs short and continues selling.
     let near = location(2, &[1], 0);
     let small = location(1, &[1], 0);
@@ -429,6 +434,8 @@ async fn item_update<R: InventoryItemRepo>(repo: &R) {
         .unwrap();
     i.set_on_hand(location_id(5), 7, None, None).unwrap();
     i.release(&reference("order-1"));
+    let most = UnitCost::new(UnitCost::MAX_SCALED, Currency::new("JPY").unwrap()).unwrap();
+    i.set_unit_cost(Some(most), None);
     repo.update(&mut i).await.unwrap();
 
     assert_eq!(i.version(), Version::new(2));

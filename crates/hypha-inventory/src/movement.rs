@@ -7,7 +7,7 @@ use std::fmt;
 
 use hypha_core::{
     Actor, FulfillmentId, InventoryItemId, LocationId, OrderId, PurchaseOrderId, ReceiptId,
-    Timestamp, TransferId, VariantId,
+    Timestamp, TransferId, UnitCost, VariantId,
 };
 
 use crate::InventoryError;
@@ -185,20 +185,26 @@ impl Cause {
     }
 }
 
-/// One change to a count, recorded by the item and not yet written: the adapter stamps it
-/// with its position, the actor and the time.
+/// One change to a count or to the unit cost, recorded by the item and not yet written:
+/// the adapter stamps it with its position, the actor and the time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StockMovement {
     pub item: InventoryItemId,
     pub variant: VariantId,
-    pub location: LocationId,
-    /// Non-zero: a write that changes nothing records nothing.
+    /// `None` for a change that moved no units (a cost).
+    pub location: Option<LocationId>,
+    /// Non-zero when units moved; 0 for a cost change.
     pub delta: i64,
-    /// `on_hand` at the location after it.
-    pub after: i64,
+    /// `on_hand` at the location after it; `None` with no location.
+    pub after: Option<i64>,
     pub reason: StockReason,
     pub source: StockSource,
     pub note: Option<MovementNote>,
+    /// What these units cost: the item's average when they moved (`None` while it has
+    /// none). For a cost change, the cost before it.
+    pub unit_cost: Option<UnitCost>,
+    /// The item's unit cost after it.
+    pub average_after: Option<UnitCost>,
 }
 
 /// A row of the ledger as stored.
@@ -216,6 +222,9 @@ pub struct StockMovementEntry {
     pub reason: StockReason,
     pub source: StockSource,
     pub note: Option<String>,
+    /// As `StockMovement::unit_cost`.
+    pub unit_cost: Option<UnitCost>,
+    pub average_after: Option<UnitCost>,
     pub actor: Actor,
     pub at: Timestamp,
 }

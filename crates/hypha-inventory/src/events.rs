@@ -1,7 +1,7 @@
 //! What happens to stock, as events. Contract types: a reshaped field is a new `VERSION`,
 //! never an edit.
 
-use hypha_core::{Event, InventoryItemId, LocationId, VariantId};
+use hypha_core::{Event, InventoryItemId, LocationId, UnitCost, VariantId};
 use serde::Serialize;
 
 pub const INVENTORY_ITEM: &str = "inventory_item";
@@ -55,5 +55,36 @@ pub struct InventoryItemDeleted {
 
 impl Event for InventoryItemDeleted {
     const TYPE: &'static str = "inventory_item.deleted";
+    const VERSION: u16 = 1;
+}
+
+/// `inventory_item.cost_changed`: the item's unit cost (the moving average, in the
+/// store's currency) changed. Apart from `inventory_item.changed`, whose readers (search,
+/// apps reading inventory) mustn't see cost: only apps that read purchasing get it.
+#[derive(Debug, Serialize)]
+pub struct InventoryItemCostChanged {
+    pub inventory_item: InventoryItemId,
+    pub variant: VariantId,
+    /// `null` once cleared.
+    pub unit_cost: Option<UnitCost>,
+    pub why: CostChange,
+}
+
+/// What changed a unit cost.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CostChange {
+    /// Goods arrived at another cost.
+    Received,
+    /// Set by hand.
+    Manual,
+    /// A cost added to a purchase order after its goods arrived.
+    LateCost,
+    /// A receipt was taken back.
+    ReceiptCancelled,
+}
+
+impl Event for InventoryItemCostChanged {
+    const TYPE: &'static str = "inventory_item.cost_changed";
     const VERSION: u16 = 1;
 }

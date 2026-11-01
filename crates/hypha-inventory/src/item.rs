@@ -2,13 +2,16 @@ use std::collections::HashSet;
 
 use hypha_core::{
     InventoryItemId, LocationId, PendingEvent, Quantity, Recorded, Recorder, Stamped, Stamps,
-    Subject, VariantId, Version, Versioned,
+    Subject, UnitCost, VariantId, Version, Versioned,
 };
 
 use crate::{
     AdjustmentReason, Cause, InventoryError, Location, MovementNote, ReservationRef, RestoreError,
     StockMovement, StockReason, StockSource,
-    events::{Available, INVENTORY_ITEM, InventoryItemChanged, InventoryItemDeleted},
+    events::{
+        Available, CostChange, INVENTORY_ITEM, InventoryItemChanged, InventoryItemCostChanged,
+        InventoryItemDeleted,
+    },
 };
 
 /// Largest stock count, either way: 2⁵³ − 1, like `Money::MAX_AMOUNT`, so JSON clients
@@ -50,11 +53,16 @@ pub struct InventoryItem {
     /// Its variant was removed while units were still reserved: it goes once the last
     /// reservation is fulfilled or released.
     retired: bool,
+    /// What one unit cost, in the store's currency: the moving average over what came in,
+    /// or what was set by hand. `None` until known.
+    unit_cost: Option<UnitCost>,
     /// Whether anything changed since it was loaded: its event is built from the item as it
     /// is when written.
     changed: Changed,
     /// Its deletion, once `delete` was called.
     deleted: Recorder,
+    /// `inventory_item.cost_changed`, apart from `changed`: its readers differ.
+    cost_changes: Recorder,
     /// Changes to its counts not written yet: the adapter writes them with the item.
     movements: Unwritten,
 }
@@ -90,9 +98,18 @@ impl Recorded for InventoryItem {
         if !deleted.is_empty() {
             return deleted;
         }
-        if !std::mem::take(&mut self.changed).0 {
-            return Vec::new();
+        let mut events = Vec::new();
+        if std::mem::take(&mut self.changed).0 {
+            events.push(self.changed_event());
         }
+        events.extend(self.cost_changes.take());
+        events
+    }
+}
+
+impl InventoryItem {
+    /// `inventory_item.changed` for the item as it is now.
+    fn changed_event(&self) -> PendingEvent {
         let mut locations: Vec<LocationId> = self
             .levels
             .iter()
@@ -114,10 +131,7 @@ impl Recorded for InventoryItem {
                 })
                 .collect(),
         };
-        vec![PendingEvent::new(
-            Subject::new(INVENTORY_ITEM, self.id.as_uuid()),
-            &event,
-        )]
+        PendingEvent::new(Subject::new(INVENTORY_ITEM, self.id.as_uuid()), &event)
     }
 }
 
@@ -158,8 +172,10 @@ impl InventoryItem {
             levels: Vec::new(),
             reservations: Vec::new(),
             retired: false,
+            unit_cost: None,
             changed: Changed(true),
             deleted: Recorder::default(),
+            cost_changes: Recorder::default(),
             movements: Unwritten::default(),
         }
     }
@@ -265,14 +281,55 @@ impl InventoryItem {
             self.movements.0.push(StockMovement {
                 item: self.id,
                 variant: self.variant,
-                location,
+                location: Some(location),
                 delta,
-                after: on_hand,
+                after: Some(on_hand),
                 reason: cause.reason,
                 source: cause.source,
                 note: cause.note,
+                unit_cost: self.unit_cost,
+                average_after: self.unit_cost,
             });
         }
+    }
+
+    /// Sets the unit cost by hand (`None` clears it): a `cost_adjustment` row, with the
+    /// cost before as its `unit_cost` and the new one as its `average_after`, and
+    /// `inventory_item.cost_changed`. The caller checks the currency is the store's.
+    /// Returns whether anything changed.
+    pub fn set_unit_cost(&mut self, cost: Option<UnitCost>, note: Option<MovementNote>) -> bool {
+        if self.unit_cost == cost {
+            return false;
+        }
+        let cause = Cause::new(StockReason::CostAdjustment, StockSource::Manual).with_note(note);
+        self.change_cost(cost, cause, CostChange::Manual);
+        true
+    }
+
+    /// The one place the unit cost changes: it records the row and the event, so no
+    /// change goes unrecorded.
+    fn change_cost(&mut self, cost: Option<UnitCost>, cause: Cause, why: CostChange) {
+        let before = std::mem::replace(&mut self.unit_cost, cost);
+        self.movements.0.push(StockMovement {
+            item: self.id,
+            variant: self.variant,
+            location: None,
+            delta: 0,
+            after: None,
+            reason: cause.reason,
+            source: cause.source,
+            note: cause.note,
+            unit_cost: before,
+            average_after: cost,
+        });
+        let event = InventoryItemCostChanged {
+            inventory_item: self.id,
+            variant: self.variant,
+            unit_cost: cost,
+            why,
+        };
+        self.cost_changes
+            .record(Subject::new(INVENTORY_ITEM, self.id.as_uuid()), &event);
     }
 
     /// Where `quantity` would be reserved from `locations`: `Ok` with the allocation, or
@@ -581,6 +638,11 @@ impl InventoryItem {
     pub fn retired(&self) -> bool {
         self.retired
     }
+
+    /// What one unit cost, in the store's currency; `None` until known.
+    pub fn unit_cost(&self) -> Option<UnitCost> {
+        self.unit_cost
+    }
 }
 
 fn check_range(quantity: i128) -> Result<i64, InventoryError> {
@@ -603,6 +665,7 @@ pub struct InventoryItemSnapshot {
     pub levels: Vec<Level>,
     pub reservations: Vec<Reservation>,
     pub retired: bool,
+    pub unit_cost: Option<UnitCost>,
 }
 
 impl InventoryItem {
@@ -617,6 +680,7 @@ impl InventoryItem {
             levels: self.levels.clone(),
             reservations: self.reservations.clone(),
             retired: self.retired,
+            unit_cost: self.unit_cost,
         }
     }
 
@@ -649,8 +713,10 @@ impl InventoryItem {
             levels: s.levels,
             reservations: s.reservations,
             retired: s.retired,
+            unit_cost: s.unit_cost,
             changed: Changed(false),
             deleted: Recorder::default(),
+            cost_changes: Recorder::default(),
             movements: Unwritten::default(),
         })
     }
@@ -1222,11 +1288,11 @@ mod tests {
 
     // ---- storage ----
 
-    /// Each recorded movement as (location, delta, after, reason), taking them.
+    /// Each recorded movement of units as (location, delta, after, reason), taking them.
     fn moved(item: &mut InventoryItem) -> Vec<(LocationId, i64, i64, StockReason)> {
         item.take_movements()
             .into_iter()
-            .map(|m| (m.location, m.delta, m.after, m.reason))
+            .filter_map(|m| Some((m.location?, m.delta, m.after?, m.reason)))
             .collect()
     }
 
@@ -1245,7 +1311,7 @@ mod tests {
         let m = &movements[0];
         assert_eq!(
             (m.item, m.variant, m.delta, m.after, m.source),
-            (i.id(), i.variant(), -3, 1, StockSource::Manual)
+            (i.id(), i.variant(), -3, Some(1), StockSource::Manual)
         );
         assert_eq!(
             m.note.as_ref().map(MovementNote::as_str),
@@ -1310,8 +1376,8 @@ mod tests {
                 .map(|m| (m.delta, m.after, m.reason, m.source))
                 .collect::<Vec<_>>(),
             [
-                (-3, 2, StockReason::Sold, source()),
-                (1, 3, StockReason::Restocked, source())
+                (-3, Some(2), StockReason::Sold, source()),
+                (1, Some(3), StockReason::Restocked, source())
             ]
         );
     }
@@ -1378,5 +1444,100 @@ mod tests {
                 location: loc_id(1)
             })
         );
+    }
+
+    // ---- cost ----
+
+    fn eur(minor_units: &str) -> UnitCost {
+        UnitCost::parse(minor_units, hypha_core::Currency::EUR).unwrap()
+    }
+
+    #[test]
+    fn a_new_item_has_no_cost() {
+        assert_eq!(item(&[]).unit_cost(), None);
+    }
+
+    #[test]
+    fn setting_a_cost_records_the_cost_before_and_after() {
+        let mut i = item(&[(1, 4)]);
+        i.take_movements();
+        assert!(i.set_unit_cost(Some(eur("250")), note("invoice")));
+        assert!(i.set_unit_cost(Some(eur("300.5")), None));
+        let rows = i.take_movements();
+        assert_eq!(
+            rows.iter()
+                .map(|m| (
+                    m.location,
+                    m.delta,
+                    m.after,
+                    m.reason,
+                    m.unit_cost,
+                    m.average_after
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    None,
+                    0,
+                    None,
+                    StockReason::CostAdjustment,
+                    None,
+                    Some(eur("250"))
+                ),
+                (
+                    None,
+                    0,
+                    None,
+                    StockReason::CostAdjustment,
+                    Some(eur("250")),
+                    Some(eur("300.5"))
+                ),
+            ]
+        );
+        assert_eq!(
+            rows[0].note.as_ref().map(MovementNote::as_str),
+            Some("invoice")
+        );
+    }
+
+    #[test]
+    fn the_same_cost_again_records_nothing() {
+        let mut i = item(&[]);
+        i.set_unit_cost(Some(eur("1")), None);
+        i.take_movements();
+        i.take_events();
+        assert!(!i.set_unit_cost(Some(eur("1")), None));
+        assert_eq!(i.take_movements(), []);
+        assert_eq!(i.take_events(), []);
+    }
+
+    #[test]
+    fn units_moving_carry_the_cost_at_the_time() {
+        let mut i = item(&[(1, 4)]);
+        i.set_unit_cost(Some(eur("99")), None);
+        i.take_movements();
+        i.adjust_on_hand(loc_id(1), -1, AdjustmentReason::Damaged, None)
+            .unwrap();
+        let row = i.take_movements().remove(0);
+        assert_eq!(
+            (row.unit_cost, row.average_after),
+            (Some(eur("99")), Some(eur("99")))
+        );
+    }
+
+    #[test]
+    fn a_cost_change_is_its_own_event() {
+        let mut i = InventoryItem::restore(item(&[(1, 4)]).snapshot()).unwrap();
+        i.set_unit_cost(Some(eur("12")), None);
+        let types: Vec<&str> = i.take_events().iter().map(|e| e.event_type).collect();
+        assert_eq!(types, ["inventory_item.cost_changed"]);
+    }
+
+    #[test]
+    fn the_cost_survives_storage() {
+        let mut i = item(&[]);
+        i.set_unit_cost(Some(eur("0.0035")), None);
+        let restored = InventoryItem::restore(i.snapshot()).unwrap();
+        assert_eq!(restored.unit_cost(), Some(eur("0.0035")));
     }
 }

@@ -190,6 +190,7 @@ fn line(n: u128, title: &str, variant: Option<&str>, quantity: u32, unit: i64) -
         fulfilled_quantity: 0,
         compare_at_price: None,
         price_list: None,
+        unit_cost: None,
     }
 }
 

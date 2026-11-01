@@ -9,7 +9,7 @@ use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
 
 use crate::{
-    columns::{actor_from_db, actor_to_db, col, micros, opt_micros},
+    columns::{actor_from_db, actor_to_db, col, micros, opt_micros, unit_cost_from_db},
     error::{corrupt, repo_error},
     store::{EventStamp, PgConnection, PgStore, Queries},
 };
@@ -76,9 +76,29 @@ pub(crate) async fn insert_movements(
     let (actor_kind, actor_id) = actor_to_db(stamp.actor);
     let items: Vec<Uuid> = movements.iter().map(|m| m.item.as_uuid()).collect();
     let variants: Vec<Uuid> = movements.iter().map(|m| m.variant.as_uuid()).collect();
-    let locations: Vec<Uuid> = movements.iter().map(|m| m.location.as_uuid()).collect();
+    let locations: Vec<Option<Uuid>> = movements
+        .iter()
+        .map(|m| m.location.map(|l| l.as_uuid()))
+        .collect();
     let deltas: Vec<i64> = movements.iter().map(|m| m.delta).collect();
-    let afters: Vec<i64> = movements.iter().map(|m| m.after).collect();
+    let afters: Vec<Option<i64>> = movements.iter().map(|m| m.after).collect();
+    let costs: Vec<Option<i64>> = movements
+        .iter()
+        .map(|m| m.unit_cost.map(|c| c.scaled()))
+        .collect();
+    let averages: Vec<Option<i64>> = movements
+        .iter()
+        .map(|m| m.average_after.map(|c| c.scaled()))
+        .collect();
+    // Both costs are in the store's currency, which can't change once one is recorded.
+    let currencies: Vec<Option<&str>> = movements
+        .iter()
+        .map(|m| {
+            m.unit_cost
+                .or(m.average_after)
+                .map(|c| c.currency().as_str())
+        })
+        .collect();
     let reasons: Vec<&str> = movements.iter().map(|m| m.reason.as_str()).collect();
     let sources: Vec<_> = movements.iter().map(|m| source_to_db(m.source)).collect();
     let kinds: Vec<&str> = sources.iter().map(|s| s.0).collect();
@@ -90,11 +110,13 @@ pub(crate) async fn insert_movements(
         .collect();
     tx.execute_typed(
         "INSERT INTO stock_movements (item_id, variant_id, location_id, delta, after, reason,
-             source_kind, source_id, source_parent_id, actor_kind, actor_id, note)
-         SELECT i, v, l, d, a, r, k, s, p, $11, $12, n
+             source_kind, source_id, source_parent_id, actor_kind, actor_id, note, unit_cost,
+             average_after, cost_currency)
+         SELECT i, v, l, d, a, r, k, s, p, $11, $12, n, c, av, cc
          FROM unnest($1::uuid[], $2::uuid[], $3::uuid[], $4::bigint[], $5::bigint[],
-                     $6::text[], $7::text[], $8::uuid[], $9::uuid[], $10::text[])
-              WITH ORDINALITY AS m (i, v, l, d, a, r, k, s, p, n, o)
+                     $6::text[], $7::text[], $8::uuid[], $9::uuid[], $10::text[],
+                     $13::bigint[], $14::bigint[], $15::text[])
+              WITH ORDINALITY AS m (i, v, l, d, a, r, k, s, p, n, c, av, cc, o)
          ORDER BY o",
         &[
             (&items, Type::UUID_ARRAY),
@@ -109,6 +131,9 @@ pub(crate) async fn insert_movements(
             (&notes, Type::TEXT_ARRAY),
             (&actor_kind, Type::TEXT),
             (&actor_id, Type::UUID),
+            (&costs, Type::INT8_ARRAY),
+            (&averages, Type::INT8_ARRAY),
+            (&currencies, Type::TEXT_ARRAY),
         ],
     )
     .await
@@ -119,7 +144,8 @@ pub(crate) async fn insert_movements(
 fn movement_columns() -> String {
     format!(
         "position, item_id, variant_id, location_id, delta, after, reason, source_kind, \
-         source_id, source_parent_id, actor_kind, actor_id, note, {}",
+         source_id, source_parent_id, actor_kind, actor_id, note, unit_cost, average_after, \
+         cost_currency, {}",
         micros("at")
     )
 }
@@ -128,6 +154,15 @@ fn movement_from_row(row: &Row) -> Result<StockMovementEntry, RepoError> {
     let reason: String = col(row, "reason")?;
     let kind: String = col(row, "source_kind")?;
     let actor_kind: String = col(row, "actor_kind")?;
+    let currency: Option<String> = col(row, "cost_currency")?;
+    let cost = |column: &str| -> Result<_, RepoError> {
+        let scaled: Option<i64> = col(row, column)?;
+        match (scaled, &currency) {
+            (Some(scaled), Some(code)) => unit_cost_from_db(Some(scaled), Some(code)),
+            (None, _) => Ok(None),
+            (Some(_), None) => Err(corrupt(format!("{column} without its currency"))),
+        }
+    };
     Ok(StockMovementEntry {
         position: col(row, "position")?,
         item: InventoryItemId::from_uuid(col(row, "item_id")?),
@@ -139,6 +174,8 @@ fn movement_from_row(row: &Row) -> Result<StockMovementEntry, RepoError> {
             .ok_or_else(|| corrupt(format!("unknown stock reason {reason:?}")))?,
         source: source_from_db(&kind, col(row, "source_id")?, col(row, "source_parent_id")?)?,
         note: col(row, "note")?,
+        unit_cost: cost("unit_cost")?,
+        average_after: cost("average_after")?,
         actor: actor_from_db(&actor_kind, col(row, "actor_id")?)?,
         at: hypha_core::Timestamp::from_unix_micros(col(row, "at")?),
     })
@@ -187,5 +224,19 @@ impl<C: PgConnection> StockMovementRepo for PgStore<C> {
             .map(movement_from_row)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Page::from_overfetch(items, page.limit))
+    }
+
+    async fn cost_recorded(&self) -> Result<bool, RepoError> {
+        let mut conn = self.conn().await;
+        let row = conn
+            .db()
+            .query_typed_one(
+                "SELECT EXISTS (SELECT 1 FROM stock_movements WHERE cost_currency IS NOT NULL)
+                     AS recorded",
+                &[],
+            )
+            .await
+            .map_err(repo_error)?;
+        col(&row, "recorded")
     }
 }

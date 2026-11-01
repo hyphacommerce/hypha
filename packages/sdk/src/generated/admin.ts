@@ -1860,6 +1860,28 @@ export interface paths {
         patch: operations["admin.inventory.update_item"];
         trace?: never;
     };
+    "/admin/inventory-items/{id}/cost": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Sets what one unit of an item cost, by hand: a `cost_adjustment` in its history and
+         *     `inventory_item.cost_changed`. Receiving goods changes it as they come in; this is for
+         *     stock bought outside purchase orders. The store's base currency must be set first
+         *     (`409 store_currency_required`), and the cost is in it (`422 cost_currency_mismatch`).
+         */
+        put: operations["admin.inventory.set_cost"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/inventory-items/{id}/levels/{location_id}": {
         parameters: {
             query?: never;
@@ -6168,7 +6190,13 @@ export interface components {
             created_at?: string | null;
             id?: components["schemas"]["InventoryItemId"] | null;
             levels: components["schemas"]["LevelResponse"][];
+            /**
+             * @description Fields left out for this caller: `unit_cost` without `purchasing:read`, staff
+             *     included. Absent when nothing was.
+             */
+            redacted?: string[] | null;
             tracked: boolean;
+            unit_cost?: components["schemas"]["UnitCost"] | null;
             /** @description When the item last changed; `null` for a variant without one. */
             updated_at?: string | null;
             variant: components["schemas"]["VariantId"];
@@ -6653,6 +6681,11 @@ export interface components {
             product_title: string;
             /** Format: int32 */
             quantity: number;
+            /**
+             * @description Fields left out for this caller: `unit_cost` without `purchasing:read`, staff
+             *     included. Absent when nothing was.
+             */
+            redacted?: string[] | null;
             sku?: string | null;
             /** @description `unit_price` × `quantity`: before discounts. */
             subtotal: components["schemas"]["Money"];
@@ -6662,6 +6695,7 @@ export interface components {
              *     this, and a refund of part of the line refunds that part of it.
              */
             total: components["schemas"]["Money"];
+            unit_cost?: components["schemas"]["UnitCost"] | null;
             unit_price: components["schemas"]["Money"];
             variant: components["schemas"]["VariantId"];
             /** @description The variant's option values ("M / Blue"); `null` for a product without options. */
@@ -7926,6 +7960,11 @@ export interface components {
         SetStatusRequest: {
             status: components["schemas"]["ProductStatus"];
         };
+        SetUnitCostRequest: {
+            /** @description Why, for the stock history: at most 500 characters. */
+            note?: string | null;
+            unit_cost?: components["schemas"]["UnitCost"] | null;
+        };
         SetVariantMediaRequest: {
             asset?: components["schemas"]["AssetId"] | null;
         };
@@ -8116,6 +8155,7 @@ export interface components {
             after?: number | null;
             /** @description When it was written, RFC 3339. */
             at: string;
+            average_after?: components["schemas"]["UnitCost"] | null;
             /**
              * Format: int64
              * @description Units added (positive) or removed (negative).
@@ -8129,7 +8169,13 @@ export interface components {
              */
             position: number;
             reason: components["schemas"]["StockReason"];
+            /**
+             * @description Fields left out for this caller: `unit_cost` and `average_after` without `purchasing:read`, staff
+             *     included. Absent when nothing was.
+             */
+            redacted?: string[] | null;
             source: components["schemas"]["StockSource"];
+            unit_cost?: components["schemas"]["UnitCost"] | null;
         };
         /**
          * @description Why stock moved.
@@ -8318,6 +8364,25 @@ export interface components {
             location?: components["schemas"]["LocationId"] | null;
             /** Format: int32 */
             quantity: number;
+        };
+        /**
+         * @description What one unit cost, finer than a minor unit: a cheap part or an average over several purchases isn't a whole cent.
+         * @example {
+         *       "amount": "0.35",
+         *       "currency": "EUR"
+         *     }
+         */
+        UnitCost: {
+            /**
+             * @description In minor units as a decimal string, with up to 4 more decimals: "1050" is 10.50, "0.35" is 0.0035. Never negative; a string so it stays exact.
+             * @example 0.35
+             */
+            amount: string;
+            /**
+             * @description An ISO 4217 currency code. Funds, precious metals and test codes (XDR, XAU, XXX) aren't accepted.
+             * @example EUR
+             */
+            currency: string;
         };
         /** @description A JSON Merge Patch of an agent. */
         UpdateAgentRequest: {
@@ -21234,6 +21299,118 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["UpdateInventoryItemRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.inventory.set_cost": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["InventoryItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetUnitCostRequest"];
             };
         };
         responses: {

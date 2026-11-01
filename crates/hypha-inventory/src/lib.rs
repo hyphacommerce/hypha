@@ -15,14 +15,17 @@ pub mod summary;
 
 pub use commands::{
     AdjustOnHand, CommandError, CreateInventoryItem, CreateLocation, DEFAULT_LOCATION_NAME,
-    SetOnHand, Shortage, UpdateInventoryItem, UpdateLocation, adjust_on_hand,
-    create_inventory_item, create_location, ensure_default_location, get_inventory_item,
-    get_location, get_variant_inventory, get_variants_inventory, list_inventory_items,
-    list_locations, list_stock_movements, reserve_lines, set_on_hand, update_inventory_item,
-    update_location,
+    SetOnHand, SetUnitCost, Shortage, UpdateInventoryItem, UpdateLocation, adjust_on_hand,
+    check_cost_currency, create_inventory_item, create_location, ensure_default_location,
+    get_inventory_item, get_location, get_variant_inventory, get_variants_inventory,
+    list_inventory_items, list_locations, list_stock_movements, reserve_lines, set_on_hand,
+    set_unit_cost, update_inventory_item, update_location,
 };
 pub use error::{InventoryError, RestoreError};
-pub use events::{Available, InventoryItemChanged, InventoryItemDeleted, LocationChanged};
+pub use events::{
+    Available, CostChange, InventoryItemChanged, InventoryItemCostChanged, InventoryItemDeleted,
+    LocationChanged,
+};
 pub use item::{InventoryItem, InventoryItemSnapshot, Level, MAX_STOCK, Reservation};
 pub use location::{Location, LocationSnapshot};
 pub use movement::{

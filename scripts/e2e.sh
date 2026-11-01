@@ -1248,6 +1248,15 @@ contains "the count with its note" '"delta":-1,"after":1,"reason":"counted","sou
 contains "and the first one" '"delta":2,"after":2,"reason":"counted"'
 step "history of an unknown item" 404 inventory_item_not_found \
     "$BASE/admin/inventory-items/invi_00000000000000000000000000000063/movements"
+step "a cost in another currency" 422 cost_currency_mismatch -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/cost" \
+    -H "$JSON" -d '{"unit_cost":{"amount":"500","currency":"USD"}}'
+step "what a lamp cost" 200 - -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/cost" \
+    -H "$JSON" -d '{"unit_cost":{"amount":"1250.5","currency":"EUR"},"note":"invoice 12"}'
+contains "finer than a cent" '"unit_cost":{"amount":"1250.5","currency":"EUR"}'
+step "the cost in the history" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?reason=cost_adjustment"
+contains "no units moved, the cost after" '"location":null,"delta":0,"after":null,"reason":"cost_adjustment","source":{"type":"manual"},"note":"invoice 12","unit_cost":null,"average_after":{"amount":"1250.5","currency":"EUR"}'
+step "the base currency is fixed now" 409 store_currency_locked -X PATCH "$BASE/admin/store" -H "$JSON" \
+    -d '{"currency":"USD"}'
 step "what runs low at the warehouse" 200 - "$BASE/admin/inventory-items?below=6&location=$WAREHOUSE"
 contains "the lamp runs low" "\"id\":\"$LAMP_ITEM\",\"variant\":\"$LAMP_VAR\",\"product\":\"$LAMP\""
 step "no lamp below zero" 200 - "$BASE/admin/inventory-items?below=0&product=$LAMP"

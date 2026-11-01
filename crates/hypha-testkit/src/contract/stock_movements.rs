@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    ActingAs, Actor, FulfillmentId, HasBatch, InventoryItemId, LocationId, OrderId, PageLimit,
-    PageRequest, PurchaseOrderId, Quantity, ReceiptId, RepoError, Timestamp, TransferId, UserId,
-    VariantId,
+    ActingAs, Actor, Currency, FulfillmentId, HasBatch, InventoryItemId, LocationId, OrderId,
+    PageLimit, PageRequest, PurchaseOrderId, Quantity, ReceiptId, RepoError, Timestamp, TransferId,
+    UnitCost, UserId, VariantId,
 };
 use hypha_inventory::{
     AdjustmentReason, HasInventoryItems, HasStockMovements, InventoryItem, InventoryItemRepo,
@@ -29,6 +29,8 @@ where
     fields_round_trip(&make().await).await;
     scenario("stock movements: newest first, paged, filtered, per item");
     lists(&make().await).await;
+    scenario("stock movements: cost changes are rows of their own, and costs are kept");
+    costs_are_recorded(&make().await).await;
 }
 
 fn location(n: u128) -> LocationId {
@@ -108,7 +110,10 @@ fn assert_adds_up(rows: &[StockMovementEntry], item: &InventoryItem) {
     // Each row's `after` is the sum up to it.
     let mut running: HashMap<LocationId, i64> = HashMap::new();
     for row in rows.iter().rev() {
-        let at = running.entry(row.location.unwrap()).or_default();
+        let Some(location) = row.location else {
+            continue;
+        };
+        let at = running.entry(location).or_default();
         *at += row.delta;
         assert_eq!(row.after, Some(*at), "position {}", row.position);
     }
@@ -392,4 +397,81 @@ where
         all(ports, b.id(), &MovementFilter::default()).await.len(),
         1
     );
+}
+
+async fn costs_are_recorded<S>(ports: &S)
+where
+    S: HasBatch + HasInventoryItems + HasStockMovements,
+    S::Batch: StageInventoryItems,
+{
+    let items = ports.inventory_items();
+    let movements = ports.stock_movements();
+    let none = MovementFilter::default();
+    assert_eq!(movements.cost_recorded().await, Ok(false));
+    let mut item = new_item(1);
+    item.set_on_hand(location(1), 4, None, None).unwrap();
+    items.insert(&mut item).await.unwrap();
+    assert_eq!(movements.cost_recorded().await, Ok(false), "no cost yet");
+
+    // A cost set, then units moving at it.
+    let cost = UnitCost::parse("1050.5", Currency::EUR).unwrap();
+    assert!(item.set_unit_cost(Some(cost), MovementNote::new("Invoice 12").unwrap()));
+    item.adjust_on_hand(location(1), -1, AdjustmentReason::Damaged, None)
+        .unwrap();
+    items.update(&mut item).await.unwrap();
+    assert_eq!(
+        items.get(item.id()).await.unwrap().unwrap().unit_cost(),
+        Some(cost)
+    );
+    let rows = all(ports, item.id(), &none).await;
+    let [damaged, adjusted, counted] = rows.as_slice() else {
+        panic!("three rows, got {rows:?}");
+    };
+    assert_eq!(
+        (
+            adjusted.reason,
+            adjusted.location,
+            adjusted.delta,
+            adjusted.after,
+            adjusted.unit_cost,
+            adjusted.average_after,
+            adjusted.note.as_deref()
+        ),
+        (
+            StockReason::CostAdjustment,
+            None,
+            0,
+            None,
+            None,
+            Some(cost),
+            Some("Invoice 12")
+        )
+    );
+    assert_eq!(
+        (damaged.unit_cost, damaged.average_after),
+        (Some(cost), Some(cost))
+    );
+    assert_eq!((counted.unit_cost, counted.average_after), (None, None));
+    assert_eq!(movements.cost_recorded().await, Ok(true));
+    let at_location = MovementFilter {
+        location: Some(location(1)),
+        ..MovementFilter::default()
+    };
+    assert_eq!(all(ports, item.id(), &at_location).await.len(), 2);
+
+    // Cleared through a batch: the row keeps the cost it had, and a cost was recorded.
+    assert!(item.set_unit_cost(None, None));
+    let mut batch = ports.batch();
+    batch.update_inventory_item(&mut item);
+    ports.commit(batch).await.unwrap();
+    assert_eq!(
+        items.get(item.id()).await.unwrap().unwrap().unit_cost(),
+        None
+    );
+    let cleared = all(ports, item.id(), &none).await.remove(0);
+    assert_eq!(
+        (cleared.unit_cost, cleared.average_after),
+        (Some(cost), None)
+    );
+    assert_eq!(movements.cost_recorded().await, Ok(true));
 }

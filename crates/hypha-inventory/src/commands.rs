@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    Address, AddressParts, AuthError, Ctx, ErrorCode, IdGenerator, InventoryItemId, Keyset,
-    LocationId, MarketId, Page, PageRequest, Quantity, RepoError, Scope, VariantId,
-    report_duplicate, retry_on_conflict,
+    Address, AddressParts, AuthError, Ctx, Currency, ErrorCode, IdGenerator, InventoryItemId,
+    Keyset, LocationId, MarketId, Page, PageRequest, Quantity, RepoError, Scope, UnitCost,
+    VariantId, report_duplicate, retry_on_conflict,
 };
 
 use crate::{
@@ -36,6 +36,11 @@ pub enum CommandError {
     /// Every line that couldn't be reserved, so a buyer sees all of them at once.
     #[error("not enough stock for {} line(s)", lines.len())]
     OutOfStock { lines: Vec<Shortage> },
+    /// A cost is kept in the store's base currency, and none is set yet.
+    #[error("set the store's base currency before recording a cost")]
+    StoreCurrencyRequired,
+    #[error("costs are kept in the store's currency, {expected}, not {got}")]
+    CostCurrencyMismatch { expected: Currency, got: Currency },
 }
 
 impl ErrorCode for CommandError {
@@ -48,6 +53,8 @@ impl ErrorCode for CommandError {
             CommandError::InventoryItemNotFound(_) => "inventory_item_not_found",
             CommandError::InventoryItemExists { .. } => "inventory_item_exists",
             CommandError::OutOfStock { .. } => "out_of_stock",
+            CommandError::StoreCurrencyRequired => "store_currency_required",
+            CommandError::CostCurrencyMismatch { .. } => "cost_currency_mismatch",
         }
     }
 }
@@ -367,6 +374,59 @@ pub async fn adjust_on_hand<R: InventoryItemRepo, L: LocationRepo>(
         lost_a_race,
     )
     .await
+}
+
+pub struct SetUnitCost {
+    pub item: InventoryItemId,
+    /// `None` clears it.
+    pub unit_cost: Option<UnitCost>,
+    /// Why, for the stock history: at most 500 characters; blank is none.
+    pub note: Option<String>,
+}
+
+/// Sets what one unit of an item cost, by hand: a `cost_adjustment` in its history.
+/// `store_currency` is the store's base currency, which the host passes: a cost is
+/// refused while there's none, or in another currency. Clearing needs neither. Retried
+/// on a concurrent change.
+pub async fn set_unit_cost<R: InventoryItemRepo>(
+    ctx: &Ctx,
+    items: &R,
+    store_currency: Option<Currency>,
+    input: SetUnitCost,
+) -> Result<InventoryItem, CommandError> {
+    ctx.require(Scope::PurchasingWrite)?;
+    let note = note(input.note.as_deref())?;
+    if let Some(cost) = input.unit_cost {
+        check_cost_currency(cost, store_currency)?;
+    }
+
+    let (input, note) = (&input, &note);
+    retry_on_conflict(
+        move || async move {
+            let mut item = load_item(items, input.item).await?;
+            if item.set_unit_cost(input.unit_cost, note.clone()) {
+                items.update(&mut item).await?;
+            }
+            Ok(item)
+        },
+        lost_a_race,
+    )
+    .await
+}
+
+/// Fails unless `cost` is in the store's base currency, which must be set.
+pub fn check_cost_currency(
+    cost: UnitCost,
+    store_currency: Option<Currency>,
+) -> Result<(), CommandError> {
+    let expected = store_currency.ok_or(CommandError::StoreCurrencyRequired)?;
+    if cost.currency() != expected {
+        return Err(CommandError::CostCurrencyMismatch {
+            expected,
+            got: cost.currency(),
+        });
+    }
+    Ok(())
 }
 
 fn note(text: Option<&str>) -> Result<Option<MovementNote>, CommandError> {

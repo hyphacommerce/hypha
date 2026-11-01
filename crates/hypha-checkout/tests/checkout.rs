@@ -263,6 +263,28 @@ fn checkout_places_an_order_from_the_priced_cart() {
 }
 
 #[test]
+fn each_line_keeps_what_a_unit_cost_when_it_was_placed() {
+    let world = World::new();
+    let cost = hypha_core::UnitCost::parse("412.5", Currency::EUR).unwrap();
+    let mut mug = block_on(world.inventory_items.get_by_variant(vid("mug")))
+        .unwrap()
+        .unwrap();
+    mug.set_unit_cost(Some(cost), None);
+    block_on(world.inventory_items.update(&mut mug)).unwrap();
+
+    let order = world.checkout(world.cart()).unwrap();
+    let costs: Vec<_> = order
+        .lines()
+        .iter()
+        .map(|l| (l.variant, l.unit_cost))
+        .collect();
+    // The cup has no inventory item, so no cost.
+    assert_eq!(costs, [(vid("mug"), Some(cost)), (vid("cup"), None)]);
+    let stored = block_on(world.orders.get(order.id())).unwrap().unwrap();
+    assert_eq!(stored.lines()[0].unit_cost, Some(cost));
+}
+
+#[test]
 fn checkout_completes_the_cart() {
     let world = World::new();
     let cart = world.cart();

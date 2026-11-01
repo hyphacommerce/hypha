@@ -11,9 +11,11 @@ import { Text } from "@astryxdesign/core/Text";
 import { ClockIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
+import { useCurrencies } from "@/components/currencies";
 import { DateTime } from "@/components/date-time";
 import { type FilterDef, ResourceTable } from "@/components/resource-table/resource-table";
 import { actorLabel } from "@/lib/apps";
+import { formatUnitCost } from "@/lib/format";
 import { REASON_LABELS } from "@/lib/inventory";
 
 type Movement = AdminSchemas["StockMovementResponse"];
@@ -45,11 +47,23 @@ function Source({ source }: { source: Movement["source"] }) {
 export function HistoryTable({
   page,
   locations = NO_NAMES,
+  showCost = false,
 }: {
   page?: { items: Movement[]; next_cursor: string | null; error?: string };
   /** Locations' names by ID. */
   locations?: Record<string, string>;
+  /** Whether the staff member sees cost (`purchasing:read`): a cost column then. */
+  showCost?: boolean;
 }) {
+  const currencies = useCurrencies();
+  const cost = (m: Movement) => {
+    if (m.reason === "cost_adjustment") {
+      const before = m.unit_cost ? formatUnitCost(m.unit_cost, currencies) : "none";
+      const after = m.average_after ? formatUnitCost(m.average_after, currencies) : "none";
+      return `${before} → ${after}`;
+    }
+    return m.unit_cost ? formatUnitCost(m.unit_cost, currencies) : "—";
+  };
   const filters: FilterDef[] = [
     {
       kind: "select",
@@ -111,6 +125,17 @@ export function HistoryTable({
       align: "end",
       renderCell: (m) => <Text hasTabularNumbers>{m.after ?? "—"}</Text>,
     },
+    ...(showCost
+      ? [
+          {
+            key: "unit_cost",
+            header: "Unit cost",
+            width: pixel(170),
+            align: "end",
+            renderCell: (m: Movement) => <Text hasTabularNumbers>{cost(m)}</Text>,
+          } satisfies TableColumn<Movement>,
+        ]
+      : []),
     {
       key: "source",
       header: "Source",

@@ -5,16 +5,17 @@ use hypha_core::Stamped;
 use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::{
-    FulfillmentId, InventoryItemId, Keyset, LocationId, MarketId, OrderId, ProductId,
-    PurchaseOrderId, ReceiptId, SortKey, Timestamp, TransferId, VariantId,
+    Ctx, FulfillmentId, InventoryItemId, Keyset, LocationId, MarketId, OrderId, ProductId,
+    PurchaseOrderId, ReceiptId, SortKey, Timestamp, TransferId, UnitCost, VariantId,
 };
 use hypha_inventory::{
     AdjustOnHand, AdjustmentReason, CreateInventoryItem, CreateLocation, HasInventoryItems,
     HasLocations, HasStockMovements, InventoryFilter, InventoryItem, Location, MovementFilter,
-    SetOnHand, StockMovementEntry, StockReason, StockSource, UpdateInventoryItem, UpdateLocation,
-    adjust_on_hand, create_inventory_item, create_location, get_inventory_item, get_location,
-    get_variant_inventory, get_variants_inventory, list_inventory_items, list_locations,
-    list_stock_movements, set_on_hand, update_inventory_item, update_location,
+    SetOnHand, SetUnitCost, StockMovementEntry, StockReason, StockSource, UpdateInventoryItem,
+    UpdateLocation, adjust_on_hand, create_inventory_item, create_location, get_inventory_item,
+    get_location, get_variant_inventory, get_variants_inventory, list_inventory_items,
+    list_locations, list_stock_movements, set_on_hand, set_unit_cost, update_inventory_item,
+    update_location,
 };
 use hypha_products::{CommandError as ProductsError, HasProducts, ProductRepo, get_product};
 use serde::{Deserialize, Serialize};
@@ -24,12 +25,14 @@ use super::{
     page::{ListQuery, PageParams, PageResponse, SortedFilters},
     payments::instant,
     rfc3339,
+    stores::store_currency,
 };
 use crate::webhooks::{EventActor, actor_of};
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId},
     patch,
+    redact::{self, Family, Redacted},
     state::{SharedState, Storage},
 };
 
@@ -279,6 +282,15 @@ pub struct InventoryResponse {
     tracked: bool,
     continue_selling: bool,
     levels: Vec<LevelResponse>,
+    /// What one unit cost, in the store's base currency: the average over what came in,
+    /// or what was set by hand. `null` until known. Absent without `purchasing:read`
+    /// (staff included), and listed in `redacted`.
+    unit_cost: Option<UnitCost>,
+    /// Fields left out for this caller: `unit_cost` without `purchasing:read`, staff
+    /// included. Absent when nothing was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    redacted: Option<Vec<String>>,
     /// When the item was created, RFC 3339 in UTC; `null` for a variant without one.
     created_at: Option<String>,
     /// When the item last changed; `null` for a variant without one.
@@ -312,6 +324,8 @@ impl InventoryResponse {
             variant: i.variant(),
             tracked: i.tracked(),
             continue_selling: i.continue_selling(),
+            unit_cost: i.unit_cost(),
+            redacted: None,
             levels: locations
                 .into_iter()
                 .map(|location| LevelResponse {
@@ -325,6 +339,15 @@ impl InventoryResponse {
     }
 }
 
+/// An item as `ctx` may see it: its cost only with `purchasing:read`.
+fn item_view(ctx: &Ctx, item: &InventoryItem) -> Result<Json<Redacted>, ApiError> {
+    Ok(Json(redact::one(
+        ctx,
+        Family::InventoryItem,
+        InventoryResponse::new(item)?,
+    )?))
+}
+
 impl InventoryResponse {
     fn untracked(variant: VariantId) -> Self {
         Self {
@@ -333,6 +356,8 @@ impl InventoryResponse {
             tracked: false,
             continue_selling: false,
             levels: Vec::new(),
+            unit_cost: None,
+            redacted: None,
             created_at: None,
             updated_at: None,
         }
@@ -351,7 +376,7 @@ pub async fn create_item<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     body: JsonBody<CreateInventoryItemRequest>,
-) -> Result<(StatusCode, Json<InventoryResponse>), ApiError> {
+) -> Result<(StatusCode, Json<Redacted>), ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let input = CreateInventoryItem {
@@ -360,7 +385,7 @@ pub async fn create_item<S: Storage>(
         continue_selling: req.continue_selling,
     };
     let item = create_inventory_item(&ctx, ports.inventory_items(), &state.ids, input).await?;
-    Ok((StatusCode::CREATED, Json(InventoryResponse::new(&item)?)))
+    Ok((StatusCode::CREATED, item_view(&ctx, &item)?))
 }
 
 /// An inventory item with its levels per location.
@@ -375,10 +400,10 @@ pub async fn fetch_item<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<InventoryItemId>,
-) -> Result<Json<InventoryResponse>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let item = get_inventory_item(&ctx, ports.inventory_items(), id).await?;
-    Ok(Json(InventoryResponse::new(&item)?))
+    item_view(&ctx, &item)
 }
 
 /// Changes how an inventory item is tracked.
@@ -395,7 +420,7 @@ pub async fn update_item<S: Storage>(
     caller: Caller,
     PathId(id): PathId<InventoryItemId>,
     body: JsonBody<UpdateInventoryItemRequest>,
-) -> Result<Json<InventoryResponse>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let input = UpdateInventoryItem {
@@ -403,7 +428,7 @@ pub async fn update_item<S: Storage>(
         continue_selling: req.continue_selling,
     };
     let item = update_inventory_item(&ctx, ports.inventory_items(), id, input).await?;
-    Ok(Json(InventoryResponse::new(&item)?))
+    item_view(&ctx, &item)
 }
 
 /// Sets the stock on hand at a location: a `counted` movement in its history.
@@ -420,7 +445,7 @@ pub async fn set_level<S: Storage>(
     caller: Caller,
     PathId((item, location)): PathId<(InventoryItemId, LocationId)>,
     body: JsonBody<SetOnHandRequest>,
-) -> Result<Json<InventoryResponse>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let input = SetOnHand {
@@ -433,7 +458,7 @@ pub async fn set_level<S: Storage>(
     let item = set_on_hand(&ctx, ports.inventory_items(), ports.locations(), input)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("location_not_found"))?;
-    Ok(Json(InventoryResponse::new(&item)?))
+    item_view(&ctx, &item)
 }
 
 /// Adjusts the stock on hand at a location by a delta, for a reason kept in its history.
@@ -450,7 +475,7 @@ pub async fn adjust_level<S: Storage>(
     caller: Caller,
     PathId((item, location)): PathId<(InventoryItemId, LocationId)>,
     body: JsonBody<AdjustOnHandRequest>,
-) -> Result<Json<InventoryResponse>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let input = AdjustOnHand {
@@ -463,7 +488,46 @@ pub async fn adjust_level<S: Storage>(
     let item = adjust_on_hand(&ctx, ports.inventory_items(), ports.locations(), input)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("location_not_found"))?;
-    Ok(Json(InventoryResponse::new(&item)?))
+    item_view(&ctx, &item)
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetUnitCostRequest {
+    /// What one unit cost, in the store's base currency; `null` clears it.
+    unit_cost: Option<UnitCost>,
+    /// Why, for the stock history: at most 500 characters.
+    note: Option<String>,
+}
+
+/// Sets what one unit of an item cost, by hand: a `cost_adjustment` in its history and
+/// `inventory_item.cost_changed`. Receiving goods changes it as they come in; this is for
+/// stock bought outside purchase orders. The store's base currency must be set first
+/// (`409 store_currency_required`), and the cost is in it (`422 cost_currency_mismatch`).
+#[utoipa::path(
+    put,
+    path = "/admin/inventory-items/{id}/cost",
+    params(("id" = InventoryItemId, Path)),
+    request_body = SetUnitCostRequest,
+    responses((status = 200, description = "OK", body = InventoryResponse)),
+    extensions(("x-hypha-scopes" = json!(["purchasing:write"]))),
+)]
+pub async fn set_cost<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(item): PathId<InventoryItemId>,
+    body: JsonBody<SetUnitCostRequest>,
+) -> Result<Json<Redacted>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let store_currency = store_currency(&state, &ports).await?;
+    let input = SetUnitCost {
+        item,
+        unit_cost: req.unit_cost,
+        note: req.note,
+    };
+    let item = set_unit_cost(&ctx, ports.inventory_items(), store_currency, input).await?;
+    item_view(&ctx, &item)
 }
 
 /// A variant's stock, whether or not it has an item.
@@ -478,13 +542,13 @@ pub async fn fetch_variant_inventory<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(variant): PathId<VariantId>,
-) -> Result<Json<InventoryResponse>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let response = match get_variant_inventory(&ctx, ports.inventory_items(), variant).await? {
         Some(item) => InventoryResponse::new(&item)?,
         None => InventoryResponse::untracked(variant),
     };
-    Ok(Json(response))
+    Ok(Json(redact::one(&ctx, Family::InventoryItem, response)?))
 }
 
 /// Every variant's stock in a product, in the product's order.
@@ -507,7 +571,7 @@ pub async fn fetch_product_inventory<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(id): PathId<ProductId>,
-) -> Result<Json<ProductInventoryResponse>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let product = get_product(&ctx, ports.products(), id).await?;
     let variants: Vec<VariantId> = product.variants().iter().map(|v| v.id()).collect();
@@ -524,7 +588,12 @@ pub async fn fetch_product_inventory<S: Storage>(
             None => Ok(InventoryResponse::untracked(variant)),
         })
         .collect::<Result<_, ApiError>>()?;
-    Ok(Json(ProductInventoryResponse { items }))
+    // `items`, like a page's: each one redacted.
+    Ok(Json(redact::page(
+        &ctx,
+        Family::InventoryItem,
+        ProductInventoryResponse { items },
+    )?))
 }
 
 // ---------- stock history ----------
@@ -660,6 +729,17 @@ pub struct StockMovementResponse {
     reason: StockReasonDto,
     source: StockSourceDto,
     note: Option<String>,
+    /// What these units cost, in the store's base currency: the item's average when
+    /// they moved; for a `cost_adjustment`, the cost before it. `null` while there was
+    /// none. Absent without `purchasing:read` (staff included), and listed in `redacted`.
+    unit_cost: Option<UnitCost>,
+    /// The item's unit cost after it. Absent without `purchasing:read`, like `unit_cost`.
+    average_after: Option<UnitCost>,
+    /// Fields left out for this caller: `unit_cost` and `average_after` without `purchasing:read`, staff
+    /// included. Absent when nothing was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    redacted: Option<Vec<String>>,
     /// Who made the change.
     actor: EventActor,
     /// When it was written, RFC 3339.
@@ -676,6 +756,9 @@ impl StockMovementResponse {
             reason: m.reason.into(),
             source: m.source.into(),
             note: m.note,
+            unit_cost: m.unit_cost,
+            average_after: m.average_after,
+            redacted: None,
             actor: actor_of(m.actor),
             at: rfc3339(m.at)?,
         })
@@ -720,7 +803,7 @@ pub async fn list_movements<S: Storage>(
     caller: Caller,
     PathId(item): PathId<InventoryItemId>,
     query: ListQuery<StockMovementFilters>,
-) -> Result<Json<StockMovementPage>, ApiError> {
+) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (page, filters, scope) = query.parse()?;
     let filter = MovementFilter {
@@ -738,12 +821,8 @@ pub async fn list_movements<S: Storage>(
         page,
     )
     .await?;
-    Ok(Json(PageResponse::new(
-        page,
-        &scope,
-        |m| m.position,
-        StockMovementResponse::new,
-    )?))
+    let page = PageResponse::new(page, &scope, |m| m.position, StockMovementResponse::new)?;
+    Ok(Json(redact::page(&ctx, Family::StockMovement, page)?))
 }
 
 // ---------- across products ----------

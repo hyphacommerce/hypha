@@ -9,16 +9,17 @@
 )]
 
 use hypha_core::{
-    Actor, AuthError, Ctx, InventoryItemId, LocationId, MarketId, PageRequest, Scope, UserId,
-    VariantId,
+    Actor, AuthError, Ctx, Currency, InventoryItemId, LocationId, MarketId, PageRequest, Scope,
+    UnitCost, UserId, VariantId,
 };
 use hypha_inventory::{
     AdjustOnHand, AdjustmentReason, CommandError, CreateInventoryItem, CreateLocation,
     DEFAULT_LOCATION_NAME, InventoryError, InventoryItem, InventoryItemRepo, Location,
-    LocationRepo, MovementFilter, SetOnHand, StockReason, StockSource, UpdateInventoryItem,
-    UpdateLocation, adjust_on_hand, create_inventory_item, create_location,
+    LocationRepo, MovementFilter, SetOnHand, SetUnitCost, StockReason, StockSource,
+    UpdateInventoryItem, UpdateLocation, adjust_on_hand, create_inventory_item, create_location,
     ensure_default_location, get_inventory_item, get_variant_inventory, get_variants_inventory,
-    list_locations, list_stock_movements, set_on_hand, update_inventory_item, update_location,
+    list_locations, list_stock_movements, set_on_hand, set_unit_cost, update_inventory_item,
+    update_location,
 };
 use hypha_testkit::{InMemoryInventoryItemRepo, InMemoryLocationRepo, SequentialIds};
 use pollster::block_on;
@@ -637,6 +638,161 @@ fn the_history_needs_the_read_scope_and_an_item() {
     let unknown = InventoryItemId::from_uuid(Uuid::from_u128(999));
     assert_eq!(
         list(reader(), unknown).map(|p| p.items.len()),
+        Err(CommandError::InventoryItemNotFound(unknown))
+    );
+}
+
+fn eur(minor_units: &str) -> UnitCost {
+    UnitCost::parse(minor_units, Currency::EUR).unwrap()
+}
+
+impl World {
+    fn set_cost(
+        &self,
+        ctx: &Ctx,
+        store: Option<Currency>,
+        item: InventoryItemId,
+        unit_cost: Option<UnitCost>,
+    ) -> Result<InventoryItem, CommandError> {
+        let input = SetUnitCost {
+            item,
+            unit_cost,
+            note: Some("supplier invoice".to_string()),
+        };
+        block_on(set_unit_cost(ctx, &self.items, store, input))
+    }
+}
+
+#[test]
+fn a_cost_set_by_hand_is_kept_recorded_and_announced_apart() {
+    let world = World::new();
+    let (item, location) = (world.item(), world.location());
+    world.set(item, location, 3, None).unwrap();
+    let before = world.items.outbox().events().len();
+
+    let set = world
+        .set_cost(
+            &Ctx::system(),
+            Some(Currency::EUR),
+            item,
+            Some(eur("1050.25")),
+        )
+        .unwrap();
+    assert_eq!(set.unit_cost(), Some(eur("1050.25")));
+    assert_eq!(world.stored(item).unit_cost(), Some(eur("1050.25")));
+
+    let rows = world.items.outbox().movements();
+    let row = rows.last().unwrap();
+    assert_eq!(
+        (
+            row.reason,
+            row.location,
+            row.delta,
+            row.unit_cost,
+            row.average_after,
+            row.note.as_deref()
+        ),
+        (
+            StockReason::CostAdjustment,
+            None,
+            0,
+            None,
+            Some(eur("1050.25")),
+            Some("supplier invoice")
+        )
+    );
+    let events = world.items.outbox().events();
+    let new: Vec<&str> = events[before..]
+        .iter()
+        .map(|e| e.event_type.as_str())
+        .collect();
+    assert_eq!(
+        new,
+        ["inventory_item.cost_changed"],
+        "no inventory_item.changed"
+    );
+    assert_eq!(
+        events.last().unwrap().data["unit_cost"],
+        serde_json::json!({ "amount": "1050.25", "currency": "EUR" })
+    );
+    assert_eq!(events.last().unwrap().data["why"], "manual");
+    // Stock moving now carries the cost; inventory_item.changed never does.
+    world.adjust(item, location, -1).unwrap();
+    let rows = world.items.outbox().movements();
+    assert_eq!(rows.last().unwrap().unit_cost, Some(eur("1050.25")));
+    let changed = world.items.outbox().events().last().unwrap().clone();
+    assert_eq!(changed.event_type, "inventory_item.changed");
+    assert!(changed.data.get("unit_cost").is_none());
+}
+
+#[test]
+fn the_same_cost_again_writes_nothing() {
+    let world = World::new();
+    let item = world.item();
+    let ctx = Ctx::system();
+    world
+        .set_cost(&ctx, Some(Currency::EUR), item, Some(eur("5")))
+        .unwrap();
+    let rows = world.items.outbox().movements().len();
+    let again = world
+        .set_cost(&ctx, Some(Currency::EUR), item, Some(eur("5")))
+        .unwrap();
+    assert_eq!(again.unit_cost(), Some(eur("5")));
+    assert_eq!(world.items.outbox().movements().len(), rows);
+}
+
+#[test]
+fn a_cost_needs_the_store_currency_and_is_kept_in_it() {
+    let world = World::new();
+    let item = world.item();
+    let ctx = Ctx::system();
+    assert_eq!(
+        world.set_cost(&ctx, None, item, Some(eur("5"))),
+        Err(CommandError::StoreCurrencyRequired)
+    );
+    let usd = UnitCost::parse("5", Currency::USD).unwrap();
+    assert_eq!(
+        world.set_cost(&ctx, Some(Currency::EUR), item, Some(usd)),
+        Err(CommandError::CostCurrencyMismatch {
+            expected: Currency::EUR,
+            got: Currency::USD
+        })
+    );
+    assert_eq!(world.stored(item).unit_cost(), None);
+    assert_eq!(world.items.outbox().movements(), []);
+}
+
+#[test]
+fn a_cost_is_cleared_without_a_store_currency() {
+    let world = World::new();
+    let item = world.item();
+    let ctx = Ctx::system();
+    world
+        .set_cost(&ctx, Some(Currency::EUR), item, Some(eur("5")))
+        .unwrap();
+    let cleared = world.set_cost(&ctx, None, item, None).unwrap();
+    assert_eq!(cleared.unit_cost(), None);
+    let row = world.items.outbox().movements().pop().unwrap();
+    assert_eq!((row.unit_cost, row.average_after), (Some(eur("5")), None));
+}
+
+#[test]
+fn setting_a_cost_needs_purchasing_write() {
+    let world = World::new();
+    let item = world.item();
+    let stock_keeper = Ctx::new(
+        Actor::User(UserId::from_uuid(Uuid::from_u128(1))),
+        vec![Scope::InventoryWrite],
+    );
+    assert_eq!(
+        world.set_cost(&stock_keeper, Some(Currency::EUR), item, Some(eur("5"))),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::PurchasingWrite
+        )))
+    );
+    let unknown = InventoryItemId::from_uuid(Uuid::from_u128(999));
+    assert_eq!(
+        world.set_cost(&Ctx::system(), Some(Currency::EUR), unknown, None),
         Err(CommandError::InventoryItemNotFound(unknown))
     );
 }

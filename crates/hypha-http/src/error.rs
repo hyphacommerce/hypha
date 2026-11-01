@@ -801,7 +801,8 @@ impl From<hypha_stores::CommandError> for ApiError {
             | E::Timezone(_)
             | E::Language(_)
             | E::Currency(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            E::Repo(
+            E::CurrencyLocked
+            | E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,
             // Only possible at startup, and a deployment problem rather than a request one.
@@ -1029,6 +1030,7 @@ impl From<hypha_inventory::CommandError> for ApiError {
             E::LocationNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::InventoryItemExists { .. }
             | E::OutOfStock { .. }
+            | E::StoreCurrencyRequired
             | E::Inventory(
                 I::OnHandChanged { .. }
                 | I::ReferenceInUse(_)
@@ -1043,7 +1045,8 @@ impl From<hypha_inventory::CommandError> for ApiError {
                 | I::Quantity(_)
                 | I::InvalidReference
                 | I::NoteTooLong { .. },
-            ) => StatusCode::UNPROCESSABLE_ENTITY,
+            )
+            | E::CostCurrencyMismatch { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
@@ -1053,6 +1056,9 @@ impl From<hypha_inventory::CommandError> for ApiError {
             E::OutOfStock { lines } => Some(shortages(
                 lines.iter().map(|l| (l.variant, l.requested, l.available)),
             )),
+            E::CostCurrencyMismatch { expected, .. } => {
+                Some(serde_json::json!({ "currency": expected }))
+            }
             _ => None,
         };
         Self::domain(status, e).with_details(details)

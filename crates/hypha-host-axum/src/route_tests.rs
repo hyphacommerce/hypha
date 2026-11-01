@@ -775,6 +775,228 @@ async fn every_stock_change_is_in_the_items_history() {
     );
 }
 
+/// A staff member `name` whose role (also `name`) has `scopes`, signed in: their session.
+async fn staff_with(app: &TestApp, name: &str, scopes: Value) -> String {
+    let body = json!({"name": name, "scopes": scopes}).to_string();
+    let (status, role) = send(app, "POST", "/admin/roles", Some(&body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{role}");
+    let invite = json!({ "email": format!("{name}@example.com"), "role": role["id"] }).to_string();
+    send(app, "POST", "/admin/invites", Some(&invite)).await;
+    let accept = json!({
+        "token": last_invite_token(app),
+        "name": name,
+        "password": "a staff password",
+    })
+    .to_string();
+    let (status, accepted) =
+        send_with(app, &[], "POST", "/admin/invites/accept", Some(&accept)).await;
+    assert_eq!(status, StatusCode::CREATED, "{accepted}");
+    accepted["session"]["token"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn a_unit_cost_is_kept_in_the_base_currency_and_fixes_it() {
+    let app = app().await;
+    let (pk, cart_path, _) = cart_for_three_mugs(&app).await;
+    let (_, mugs) = send(&app, "GET", "/admin/products?limit=1", None).await;
+    let mug = mugs["items"][0]["variants"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (_, stock) = send(
+        &app,
+        "GET",
+        &format!("/admin/variants/{mug}/inventory"),
+        None,
+    )
+    .await;
+    let item = stock["id"].as_str().unwrap().to_string();
+    let cost = format!("/admin/inventory-items/{item}/cost");
+    let eur = json!({"unit_cost": {"amount": "412.5", "currency": "EUR"}, "note": "invoice 7"})
+        .to_string();
+
+    let (status, body) = send(&app, "PUT", &cost, Some(&eur)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "store_currency_required")
+    );
+    let (status, body) = send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let usd = json!({"unit_cost": {"amount": "5", "currency": "USD"}}).to_string();
+    let (status, body) = send(&app, "PUT", &cost, Some(&usd)).await;
+    assert_eq!(
+        (status, code(&body), &body["details"]["currency"]),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "cost_currency_mismatch",
+            &json!("EUR")
+        )
+    );
+    let bad = json!({"unit_cost": {"amount": "1.00001", "currency": "EUR"}}).to_string();
+    let (status, _) = send(&app, "PUT", &cost, Some(&bad)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let (status, set) = send(&app, "PUT", &cost, Some(&eur)).await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    assert_eq!(
+        set["unit_cost"],
+        json!({"amount": "412.5", "currency": "EUR"})
+    );
+    let (_, history) = send(
+        &app,
+        "GET",
+        &format!("/admin/inventory-items/{item}/movements?reason=cost_adjustment"),
+        None,
+    )
+    .await;
+    let row = &history["items"][0];
+    assert_eq!(
+        (
+            &row["location"],
+            &row["delta"],
+            &row["unit_cost"],
+            &row["average_after"],
+            &row["note"]
+        ),
+        (
+            &Value::Null,
+            &json!(0),
+            &Value::Null,
+            &json!({"amount": "412.5", "currency": "EUR"}),
+            &json!("invoice 7")
+        )
+    );
+
+    // A cost was recorded in euros: the base currency stays.
+    let (status, body) = send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"USD"}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "store_currency_locked")
+    );
+    let (status, _) = send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    assert_eq!(status, StatusCode::OK, "the same one again");
+
+    // An order placed now keeps what a mug cost.
+    pay_on_delivery(&app, &pk, &cart_path).await;
+    let checkout = format!("{cart_path}/checkout");
+    let (status, placed) = send_as(&app, &pk, "POST", &checkout, Some("{}")).await;
+    assert_eq!(status, StatusCode::CREATED, "{placed}");
+    assert!(
+        placed["lines"][0].get("unit_cost").is_none(),
+        "shoppers never see cost"
+    );
+    let order = placed["id"].as_str().unwrap();
+    let (_, read) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
+    assert_eq!(
+        read["lines"][0]["unit_cost"],
+        json!({"amount": "412.5", "currency": "EUR"})
+    );
+    let (_, events) = send(
+        &app,
+        "GET",
+        &format!("/admin/inventory-items/{item}/movements?reason=sold"),
+        None,
+    )
+    .await;
+    assert_eq!(events["items"], json!([]), "nothing shipped yet");
+
+    // Cleared, without a body's currency.
+    let (status, cleared) = send(&app, "PUT", &cost, Some(r#"{"unit_cost":null}"#)).await;
+    assert_eq!(
+        (status, &cleared["unit_cost"]),
+        (StatusCode::OK, &Value::Null)
+    );
+
+    // Setting a cost needs purchasing:write.
+    let clerk = staff_with(&app, "clerk", json!(["inventory:write"])).await;
+    let (status, body) = send_as(&app, &clerk, "PUT", &cost, Some(&eur)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "missing_scope")
+    );
+}
+
+#[tokio::test]
+async fn cost_is_hidden_from_staff_without_purchasing_read() {
+    let app = app().await;
+    let (order, _, _) = placed_order_for_three_mugs(&app).await;
+    let (_, mugs) = send(&app, "GET", "/admin/products?limit=1", None).await;
+    let product = mugs["items"][0]["id"].as_str().unwrap().to_string();
+    let mug = mugs["items"][0]["variants"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (_, stock) = send(
+        &app,
+        "GET",
+        &format!("/admin/variants/{mug}/inventory"),
+        None,
+    )
+    .await;
+    let item = stock["id"].as_str().unwrap().to_string();
+
+    let clerk = staff_with(
+        &app,
+        "clerk",
+        json!(["inventory:read", "orders:read", "products:read"]),
+    )
+    .await;
+    let paths = [
+        format!("/admin/inventory-items/{item}"),
+        format!("/admin/variants/{mug}/inventory"),
+    ];
+    for path in &paths {
+        let (_, all) = send(&app, "GET", path, None).await;
+        assert!(all.get("unit_cost").is_some(), "{path}: {all}");
+        let (status, read) = send_as(&app, &clerk, "GET", path, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {read}");
+        assert_eq!(
+            (read.get("unit_cost"), &read["redacted"]),
+            (None, &json!(["unit_cost"])),
+            "{path}"
+        );
+    }
+    let (_, product_stock) = send_as(
+        &app,
+        &clerk,
+        "GET",
+        &format!("/admin/products/{product}/inventory"),
+        None,
+    )
+    .await;
+    assert_eq!(product_stock["items"][0]["redacted"], json!(["unit_cost"]));
+    let (_, history) = send_as(
+        &app,
+        &clerk,
+        "GET",
+        &format!("/admin/inventory-items/{item}/movements"),
+        None,
+    )
+    .await;
+    let row = &history["items"][0];
+    assert_eq!(
+        (
+            row.get("unit_cost"),
+            row.get("average_after"),
+            &row["redacted"]
+        ),
+        (None, None, &json!(["unit_cost", "average_after"]))
+    );
+    let (_, read) = send_as(&app, &clerk, "GET", &format!("/admin/orders/{order}"), None).await;
+    assert_eq!(
+        (
+            read["lines"][0].get("unit_cost"),
+            &read["lines"][0]["redacted"]
+        ),
+        (None, &json!(["unit_cost"]))
+    );
+
+    let buyer = staff_with(&app, "buyer", json!(["orders:read", "purchasing:read"])).await;
+    let (_, read) = send_as(&app, &buyer, "GET", &format!("/admin/orders/{order}"), None).await;
+    assert!(read["lines"][0].get("unit_cost").is_some(), "{read}");
+    assert!(read["lines"][0].get("redacted").is_none(), "{read}");
+}
+
 #[tokio::test]
 async fn inventory_items_are_listed_across_products_lowest_first() {
     let app = app().await;

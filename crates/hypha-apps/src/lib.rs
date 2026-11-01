@@ -30,7 +30,7 @@ pub use ui::{
 
 pub use app::{
     App, AppSnapshot, EventPattern, Grant, GrantSnapshot, InstalledManifest, NewApp, NewSpore,
-    Webhook, event_scope, normalize,
+    Webhook, event_scope, normalize, route_scope,
 };
 pub use commands::{
     CommandError, CreateApp, SECRET_PREFIX, SporeRegistration, UpdateApp, WebhookInput, create_app,

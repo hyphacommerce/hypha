@@ -6938,8 +6938,29 @@
             },
             "type": "array"
           },
+          "redacted": {
+            "description": "Fields left out for this caller: `unit_cost` without `purchasing:read`, staff\nincluded. Absent when nothing was.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "tracked": {
             "type": "boolean"
+          },
+          "unit_cost": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UnitCost",
+                "description": "What one unit cost, in the store's base currency: the average over what came in,\nor what was set by hand. `null` until known. Absent without `purchasing:read`\n(staff included), and listed in `redacted`."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "updated_at": {
             "description": "When the item last changed; `null` for a variant without one.",
@@ -8355,6 +8376,16 @@
             "minimum": 0,
             "type": "integer"
           },
+          "redacted": {
+            "description": "Fields left out for this caller: `unit_cost` without `purchasing:read`, staff\nincluded. Absent when nothing was.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "sku": {
             "type": [
               "string",
@@ -8379,6 +8410,17 @@
           "total": {
             "$ref": "#/components/schemas/Money",
             "description": "What the buyer was charged for the line: `subtotal` less its discounts. Tax is on\nthis, and a refund of part of the line refunds that part of it."
+          },
+          "unit_cost": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UnitCost",
+                "description": "What one unit cost the store when the order was placed, in its base currency:\nfor the line's margin. `null` without a cost, and for lines placed before costs\nwere kept. Absent without `purchasing:read` (staff included), and listed in the\nline's `redacted`."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "unit_price": {
             "$ref": "#/components/schemas/Money"
@@ -11828,6 +11870,30 @@
         ],
         "type": "object"
       },
+      "SetUnitCostRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "description": "Why, for the stock history: at most 500 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unit_cost": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UnitCost",
+                "description": "What one unit cost, in the store's base currency; `null` clears it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
       "SetVariantMediaRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12301,6 +12367,17 @@
             "description": "When it was written, RFC 3339.",
             "type": "string"
           },
+          "average_after": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UnitCost",
+                "description": "The item's unit cost after it. Absent without `purchasing:read`, like `unit_cost`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "delta": {
             "description": "Units added (positive) or removed (negative).",
             "format": "int64",
@@ -12331,8 +12408,29 @@
           "reason": {
             "$ref": "#/components/schemas/StockReason"
           },
+          "redacted": {
+            "description": "Fields left out for this caller: `unit_cost` and `average_after` without `purchasing:read`, staff\nincluded. Absent when nothing was.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "source": {
             "$ref": "#/components/schemas/StockSource"
+          },
+          "unit_cost": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UnitCost",
+                "description": "What these units cost, in the store's base currency: the item's average when\nthey moved; for a `cost_adjustment`, the cost before it. `null` while there was\nnone. Absent without `purchasing:read` (staff included), and listed in `redacted`."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -12952,6 +13050,38 @@
         "required": [
           "line",
           "quantity"
+        ],
+        "type": "object"
+      },
+      "UnitCost": {
+        "description": "What one unit cost, finer than a minor unit: a cheap part or an average over several purchases isn't a whole cent.",
+        "examples": [
+          {
+            "amount": "0.35",
+            "currency": "EUR"
+          }
+        ],
+        "properties": {
+          "amount": {
+            "description": "In minor units as a decimal string, with up to 4 more decimals: \"1050\" is 10.50, \"0.35\" is 0.0035. Never negative; a string so it stays exact.",
+            "examples": [
+              "0.35"
+            ],
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,4})?$",
+            "type": "string"
+          },
+          "currency": {
+            "description": "An ISO 4217 currency code. Funds, precious metals and test codes (XDR, XAU, XXX) aren't accepted.",
+            "examples": [
+              "EUR"
+            ],
+            "pattern": "^[A-Z]{3}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
         ],
         "type": "object"
       },
@@ -31041,6 +31171,154 @@
         },
         "x-hypha-scopes": [
           "inventory:write"
+        ]
+      }
+    },
+    "/admin/inventory-items/{id}/cost": {
+      "put": {
+        "operationId": "admin.inventory.set_cost",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/InventoryItemId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetUnitCostRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sets what one unit of an item cost, by hand: a `cost_adjustment` in its history and\n`inventory_item.cost_changed`. Receiving goods changes it as they come in; this is for\nstock bought outside purchase orders. The store's base currency must be set first\n(`409 store_currency_required`), and the cost is in it (`422 cost_currency_mismatch`).",
+        "tags": [
+          "inventory"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "purchasing:write"
         ]
       }
     },

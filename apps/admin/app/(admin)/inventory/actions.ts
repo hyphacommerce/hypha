@@ -26,3 +26,21 @@ export async function adjustStock(
   revalidatePath(`/inventory/${item}`);
   return {};
 }
+
+/**
+ * Sets what one unit cost, in the store's base currency (`amount` in minor units as a
+ * decimal string), or clears it with `null`, for a reason the history keeps.
+ */
+export async function setUnitCost(
+  item: string,
+  input: { cost: { amount: string; currency: string } | null; note: string },
+): Promise<{ error?: string }> {
+  const client = await sessionClient();
+  const { error } = await client.PUT("/admin/inventory-items/{id}/cost", {
+    params: { path: { id: item } },
+    body: { unit_cost: input.cost, note: input.note.trim() === "" ? null : input.note },
+  });
+  if (error) return { error: describe(error) };
+  revalidatePath(`/inventory/${item}`);
+  return {};
+}

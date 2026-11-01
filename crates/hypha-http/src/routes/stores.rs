@@ -1,5 +1,6 @@
 use axum::{Json, extract::State};
 use hypha_core::{Ctx, Currency, Email, Language, StoreId, Timezone};
+use hypha_inventory::{HasStockMovements, StockMovementRepo};
 use hypha_stores::{Store, UpdateStore, get_store, update_store};
 use serde::{Deserialize, Serialize};
 
@@ -159,6 +160,12 @@ pub async fn update<S: Storage>(
 ) -> Result<Json<StoreResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
+    // Recorded costs fix the currency. Checked before the write, not in its transaction:
+    // a cost recorded at the same instant as a currency change can slip through.
+    let currency_locked = match req.currency {
+        Some(_) => ports.stock_movements().cost_recorded().await?,
+        None => false,
+    };
     let input = UpdateStore {
         name: req.name,
         contact_email: req.contact_email,
@@ -168,6 +175,7 @@ pub async fn update<S: Storage>(
         timezone: req.timezone,
         default_language: req.default_language,
         currency: req.currency,
+        currency_locked,
         setup_step: req.setup_step,
         setup_finished: req.setup_finished,
     };
@@ -230,4 +238,21 @@ pub(crate) async fn read_store<S: Storage>(
     drop(ports);
     let directory = state.storage.directory().await?;
     Ok(get_store(ctx, &directory, state.store).await?)
+}
+
+/// The store's base currency, which every cost is kept in, for the routes that record
+/// one. Read as the system: recording a cost needs `purchasing:write`, not `stores:read`.
+pub(crate) async fn store_currency<S: Storage>(
+    state: &AppState<S>,
+    ports: &S::Ports<'_>,
+) -> Result<Option<Currency>, ApiError> {
+    let ctx = Ctx::system();
+    let store = match state.storage.directory_in(ports) {
+        Some(directory) => get_store(&ctx, directory, state.store).await?,
+        None => {
+            let directory = state.storage.directory().await?;
+            get_store(&ctx, &directory, state.store).await?
+        }
+    };
+    Ok(store.currency())
 }

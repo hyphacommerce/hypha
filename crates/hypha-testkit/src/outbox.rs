@@ -101,12 +101,14 @@ impl InMemoryOutbox {
                 position,
                 item: m.item,
                 variant: m.variant,
-                location: Some(m.location),
+                location: m.location,
                 delta: m.delta,
-                after: Some(m.after),
+                after: m.after,
                 reason: m.reason,
                 source: m.source,
                 note: m.note.map(|n| n.as_str().to_string()),
+                unit_cost: m.unit_cost,
+                average_after: m.average_after,
                 actor,
                 at: self.clock.now(),
             });
@@ -200,6 +202,14 @@ impl StockMovementRepo for InMemoryOutbox {
             .cloned()
             .collect();
         Ok(Page::from_overfetch(rows, page.limit))
+    }
+
+    async fn cost_recorded(&self) -> Result<bool, RepoError> {
+        let state = self.inner.lock().unwrap();
+        Ok(state
+            .movements
+            .iter()
+            .any(|m| m.unit_cost.is_some() || m.average_after.is_some()))
     }
 }
 

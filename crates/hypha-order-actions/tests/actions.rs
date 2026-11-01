@@ -87,6 +87,7 @@ fn line(id: OrderLineId, variant: u128, quantity: u32) -> OrderLine {
         fulfilled_quantity: 0,
         compare_at_price: None,
         price_list: None,
+        unit_cost: None,
     }
 }
 
