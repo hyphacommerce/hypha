@@ -7,8 +7,8 @@ use thiserror::Error;
 
 use crate::{
     ContactDraft, CostDraft, LineDraft, PaymentTermsDraft, PurchaseOrder, PurchaseOrderDraft,
-    PurchaseOrderSummary, PurchasingError, Supplier, SupplierDraft, SupplierVariant,
-    SupplierVariantDraft,
+    PurchaseOrderStatus, PurchaseOrderSummary, PurchasingError, Supplier, SupplierDraft,
+    SupplierVariant, SupplierVariantDraft,
     repo::{
         HasPurchaseOrders, HasSupplierVariants, HasSuppliers, PurchaseOrderFilter,
         PurchaseOrderRepo, PurchaseOrderSort, SupplierFilter, SupplierRepo, SupplierVariantRepo,
@@ -545,8 +545,9 @@ pub async fn update_purchase_order<S: HasSupplierVariants + HasPurchaseOrders>(
             lines,
         )
         .await?;
-    } else if draft.currency != po.currency() {
-        // Lines kept as they are would be in the old currency: they say so.
+    } else if draft.currency != po.currency() && po.status() == PurchaseOrderStatus::Draft {
+        // Lines kept as they are would be in the old currency: they say so. Past a draft
+        // the currency is fixed, which the order itself refuses first.
         for line in &mut draft.lines {
             if line.unit_cost.currency() != draft.currency {
                 return Err(PurchasingError::LineCurrencyMismatch {

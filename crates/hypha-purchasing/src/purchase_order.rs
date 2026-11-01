@@ -671,10 +671,12 @@ impl PurchaseOrder {
                 });
             }
         };
-        let (fields, mut lines) = check(draft)?;
-        if ordered && fields.currency != self.fields.currency {
+        // Before the draft's own checks: its lines are in the new currency, which would
+        // otherwise be refused as theirs rather than as the order's.
+        if ordered && draft.currency != self.fields.currency {
             return Err(PurchasingError::CurrencyFixed);
         }
+        let (fields, mut lines) = check(draft)?;
         // Lines keep their counts by variant.
         for old in &self.lines {
             match lines.iter_mut().find(|l| l.variant == old.variant) {
