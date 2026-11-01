@@ -1215,7 +1215,7 @@ LAMP_ITEM=$(id)
 contains "tracked by default" '"tracked":true,"continue_selling":false,"levels":[]'
 step "2 lamps on hand" 200 - -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" \
     -d '{"on_hand":2}'
-contains "level is stored" "\"levels\":[{\"location\":\"$WAREHOUSE\",\"on_hand\":2,\"reserved\":0,\"available\":2}]"
+contains "level is stored" "\"levels\":[{\"location\":\"$WAREHOUSE\",\"on_hand\":2,\"reserved\":0,\"available\":2,\"incoming\":0,\"next_expected_at\":null}]"
 step "create stock cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 STOCK_CART=$(id)
 step "add 3 lamps" 409 out_of_stock -X POST "$BASE/storefront/carts/$STOCK_CART/lines" -H "$JSON" \
