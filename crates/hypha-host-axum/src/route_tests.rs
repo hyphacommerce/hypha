@@ -794,15 +794,20 @@ async fn staff_with(app: &TestApp, name: &str, scopes: Value) -> String {
     accepted["session"]["token"].as_str().unwrap().to_string()
 }
 
+/// The first variant of the newest product: a listed product is a summary without its
+/// variants, so it's read whole.
+async fn only_variant(app: &TestApp) -> String {
+    let (_, products) = send(app, "GET", "/admin/products?limit=1", None).await;
+    let id = products["items"][0]["id"].as_str().unwrap();
+    let (_, product) = send(app, "GET", &format!("/admin/products/{id}"), None).await;
+    product["variants"][0]["id"].as_str().unwrap().to_string()
+}
+
 #[tokio::test]
 async fn a_unit_cost_is_kept_in_the_base_currency_and_fixes_it() {
     let app = app().await;
     let (pk, cart_path, _) = cart_for_three_mugs(&app).await;
-    let (_, mugs) = send(&app, "GET", "/admin/products?limit=1", None).await;
-    let mug = mugs["items"][0]["variants"][0]["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let mug = only_variant(&app).await;
     let (_, stock) = send(
         &app,
         "GET",
@@ -922,10 +927,7 @@ async fn cost_is_hidden_from_staff_without_purchasing_read() {
     let (order, _, _) = placed_order_for_three_mugs(&app).await;
     let (_, mugs) = send(&app, "GET", "/admin/products?limit=1", None).await;
     let product = mugs["items"][0]["id"].as_str().unwrap().to_string();
-    let mug = mugs["items"][0]["variants"][0]["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let mug = only_variant(&app).await;
     let (_, stock) = send(
         &app,
         "GET",
