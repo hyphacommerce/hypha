@@ -110,6 +110,9 @@ const share = (money, factor) => ({
   currency: money.currency,
 });
 
+/** Dollars per euro: the US market's prices, the US supplier's costs and its order's rate. */
+const USD_PER_EUR = 1.08;
+
 /** A base price (EUR cents) in another market's currency, rounded like a shop would. */
 function convert(cents, currency) {
   const euros = cents / 100;
@@ -117,7 +120,7 @@ function convert(cents, currency) {
     case "GBP":
       return { amount: Math.max(1, Math.ceil(euros * 0.86)) * 100 - 1, currency }; // £x.99
     case "USD":
-      return { amount: Math.ceil(euros * 1.08) * 100, currency }; // $x.00
+      return { amount: Math.ceil(euros * USD_PER_EUR) * 100, currency }; // $x.00
     case "RSD":
       return { amount: Math.ceil((euros * 117.2) / 100) * 100 * 100, currency }; // 3,500.00
     default:
@@ -1792,7 +1795,7 @@ const SUPPLIERS = [
 /** What `supplier` charges for `variant` (EUR cents on the shelf), in minor units as text. */
 function supplierCost(supplier, variant) {
   const euros = (variant.price.amount * supplier.factor) / 100;
-  const amount = supplier.currency === "USD" ? euros * 1.08 : euros;
+  const amount = supplier.currency === "USD" ? euros * USD_PER_EUR : euros;
   return { amount: String(Math.round(amount * 100)), currency: supplier.currency };
 }
 
@@ -1807,6 +1810,12 @@ function supplierCost(supplier, variant) {
 async function seedPurchasing() {
   const added = [];
   const store = await admin.get("/admin/store");
+  if (store.currency && store.currency !== "EUR") {
+    console.log(
+      `  Skipped: the demo's costs are in EUR and the store keeps them in ${store.currency}.`,
+    );
+    return added;
+  }
   if (!store.currency) {
     await admin.patch("/admin/store", { currency: "EUR" });
     added.push("base currency EUR");
@@ -1828,19 +1837,26 @@ async function seedPurchasing() {
   }
   const variantsOf = (handles) => handles.flatMap((h) => products[h]?.variants ?? []);
 
-  const existing = new Set((await all("/admin/suppliers")).map((s) => s.name));
+  const existing = new Map((await all("/admin/suppliers")).map((s) => [s.name, s]));
   const made = {};
   for (const spec of SUPPLIERS) {
-    if (existing.has(spec.name)) continue;
-    const supplier = await admin.post("/admin/suppliers", {
-      name: spec.name,
-      currency: spec.currency,
-      contacts: [{ ...spec.contact, primary: true }],
-      payment_terms: spec.payment_terms,
-      lead_time_days: spec.lead_time_days,
-      ...(spec.tax_number ? { tax_number: spec.tax_number } : {}),
-      notes: spec.notes,
-    });
+    const earlier = existing.get(spec.name);
+    if (earlier) {
+      // Its orders are what a finished run left; without any, that run stopped early.
+      const orders = await admin.get(`/admin/purchase-orders?supplier=${earlier.id}&limit=1`);
+      if (orders.items.length > 0) continue;
+    }
+    const supplier =
+      earlier ??
+      (await admin.post("/admin/suppliers", {
+        name: spec.name,
+        currency: spec.currency,
+        contacts: [{ ...spec.contact, primary: true }],
+        payment_terms: spec.payment_terms,
+        lead_time_days: spec.lead_time_days,
+        tax_number: spec.tax_number,
+        notes: spec.notes,
+      }));
     let n = 0;
     for (const variant of variantsOf(spec.products)) {
       n += 1;
@@ -1900,8 +1916,7 @@ async function seedPurchasing() {
     const po = await admin.post("/admin/purchase-orders", {
       supplier: northlab.id,
       destination: farm.id,
-      currency: "USD",
-      exchange_rate: "0.92",
+      exchange_rate: (1 / USD_PER_EUR).toFixed(8),
       lines: lab.map((variant) => ({ variant: variant.id, quantity: 10 })),
       costs: [
         { kind: "shipping", amount: { amount: 6000, currency: "USD" } },
@@ -1935,12 +1950,16 @@ async function seedPurchasing() {
   const transfers = await admin.get("/admin/transfers?limit=1");
   if (transfers.items.length === 0) {
     const lines = [];
-    for (const variant of variantsOf(["oyster-grow-kit", "lions-mane-grow-kit"])) {
-      const stock = await admin.get(`/admin/variants/${variant.id}/inventory`);
-      const here = stock.levels?.find((level) => level.location === farm.id)?.on_hand ?? 0;
-      if (stock.tracked && here >= 6) lines.push({ variant: variant.id, quantity: 4 });
-      if (lines.length === 2) break;
-    }
+    const kits = variantsOf(["oyster-grow-kit", "lions-mane-grow-kit"]);
+    const stocks = await Promise.all(
+      kits.map((variant) => admin.get(`/admin/variants/${variant.id}/inventory`)),
+    );
+    kits.forEach((variant, i) => {
+      // Available, not on hand: units reserved by the seeded orders stay at the farm.
+      const free = stocks[i].levels?.find((level) => level.location === farm.id)?.available ?? 0;
+      if (stocks[i].tracked && free >= 6 && lines.length < 2)
+        lines.push({ variant: variant.id, quantity: 4 });
+    });
     if (lines.length > 0) {
       const transfer = await admin.post("/admin/transfers", {
         origin: farm.id,
@@ -1956,8 +1975,12 @@ async function seedPurchasing() {
 
   // Costs by hand for what the store makes itself.
   let costed = 0;
-  for (const variant of variantsOf(["mycelium-leather", "acoustic-panel"])) {
-    const stock = await admin.get(`/admin/variants/${variant.id}/inventory`);
+  const own = variantsOf(["mycelium-leather", "acoustic-panel"]);
+  const ownStock = await Promise.all(
+    own.map((variant) => admin.get(`/admin/variants/${variant.id}/inventory`)),
+  );
+  for (const [i, variant] of own.entries()) {
+    const stock = ownStock[i];
     if (!stock.id || stock.unit_cost) continue;
     const cents = Math.round(variant.price.amount * 0.35);
     await admin.put(`/admin/inventory-items/${stock.id}/cost`, {
@@ -1990,9 +2013,13 @@ async function main() {
     throw new Error(`login needs ${login.status}: use a store owner without 2FA`);
   token = login.session.token;
 
-  if (process.argv.includes("--images")) return replaceImages();
-  if (process.argv.includes("--pricing")) return addPricing();
-  if (process.argv.includes("--purchasing")) return addPurchasing();
+  const flags = ["--images", "--pricing", "--purchasing"].filter((f) => process.argv.includes(f));
+  if (flags.length > 0) {
+    if (flags.includes("--images")) await replaceImages();
+    if (flags.includes("--pricing")) await addPricing();
+    if (flags.includes("--purchasing")) await addPurchasing();
+    return;
+  }
 
   const existing = await admin.get("/admin/products?limit=1");
   if (existing.items.length > 0 && !process.argv.includes("--force")) {
@@ -2587,8 +2614,20 @@ async function main() {
     have: new Set(),
   });
 
-  console.log("Purchasing");
-  const purchasing = await seedPurchasing();
+  console.log("\nFor the storefront (apps/storefront/.dev.vars):");
+  console.log(`  STOREFRONT_KEY=${key.token}`);
+  if (webhookSecret) console.log(`  HYPHA_WEBHOOK_SECRET=${webhookSecret}`);
+
+  console.log("\nPurchasing");
+  let purchasing;
+  try {
+    purchasing = await seedPurchasing();
+  } catch (e) {
+    console.error(
+      `  Purchasing failed: ${e.message}. Run \`pnpm seed --purchasing\` to finish it.`,
+    );
+    purchasing = [];
+  }
 
   const variantCount = sellable.reduce((n, p) => n + p.variants.length, 0);
   console.log("\nDone: Mycelium Works is set up.");
@@ -2596,9 +2635,6 @@ async function main() {
     `  ${sellable.length} products for sale (${variantCount} variants), 1 draft · ${FIELDS.length} custom fields · ${MARKETS.length} markets · ${orders.length} orders · ${discounts.length} discounts`,
   );
   for (const line of purchasing) console.log(`  ${line}`);
-  console.log("\nFor the storefront (apps/storefront/.dev.vars):");
-  console.log(`  STOREFRONT_KEY=${key.token}`);
-  if (webhookSecret) console.log(`  HYPHA_WEBHOOK_SECRET=${webhookSecret}`);
 }
 
 main().catch((e) => {
