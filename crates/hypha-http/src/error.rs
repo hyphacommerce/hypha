@@ -795,10 +795,14 @@ impl From<hypha_stores::CommandError> for ApiError {
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
             E::StoreNotFound(_) => StatusCode::NOT_FOUND,
-            E::Store(_) | E::Email(_) | E::Address(_) | E::Timezone(_) | E::Language(_) => {
-                StatusCode::UNPROCESSABLE_ENTITY
-            }
-            E::Repo(
+            E::Store(_)
+            | E::Email(_)
+            | E::Address(_)
+            | E::Timezone(_)
+            | E::Language(_)
+            | E::Currency(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::CurrencyLocked
+            | E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,
             // Only possible at startup, and a deployment problem rather than a request one.
@@ -1022,15 +1026,22 @@ impl From<hypha_inventory::CommandError> for ApiError {
             E::Auth(_) => StatusCode::FORBIDDEN,
             // Item IDs only ever arrive in URLs; locations can come in either, so routes
             // that name one in the URL turn its 422 into a 404 (`not_found_if`).
-            E::InventoryItemNotFound(_) => StatusCode::NOT_FOUND,
+            E::InventoryItemNotFound(_) | E::TransferNotFound(_) => StatusCode::NOT_FOUND,
             E::LocationNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            // The transfer's state: shipped, received or cancelled, or empty, or less on
+            // its way than arrived.
             E::InventoryItemExists { .. }
             | E::OutOfStock { .. }
+            | E::StoreCurrencyRequired
             | E::Inventory(
                 I::OnHandChanged { .. }
                 | I::ReferenceInUse(_)
                 | I::OutOfStock { .. }
-                | I::StillReserved,
+                | I::StillReserved
+                | I::TransferNotDraft { .. }
+                | I::TransferNotInTransit { .. }
+                | I::TransferEmpty
+                | I::OverReceived(_),
             ) => StatusCode::CONFLICT,
             E::Inventory(
                 I::Text(_)
@@ -1038,8 +1049,24 @@ impl From<hypha_inventory::CommandError> for ApiError {
                 | I::DuplicateMarket(_)
                 | I::StockOutOfRange(_)
                 | I::Quantity(_)
-                | I::InvalidReference,
-            ) => StatusCode::UNPROCESSABLE_ENTITY,
+                | I::InvalidReference
+                | I::NoteTooLong { .. }
+                | I::CostCurrency { .. }
+                | I::Money(_)
+                | I::InvalidTransferNumber(_)
+                | I::SameLocation
+                | I::TooManyTransferLines { .. }
+                | I::DuplicateTransferLine(_)
+                | I::InvalidTransferQuantity(_)
+                | I::TransferQuantityTooLarge { .. }
+                | I::TransferNoteTooLong { .. }
+                | I::UnknownTransferLine(_)
+                | I::EmptyArrival(_)
+                | I::TransferArrivalEmpty
+                | I::VariantNotStocked(_),
+            )
+            | E::CostCurrencyMismatch { .. }
+            | E::Idempotency(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
@@ -1049,6 +1076,15 @@ impl From<hypha_inventory::CommandError> for ApiError {
             E::OutOfStock { lines } => Some(shortages(
                 lines.iter().map(|l| (l.variant, l.requested, l.available)),
             )),
+            E::CostCurrencyMismatch { expected, .. } => {
+                Some(serde_json::json!({ "currency": expected }))
+            }
+            E::Inventory(I::OverReceived(lines)) => Some(serde_json::json!({
+                "lines": lines
+                    .iter()
+                    .map(|l| serde_json::json!({ "variant": l.variant, "in_transit": l.in_transit }))
+                    .collect::<Vec<_>>()
+            })),
             _ => None,
         };
         Self::domain(status, e).with_details(details)
@@ -1276,7 +1312,25 @@ impl From<hypha_order_actions::CommandError> for ApiError {
                 | I::InvalidReference
                 | I::ReferenceInUse(_)
                 | I::OutOfStock { .. }
-                | I::StillReserved,
+                | I::StillReserved
+                | I::NoteTooLong { .. }
+                | I::CostCurrency { .. }
+                | I::Money(_)
+                | I::InvalidTransferNumber(_)
+                | I::SameLocation
+                | I::TooManyTransferLines { .. }
+                | I::DuplicateTransferLine(_)
+                | I::InvalidTransferQuantity(_)
+                | I::TransferQuantityTooLarge { .. }
+                | I::TransferNoteTooLong { .. }
+                | I::TransferNotDraft { .. }
+                | I::TransferNotInTransit { .. }
+                | I::TransferEmpty
+                | I::UnknownTransferLine(_)
+                | I::EmptyArrival(_)
+                | I::TransferArrivalEmpty
+                | I::OverReceived(_)
+                | I::VariantNotStocked(_),
             ) => return Self::internal(e),
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
@@ -1646,6 +1700,149 @@ impl From<hypha_oauth::CommandError> for ApiError {
     }
 }
 
+impl From<hypha_purchasing::CommandError> for ApiError {
+    fn from(e: hypha_purchasing::CommandError) -> Self {
+        use hypha_purchasing::{CommandError as E, PurchasingError as P};
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Suppliers, catalogue rows and purchase orders arrive in URLs (a new order's
+            // supplier, in its body, is mapped by its route).
+            E::SupplierNotFound(_)
+            | E::SupplierVariantNotFound { .. }
+            | E::PurchaseOrderNotFound(_)
+            | E::ReceiptNotFound(_) => StatusCode::NOT_FOUND,
+            E::SupplierCurrencyInUse(_)
+            | E::SupplierInUse(_)
+            | E::SupplierArchived(_)
+            | E::ReceivedStock(_) => StatusCode::CONFLICT,
+            E::UnknownVariant(_) | E::UnitCostRequired(_) | E::SupplierEmailRequired(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            // The order in the URL isn't in a state that allows it.
+            E::Purchasing(
+                P::NotDraft { .. }
+                | P::NotOrdered { .. }
+                | P::NotOpen { .. }
+                | P::AlreadyReceived
+                | P::DestinationRequired
+                | P::NoLines
+                | P::StoreCurrencyRequired
+                | P::ExchangeRateRequired { .. }
+                | P::CurrencyFixed
+                | P::OverReceived(_)
+                | P::ReceiptCancelled,
+            ) => StatusCode::CONFLICT,
+            E::Purchasing(
+                P::Text(_)
+                | P::Email(_)
+                | P::Address(_)
+                | P::TooManyContacts { .. }
+                | P::SeveralPrimaryContacts
+                | P::InvalidNetDays { .. }
+                | P::LeadTimeTooLong { .. }
+                | P::NotesTooLong { .. }
+                | P::InvalidMinOrderQuantity
+                | P::CostCurrencyMismatch { .. }
+                | P::Money(_)
+                | P::InvalidNumber(_)
+                | P::TooManyLines { .. }
+                | P::DuplicateLine(_)
+                | P::InvalidLineQuantity(_)
+                | P::QuantityTooLarge { .. }
+                | P::LineCurrencyMismatch { .. }
+                | P::TooManyCosts { .. }
+                | P::NegativeCost
+                | P::ExtraCostCurrency { .. }
+                | P::TaxCurrencyMismatch { .. }
+                | P::LineReceived(_)
+                | P::BelowReceived { .. }
+                | P::UnknownLine(_)
+                | P::EmptyReceiptLine(_)
+                | P::TakeBackMismatch(_)
+                | P::EmptyReceipt
+                | P::NoRecipients
+                | P::TooManyRecipients { .. }
+                | P::MessageTooLong { .. },
+            ) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        let details = match &e {
+            E::Purchasing(
+                P::CostCurrencyMismatch { expected, .. } | P::TaxCurrencyMismatch { expected, .. },
+            ) => Some(json!({ "currency": expected })),
+            E::Purchasing(P::LineCurrencyMismatch {
+                variant, expected, ..
+            }) => Some(json!({ "variant": variant, "currency": expected })),
+            E::Purchasing(P::ExtraCostCurrency { order, store, .. }) => {
+                Some(json!({ "currencies": [order, store] }))
+            }
+            E::Purchasing(P::ExchangeRateRequired { currency, store }) => {
+                Some(json!({ "currency": currency, "store_currency": store }))
+            }
+            E::Purchasing(P::BelowReceived { variant, minimum }) => {
+                Some(json!({ "variant": variant, "minimum": minimum }))
+            }
+            E::Purchasing(P::QuantityTooLarge { variant, max }) => {
+                Some(json!({ "variant": variant, "max": max }))
+            }
+            E::Purchasing(
+                P::DuplicateLine(variant)
+                | P::InvalidLineQuantity(variant)
+                | P::LineReceived(variant)
+                | P::UnknownLine(variant)
+                | P::EmptyReceiptLine(variant)
+                | P::TakeBackMismatch(variant),
+            )
+            | E::UnknownVariant(variant)
+            | E::UnitCostRequired(variant) => Some(json!({ "variant": variant })),
+            E::Purchasing(P::OverReceived(lines)) => Some(json!({
+                "lines": lines
+                    .iter()
+                    .map(|l| json!({ "variant": l.variant, "outstanding": l.outstanding }))
+                    .collect::<Vec<_>>()
+            })),
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
+    }
+}
+
+impl From<hypha_receiving::CommandError> for ApiError {
+    fn from(e: hypha_receiving::CommandError) -> Self {
+        use hypha_receiving::CommandError as E;
+        // The order's and the stock's own rules answer as they do on their routes.
+        let e = match e {
+            E::Purchasing(p) => return hypha_purchasing::CommandError::Purchasing(p).into(),
+            E::PurchaseOrder(p) => return p.into(),
+            E::Inventory(i) => return hypha_inventory::CommandError::Inventory(i).into(),
+            other => other,
+        };
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // The order or the receipt in the URL.
+            E::PurchaseOrderNotFound(_) | E::ReceiptNotFound(_) => StatusCode::NOT_FOUND,
+            // A location named in the body.
+            E::LocationNotFound(_) | E::Quantity(_) | E::Idempotency(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            E::StoreCurrencyRequired => StatusCode::CONFLICT,
+            E::Purchasing(_)
+            | E::PurchaseOrder(_)
+            | E::Inventory(_)
+            | E::Repo(RepoError::Backend(_)) => {
+                return Self::internal(e);
+            }
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
+    }
+}
+
 impl From<hypha_discounts::CommandError> for ApiError {
     fn from(e: hypha_discounts::CommandError) -> Self {
         use hypha_discounts::{CodeError as C, CommandError as E, DiscountError as D};
@@ -1872,14 +2069,18 @@ impl From<hypha_mail::CommandError> for ApiError {
             | E::AssetNotReady(_)
             | E::AssetNotPublic(_)
             | E::AssetKindNotAllowed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
-            // Message IDs only ever arrive in URLs.
-            E::NotificationNotFound(_) => StatusCode::NOT_FOUND,
+            // Message IDs only ever arrive in URLs; a resent message's purchase order is
+            // its own (only drafts are deleted, and a sent order isn't one).
+            E::NotificationNotFound(_) | E::PurchaseOrderNotFound(_) => StatusCode::NOT_FOUND,
             // The deployment, not the request: a test send with the `log` sender.
             E::EmailNotConfigured => StatusCode::CONFLICT,
             // The message in the URL is an invite or a reset, or its customer was erased.
             E::NotResendable { .. } | E::RecipientErased => StatusCode::CONFLICT,
-            // A host set up wrongly, or an event the store wrote itself.
-            E::StoreNotFound(_) | E::BadEvent { .. } => return Self::internal(e),
+            // A host set up wrongly, an event the store wrote itself, or a purchase order
+            // whose totals overflow (its writes check them).
+            E::StoreNotFound(_) | E::BadEvent { .. } | E::Purchasing(_) => {
+                return Self::internal(e);
+            }
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),

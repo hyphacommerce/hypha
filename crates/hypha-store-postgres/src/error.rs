@@ -20,6 +20,7 @@ use hypha_oauth::keys as oauth_keys;
 use hypha_orders::repo::keys as order_keys;
 use hypha_payments::keys as payment_keys;
 use hypha_products::repo::keys as product_keys;
+use hypha_purchasing::keys as purchasing_keys;
 use hypha_search_index::keys as search_keys;
 use hypha_shipping::keys as shipping_keys;
 use hypha_stores::repo::keys as store_keys;
@@ -34,6 +35,18 @@ const REFERENCE_KEYS: &[(&str, &str)] = &[
     ("shipping_provider_app", shipping_keys::PROVIDER_APP),
     ("catalog_price_list", market_keys::CATALOG_PRICE_LIST),
     ("price_list_group", market_keys::PRICE_LIST_GROUP),
+    (
+        "supplier_variant_supplier",
+        purchasing_keys::CATALOGUE_SUPPLIER,
+    ),
+    (
+        "purchase_order_supplier",
+        purchasing_keys::PURCHASE_ORDER_SUPPLIER,
+    ),
+    (
+        "receipt_purchase_order",
+        purchasing_keys::RECEIPT_PURCHASE_ORDER,
+    ),
 ];
 
 /// Unique constraint names (see `migrations/`) and the repo key each one reports.
@@ -148,6 +161,15 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("agent_proposals_pkey", agent_keys::PROPOSAL_ID),
     ("agent_proposal_key", agent_keys::PROPOSAL_KEY),
     ("agent_calls_pkey", agent_keys::AGENT_CALL_ID),
+    ("suppliers_pkey", purchasing_keys::SUPPLIER_ID),
+    ("purchase_orders_pkey", purchasing_keys::PURCHASE_ORDER_ID),
+    ("receipts_pkey", purchasing_keys::RECEIPT_ID),
+    (
+        "purchase_order_number",
+        purchasing_keys::PURCHASE_ORDER_NUMBER,
+    ),
+    ("transfers_pkey", inventory_keys::TRANSFER_ID),
+    ("transfer_number", inventory_keys::TRANSFER_NUMBER),
 ];
 
 /// Maps a driver error to the repo error the ports promise. A spore's query error as a

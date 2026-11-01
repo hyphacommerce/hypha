@@ -18,8 +18,8 @@ use crate::{
     columns::{
         ADDRESS_LEN, address_assignments, address_columns, address_from_row, address_values, col,
         currency_from_db, id_and_address, micros, opt_micros, opt_ts, stamp_columns,
-        stamps_from_row, tax_rate_from_db, tax_rate_to_db, ts, version_from_db, version_to_db,
-        write_stamps,
+        stamps_from_row, tax_rate_from_db, tax_rate_to_db, ts, unit_cost_from_db, unit_cost_to_db,
+        version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
     field_filters::{Params, field_predicates},
@@ -513,6 +513,8 @@ async fn insert_lines(
         .iter()
         .map(|l| i64::from(l.fulfilled_quantity))
         .collect();
+    let (costs, cost_currencies): (Vec<Option<i64>>, Vec<Option<&str>>) =
+        lines.iter().map(|l| unit_cost_to_db(l.unit_cost)).unzip();
     let tax_rates = lines
         .iter()
         .map(|l| l.tax.map(|t| tax_rate_to_db(t.rate)).transpose())
@@ -537,19 +539,19 @@ async fn insert_lines(
         "INSERT INTO order_lines (order_id, position, id, product_id, variant_id, quantity,
              product_title, variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id,
              tax_amount, tax_region_id, fulfilled_quantity, compare_at_amount, price_list_id,
-             subtotal, discounts)
+             subtotal, discounts, unit_cost, unit_cost_currency)
          SELECT $1, (n - 1)::integer, id, product_id, variant_id, quantity, product_title,
              variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id, tax_amount,
              tax_region_id, fulfilled_quantity, compare_at, price_list, subtotal,
-             discounts::jsonb
+             discounts::jsonb, unit_cost, unit_cost_currency
          FROM unnest($2::uuid[], $3::uuid[], $4::uuid[], $5::bigint[], $6::text[], $7::text[],
                      $8::text[], $9::bigint[], $10::bigint[], $11::integer[], $12::uuid[],
                      $13::bigint[], $14::uuid[], $15::bigint[], $16::bigint[], $17::uuid[],
-                     $18::bigint[], $19::text[])
+                     $18::bigint[], $19::text[], $20::bigint[], $21::text[])
               WITH ORDINALITY AS t (id, product_id, variant_id, quantity, product_title,
                   variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id,
                   tax_amount, tax_region_id, fulfilled_quantity, compare_at, price_list,
-                  subtotal, discounts, n)",
+                  subtotal, discounts, unit_cost, unit_cost_currency, n)",
         &[
             (&order.as_uuid(), Type::UUID),
             (&ids, Type::UUID_ARRAY),
@@ -570,6 +572,8 @@ async fn insert_lines(
             (&price_lists, Type::UUID_ARRAY),
             (&subtotals, Type::INT8_ARRAY),
             (&shares, Type::TEXT_ARRAY),
+            (&costs, Type::INT8_ARRAY),
+            (&cost_currencies, Type::TEXT_ARRAY),
         ],
     )
     .await
@@ -616,7 +620,7 @@ async fn load(client: &impl Queries, ids: &[Uuid]) -> Result<Vec<Order>, RepoErr
             "SELECT id, product_id, variant_id, quantity, product_title, variant_title, sku,
                  unit_price, total, tax_rate_ppm, tax_class_id, tax_amount, tax_region_id,
                  fulfilled_quantity, order_id, compare_at_amount, price_list_id, subtotal,
-                 discounts::text AS discounts
+                 discounts::text AS discounts, unit_cost, unit_cost_currency
              FROM order_lines WHERE order_id = ANY($1) ORDER BY order_id, position",
             &param,
         )
@@ -837,6 +841,10 @@ fn line_from_db(
             .map(|amount| money(amount).and_then(|m| Price::new(m).map_err(corrupt)))
             .transpose()?,
         price_list: col::<Option<Uuid>>(line, "price_list_id")?.map(PriceListId::from_uuid),
+        unit_cost: unit_cost_from_db(
+            col(line, "unit_cost")?,
+            col::<Option<String>>(line, "unit_cost_currency")?.as_deref(),
+        )?,
     })
 }
 

@@ -1,10 +1,12 @@
 use hypha_core::{
-    AssetId, AuthError, ErrorCode, FulfillmentId, NotificationId, OrderId, RepoError, StoreId,
+    AssetId, AuthError, ErrorCode, FulfillmentId, NotificationId, OrderId, PurchaseOrderId,
+    RepoError, StoreId,
 };
 use hypha_media::AssetKind;
 use hypha_notifications::{
     NotificationError, RenderError, SendError, SettingsError, TemplateError, TemplateKey,
 };
+use hypha_purchasing::PurchasingError;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -27,6 +29,9 @@ pub enum CommandError {
     /// dispatcher (the message's record says `failed` meanwhile).
     #[error(transparent)]
     Send(#[from] SendError),
+    /// A purchase order whose totals don't add up (past the largest amount).
+    #[error(transparent)]
+    Purchasing(#[from] PurchasingError),
     #[error("order {0} not found")]
     OrderNotFound(OrderId),
     #[error("fulfilment {0} not found")]
@@ -36,6 +41,8 @@ pub enum CommandError {
     NoFulfillment(OrderId),
     #[error("notification {0} not found")]
     NotificationNotFound(NotificationId),
+    #[error("purchase order {0} not found")]
+    PurchaseOrderNotFound(PurchaseOrderId),
     /// The store the host serves isn't in its database: a host set up wrongly.
     #[error("store {0} not found")]
     StoreNotFound(StoreId),
@@ -83,10 +90,12 @@ impl ErrorCode for CommandError {
             CommandError::Settings(e) => e.code(),
             CommandError::Notification(e) => e.code(),
             CommandError::Send(e) => e.code(),
+            CommandError::Purchasing(e) => e.code(),
             CommandError::OrderNotFound(_) => "order_not_found",
             CommandError::FulfillmentNotFound(_) => "fulfillment_not_found",
             CommandError::NoFulfillment(_) => "order_not_fulfilled",
             CommandError::NotificationNotFound(_) => "notification_not_found",
+            CommandError::PurchaseOrderNotFound(_) => "purchase_order_not_found",
             CommandError::StoreNotFound(_) => "store_not_found",
             CommandError::AssetNotFound(_) => "asset_not_found",
             CommandError::AssetNotReady(_) => "asset_not_ready",

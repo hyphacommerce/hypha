@@ -24,7 +24,7 @@ export default async function InventoryPage({
       <VStack gap={5}>
         <PageHeader
           title="Inventory"
-          description="Stock of every variant. Change it on the product's page."
+          description="Stock of every variant. Open one for its history, or to adjust it."
         />
         <Suspense fallback={<InventoryTable />}>
           <InventoryRows params={params} />

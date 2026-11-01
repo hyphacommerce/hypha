@@ -2,7 +2,8 @@
 //! renders and records; the send job sends.
 
 use hypha_core::{
-    Email, Event, EventHandler, EventId, FulfillmentId, OrderId, StoredEvent, Timezone,
+    Email, Event, EventHandler, EventId, FulfillmentId, OrderId, PurchaseOrderId, StoredEvent,
+    Timezone,
 };
 use hypha_fulfillment::{
     Fulfillment, FulfillmentCreated, FulfillmentRepo, FulfillmentUpdated, HasFulfillments,
@@ -14,6 +15,10 @@ use hypha_notifications::{
 };
 use hypha_orders::{HasOrders, Order, OrderCancelled, OrderPlaced, OrderRepo};
 use hypha_payments::{HasPayments, Payment, newest_payment};
+use hypha_purchasing::{
+    HasPurchaseOrders, HasSuppliers, PurchaseOrder, PurchaseOrderRepo, PurchaseOrderSent,
+    SupplierRepo,
+};
 use hypha_stores::StoreRepo;
 use serde::Deserialize;
 
@@ -21,7 +26,8 @@ use crate::{
     CommandError, MailEnv,
     context::{
         CancellationContext, CancellationMail, CustomerContext, FulfillmentContext, MailContext,
-        NewOrderMail, OrderContext, OrderMail, ShipmentMail,
+        NewOrderMail, OrderContext, OrderMail, PurchaseOrderContext, ShipmentMail, SupplierContext,
+        SupplierOrderMail,
     },
     send::{Branding, Message, Sources, branding, queue, render_for_sending, skip},
 };
@@ -37,6 +43,8 @@ pub trait MailPorts:
     + HasNotificationTemplates
     + HasNotificationSettings
     + HasNotifications
+    + HasPurchaseOrders
+    + HasSuppliers
     + StoreRepo
 {
 }
@@ -49,6 +57,8 @@ impl<T> MailPorts for T where
         + HasNotificationTemplates
         + HasNotificationSettings
         + HasNotifications
+        + HasPurchaseOrders
+        + HasSuppliers
         + StoreRepo
         + ?Sized
 {
@@ -59,13 +69,15 @@ pub const ORDER_PLACED: &str = <OrderPlaced as Event>::TYPE;
 pub const ORDER_CANCELLED: &str = <OrderCancelled as Event>::TYPE;
 pub const FULFILLMENT_CREATED: &str = <FulfillmentCreated as Event>::TYPE;
 pub const FULFILLMENT_UPDATED: &str = <FulfillmentUpdated as Event>::TYPE;
+pub const PURCHASE_ORDER_SENT: &str = <PurchaseOrderSent as Event>::TYPE;
 
 /// Emails about orders, on their events:
 /// - `order.placed`: `order_confirmation` to the buyer, `staff_new_order` to each staff
 ///   recipient;
 /// - `order.cancelled`, `fulfillment.created`, `fulfillment.updated`: `order_cancelled`,
 ///   `order_shipped`, `order_tracking_updated` to the buyer, when the event's
-///   `notify_customer` says so (events recorded before it existed don't).
+///   `notify_customer` says so (events recorded before it existed don't);
+/// - `purchase_order.sent`: `supplier_purchase_order` to each address it was sent to.
 ///
 /// It renders each message and records it `queued` (or `skipped`, its template off) for
 /// the send job: no network, so a dispatch step's budget holds and no connection waits
@@ -107,6 +119,7 @@ where
             ORDER_CANCELLED,
             FULFILLMENT_CREATED,
             FULFILLMENT_UPDATED,
+            PURCHASE_ORDER_SENT,
         ]
         .contains(&event_type)
     }
@@ -146,6 +159,7 @@ pub async fn queue_event<E: MailEnv, P: MailPorts>(
     event: &StoredEvent,
 ) -> Result<Vec<Notification>, CommandError> {
     let template = match event.event_type.as_str() {
+        PURCHASE_ORDER_SENT => return queue_supplier_order(env, ports, event).await,
         ORDER_PLACED => TemplateKey::OrderConfirmation,
         ORDER_CANCELLED => TemplateKey::OrderCancelled,
         FULFILLMENT_CREATED => TemplateKey::OrderShipped,
@@ -244,6 +258,7 @@ async fn queue_template<E: MailEnv, P: MailPorts>(
             to,
             event: Some(event),
             order: Some(about.order.id()),
+            purchase_order: None,
         };
         // An erased customer's placeholder can't receive mail.
         if message.to.is_placeholder() {
@@ -259,6 +274,99 @@ async fn queue_template<E: MailEnv, P: MailPorts>(
         });
     }
     Ok((records, queued))
+}
+
+/// Queues `supplier_purchase_order` to every address a `purchase_order.sent` event names,
+/// rendered once from the order as it is now (with the event's message and ship-to), each
+/// recorded once per (event, template, recipient) like the order emails.
+async fn queue_supplier_order<E: MailEnv, P: MailPorts>(
+    env: &E,
+    ports: &P,
+    event: &StoredEvent,
+) -> Result<Vec<Notification>, CommandError> {
+    let template = TemplateKey::SupplierPurchaseOrder;
+    let event_id = EventId::from_uuid(event.id);
+    let sent: PurchaseOrderSent =
+        serde_json::from_value(event.data.clone()).map_err(|e| CommandError::BadEvent {
+            event: event_id,
+            event_type: event.event_type.clone(),
+            reason: e.to_string(),
+        })?;
+    let mut slots = Vec::new();
+    for to in sent.to.iter().chain(&sent.cc) {
+        let earlier = ports.notifications().find(event_id, template, to).await?;
+        slots.push((to.clone(), earlier));
+    }
+    if slots.iter().all(|(_, earlier)| earlier.is_some()) {
+        return Ok(slots.into_iter().filter_map(|(_, e)| e).collect());
+    }
+    let po = load_purchase_order(ports, sent.purchase_order).await?;
+    let branding = branding(env, ports).await?;
+    let context = supplier_order_context(ports, &branding, &po, &sent).await?;
+    let sources = Sources::load(ports, template).await?;
+    let rendering = render_for_sending(&sources, &context)?;
+    let mut records = Vec::with_capacity(slots.len());
+    let mut queued = false;
+    for (to, earlier) in slots {
+        if let Some(earlier) = earlier {
+            records.push(earlier);
+            continue;
+        }
+        let message = Message {
+            template,
+            to,
+            event: Some(event_id),
+            order: None,
+            purchase_order: Some(po.id()),
+        };
+        queued = true;
+        records.push(queue(env, ports, &branding, &message, &rendering).await?);
+    }
+    if queued {
+        env.queued();
+    }
+    Ok(records)
+}
+
+/// The context of `supplier_purchase_order` for `po` as it is now, with what `sent` said:
+/// its message and where the goods go. The supplier's name is the one the order kept
+/// when ordered, else the supplier's own.
+pub async fn supplier_order_context<P: HasSuppliers>(
+    ports: &P,
+    branding: &Branding,
+    po: &PurchaseOrder,
+    sent: &PurchaseOrderSent,
+) -> Result<MailContext, CommandError> {
+    let name = match po.supplier_name() {
+        Some(name) => name.to_string(),
+        None => ports
+            .suppliers()
+            .get(po.supplier())
+            .await?
+            .map_or_else(String::new, |s| s.name().to_string()),
+    };
+    Ok(MailContext::SupplierOrder(SupplierOrderMail {
+        shop: branding.shop.clone(),
+        brand: branding.brand.clone(),
+        supplier: SupplierContext { name },
+        purchase_order: PurchaseOrderContext::of(
+            po,
+            sent.ship_to.as_ref(),
+            branding.store.timezone(),
+        )?,
+        message: sent.message.clone(),
+    }))
+}
+
+pub(crate) async fn load_purchase_order<P: HasPurchaseOrders>(
+    ports: &P,
+    id: PurchaseOrderId,
+) -> Result<PurchaseOrder, CommandError> {
+    ports
+        .purchase_orders()
+        .get(id)
+        .await?
+        .ok_or(CommandError::PurchaseOrderNotFound(id))
 }
 
 pub(crate) async fn load_order<P: HasOrders>(
@@ -355,6 +463,7 @@ pub async fn order_context<E: MailEnv, P: HasFulfillments>(
         | TemplateKey::StaffInvite
         | TemplateKey::StaffPasswordReset
         | TemplateKey::CustomerLoginCode
-        | TemplateKey::CustomerErasureRequested => MailContext::Order(mail),
+        | TemplateKey::CustomerErasureRequested
+        | TemplateKey::SupplierPurchaseOrder => MailContext::Order(mail),
     })
 }

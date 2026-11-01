@@ -5,7 +5,7 @@ use hypha_cart::HasCarts;
 use hypha_core::{ActingAs, Actor, HasIdempotency, HasOutbox, RepoError};
 use hypha_customers::{HasCustomerGroups, HasCustomers};
 use hypha_fulfillment::HasFulfillments;
-use hypha_inventory::{HasInventoryItems, HasLocations};
+use hypha_inventory::{HasInventoryItems, HasLocations, HasStockMovements};
 use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
 use hypha_media::{HasAssetUsages, HasAssets};
 use hypha_orders::HasOrders;
@@ -93,6 +93,14 @@ pub struct InMemoryPorts {
     pub agents: crate::InMemoryAgents,
     /// Discounts, their codes and their usage.
     pub discounts: crate::InMemoryDiscounts,
+    /// Suppliers and their catalogues.
+    pub suppliers: crate::InMemorySuppliers,
+    /// Purchase orders, sharing the suppliers' store.
+    pub purchase_orders: crate::InMemoryPurchaseOrders,
+    /// What arrived against purchase orders.
+    pub receipts: crate::InMemoryReceipts,
+    /// Stock moving between locations.
+    pub transfers: crate::InMemoryTransfers,
 }
 
 impl Default for InMemoryPorts {
@@ -102,6 +110,7 @@ impl Default for InMemoryPorts {
         let (payment_methods, payments) = crate::payments::linked(&outbox);
         let channels = InMemoryChannelRepo::sharing(&outbox);
         let custom_fields = crate::InMemoryCustomFields::sharing(&outbox);
+        let suppliers = crate::InMemorySuppliers::sharing(&outbox);
         let categories = InMemoryCategoryRepo::sharing(&outbox).joining_fields(&custom_fields);
         let customer_groups = crate::InMemoryCustomerGroupRepo::sharing(&outbox);
         let products = InMemoryProductRepo::sharing(&outbox)
@@ -170,6 +179,10 @@ impl Default for InMemoryPorts {
             custom_fields,
             agents: crate::InMemoryAgents::sharing(&outbox),
             discounts,
+            purchase_orders: crate::InMemoryPurchaseOrders::sharing(&suppliers, &outbox),
+            receipts: crate::InMemoryReceipts::default(),
+            transfers: crate::InMemoryTransfers::sharing(&outbox),
+            suppliers,
             outbox,
         }
     }
@@ -190,6 +203,34 @@ impl hypha_discounts::HasDiscounts for InMemoryPorts {
     type Discounts = crate::InMemoryDiscounts;
     fn discounts(&self) -> &crate::InMemoryDiscounts {
         &self.discounts
+    }
+}
+
+impl hypha_purchasing::HasSuppliers for InMemoryPorts {
+    type Suppliers = crate::InMemorySuppliers;
+    fn suppliers(&self) -> &crate::InMemorySuppliers {
+        &self.suppliers
+    }
+}
+
+impl hypha_purchasing::HasSupplierVariants for InMemoryPorts {
+    type SupplierVariants = crate::InMemorySuppliers;
+    fn supplier_variants(&self) -> &crate::InMemorySuppliers {
+        &self.suppliers
+    }
+}
+
+impl hypha_purchasing::HasPurchaseOrders for InMemoryPorts {
+    type PurchaseOrders = crate::InMemoryPurchaseOrders;
+    fn purchase_orders(&self) -> &crate::InMemoryPurchaseOrders {
+        &self.purchase_orders
+    }
+}
+
+impl hypha_purchasing::HasReceipts for InMemoryPorts {
+    type Receipts = crate::InMemoryReceipts;
+    fn receipts(&self) -> &crate::InMemoryReceipts {
+        &self.receipts
     }
 }
 
@@ -347,6 +388,20 @@ impl HasInventoryItems for InMemoryPorts {
     type InventoryItems = InMemoryInventoryItemRepo;
     fn inventory_items(&self) -> &InMemoryInventoryItemRepo {
         &self.inventory_items
+    }
+}
+
+impl hypha_inventory::HasTransfers for InMemoryPorts {
+    type Transfers = crate::InMemoryTransfers;
+    fn transfers(&self) -> &crate::InMemoryTransfers {
+        &self.transfers
+    }
+}
+
+impl HasStockMovements for InMemoryPorts {
+    type StockMovements = InMemoryOutbox;
+    fn stock_movements(&self) -> &InMemoryOutbox {
+        &self.outbox
     }
 }
 

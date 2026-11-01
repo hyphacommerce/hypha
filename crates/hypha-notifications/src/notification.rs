@@ -12,8 +12,8 @@
 use std::{fmt, str::FromStr};
 
 use hypha_core::{
-    Email, EventId, NotificationId, OrderId, Stamped, Stamps, Timestamp, Version, Versioned,
-    optional_text,
+    Email, EventId, NotificationId, OrderId, PurchaseOrderId, Stamped, Stamps, Timestamp, Version,
+    Versioned, optional_text,
 };
 
 use crate::{NotificationError, TemplateKey};
@@ -99,6 +99,8 @@ pub struct NewNotification {
     pub event: Option<EventId>,
     /// The order it's about, for the order's emails.
     pub order: Option<OrderId>,
+    /// The purchase order it's about, for the emails to suppliers.
+    pub purchase_order: Option<PurchaseOrderId>,
 }
 
 /// A queued message's rendered email, kept until it's sent or has failed for good: the
@@ -142,6 +144,7 @@ pub struct Notification {
     note: Option<String>,
     event: Option<EventId>,
     order: Option<OrderId>,
+    purchase_order: Option<PurchaseOrderId>,
     sent_at: Option<Timestamp>,
     /// When a queued message is next due.
     next_attempt_at: Option<Timestamp>,
@@ -229,6 +232,7 @@ impl Notification {
             note: None,
             event: new.event,
             order: new.order,
+            purchase_order: new.purchase_order,
             sent_at: None,
             next_attempt_at: None,
             lease_until: None,
@@ -410,6 +414,10 @@ impl Notification {
         self.order
     }
 
+    pub fn purchase_order(&self) -> Option<PurchaseOrderId> {
+        self.purchase_order
+    }
+
     pub fn sent_at(&self) -> Option<Timestamp> {
         self.sent_at
     }
@@ -453,6 +461,7 @@ pub struct NotificationSnapshot {
     pub note: Option<String>,
     pub event: Option<EventId>,
     pub order: Option<OrderId>,
+    pub purchase_order: Option<PurchaseOrderId>,
     pub sent_at: Option<Timestamp>,
     pub next_attempt_at: Option<Timestamp>,
     pub lease_until: Option<Timestamp>,
@@ -476,6 +485,7 @@ impl Notification {
             note: self.note.clone(),
             event: self.event,
             order: self.order,
+            purchase_order: self.purchase_order,
             sent_at: self.sent_at,
             next_attempt_at: self.next_attempt_at,
             lease_until: self.lease_until,
@@ -535,6 +545,7 @@ impl Notification {
             note: s.note,
             event: s.event,
             order: s.order,
+            purchase_order: s.purchase_order,
             sent_at: s.sent_at,
             next_attempt_at: s.next_attempt_at,
             lease_until: s.lease_until,
@@ -557,6 +568,7 @@ mod tests {
             subject: " Order #1001 confirmed ".to_string(),
             event: Some(EventId::from_uuid(Uuid::from_u128(2))),
             order: Some(OrderId::from_uuid(Uuid::from_u128(3))),
+            purchase_order: None,
         }
     }
 

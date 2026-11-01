@@ -281,6 +281,9 @@ step "an unknown time zone" 422 unknown_timezone -X PATCH "$BASE/admin/store" -H
 step "a malformed language" 422 invalid_language -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"default_language":"en_GB"}'
 step "clear the legal address" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"legal_address":null}'
 contains "it is gone" '"legal_address":null'
+step "choose the base currency costs are kept in" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"currency":"EUR"}'
+contains "the currency is kept" '"currency":"EUR"'
+step "an unknown currency" 422 unknown_currency -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"currency":"eur"}'
 step "create mug" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"mug","title":"Mug","price":{"amount":1000,"currency":"EUR"}}'
 if [[ $BODY == *'"code":"handle_taken"'* ]]; then
@@ -1200,7 +1203,7 @@ step "lamp has no stock set up" 200 - "$BASE/admin/variants/$LAMP_VAR/inventory"
 contains "so it is untracked" '"id":null,'
 contains "reported as tracked: false" '"tracked":false'
 step "the lamp's stock, every variant at once" 200 - "$BASE/admin/products/$LAMP/inventory"
-contains "one untracked variant" "\"items\":[{\"id\":null,\"variant\":\"$LAMP_VAR\",\"tracked\":false"
+contains "one untracked variant, naming its product" "\"items\":[{\"id\":null,\"variant\":\"$LAMP_VAR\",\"product\":\"$LAMP\",\"tracked\":false"
 step "the setup checklist" 200 - "$BASE/admin/setup/checklist"
 contains "a market exists by now" '"market":true'
 step "create warehouse for the market" 201 - -X POST "$BASE/admin/locations" -H "$JSON" \
@@ -1212,7 +1215,7 @@ LAMP_ITEM=$(id)
 contains "tracked by default" '"tracked":true,"continue_selling":false,"levels":[]'
 step "2 lamps on hand" 200 - -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" \
     -d '{"on_hand":2}'
-contains "level is stored" "\"levels\":[{\"location\":\"$WAREHOUSE\",\"on_hand\":2,\"reserved\":0,\"available\":2}]"
+contains "level is stored" "\"levels\":[{\"location\":\"$WAREHOUSE\",\"on_hand\":2,\"reserved\":0,\"available\":2,\"incoming\":0,\"next_expected_at\":null}]"
 step "create stock cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 STOCK_CART=$(id)
 step "add 3 lamps" 409 out_of_stock -X POST "$BASE/storefront/carts/$STOCK_CART/lines" -H "$JSON" \
@@ -1223,13 +1226,180 @@ contains "lamps are available" '"fully_available":true'
 step "count with a stale expected" 409 on_hand_changed -X PUT \
     "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" -d '{"on_hand":1,"expected_on_hand":5}'
 step "a lamp broke (1 left)" 200 - -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" \
-    -H "$JSON" -d '{"on_hand":1,"expected_on_hand":2}'
+    -H "$JSON" -d '{"on_hand":1,"expected_on_hand":2,"note":"one broke"}'
 step "get stock cart" 200 - "$BASE/storefront/carts/$STOCK_CART"
 contains "lamp line ran out" '"status":"unavailable","reason_code":"out_of_stock"'
 contains "and is left out of the total" '"total":{"amount":0,"currency":"EUR"},"fully_available":false'
 step "delivery of 4" 200 - -X POST "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" \
     -H "$JSON" -d '{"delta":4}'
 contains "5 on hand" '"on_hand":5'
+step "a lamp given away" 200 - -X POST "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" \
+    -H "$JSON" -d '{"delta":-1,"reason":"promotion","note":"for a review"}'
+step "a reason that isn't one" 422 invalid_body -X POST \
+    "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" -H "$JSON" -d '{"delta":1,"reason":"sold"}'
+step "put it back" 200 - -X POST "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" \
+    -H "$JSON" -d '{"delta":1}'
+step "the lamp's stock history" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?limit=3"
+contains "newest first, by hand" "\"location\":\"$WAREHOUSE\",\"delta\":1,\"after\":5,\"reason\":\"correction\",\"source\":{\"type\":\"manual\"}"
+contains "the gift with its note" '"delta":-1,"after":4,"reason":"promotion","source":{"type":"manual"},"note":"for a review"'
+contains "more to come" '"has_more":true'
+step "only what was counted" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?reason=counted"
+contains "the count with its note" '"delta":-1,"after":1,"reason":"counted","source":{"type":"manual"},"note":"one broke"'
+contains "and the first one" '"delta":2,"after":2,"reason":"counted"'
+step "history of an unknown item" 404 inventory_item_not_found \
+    "$BASE/admin/inventory-items/invi_00000000000000000000000000000063/movements"
+step "a cost in another currency" 422 cost_currency_mismatch -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/cost" \
+    -H "$JSON" -d '{"unit_cost":{"amount":"500","currency":"USD"}}'
+step "what a lamp cost" 200 - -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/cost" \
+    -H "$JSON" -d '{"unit_cost":{"amount":"1250.5","currency":"EUR"},"note":"invoice 12"}'
+contains "finer than a cent" '"unit_cost":{"amount":"1250.5","currency":"EUR"}'
+step "the cost in the history" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?reason=cost_adjustment"
+contains "no units moved, the cost after" '"location":null,"delta":0,"after":null,"reason":"cost_adjustment","source":{"type":"manual"},"note":"invoice 12","unit_cost":null,"average_after":{"amount":"1250.5","currency":"EUR"}'
+step "the base currency is fixed now" 409 store_currency_locked -X PATCH "$BASE/admin/store" -H "$JSON" \
+    -d '{"currency":"USD"}'
+
+# --- suppliers and what they sell ---
+step "add a supplier" 201 - -X POST "$BASE/admin/suppliers" -H "$JSON" -d '{"name":"Lamp Works","currency":"EUR",
+    "contacts":[{"name":"Ana","email":"ana@lampworks.example","primary":true}],
+    "payment_terms":{"type":"net","days":30},"lead_time_days":10}'
+SUPPLIER=$(id)
+contains "with its terms" '"payment_terms":{"type":"net","days":30,"note":null}'
+step "two primary contacts" 422 several_primary_contacts -X POST "$BASE/admin/suppliers" -H "$JSON" \
+    -d '{"name":"Other","currency":"EUR","contacts":[{"name":"A","primary":true},{"name":"B","primary":true}]}'
+step "what they charge for lamps" 200 - -X PUT "$BASE/admin/suppliers/$SUPPLIER/variants/$LAMP_VAR" -H "$JSON" \
+    -d '{"supplier_sku":"LW-LAMP","unit_cost":{"amount":"1100","currency":"EUR"},"min_order_quantity":10}'
+contains "named after the product" '"product_title":"Lamp"'
+step "a price in another currency" 422 cost_currency_mismatch -X PUT \
+    "$BASE/admin/suppliers/$SUPPLIER/variants/$LAMP_VAR" -H "$JSON" -d '{"unit_cost":{"amount":"1","currency":"USD"}}'
+step "a variant that doesn't exist" 404 variant_not_found -X PUT \
+    "$BASE/admin/suppliers/$SUPPLIER/variants/var_00000000000000000000000000000063" -H "$JSON" -d '{}'
+step "the supplier's catalogue" 200 - "$BASE/admin/suppliers/$SUPPLIER/variants"
+contains "the lamp at their price" '"supplier_sku":"LW-LAMP","unit_cost":{"amount":"1100","currency":"EUR"}'
+step "who sells lamps" 200 - "$BASE/admin/variants/$LAMP_VAR/suppliers"
+contains "Lamp Works does" "\"supplier\":\"$SUPPLIER\",\"supplier_name\":\"Lamp Works\""
+step "their currency is fixed while they have prices" 409 supplier_currency_in_use -X PATCH \
+    "$BASE/admin/suppliers/$SUPPLIER" -H "$JSON" -d '{"currency":"USD"}'
+step "archive them" 200 - -X PATCH "$BASE/admin/suppliers/$SUPPLIER" -H "$JSON" -d '{"archived":true}'
+step "archived suppliers" 200 - "$BASE/admin/suppliers?archived=true&q=lamp"
+contains "Lamp Works is one" "\"id\":\"$SUPPLIER\""
+step "back to active" 200 - -X PATCH "$BASE/admin/suppliers/$SUPPLIER" -H "$JSON" -d '{"archived":false}'
+step "an unknown supplier" 404 supplier_not_found "$BASE/admin/suppliers/sup_00000000000000000000000000000063"
+
+# --- purchase orders ---
+step "draft a purchase order" 201 - -X POST "$BASE/admin/purchase-orders" -H "$JSON" \
+    -d "{\"supplier\":\"$SUPPLIER\",\"destination\":\"$WAREHOUSE\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"quantity\":10}],
+        \"costs\":[{\"kind\":\"shipping\",\"amount\":{\"amount\":2000,\"currency\":\"EUR\"}}]}"
+PO=$(id)
+contains "a draft from the supplier" '"status":"draft"'
+contains "priced from their catalogue" '"supplier_sku":"LW-LAMP","quantity":10,"unit_cost":{"amount":"1100","currency":"EUR"}'
+contains "shipping in each lamp's landed cost" '"landed_unit_cost":{"amount":"1300","currency":"EUR"}'
+step "a line nobody has a price for" 422 unit_cost_required -X POST "$BASE/admin/purchase-orders" -H "$JSON" \
+    -d "{\"supplier\":\"$SUPPLIER\",\"currency\":\"USD\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"quantity\":1}]}"
+step "place it with the supplier" 200 - -X POST "$BASE/admin/purchase-orders/$PO/order"
+contains "ordered" '"status":"ordered"'
+step "order more lamps" 200 - -X PATCH "$BASE/admin/purchase-orders/$PO" -H "$JSON" \
+    -d "{\"lines\":[{\"variant\":\"$LAMP_VAR\",\"quantity\":12}]}"
+contains "a revision" '"revision":1'
+step "the lamps on their way" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
+contains "12 incoming at the warehouse" '"incoming":12'
+forget_mail "ana@lampworks.example"
+step "send it to the supplier" 200 - -X POST "$BASE/admin/purchase-orders/$PO/send" -H "$JSON" \
+    -d '{"message":"Lamps before the sale, please."}'
+contains "sent" '"sent_at":"'
+step "too many words for a note" 422 message_too_long -X POST "$BASE/admin/purchase-orders/$PO/send" -H "$JSON" \
+    -d "{\"message\":\"$(printf 'x%.0s' $(seq 1 2001))\"}"
+mail "the supplier gets the order" "ana@lampworks.example" "Purchase order PO-"
+step "the order's emails" 200 - "$BASE/admin/notifications?purchase_order=$PO"
+contains "to the supplier" '"template":"supplier_purchase_order"'
+step "an ordered one isn't deleted" 409 purchase_order_not_draft -X DELETE "$BASE/admin/purchase-orders/$PO"
+step "open orders for lamps" 200 - "$BASE/admin/purchase-orders?status=ordered&variant=$LAMP_VAR&sort=expected_at"
+contains "this one" "\"id\":\"$PO\""
+step "a supplier on an order stays" 409 supplier_in_use -X DELETE "$BASE/admin/suppliers/$SUPPLIER"
+step "an unknown purchase order" 404 purchase_order_not_found \
+    "$BASE/admin/purchase-orders/po_00000000000000000000000000000063"
+
+# --- receiving (into a back room no market sells from, so the lamp's counts below stay) ---
+step "a back room" 201 - -X POST "$BASE/admin/locations" -H "$JSON" -d '{"name":"Back room"}'
+BACKROOM=$(id)
+RECEIPT_BODY="{\"location\":\"$BACKROOM\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":5,\"rejected\":1}],\"note\":\"pallet 1\"}"
+step "5 lamps arrive, 1 broken" 201 - -X POST "$BASE/admin/purchase-orders/$PO/receipts" -H "$JSON" \
+    -H "Idempotency-Key: e2e-receipt-1" -d "$RECEIPT_BODY"
+# The answer is {receipt, purchase_order, new_items}: the receipt's own ID.
+RECEIPT=$(grep -o '"id":"rcpt_[0-9a-f]*"' <<<"$BODY" | head -1 | sed -E 's/.*"(rcpt_[0-9a-f]+)"/\1/')
+contains "at their landed cost" '"landed_unit_cost":{"amount":"1266.6667","currency":"EUR"}'
+contains "the order is partly received" '"receipt_status":"partial"'
+replayed "the same key answers with the same receipt" -X POST "$BASE/admin/purchase-orders/$PO/receipts" \
+    -H "$JSON" -H "Idempotency-Key: e2e-receipt-1" -d "$RECEIPT_BODY"
+step "more than is outstanding" 409 over_received -X POST "$BASE/admin/purchase-orders/$PO/receipts" -H "$JSON" \
+    -d "{\"location\":\"$BACKROOM\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":7}]}"
+contains "6 are still to come" "\"outstanding\":6,\"variant\":\"$LAMP_VAR\""
+step "the lamps in the back room" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?location=$BACKROOM"
+contains "received there" '"reason":"received"'
+step "fewer on their way" 200 - "$BASE/admin/variants/$LAMP_VAR/inventory"
+contains "6 still incoming" '"incoming":6'
+step "the order's receipts" 200 - "$BASE/admin/purchase-orders/$PO/receipts"
+contains "this one" "\"id\":\"$RECEIPT\""
+step "take the receipt back" 200 - -X POST "$BASE/admin/receipts/$RECEIPT/cancel"
+contains "taken back" '"status":"cancelled"'
+contains "nothing received any more" '"receipt_status":"none"'
+step "not twice" 409 receipt_cancelled -X POST "$BASE/admin/receipts/$RECEIPT/cancel"
+step "an unknown receipt" 404 receipt_not_found "$BASE/admin/receipts/rcpt_00000000000000000000000000000063"
+
+# --- late costs (a bill that comes after the goods revalues what arrived) ---
+step "5 lamps arrive again" 201 - -X POST "$BASE/admin/purchase-orders/$PO/receipts" -H "$JSON" \
+    -d "{\"location\":\"$BACKROOM\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":5}]}"
+RECEIPT2=$(grep -o '"id":"rcpt_[0-9a-f]*"' <<<"$BODY" | head -1 | sed -E 's/.*"(rcpt_[0-9a-f]+)"/\1/')
+step "the duties come later" 200 - -X PATCH "$BASE/admin/purchase-orders/$PO" -H "$JSON" \
+    -d '{"costs":[{"kind":"shipping","amount":{"amount":2000,"currency":"EUR"}},
+        {"kind":"duties","amount":{"amount":600,"currency":"EUR"},"allocation":"by_quantity"}]}'
+step "the lamp's cost changes" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?reason=cost_adjustment&limit=1"
+contains "revalued by the order" "\"reason\":\"cost_adjustment\",\"source\":{\"type\":\"purchase_order\",\"purchase_order\":\"$PO\"}"
+step "take those back too" 200 - -X POST "$BASE/admin/receipts/$RECEIPT2/cancel"
+
+# --- transfers (from the back room to a pop-up; neither serves a market, so the lamp's
+# counts below stay) ---
+step "a pop-up shop" 201 - -X POST "$BASE/admin/locations" -H "$JSON" -d '{"name":"Pop-up"}'
+POPUP=$(id)
+step "4 lamps in the back room" 200 - -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$BACKROOM" \
+    -H "$JSON" -d '{"on_hand":4}'
+step "a transfer going nowhere" 422 transfer_same_location -X POST "$BASE/admin/transfers" -H "$JSON" \
+    -d "{\"origin\":\"$BACKROOM\",\"destination\":\"$BACKROOM\"}"
+step "draft a transfer" 201 - -X POST "$BASE/admin/transfers" -H "$JSON" \
+    -d "{\"origin\":\"$BACKROOM\",\"destination\":\"$POPUP\",\"expected_at\":\"2030-01-02T12:00:00Z\",
+        \"reference\":\"Van 2\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"quantity\":3}]}"
+TRANSFER=$(id)
+contains "a draft, the lamp named" '"status":"draft"'
+contains "with its product" '"product_title":"Lamp"'
+step "ship it" 200 - -X POST "$BASE/admin/transfers/$TRANSFER/ship" -H "Idempotency-Key: e2e-ship-1"
+contains "on its way" '"status":"in_transit"'
+replayed "shipping again with the key ships nothing more" -X POST "$BASE/admin/transfers/$TRANSFER/ship" \
+    -H "Idempotency-Key: e2e-ship-1"
+step "a shipped transfer doesn't change" 409 transfer_not_draft -X PATCH "$BASE/admin/transfers/$TRANSFER" \
+    -H "$JSON" -d '{"note":"late"}'
+step "lamps on their way to the pop-up" 200 - "$BASE/admin/variants/$LAMP_VAR/inventory"
+contains "1 left in the back room" "\"location\":\"$BACKROOM\",\"on_hand\":1"
+contains "3 incoming at the pop-up" "\"location\":\"$POPUP\",\"on_hand\":0,\"reserved\":0,\"available\":0,\"incoming\":3,\"next_expected_at\":\"2030-01-02T12:00:00Z\""
+step "1 arrives, 1 broke on the way" 200 - -X POST "$BASE/admin/transfers/$TRANSFER/receive" -H "$JSON" \
+    -H "Idempotency-Key: e2e-transfer-in-1" -d "{\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":1,\"rejected\":1}]}"
+contains "1 still on its way" '"in_transit":1'
+step "more than is on its way" 409 over_received -X POST "$BASE/admin/transfers/$TRANSFER/receive" -H "$JSON" \
+    -d "{\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":2}]}"
+contains "1 is" "\"in_transit\":1,\"variant\":\"$LAMP_VAR\""
+step "the last one arrives" 200 - -X POST "$BASE/admin/transfers/$TRANSFER/receive" -H "$JSON" \
+    -d "{\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":1}]}"
+contains "received" '"status":"received"'
+step "the pop-up's lamps" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?location=$POPUP"
+contains "the broken one, no units" '"delta":0,"after":1,"reason":"shrinkage"'
+contains "from the transfer" "\"source\":{\"type\":\"transfer\",\"transfer\":\"$TRANSFER\"}"
+step "received transfers of lamps" 200 - "$BASE/admin/transfers?status=received&variant=$LAMP_VAR"
+contains "this one" "\"id\":\"$TRANSFER\""
+step "a shipped transfer stays" 409 transfer_not_draft -X DELETE "$BASE/admin/transfers/$TRANSFER"
+step "a draft to throw away" 201 - -X POST "$BASE/admin/transfers" -H "$JSON" \
+    -d "{\"origin\":\"$POPUP\",\"destination\":\"$BACKROOM\"}"
+SPARE_TRANSFER=$(id)
+step "nothing to ship" 409 transfer_empty -X POST "$BASE/admin/transfers/$SPARE_TRANSFER/ship"
+step "throw it away" 204 - -X DELETE "$BASE/admin/transfers/$SPARE_TRANSFER"
+step "an unknown transfer" 404 transfer_not_found "$BASE/admin/transfers/trf_00000000000000000000000000000063"
 step "what runs low at the warehouse" 200 - "$BASE/admin/inventory-items?below=6&location=$WAREHOUSE"
 contains "the lamp runs low" "\"id\":\"$LAMP_ITEM\",\"variant\":\"$LAMP_VAR\",\"product\":\"$LAMP\""
 step "no lamp below zero" 200 - "$BASE/admin/inventory-items?below=0&product=$LAMP"

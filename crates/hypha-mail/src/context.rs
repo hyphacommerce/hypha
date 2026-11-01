@@ -5,15 +5,18 @@
 //! Each kind of email has a `sample()`, a made-up order (or staff message) for
 //! previews, test sends, the editor's variable list and checking a template on save.
 
-use hypha_core::{Address, Currency, Email, Money, OrderId, Timestamp, Timezone};
+use hypha_core::{
+    Address, CountryCode, Currency, Email, Money, OrderId, Timestamp, Timezone, UnitCost,
+};
 use hypha_fulfillment::Fulfillment;
 use hypha_notifications::{NotificationSettings, TemplateKey};
 use hypha_orders::{CancelReason, Order};
 use hypha_payments::Payment;
+use hypha_purchasing::{CostKind, PaymentDue, PurchaseOrder, PurchasingError, ShipTo};
 use hypha_stores::Store;
 use serde::Serialize;
 
-use crate::format::{MoneyValue, TimeValue};
+use crate::format::{CostValue, MoneyValue, TimeValue};
 
 /// `shop`: in every template.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -415,6 +418,211 @@ pub struct ErasureMail {
     pub due_at: TimeValue,
 }
 
+/// `supplier`: who a purchase order goes to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SupplierContext {
+    pub name: String,
+}
+
+/// `purchase_order.payment_terms`: "Net 30 days" and the store's note.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TermsContext {
+    pub summary: String,
+    pub note: Option<String>,
+}
+
+/// `purchase_order.lines[]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PurchaseLineContext {
+    /// The product's title.
+    pub title: String,
+    /// The variant's option values; `null` for a simple product.
+    pub variant: Option<String>,
+    /// The store's SKU.
+    pub sku: Option<String>,
+    /// The supplier's own code for it.
+    pub supplier_sku: Option<String>,
+    /// Ordered, less any cancelled.
+    pub quantity: u32,
+    pub unit_cost: CostValue,
+    pub total: MoneyValue,
+}
+
+/// `purchase_order.costs[]`: the extra costs in the order's currency (those paid in the
+/// store's are its own business).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PurchaseCostContext {
+    /// `shipping`, `duties`, `fees` or `other`.
+    pub kind: &'static str,
+    /// "Shipping", "Duties", "Fees", "Other".
+    pub label: &'static str,
+    pub description: Option<String>,
+    pub amount: MoneyValue,
+}
+
+/// `purchase_order.ship_to`: where the goods go, as it was when sent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ShipToContext {
+    /// The location's name.
+    pub name: String,
+    pub address: Option<ShipToAddressContext>,
+}
+
+/// `purchase_order.ship_to.address`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ShipToAddressContext {
+    /// The person to ask for.
+    pub contact: Option<String>,
+    pub company: Option<String>,
+    pub line1: String,
+    pub line2: Option<String>,
+    pub city: String,
+    pub province: Option<String>,
+    pub postal_code: Option<String>,
+    /// The country's name ("Croatia").
+    pub country: String,
+    pub phone: Option<String>,
+}
+
+impl ShipToContext {
+    pub fn of(ship_to: &ShipTo) -> Self {
+        Self {
+            name: ship_to.name.clone(),
+            address: ship_to.address.as_ref().map(|a| ShipToAddressContext {
+                contact: a.contact.clone(),
+                company: a.company.clone(),
+                line1: a.line1.clone(),
+                line2: a.line2.clone(),
+                city: a.city.clone(),
+                province: a.province.clone(),
+                postal_code: a.postal_code.clone(),
+                // A code that isn't one shows as it is rather than failing the email.
+                country: CountryCode::new(&a.country)
+                    .map_or_else(|_| a.country.clone(), |c| c.name().to_string()),
+                phone: a.phone.clone(),
+            }),
+        }
+    }
+}
+
+/// `purchase_order`: the order as the supplier reads it, in the order's currency.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PurchaseOrderContext {
+    pub id: String,
+    /// "PO-1001".
+    pub number: String,
+    /// Edits since it was first ordered: 0 the first time.
+    pub revision: u32,
+    pub ordered_at: Option<TimeValue>,
+    /// The day it's expected, without a time.
+    pub expected_at: Option<TimeValue>,
+    /// The supplier's own order or confirmation number.
+    pub supplier_reference: Option<String>,
+    pub payment_terms: Option<TermsContext>,
+    pub note_to_supplier: Option<String>,
+    pub currency: &'static str,
+    pub lines: Vec<PurchaseLineContext>,
+    pub costs: Vec<PurchaseCostContext>,
+    /// The lines' totals.
+    pub subtotal: MoneyValue,
+    /// The extra costs in the order's currency.
+    pub costs_total: MoneyValue,
+    /// `null` when the order has none.
+    pub tax: Option<MoneyValue>,
+    /// Subtotal, costs and tax.
+    pub total: MoneyValue,
+    pub ship_to: Option<ShipToContext>,
+}
+
+impl PurchaseOrderContext {
+    /// `po` as it is now, with where it ships as `ship_to` said when it was sent, times in
+    /// `zone`.
+    pub fn of(
+        po: &PurchaseOrder,
+        ship_to: Option<&ShipTo>,
+        zone: Option<Timezone>,
+    ) -> Result<Self, PurchasingError> {
+        let totals = po.totals(None)?;
+        let lines = po
+            .lines()
+            .iter()
+            .map(|line| {
+                Ok(PurchaseLineContext {
+                    title: line.product_title().to_string(),
+                    variant: line.variant_title().map(str::to_string),
+                    sku: line.sku().map(str::to_string),
+                    supplier_sku: line.supplier_sku().map(str::to_string),
+                    quantity: line.effective_quantity(),
+                    unit_cost: CostValue::of(line.unit_cost()),
+                    total: MoneyValue::of(line.total()?),
+                })
+            })
+            .collect::<Result<_, PurchasingError>>()?;
+        let costs = po
+            .costs()
+            .iter()
+            .filter(|c| c.amount().currency() == po.currency())
+            .map(|c| PurchaseCostContext {
+                kind: c.kind().as_str(),
+                label: cost_label(c.kind()),
+                description: c.description().map(str::to_string),
+                amount: MoneyValue::of(c.amount()),
+            })
+            .collect();
+        Ok(Self {
+            id: po.id().to_string(),
+            number: po.number().to_string(),
+            revision: po.revision(),
+            ordered_at: po.ordered_at().map(|at| TimeValue::of(at, zone)),
+            expected_at: po.expected_at().map(TimeValue::date),
+            supplier_reference: po.supplier_reference().map(str::to_string),
+            payment_terms: po.payment_terms().map(|t| TermsContext {
+                summary: terms_summary(t.due()),
+                note: t.note().map(str::to_string),
+            }),
+            note_to_supplier: po.note_to_supplier().map(str::to_string),
+            currency: po.currency().as_str(),
+            lines,
+            costs,
+            subtotal: MoneyValue::of(totals.subtotal),
+            costs_total: MoneyValue::of(totals.costs),
+            tax: po.tax().map(MoneyValue::of),
+            total: MoneyValue::of(totals.total),
+            ship_to: ship_to.map(ShipToContext::of),
+        })
+    }
+}
+
+fn cost_label(kind: CostKind) -> &'static str {
+    match kind {
+        CostKind::Shipping => "Shipping",
+        CostKind::Duties => "Duties",
+        CostKind::Fees => "Fees",
+        CostKind::Other => "Other",
+    }
+}
+
+/// "Payment in advance", "Payment on receipt", "Net 30 days".
+fn terms_summary(due: PaymentDue) -> String {
+    match due {
+        PaymentDue::InAdvance => "Payment in advance".to_string(),
+        PaymentDue::OnReceipt => "Payment on receipt".to_string(),
+        PaymentDue::Net { days: 1 } => "Net 1 day".to_string(),
+        PaymentDue::Net { days } => format!("Net {days} days"),
+    }
+}
+
+/// `supplier_purchase_order`: a purchase order sent to its supplier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SupplierOrderMail {
+    pub shop: ShopContext,
+    pub brand: BrandContext,
+    pub supplier: SupplierContext,
+    pub purchase_order: PurchaseOrderContext,
+    /// The note sent with it this time; `null` without one.
+    pub message: Option<String>,
+}
+
 /// One template's context, whichever it is: what rendering is given.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
@@ -426,6 +634,7 @@ pub enum MailContext {
     Staff(StaffMail),
     Code(CodeMail),
     Erasure(ErasureMail),
+    SupplierOrder(SupplierOrderMail),
 }
 
 impl MailContext {
@@ -493,6 +702,9 @@ impl MailContext {
                 // Ten days after the sample order.
                 due_at: TimeValue::of(SAMPLE_PLACED_AT.plus_secs(10 * 24 * 3600), None),
             }),
+            TemplateKey::SupplierPurchaseOrder => {
+                MailContext::SupplierOrder(sample_supplier_order())
+            }
             TemplateKey::CustomerLoginCode => MailContext::Code(CodeMail {
                 shop: sample_shop(),
                 brand: sample_brand(),
@@ -554,6 +766,24 @@ impl MailContext {
             MailContext::Staff(m) => thin_branding(&mut m.shop, &mut m.brand),
             MailContext::Code(m) => thin_branding(&mut m.shop, &mut m.brand),
             MailContext::Erasure(m) => thin_branding(&mut m.shop, &mut m.brand),
+            MailContext::SupplierOrder(m) => {
+                thin_branding(&mut m.shop, &mut m.brand);
+                m.message = None;
+                let po = &mut m.purchase_order;
+                po.expected_at = None;
+                po.supplier_reference = None;
+                po.payment_terms = None;
+                po.note_to_supplier = None;
+                po.lines.truncate(1);
+                for line in &mut po.lines {
+                    line.variant = None;
+                    line.sku = None;
+                    line.supplier_sku = None;
+                }
+                po.costs.clear();
+                po.tax = None;
+                po.ship_to = None;
+            }
         }
         context
     }
@@ -590,6 +820,18 @@ impl MailContext {
             MailContext::Cancellation(m) => thin(&mut m.mail),
             MailContext::NewOrder(m) => thin(&mut m.mail),
             MailContext::Staff(_) | MailContext::Code(_) | MailContext::Erasure(_) => {}
+            MailContext::SupplierOrder(m) => {
+                let po = &mut m.purchase_order;
+                if let Some(terms) = &mut po.payment_terms {
+                    terms.note = None;
+                }
+                for cost in &mut po.costs {
+                    cost.description = None;
+                }
+                if let Some(ship_to) = &mut po.ship_to {
+                    ship_to.address = None;
+                }
+            }
         }
         context
     }
@@ -615,6 +857,7 @@ impl MailContext {
             MailContext::Staff(m) => (&mut m.shop, &mut m.brand),
             MailContext::Code(m) => (&mut m.shop, &mut m.brand),
             MailContext::Erasure(m) => (&mut m.shop, &mut m.brand),
+            MailContext::SupplierOrder(m) => (&mut m.shop, &mut m.brand),
         };
         *s = shop;
         *b = brand;
@@ -651,6 +894,83 @@ fn thin_branding(shop: &mut ShopContext, brand: &mut BrandContext) {
     shop.url = None;
     brand.logo_url = None;
     brand.footer = None;
+}
+
+/// A purchase order of two kits from a supplier in euros, revised once, with shipping and
+/// tax, to a warehouse with an address.
+fn sample_supplier_order() -> SupplierOrderMail {
+    let cost = |minor: &str| {
+        // A constant in range.
+        CostValue::of(
+            UnitCost::parse(minor, Currency::EUR).unwrap_or(UnitCost::zero(Currency::EUR)),
+        )
+    };
+    SupplierOrderMail {
+        shop: sample_shop(),
+        brand: sample_brand(),
+        supplier: SupplierContext {
+            name: "Spore Labs".to_string(),
+        },
+        message: Some("Please ship by the end of the month.".to_string()),
+        purchase_order: PurchaseOrderContext {
+            id: "po_01a1984511d7710d8c5c680eed308d93".to_string(),
+            number: "PO-1001".to_string(),
+            revision: 1,
+            ordered_at: Some(TimeValue::of(SAMPLE_PLACED_AT, None)),
+            expected_at: Some(TimeValue::date(SAMPLE_PLACED_AT.plus_secs(14 * 24 * 3600))),
+            supplier_reference: Some("SO-778".to_string()),
+            payment_terms: Some(TermsContext {
+                summary: "Net 30 days".to_string(),
+                note: Some("2% off within 10 days".to_string()),
+            }),
+            note_to_supplier: Some("Deliver to the back door, 8:00 to 16:00.".to_string()),
+            currency: "EUR",
+            lines: vec![
+                PurchaseLineContext {
+                    title: "Oyster grow kit".to_string(),
+                    variant: Some("Large".to_string()),
+                    sku: Some("GK-OY-L".to_string()),
+                    supplier_sku: Some("SL-4411".to_string()),
+                    quantity: 24,
+                    unit_cost: cost("1250"),
+                    total: eur(30_000),
+                },
+                PurchaseLineContext {
+                    title: "Spore syringe".to_string(),
+                    variant: None,
+                    sku: Some("SY-10".to_string()),
+                    supplier_sku: None,
+                    quantity: 100,
+                    unit_cost: cost("349.5"),
+                    total: eur(34_950),
+                },
+            ],
+            costs: vec![PurchaseCostContext {
+                kind: "shipping",
+                label: "Shipping",
+                description: Some("DHL Freight".to_string()),
+                amount: eur(4_500),
+            }],
+            subtotal: eur(64_950),
+            costs_total: eur(4_500),
+            tax: Some(eur(17_363)),
+            total: eur(86_813),
+            ship_to: Some(ShipToContext {
+                name: "Warehouse".to_string(),
+                address: Some(ShipToAddressContext {
+                    contact: Some("Iva Horvat".to_string()),
+                    company: Some("Fern & Field d.o.o.".to_string()),
+                    line1: "Radnička cesta 80".to_string(),
+                    line2: Some("Gate 3".to_string()),
+                    city: "Zagreb".to_string(),
+                    province: None,
+                    postal_code: Some("10000".to_string()),
+                    country: "Croatia".to_string(),
+                    phone: Some("+385 1 234 5678".to_string()),
+                }),
+            }),
+        },
+    }
 }
 
 fn sample_shop() -> ShopContext {

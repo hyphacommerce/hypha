@@ -4,7 +4,7 @@ use hypha_core::{
     Address, CartId, ChannelId, CountryCode, Currency, CustomerId, DiscountId, Email, MarketId,
     Money, OrderId, OrderLineId, PendingEvent, Price, PriceListId, ProductId, Quantity, Recorded,
     Recorder, ShippingGroupId, ShippingOptionId, Stamped, Stamps, Subject, TaxClassId, TaxRate,
-    TaxRegionId, Timestamp, VariantId, Version, Versioned, required_text,
+    TaxRegionId, Timestamp, UnitCost, VariantId, Version, Versioned, required_text,
 };
 
 use crate::{
@@ -258,6 +258,10 @@ pub struct OrderLine {
     pub compare_at_price: Option<Price>,
     /// The price list `unit_price` came from; `None` for the base price.
     pub price_list: Option<PriceListId>,
+    /// What one unit cost the store when the order was placed (its inventory item's
+    /// average, in the store's currency), for the order's margin. `None` without a cost,
+    /// and for lines placed before costs were kept.
+    pub unit_cost: Option<UnitCost>,
 }
 
 impl OrderLine {
@@ -980,6 +984,7 @@ mod tests {
             fulfilled_quantity: 0,
             compare_at_price: None,
             price_list: None,
+            unit_cost: None,
         }
     }
 

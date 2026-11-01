@@ -689,6 +689,7 @@ accessors! {
     hypha_tax::HasTaxRegions => TaxRegions, tax_regions;
     hypha_inventory::HasInventoryItems => InventoryItems, inventory_items;
     hypha_inventory::HasLocations => Locations, locations;
+    hypha_inventory::HasStockMovements => StockMovements, stock_movements;
     hypha_customers::HasCustomers => Customers, customers;
     hypha_customers::HasCustomerGroups => CustomerGroups, customer_groups;
     hypha_core::HasIdempotency => Idempotency, idempotency;
@@ -728,6 +729,11 @@ accessors! {
     hypha_custom_fields::HasCustomFieldValues => CustomFieldValues, custom_field_values;
     hypha_agents::HasAgents => Agents, agents;
     hypha_discounts::HasDiscounts => Discounts, discounts;
+    hypha_purchasing::HasSuppliers => Suppliers, suppliers;
+    hypha_purchasing::HasSupplierVariants => SupplierVariants, supplier_variants;
+    hypha_purchasing::HasPurchaseOrders => PurchaseOrders, purchase_orders;
+    hypha_purchasing::HasReceipts => Receipts, receipts;
+    hypha_inventory::HasTransfers => Transfers, transfers;
     hypha_agents::HasProposals => Proposals, proposals;
     hypha_agents::HasAgentCalls => AgentCalls, agent_calls;
     hypha_core::HasPreviewTokens => PreviewTokens, preview_tokens;

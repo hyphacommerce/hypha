@@ -19,6 +19,7 @@ use hypha_notifications::{
     keys, render, template_in_effect,
 };
 use hypha_payments::newest_payment;
+use hypha_purchasing::PurchaseOrderSent;
 use hypha_stores::StoreRepo;
 use hypha_users::{HasUsers, StaffEmail, UserRepo};
 
@@ -26,7 +27,9 @@ use crate::{
     CommandError, MailEnv, MailPorts,
     context::{CodeMail, ErasureMail, MailContext, StaffMail, login_link, user_context},
     format::TimeValue,
-    handler::{load_fulfillment, load_order, order_context},
+    handler::{
+        load_fulfillment, load_order, load_purchase_order, order_context, supplier_order_context,
+    },
     send::{
         Branding, Message, Sources, branding, lost_a_race, queue, render_for_sending, send_now,
     },
@@ -292,7 +295,8 @@ async fn preview_context<E: MailEnv, P: MailPorts>(
         TemplateKey::StaffInvite
         | TemplateKey::StaffPasswordReset
         | TemplateKey::CustomerLoginCode
-        | TemplateKey::CustomerErasureRequested => None,
+        | TemplateKey::CustomerErasureRequested
+        | TemplateKey::SupplierPurchaseOrder => None,
         other => Some(other),
     };
     match (order, as_order) {
@@ -444,6 +448,13 @@ where
         return Err(CommandError::RecipientErased);
     }
     let not_resendable = CommandError::NotResendable { template };
+    if template == TemplateKey::SupplierPurchaseOrder {
+        // Emailing a supplier takes what sending the order takes, so `notifications:write`
+        // alone (an agent's, say) never reaches a supplier.
+        ctx.require(Scope::PurchasingWrite)?;
+        ctx.require(Scope::PurchasingSend)?;
+        return resend_supplier_order(env, ports, &earlier).await;
+    }
     let (
         TemplateKey::OrderConfirmation
         | TemplateKey::OrderShipped
@@ -489,6 +500,54 @@ where
         to: earlier.to().clone(),
         event: None,
         order: Some(order.id()),
+        purchase_order: None,
+    };
+    let queued = queue(env, ports, &branding, &message, &rendering).await?;
+    env.queued();
+    Ok(queued)
+}
+
+/// `resend` of an email to a supplier: the purchase order as it is now, with the message
+/// and ship-to its send carried (while the event is kept; without them otherwise).
+async fn resend_supplier_order<E, P>(
+    env: &E,
+    ports: &P,
+    earlier: &Notification,
+) -> Result<Notification, CommandError>
+where
+    E: MailEnv,
+    P: MailPorts + HasOutbox,
+{
+    let template = earlier.template();
+    let Some(id) = earlier.purchase_order() else {
+        return Err(CommandError::NotResendable { template });
+    };
+    let po = load_purchase_order(ports, id).await?;
+    let stored = match earlier.event() {
+        Some(event) => ports.outbox().get_event(event.as_uuid()).await?,
+        None => None,
+    };
+    let sent = stored
+        .and_then(|e| serde_json::from_value::<PurchaseOrderSent>(e.data).ok())
+        .unwrap_or(PurchaseOrderSent {
+            purchase_order: po.id(),
+            supplier: po.supplier(),
+            revision: po.revision(),
+            to: vec![earlier.to().clone()],
+            cc: Vec::new(),
+            message: None,
+            ship_to: None,
+        });
+    let branding = branding(env, ports).await?;
+    let context = supplier_order_context(ports, &branding, &po, &sent).await?;
+    let sources = Sources::load(ports, template).await?;
+    let rendering = render_for_sending(&sources, &context)?;
+    let message = Message {
+        template,
+        to: earlier.to().clone(),
+        event: None,
+        order: None,
+        purchase_order: Some(po.id()),
     };
     let queued = queue(env, ports, &branding, &message, &rendering).await?;
     env.queued();
@@ -549,6 +608,7 @@ where
         to,
         event: None,
         order: None,
+        purchase_order: None,
     };
     let sources = Sources::load(ports, template)
         .await
@@ -621,6 +681,7 @@ where
         to,
         event: None,
         order: None,
+        purchase_order: None,
     };
     let sources = Sources::load(ports, template)
         .await

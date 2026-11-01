@@ -133,7 +133,7 @@ impl World {
             true,
             false,
         );
-        item.set_on_hand(warehouse(), 5, None).unwrap();
+        item.set_on_hand(warehouse(), 5, None, None).unwrap();
         block_on(world.inventory_items.insert(&mut item)).unwrap();
 
         let mut vat = TaxRegion::new(region(), hr(), TaxRate::new(250_000).unwrap());
@@ -260,6 +260,28 @@ fn checkout_places_an_order_from_the_priced_cart() {
     assert_eq!(tax.source, OrderTaxSource::RateTable { region: region() });
 
     assert_eq!(block_on(world.orders.get(order.id())), Ok(Some(order)));
+}
+
+#[test]
+fn each_line_keeps_what_a_unit_cost_when_it_was_placed() {
+    let world = World::new();
+    let cost = hypha_core::UnitCost::parse("412.5", Currency::EUR).unwrap();
+    let mut mug = block_on(world.inventory_items.get_by_variant(vid("mug")))
+        .unwrap()
+        .unwrap();
+    mug.set_unit_cost(Some(cost), None);
+    block_on(world.inventory_items.update(&mut mug)).unwrap();
+
+    let order = world.checkout(world.cart()).unwrap();
+    let costs: Vec<_> = order
+        .lines()
+        .iter()
+        .map(|l| (l.variant, l.unit_cost))
+        .collect();
+    // The cup has no inventory item, so no cost.
+    assert_eq!(costs, [(vid("mug"), Some(cost)), (vid("cup"), None)]);
+    let stored = block_on(world.orders.get(order.id())).unwrap().unwrap();
+    assert_eq!(stored.lines()[0].unit_cost, Some(cost));
 }
 
 #[test]
@@ -1572,7 +1594,7 @@ fn money_is_given_back_when_the_order_cant_be_placed() {
     let mut item = block_on(world.inventory_items.get_by_variant(vid("mug")))
         .unwrap()
         .unwrap();
-    item.set_on_hand(warehouse(), 0, None).unwrap();
+    item.set_on_hand(warehouse(), 0, None, None).unwrap();
     block_on(world.inventory_items.update(&mut item)).unwrap();
     assert!(matches!(
         check_out_by(&world, cart, &app),
@@ -1615,7 +1637,7 @@ fn money_given_back_is_not_committed_and_paying_starts_again() {
     let mut item = block_on(world.inventory_items.get_by_variant(vid("mug")))
         .unwrap()
         .unwrap();
-    item.set_on_hand(warehouse(), 0, None).unwrap();
+    item.set_on_hand(warehouse(), 0, None, None).unwrap();
     block_on(world.inventory_items.update(&mut item)).unwrap();
     assert!(check_out_by(&world, cart, &app).is_err());
     let refunded = block_on(world.payments.get(payment.id())).unwrap().unwrap();
@@ -1626,7 +1648,7 @@ fn money_given_back_is_not_committed_and_paying_starts_again() {
     );
     // Restocked: the shopper pays again, a new payment (the refunded one counts for
     // nothing).
-    item.set_on_hand(warehouse(), 5, None).unwrap();
+    item.set_on_hand(warehouse(), 5, None, None).unwrap();
     block_on(world.inventory_items.update(&mut item)).unwrap();
     app.state.set(ProviderState::Open);
     let again = start_paying(&world, cart, &app).unwrap();

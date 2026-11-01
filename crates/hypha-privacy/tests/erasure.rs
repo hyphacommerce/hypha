@@ -92,6 +92,7 @@ fn order_for(ana: CustomerId, n: u128, cart: CartId) -> Order {
             fulfilled_quantity: 0,
             compare_at_price: None,
             price_list: None,
+            unit_cost: None,
         }],
         shipping_address: Some(address()),
         shipping_lines: vec![],
@@ -406,6 +407,7 @@ fn erasing_redacts_the_orders_email_records() {
             subject: "Order #1001 confirmed".to_string(),
             event: None,
             order: Some(ana_order()),
+            purchase_order: None,
         },
         QueuedEmail {
             sender_name: None,

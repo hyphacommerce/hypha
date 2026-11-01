@@ -1218,7 +1218,7 @@ mod tests {
             true,
             false,
         );
-        item.set_on_hand(location, on_hand, None).unwrap();
+        item.set_on_hand(location, on_hand, None, None).unwrap();
         StockContext {
             items: HashMap::from([(vid(11), item)]),
             locations: vec![Location::new(location, "Zagreb".to_string(), vec![mid()], 0).unwrap()],

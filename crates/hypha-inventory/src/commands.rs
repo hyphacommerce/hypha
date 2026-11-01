@@ -1,9 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    Address, AddressParts, AuthError, Ctx, ErrorCode, IdGenerator, InventoryItemId, Keyset,
-    LocationId, MarketId, Page, PageRequest, Quantity, RepoError, Scope, VariantId,
-    report_duplicate, retry_on_conflict,
+    Address, AddressParts, AuthError, Ctx, Currency, ErrorCode, IdGenerator, IdempotencyError,
+    InventoryItemId, Keyset, LocationId, MarketId, Page, PageRequest, Quantity, RepoError, Scope,
+    TransferId, UnitCost, VariantId, report_duplicate, retry_on_conflict,
+};
+
+use crate::{
+    AdjustmentReason, MovementFilter, MovementNote, StockMovementEntry, repo::StockMovementRepo,
 };
 use thiserror::Error;
 
@@ -32,6 +36,15 @@ pub enum CommandError {
     /// Every line that couldn't be reserved, so a buyer sees all of them at once.
     #[error("not enough stock for {} line(s)", lines.len())]
     OutOfStock { lines: Vec<Shortage> },
+    /// A cost is kept in the store's base currency, and none is set yet.
+    #[error("set the store's base currency before recording a cost")]
+    StoreCurrencyRequired,
+    #[error("costs are kept in the store's currency, {expected}, not {got}")]
+    CostCurrencyMismatch { expected: Currency, got: Currency },
+    #[error(transparent)]
+    Idempotency(#[from] IdempotencyError),
+    #[error("transfer {0} not found")]
+    TransferNotFound(TransferId),
 }
 
 impl ErrorCode for CommandError {
@@ -44,6 +57,10 @@ impl ErrorCode for CommandError {
             CommandError::InventoryItemNotFound(_) => "inventory_item_not_found",
             CommandError::InventoryItemExists { .. } => "inventory_item_exists",
             CommandError::OutOfStock { .. } => "out_of_stock",
+            CommandError::StoreCurrencyRequired => "store_currency_required",
+            CommandError::CostCurrencyMismatch { .. } => "cost_currency_mismatch",
+            CommandError::Idempotency(e) => e.code(),
+            CommandError::TransferNotFound(_) => "transfer_not_found",
         }
     }
 }
@@ -301,6 +318,8 @@ pub struct SetOnHand {
     pub quantity: i64,
     /// The count the caller last saw; the change is refused if it moved since.
     pub expected: Option<i64>,
+    /// Why, for the stock history: at most 500 characters; blank is none.
+    pub note: Option<String>,
 }
 
 /// Sets the count at a location. Retried on a concurrent change (a checkout reserving
@@ -312,13 +331,14 @@ pub async fn set_on_hand<R: InventoryItemRepo, L: LocationRepo>(
     input: SetOnHand,
 ) -> Result<InventoryItem, CommandError> {
     ctx.require(Scope::InventoryWrite)?;
+    let note = note(input.note.as_deref())?;
 
     load_location(locations, input.location).await?;
-    let input = &input;
+    let (input, note) = (&input, &note);
     retry_on_conflict(
         move || async move {
             let mut item = load_item(items, input.item).await?;
-            item.set_on_hand(input.location, input.quantity, input.expected)?;
+            item.set_on_hand(input.location, input.quantity, input.expected, note.clone())?;
             items.update(&mut item).await?;
             Ok(item)
         },
@@ -332,6 +352,9 @@ pub struct AdjustOnHand {
     pub location: LocationId,
     /// Negative to remove stock.
     pub delta: i64,
+    pub reason: AdjustmentReason,
+    /// At most 500 characters; blank is none.
+    pub note: Option<String>,
 }
 
 /// Adds to (or removes from) the count at a location, e.g. a delivery arrived.
@@ -343,19 +366,92 @@ pub async fn adjust_on_hand<R: InventoryItemRepo, L: LocationRepo>(
     input: AdjustOnHand,
 ) -> Result<InventoryItem, CommandError> {
     ctx.require(Scope::InventoryWrite)?;
+    let note = note(input.note.as_deref())?;
 
     load_location(locations, input.location).await?;
-    let input = &input;
+    let (input, note) = (&input, &note);
     retry_on_conflict(
         move || async move {
             let mut item = load_item(items, input.item).await?;
-            item.adjust_on_hand(input.location, input.delta)?;
+            item.adjust_on_hand(input.location, input.delta, input.reason, note.clone())?;
             items.update(&mut item).await?;
             Ok(item)
         },
         lost_a_race,
     )
     .await
+}
+
+pub struct SetUnitCost {
+    pub item: InventoryItemId,
+    /// `None` clears it.
+    pub unit_cost: Option<UnitCost>,
+    /// Why, for the stock history: at most 500 characters; blank is none.
+    pub note: Option<String>,
+}
+
+/// Sets what one unit of an item cost, by hand: a `cost_adjustment` in its history.
+/// `store_currency` is the store's base currency, which the host passes: a cost is
+/// refused while there's none, or in another currency. Clearing needs neither. Retried
+/// on a concurrent change.
+pub async fn set_unit_cost<R: InventoryItemRepo>(
+    ctx: &Ctx,
+    items: &R,
+    store_currency: Option<Currency>,
+    input: SetUnitCost,
+) -> Result<InventoryItem, CommandError> {
+    ctx.require(Scope::PurchasingWrite)?;
+    let note = note(input.note.as_deref())?;
+    if let Some(cost) = input.unit_cost {
+        check_cost_currency(cost, store_currency)?;
+    }
+
+    let (input, note) = (&input, &note);
+    retry_on_conflict(
+        move || async move {
+            let mut item = load_item(items, input.item).await?;
+            if item.set_unit_cost(input.unit_cost, note.clone()) {
+                items.update(&mut item).await?;
+            }
+            Ok(item)
+        },
+        lost_a_race,
+    )
+    .await
+}
+
+/// Fails unless `cost` is in the store's base currency, which must be set.
+pub fn check_cost_currency(
+    cost: UnitCost,
+    store_currency: Option<Currency>,
+) -> Result<(), CommandError> {
+    let expected = store_currency.ok_or(CommandError::StoreCurrencyRequired)?;
+    if cost.currency() != expected {
+        return Err(CommandError::CostCurrencyMismatch {
+            expected,
+            got: cost.currency(),
+        });
+    }
+    Ok(())
+}
+
+fn note(text: Option<&str>) -> Result<Option<MovementNote>, CommandError> {
+    Ok(text.map(MovementNote::new).transpose()?.flatten())
+}
+
+/// A page of an item's stock history, newest first. The rows outlive their item, but
+/// they're read through it: an item that's gone is `InventoryItemNotFound`.
+pub async fn list_stock_movements<R: InventoryItemRepo, M: StockMovementRepo>(
+    ctx: &Ctx,
+    items: &R,
+    movements: &M,
+    item: InventoryItemId,
+    filter: &MovementFilter,
+    page: PageRequest<i64>,
+) -> Result<Page<StockMovementEntry>, CommandError> {
+    ctx.require(Scope::InventoryRead)?;
+    load_item(items, item).await?;
+    Ok(movements.list(item, filter, page).await?)
 }
 
 async fn load_item<R: InventoryItemRepo>(
@@ -448,7 +544,8 @@ mod tests {
                 let id = InventoryItemId::from_uuid(Uuid::from_u128(300 + n));
                 let mut item = InventoryItem::new(id, vid(*n), true, false);
                 for (location, on_hand) in *levels {
-                    item.set_on_hand(loc(*location), *on_hand, None).unwrap();
+                    item.set_on_hand(loc(*location), *on_hand, None, None)
+                        .unwrap();
                 }
                 (vid(*n), item)
             })

@@ -156,6 +156,7 @@ fn plain_line(id: u128) -> OrderLine {
         fulfilled_quantity: 0,
         compare_at_price: None,
         price_list: None,
+        unit_cost: None,
     }
 }
 
@@ -185,6 +186,8 @@ fn full_line(id: u128) -> OrderLine {
         fulfilled_quantity: 0,
         compare_at_price: Some(Price::new(eur(3)).unwrap()),
         price_list: Some(hypha_core::PriceListId::from_uuid(Uuid::from_u128(id + 5))),
+        // In another currency than the order's: costs are in the store's.
+        unit_cost: Some(hypha_core::UnitCost::parse("0.0035", Currency::USD).unwrap()),
     }
 }
 
@@ -886,6 +889,7 @@ fn sale(s: Sale) -> Order {
             fulfilled_quantity: 0,
             compare_at_price: None,
             price_list: None,
+            unit_cost: None,
         })
         .collect();
     let subtotal: i64 = lines.iter().map(|l| l.total.amount()).sum();

@@ -205,7 +205,7 @@ impl World {
         }
         let id = InventoryItemId::from_uuid(vid(name).as_uuid());
         let mut item = InventoryItem::new(id, vid(name), true, false);
-        item.set_on_hand(warehouse(), on_hand, None).unwrap();
+        item.set_on_hand(warehouse(), on_hand, None, None).unwrap();
         block_on(self.inventory_items.insert(&mut item)).unwrap();
     }
 
@@ -883,7 +883,7 @@ fn stock_at_a_location_serving_another_market_does_not_count() {
     let mut item = block_on(world.inventory_items.get_by_variant(vid("mug")))
         .unwrap()
         .unwrap();
-    item.set_on_hand(far.id(), 50, None).unwrap();
+    item.set_on_hand(far.id(), 50, None, None).unwrap();
     block_on(world.inventory_items.update(&mut item)).unwrap();
     let cart = world.create_cart();
 
@@ -1333,7 +1333,7 @@ fn a_command_that_fails_records_no_key() {
     let mut item = block_on(world.inventory_items.get_by_variant(vid("mug")))
         .unwrap()
         .unwrap();
-    item.set_on_hand(warehouse(), 5, None).unwrap();
+    item.set_on_hand(warehouse(), 5, None, None).unwrap();
     block_on(world.inventory_items.update(&mut item)).unwrap();
 
     // Nothing was recorded, so the retry runs for real.

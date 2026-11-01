@@ -11,6 +11,7 @@ hypha-auth = { path = "../hypha-auth" }
 hypha-inventory = { path = "../hypha-inventory" }
 hypha-markets = { path = "../hypha-markets" }
 hypha-products = { path = "../hypha-products" }
+hypha-purchasing = { path = "../hypha-purchasing" }
 
 [dev-dependencies]
 hypha-testkit = { path = "../hypha-testkit" }

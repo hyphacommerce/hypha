@@ -71,11 +71,13 @@ export function TemplateEditor({
 }) {
   const key = template.key;
   const isLayout = key === "layout";
+  // Templates about no order: their preview is the sample's.
   const isStaffAccount =
     key === "staff_invite" ||
     key === "staff_password_reset" ||
     key === "customer_login_code" ||
-    key === "customer_erasure_requested";
+    key === "customer_erasure_requested" ||
+    key === "supplier_purchase_order";
   const [saved, setSaved] = useState(() => sourcesOf(template));
   const [draft, setDraft] = useState(saved);
   const [isCustomized, setIsCustomized] = useState(template.customized);

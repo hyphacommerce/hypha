@@ -1,0 +1,70 @@
+Purchase order {{ purchase_order.number }}{% if purchase_order.revision %} (revision {{ purchase_order.revision }}, replacing the earlier one){% endif %}
+
+Hello {{ supplier.name }}, here is our purchase order. Please confirm it and tell us if anything can't be delivered as listed.
+{%- if message %}
+
+{{ message }}
+{%- endif %}
+{%- if purchase_order.ordered_at %}
+
+Ordered: {{ purchase_order.ordered_at.formatted }}
+{%- endif %}
+{%- if purchase_order.expected_at %}
+Expected by: {{ purchase_order.expected_at.formatted }}
+{%- endif %}
+{%- if purchase_order.supplier_reference %}
+Your reference: {{ purchase_order.supplier_reference }}
+{%- endif %}
+{%- if purchase_order.payment_terms %}
+Payment terms: {{ purchase_order.payment_terms.summary }}{% if purchase_order.payment_terms.note %} ({{ purchase_order.payment_terms.note }}){% endif %}
+{%- endif %}
+
+Items:
+{%- for line in purchase_order.lines %}
+- {{ line.quantity }} × {{ line.title }}{% if line.variant %} ({{ line.variant }}){% endif %}{% if line.supplier_sku %}, your code {{ line.supplier_sku }}{% endif %}{% if line.sku %}, our SKU {{ line.sku }}{% endif %}: {{ line.unit_cost.formatted }} each, {{ line.total.formatted }}
+{%- endfor %}
+
+Subtotal: {{ purchase_order.subtotal.formatted }}
+{%- for cost in purchase_order.costs %}
+{{ cost.label }}{% if cost.description %} ({{ cost.description }}){% endif %}: {{ cost.amount.formatted }}
+{%- endfor %}
+{%- if purchase_order.tax %}
+Tax: {{ purchase_order.tax.formatted }}
+{%- endif %}
+Total: {{ purchase_order.total.formatted }}
+{%- if purchase_order.ship_to %}
+
+Ship to:
+{{ purchase_order.ship_to.name }}
+{%- if purchase_order.ship_to.address %}
+{%- if purchase_order.ship_to.address.contact %}
+{{ purchase_order.ship_to.address.contact }}
+{%- endif %}
+{%- if purchase_order.ship_to.address.company %}
+{{ purchase_order.ship_to.address.company }}
+{%- endif %}
+{{ purchase_order.ship_to.address.line1 }}
+{%- if purchase_order.ship_to.address.line2 %}
+{{ purchase_order.ship_to.address.line2 }}
+{%- endif %}
+{% if purchase_order.ship_to.address.postal_code %}{{ purchase_order.ship_to.address.postal_code }} {% endif %}{{ purchase_order.ship_to.address.city }}
+{%- if purchase_order.ship_to.address.province %}
+{{ purchase_order.ship_to.address.province }}
+{%- endif %}
+{{ purchase_order.ship_to.address.country }}
+{%- if purchase_order.ship_to.address.phone %}
+{{ purchase_order.ship_to.address.phone }}
+{%- endif %}
+{%- endif %}
+{%- endif %}
+{%- if purchase_order.note_to_supplier %}
+
+Notes:
+{{ purchase_order.note_to_supplier }}
+{%- endif %}
+
+--
+{{ shop.name }}{% if shop.email %} · {{ shop.email }}{% endif %}
+{%- if brand.footer %}
+{{ brand.footer }}
+{%- endif %}

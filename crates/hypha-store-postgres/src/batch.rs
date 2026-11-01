@@ -26,7 +26,10 @@ use hypha_discounts::{
     ClassSet, CodeSelection, Discount, DiscountCode, DiscountSnapshot, StageDiscounts, UsageClaim,
 };
 use hypha_fulfillment::{Fulfillment, FulfillmentSnapshot, StageFulfillments};
-use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems};
+use hypha_inventory::{
+    InventoryItem, InventoryItemSnapshot, StageInventoryItems, StageTransfers, StockMovement,
+    Transfer, TransferSnapshot,
+};
 use hypha_markets::{FixedPrice, StageCatalogProducts, StageFixedPrices, StagePriceListSchedule};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_notifications::{
@@ -39,6 +42,10 @@ use hypha_oauth::{
 use hypha_orders::{Order, OrderSnapshot, StageOrders};
 use hypha_payments::{Payment, PaymentSnapshot, StagePayments};
 use hypha_products::{Product, ProductSnapshot, StageProducts};
+use hypha_purchasing::{
+    PurchaseOrder, PurchaseOrderSnapshot, PurchaseOrderSummary, Receipt, ReceiptSnapshot,
+    StagePurchaseOrders, StageReceipts,
+};
 use hypha_tax::StageTaxAssignments;
 use hypha_users::{
     Invite, InviteSnapshot, Role, RoleSnapshot, StageInvites, StageRoles, StageUsers, User,
@@ -63,7 +70,7 @@ use crate::{
     fulfillments::{insert_fulfillment, update_fulfillment},
     idempotency::insert_records,
     inventory::update_items,
-    inventory::{delete_items, lock_items},
+    inventory::{delete_items, insert_item, lock_items},
     markets::{
         add_catalog_products, remove_catalog_products, remove_fixed_prices, set_fixed_prices,
     },
@@ -73,6 +80,9 @@ use crate::{
     outbox::insert_events,
     payments::{insert_payment, update_payment},
     products::{delete_product, update_product},
+    purchase_orders::update_purchase_order,
+    receipts::{insert_receipt, update_receipt},
+    stock_movements::insert_movements,
     store::{Db, Tx, end_transaction},
     store::{PgConnection, PgStore},
     tax::assign_tax_class,
@@ -127,9 +137,12 @@ enum Staged {
     NewPasswordReset(PasswordResetSnapshot),
     PasswordReset(PasswordResetSnapshot),
     UsedUpResets(IdentityId, Timestamp),
+    NewInventoryItem(InventoryItemSnapshot),
     InventoryItem(InventoryItemSnapshot),
     /// An item removed at the version it was loaded at.
     DeletedInventoryItem(InventoryItemSnapshot),
+    /// What the items staged recorded: written after them, once their rows are locked.
+    StockMovements(Vec<StockMovement>),
     /// Products' tax class (`None`: the default rate).
     TaxAssignment(Vec<ProductId>, Option<TaxClassId>),
     /// Catalog membership: added (`true`) or removed.
@@ -179,6 +192,11 @@ enum Staged {
     DiscountCodesActive(DiscountId, CodeSelection, bool),
     /// The discount schedule job's progress moved from the first to the second.
     DiscountSchedule(Option<Timestamp>, Timestamp),
+    /// With the summary its row keeps for lists.
+    PurchaseOrder(PurchaseOrderSnapshot, PurchaseOrderSummary),
+    NewReceipt(ReceiptSnapshot),
+    Receipt(ReceiptSnapshot),
+    Transfer(TransferSnapshot),
 }
 
 impl Staged {
@@ -233,9 +251,19 @@ impl Staged {
             Staged::FixedPrices(..) => 31,
             Staged::PriceListSchedule(..) => 31,
             Staged::TaxAssignment(..) => 32,
+            // Purchase orders before the items received into stock.
+            Staged::PurchaseOrder(..) => 33,
+            // A receipt after its order (it names it).
+            Staged::NewReceipt(_) | Staged::Receipt(_) => 33,
+            // Transfers before the items they move.
+            Staged::Transfer(_) => 33,
             Staged::Idempotency(_) => 33,
+            // New items are inserted as they come; nothing else holds their rows yet.
+            Staged::NewInventoryItem(_) => 34,
             Staged::InventoryItem(_) => 34,
             Staged::DeletedInventoryItem(_) => 35,
+            // Gathered and written after the items, like them.
+            Staged::StockMovements(_) => 35,
             // Inserts into a table nothing else locks: anywhere would do.
             Staged::Events(..) => 36,
             // An app before what refers to it (its tokens), a request before its codes.
@@ -278,6 +306,11 @@ impl Staged {
                 | (Staged::Order(a), Staged::Order(b)) => a.id.cmp(&b.id),
                 (Staged::NewFulfillment(a), Staged::NewFulfillment(b))
                 | (Staged::Fulfillment(a), Staged::Fulfillment(b)) => a.id.cmp(&b.id),
+                (Staged::PurchaseOrder(a, _), Staged::PurchaseOrder(b, _)) => a.id.cmp(&b.id),
+                (Staged::NewReceipt(a), Staged::NewReceipt(b))
+                | (Staged::Receipt(a), Staged::Receipt(b)) => a.id.cmp(&b.id),
+                (Staged::Transfer(a), Staged::Transfer(b)) => a.id.cmp(&b.id),
+                (Staged::NewInventoryItem(a), Staged::NewInventoryItem(b)) => a.id.cmp(&b.id),
                 (Staged::NewPayment(a), Staged::NewPayment(b))
                 | (Staged::Payment(a), Staged::Payment(b)) => a.id.cmp(&b.id),
                 (Staged::NewCart(a), Staged::NewCart(b)) | (Staged::Cart(a), Staged::Cart(b)) => {
@@ -371,6 +404,14 @@ fn value_key(write: &Staged) -> Option<(CustomFieldDefinitionId, uuid::Uuid)> {
 impl PgBatch {
     fn stage(&mut self, write: Staged) {
         self.staged.push(write);
+    }
+
+    /// Stages the movements `item` recorded, to write with it.
+    fn stage_movements_of(&mut self, item: &mut InventoryItem) {
+        let movements = item.take_movements();
+        if !movements.is_empty() {
+            self.stage(Staged::StockMovements(movements));
+        }
     }
 
     /// Stages the events `aggregate` recorded, about the write staged with them, which
@@ -517,11 +558,20 @@ impl StageAssetUsages for PgBatch {
 }
 
 impl StageInventoryItems for PgBatch {
+    fn insert_inventory_item(&mut self, item: &mut InventoryItem) {
+        stamp_insert(item, self.now);
+        self.stage(Staged::NewInventoryItem(item.snapshot()));
+        self.stage_events_of(item, Version::NEW.next());
+        self.stage_movements_of(item);
+        item.set_version(Version::NEW.next());
+    }
+
     fn update_inventory_item(&mut self, item: &mut InventoryItem) {
         stamp_update(item, self.now);
         self.stage(Staged::InventoryItem(item.snapshot()));
         let version = item.version().next();
         self.stage_events_of(item, version);
+        self.stage_movements_of(item);
         item.set_version(version);
     }
 
@@ -531,6 +581,7 @@ impl StageInventoryItems for PgBatch {
         if !events.is_empty() {
             self.stage(Staged::Events(events, None));
         }
+        self.stage_movements_of(item);
     }
 }
 
@@ -548,6 +599,43 @@ impl StageOrders for PgBatch {
         let version = order.version().next();
         self.stage_events_of(order, version);
         order.set_version(version);
+    }
+}
+
+impl StagePurchaseOrders for PgBatch {
+    fn update_purchase_order(&mut self, po: &mut PurchaseOrder) {
+        stamp_update(po, self.now);
+        self.stage(Staged::PurchaseOrder(po.snapshot(), po.summary()));
+        let version = po.version().next();
+        self.stage_events_of(po, version);
+        po.set_version(version);
+    }
+}
+
+impl StageTransfers for PgBatch {
+    fn update_transfer(&mut self, transfer: &mut Transfer) {
+        stamp_update(transfer, self.now);
+        self.stage(Staged::Transfer(transfer.snapshot()));
+        let version = transfer.version().next();
+        self.stage_events_of(transfer, version);
+        transfer.set_version(version);
+    }
+}
+
+impl StageReceipts for PgBatch {
+    fn insert_receipt(&mut self, receipt: &mut Receipt) {
+        stamp_insert(receipt, self.now);
+        self.stage(Staged::NewReceipt(receipt.snapshot()));
+        self.stage_events_of(receipt, Version::NEW.next());
+        receipt.set_version(Version::NEW.next());
+    }
+
+    fn update_receipt(&mut self, receipt: &mut Receipt) {
+        stamp_update(receipt, self.now);
+        self.stage(Staged::Receipt(receipt.snapshot()));
+        let version = receipt.version().next();
+        self.stage_events_of(receipt, version);
+        receipt.set_version(version);
     }
 }
 
@@ -673,6 +761,7 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
         let now = batch.now;
         let mut items = Vec::new();
         let mut deleted = Vec::new();
+        let mut movements = Vec::new();
         let mut records = Vec::new();
 
         let mut conn = self.conn().await;
@@ -750,8 +839,10 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     Staged::UsedUpResets(identity, at) => {
                         use_up_password_resets(&db, identity, at).await?;
                     }
+                    Staged::NewInventoryItem(s) => insert_item(&db, &s).await?,
                     Staged::InventoryItem(s) => items.push(s),
                     Staged::DeletedInventoryItem(s) => deleted.push(s),
+                    Staged::StockMovements(staged) => movements.extend(staged),
                     Staged::TaxAssignment(products, class) => {
                         assign_tax_class(&db, &products, class).await?;
                     }
@@ -857,6 +948,16 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     Staged::DiscountSchedule(from, to) => {
                         crate::discounts::advance_discount_schedule(&db, from, to).await?;
                     }
+                    Staged::PurchaseOrder(s, summary) => {
+                        update_purchase_order(&db, &s, &summary).await?;
+                    }
+                    Staged::NewReceipt(s) => insert_receipt(&db, &s).await?,
+                    Staged::Transfer(s) => {
+                        crate::transfers::update_transfer(&db, &s).await?;
+                    }
+                    Staged::Receipt(s) => {
+                        update_receipt(&db, &s).await?;
+                    }
                 }
             }
             insert_records(&db, &records).await?;
@@ -869,6 +970,7 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
             lock_items(&db, &ids).await?;
             update_items(&db, items).await?;
             delete_items(&db, &deleted).await?;
+            insert_movements(&db, &movements, &self.event_stamp()).await?;
             Ok(())
         }
         .await;

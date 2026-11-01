@@ -126,6 +126,13 @@ define_id!(TaxRegionId, "txreg");
 
 define_id!(LocationId, "loc");
 define_id!(InventoryItemId, "invi");
+// Stock moved between the store's own locations.
+define_id!(TransferId, "trf");
+
+// Purchasing: suppliers, purchase orders and the receipts of what arrived.
+define_id!(SupplierId, "sup");
+define_id!(PurchaseOrderId, "po");
+define_id!(ReceiptId, "rcpt");
 
 define_id!(CustomerId, "cus");
 define_id!(CustomerGroupId, "cgrp");

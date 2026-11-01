@@ -44,16 +44,21 @@ mod outbox;
 mod payments;
 mod preview_tokens;
 mod products;
+mod purchase_orders;
+mod receipts;
 mod sales;
 mod search;
 mod shipping;
 pub mod spore_check;
 mod spore_settings;
+mod stock_movements;
 mod store;
 mod stores;
+mod suppliers;
 mod tax;
 #[cfg(feature = "testing")]
 pub mod testing;
+mod transfers;
 mod users;
 
 pub use batch::PgBatch;

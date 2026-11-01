@@ -29,7 +29,13 @@ import {
   PaymentBadge,
   PaymentStatusBadge,
 } from "@/components/status";
-import { CANCEL_REASONS, type Currencies, formatMoney } from "@/lib/format";
+import {
+  CANCEL_REASONS,
+  type Currencies,
+  formatMoney,
+  formatUnitCost,
+  unitCostTotal,
+} from "@/lib/format";
 import {
   channelNames,
   loadCountries,
@@ -91,6 +97,7 @@ function UnitPrice({
           </Text>
         )}
       </HStack>
+      {line.unit_cost && <Margin line={line} cost={line.unit_cost} currencies={currencies} />}
       {line.price_list && (
         <Link href={`/markets/price-lists/${line.price_list}`}>
           <Text type="supporting">
@@ -101,6 +108,35 @@ function UnitPrice({
         </Link>
       )}
     </VStack>
+  );
+}
+
+/**
+ * What a unit cost the store when the order was placed, and the line's margin: what it
+ * was charged less what its units cost, when both are in one currency.
+ */
+function Margin({
+  line,
+  cost,
+  currencies,
+}: {
+  line: OrderLine;
+  cost: AdminSchemas["UnitCost"];
+  currencies: Currencies;
+}) {
+  const costs = unitCostTotal(cost, line.quantity);
+  const margin =
+    costs.currency === line.total.currency
+      ? { amount: line.total.amount - costs.amount, currency: costs.currency }
+      : null;
+  const share =
+    margin && line.total.amount > 0 ? Math.round((margin.amount / line.total.amount) * 100) : null;
+  return (
+    <Text type="supporting" color="secondary" hasTabularNumbers>
+      Cost {formatUnitCost(cost, currencies)}
+      {margin &&
+        ` · margin ${formatMoney(margin, currencies)}${share === null ? "" : ` (${share}%)`}`}
+    </Text>
   );
 }
 

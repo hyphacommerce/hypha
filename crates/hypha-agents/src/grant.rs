@@ -52,8 +52,9 @@ pub const NEVER_GRANTED: [Scope; 5] = [
     Scope::AgentsWrite,
 ];
 
-/// Write scopes an agent may only propose: a person approves every use.
-pub const PROPOSE_ONLY: [Scope; 1] = [Scope::CustomersErase];
+/// Write scopes an agent may only propose: a person approves every use (erasing someone,
+/// emailing a supplier).
+pub const PROPOSE_ONLY: [Scope; 2] = [Scope::CustomersErase, Scope::PurchasingSend];
 
 /// The most operations an allowlist names: more than the admin surface has.
 pub const MAX_OPERATIONS: usize = 1000;
@@ -740,6 +741,16 @@ mod tests {
         );
         let g = grant(&[], &[("customers:erase", "propose")], &[]);
         assert_eq!(g.write(), [(Scope::CustomersErase, WriteMode::Propose)]);
+    }
+
+    #[test]
+    fn emailing_suppliers_is_propose_only() {
+        assert_eq!(
+            Grant::new(input(&[], &[("purchasing:send", "apply")], &[])),
+            Err(GrantError::ProposeOnly(Scope::PurchasingSend))
+        );
+        let g = grant(&[], &[("purchasing:send", "propose")], &[]);
+        assert_eq!(g.write(), [(Scope::PurchasingSend, WriteMode::Propose)]);
     }
 
     #[test]

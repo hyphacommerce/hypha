@@ -8,7 +8,7 @@ use hypha_cart::{
 use hypha_core::{
     Attempts, AuthError, CartId, Clock, Ctx, CustomerId, ErrorCode, HasBatch, HasIdempotency,
     IdGenerator, IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, Money,
-    OrderId, OrderLineId, PaymentId, PaymentMethodId, RepoError, Scope, StageIdempotency,
+    OrderId, OrderLineId, PaymentId, PaymentMethodId, RepoError, Scope, StageIdempotency, UnitCost,
     VariantId, Version, Versioned, earlier_id,
 };
 use hypha_customers::{
@@ -711,7 +711,11 @@ async fn attempt<
     let lines = priced
         .lines
         .iter()
-        .map(|line| order_line(line, OrderLineId::from_uuid(ids.new_uuid())))
+        .map(|line| {
+            // What a unit costs now, from the item already read for its stock.
+            let cost = stock.items.get(&line.variant).and_then(|i| i.unit_cost());
+            order_line(line, OrderLineId::from_uuid(ids.new_uuid()), cost)
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
     let shipping_lines = shipping_lines(&priced, &lines)?;
@@ -1162,8 +1166,12 @@ fn order_tax(t: TaxLine) -> OrderTax {
     }
 }
 
-/// An available line as the order keeps it: names, prices and tax copied.
-fn order_line(line: &PricedLine, id: OrderLineId) -> Result<OrderLine, CommandError> {
+/// An available line as the order keeps it: names, prices, tax and the unit cost copied.
+fn order_line(
+    line: &PricedLine,
+    id: OrderLineId,
+    unit_cost: Option<UnitCost>,
+) -> Result<OrderLine, CommandError> {
     // Unavailable lines were refused above, so these always match; checked anyway.
     let unavailable = || CommandError::Unavailable {
         lines: vec![line.variant],
@@ -1197,6 +1205,7 @@ fn order_line(line: &PricedLine, id: OrderLineId) -> Result<OrderLine, CommandEr
         fulfilled_quantity: 0,
         compare_at_price: *compare_at,
         price_list: *price_list,
+        unit_cost,
     })
 }
 

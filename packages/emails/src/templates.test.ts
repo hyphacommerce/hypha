@@ -17,6 +17,7 @@ const keys = [
   "staff_new_order",
   "staff_invite",
   "staff_password_reset",
+  "supplier_purchase_order",
 ] as const;
 type Key = (typeof keys)[number];
 
@@ -68,6 +69,43 @@ const fulfillment = [
   ...nested("fulfillment.tracking[]", ["carrier", "number", "url"]),
 ];
 const staff = ["user.email", "link", ...nested("expires_at", time)];
+const purchaseOrder = [
+  "supplier.name",
+  "message",
+  ...nested("purchase_order", [
+    "id",
+    "number",
+    "revision",
+    "supplier_reference",
+    "note_to_supplier",
+    "currency",
+    "lines[]",
+    "costs[]",
+  ]),
+  ...nested("purchase_order.ordered_at", time),
+  ...nested("purchase_order.expected_at", time),
+  ...nested("purchase_order.payment_terms", ["summary", "note"]),
+  ...nested("purchase_order.lines[]", ["title", "variant", "sku", "supplier_sku", "quantity"]),
+  ...nested("purchase_order.lines[].unit_cost", money),
+  ...nested("purchase_order.lines[].total", money),
+  ...nested("purchase_order.costs[]", ["kind", "label", "description"]),
+  ...nested("purchase_order.costs[].amount", money),
+  ...["subtotal", "costs_total", "tax", "total"].flatMap((name) =>
+    nested(`purchase_order.${name}`, money),
+  ),
+  ...nested("purchase_order.ship_to", ["name", "address"]),
+  ...nested("purchase_order.ship_to.address", [
+    "contact",
+    "company",
+    "line1",
+    "line2",
+    "city",
+    "province",
+    "postal_code",
+    "country",
+    "phone",
+  ]),
+];
 
 const contexts: Record<Key | "layout", string[]> = {
   layout: every,
@@ -78,6 +116,7 @@ const contexts: Record<Key | "layout", string[]> = {
   staff_new_order: [...every, ...order, "admin_url"],
   staff_invite: [...every, ...staff],
   staff_password_reset: [...every, ...staff],
+  supplier_purchase_order: [...every, ...purchaseOrder],
 };
 
 /** Every path and its prefixes (`order.payment` is tested before its fields are read). */

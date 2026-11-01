@@ -323,6 +323,34 @@ async fn the_store_remembers_the_setup_guide() {
 }
 
 #[tokio::test]
+async fn the_store_keeps_a_base_currency_for_costs() {
+    let app = app().await;
+    let (_, store) = send(&app, "GET", "/admin/store", None).await;
+    assert_eq!(store["currency"], Value::Null, "no markets, so none yet");
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    assert_eq!(
+        (status, &store["currency"]),
+        (StatusCode::OK, &json!("EUR"))
+    );
+    let (status, body) = send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"eur"}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "unknown_currency")
+    );
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(r#"{"currency":null}"#)).await;
+    assert_eq!((status, &store["currency"]), (StatusCode::OK, &Value::Null));
+    let (_, public) = send_as(
+        &app,
+        &publishable(&app).await,
+        "GET",
+        "/storefront/store",
+        None,
+    )
+    .await;
+    assert!(public.get("currency").is_none(), "storefronts don't see it");
+}
+
+#[tokio::test]
 async fn the_store_details_are_set_cleared_and_partly_public() {
     let app = app().await;
     let (_, store) = send(&app, "GET", "/admin/store", None).await;
@@ -632,6 +660,353 @@ async fn a_products_inventory_is_one_call_in_variant_order() {
 }
 
 #[tokio::test]
+async fn every_stock_change_is_in_the_items_history() {
+    let app = app().await;
+    let mug = create_product(&app, "mug").await;
+    let (_, read) = send(&app, "GET", &format!("/admin/products/{mug}"), None).await;
+    let variant = read["variants"][0]["id"].as_str().unwrap().to_string();
+    let body = json!({ "variant": variant }).to_string();
+    let (_, item) = send(&app, "POST", "/admin/inventory-items", Some(&body)).await;
+    let item = item["id"].as_str().unwrap().to_string();
+    let body = json!({ "name": "Warehouse" }).to_string();
+    let (_, location) = send(&app, "POST", "/admin/locations", Some(&body)).await;
+    let location = location["id"].as_str().unwrap().to_string();
+    let level = format!("/admin/inventory-items/{item}/levels/{location}");
+
+    let body = json!({ "on_hand": 10, "note": "opening count" }).to_string();
+    let (status, json) = send(&app, "PUT", &level, Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let body = json!({ "delta": -2, "reason": "damaged", "note": "dropped" }).to_string();
+    let (status, json) = send(&app, "POST", &format!("{level}/adjustments"), Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let (status, json) = send(
+        &app,
+        "POST",
+        &format!("{level}/adjustments"),
+        Some(r#"{"delta":1}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let (status, body) = send(
+        &app,
+        "POST",
+        &format!("{level}/adjustments"),
+        Some(r#"{"delta":1,"reason":"counted"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_body"),
+        "counting is the level's PUT"
+    );
+
+    let history = format!("/admin/inventory-items/{item}/movements");
+    let (status, page) = send(&app, "GET", &format!("{history}?limit=2"), None).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["has_more"], json!(true));
+    let newest = &page["items"][0];
+    assert_eq!(
+        (
+            &newest["location"],
+            &newest["delta"],
+            &newest["after"],
+            &newest["reason"],
+            &newest["source"],
+            &newest["note"],
+            &newest["actor"]["type"]
+        ),
+        (
+            &json!(location),
+            &json!(1),
+            &json!(9),
+            &json!("correction"),
+            &json!({"type": "manual"}),
+            &Value::Null,
+            &json!("api_key")
+        )
+    );
+    assert!(newest["at"].is_string());
+    let cursor = page["next_cursor"].as_str().unwrap();
+    let (_, rest) = send(&app, "GET", &format!("{history}?cursor={cursor}"), None).await;
+    let rest: Vec<_> = rest["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| (m["delta"].clone(), m["reason"].clone(), m["note"].clone()))
+        .collect();
+    assert_eq!(
+        rest,
+        [(json!(10), json!("counted"), json!("opening count"))],
+        "the page after the cursor"
+    );
+
+    let (_, damaged) = send(&app, "GET", &format!("{history}?reason=damaged"), None).await;
+    assert_eq!(damaged["items"].as_array().unwrap().len(), 1);
+    assert_eq!(damaged["items"][0]["note"], json!("dropped"));
+    let (_, none) = send(
+        &app,
+        "GET",
+        &format!("{history}?to=2000-01-01T00:00:00Z"),
+        None,
+    )
+    .await;
+    assert_eq!(none["items"], json!([]));
+    let (status, body) = send(&app, "GET", &format!("{history}?from=yesterday"), None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+    let (status, body) = send(
+        &app,
+        "GET",
+        "/admin/inventory-items/invi_00000000000000000000000000000000/movements",
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "inventory_item_not_found")
+    );
+    let body = json!({ "delta": 1, "note": "x".repeat(501) }).to_string();
+    let (status, body) = send(&app, "POST", &format!("{level}/adjustments"), Some(&body)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "movement_note_too_long")
+    );
+}
+
+/// A staff member `name` whose role (also `name`) has `scopes`, signed in: their session.
+async fn staff_with(app: &TestApp, name: &str, scopes: Value) -> String {
+    let body = json!({"name": name, "scopes": scopes}).to_string();
+    let (status, role) = send(app, "POST", "/admin/roles", Some(&body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{role}");
+    let invite = json!({ "email": format!("{name}@example.com"), "role": role["id"] }).to_string();
+    send(app, "POST", "/admin/invites", Some(&invite)).await;
+    let accept = json!({
+        "token": last_invite_token(app),
+        "name": name,
+        "password": "a staff password",
+    })
+    .to_string();
+    let (status, accepted) =
+        send_with(app, &[], "POST", "/admin/invites/accept", Some(&accept)).await;
+    assert_eq!(status, StatusCode::CREATED, "{accepted}");
+    accepted["session"]["token"].as_str().unwrap().to_string()
+}
+
+/// The first variant of the newest product: a listed product is a summary without its
+/// variants, so it's read whole.
+async fn only_variant(app: &TestApp) -> String {
+    let (_, products) = send(app, "GET", "/admin/products?limit=1", None).await;
+    let id = products["items"][0]["id"].as_str().unwrap();
+    let (_, product) = send(app, "GET", &format!("/admin/products/{id}"), None).await;
+    product["variants"][0]["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn a_unit_cost_is_kept_in_the_base_currency_and_fixes_it() {
+    let app = app().await;
+    let (pk, cart_path, _) = cart_for_three_mugs(&app).await;
+    let mug = only_variant(&app).await;
+    let (_, stock) = send(
+        &app,
+        "GET",
+        &format!("/admin/variants/{mug}/inventory"),
+        None,
+    )
+    .await;
+    let item = stock["id"].as_str().unwrap().to_string();
+    let (_, products) = send(&app, "GET", "/admin/products?limit=1", None).await;
+    let (_, read) = send(&app, "GET", &format!("/admin/inventory-items/{item}"), None).await;
+    assert_eq!(
+        (&stock["product"], &read["product"]),
+        (&products["items"][0]["id"], &products["items"][0]["id"]),
+        "an item names its product, so its page can"
+    );
+    let cost = format!("/admin/inventory-items/{item}/cost");
+    let eur = json!({"unit_cost": {"amount": "412.5", "currency": "EUR"}, "note": "invoice 7"})
+        .to_string();
+
+    let (status, body) = send(&app, "PUT", &cost, Some(&eur)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "store_currency_required")
+    );
+    let (status, body) = send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let usd = json!({"unit_cost": {"amount": "5", "currency": "USD"}}).to_string();
+    let (status, body) = send(&app, "PUT", &cost, Some(&usd)).await;
+    assert_eq!(
+        (status, code(&body), &body["details"]["currency"]),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "cost_currency_mismatch",
+            &json!("EUR")
+        )
+    );
+    let bad = json!({"unit_cost": {"amount": "1.00001", "currency": "EUR"}}).to_string();
+    let (status, _) = send(&app, "PUT", &cost, Some(&bad)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let (status, set) = send(&app, "PUT", &cost, Some(&eur)).await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    assert_eq!(
+        set["unit_cost"],
+        json!({"amount": "412.5", "currency": "EUR"})
+    );
+    let (_, history) = send(
+        &app,
+        "GET",
+        &format!("/admin/inventory-items/{item}/movements?reason=cost_adjustment"),
+        None,
+    )
+    .await;
+    let row = &history["items"][0];
+    assert_eq!(
+        (
+            &row["location"],
+            &row["delta"],
+            &row["unit_cost"],
+            &row["average_after"],
+            &row["note"]
+        ),
+        (
+            &Value::Null,
+            &json!(0),
+            &Value::Null,
+            &json!({"amount": "412.5", "currency": "EUR"}),
+            &json!("invoice 7")
+        )
+    );
+
+    // A cost was recorded in euros: the base currency stays.
+    let (status, body) = send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"USD"}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "store_currency_locked")
+    );
+    let (status, _) = send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    assert_eq!(status, StatusCode::OK, "the same one again");
+
+    // An order placed now keeps what a mug cost.
+    pay_on_delivery(&app, &pk, &cart_path).await;
+    let checkout = format!("{cart_path}/checkout");
+    let (status, placed) = send_as(&app, &pk, "POST", &checkout, Some("{}")).await;
+    assert_eq!(status, StatusCode::CREATED, "{placed}");
+    assert!(
+        placed["lines"][0].get("unit_cost").is_none(),
+        "shoppers never see cost"
+    );
+    let order = placed["id"].as_str().unwrap();
+    let (_, read) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
+    assert_eq!(
+        read["lines"][0]["unit_cost"],
+        json!({"amount": "412.5", "currency": "EUR"})
+    );
+    let (_, events) = send(
+        &app,
+        "GET",
+        &format!("/admin/inventory-items/{item}/movements?reason=sold"),
+        None,
+    )
+    .await;
+    assert_eq!(events["items"], json!([]), "nothing shipped yet");
+
+    // Cleared, without a body's currency.
+    let (status, cleared) = send(&app, "PUT", &cost, Some(r#"{"unit_cost":null}"#)).await;
+    assert_eq!(
+        (status, &cleared["unit_cost"]),
+        (StatusCode::OK, &Value::Null)
+    );
+
+    // Setting a cost needs purchasing:write.
+    let clerk = staff_with(&app, "clerk", json!(["inventory:write"])).await;
+    let (status, body) = send_as(&app, &clerk, "PUT", &cost, Some(&eur)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "missing_scope")
+    );
+}
+
+#[tokio::test]
+async fn cost_is_hidden_from_staff_without_purchasing_read() {
+    let app = app().await;
+    let (order, _, _) = placed_order_for_three_mugs(&app).await;
+    let (_, mugs) = send(&app, "GET", "/admin/products?limit=1", None).await;
+    let product = mugs["items"][0]["id"].as_str().unwrap().to_string();
+    let mug = only_variant(&app).await;
+    let (_, stock) = send(
+        &app,
+        "GET",
+        &format!("/admin/variants/{mug}/inventory"),
+        None,
+    )
+    .await;
+    let item = stock["id"].as_str().unwrap().to_string();
+
+    let clerk = staff_with(
+        &app,
+        "clerk",
+        json!(["inventory:read", "orders:read", "products:read"]),
+    )
+    .await;
+    let paths = [
+        format!("/admin/inventory-items/{item}"),
+        format!("/admin/variants/{mug}/inventory"),
+    ];
+    for path in &paths {
+        let (_, all) = send(&app, "GET", path, None).await;
+        assert!(all.get("unit_cost").is_some(), "{path}: {all}");
+        let (status, read) = send_as(&app, &clerk, "GET", path, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {read}");
+        assert_eq!(
+            (read.get("unit_cost"), &read["redacted"]),
+            (None, &json!(["unit_cost"])),
+            "{path}"
+        );
+    }
+    let (_, product_stock) = send_as(
+        &app,
+        &clerk,
+        "GET",
+        &format!("/admin/products/{product}/inventory"),
+        None,
+    )
+    .await;
+    assert_eq!(product_stock["items"][0]["redacted"], json!(["unit_cost"]));
+    let (_, history) = send_as(
+        &app,
+        &clerk,
+        "GET",
+        &format!("/admin/inventory-items/{item}/movements"),
+        None,
+    )
+    .await;
+    let row = &history["items"][0];
+    assert_eq!(
+        (
+            row.get("unit_cost"),
+            row.get("average_after"),
+            &row["redacted"]
+        ),
+        (None, None, &json!(["unit_cost", "average_after"]))
+    );
+    let (_, read) = send_as(&app, &clerk, "GET", &format!("/admin/orders/{order}"), None).await;
+    assert_eq!(
+        (
+            read["lines"][0].get("unit_cost"),
+            &read["lines"][0]["redacted"]
+        ),
+        (None, &json!(["unit_cost"]))
+    );
+
+    let buyer = staff_with(&app, "buyer", json!(["orders:read", "purchasing:read"])).await;
+    let (_, read) = send_as(&app, &buyer, "GET", &format!("/admin/orders/{order}"), None).await;
+    assert!(read["lines"][0].get("unit_cost").is_some(), "{read}");
+    assert!(read["lines"][0].get("redacted").is_none(), "{read}");
+}
+
+#[tokio::test]
 async fn inventory_items_are_listed_across_products_lowest_first() {
     let app = app().await;
     let shirt = create_product(&app, "shirt").await;
@@ -698,7 +1073,14 @@ async fn inventory_items_are_listed_across_products_lowest_first() {
     );
     assert_eq!(
         first["levels"],
-        json!([{ "location": location, "on_hand": 2, "reserved": 0, "available": 2 }])
+        json!([{
+            "location": location,
+            "on_hand": 2,
+            "reserved": 0,
+            "available": 2,
+            "incoming": 0,
+            "next_expected_at": null
+        }])
     );
     assert_eq!(page["items"][1]["variant_title"], Value::Null);
 
@@ -5947,7 +6329,7 @@ async fn templates_are_listed_read_saved_checked_and_reverted() {
     let (status, list) = send(&app, "GET", "/admin/notification-templates", None).await;
     assert_eq!(status, StatusCode::OK, "{list}");
     let items = list["items"].as_array().unwrap();
-    assert_eq!(items.len(), 10);
+    assert_eq!(items.len(), 11);
     assert_eq!(
         (
             &items[0]["key"],
@@ -5955,6 +6337,19 @@ async fn templates_are_listed_read_saved_checked_and_reverted() {
             &items[0]["can_disable"]
         ),
         (&json!("layout"), &Value::Null, &json!(false))
+    );
+    // Purchase orders are emailed only when sent: that template stays on.
+    assert_eq!(
+        (
+            &items[10]["key"],
+            &items[10]["audience"],
+            &items[10]["can_disable"]
+        ),
+        (
+            &json!("supplier_purchase_order"),
+            &json!("supplier"),
+            &json!(false)
+        )
     );
 
     let path = "/admin/notification-templates/order_confirmation";
@@ -7100,5 +7495,1095 @@ async fn anyone_renames_themselves_but_only_users_write_renames_others() {
     assert_eq!(
         (status, code(&json)),
         (StatusCode::FORBIDDEN, "missing_scope")
+    );
+}
+
+#[tokio::test]
+async fn suppliers_keep_contacts_terms_and_a_catalogue() {
+    let app = app().await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let body = json!({
+        "name": "Spore Labs",
+        "currency": "EUR",
+        "contacts": [
+            {"name": "Ana", "email": "ana@sporelabs.example", "primary": true},
+            {"name": "Accounts", "email": "accounts@sporelabs.example"}
+        ],
+        "payment_terms": {"type": "net", "days": 30, "note": "2% off within 10 days"},
+        "lead_time_days": 14
+    })
+    .to_string();
+    let (status, created) = send(&app, "POST", "/admin/suppliers", Some(&body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("sup_"));
+    assert_eq!(
+        created["payment_terms"],
+        json!({"type": "net", "days": 30, "note": "2% off within 10 days"})
+    );
+    assert_eq!(created["contacts"][0]["primary"], json!(true));
+
+    let two_primaries = json!({
+        "name": "Other",
+        "currency": "EUR",
+        "contacts": [{"name": "A", "primary": true}, {"name": "B", "primary": true}]
+    })
+    .to_string();
+    let (status, body) = send(&app, "POST", "/admin/suppliers", Some(&two_primaries)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "several_primary_contacts")
+    );
+
+    // The catalogue: a cost in the supplier's currency, for a variant that exists.
+    let row = format!("/admin/suppliers/{id}/variants/{mug}");
+    let usd = json!({"unit_cost": {"amount": "350", "currency": "USD"}}).to_string();
+    let (status, body) = send(&app, "PUT", &row, Some(&usd)).await;
+    assert_eq!(
+        (status, code(&body), &body["details"]["currency"]),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "cost_currency_mismatch",
+            &json!("EUR")
+        )
+    );
+    let gone = format!("/admin/suppliers/{id}/variants/var_0190000000007000800000000000ffff");
+    let (status, body) = send(&app, "PUT", &gone, Some("{}")).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "variant_not_found")
+    );
+    let eur = json!({
+        "supplier_sku": "SL-MUG",
+        "unit_cost": {"amount": "0.35", "currency": "EUR"},
+        "min_order_quantity": 100
+    })
+    .to_string();
+    let (status, set) = send(&app, "PUT", &row, Some(&eur)).await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    assert_eq!(
+        (
+            &set["supplier_name"],
+            &set["product_title"],
+            &set["unit_cost"]
+        ),
+        (
+            &json!("Spore Labs"),
+            &json!("Mug"),
+            &json!({"amount": "0.35", "currency": "EUR"})
+        )
+    );
+    let (_, page) = send(
+        &app,
+        "GET",
+        &format!("/admin/suppliers/{id}/variants"),
+        None,
+    )
+    .await;
+    assert_eq!(page["items"][0]["supplier_sku"], json!("SL-MUG"));
+    let (_, sellers) = send(
+        &app,
+        "GET",
+        &format!("/admin/variants/{mug}/suppliers"),
+        None,
+    )
+    .await;
+    assert_eq!(sellers["items"][0]["supplier"], json!(id));
+
+    // Its currency stays while the catalogue has costs.
+    let path = format!("/admin/suppliers/{id}");
+    let (status, body) = send(&app, "PATCH", &path, Some(r#"{"currency":"USD"}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "supplier_currency_in_use")
+    );
+    let (status, patched) = send(
+        &app,
+        "PATCH",
+        &path,
+        Some(r#"{"archived":true,"payment_terms":null,"notes":"Ships Mondays"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{patched}");
+    assert_eq!(
+        (
+            &patched["archived"],
+            &patched["payment_terms"],
+            &patched["notes"]
+        ),
+        (&json!(true), &Value::Null, &json!("Ships Mondays"))
+    );
+    let (_, listed) = send(&app, "GET", "/admin/suppliers?archived=true&q=spore", None).await;
+    assert_eq!(listed["items"][0]["id"], json!(id));
+    let (_, listed) = send(&app, "GET", "/admin/suppliers?archived=false", None).await;
+    assert_eq!(listed["items"], json!([]));
+
+    let (status, _) = send(&app, "DELETE", &row, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = send(&app, "DELETE", &row, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "supplier_variant_not_found")
+    );
+    let (status, _) = send(&app, "DELETE", &path, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = send(&app, "GET", &path, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "supplier_not_found")
+    );
+}
+
+#[tokio::test]
+async fn a_purchase_order_is_emailed_to_its_supplier() {
+    let app = app().await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let (_, locations) = send(&app, "GET", "/admin/locations", None).await;
+    let location = locations["items"][0]["id"].as_str().unwrap().to_string();
+    send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    let supplier = json!({
+        "name": "Spore Labs",
+        "currency": "EUR",
+        "contacts": [{"name": "Ana", "email": "ana@sporelabs.example", "primary": true}]
+    });
+    let (_, supplier) = send(
+        &app,
+        "POST",
+        "/admin/suppliers",
+        Some(&supplier.to_string()),
+    )
+    .await;
+    let draft = json!({
+        "supplier": supplier["id"],
+        "destination": location,
+        "lines": [{"variant": mug, "quantity": 12, "unit_cost": {"amount": "450", "currency": "EUR"}}]
+    });
+    let (_, po) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&draft.to_string()),
+    )
+    .await;
+    let id = po["id"].as_str().unwrap().to_string();
+    let path = format!("/admin/purchase-orders/{id}/send");
+
+    // Sending takes `purchasing:send` too.
+    let writer = key(
+        &app,
+        json!({"kind": "secret", "name": "buyer", "scopes": ["purchasing:write"]}),
+    )
+    .await;
+    let (status, body) = send_as(&app, &writer, "POST", &path, Some("{}")).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "missing_scope"),
+        "{body}"
+    );
+
+    // A draft is ordered and sent to the supplier's primary contact.
+    let body = json!({"cc": ["boss@sporelabs.example"], "message": "Before Friday, please."});
+    let (status, sent) = send(&app, "POST", &path, Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    assert_eq!(sent["status"], json!("ordered"));
+    assert!(sent["sent_at"].is_string(), "{sent}");
+    assert_eq!(
+        (&sent["revision"], &sent["sent_revision"]),
+        (&json!(0), &json!(0))
+    );
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    hypha_http::jobs::send_notifications(&app.state)
+        .await
+        .unwrap();
+    let emails: Vec<(String, String, String)> = app
+        .emails
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|e| (e.to.to_string(), e.subject.clone(), e.text.clone()))
+        .collect();
+    let number = format!("PO-{}", sent["number"]);
+    let to: Vec<&str> = emails.iter().map(|(to, _, _)| to.as_str()).collect();
+    assert_eq!(to, ["ana@sporelabs.example", "boss@sporelabs.example"]);
+    for (_, subject, text) in &emails {
+        assert!(subject.contains(&number), "{subject}");
+        assert!(text.contains("Before Friday, please."), "{text}");
+        assert!(text.contains("12 × Mug: €4.50 each, €54.00"), "{text}");
+    }
+    let (status, records) = send(
+        &app,
+        "GET",
+        &format!("/admin/notifications?purchase_order={id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{records}");
+    let items = records["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "{records}");
+    for n in items {
+        assert_eq!(
+            (&n["template"], &n["purchase_order_id"], &n["status"]),
+            (
+                &json!("supplier_purchase_order"),
+                &json!(id),
+                &json!("sent")
+            )
+        );
+    }
+
+    // Sending it again from its email record takes what sending takes:
+    // `notifications:write` alone never reaches a supplier.
+    let resend = format!(
+        "/admin/notifications/{}/resend",
+        items[0]["id"].as_str().unwrap()
+    );
+    let mailer = key(
+        &app,
+        json!({"kind": "secret", "name": "mailer", "scopes": ["notifications:write"]}),
+    )
+    .await;
+    let (status, body) = send_as(&app, &mailer, "POST", &resend, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "missing_scope"),
+        "{body}"
+    );
+    let (status, again) = send(&app, "POST", &resend, None).await;
+    assert_eq!(status, StatusCode::CREATED, "{again}");
+
+    // A supplier with no address to send to needs one named.
+    let quiet = json!({"name": "Quiet Fungi", "currency": "EUR"});
+    let (_, quiet) = send(&app, "POST", "/admin/suppliers", Some(&quiet.to_string())).await;
+    let draft = json!({
+        "supplier": quiet["id"],
+        "destination": location,
+        "lines": [{"variant": mug, "quantity": 1, "unit_cost": {"amount": "450", "currency": "EUR"}}]
+    });
+    let (_, other) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&draft.to_string()),
+    )
+    .await;
+    let other_path = format!(
+        "/admin/purchase-orders/{}/send",
+        other["id"].as_str().unwrap()
+    );
+    let (status, body) = send(&app, "POST", &other_path, Some("{}")).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "supplier_email_required")
+    );
+    let named = json!({"to": ["orders@quietfungi.example"]});
+    let (status, _) = send(&app, "POST", &other_path, Some(&named.to_string())).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // A closed order isn't sent.
+    let close = format!("/admin/purchase-orders/{id}/close");
+    send(&app, "POST", &close, None).await;
+    let (status, body) = send(&app, "POST", &path, Some("{}")).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "purchase_order_not_open")
+    );
+}
+
+#[tokio::test]
+async fn incoming_stock_is_what_ordered_purchase_orders_still_bring() {
+    let app = app().await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let stock_of = format!("/admin/variants/{mug}/inventory");
+    let (_, locations) = send(&app, "GET", "/admin/locations", None).await;
+    let location = locations["items"][0]["id"].as_str().unwrap().to_string();
+    send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    let supplier = json!({"name": "Spore Labs", "currency": "EUR"});
+    let (_, supplier) = send(
+        &app,
+        "POST",
+        "/admin/suppliers",
+        Some(&supplier.to_string()),
+    )
+    .await;
+    let draft = json!({
+        "supplier": supplier["id"],
+        "destination": location,
+        "expected_at": "2027-03-01T12:00:00Z",
+        "lines": [{"variant": mug, "quantity": 10, "unit_cost": {"amount": "100", "currency": "EUR"}}]
+    });
+    let (status, po) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&draft.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{po}");
+    let path = format!("/admin/purchase-orders/{}", po["id"].as_str().unwrap());
+    let level = |stock: &Value| {
+        let level = &stock["levels"][0];
+        (
+            level["location"].clone(),
+            level["on_hand"].as_i64().unwrap_or(0),
+            level["incoming"].as_u64().unwrap_or(0),
+            level["next_expected_at"].clone(),
+        )
+    };
+
+    // A draft brings nothing yet.
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(stock["levels"], json!([]), "{stock}");
+
+    // Ordered, its units are incoming at its destination, though the mug has no stock
+    // record: the level is listed with nothing on hand.
+    send(&app, "POST", &format!("{path}/order"), None).await;
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(stock["id"], Value::Null);
+    let expected = json!("2027-03-01T12:00:00Z");
+    assert_eq!(level(&stock), (json!(location), 0, 10, expected.clone()));
+
+    // What arrives or is refused is no longer incoming.
+    let auth = format!("Bearer {}", app.admin_key);
+    let headers = [
+        ("authorization", auth.as_str()),
+        ("idempotency-key", "incoming-1"),
+    ];
+    let receipt = json!({"lines": [{"variant": mug, "accepted": 4, "rejected": 1}]});
+    let (status, received) = send_with(
+        &app,
+        &headers,
+        "POST",
+        &format!("{path}/receipts"),
+        Some(&receipt.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{received}");
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(level(&stock), (json!(location), 4, 5, expected.clone()));
+    let item = stock["id"].as_str().unwrap().to_string();
+    let (_, read) = send(&app, "GET", &format!("/admin/inventory-items/{item}"), None).await;
+    assert_eq!(level(&read), (json!(location), 4, 5, expected.clone()));
+
+    // The product's stock and the inventory list say the same.
+    let (_, products) = send(&app, "GET", "/admin/products?limit=1", None).await;
+    let product = products["items"][0]["id"].as_str().unwrap();
+    let (_, all) = send(
+        &app,
+        "GET",
+        &format!("/admin/products/{product}/inventory"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        level(&all["items"][0]),
+        (json!(location), 4, 5, expected.clone())
+    );
+    let (_, list) = send(&app, "GET", "/admin/inventory-items", None).await;
+    assert_eq!(level(&list["items"][0]), (json!(location), 4, 5, expected));
+
+    // Closing the order cancels the rest: nothing is coming any more.
+    let (status, _) = send(&app, "POST", &format!("{path}/close"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(level(&stock), (json!(location), 4, 0, Value::Null));
+}
+
+#[tokio::test]
+async fn a_late_cost_revalues_the_stock_that_arrived() {
+    let app = app().await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let (_, locations) = send(&app, "GET", "/admin/locations", None).await;
+    let location = locations["items"][0]["id"].as_str().unwrap().to_string();
+    send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    let supplier = json!({"name": "Spore Labs", "currency": "EUR"});
+    let (_, supplier) = send(
+        &app,
+        "POST",
+        "/admin/suppliers",
+        Some(&supplier.to_string()),
+    )
+    .await;
+    let draft = json!({
+        "supplier": supplier["id"],
+        "destination": location,
+        "lines": [{"variant": mug, "quantity": 4, "unit_cost": {"amount": "500", "currency": "EUR"}}]
+    });
+    let (_, po) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&draft.to_string()),
+    )
+    .await;
+    let path = format!("/admin/purchase-orders/{}", po["id"].as_str().unwrap());
+    send(&app, "POST", &format!("{path}/order"), None).await;
+    let receipt = json!({"lines": [{"variant": mug, "accepted": 4, "rejected": 0}]});
+    let (status, received) = send(
+        &app,
+        "POST",
+        &format!("{path}/receipts"),
+        Some(&receipt.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{received}");
+    assert_eq!(received["purchase_order"]["status"], json!("closed"));
+    let stock_of = format!("/admin/variants/{mug}/inventory");
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(
+        stock["unit_cost"],
+        json!({"amount": "500", "currency": "EUR"})
+    );
+
+    // The carrier's bill comes after the goods: €8.00 over the 4, €2.00 more each.
+    let costs =
+        json!({"costs": [{"kind": "shipping", "amount": {"amount": 800, "currency": "EUR"}}]});
+    let (status, closed) = send(&app, "PATCH", &path, Some(&costs.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(
+        (&closed["status"], &closed["revision"]),
+        (&json!("closed"), &json!(1))
+    );
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(
+        stock["unit_cost"],
+        json!({"amount": "700", "currency": "EUR"})
+    );
+    let item = stock["id"].as_str().unwrap();
+    let (_, history) = send(
+        &app,
+        "GET",
+        &format!("/admin/inventory-items/{item}/movements?limit=1"),
+        None,
+    )
+    .await;
+    let row = &history["items"][0];
+    assert_eq!(
+        (
+            &row["reason"],
+            &row["delta"],
+            &row["location"],
+            &row["source"],
+            &row["unit_cost"],
+            &row["average_after"]
+        ),
+        (
+            &json!("cost_adjustment"),
+            &json!(0),
+            &Value::Null,
+            &json!({"type": "purchase_order", "purchase_order": closed["id"]}),
+            &json!({"amount": "500", "currency": "EUR"}),
+            &json!({"amount": "700", "currency": "EUR"})
+        )
+    );
+
+    // Anything but the costs stays as it was on a closed order.
+    let (status, body) = send(&app, "PATCH", &path, Some(r#"{"note":"late"}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "purchase_order_not_open")
+    );
+    // Removing the cost takes the value back off.
+    let (status, _) = send(&app, "PATCH", &path, Some(r#"{"costs":[]}"#)).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(
+        stock["unit_cost"],
+        json!({"amount": "500", "currency": "EUR"})
+    );
+}
+
+#[tokio::test]
+async fn receiving_brings_stock_in_at_its_landed_cost_and_can_be_taken_back() {
+    let app = app().await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let stock_of = format!("/admin/variants/{mug}/inventory");
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(stock["id"], Value::Null, "no stock record yet");
+    let (_, locations) = send(&app, "GET", "/admin/locations", None).await;
+    let location = locations["items"][0]["id"].as_str().unwrap().to_string();
+    let on_hand = |stock: &Value| stock["levels"][0]["on_hand"].as_i64().unwrap_or(0);
+    send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    let supplier = json!({"name": "Spore Labs", "currency": "EUR"});
+    let (_, supplier) = send(
+        &app,
+        "POST",
+        "/admin/suppliers",
+        Some(&supplier.to_string()),
+    )
+    .await;
+    let draft = json!({
+        "supplier": supplier["id"],
+        "destination": location,
+        "lines": [{"variant": mug, "quantity": 10, "unit_cost": {"amount": "100", "currency": "EUR"}}],
+        "costs": [{"kind": "shipping", "amount": {"amount": 100, "currency": "EUR"}}]
+    });
+    let (_, po) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&draft.to_string()),
+    )
+    .await;
+    let path = format!("/admin/purchase-orders/{}", po["id"].as_str().unwrap());
+    send(&app, "POST", &format!("{path}/order"), None).await;
+    let auth = format!("Bearer {}", app.admin_key);
+    let headers = [
+        ("authorization", auth.as_str()),
+        ("idempotency-key", "rcv-1"),
+    ];
+
+    // 6 accepted and 1 rejected; each unit carries 10 cents of the shipping.
+    let receipt =
+        json!({"lines": [{"variant": mug, "accepted": 6, "rejected": 1}], "note": "box 1"});
+    let receipts = format!("{path}/receipts");
+    let (status, received) = send_with(
+        &app,
+        &headers,
+        "POST",
+        &receipts,
+        Some(&receipt.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{received}");
+    let rcpt = received["receipt"]["id"].as_str().unwrap().to_string();
+    assert!(rcpt.starts_with("rcpt_"));
+    assert_eq!(
+        (
+            &received["receipt"]["lines"][0]["landed_unit_cost"],
+            &received["receipt"]["status"],
+            &received["purchase_order"]["receipt_status"],
+            &received["purchase_order"]["lines"][0]["outstanding"],
+            &received["new_items"],
+        ),
+        (
+            &json!({"amount": "110", "currency": "EUR"}),
+            &json!("recorded"),
+            &json!("partial"),
+            &json!(3),
+            &json!([mug]),
+        )
+    );
+    // Receiving made the mug a stock record, untracked: whether it sells didn't change.
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    let item = stock["id"].as_str().unwrap().to_string();
+    assert_eq!((&stock["tracked"], on_hand(&stock)), (&json!(false), 6));
+    // The same key again: the same receipt, received once.
+    let (status, again) = send_with(
+        &app,
+        &headers,
+        "POST",
+        &receipts,
+        Some(&receipt.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, &again["receipt"]["id"]),
+        (StatusCode::CREATED, &json!(rcpt))
+    );
+    let (_, stock) = send(
+        &app,
+        "GET",
+        &format!("/admin/variants/{mug}/inventory"),
+        None,
+    )
+    .await;
+    assert_eq!(on_hand(&stock), 6);
+    let (_, history) = send(
+        &app,
+        "GET",
+        &format!("/admin/inventory-items/{item}/movements"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (
+            &history["items"][0]["reason"],
+            &history["items"][0]["delta"]
+        ),
+        (&json!("received"), &json!(6))
+    );
+
+    // More than is outstanding, unless allowed.
+    let over = json!({"lines": [{"variant": mug, "accepted": 4}]});
+    let (status, body) = send(&app, "POST", &receipts, Some(&over.to_string())).await;
+    assert_eq!(
+        (
+            status,
+            code(&body),
+            &body["details"]["lines"][0]["outstanding"]
+        ),
+        (StatusCode::CONFLICT, "over_received", &json!(3))
+    );
+    let over = json!({"lines": [{"variant": mug, "accepted": 4}], "allow_over": true});
+    let (status, closed) = send(&app, "POST", &receipts, Some(&over.to_string())).await;
+    assert_eq!(status, StatusCode::CREATED, "{closed}");
+    assert_eq!(closed["purchase_order"]["status"], json!("closed"));
+    let more = json!({"lines": [{"variant": mug, "accepted": 1}]});
+    let (status, _) = send(&app, "POST", &receipts, Some(&more.to_string())).await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "a closed order takes nothing more"
+    );
+
+    let (_, list) = send(&app, "GET", &receipts, None).await;
+    assert_eq!(list["items"].as_array().map(Vec::len), Some(2));
+    // Taking the last receipt back opens the order again.
+    let last = closed["receipt"]["id"].as_str().unwrap();
+    let (status, taken) = send(
+        &app,
+        "POST",
+        &format!("/admin/receipts/{last}/cancel"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{taken}");
+    assert_eq!(
+        (
+            &taken["receipt"]["status"],
+            &taken["purchase_order"]["status"]
+        ),
+        (&json!("cancelled"), &json!("ordered"))
+    );
+    let (status, body) = send(
+        &app,
+        "POST",
+        &format!("/admin/receipts/{last}/cancel"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "receipt_cancelled")
+    );
+    let (status, fetched) = send(&app, "GET", &format!("/admin/receipts/{rcpt}"), None).await;
+    assert_eq!(
+        (status, &fetched["note"]),
+        (StatusCode::OK, &json!("box 1"))
+    );
+    let (_, stock) = send(
+        &app,
+        "GET",
+        &format!("/admin/variants/{mug}/inventory"),
+        None,
+    )
+    .await;
+    assert_eq!(on_hand(&stock), 6);
+}
+
+#[tokio::test]
+async fn purchase_orders_are_drafted_ordered_edited_and_closed() {
+    let app = app().await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let (_, locations) = send(&app, "GET", "/admin/locations", None).await;
+    let location = locations["items"][0]["id"].as_str().unwrap().to_string();
+    let supplier = json!({"name": "Spore Labs", "currency": "EUR", "lead_time_days": 7});
+    let (_, supplier) = send(
+        &app,
+        "POST",
+        "/admin/suppliers",
+        Some(&supplier.to_string()),
+    )
+    .await;
+    let supplier = supplier["id"].as_str().unwrap().to_string();
+    let price =
+        json!({"supplier_sku": "SL-MUG", "unit_cost": {"amount": "0.35", "currency": "EUR"}});
+    let row = format!("/admin/suppliers/{supplier}/variants/{mug}");
+    send(&app, "PUT", &row, Some(&price.to_string())).await;
+
+    // A draft: the line's cost and code come from the catalogue.
+    let draft = json!({
+        "supplier": supplier,
+        "destination": location,
+        "lines": [{"variant": mug, "quantity": 100}],
+        "costs": [{"kind": "shipping", "amount": {"amount": 500, "currency": "EUR"}}]
+    });
+    let (status, po) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&draft.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{po}");
+    let id = po["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("po_"));
+    assert_eq!(po["number"], json!(1001));
+    assert_eq!(
+        (
+            &po["status"],
+            &po["supplier_name"],
+            &po["lines"][0]["supplier_sku"]
+        ),
+        (&json!("draft"), &json!("Spore Labs"), &json!("SL-MUG"))
+    );
+    assert_eq!(
+        po["lines"][0]["unit_cost"],
+        json!({"amount": "0.35", "currency": "EUR"})
+    );
+    // 100 × 0.35 cents is 35 cents, plus €5.00 shipping.
+    assert_eq!(
+        (
+            &po["subtotal"]["amount"],
+            &po["costs_total"]["amount"],
+            &po["total"]["amount"]
+        ),
+        (&json!(35), &json!(500), &json!(535))
+    );
+
+    // Ordering needs the store's base currency.
+    let path = format!("/admin/purchase-orders/{id}");
+    let (status, body) = send(&app, "POST", &format!("{path}/order"), None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "store_currency_required")
+    );
+    send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    let (_, po) = send(&app, "GET", &path, None).await;
+    // Each unit carries 5 cents of the shipping: 0.35 + 5 = 5.35 cents landed.
+    assert_eq!(
+        po["lines"][0]["landed_unit_cost"],
+        json!({"amount": "5.35", "currency": "EUR"})
+    );
+    let (status, ordered) = send(&app, "POST", &format!("{path}/order"), None).await;
+    assert_eq!(status, StatusCode::OK, "{ordered}");
+    assert_eq!(ordered["status"], json!("ordered"));
+    assert!(ordered["ordered_at"].is_string());
+    assert!(ordered["expected_at"].is_string(), "from the lead time");
+    // Its landed costs are in the store's currency now, though nothing arrived yet.
+    let (status, body) = send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"USD"}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "store_currency_locked")
+    );
+
+    // An ordered order still changes, counting revisions.
+    let edit = json!({"lines": [{"variant": mug, "quantity": 120}], "note": "Rush"});
+    let (status, edited) = send(&app, "PATCH", &path, Some(&edit.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    assert_eq!(
+        (
+            &edited["revision"],
+            &edited["lines"][0]["quantity"],
+            &edited["lines"][0]["outstanding"]
+        ),
+        (&json!(1), &json!(120), &json!(120))
+    );
+    let (status, body) = send(&app, "PATCH", &path, Some(r#"{"currency":"USD"}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "purchase_order_currency_fixed")
+    );
+    let (status, body) = send(&app, "DELETE", &path, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "purchase_order_not_draft")
+    );
+
+    let (_, listed) = send(
+        &app,
+        "GET",
+        &format!("/admin/purchase-orders?status=ordered&supplier={supplier}&variant={mug}"),
+        None,
+    )
+    .await;
+    assert_eq!(listed["items"][0]["id"], json!(id));
+    assert_eq!(listed["items"][0]["supplier_name"], json!("Spore Labs"));
+    let (_, listed) = send(&app, "GET", "/admin/purchase-orders?status=draft", None).await;
+    assert_eq!(listed["items"], json!([]));
+
+    // Closing cancels what's outstanding.
+    let (status, closed) = send(&app, "POST", &format!("{path}/close"), None).await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(
+        (
+            &closed["status"],
+            &closed["lines"][0]["cancelled"],
+            &closed["receipt_status"]
+        ),
+        (&json!("closed"), &json!(120), &json!("none"))
+    );
+    let (status, body) = send(&app, "POST", &format!("{path}/cancel"), None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "purchase_order_not_open")
+    );
+
+    // Drafts are cancelled or deleted; a supplier on an order is archived, not deleted.
+    let (_, other) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&json!({"supplier": supplier}).to_string()),
+    )
+    .await;
+    let other = format!("/admin/purchase-orders/{}", other["id"].as_str().unwrap());
+    let (status, _) = send(&app, "DELETE", &other, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = send(
+        &app,
+        "DELETE",
+        &format!("/admin/suppliers/{supplier}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "supplier_in_use")
+    );
+    send(
+        &app,
+        "PATCH",
+        &format!("/admin/suppliers/{supplier}"),
+        Some(r#"{"archived":true}"#),
+    )
+    .await;
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&json!({"supplier": supplier}).to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "supplier_archived")
+    );
+}
+
+#[tokio::test]
+async fn a_purchase_order_names_what_exists() {
+    let app = app().await;
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(r#"{"supplier":"sup_0190000000007000800000000000ffff"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "supplier_not_found")
+    );
+    let (_, supplier) = send(
+        &app,
+        "POST",
+        "/admin/suppliers",
+        Some(r#"{"name":"Spore Labs","currency":"EUR"}"#),
+    )
+    .await;
+    let supplier = supplier["id"].as_str().unwrap();
+    let ghost = json!({
+        "supplier": supplier,
+        "lines": [{"variant": "var_0190000000007000800000000000ffff", "quantity": 1,
+                   "unit_cost": {"amount": "1", "currency": "EUR"}}]
+    });
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&ghost.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "unknown_variant")
+    );
+    let nowhere = json!({
+        "supplier": supplier,
+        "destination": "loc_0190000000007000800000000000ffff"
+    });
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&nowhere.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "location_not_found")
+    );
+    let (status, body) = send(
+        &app,
+        "GET",
+        "/admin/purchase-orders/po_0190000000007000800000000000ffff",
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "purchase_order_not_found")
+    );
+}
+
+#[tokio::test]
+async fn a_transfer_moves_stock_between_locations_through_transit() {
+    let app = app().await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let (_, locations) = send(&app, "GET", "/admin/locations", None).await;
+    let warehouse = locations["items"][0]["id"].as_str().unwrap().to_string();
+    let (_, shop) = send(&app, "POST", "/admin/locations", Some(r#"{"name":"Shop"}"#)).await;
+    let shop = shop["id"].as_str().unwrap().to_string();
+
+    // Only a variant with a stock record moves.
+    let draft = json!({"origin": warehouse, "destination": shop, "lines": [{"variant": mug, "quantity": 4}]});
+    let (status, body) = send(&app, "POST", "/admin/transfers", Some(&draft.to_string())).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "variant_not_stocked")
+    );
+    let item = json!({"variant": mug}).to_string();
+    let (_, item) = send(&app, "POST", "/admin/inventory-items", Some(&item)).await;
+    let item = item["id"].as_str().unwrap().to_string();
+    let level = format!("/admin/inventory-items/{item}/levels/{warehouse}");
+    send(&app, "PUT", &level, Some(r#"{"on_hand":10}"#)).await;
+
+    let same = json!({"origin": warehouse, "destination": warehouse});
+    let (status, body) = send(&app, "POST", "/admin/transfers", Some(&same.to_string())).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "transfer_same_location")
+    );
+    let draft = json!({
+        "origin": warehouse,
+        "destination": shop,
+        "expected_at": "2026-03-01T12:00:00Z",
+        "reference": "Van 2",
+        "lines": [{"variant": mug, "quantity": 4}]
+    });
+    let (status, created) = send(&app, "POST", "/admin/transfers", Some(&draft.to_string())).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("trf_"));
+    assert_eq!(
+        (
+            &created["number"],
+            &created["status"],
+            &created["lines"][0]["product_title"],
+            &created["lines"][0]["shipped"]
+        ),
+        (&json!(1001), &json!("draft"), &json!("Mug"), &json!(0))
+    );
+    let path = format!("/admin/transfers/{id}");
+
+    // Shipped once, whatever the retries.
+    let auth = format!("Bearer {}", app.admin_key);
+    let keyed = [
+        ("authorization", auth.as_str()),
+        ("idempotency-key", "ship-1"),
+    ];
+    let (status, shipped) = send_with(&app, &keyed, "POST", &format!("{path}/ship"), None).await;
+    assert_eq!(status, StatusCode::OK, "{shipped}");
+    assert_eq!(
+        (&shipped["status"], &shipped["lines"][0]["in_transit"]),
+        (&json!("in_transit"), &json!(4))
+    );
+    let (_, again) = send_with(&app, &keyed, "POST", &format!("{path}/ship"), None).await;
+    assert_eq!(again["status"], json!("in_transit"));
+    let (_, stock) = send(&app, "GET", &format!("/admin/inventory-items/{item}"), None).await;
+    let level_at = |stock: &Value, location: &str| {
+        stock["levels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["location"] == json!(location))
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    assert_eq!(level_at(&stock, &warehouse)["on_hand"], json!(6));
+    // On its way to the shop, expected when the transfer said.
+    assert_eq!(
+        (
+            &level_at(&stock, &shop)["incoming"],
+            &level_at(&stock, &shop)["next_expected_at"]
+        ),
+        (&json!(4), &json!("2026-03-01T12:00:00Z"))
+    );
+    let (status, body) = send(&app, "PATCH", &path, Some(r#"{"note":"late"}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "transfer_not_draft")
+    );
+
+    // 2 arrive, 1 is lost; then more than is left on its way is refused.
+    let arrival = json!({"lines": [{"variant": mug, "accepted": 2, "rejected": 1}]});
+    let (status, partly) = send(
+        &app,
+        "POST",
+        &format!("{path}/receive"),
+        Some(&arrival.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{partly}");
+    assert_eq!(partly["status"], json!("in_transit"));
+    let over = json!({"lines": [{"variant": mug, "accepted": 2}]});
+    let (status, body) = send(
+        &app,
+        "POST",
+        &format!("{path}/receive"),
+        Some(&over.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body), &body["details"]["lines"]),
+        (
+            StatusCode::CONFLICT,
+            "over_received",
+            &json!([{"variant": mug, "in_transit": 1}])
+        )
+    );
+    let last = json!({"lines": [{"variant": mug, "accepted": 1}]});
+    let (_, done) = send(
+        &app,
+        "POST",
+        &format!("{path}/receive"),
+        Some(&last.to_string()),
+    )
+    .await;
+    assert_eq!(done["status"], json!("received"));
+    let (_, stock) = send(&app, "GET", &format!("/admin/inventory-items/{item}"), None).await;
+    assert_eq!(
+        (
+            &level_at(&stock, &shop)["on_hand"],
+            &level_at(&stock, &shop)["incoming"]
+        ),
+        (&json!(3), &json!(0))
+    );
+
+    // The history says where every unit went.
+    let (_, history) = send(
+        &app,
+        "GET",
+        &format!("/admin/inventory-items/{item}/movements"),
+        None,
+    )
+    .await;
+    let rows: Vec<(Value, Value)> = history["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| (r["reason"].clone(), r["delta"].clone()))
+        .collect();
+    assert_eq!(
+        rows[..4],
+        [
+            (json!("transfer_in"), json!(1)),
+            (json!("shrinkage"), json!(0)),
+            (json!("transfer_in"), json!(2)),
+            (json!("transfer_out"), json!(-4)),
+        ]
+    );
+    assert_eq!(
+        history["items"][0]["source"],
+        json!({"type": "transfer", "transfer": id})
+    );
+
+    let (_, listed) = send(&app, "GET", "/admin/transfers?status=received", None).await;
+    assert_eq!(listed["items"][0]["id"], json!(id));
+    let (status, body) = send(&app, "DELETE", &path, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "transfer_not_draft")
     );
 }

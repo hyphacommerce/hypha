@@ -9,7 +9,10 @@ use utoipa::{
     openapi::{KnownFormat, ObjectBuilder, RefOr, Schema, SchemaFormat, Type, schema::SchemaType},
 };
 
-use crate::{BasisPoints, CountryCode, Currency, Email, Language, Money, TaxRate, Timezone};
+use crate::{
+    BasisPoints, CountryCode, Currency, Email, ExchangeRate, Language, Money, TaxRate, Timezone,
+    UnitCost,
+};
 
 /// A string schema with a pattern, an example and a description.
 pub(crate) fn string_schema(pattern: &str, example: &str, description: &str) -> RefOr<Schema> {
@@ -185,6 +188,55 @@ impl ToSchema for Money {
     }
 }
 
+impl PartialSchema for UnitCost {
+    fn schema() -> RefOr<Schema> {
+        ObjectBuilder::new()
+            .schema_type(SchemaType::new(Type::Object))
+            .property(
+                "amount",
+                string_schema(
+                    r"^(0|[1-9][0-9]*)(\.[0-9]{1,4})?$",
+                    "0.35",
+                    "In minor units as a decimal string, with up to 4 more decimals: \
+                     \"1050\" is 10.50, \"0.35\" is 0.0035. Never negative; a string so it \
+                     stays exact.",
+                ),
+            )
+            .required("amount")
+            .property("currency", crate::Currency::schema())
+            .required("currency")
+            .examples([serde_json::json!({ "amount": "0.35", "currency": "EUR" })])
+            .description(Some(
+                "What one unit cost, finer than a minor unit: a cheap part or an average \
+                 over several purchases isn't a whole cent.",
+            ))
+            .into()
+    }
+}
+
+impl ToSchema for UnitCost {
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("UnitCost")
+    }
+}
+
+impl PartialSchema for ExchangeRate {
+    fn schema() -> RefOr<Schema> {
+        string_schema(
+            r"^(0|[1-9][0-9]*)(\.[0-9]{1,8})?$",
+            "0.9213",
+            "What one unit of a currency is worth in another, as a positive decimal string \
+             with up to 8 decimals.",
+        )
+    }
+}
+
+impl ToSchema for ExchangeRate {
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("ExchangeRate")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
@@ -215,6 +267,16 @@ mod tests {
         );
         let money = serde_json::to_value(Money::new(1050, Currency::EUR).unwrap()).unwrap();
         assert_eq!(money, json!({ "amount": 1050, "currency": "EUR" }));
+    }
+
+    #[test]
+    fn a_unit_cost_amount_is_a_decimal_string_the_pattern_matches() {
+        let schema = json_of::<UnitCost>();
+        assert_eq!(schema["required"], json!(["amount", "currency"]));
+        let pattern = schema["properties"]["amount"]["pattern"].as_str().unwrap();
+        assert_eq!(pattern, r"^(0|[1-9][0-9]*)(\.[0-9]{1,4})?$");
+        let cost = serde_json::to_value(UnitCost::new(35, Currency::EUR).unwrap()).unwrap();
+        assert_eq!(cost, json!({ "amount": "0.0035", "currency": "EUR" }));
     }
 
     #[test]

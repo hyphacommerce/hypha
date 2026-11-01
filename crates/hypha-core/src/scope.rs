@@ -114,6 +114,16 @@ pub enum Scope {
     DiscountsRead,
     #[serde(rename = "discounts:write")]
     DiscountsWrite,
+    /// Suppliers, purchase orders, receiving stock and unit costs. Without
+    /// `purchasing:read`, costs are absent from inventory and orders, even for staff.
+    #[serde(rename = "purchasing:read")]
+    PurchasingRead,
+    #[serde(rename = "purchasing:write")]
+    PurchasingWrite,
+    /// Emailing a purchase order to its supplier: apart from `purchasing:write` so an
+    /// agent may draft orders but only propose sending them.
+    #[serde(rename = "purchasing:send")]
+    PurchasingSend,
     /// Personal data: without these, a caller that isn't a staff session (an API key, an
     /// app) gets customers, orders and carts with the field absent and listed in
     /// `redacted`. First and last names.
@@ -181,6 +191,9 @@ impl Scope {
             Scope::AgentsWrite => "agents:write",
             Scope::DiscountsRead => "discounts:read",
             Scope::DiscountsWrite => "discounts:write",
+            Scope::PurchasingRead => "purchasing:read",
+            Scope::PurchasingWrite => "purchasing:write",
+            Scope::PurchasingSend => "purchasing:send",
             Scope::CustomerDataName => "customer_data:name",
             Scope::CustomerDataEmail => "customer_data:email",
             Scope::CustomerDataPhone => "customer_data:phone",
@@ -226,6 +239,7 @@ impl Scope {
             Scope::CustomFieldsRead => Some(Scope::CustomFieldsWrite),
             Scope::AgentsRead => Some(Scope::AgentsWrite),
             Scope::DiscountsRead => Some(Scope::DiscountsWrite),
+            Scope::PurchasingRead => Some(Scope::PurchasingWrite),
             Scope::ProductsWrite
             | Scope::MarketsWrite
             | Scope::PricingWrite
@@ -249,6 +263,8 @@ impl Scope {
             | Scope::CustomFieldsWrite
             | Scope::AgentsWrite
             | Scope::DiscountsWrite
+            | Scope::PurchasingWrite
+            | Scope::PurchasingSend
             | Scope::CustomerDataName
             | Scope::CustomerDataEmail
             | Scope::CustomerDataPhone
@@ -277,7 +293,7 @@ impl Scope {
         Scope::CustomerDataProfile,
     ];
 
-    pub const ALL: [Scope; 49] = [
+    pub const ALL: [Scope; 52] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -322,6 +338,9 @@ impl Scope {
         Scope::AgentsWrite,
         Scope::DiscountsRead,
         Scope::DiscountsWrite,
+        Scope::PurchasingRead,
+        Scope::PurchasingWrite,
+        Scope::PurchasingSend,
         Scope::CustomerDataName,
         Scope::CustomerDataEmail,
         Scope::CustomerDataPhone,

@@ -11,6 +11,7 @@ import { orderTrackingUpdated } from "./emails/order-tracking-updated.tsx";
 import { staffInvite } from "./emails/staff-invite.tsx";
 import { staffNewOrder } from "./emails/staff-new-order.tsx";
 import { staffPasswordReset } from "./emails/staff-password-reset.tsx";
+import { supplierPurchaseOrder } from "./emails/supplier-purchase-order.tsx";
 import { toJinja } from "./jinja.tsx";
 import { Layout } from "./layout.tsx";
 
@@ -24,6 +25,7 @@ export const emails: Email[] = [
   staffNewOrder,
   staffInvite,
   staffPasswordReset,
+  supplierPurchaseOrder,
 ];
 
 function oneLine(email: Email, what: string, value: string): string {

@@ -1844,6 +1844,17 @@
               "null"
             ]
           },
+          "purchase_order_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PurchaseOrderId",
+                "description": "The purchase order an email to a supplier sent; `null` for every other email."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "redacted": {
             "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
@@ -1901,7 +1912,7 @@
         "x-hypha-open-enum": true
       },
       "NotificationTemplateKey": {
-        "description": "One of the store's templates. The names are stable.\n\nKnown values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "One of the store's templates. The names are stable.\n\nKnown values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`, `supplier_purchase_order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "layout",
           "order_confirmation",
@@ -1912,7 +1923,8 @@
           "staff_invite",
           "staff_password_reset",
           "customer_login_code",
-          "customer_erasure_requested"
+          "customer_erasure_requested",
+          "supplier_purchase_order"
         ],
         "type": "string",
         "x-hypha-open-enum": true
@@ -2649,6 +2661,14 @@
           "app"
         ],
         "type": "object"
+      },
+      "PurchaseOrderId": {
+        "description": "A PurchaseOrderId: `po_` and 32 hex digits.",
+        "examples": [
+          "po_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^po_[0-9a-f]{32}$",
+        "type": "string"
       },
       "SearchHitResponse": {
         "description": "One result: a listing, a product or a variant (the request's `group`), shown by\nits best match.",

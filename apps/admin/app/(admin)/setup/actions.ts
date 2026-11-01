@@ -29,6 +29,8 @@ export async function saveStore(input: {
   contactEmail: string;
   timezone: string;
   language: string;
+  /** Blank leaves the store's as it is: it can't change once a cost is recorded. */
+  currency: string;
 }): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/store", {
@@ -37,6 +39,7 @@ export async function saveStore(input: {
       contact_email: orNull(input.contactEmail),
       timezone: orNull(input.timezone),
       default_language: input.language,
+      ...(input.currency ? { currency: input.currency } : {}),
     },
   });
   if (error) return { error: describe(error) };

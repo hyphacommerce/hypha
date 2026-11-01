@@ -519,6 +519,19 @@ impl<T: DeserializeOwned> KeyedJson<T> {
             idempotency,
         })
     }
+
+    /// For routes whose body is optional (`JsonBody::parse_optional`): no body at all is
+    /// `None`, fingerprinted as empty.
+    pub fn parse_optional(self) -> Result<Keyed<Option<T>>, ApiError> {
+        let idempotency = self.key.map(|key| IdempotencyRequest {
+            key,
+            fingerprint: fingerprint(&self.method, &self.path, &self.query, &self.body.bytes),
+        });
+        Ok(Keyed {
+            body: self.body.parse_optional()?,
+            idempotency,
+        })
+    }
 }
 
 /// A request's fingerprint: SHA-256 over the method, the path as given, its query string,

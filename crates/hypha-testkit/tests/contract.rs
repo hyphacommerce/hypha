@@ -135,6 +135,11 @@ fn batch() {
 }
 
 #[test]
+fn stock_movements() {
+    block_on(contract::stock_movements(async || InMemoryPorts::default()));
+}
+
+#[test]
 fn preview_token_repo() {
     block_on(contract::preview_token_repo(async || {
         InMemoryPorts::default()
@@ -422,6 +427,35 @@ fn custom_field_values() {
 #[test]
 fn custom_field_filters() {
     block_on(contract::custom_field_filters(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
+fn purchase_order_repo() {
+    block_on(contract::purchase_order_repo(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
+fn receipt_repo() {
+    block_on(contract::receipt_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn transfer_repo() {
+    block_on(contract::transfer_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn supplier_repo() {
+    block_on(contract::supplier_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn supplier_variants() {
+    block_on(contract::supplier_variants(async || {
         InMemoryPorts::default()
     }));
 }

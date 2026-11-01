@@ -8,7 +8,9 @@
 //! Staff invites and resets are sent at once by their request (`send_now`): the flow
 //! waits for them, and their token never lands in a stored body.
 
-use hypha_core::{Clock, Email, EventId, IdGenerator, NotificationId, OrderId, RepoError};
+use hypha_core::{
+    Clock, Email, EventId, IdGenerator, NotificationId, OrderId, PurchaseOrderId, RepoError,
+};
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_notifications::{
     EffectiveTemplate, EmailSender, HasNotificationSettings, HasNotificationTemplates,
@@ -163,6 +165,8 @@ pub struct Message {
     /// The event it answers, so a second run finds it; `None` for direct sends and resends.
     pub event: Option<EventId>,
     pub order: Option<OrderId>,
+    /// The purchase order an email to a supplier is about.
+    pub purchase_order: Option<PurchaseOrderId>,
 }
 
 impl Message {
@@ -174,6 +178,7 @@ impl Message {
             subject,
             event: self.event,
             order: self.order,
+            purchase_order: self.purchase_order,
         }
     }
 }

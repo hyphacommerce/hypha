@@ -111,6 +111,14 @@ fn cores_error_codes_keep_their_names() {
             "invalid_tax_rate",
             code(MoneyError::InvalidTaxRate(1_000_001)),
         ),
+        (
+            "invalid_unit_cost",
+            code(MoneyError::InvalidUnitCost(String::new())),
+        ),
+        (
+            "invalid_exchange_rate",
+            code(MoneyError::InvalidExchangeRate(String::new())),
+        ),
         ("field_required", code(TextError::Missing("name"))),
         ("field_too_long", code(TextError::TooLong("name"))),
         (

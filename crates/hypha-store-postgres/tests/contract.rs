@@ -145,6 +145,12 @@ async fn batch() {
 }
 
 #[tokio::test]
+async fn stock_movements() {
+    let Some(url) = database_url() else { return };
+    contract::stock_movements(async || fresh_store(&url, "contract_stock_movements").await).await;
+}
+
+#[tokio::test]
 async fn idempotency_repo() {
     let Some(url) = database_url() else { return };
     contract::idempotency_repo(async || fresh_store(&url, "contract_idempotency").await).await;
@@ -474,4 +480,36 @@ async fn custom_field_filters() {
         fresh_store(&url, "contract_custom_field_filters").await
     })
     .await;
+}
+
+#[tokio::test]
+async fn purchase_order_repo() {
+    let Some(url) = database_url() else { return };
+    contract::purchase_order_repo(async || fresh_store(&url, "contract_purchase_orders").await)
+        .await;
+}
+
+#[tokio::test]
+async fn receipt_repo() {
+    let Some(url) = database_url() else { return };
+    contract::receipt_repo(async || fresh_store(&url, "contract_receipts").await).await;
+}
+
+#[tokio::test]
+async fn transfer_repo() {
+    let Some(url) = database_url() else { return };
+    contract::transfer_repo(async || fresh_store(&url, "contract_transfers").await).await;
+}
+
+#[tokio::test]
+async fn supplier_repo() {
+    let Some(url) = database_url() else { return };
+    contract::supplier_repo(async || fresh_store(&url, "contract_suppliers").await).await;
+}
+
+#[tokio::test]
+async fn supplier_variants() {
+    let Some(url) = database_url() else { return };
+    contract::supplier_variants(async || fresh_store(&url, "contract_supplier_variants").await)
+        .await;
 }

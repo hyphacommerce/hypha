@@ -32,6 +32,8 @@ pub mod orders;
 pub mod page;
 pub mod payments;
 pub mod products;
+pub mod purchase_orders;
+pub mod receipts;
 pub mod reference;
 pub mod reports;
 pub mod search;
@@ -39,7 +41,9 @@ pub mod setup;
 pub mod shipping;
 pub mod staff;
 pub mod stores;
+pub mod suppliers;
 pub mod taxes;
+pub mod transfers;
 pub mod uploads;
 
 use hypha_core::{Stamps, Timestamp};
@@ -231,6 +235,29 @@ macro_rules! route_table {
             [admin, POST, "/admin/discounts/{id}/codes/generate", discounts::generate],
             [admin, GET, "/admin/discounts/{id}/codes/export", discounts::export],
             [admin, GET, "/admin/discounts/{id}/usage", discounts::usage],
+            // suppliers and their catalogues
+            [admin, GET, "/admin/suppliers", suppliers::list],
+            [admin, POST, "/admin/suppliers", suppliers::create],
+            [admin, GET, "/admin/suppliers/{id}", suppliers::fetch],
+            [admin, PATCH, "/admin/suppliers/{id}", suppliers::update],
+            [admin, DELETE, "/admin/suppliers/{id}", suppliers::remove],
+            [admin, GET, "/admin/suppliers/{id}/variants", suppliers::catalogue],
+            [admin, PUT, "/admin/suppliers/{id}/variants/{variant_id}", suppliers::set_variant],
+            [admin, DELETE, "/admin/suppliers/{id}/variants/{variant_id}", suppliers::remove_variant],
+            [admin, GET, "/admin/variants/{id}/suppliers", suppliers::of_variant],
+            [admin, GET, "/admin/purchase-orders", purchase_orders::list],
+            [admin, POST, "/admin/purchase-orders", purchase_orders::create],
+            [admin, GET, "/admin/purchase-orders/{id}", purchase_orders::fetch],
+            [admin, PATCH, "/admin/purchase-orders/{id}", purchase_orders::update],
+            [admin, DELETE, "/admin/purchase-orders/{id}", purchase_orders::remove],
+            [admin, POST, "/admin/purchase-orders/{id}/order", purchase_orders::order],
+            [admin, POST, "/admin/purchase-orders/{id}/send", purchase_orders::send],
+            [admin, POST, "/admin/purchase-orders/{id}/close", purchase_orders::close],
+            [admin, POST, "/admin/purchase-orders/{id}/cancel", purchase_orders::cancel],
+            [admin, POST, "/admin/purchase-orders/{id}/receipts", receipts::create],
+            [admin, GET, "/admin/purchase-orders/{id}/receipts", receipts::list],
+            [admin, GET, "/admin/receipts/{id}", receipts::fetch],
+            [admin, POST, "/admin/receipts/{id}/cancel", receipts::cancel],
             [admin, GET, "/admin/customer-groups", customer_groups::list],
             [admin, POST, "/admin/customer-groups", customer_groups::create],
             [admin, GET, "/admin/customer-groups/{id}", customer_groups::fetch],
@@ -312,6 +339,16 @@ macro_rules! route_table {
             [admin, PATCH, "/admin/inventory-items/{id}", inventory::update_item],
             [admin, PUT, "/admin/inventory-items/{id}/levels/{location_id}", inventory::set_level],
             [admin, POST, "/admin/inventory-items/{id}/levels/{location_id}/adjustments", inventory::adjust_level],
+            [admin, GET, "/admin/inventory-items/{id}/movements", inventory::list_movements],
+            [admin, PUT, "/admin/inventory-items/{id}/cost", inventory::set_cost],
+            [admin, GET, "/admin/transfers", transfers::list],
+            [admin, POST, "/admin/transfers", transfers::create],
+            [admin, GET, "/admin/transfers/{id}", transfers::fetch],
+            [admin, PATCH, "/admin/transfers/{id}", transfers::update],
+            [admin, DELETE, "/admin/transfers/{id}", transfers::remove],
+            [admin, POST, "/admin/transfers/{id}/ship", transfers::ship],
+            [admin, POST, "/admin/transfers/{id}/receive", transfers::receive],
+            [admin, POST, "/admin/transfers/{id}/cancel", transfers::cancel],
             [admin, GET, "/admin/variants/{id}/inventory", inventory::fetch_variant_inventory],
             [admin, GET, "/admin/products/{id}/inventory", inventory::fetch_product_inventory],
             [admin, GET, "/admin/setup/checklist", setup::checklist],

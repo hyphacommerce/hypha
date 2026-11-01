@@ -16,6 +16,15 @@ pub struct Timestamp(i64);
 impl Timestamp {
     pub const UNIX_EPOCH: Timestamp = Timestamp(0);
 
+    /// The sooner of two times either of which may be unknown: one known time wins over
+    /// none.
+    pub fn earliest(a: Option<Timestamp>, b: Option<Timestamp>) -> Option<Timestamp> {
+        match (a, b) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
     pub const fn from_unix_micros(micros: i64) -> Self {
         Self(micros)
     }
@@ -114,6 +123,16 @@ pub fn stamp_update(aggregate: &mut impl Stamped, now: Timestamp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn earliest_takes_the_sooner_or_the_one_known() {
+        let (early, late) = (Timestamp(1), Timestamp(2));
+        assert_eq!(Timestamp::earliest(Some(late), Some(early)), Some(early));
+        assert_eq!(Timestamp::earliest(Some(early), Some(late)), Some(early));
+        assert_eq!(Timestamp::earliest(None, Some(late)), Some(late));
+        assert_eq!(Timestamp::earliest(Some(early), None), Some(early));
+        assert_eq!(Timestamp::earliest(None, None), None);
+    }
 
     #[derive(Default)]
     struct Thing(Option<Stamps>);

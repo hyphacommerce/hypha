@@ -198,7 +198,7 @@ impl World {
         block_on(p.locations.insert(&mut location)).unwrap();
         let mut item =
             InventoryItem::new(InventoryItemId::from_uuid(id(1700)), mug_v(), true, false);
-        item.set_on_hand(warehouse(), 0, None).unwrap();
+        item.set_on_hand(warehouse(), 0, None, None).unwrap();
         block_on(p.inventory_items.insert(&mut item)).unwrap();
         w
     }
@@ -412,7 +412,7 @@ fn stock_arriving_makes_a_variant_available() {
     let mut item = block_on(w.ports.inventory_items.get_by_variant(mug_v()))
         .unwrap()
         .unwrap();
-    item.set_on_hand(warehouse(), 5, None).unwrap();
+    item.set_on_hand(warehouse(), 5, None, None).unwrap();
     block_on(w.ports.inventory_items.update(&mut item)).unwrap();
     w.deliver();
     assert_eq!(w.ports.search_queue.targets(), [Target::Variant(mug_v())]);

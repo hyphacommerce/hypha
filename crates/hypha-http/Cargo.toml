@@ -25,6 +25,8 @@ hypha-privacy = { path = "../hypha-privacy" }
 hypha-payments = { path = "../hypha-payments" }
 hypha-agents = { path = "../hypha-agents" }
 hypha-discounts = { path = "../hypha-discounts" }
+hypha-purchasing = { path = "../hypha-purchasing" }
+hypha-receiving = { path = "../hypha-receiving" }
 hypha-mcp = { path = "../hypha-mcp" }
 hypha-auth = { path = "../hypha-auth" }
 hypha-users = { path = "../hypha-users" }

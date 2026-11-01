@@ -21,6 +21,8 @@ pub enum TemplateKey {
     /// A customer asked from their account for their data to be erased: when it runs, and
     /// that they can still cancel.
     CustomerErasureRequested,
+    /// A purchase order, emailed to its supplier.
+    SupplierPurchaseOrder,
 }
 
 /// Who a template's messages go to.
@@ -30,12 +32,14 @@ pub enum Audience {
     Buyer,
     /// Staff: the settings' recipients, an invitee, a staff member resetting a password.
     Staff,
+    /// A supplier's addresses: those a purchase order is sent to.
+    Supplier,
 }
 
 impl TemplateKey {
-    /// Every key: the layout first, then the buyer's templates, then the staff's, the
-    /// order the admin lists them in.
-    pub const ALL: [TemplateKey; 10] = [
+    /// Every key: the layout first, then the buyer's templates, then the staff's, then
+    /// the suppliers', the order the admin lists them in.
+    pub const ALL: [TemplateKey; 11] = [
         TemplateKey::Layout,
         TemplateKey::OrderConfirmation,
         TemplateKey::OrderShipped,
@@ -46,6 +50,7 @@ impl TemplateKey {
         TemplateKey::StaffNewOrder,
         TemplateKey::StaffInvite,
         TemplateKey::StaffPasswordReset,
+        TemplateKey::SupplierPurchaseOrder,
     ];
 
     /// The same string used in JSON, storage and the default files' names.
@@ -61,12 +66,14 @@ impl TemplateKey {
             TemplateKey::StaffPasswordReset => "staff_password_reset",
             TemplateKey::CustomerLoginCode => "customer_login_code",
             TemplateKey::CustomerErasureRequested => "customer_erasure_requested",
+            TemplateKey::SupplierPurchaseOrder => "supplier_purchase_order",
         }
     }
 
     /// Whether a merchant may turn it off. The layout isn't a message; invites and
     /// password resets are how staff get in, and the sign-in code how customers do:
-    /// without them nobody could join, recover an account or sign in.
+    /// without them nobody could join, recover an account or sign in. A purchase order is
+    /// emailed only when someone sends it: off, "Send" would do nothing.
     pub fn can_disable(self) -> bool {
         match self {
             TemplateKey::OrderConfirmation
@@ -78,7 +85,8 @@ impl TemplateKey {
             TemplateKey::Layout
             | TemplateKey::StaffInvite
             | TemplateKey::StaffPasswordReset
-            | TemplateKey::CustomerLoginCode => false,
+            | TemplateKey::CustomerLoginCode
+            | TemplateKey::SupplierPurchaseOrder => false,
         }
     }
 
@@ -95,6 +103,7 @@ impl TemplateKey {
             TemplateKey::StaffNewOrder
             | TemplateKey::StaffInvite
             | TemplateKey::StaffPasswordReset => Some(Audience::Staff),
+            TemplateKey::SupplierPurchaseOrder => Some(Audience::Supplier),
         }
     }
 

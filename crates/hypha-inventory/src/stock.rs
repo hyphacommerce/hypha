@@ -92,7 +92,7 @@ mod tests {
             tracked,
             false,
         );
-        item.set_on_hand(loc(), 2, None).unwrap();
+        item.set_on_hand(loc(), 2, None, None).unwrap();
         let location = Location::new(
             loc(),
             "Zagreb".to_string(),
@@ -130,7 +130,7 @@ mod tests {
         let mut overselling = context(true);
         let item = overselling.items.remove(&vid(1)).unwrap();
         let mut keeps = InventoryItem::new(item.id(), vid(1), true, true);
-        keeps.set_on_hand(loc(), 2, None).unwrap();
+        keeps.set_on_hand(loc(), 2, None, None).unwrap();
         overselling.items.insert(vid(1), keeps);
         assert_eq!(overselling.sellable(vid(1)), None, "keeps selling");
     }

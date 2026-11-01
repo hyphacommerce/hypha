@@ -76,3 +76,45 @@ export function ShipmentBadge({ status }: { status: AdminSchemas["FulfillmentSta
     <Badge label="Shipped" variant="success" />
   );
 }
+
+/** A purchase order's status. */
+const PURCHASE_ORDER: Record<string, { label: string; variant: Variant }> = {
+  draft: { label: "Draft", variant: "neutral" },
+  ordered: { label: "Ordered", variant: "info" },
+  closed: { label: "Closed", variant: "success" },
+  cancelled: { label: "Cancelled", variant: "warning" },
+};
+
+export function PurchaseOrderStatusBadge({
+  status,
+}: {
+  status: AdminSchemas["PurchaseOrderStatusDto"];
+}) {
+  const { label, variant } = PURCHASE_ORDER[status] ?? { label: status, variant: "neutral" };
+  return <Badge label={label} variant={variant} />;
+}
+
+/** How much of a purchase order has arrived. */
+const RECEIPT: Record<string, { label: string; variant: Variant }> = {
+  none: { label: "Not received", variant: "neutral" },
+  partial: { label: "Partly received", variant: "warning" },
+  received: { label: "Received", variant: "success" },
+};
+
+export function ReceiptStatusBadge({ status }: { status: AdminSchemas["ReceiptStatusDto"] }) {
+  const { label, variant } = RECEIPT[status] ?? { label: status, variant: "neutral" };
+  return <Badge label={label} variant={variant} />;
+}
+
+/** A transfer's status. */
+const TRANSFER: Record<string, { label: string; variant: Variant }> = {
+  draft: { label: "Draft", variant: "neutral" },
+  in_transit: { label: "In transit", variant: "info" },
+  received: { label: "Received", variant: "success" },
+  cancelled: { label: "Cancelled", variant: "warning" },
+};
+
+export function TransferStatusBadge({ status }: { status: AdminSchemas["TransferStatusDto"] }) {
+  const { label, variant } = TRANSFER[status] ?? { label: status, variant: "neutral" };
+  return <Badge label={label} variant={variant} />;
+}

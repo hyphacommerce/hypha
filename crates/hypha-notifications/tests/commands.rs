@@ -222,6 +222,7 @@ fn record(ports: &InMemoryPorts, n: u128, order: Option<u128>) {
         subject: format!("Order {n}"),
         event: Some(EventId::from_uuid(Uuid::from_u128(100 + n))),
         order: order.map(|o| OrderId::from_uuid(Uuid::from_u128(o))),
+        purchase_order: None,
     });
     block_on(ports.notifications.insert(&mut message)).unwrap();
 }
