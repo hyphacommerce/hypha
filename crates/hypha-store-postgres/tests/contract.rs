@@ -481,3 +481,16 @@ async fn custom_field_filters() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn supplier_repo() {
+    let Some(url) = database_url() else { return };
+    contract::supplier_repo(async || fresh_store(&url, "contract_suppliers").await).await;
+}
+
+#[tokio::test]
+async fn supplier_variants() {
+    let Some(url) = database_url() else { return };
+    contract::supplier_variants(async || fresh_store(&url, "contract_supplier_variants").await)
+        .await;
+}

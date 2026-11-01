@@ -474,6 +474,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "unit_costs",
             sql: include_str!("../migrations/0090_unit_costs.sql"),
         },
+        Migration {
+            version: 91,
+            name: "suppliers",
+            sql: include_str!("../migrations/0091_suppliers.sql"),
+        },
     ],
 };
 

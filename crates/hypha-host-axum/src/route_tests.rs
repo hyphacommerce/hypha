@@ -7470,3 +7470,139 @@ async fn anyone_renames_themselves_but_only_users_write_renames_others() {
         (StatusCode::FORBIDDEN, "missing_scope")
     );
 }
+
+#[tokio::test]
+async fn suppliers_keep_contacts_terms_and_a_catalogue() {
+    let app = app().await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let body = json!({
+        "name": "Spore Labs",
+        "currency": "EUR",
+        "contacts": [
+            {"name": "Ana", "email": "ana@sporelabs.example", "primary": true},
+            {"name": "Accounts", "email": "accounts@sporelabs.example"}
+        ],
+        "payment_terms": {"type": "net", "days": 30, "note": "2% off within 10 days"},
+        "lead_time_days": 14
+    })
+    .to_string();
+    let (status, created) = send(&app, "POST", "/admin/suppliers", Some(&body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("sup_"));
+    assert_eq!(
+        created["payment_terms"],
+        json!({"type": "net", "days": 30, "note": "2% off within 10 days"})
+    );
+    assert_eq!(created["contacts"][0]["primary"], json!(true));
+
+    let two_primaries = json!({
+        "name": "Other",
+        "currency": "EUR",
+        "contacts": [{"name": "A", "primary": true}, {"name": "B", "primary": true}]
+    })
+    .to_string();
+    let (status, body) = send(&app, "POST", "/admin/suppliers", Some(&two_primaries)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "several_primary_contacts")
+    );
+
+    // The catalogue: a cost in the supplier's currency, for a variant that exists.
+    let row = format!("/admin/suppliers/{id}/variants/{mug}");
+    let usd = json!({"unit_cost": {"amount": "350", "currency": "USD"}}).to_string();
+    let (status, body) = send(&app, "PUT", &row, Some(&usd)).await;
+    assert_eq!(
+        (status, code(&body), &body["details"]["currency"]),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "cost_currency_mismatch",
+            &json!("EUR")
+        )
+    );
+    let gone = format!("/admin/suppliers/{id}/variants/var_0190000000007000800000000000ffff");
+    let (status, body) = send(&app, "PUT", &gone, Some("{}")).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "variant_not_found")
+    );
+    let eur = json!({
+        "supplier_sku": "SL-MUG",
+        "unit_cost": {"amount": "0.35", "currency": "EUR"},
+        "min_order_quantity": 100
+    })
+    .to_string();
+    let (status, set) = send(&app, "PUT", &row, Some(&eur)).await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    assert_eq!(
+        (
+            &set["supplier_name"],
+            &set["product_title"],
+            &set["unit_cost"]
+        ),
+        (
+            &json!("Spore Labs"),
+            &json!("Mug"),
+            &json!({"amount": "0.35", "currency": "EUR"})
+        )
+    );
+    let (_, page) = send(
+        &app,
+        "GET",
+        &format!("/admin/suppliers/{id}/variants"),
+        None,
+    )
+    .await;
+    assert_eq!(page["items"][0]["supplier_sku"], json!("SL-MUG"));
+    let (_, sellers) = send(
+        &app,
+        "GET",
+        &format!("/admin/variants/{mug}/suppliers"),
+        None,
+    )
+    .await;
+    assert_eq!(sellers["items"][0]["supplier"], json!(id));
+
+    // Its currency stays while the catalogue has costs.
+    let path = format!("/admin/suppliers/{id}");
+    let (status, body) = send(&app, "PATCH", &path, Some(r#"{"currency":"USD"}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "supplier_currency_in_use")
+    );
+    let (status, patched) = send(
+        &app,
+        "PATCH",
+        &path,
+        Some(r#"{"archived":true,"payment_terms":null,"notes":"Ships Mondays"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{patched}");
+    assert_eq!(
+        (
+            &patched["archived"],
+            &patched["payment_terms"],
+            &patched["notes"]
+        ),
+        (&json!(true), &Value::Null, &json!("Ships Mondays"))
+    );
+    let (_, listed) = send(&app, "GET", "/admin/suppliers?archived=true&q=spore", None).await;
+    assert_eq!(listed["items"][0]["id"], json!(id));
+    let (_, listed) = send(&app, "GET", "/admin/suppliers?archived=false", None).await;
+    assert_eq!(listed["items"], json!([]));
+
+    let (status, _) = send(&app, "DELETE", &row, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = send(&app, "DELETE", &row, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "supplier_variant_not_found")
+    );
+    let (status, _) = send(&app, "DELETE", &path, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = send(&app, "GET", &path, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "supplier_not_found")
+    );
+}

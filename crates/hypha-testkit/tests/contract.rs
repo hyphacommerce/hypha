@@ -430,3 +430,15 @@ fn custom_field_filters() {
         InMemoryPorts::default()
     }));
 }
+
+#[test]
+fn supplier_repo() {
+    block_on(contract::supplier_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn supplier_variants() {
+    block_on(contract::supplier_variants(async || {
+        InMemoryPorts::default()
+    }));
+}

@@ -1657,6 +1657,41 @@ impl From<hypha_oauth::CommandError> for ApiError {
     }
 }
 
+impl From<hypha_purchasing::CommandError> for ApiError {
+    fn from(e: hypha_purchasing::CommandError) -> Self {
+        use hypha_purchasing::{CommandError as E, PurchasingError as P};
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Suppliers and catalogue rows only arrive in URLs.
+            E::SupplierNotFound(_) | E::SupplierVariantNotFound { .. } => StatusCode::NOT_FOUND,
+            E::SupplierCurrencyInUse(_) | E::SupplierInUse(_) => StatusCode::CONFLICT,
+            E::Purchasing(
+                P::Text(_)
+                | P::Email(_)
+                | P::Address(_)
+                | P::TooManyContacts { .. }
+                | P::SeveralPrimaryContacts
+                | P::InvalidNetDays { .. }
+                | P::LeadTimeTooLong { .. }
+                | P::NotesTooLong { .. }
+                | P::InvalidMinOrderQuantity
+                | P::CostCurrencyMismatch { .. },
+            ) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        let details = match &e {
+            E::Purchasing(P::CostCurrencyMismatch { expected, .. }) => {
+                Some(json!({ "currency": expected }))
+            }
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
+    }
+}
+
 impl From<hypha_discounts::CommandError> for ApiError {
     fn from(e: hypha_discounts::CommandError) -> Self {
         use hypha_discounts::{CodeError as C, CommandError as E, DiscountError as D};

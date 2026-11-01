@@ -8,6 +8,7 @@ use hypha_core::{Ctx, Event, EventHandler, HasBatch, StageEvents, StoredEvent, V
 use hypha_inventory::{HasInventoryItems, InventoryError, InventoryItemRepo};
 use hypha_markets::{HasPriceLists, PriceListRepo, StageFixedPrices, remove_fixed_prices};
 use hypha_products::{ProductDeleted, VariantRemoved};
+use hypha_purchasing::{HasSupplierVariants, SupplierVariantRepo};
 
 /// Cleans up what other domains keep for a removed variant, and for each variant of a
 /// deleted product.
@@ -16,7 +17,10 @@ pub struct VariantCleanup;
 
 impl<P> EventHandler<P> for VariantCleanup
 where
-    P: HasPriceLists + HasInventoryItems + HasBatch<Batch: StageFixedPrices + StageEvents>,
+    P: HasPriceLists
+        + HasInventoryItems
+        + HasSupplierVariants
+        + HasBatch<Batch: StageFixedPrices + StageEvents>,
 {
     fn name(&self) -> &'static str {
         "variant_cleanup"
@@ -34,7 +38,10 @@ where
 /// `product.variant_removed` cleans up its variant, `product.deleted` each listed one.
 async fn variant_cleanup<P>(ports: &P, event: &StoredEvent) -> Result<(), String>
 where
-    P: HasPriceLists + HasInventoryItems + HasBatch<Batch: StageFixedPrices + StageEvents>,
+    P: HasPriceLists
+        + HasInventoryItems
+        + HasSupplierVariants
+        + HasBatch<Batch: StageFixedPrices + StageEvents>,
 {
     let named = || format!("event {} names no variant", event.id);
     let variants: Vec<VariantId> = if event.event_type == ProductDeleted::TYPE {
@@ -53,14 +60,17 @@ where
     Ok(())
 }
 
-/// Removes the variant's fixed prices from every price list, and deletes its inventory
-/// item. While units are still reserved on it (open orders count on them) the item is
+/// Removes the variant's fixed prices from every price list and its rows from suppliers'
+/// catalogues, and deletes its inventory item. While units are still reserved on it (open orders count on them) the item is
 /// retired instead, and goes with its last reservation when the orders are fulfilled or
 /// cancelled. Each write records its own events. Running again finds nothing left to do; a
 /// write that lost a race fails the run, and the retry sees the item as it is then.
 async fn clean_variant<P>(ports: &P, variant: VariantId) -> Result<(), String>
 where
-    P: HasPriceLists + HasInventoryItems + HasBatch<Batch: StageFixedPrices + StageEvents>,
+    P: HasPriceLists
+        + HasInventoryItems
+        + HasSupplierVariants
+        + HasBatch<Batch: StageFixedPrices + StageEvents>,
 {
     let ctx = Ctx::system();
     let lists = ports
@@ -73,6 +83,11 @@ where
             .await
             .map_err(|e| e.to_string())?;
     }
+    ports
+        .supplier_variants()
+        .remove_variants(&[variant])
+        .await
+        .map_err(|e| e.to_string())?;
     let items = ports.inventory_items();
     if let Some(mut item) = items
         .get_by_variant(variant)

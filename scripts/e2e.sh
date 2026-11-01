@@ -1257,6 +1257,33 @@ step "the cost in the history" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/mov
 contains "no units moved, the cost after" '"location":null,"delta":0,"after":null,"reason":"cost_adjustment","source":{"type":"manual"},"note":"invoice 12","unit_cost":null,"average_after":{"amount":"1250.5","currency":"EUR"}'
 step "the base currency is fixed now" 409 store_currency_locked -X PATCH "$BASE/admin/store" -H "$JSON" \
     -d '{"currency":"USD"}'
+
+# --- suppliers and what they sell ---
+step "add a supplier" 201 - -X POST "$BASE/admin/suppliers" -H "$JSON" -d '{"name":"Lamp Works","currency":"EUR",
+    "contacts":[{"name":"Ana","email":"ana@lampworks.example","primary":true}],
+    "payment_terms":{"type":"net","days":30},"lead_time_days":10}'
+SUPPLIER=$(id)
+contains "with its terms" '"payment_terms":{"type":"net","days":30,"note":null}'
+step "two primary contacts" 422 several_primary_contacts -X POST "$BASE/admin/suppliers" -H "$JSON" \
+    -d '{"name":"Other","currency":"EUR","contacts":[{"name":"A","primary":true},{"name":"B","primary":true}]}'
+step "what they charge for lamps" 200 - -X PUT "$BASE/admin/suppliers/$SUPPLIER/variants/$LAMP_VAR" -H "$JSON" \
+    -d '{"supplier_sku":"LW-LAMP","unit_cost":{"amount":"1100","currency":"EUR"},"min_order_quantity":10}'
+contains "named after the product" '"product_title":"Lamp"'
+step "a price in another currency" 422 cost_currency_mismatch -X PUT \
+    "$BASE/admin/suppliers/$SUPPLIER/variants/$LAMP_VAR" -H "$JSON" -d '{"unit_cost":{"amount":"1","currency":"USD"}}'
+step "a variant that doesn't exist" 404 variant_not_found -X PUT \
+    "$BASE/admin/suppliers/$SUPPLIER/variants/var_00000000000000000000000000000063" -H "$JSON" -d '{}'
+step "the supplier's catalogue" 200 - "$BASE/admin/suppliers/$SUPPLIER/variants"
+contains "the lamp at their price" '"supplier_sku":"LW-LAMP","unit_cost":{"amount":"1100","currency":"EUR"}'
+step "who sells lamps" 200 - "$BASE/admin/variants/$LAMP_VAR/suppliers"
+contains "Lamp Works does" "\"supplier\":\"$SUPPLIER\",\"supplier_name\":\"Lamp Works\""
+step "their currency is fixed while they have prices" 409 supplier_currency_in_use -X PATCH \
+    "$BASE/admin/suppliers/$SUPPLIER" -H "$JSON" -d '{"currency":"USD"}'
+step "archive them" 200 - -X PATCH "$BASE/admin/suppliers/$SUPPLIER" -H "$JSON" -d '{"archived":true}'
+step "archived suppliers" 200 - "$BASE/admin/suppliers?archived=true&q=lamp"
+contains "Lamp Works is one" "\"id\":\"$SUPPLIER\""
+step "back to active" 200 - -X PATCH "$BASE/admin/suppliers/$SUPPLIER" -H "$JSON" -d '{"archived":false}'
+step "an unknown supplier" 404 supplier_not_found "$BASE/admin/suppliers/sup_00000000000000000000000000000063"
 step "what runs low at the warehouse" 200 - "$BASE/admin/inventory-items?below=6&location=$WAREHOUSE"
 contains "the lamp runs low" "\"id\":\"$LAMP_ITEM\",\"variant\":\"$LAMP_VAR\",\"product\":\"$LAMP\""
 step "no lamp below zero" 200 - "$BASE/admin/inventory-items?below=0&product=$LAMP"

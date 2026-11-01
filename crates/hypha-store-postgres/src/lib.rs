@@ -52,6 +52,7 @@ mod spore_settings;
 mod stock_movements;
 mod store;
 mod stores;
+mod suppliers;
 mod tax;
 #[cfg(feature = "testing")]
 pub mod testing;

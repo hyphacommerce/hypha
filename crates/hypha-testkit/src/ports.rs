@@ -93,6 +93,8 @@ pub struct InMemoryPorts {
     pub agents: crate::InMemoryAgents,
     /// Discounts, their codes and their usage.
     pub discounts: crate::InMemoryDiscounts,
+    /// Suppliers and their catalogues.
+    pub suppliers: crate::InMemorySuppliers,
 }
 
 impl Default for InMemoryPorts {
@@ -170,6 +172,7 @@ impl Default for InMemoryPorts {
             custom_fields,
             agents: crate::InMemoryAgents::sharing(&outbox),
             discounts,
+            suppliers: crate::InMemorySuppliers::sharing(&outbox),
             outbox,
         }
     }
@@ -190,6 +193,20 @@ impl hypha_discounts::HasDiscounts for InMemoryPorts {
     type Discounts = crate::InMemoryDiscounts;
     fn discounts(&self) -> &crate::InMemoryDiscounts {
         &self.discounts
+    }
+}
+
+impl hypha_purchasing::HasSuppliers for InMemoryPorts {
+    type Suppliers = crate::InMemorySuppliers;
+    fn suppliers(&self) -> &crate::InMemorySuppliers {
+        &self.suppliers
+    }
+}
+
+impl hypha_purchasing::HasSupplierVariants for InMemoryPorts {
+    type SupplierVariants = crate::InMemorySuppliers;
+    fn supplier_variants(&self) -> &crate::InMemorySuppliers {
+        &self.suppliers
     }
 }
 

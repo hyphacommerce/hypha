@@ -5,6 +5,7 @@ import {
   ArchiveBoxIcon,
   BanknotesIcon,
   BuildingStorefrontIcon,
+  ClipboardDocumentListIcon,
   CodeBracketIcon,
   Cog6ToothIcon,
   CpuChipIcon,
@@ -98,6 +99,13 @@ export const NAV_SECTIONS: NavSection[] = [
         children: [{ label: "Categories", href: "/products/categories", scope: "products:read" }],
       },
       { label: "Inventory", href: "/inventory", icon: ArchiveBoxIcon, scope: "inventory:read" },
+      {
+        label: "Purchasing",
+        href: "/suppliers",
+        icon: ClipboardDocumentListIcon,
+        scope: "purchasing:read",
+        children: [{ label: "Suppliers", href: "/suppliers", scope: "purchasing:read" }],
+      },
       {
         label: "Customers",
         href: "/customers",

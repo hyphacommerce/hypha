@@ -46,6 +46,7 @@ mod search;
 mod shipping;
 mod spore_settings;
 mod stores;
+mod suppliers;
 mod table;
 mod tax_classes;
 mod tax_regions;
@@ -96,6 +97,7 @@ pub use search::{
 pub use shipping::{InMemoryAppProviderRepo, InMemoryShippingZoneRepo, NoRateProviders};
 pub use spore_settings::InMemorySporeSettingsRepo;
 pub use stores::InMemoryStoreRepo;
+pub use suppliers::InMemorySuppliers;
 pub use tax_classes::InMemoryTaxClassRepo;
 pub use tax_regions::InMemoryTaxRegionRepo;
 pub use users::{InMemoryInviteRepo, InMemoryRoleRepo, InMemoryUserRepo};

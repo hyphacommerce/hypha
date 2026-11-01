@@ -39,6 +39,7 @@ pub mod setup;
 pub mod shipping;
 pub mod staff;
 pub mod stores;
+pub mod suppliers;
 pub mod taxes;
 pub mod uploads;
 
@@ -231,6 +232,16 @@ macro_rules! route_table {
             [admin, POST, "/admin/discounts/{id}/codes/generate", discounts::generate],
             [admin, GET, "/admin/discounts/{id}/codes/export", discounts::export],
             [admin, GET, "/admin/discounts/{id}/usage", discounts::usage],
+            // suppliers and their catalogues
+            [admin, GET, "/admin/suppliers", suppliers::list],
+            [admin, POST, "/admin/suppliers", suppliers::create],
+            [admin, GET, "/admin/suppliers/{id}", suppliers::fetch],
+            [admin, PATCH, "/admin/suppliers/{id}", suppliers::update],
+            [admin, DELETE, "/admin/suppliers/{id}", suppliers::remove],
+            [admin, GET, "/admin/suppliers/{id}/variants", suppliers::catalogue],
+            [admin, PUT, "/admin/suppliers/{id}/variants/{variant_id}", suppliers::set_variant],
+            [admin, DELETE, "/admin/suppliers/{id}/variants/{variant_id}", suppliers::remove_variant],
+            [admin, GET, "/admin/variants/{id}/suppliers", suppliers::of_variant],
             [admin, GET, "/admin/customer-groups", customer_groups::list],
             [admin, POST, "/admin/customer-groups", customer_groups::create],
             [admin, GET, "/admin/customer-groups/{id}", customer_groups::fetch],

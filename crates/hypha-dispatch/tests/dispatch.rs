@@ -193,6 +193,53 @@ fn a_removed_variant_loses_its_prices_and_stock_record() {
 }
 
 #[test]
+fn a_removed_variant_leaves_suppliers_catalogues() {
+    use hypha_purchasing::{
+        Supplier, SupplierDraft, SupplierRepo, SupplierVariant, SupplierVariantDraft,
+        SupplierVariantRepo,
+    };
+    let ports = world();
+    let clock = FixedClock::default();
+    let supplier = hypha_core::SupplierId::from_uuid(Uuid::from_u128(41));
+    let mut labs = Supplier::new(
+        supplier,
+        SupplierDraft::new("Spore Labs", hypha_core::Currency::EUR),
+    )
+    .unwrap();
+    block_on(ports.suppliers.insert(&mut labs)).unwrap();
+    for variant in [small(), large()] {
+        let row = SupplierVariant::new(
+            supplier,
+            hypha_core::Currency::EUR,
+            variant,
+            SupplierVariantDraft::default(),
+        )
+        .unwrap();
+        block_on(ports.suppliers.put(&row)).unwrap();
+    }
+    remove(&ports, small());
+    assert_eq!(dispatch(&ports, &clock).done, 1);
+    assert_eq!(
+        block_on(SupplierVariantRepo::get(
+            &ports.suppliers,
+            supplier,
+            small()
+        )),
+        Ok(None)
+    );
+    assert!(
+        block_on(SupplierVariantRepo::get(
+            &ports.suppliers,
+            supplier,
+            large()
+        ))
+        .unwrap()
+        .is_some(),
+        "the other variant stays listed"
+    );
+}
+
+#[test]
 fn a_deleted_products_variants_lose_their_prices_and_stock_records() {
     use hypha_core::HasBatch;
     use hypha_products::StageProducts;
