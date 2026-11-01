@@ -1,8 +1,9 @@
 # 0039: Purchasing: suppliers, purchase orders, receiving, transfers, stock history and cost
 
-- **Status:** Accepted (2026-10-31). Danilo accepted every recommendation of the research
-  (§1), which became PU1–PU16. §14's details and §15's edges were confirmed on
-  2026-11-01, with unit costs sent as decimal strings of minor units.
+- **Status:** Built (2026-11-01; "As built" at the end). Accepted 2026-10-31: Danilo
+  accepted every recommendation of the research (§1), which became PU1–PU16. §14's
+  details and §15's edges were confirmed on 2026-11-01, with unit costs sent as decimal
+  strings of minor units.
 - **Scope:**
   - Suppliers, and each supplier's codes and prices for the variants it sells.
   - Purchase orders: drafting, ordering, sending to the supplier, editing, closing,
@@ -784,3 +785,57 @@ where it has them.
 11. **The demo seed:** suppliers with catalogues, received and open POs, a transfer in
     transit (`pnpm seed --purchasing` for a seeded store). Then the site's roadmap moves
     purchasing to "Now".
+
+## As built
+
+All of §16 was built on 2026-11-01, one stacked branch per step, then reviewed and
+tested end to end. Where the code differs from the sections above, or settles what they
+left open:
+
+- **Crates and tables.** `hypha-purchasing` (suppliers, catalogue rows, purchase orders,
+  receipts, the allocation and landed cost in `costs.rs`, incoming in `incoming.rs`) and
+  `hypha-receiving` (`receive`, `cancel_receipt`, and the purchase order edits and close
+  that revalue stock). Transfers are in `hypha-inventory` (`transfer.rs`,
+  `transfer_commands.rs`). Migrations 0088 (the store's currency) to 0097
+  (`sent_revision`).
+- **Expected dates** (`expected_at` on purchase orders and transfers) are a `Timestamp` at
+  noon UTC, since core has no date type, and are always shown as their UTC day: in the
+  admin, the print view and the supplier's email.
+- **Late costs** (§8.3) are applied by `hypha-receiving`'s `update_purchase_order` and
+  `close_purchase_order` (closing early cancels what's outstanding, so the costs spread
+  over fewer units), and `cancel_receipt` keeps the rest of the order's stock right too.
+  Each line keeps `extra_applied`, the extra-cost value its received stock carries in the
+  store's currency. `hypha-purchasing`'s own `update_purchase_order` and
+  `close_purchase_order` refuse an order goods arrived on (`purchase_order_received`), so
+  only the workflow's can change one.
+- **Units received past the ordered quantity** (`allow_over`) carry no extra cost: the
+  extras are spread over what was ordered (`PurchaseOrder::extra_bearing`), so stock never
+  carries more of a cost than was paid. Such a receipt line's landed cost is the blend of
+  both.
+- **A removed variant** on an ordered purchase order is still received on the order and
+  the receipt (the host passes `removed_variants`), but no stock record is made for it.
+- **The store's currency** is locked once a ledger row has a cost *or* a purchase order is
+  ordered, closed, or a draft with a rate (`PurchaseOrderRepo::store_currency_named`), not
+  only once a cost is recorded (§8.4). The check reads before the store's write, outside
+  its transaction.
+- **Quantities** on purchase order, receipt and transfer lines are at most
+  1,000,000,000 (`422 quantity_too_large`): their columns are `integer`.
+- **Sending** (§10): `purchase_order.sent` carries a `ship_to` snapshot (mail can't read
+  inventory); the order keeps `sent_revision`, which the admin compares with `revision`
+  for "Send updated PO"; extra costs paid in the store's currency are left off what the
+  supplier sees; resending a supplier email needs `purchasing:write` and
+  `purchasing:send`, like sending, so an agent can't email a supplier through
+  `notifications:write`; the `supplier_purchase_order` template can't be turned off.
+- **Incoming** (§9) is computed for every location of the asked variants
+  (`PurchaseOrderRepo::incoming(variants)`, `TransferRepo::incoming`), merged in
+  `hypha-http`'s `incoming_of`; inventory responses also name the variant's `product`.
+- **Transfers** (§6): lost units are a `shrinkage` row with delta 0 whose note says how
+  many; a variant whose stock record went after drafting fails at shipping
+  (`variant_not_stocked`); the admin lists Transfers under Purchasing, shown with
+  `purchasing:read`, though the routes need only the inventory scopes.
+- **Lost races** (§5): with `MAX_ATTEMPTS` 3, a receipt or a shipment can lose every
+  attempt to many concurrent checkouts on the same items; the Postgres race tests check
+  that whatever wins is written whole, not that the receipt always wins.
+- **Seed**: `pnpm seed` and `pnpm seed --purchasing` add three suppliers, purchase orders
+  in every state (found again by their supplier reference, so an interrupted run is
+  finished by the next), a transfer in transit and costs set by hand.

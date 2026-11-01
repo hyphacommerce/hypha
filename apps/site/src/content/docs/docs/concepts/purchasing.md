@@ -6,8 +6,49 @@ sidebar:
 ---
 
 Purchasing is where stock comes from: the **suppliers** you buy from, what each sells you,
-the **purchase orders** you place with them, and (as it lands) the goods you receive. It
-needs the `purchasing:read` and `purchasing:write` scopes.
+the **purchase orders** you place with them, the goods you **receive** against them, and
+what each unit cost you once it's landed. **Transfers** move stock between your own
+locations.
+
+It needs the `purchasing:read` and `purchasing:write` scopes, and `purchasing:send` to
+email a supplier. Transfers need the inventory scopes instead.
+
+## How a purchase goes
+
+1. **Set your base currency** (Settings → Store, or the setup wizard). Every cost is kept
+   in it: what stock is worth, what each order line cost you.
+2. **Add the supplier** and, if you like, its **catalogue**: its code and price for each
+   variant it sells you.
+3. **Draft a purchase order** to one of your locations. Lines take the catalogue's price;
+   add shipping, duties or fees as **extra costs**.
+4. **Order it**, or **send it**: the supplier gets it by email, and it's marked ordered.
+   What it brings now shows as **incoming** stock at that location.
+5. **Receive** the goods as they arrive, in as many parts as they come. Accepted units go
+   on hand at their **landed cost**, and each item's cost becomes the average of what it
+   had and what arrived.
+6. A bill that comes later is added to the order's extra costs: the stock that arrived is
+   **revalued**.
+
+Every step leaves a row in each item's [stock history](/docs/concepts/inventory/#stock-history).
+
+## In the admin
+
+**Purchasing** in the side menu has three pages:
+
+- **Purchase orders**: every order with its status and how much arrived, filtered by
+  view. An order's page has its lines (with what's still to come and each unit's landed
+  cost), its extra costs, totals in its currency and yours, and the actions its status
+  allows: *Mark as ordered*, *Send to supplier* (*Send again*, or *Send updated PO* after
+  an edit), *Receive*, *Close*, *Cancel*, *Print*. Its receipts are listed below, each
+  with *Take back*.
+- **Suppliers**: details, contacts and payment terms; a **Catalogue** tab to add, change
+  and remove what they sell you; and their purchase orders.
+- **Transfers**: moving stock between your locations, with *Ship* and *Receive*.
+
+The **Receive** dialog starts with what's still to come on each line: change it to what
+arrived, put damaged or wrong units under *Refused*, and confirm when more came than was
+ordered. An inventory item's page shows its cost (*Change cost*), what's incoming at each
+location, and its history, each row linking to the order, receipt or transfer behind it.
 
 ## Suppliers
 
@@ -51,14 +92,16 @@ A purchase order (`po_…`, numbered `PO-1001`, `POST /admin/purchase-orders`) i
 order from one supplier, to one of your locations (its **destination**). It starts as a
 **draft** in the supplier's currency with their payment terms, and has:
 
-- **lines**, one per variant (up to 1,000): a quantity and a unit cost in the order's
-  currency, net of tax. A line sent without a cost takes the supplier's catalogue price,
+- **lines**, one per variant (up to 1,000, each up to 1,000,000,000 units:
+  `422 quantity_too_large`): a quantity and a unit cost in the order's currency, net of
+  tax. A line sent without a cost takes the supplier's catalogue price,
   else the cost on the supplier's last order with that variant;
 - **extra costs** (up to 20): shipping, duties, fees or other, in the order's currency or
   your store's, spread over the lines **by value** (the default), **by quantity**, or not
   at all (`none`: an expense on the total);
-- a tax amount (on the total only: purchase tax is in no unit's cost), an expected date,
-  the supplier's own reference, a note printed for the supplier and one for staff.
+- a tax amount (on the total only: purchase tax is in no unit's cost), an expected date
+  (a calendar day, set by default from the supplier's lead time when it's ordered), the
+  supplier's own reference, a note printed for the supplier and one for staff.
 
 Each line shows its **landed unit cost**: its price plus its share of the extra costs, in
 your store's base currency. An order in another currency needs an **exchange rate** (one
@@ -75,6 +118,8 @@ unit of it in yours, as a decimal string like `"0.9213"`) before it's ordered.
 
 Ordering needs a destination, a line, your store's base currency (`409
 store_currency_required`) and, in another currency, a rate (`409 exchange_rate_required`).
+Once a purchase order is ordered, the store's base currency is fixed
+(`409 store_currency_locked`): its rate converts into it.
 An ordered order still changes (`PATCH`): lines can be added and their quantity or cost
 changed, but a line goods arrived on stays, at no less than arrived (`422 below_received`),
 and the currency is fixed. Each change counts a **revision**. **Closing** an ordered one
@@ -110,9 +155,13 @@ another `location`. Send an `Idempotency-Key`: a retry answers with the first re
 - **Refused units add no stock**, but they're counted: a line is done once received and
   refused units cover it. To expect a replacement, raise the line's quantity.
 - **More than is outstanding** is `409 over_received`, listing each line's outstanding in
-  `details.lines`, unless the request says `"allow_over": true`.
+  `details.lines`, unless the request says `"allow_over": true`. The extra costs were
+  spread over what was ordered, so units past that come in at the line's price alone:
+  stock never carries more of a cost than was paid.
 - **A variant with no stock record** gets one, **untracked**, so receiving doesn't change
-  whether it sells; the answer lists it in `new_items` for you to turn tracking on.
+  whether it sells; the answer lists it in `new_items` for you to turn tracking on. A
+  variant removed from its product since is still counted on the order and the receipt,
+  but no stock is added for it.
 
 The order counts what arrived and closes once every line is accounted for. Its receipts
 are at `GET /admin/purchase-orders/{id}/receipts`. A receipt recorded by mistake is
@@ -198,11 +247,14 @@ address, through the store's email settings like every other email (the editable
   sent again as it is now, with its revision: after editing an order, send it again.
 - The email lists the lines (with the supplier's own codes), the extra costs in the
   order's currency, the totals, the payment terms, where to ship and your note.
-- It sets `sent_at` and records `purchase_order.sent`. The emails are listed with
-  `GET /admin/notifications?purchase_order={id}`, and can be resent from there.
+- It sets `sent_at` and `sent_revision` (the revision that went out), and records
+  `purchase_order.sent`. The emails are listed with
+  `GET /admin/notifications?purchase_order={id}`, and can be resent from there, which
+  needs the same scopes as sending.
 - **Sending needs `purchasing:send`** as well as `purchasing:write`. An agent may draft
   purchase orders, but only proposes sending one: a person approves every email to a
   supplier.
 
 The admin's purchase order page also has a print view, which the browser can save as a
-PDF.
+PDF. Extra costs paid in your own currency (duties at home) are left off what the supplier
+sees, in the email and the print view alike.
