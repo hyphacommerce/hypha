@@ -26,7 +26,10 @@ use hypha_discounts::{
     ClassSet, CodeSelection, Discount, DiscountCode, DiscountSnapshot, StageDiscounts, UsageClaim,
 };
 use hypha_fulfillment::{Fulfillment, FulfillmentSnapshot, StageFulfillments};
-use hypha_inventory::{InventoryItem, InventoryItemSnapshot, StageInventoryItems, StockMovement};
+use hypha_inventory::{
+    InventoryItem, InventoryItemSnapshot, StageInventoryItems, StageTransfers, StockMovement,
+    Transfer, TransferSnapshot,
+};
 use hypha_markets::{FixedPrice, StageCatalogProducts, StageFixedPrices, StagePriceListSchedule};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_notifications::{
@@ -193,6 +196,7 @@ enum Staged {
     PurchaseOrder(PurchaseOrderSnapshot, PurchaseOrderSummary),
     NewReceipt(ReceiptSnapshot),
     Receipt(ReceiptSnapshot),
+    Transfer(TransferSnapshot),
 }
 
 impl Staged {
@@ -251,6 +255,8 @@ impl Staged {
             Staged::PurchaseOrder(..) => 33,
             // A receipt after its order (it names it).
             Staged::NewReceipt(_) | Staged::Receipt(_) => 33,
+            // Transfers before the items they move.
+            Staged::Transfer(_) => 33,
             Staged::Idempotency(_) => 33,
             // New items are inserted as they come; nothing else holds their rows yet.
             Staged::NewInventoryItem(_) => 34,
@@ -303,6 +309,7 @@ impl Staged {
                 (Staged::PurchaseOrder(a, _), Staged::PurchaseOrder(b, _)) => a.id.cmp(&b.id),
                 (Staged::NewReceipt(a), Staged::NewReceipt(b))
                 | (Staged::Receipt(a), Staged::Receipt(b)) => a.id.cmp(&b.id),
+                (Staged::Transfer(a), Staged::Transfer(b)) => a.id.cmp(&b.id),
                 (Staged::NewInventoryItem(a), Staged::NewInventoryItem(b)) => a.id.cmp(&b.id),
                 (Staged::NewPayment(a), Staged::NewPayment(b))
                 | (Staged::Payment(a), Staged::Payment(b)) => a.id.cmp(&b.id),
@@ -602,6 +609,16 @@ impl StagePurchaseOrders for PgBatch {
         let version = po.version().next();
         self.stage_events_of(po, version);
         po.set_version(version);
+    }
+}
+
+impl StageTransfers for PgBatch {
+    fn update_transfer(&mut self, transfer: &mut Transfer) {
+        stamp_update(transfer, self.now);
+        self.stage(Staged::Transfer(transfer.snapshot()));
+        let version = transfer.version().next();
+        self.stage_events_of(transfer, version);
+        transfer.set_version(version);
     }
 }
 
@@ -935,6 +952,9 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                         update_purchase_order(&db, &s, &summary).await?;
                     }
                     Staged::NewReceipt(s) => insert_receipt(&db, &s).await?,
+                    Staged::Transfer(s) => {
+                        crate::transfers::update_transfer(&db, &s).await?;
+                    }
                     Staged::Receipt(s) => {
                         update_receipt(&db, &s).await?;
                     }

@@ -444,6 +444,11 @@ fn receipt_repo() {
 }
 
 #[test]
+fn transfer_repo() {
+    block_on(contract::transfer_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
 fn supplier_repo() {
     block_on(contract::supplier_repo(async || InMemoryPorts::default()));
 }

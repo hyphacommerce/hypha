@@ -25,7 +25,8 @@ use hypha_discounts::{
 };
 use hypha_fulfillment::{Fulfillment, StageFulfillments, keys as fulfillment_keys};
 use hypha_inventory::{
-    InventoryItem, StageInventoryItems, StockMovement, repo::keys as inventory_keys,
+    InventoryItem, StageInventoryItems, StageTransfers, StockMovement, Transfer,
+    repo::keys as inventory_keys,
 };
 use hypha_markets::{FixedPrice, StageCatalogProducts, StageFixedPrices, StagePriceListSchedule};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
@@ -158,6 +159,7 @@ enum Staged {
     PurchaseOrder(PurchaseOrder),
     NewReceipt(Receipt),
     Receipt(Receipt),
+    Transfer(Transfer),
 }
 
 impl StageDiscounts for InMemoryBatch {
@@ -471,6 +473,16 @@ impl StagePurchaseOrders for InMemoryBatch {
     }
 }
 
+impl StageTransfers for InMemoryBatch {
+    fn update_transfer(&mut self, transfer: &mut Transfer) {
+        stamp_update(transfer, self.now);
+        let version = transfer.version().next();
+        self.stage_events_of(transfer, version);
+        self.stage(Staged::Transfer(transfer.clone()));
+        transfer.set_version(version);
+    }
+}
+
 impl StageReceipts for InMemoryBatch {
     fn insert_receipt(&mut self, receipt: &mut Receipt) {
         stamp_insert(receipt, self.now);
@@ -676,6 +688,8 @@ impl HasBatch for InMemoryPorts {
         let purchase_orders_before = purchase_orders.clone();
         let mut receipts = self.receipts.receipts.lock();
         let receipts_before = receipts.clone();
+        let mut transfers = self.transfers.transfers.lock();
+        let transfers_before = transfers.clone();
         let now = self.outbox.now();
         // Single writes first, the set-based revocation after them (as Postgres sorts).
         let mut revocations = Vec::new();
@@ -1196,6 +1210,14 @@ impl HasBatch for InMemoryPorts {
                             &no_unique_keys,
                         )?;
                     }
+                    Staged::Transfer(mut transfer) => {
+                        update_row(
+                            &mut transfers,
+                            transfer.id(),
+                            &mut transfer,
+                            &crate::transfers::unique,
+                        )?;
+                    }
                     Staged::Receipt(mut receipt) => {
                         update_row(&mut receipts, receipt.id(), &mut receipt, &no_unique_keys)?;
                     }
@@ -1238,6 +1260,7 @@ impl HasBatch for InMemoryPorts {
             *discount_rows = discount_rows_before;
             *purchase_orders = purchase_orders_before;
             *receipts = receipts_before;
+            *transfers = transfers_before;
             (*identities, *sessions, *resets, *roles, *users, *invites) = before_staff;
         }
         written

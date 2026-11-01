@@ -1344,6 +1344,51 @@ contains "taken back" '"status":"cancelled"'
 contains "nothing received any more" '"receipt_status":"none"'
 step "not twice" 409 receipt_cancelled -X POST "$BASE/admin/receipts/$RECEIPT/cancel"
 step "an unknown receipt" 404 receipt_not_found "$BASE/admin/receipts/rcpt_00000000000000000000000000000063"
+
+# --- transfers (from the back room to a pop-up; neither serves a market, so the lamp's
+# counts below stay) ---
+step "a pop-up shop" 201 - -X POST "$BASE/admin/locations" -H "$JSON" -d '{"name":"Pop-up"}'
+POPUP=$(id)
+step "4 lamps in the back room" 200 - -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$BACKROOM" \
+    -H "$JSON" -d '{"on_hand":4}'
+step "a transfer going nowhere" 422 transfer_same_location -X POST "$BASE/admin/transfers" -H "$JSON" \
+    -d "{\"origin\":\"$BACKROOM\",\"destination\":\"$BACKROOM\"}"
+step "draft a transfer" 201 - -X POST "$BASE/admin/transfers" -H "$JSON" \
+    -d "{\"origin\":\"$BACKROOM\",\"destination\":\"$POPUP\",\"expected_at\":\"2030-01-02T12:00:00Z\",
+        \"reference\":\"Van 2\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"quantity\":3}]}"
+TRANSFER=$(id)
+contains "a draft, the lamp named" '"status":"draft"'
+contains "with its product" '"product_title":"Lamp"'
+step "ship it" 200 - -X POST "$BASE/admin/transfers/$TRANSFER/ship" -H "Idempotency-Key: e2e-ship-1"
+contains "on its way" '"status":"in_transit"'
+replayed "shipping again with the key ships nothing more" -X POST "$BASE/admin/transfers/$TRANSFER/ship" \
+    -H "Idempotency-Key: e2e-ship-1"
+step "a shipped transfer doesn't change" 409 transfer_not_draft -X PATCH "$BASE/admin/transfers/$TRANSFER" \
+    -H "$JSON" -d '{"note":"late"}'
+step "lamps on their way to the pop-up" 200 - "$BASE/admin/variants/$LAMP_VAR/inventory"
+contains "1 left in the back room" "\"location\":\"$BACKROOM\",\"on_hand\":1"
+contains "3 incoming at the pop-up" "\"location\":\"$POPUP\",\"on_hand\":0,\"reserved\":0,\"available\":0,\"incoming\":3,\"next_expected_at\":\"2030-01-02T12:00:00Z\""
+step "1 arrives, 1 broke on the way" 200 - -X POST "$BASE/admin/transfers/$TRANSFER/receive" -H "$JSON" \
+    -H "Idempotency-Key: e2e-transfer-in-1" -d "{\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":1,\"rejected\":1}]}"
+contains "1 still on its way" '"in_transit":1'
+step "more than is on its way" 409 over_received -X POST "$BASE/admin/transfers/$TRANSFER/receive" -H "$JSON" \
+    -d "{\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":2}]}"
+contains "1 is" "\"in_transit\":1,\"variant\":\"$LAMP_VAR\""
+step "the last one arrives" 200 - -X POST "$BASE/admin/transfers/$TRANSFER/receive" -H "$JSON" \
+    -d "{\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":1}]}"
+contains "received" '"status":"received"'
+step "the pop-up's lamps" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?location=$POPUP"
+contains "the broken one, no units" '"delta":0,"after":1,"reason":"shrinkage"'
+contains "from the transfer" "\"source\":{\"type\":\"transfer\",\"transfer\":\"$TRANSFER\"}"
+step "received transfers of lamps" 200 - "$BASE/admin/transfers?status=received&variant=$LAMP_VAR"
+contains "this one" "\"id\":\"$TRANSFER\""
+step "a shipped transfer stays" 409 transfer_not_draft -X DELETE "$BASE/admin/transfers/$TRANSFER"
+step "a draft to throw away" 201 - -X POST "$BASE/admin/transfers" -H "$JSON" \
+    -d "{\"origin\":\"$POPUP\",\"destination\":\"$BACKROOM\"}"
+SPARE_TRANSFER=$(id)
+step "nothing to ship" 409 transfer_empty -X POST "$BASE/admin/transfers/$SPARE_TRANSFER/ship"
+step "throw it away" 204 - -X DELETE "$BASE/admin/transfers/$SPARE_TRANSFER"
+step "an unknown transfer" 404 transfer_not_found "$BASE/admin/transfers/trf_00000000000000000000000000000063"
 step "what runs low at the warehouse" 200 - "$BASE/admin/inventory-items?below=6&location=$WAREHOUSE"
 contains "the lamp runs low" "\"id\":\"$LAMP_ITEM\",\"variant\":\"$LAMP_VAR\",\"product\":\"$LAMP\""
 step "no lamp below zero" 200 - "$BASE/admin/inventory-items?below=0&product=$LAMP"

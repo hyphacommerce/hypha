@@ -99,6 +99,8 @@ pub struct InMemoryPorts {
     pub purchase_orders: crate::InMemoryPurchaseOrders,
     /// What arrived against purchase orders.
     pub receipts: crate::InMemoryReceipts,
+    /// Stock moving between locations.
+    pub transfers: crate::InMemoryTransfers,
 }
 
 impl Default for InMemoryPorts {
@@ -179,6 +181,7 @@ impl Default for InMemoryPorts {
             discounts,
             purchase_orders: crate::InMemoryPurchaseOrders::sharing(&suppliers, &outbox),
             receipts: crate::InMemoryReceipts::default(),
+            transfers: crate::InMemoryTransfers::sharing(&outbox),
             suppliers,
             outbox,
         }
@@ -385,6 +388,13 @@ impl HasInventoryItems for InMemoryPorts {
     type InventoryItems = InMemoryInventoryItemRepo;
     fn inventory_items(&self) -> &InMemoryInventoryItemRepo {
         &self.inventory_items
+    }
+}
+
+impl hypha_inventory::HasTransfers for InMemoryPorts {
+    type Transfers = crate::InMemoryTransfers;
+    fn transfers(&self) -> &crate::InMemoryTransfers {
+        &self.transfers
     }
 }
 

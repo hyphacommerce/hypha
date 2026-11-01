@@ -598,6 +598,8 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_purchasing::HasSupplierVariants
         + hypha_purchasing::HasPurchaseOrders
         + hypha_receiving::ReceivingPorts
+        + hypha_inventory::TransferPorts
+        + hypha_inventory::HasLocations
         + HasBatch<
             Batch: hypha_core::StageEvents
                        + hypha_markets::StageCatalogProducts

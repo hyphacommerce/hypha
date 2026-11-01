@@ -58,6 +58,7 @@ mod suppliers;
 mod tax;
 #[cfg(feature = "testing")]
 pub mod testing;
+mod transfers;
 mod users;
 
 pub use batch::PgBatch;

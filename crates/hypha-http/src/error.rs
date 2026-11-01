@@ -1026,8 +1026,10 @@ impl From<hypha_inventory::CommandError> for ApiError {
             E::Auth(_) => StatusCode::FORBIDDEN,
             // Item IDs only ever arrive in URLs; locations can come in either, so routes
             // that name one in the URL turn its 422 into a 404 (`not_found_if`).
-            E::InventoryItemNotFound(_) => StatusCode::NOT_FOUND,
+            E::InventoryItemNotFound(_) | E::TransferNotFound(_) => StatusCode::NOT_FOUND,
             E::LocationNotFound(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            // The transfer's state: shipped, received or cancelled, or empty, or less on
+            // its way than arrived.
             E::InventoryItemExists { .. }
             | E::OutOfStock { .. }
             | E::StoreCurrencyRequired
@@ -1035,7 +1037,11 @@ impl From<hypha_inventory::CommandError> for ApiError {
                 I::OnHandChanged { .. }
                 | I::ReferenceInUse(_)
                 | I::OutOfStock { .. }
-                | I::StillReserved,
+                | I::StillReserved
+                | I::TransferNotDraft { .. }
+                | I::TransferNotInTransit { .. }
+                | I::TransferEmpty
+                | I::OverReceived(_),
             ) => StatusCode::CONFLICT,
             E::Inventory(
                 I::Text(_)
@@ -1046,9 +1052,20 @@ impl From<hypha_inventory::CommandError> for ApiError {
                 | I::InvalidReference
                 | I::NoteTooLong { .. }
                 | I::CostCurrency { .. }
-                | I::Money(_),
+                | I::Money(_)
+                | I::InvalidTransferNumber(_)
+                | I::SameLocation
+                | I::TooManyTransferLines { .. }
+                | I::DuplicateTransferLine(_)
+                | I::InvalidTransferQuantity(_)
+                | I::TransferNoteTooLong { .. }
+                | I::UnknownTransferLine(_)
+                | I::EmptyArrival(_)
+                | I::TransferArrivalEmpty
+                | I::VariantNotStocked(_),
             )
-            | E::CostCurrencyMismatch { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            | E::CostCurrencyMismatch { .. }
+            | E::Idempotency(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
@@ -1061,6 +1078,12 @@ impl From<hypha_inventory::CommandError> for ApiError {
             E::CostCurrencyMismatch { expected, .. } => {
                 Some(serde_json::json!({ "currency": expected }))
             }
+            E::Inventory(I::OverReceived(lines)) => Some(serde_json::json!({
+                "lines": lines
+                    .iter()
+                    .map(|l| serde_json::json!({ "variant": l.variant, "in_transit": l.in_transit }))
+                    .collect::<Vec<_>>()
+            })),
             _ => None,
         };
         Self::domain(status, e).with_details(details)
@@ -1291,7 +1314,21 @@ impl From<hypha_order_actions::CommandError> for ApiError {
                 | I::StillReserved
                 | I::NoteTooLong { .. }
                 | I::CostCurrency { .. }
-                | I::Money(_),
+                | I::Money(_)
+                | I::InvalidTransferNumber(_)
+                | I::SameLocation
+                | I::TooManyTransferLines { .. }
+                | I::DuplicateTransferLine(_)
+                | I::InvalidTransferQuantity(_)
+                | I::TransferNoteTooLong { .. }
+                | I::TransferNotDraft { .. }
+                | I::TransferNotInTransit { .. }
+                | I::TransferEmpty
+                | I::UnknownTransferLine(_)
+                | I::EmptyArrival(_)
+                | I::TransferArrivalEmpty
+                | I::OverReceived(_)
+                | I::VariantNotStocked(_),
             ) => return Self::internal(e),
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(

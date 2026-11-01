@@ -889,6 +889,7 @@ mod tests {
                 "get /admin/purchase-orders",
                 "get /admin/suppliers",
                 "get /admin/suppliers/{id}/variants",
+                "get /admin/transfers",
                 "get /admin/variants"
             ]
         );

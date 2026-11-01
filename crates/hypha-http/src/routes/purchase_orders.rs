@@ -365,7 +365,7 @@ pub(crate) async fn respond<S: Storage>(
 /// What the lines' variants are: their products' titles and SKUs, read as the system (a
 /// line keeps them as snapshots). A variant the store lacks is left out, and the command
 /// refuses its line.
-async fn variant_infos<P: HasProducts>(
+pub(crate) async fn variant_infos<P: HasProducts>(
     ports: &P,
     variants: &[VariantId],
 ) -> Result<Vec<VariantInfo>, ApiError> {

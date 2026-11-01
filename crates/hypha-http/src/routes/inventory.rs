@@ -12,12 +12,12 @@ use hypha_core::{
 };
 use hypha_inventory::{
     AdjustOnHand, AdjustmentReason, CreateInventoryItem, CreateLocation, HasInventoryItems,
-    HasLocations, HasStockMovements, InventoryFilter, InventoryItem, Location, MovementFilter,
-    SetOnHand, SetUnitCost, StockMovementEntry, StockReason, StockSource, UpdateInventoryItem,
-    UpdateLocation, adjust_on_hand, create_inventory_item, create_location, get_inventory_item,
-    get_location, get_variant_inventory, get_variants_inventory, list_inventory_items,
-    list_locations, list_stock_movements, set_on_hand, set_unit_cost, update_inventory_item,
-    update_location,
+    HasLocations, HasStockMovements, HasTransfers, InventoryFilter, InventoryItem, Location,
+    MovementFilter, SetOnHand, SetUnitCost, StockMovementEntry, StockReason, StockSource,
+    TransferRepo, UpdateInventoryItem, UpdateLocation, adjust_on_hand, create_inventory_item,
+    create_location, get_inventory_item, get_location, get_variant_inventory,
+    get_variants_inventory, list_inventory_items, list_locations, list_stock_movements,
+    set_on_hand, set_unit_cost, update_inventory_item, update_location,
 };
 use hypha_products::{CommandError as ProductsError, HasProducts, ProductRepo, get_product};
 use hypha_purchasing::{
@@ -311,11 +311,11 @@ pub struct LevelResponse {
     /// `on_hand - reserved`; negative when more is reserved than is there.
     available: i64,
     /// Units on their way here: what ordered purchase orders to this location still
-    /// bring. Not sellable until received. A location with only incoming units is listed
-    /// with zero counts.
+    /// bring, and what transfers in transit to it carry. Not sellable until received. A
+    /// location with only incoming units is listed with zero counts.
     incoming: u64,
-    /// The soonest an order bringing some of `incoming` is expected, RFC 3339 in UTC;
-    /// `null` when nothing is coming or no order says.
+    /// The soonest an order or transfer bringing some of `incoming` is expected, RFC 3339
+    /// in UTC; `null` when nothing is coming or none says.
     next_expected_at: Option<String>,
 }
 
@@ -333,20 +333,33 @@ impl LevelResponse {
 }
 
 /// What's on its way, per variant: each variant's incoming units by location, from every
-/// source of them (open purchase orders).
+/// source of them (open purchase orders, transfers in transit).
 pub(crate) type Incoming = HashMap<VariantId, Vec<IncomingStock>>;
 
 /// The incoming units of `variants`, read once for them all. Derived on every read, never
-/// stored on the items, so ordering stock never touches what checkouts lock.
-pub(crate) async fn incoming_of<P: HasPurchaseOrders>(
+/// stored on the items, so ordering or moving stock never touches what checkouts lock.
+pub(crate) async fn incoming_of<P: HasPurchaseOrders + HasTransfers>(
     ports: &P,
     variants: &[VariantId],
 ) -> Result<Incoming, ApiError> {
-    let found = ports
+    let ordered = ports
         .purchase_orders()
         .incoming(variants)
         .await
         .map_err(PurchasingError::from)?;
+    let moving = ports
+        .transfers()
+        .incoming(variants)
+        .await
+        .map_err(hypha_inventory::CommandError::from)?;
+    let found = ordered
+        .into_iter()
+        .chain(moving.into_iter().map(|t| IncomingStock {
+            variant: t.variant,
+            location: t.location,
+            quantity: t.quantity,
+            next_expected_at: t.next_expected_at,
+        }));
     let mut incoming = Incoming::new();
     for stock in found {
         let at = incoming.entry(stock.variant).or_default();
@@ -426,7 +439,7 @@ impl InventoryResponse {
 
 /// An item as `ctx` may see it, with what's incoming: its cost only with
 /// `purchasing:read`.
-async fn item_view<P: HasPurchaseOrders>(
+async fn item_view<P: HasPurchaseOrders + HasTransfers>(
     ports: &P,
     ctx: &Ctx,
     item: &InventoryItem,

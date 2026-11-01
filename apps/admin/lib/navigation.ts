@@ -107,6 +107,7 @@ export const NAV_SECTIONS: NavSection[] = [
         children: [
           { label: "Purchase orders", href: "/purchase-orders", scope: "purchasing:read" },
           { label: "Suppliers", href: "/suppliers", scope: "purchasing:read" },
+          { label: "Transfers", href: "/transfers", scope: "inventory:read" },
         ],
       },
       {

@@ -1,11 +1,12 @@
 //! What happens to stock, as events. Contract types: a reshaped field is a new `VERSION`,
 //! never an edit.
 
-use hypha_core::{Event, InventoryItemId, LocationId, UnitCost, VariantId};
+use hypha_core::{Event, InventoryItemId, LocationId, TransferId, UnitCost, VariantId};
 use serde::Serialize;
 
 pub const INVENTORY_ITEM: &str = "inventory_item";
 pub const LOCATION: &str = "location";
+pub const TRANSFER: &str = "transfer";
 
 /// `location.changed`: created, or which of `name`, `markets`, `priority` and `address`
 /// changed (all four when created). Its markets decide where its stock counts, so search
@@ -86,5 +87,83 @@ pub enum CostChange {
 
 impl Event for InventoryItemCostChanged {
     const TYPE: &'static str = "inventory_item.cost_changed";
+    const VERSION: u16 = 1;
+}
+
+/// `transfer.created`: a draft.
+#[derive(Debug, Serialize)]
+pub struct TransferCreated {
+    pub transfer: TransferId,
+    pub origin: LocationId,
+    pub destination: LocationId,
+}
+
+impl Event for TransferCreated {
+    const TYPE: &'static str = "transfer.created";
+    const VERSION: u16 = 1;
+}
+
+/// `transfer.updated`: a draft changed; `fields` names what (`origin`, `destination`,
+/// `expected_at`, `reference`, `note`, `lines`).
+#[derive(Debug, Serialize)]
+pub struct TransferUpdated {
+    pub transfer: TransferId,
+    pub origin: LocationId,
+    pub destination: LocationId,
+    pub fields: Vec<&'static str>,
+}
+
+impl Event for TransferUpdated {
+    const TYPE: &'static str = "transfer.updated";
+    const VERSION: u16 = 1;
+}
+
+/// `transfer.shipped`: every line left the origin.
+#[derive(Debug, Serialize)]
+pub struct TransferShipped {
+    pub transfer: TransferId,
+    pub origin: LocationId,
+    pub destination: LocationId,
+}
+
+impl Event for TransferShipped {
+    const TYPE: &'static str = "transfer.shipped";
+    const VERSION: u16 = 1;
+}
+
+/// `transfer.received`: units arrived at the destination this time (rejected ones were
+/// lost on the way); `complete` once every line is accounted for.
+#[derive(Debug, Serialize)]
+pub struct TransferReceived {
+    pub transfer: TransferId,
+    pub origin: LocationId,
+    pub destination: LocationId,
+    pub lines: Vec<TransferLineReceived>,
+    pub complete: bool,
+}
+
+/// One variant's units in a `transfer.received`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct TransferLineReceived {
+    pub variant: VariantId,
+    pub accepted: u32,
+    pub rejected: u32,
+}
+
+impl Event for TransferReceived {
+    const TYPE: &'static str = "transfer.received";
+    const VERSION: u16 = 1;
+}
+
+/// `transfer.cancelled`: a draft called off.
+#[derive(Debug, Serialize)]
+pub struct TransferCancelled {
+    pub transfer: TransferId,
+    pub origin: LocationId,
+    pub destination: LocationId,
+}
+
+impl Event for TransferCancelled {
+    const TYPE: &'static str = "transfer.cancelled";
     const VERSION: u16 = 1;
 }

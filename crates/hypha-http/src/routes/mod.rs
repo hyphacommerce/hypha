@@ -43,6 +43,7 @@ pub mod staff;
 pub mod stores;
 pub mod suppliers;
 pub mod taxes;
+pub mod transfers;
 pub mod uploads;
 
 use hypha_core::{Stamps, Timestamp};
@@ -340,6 +341,14 @@ macro_rules! route_table {
             [admin, POST, "/admin/inventory-items/{id}/levels/{location_id}/adjustments", inventory::adjust_level],
             [admin, GET, "/admin/inventory-items/{id}/movements", inventory::list_movements],
             [admin, PUT, "/admin/inventory-items/{id}/cost", inventory::set_cost],
+            [admin, GET, "/admin/transfers", transfers::list],
+            [admin, POST, "/admin/transfers", transfers::create],
+            [admin, GET, "/admin/transfers/{id}", transfers::fetch],
+            [admin, PATCH, "/admin/transfers/{id}", transfers::update],
+            [admin, DELETE, "/admin/transfers/{id}", transfers::remove],
+            [admin, POST, "/admin/transfers/{id}/ship", transfers::ship],
+            [admin, POST, "/admin/transfers/{id}/receive", transfers::receive],
+            [admin, POST, "/admin/transfers/{id}/cancel", transfers::cancel],
             [admin, GET, "/admin/variants/{id}/inventory", inventory::fetch_variant_inventory],
             [admin, GET, "/admin/products/{id}/inventory", inventory::fetch_product_inventory],
             [admin, GET, "/admin/setup/checklist", setup::checklist],

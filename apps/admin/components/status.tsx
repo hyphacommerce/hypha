@@ -105,3 +105,16 @@ export function ReceiptStatusBadge({ status }: { status: AdminSchemas["ReceiptSt
   const { label, variant } = RECEIPT[status] ?? { label: status, variant: "neutral" };
   return <Badge label={label} variant={variant} />;
 }
+
+/** A transfer's status. */
+const TRANSFER: Record<string, { label: string; variant: Variant }> = {
+  draft: { label: "Draft", variant: "neutral" },
+  in_transit: { label: "In transit", variant: "info" },
+  received: { label: "Received", variant: "success" },
+  cancelled: { label: "Cancelled", variant: "warning" },
+};
+
+export function TransferStatusBadge({ status }: { status: AdminSchemas["TransferStatusDto"] }) {
+  const { label, variant } = TRANSFER[status] ?? { label: status, variant: "neutral" };
+  return <Badge label={label} variant={variant} />;
+}

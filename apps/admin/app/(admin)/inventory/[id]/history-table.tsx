@@ -44,7 +44,11 @@ function Source({ source }: { source: Movement["source"] }) {
         </Link>
       );
     case "transfer":
-      return <Text>Transfer</Text>;
+      return (
+        <Link href={`/transfers/${source.transfer}`} color="primary">
+          Transfer
+        </Link>
+      );
     case "migration":
       return <Text color="secondary">When history began</Text>;
     case "manual":

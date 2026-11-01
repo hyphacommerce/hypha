@@ -454,6 +454,65 @@ impl InventoryItem {
         }
     }
 
+    /// Units of a transfer leaving `location`, its origin: `quantity` fewer on hand there
+    /// (which may go below zero, as fulfilling can), a `transfer_out` movement caused by
+    /// `source`. The cost stays: it's the item's, wherever the units are. Untracked items
+    /// count it too. All or nothing.
+    pub fn transfer_out(
+        &mut self,
+        location: LocationId,
+        quantity: Quantity,
+        source: StockSource,
+    ) -> Result<(), InventoryError> {
+        let on_hand =
+            check_range(i128::from(self.on_hand(location)) - i128::from(quantity.value()))?;
+        let cause = Cause::new(StockReason::TransferOut, source);
+        self.write_level(location, on_hand, cause);
+        Ok(())
+    }
+
+    /// Units of a transfer arriving at `location`, its destination: `quantity` more on
+    /// hand there, a `transfer_in` movement caused by `source`. All or nothing.
+    pub fn transfer_in(
+        &mut self,
+        location: LocationId,
+        quantity: Quantity,
+        source: StockSource,
+    ) -> Result<(), InventoryError> {
+        let on_hand =
+            check_range(i128::from(self.on_hand(location)) + i128::from(quantity.value()))?;
+        let cause = Cause::new(StockReason::TransferIn, source);
+        self.write_level(location, on_hand, cause);
+        Ok(())
+    }
+
+    /// Units of a transfer lost on the way to `location`: the origin gave them up when
+    /// they shipped, so no count changes, but a `shrinkage` row with no delta at the
+    /// destination says where they went, its note saying how many.
+    pub fn lose_in_transit(
+        &mut self,
+        location: LocationId,
+        quantity: Quantity,
+        source: StockSource,
+    ) {
+        let note = MovementNote::new(&format!("{} lost in transit", quantity.value()))
+            .ok()
+            .flatten();
+        let cost = self.unit_cost;
+        self.movements.0.push(StockMovement {
+            item: self.id,
+            variant: self.variant,
+            location: Some(location),
+            delta: 0,
+            after: Some(self.on_hand(location)),
+            reason: StockReason::Shrinkage,
+            source,
+            note,
+            unit_cost: cost,
+            average_after: cost,
+        });
+    }
+
     /// On hand summed over every location.
     fn total_on_hand(&self) -> i128 {
         self.levels.iter().map(|l| i128::from(l.on_hand)).sum()
@@ -1915,5 +1974,111 @@ mod tests {
         i.unreceive(loc_id(1), qty(1), Some(eur("0.0001")), receipt())
             .unwrap();
         assert_eq!(i.unit_cost(), Some(eur("1.5")));
+    }
+
+    // ---- transfers ----
+
+    fn transfer_source() -> StockSource {
+        StockSource::Transfer(hypha_core::TransferId::from_uuid(Uuid::from_u128(90)))
+    }
+
+    #[test]
+    fn a_transfer_takes_units_off_the_origin_and_puts_them_at_the_destination() {
+        let mut i = item(&[(1, 5)]);
+        i.take_movements();
+        i.transfer_out(loc_id(1), qty(3), transfer_source())
+            .unwrap();
+        i.transfer_in(loc_id(2), qty(2), transfer_source()).unwrap();
+        assert_eq!((i.on_hand(loc_id(1)), i.on_hand(loc_id(2))), (2, 2));
+        let rows = i.take_movements();
+        assert_eq!(
+            rows.iter()
+                .map(|m| (m.location, m.delta, m.after, m.reason, m.source))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    Some(loc_id(1)),
+                    -3,
+                    Some(2),
+                    StockReason::TransferOut,
+                    transfer_source()
+                ),
+                (
+                    Some(loc_id(2)),
+                    2,
+                    Some(2),
+                    StockReason::TransferIn,
+                    transfer_source()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn shipping_more_than_is_there_goes_below_zero() {
+        let mut i = item(&[(1, 1)]);
+        i.transfer_out(loc_id(1), qty(3), transfer_source())
+            .unwrap();
+        assert_eq!(i.on_hand(loc_id(1)), -2);
+    }
+
+    #[test]
+    fn a_transfer_leaves_the_cost_as_it_is() {
+        let mut i = item(&[(1, 5)]);
+        let cost = UnitCost::new(10_000, hypha_core::Currency::EUR).unwrap();
+        i.set_unit_cost(Some(cost), None);
+        i.take_movements();
+        i.take_events();
+        i.transfer_out(loc_id(1), qty(2), transfer_source())
+            .unwrap();
+        i.transfer_in(loc_id(2), qty(2), transfer_source()).unwrap();
+        assert_eq!(i.unit_cost(), Some(cost));
+        assert!(
+            i.take_movements()
+                .iter()
+                .all(|m| m.unit_cost == Some(cost) && m.average_after == Some(cost))
+        );
+        assert!(
+            i.take_events()
+                .iter()
+                .all(|e| e.event_type != "inventory_item.cost_changed"),
+            "no cost changed"
+        );
+    }
+
+    #[test]
+    fn units_lost_in_transit_are_a_row_without_a_delta_at_the_destination() {
+        let mut i = item(&[(2, 4)]);
+        i.take_movements();
+        i.lose_in_transit(loc_id(2), qty(3), transfer_source());
+        assert_eq!(i.on_hand(loc_id(2)), 4);
+        let rows = i.take_movements();
+        assert_eq!(
+            rows.iter()
+                .map(|m| (
+                    m.location,
+                    m.delta,
+                    m.after,
+                    m.reason,
+                    m.note.as_ref().map(MovementNote::as_str)
+                ))
+                .collect::<Vec<_>>(),
+            [(
+                Some(loc_id(2)),
+                0,
+                Some(4),
+                StockReason::Shrinkage,
+                Some("3 lost in transit")
+            )]
+        );
+    }
+
+    #[test]
+    fn an_untracked_item_counts_transfers_too() {
+        let mut i = item(&[(1, 5)]);
+        i.set_tracked(false);
+        i.transfer_out(loc_id(1), qty(2), transfer_source())
+            .unwrap();
+        assert_eq!(i.on_hand(loc_id(1)), 3);
     }
 }

@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    Address, AddressParts, AuthError, Ctx, Currency, ErrorCode, IdGenerator, InventoryItemId,
-    Keyset, LocationId, MarketId, Page, PageRequest, Quantity, RepoError, Scope, UnitCost,
-    VariantId, report_duplicate, retry_on_conflict,
+    Address, AddressParts, AuthError, Ctx, Currency, ErrorCode, IdGenerator, IdempotencyError,
+    InventoryItemId, Keyset, LocationId, MarketId, Page, PageRequest, Quantity, RepoError, Scope,
+    TransferId, UnitCost, VariantId, report_duplicate, retry_on_conflict,
 };
 
 use crate::{
@@ -41,6 +41,10 @@ pub enum CommandError {
     StoreCurrencyRequired,
     #[error("costs are kept in the store's currency, {expected}, not {got}")]
     CostCurrencyMismatch { expected: Currency, got: Currency },
+    #[error(transparent)]
+    Idempotency(#[from] IdempotencyError),
+    #[error("transfer {0} not found")]
+    TransferNotFound(TransferId),
 }
 
 impl ErrorCode for CommandError {
@@ -55,6 +59,8 @@ impl ErrorCode for CommandError {
             CommandError::OutOfStock { .. } => "out_of_stock",
             CommandError::StoreCurrencyRequired => "store_currency_required",
             CommandError::CostCurrencyMismatch { .. } => "cost_currency_mismatch",
+            CommandError::Idempotency(e) => e.code(),
+            CommandError::TransferNotFound(_) => "transfer_not_found",
         }
     }
 }

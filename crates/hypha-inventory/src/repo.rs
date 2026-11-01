@@ -1,10 +1,11 @@
 use hypha_core::{
-    InventoryItemId, Keyset, LocationId, MarketId, Page, PageRequest, RepoError, VariantId,
+    InventoryItemId, Keyset, LocationId, MarketId, Page, PageRequest, RepoError, TransferId,
+    VariantId,
 };
 
 use crate::{
-    InventoryFilter, InventoryItem, InventoryItemSummary, Location, MovementFilter,
-    StockMovementEntry,
+    IncomingTransfer, InventoryFilter, InventoryItem, InventoryItemSummary, Location,
+    MovementFilter, StockMovementEntry, Transfer, TransferFilter, TransferNumber, TransferSummary,
 };
 
 pub mod keys {
@@ -12,6 +13,9 @@ pub mod keys {
     pub const INVENTORY_ITEM_ID: &str = "inventory_item_id";
     /// One inventory item per variant.
     pub const INVENTORY_ITEM_VARIANT: &str = "inventory_item_variant";
+    pub const TRANSFER_ID: &str = "transfer_id";
+    /// One transfer per number.
+    pub const TRANSFER_NUMBER: &str = "transfer_number";
 }
 
 #[allow(async_fn_in_trait)]
@@ -70,6 +74,37 @@ pub trait StockMovementRepo {
     /// Whether any row ever carried a cost (`unit_cost` or `average_after`): from then
     /// on, the store's base currency is fixed.
     async fn cost_recorded(&self) -> Result<bool, RepoError>;
+}
+
+/// Transfers between the store's locations.
+#[allow(async_fn_in_trait)]
+pub trait TransferRepo {
+    async fn get(&self, id: TransferId) -> Result<Option<Transfer>, RepoError>;
+    /// A page of the transfers `filter` matches (`TransferFilter::matches`), newest
+    /// first by ID, those below `page.after`.
+    async fn list(
+        &self,
+        filter: &TransferFilter,
+        page: PageRequest<TransferId>,
+    ) -> Result<Page<TransferSummary>, RepoError>;
+    /// The next number, never handed out twice (a failed insert leaves a gap).
+    async fn next_number(&self) -> Result<TransferNumber, RepoError>;
+    /// A new transfer, with the events it recorded. Its number is unique
+    /// (`Duplicate(TRANSFER_NUMBER)`).
+    async fn insert(&self, transfer: &mut Transfer) -> Result<(), RepoError>;
+    async fn update(&self, transfer: &mut Transfer) -> Result<(), RepoError>;
+    /// Removes a draft at its version (`StaleVersion` if it changed or is gone).
+    async fn delete(&self, transfer: &mut Transfer) -> Result<(), RepoError>;
+    /// What transfers in transit still bring of `variants`, per destination: equal to
+    /// `incoming_transfers` over every stored transfer.
+    async fn incoming(&self, variants: &[VariantId]) -> Result<Vec<IncomingTransfer>, RepoError>;
+}
+
+/// Stages a transfer's update in a `hypha_core::HasBatch` batch with the stock it moves.
+pub trait StageTransfers {
+    /// Stages what `TransferRepo::update` would write, and moves `transfer` to the version
+    /// it has once the batch commits.
+    fn update_transfer(&mut self, transfer: &mut Transfer);
 }
 
 /// Stages inventory item writes in a `hypha_core::HasBatch` batch; the adapter's batch
@@ -133,5 +168,19 @@ impl<T: HasStockMovements + ?Sized> HasStockMovements for &T {
     type StockMovements = T::StockMovements;
     fn stock_movements(&self) -> &Self::StockMovements {
         (**self).stock_movements()
+    }
+}
+
+/// Whatever holds the `TransferRepo`.
+pub trait HasTransfers {
+    type Transfers: TransferRepo;
+    fn transfers(&self) -> &Self::Transfers;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasTransfers + ?Sized> HasTransfers for &T {
+    type Transfers = T::Transfers;
+    fn transfers(&self) -> &Self::Transfers {
+        (**self).transfers()
     }
 }

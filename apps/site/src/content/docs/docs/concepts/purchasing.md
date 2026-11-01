@@ -128,9 +128,40 @@ the admin API (`GET /admin/inventory-items/{id}`, `/admin/variants/{id}/inventor
 `/admin/products/{id}/inventory` and the inventory list) carries **`incoming`**, the units
 that ordered purchase orders to that location still bring (ordered, less what arrived,
 was refused or cancelled), and **`next_expected_at`**, the soonest of those orders'
-expected dates. A location with units coming but none yet is listed with zero counts.
-Drafts, closed and cancelled orders bring nothing. Incoming units can't be sold, and
-storefronts don't see them.
+expected dates. Transfers in transit to the location count too (shipped, less what
+arrived or was lost), with their expected dates. A location with units coming but none
+yet is listed with zero counts. Drafts, closed and cancelled orders bring nothing.
+Incoming units can't be sold, and storefronts don't see them.
+
+## Transfers
+
+A **transfer** moves stock between two of your locations, with a time in transit between
+leaving one and reaching the other. It needs `inventory:write` (`inventory:read` to see
+one), not the purchasing scopes.
+
+1. **Draft it:** `POST /admin/transfers` with an `origin`, a `destination` and one line per
+   variant (`{ "variant": "var_…", "quantity": 4 }`). Each variant needs a stock record:
+   there's nothing at the origin to move otherwise (`422 variant_not_stocked`). A draft
+   changes freely (`PATCH`) and can be deleted or cancelled. Transfers are numbered
+   `TR-1001` and up.
+2. **Ship it:** `POST /admin/transfers/{id}/ship` sends every line whole. The units leave
+   the origin now (a `transfer_out` row in each item's history; the count may go below
+   zero, as fulfilling can) and are **in transit** until received, showing as incoming at
+   the destination.
+3. **Receive it,** in as many parts as the goods arrive:
+   `POST /admin/transfers/{id}/receive` with how many of each variant were **accepted**
+   (on hand at the destination, a `transfer_in` row) and how many were **lost** on the
+   way (`rejected`: a `shrinkage` row at the destination with no units, so the history
+   still says where they went). No more than a line has in transit
+   (`409 over_received`, with each such line's `in_transit` in `details.lines`). Once
+   every unit is accounted for, the transfer is `received`.
+
+Shipping and receiving take an `Idempotency-Key`: a retry answers with the transfer
+without moving anything again. A transfer changes no cost: an item's unit cost is the
+same wherever its units are. A shipped transfer can't be taken back; bring the stock
+back with another transfer. Events `transfer.created`, `.updated`, `.shipped`,
+`.received` (with the lines that arrived) and `.cancelled` reach apps whose grant holds
+`inventory:read`.
 
 ## Sending a purchase order
 

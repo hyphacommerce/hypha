@@ -8275,3 +8275,174 @@ async fn a_purchase_order_names_what_exists() {
         (StatusCode::NOT_FOUND, "purchase_order_not_found")
     );
 }
+
+#[tokio::test]
+async fn a_transfer_moves_stock_between_locations_through_transit() {
+    let app = app().await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let (_, locations) = send(&app, "GET", "/admin/locations", None).await;
+    let warehouse = locations["items"][0]["id"].as_str().unwrap().to_string();
+    let (_, shop) = send(&app, "POST", "/admin/locations", Some(r#"{"name":"Shop"}"#)).await;
+    let shop = shop["id"].as_str().unwrap().to_string();
+
+    // Only a variant with a stock record moves.
+    let draft = json!({"origin": warehouse, "destination": shop, "lines": [{"variant": mug, "quantity": 4}]});
+    let (status, body) = send(&app, "POST", "/admin/transfers", Some(&draft.to_string())).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "variant_not_stocked")
+    );
+    let item = json!({"variant": mug}).to_string();
+    let (_, item) = send(&app, "POST", "/admin/inventory-items", Some(&item)).await;
+    let item = item["id"].as_str().unwrap().to_string();
+    let level = format!("/admin/inventory-items/{item}/levels/{warehouse}");
+    send(&app, "PUT", &level, Some(r#"{"on_hand":10}"#)).await;
+
+    let same = json!({"origin": warehouse, "destination": warehouse});
+    let (status, body) = send(&app, "POST", "/admin/transfers", Some(&same.to_string())).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "transfer_same_location")
+    );
+    let draft = json!({
+        "origin": warehouse,
+        "destination": shop,
+        "expected_at": "2026-03-01T12:00:00Z",
+        "reference": "Van 2",
+        "lines": [{"variant": mug, "quantity": 4}]
+    });
+    let (status, created) = send(&app, "POST", "/admin/transfers", Some(&draft.to_string())).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("trf_"));
+    assert_eq!(
+        (
+            &created["number"],
+            &created["status"],
+            &created["lines"][0]["product_title"],
+            &created["lines"][0]["shipped"]
+        ),
+        (&json!(1001), &json!("draft"), &json!("Mug"), &json!(0))
+    );
+    let path = format!("/admin/transfers/{id}");
+
+    // Shipped once, whatever the retries.
+    let auth = format!("Bearer {}", app.admin_key);
+    let keyed = [
+        ("authorization", auth.as_str()),
+        ("idempotency-key", "ship-1"),
+    ];
+    let (status, shipped) = send_with(&app, &keyed, "POST", &format!("{path}/ship"), None).await;
+    assert_eq!(status, StatusCode::OK, "{shipped}");
+    assert_eq!(
+        (&shipped["status"], &shipped["lines"][0]["in_transit"]),
+        (&json!("in_transit"), &json!(4))
+    );
+    let (_, again) = send_with(&app, &keyed, "POST", &format!("{path}/ship"), None).await;
+    assert_eq!(again["status"], json!("in_transit"));
+    let (_, stock) = send(&app, "GET", &format!("/admin/inventory-items/{item}"), None).await;
+    let level_at = |stock: &Value, location: &str| {
+        stock["levels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["location"] == json!(location))
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    assert_eq!(level_at(&stock, &warehouse)["on_hand"], json!(6));
+    // On its way to the shop, expected when the transfer said.
+    assert_eq!(
+        (
+            &level_at(&stock, &shop)["incoming"],
+            &level_at(&stock, &shop)["next_expected_at"]
+        ),
+        (&json!(4), &json!("2026-03-01T12:00:00Z"))
+    );
+    let (status, body) = send(&app, "PATCH", &path, Some(r#"{"note":"late"}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "transfer_not_draft")
+    );
+
+    // 2 arrive, 1 is lost; then more than is left on its way is refused.
+    let arrival = json!({"lines": [{"variant": mug, "accepted": 2, "rejected": 1}]});
+    let (status, partly) = send(
+        &app,
+        "POST",
+        &format!("{path}/receive"),
+        Some(&arrival.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{partly}");
+    assert_eq!(partly["status"], json!("in_transit"));
+    let over = json!({"lines": [{"variant": mug, "accepted": 2}]});
+    let (status, body) = send(
+        &app,
+        "POST",
+        &format!("{path}/receive"),
+        Some(&over.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body), &body["details"]["lines"]),
+        (
+            StatusCode::CONFLICT,
+            "over_received",
+            &json!([{"variant": mug, "in_transit": 1}])
+        )
+    );
+    let last = json!({"lines": [{"variant": mug, "accepted": 1}]});
+    let (_, done) = send(
+        &app,
+        "POST",
+        &format!("{path}/receive"),
+        Some(&last.to_string()),
+    )
+    .await;
+    assert_eq!(done["status"], json!("received"));
+    let (_, stock) = send(&app, "GET", &format!("/admin/inventory-items/{item}"), None).await;
+    assert_eq!(
+        (
+            &level_at(&stock, &shop)["on_hand"],
+            &level_at(&stock, &shop)["incoming"]
+        ),
+        (&json!(3), &json!(0))
+    );
+
+    // The history says where every unit went.
+    let (_, history) = send(
+        &app,
+        "GET",
+        &format!("/admin/inventory-items/{item}/movements"),
+        None,
+    )
+    .await;
+    let rows: Vec<(Value, Value)> = history["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| (r["reason"].clone(), r["delta"].clone()))
+        .collect();
+    assert_eq!(
+        rows[..4],
+        [
+            (json!("transfer_in"), json!(1)),
+            (json!("shrinkage"), json!(0)),
+            (json!("transfer_in"), json!(2)),
+            (json!("transfer_out"), json!(-4)),
+        ]
+    );
+    assert_eq!(
+        history["items"][0]["source"],
+        json!({"type": "transfer", "transfer": id})
+    );
+
+    let (_, listed) = send(&app, "GET", "/admin/transfers?status=received", None).await;
+    assert_eq!(listed["items"][0]["id"], json!(id));
+    let (status, body) = send(&app, "DELETE", &path, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "transfer_not_draft")
+    );
+}
