@@ -1,18 +1,18 @@
 use hypha_core::{
     AddressParts, AuthError, Clock, Ctx, Currency, ErrorCode, ExchangeRate, IdGenerator, Keyset,
-    LocationId, Money, Page, PageRequest, PurchaseOrderId, RepoError, Scope, SupplierId, Timestamp,
-    UnitCost, VariantId,
+    LocationId, Money, Page, PageRequest, PurchaseOrderId, ReceiptId, RepoError, Scope, SupplierId,
+    Timestamp, UnitCost, VariantId,
 };
 use thiserror::Error;
 
 use crate::{
     ContactDraft, CostDraft, LineDraft, PaymentTermsDraft, PurchaseOrder, PurchaseOrderDraft,
-    PurchaseOrderStatus, PurchaseOrderSummary, PurchasingError, Supplier, SupplierDraft,
+    PurchaseOrderStatus, PurchaseOrderSummary, PurchasingError, Receipt, Supplier, SupplierDraft,
     SupplierVariant, SupplierVariantDraft,
     repo::{
-        HasPurchaseOrders, HasSupplierVariants, HasSuppliers, PurchaseOrderFilter,
-        PurchaseOrderRepo, PurchaseOrderSort, SupplierFilter, SupplierRepo, SupplierVariantRepo,
-        keys,
+        HasPurchaseOrders, HasReceipts, HasSupplierVariants, HasSuppliers, PurchaseOrderFilter,
+        PurchaseOrderRepo, PurchaseOrderSort, ReceiptRepo, SupplierFilter, SupplierRepo,
+        SupplierVariantRepo, keys,
     },
 };
 
@@ -41,6 +41,8 @@ pub enum CommandError {
     SupplierArchived(SupplierId),
     #[error("purchase order {0} not found")]
     PurchaseOrderNotFound(PurchaseOrderId),
+    #[error("receipt {0} not found")]
+    ReceiptNotFound(ReceiptId),
     /// A line names a variant the store doesn't have.
     #[error("variant {0} not found")]
     UnknownVariant(VariantId),
@@ -62,6 +64,7 @@ impl ErrorCode for CommandError {
             CommandError::SupplierInUse(_) => "supplier_in_use",
             CommandError::SupplierArchived(_) => "supplier_archived",
             CommandError::PurchaseOrderNotFound(_) => "purchase_order_not_found",
+            CommandError::ReceiptNotFound(_) => "receipt_not_found",
             CommandError::UnknownVariant(_) => "unknown_variant",
             CommandError::UnitCostRequired(_) => "unit_cost_required",
         }
@@ -471,6 +474,31 @@ pub async fn get_purchase_order<S: HasPurchaseOrders>(
 ) -> Result<PurchaseOrder, CommandError> {
     ctx.require(Scope::PurchasingRead)?;
     load_po(ports, id).await
+}
+
+/// A receipt, taken back or not.
+pub async fn get_receipt<S: HasReceipts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: ReceiptId,
+) -> Result<Receipt, CommandError> {
+    ctx.require(Scope::PurchasingRead)?;
+    ports
+        .receipts()
+        .get(id)
+        .await?
+        .ok_or(CommandError::ReceiptNotFound(id))
+}
+
+/// The order's receipts, oldest first, those taken back too.
+pub async fn list_receipts<S: HasPurchaseOrders + HasReceipts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: PurchaseOrderId,
+) -> Result<Vec<Receipt>, CommandError> {
+    ctx.require(Scope::PurchasingRead)?;
+    load_po(ports, id).await?;
+    Ok(ports.receipts().for_purchase_order(id).await?)
 }
 
 async fn load_po<S: HasPurchaseOrders>(

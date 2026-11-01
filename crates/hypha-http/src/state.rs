@@ -597,6 +597,7 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_purchasing::HasSuppliers
         + hypha_purchasing::HasSupplierVariants
         + hypha_purchasing::HasPurchaseOrders
+        + hypha_receiving::ReceivingPorts
         + HasBatch<
             Batch: hypha_core::StageEvents
                        + hypha_markets::StageCatalogProducts

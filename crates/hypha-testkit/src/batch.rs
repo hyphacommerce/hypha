@@ -24,7 +24,9 @@ use hypha_discounts::{
     CodeSelection, Discount, DiscountCode, StageDiscounts, UsageClaim, keys as discount_keys,
 };
 use hypha_fulfillment::{Fulfillment, StageFulfillments, keys as fulfillment_keys};
-use hypha_inventory::{InventoryItem, StageInventoryItems, StockMovement};
+use hypha_inventory::{
+    InventoryItem, StageInventoryItems, StockMovement, repo::keys as inventory_keys,
+};
 use hypha_markets::{FixedPrice, StageCatalogProducts, StageFixedPrices, StagePriceListSchedule};
 use hypha_media::{StageAssetUsages, UsageOwner, UsageRole};
 use hypha_notifications::{
@@ -36,7 +38,9 @@ use hypha_oauth::{
 use hypha_orders::{Order, StageOrders, repo::keys as order_keys};
 use hypha_payments::{Payment, StagePayments, keys as payment_keys};
 use hypha_products::{Product, StageProducts};
-use hypha_purchasing::{PurchaseOrder, StagePurchaseOrders};
+use hypha_purchasing::{
+    PurchaseOrder, Receipt, StagePurchaseOrders, StageReceipts, keys as purchasing_keys,
+};
 use hypha_tax::StageTaxAssignments;
 use hypha_users::{Invite, Role, StageInvites, StageRoles, StageUsers, User, keys as user_keys};
 
@@ -79,6 +83,7 @@ enum Staged {
     /// A product removed at the version it was loaded at.
     DeletedProduct(Product),
     AssetUsages(UsageOwner, Vec<(hypha_core::AssetId, UsageRole)>),
+    NewInventoryItem(InventoryItem),
     InventoryItem(InventoryItem),
     DeletedInventoryItem(InventoryItem),
     /// What the item staged just before recorded, written if the batch commits.
@@ -151,6 +156,8 @@ enum Staged {
     /// The discount schedule job's progress moved from the first to the second.
     DiscountSchedule(Option<Timestamp>, Timestamp),
     PurchaseOrder(PurchaseOrder),
+    NewReceipt(Receipt),
+    Receipt(Receipt),
 }
 
 impl StageDiscounts for InMemoryBatch {
@@ -406,6 +413,16 @@ impl StageAssetUsages for InMemoryBatch {
 }
 
 impl StageInventoryItems for InMemoryBatch {
+    fn insert_inventory_item(&mut self, item: &mut InventoryItem) {
+        stamp_insert(item, self.now);
+        let events = item.take_events();
+        let movements = item.take_movements();
+        self.stage(Staged::NewInventoryItem(item.clone()));
+        self.stage(Staged::Events(events, Some(Version::NEW.next())));
+        self.stage(Staged::StockMovements(movements));
+        item.set_version(Version::NEW.next());
+    }
+
     fn update_inventory_item(&mut self, item: &mut InventoryItem) {
         stamp_update(item, self.now);
         let version = item.version().next();
@@ -451,6 +468,24 @@ impl StagePurchaseOrders for InMemoryBatch {
         self.stage_events_of(po, version);
         self.stage(Staged::PurchaseOrder(po.clone()));
         po.set_version(version);
+    }
+}
+
+impl StageReceipts for InMemoryBatch {
+    fn insert_receipt(&mut self, receipt: &mut Receipt) {
+        stamp_insert(receipt, self.now);
+        let events = receipt.take_events();
+        self.stage(Staged::NewReceipt(receipt.clone()));
+        self.stage(Staged::Events(events, Some(Version::NEW.next())));
+        receipt.set_version(Version::NEW.next());
+    }
+
+    fn update_receipt(&mut self, receipt: &mut Receipt) {
+        stamp_update(receipt, self.now);
+        let version = receipt.version().next();
+        self.stage_events_of(receipt, version);
+        self.stage(Staged::Receipt(receipt.clone()));
+        receipt.set_version(version);
     }
 }
 
@@ -639,6 +674,8 @@ impl HasBatch for InMemoryPorts {
         let discount_rows_before = discount_rows.clone();
         let mut purchase_orders = self.purchase_orders.orders.lock();
         let purchase_orders_before = purchase_orders.clone();
+        let mut receipts = self.receipts.receipts.lock();
+        let receipts_before = receipts.clone();
         let now = self.outbox.now();
         // Single writes first, the set-based revocation after them (as Postgres sorts).
         let mut revocations = Vec::new();
@@ -740,6 +777,13 @@ impl HasBatch for InMemoryPorts {
                     Staged::AssetUsages(owner, replacement) => {
                         replace_usages(&assets, &mut usages, &owner, &replacement)?;
                     }
+                    Staged::NewInventoryItem(mut item) => insert_row(
+                        &mut items,
+                        item.id(),
+                        &mut item,
+                        inventory_keys::INVENTORY_ITEM_ID,
+                        &inventory_items::unique,
+                    )?,
                     Staged::InventoryItem(mut item) => {
                         update_row(&mut items, item.id(), &mut item, &inventory_items::unique)?;
                     }
@@ -1138,6 +1182,23 @@ impl HasBatch for InMemoryPorts {
                     Staged::PurchaseOrder(mut po) => {
                         update_row(&mut purchase_orders, po.id(), &mut po, &no_unique_keys)?;
                     }
+                    Staged::NewReceipt(mut receipt) => {
+                        if !purchase_orders.contains_key(&receipt.purchase_order()) {
+                            return Err(RepoError::Reference(
+                                purchasing_keys::RECEIPT_PURCHASE_ORDER,
+                            ));
+                        }
+                        insert_row(
+                            &mut receipts,
+                            receipt.id(),
+                            &mut receipt,
+                            purchasing_keys::RECEIPT_ID,
+                            &no_unique_keys,
+                        )?;
+                    }
+                    Staged::Receipt(mut receipt) => {
+                        update_row(&mut receipts, receipt.id(), &mut receipt, &no_unique_keys)?;
+                    }
                 }
             }
             for (app, at) in revocations {
@@ -1176,6 +1237,7 @@ impl HasBatch for InMemoryPorts {
             *discounts = discounts_before;
             *discount_rows = discount_rows_before;
             *purchase_orders = purchase_orders_before;
+            *receipts = receipts_before;
             (*identities, *sessions, *resets, *roles, *users, *invites) = before_staff;
         }
         written

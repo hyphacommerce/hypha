@@ -101,6 +101,10 @@ pub enum PurchasingError {
     /// Taking back more than a line counts: the receipt doesn't match the order.
     #[error("variant {0}'s counts are below what would be taken back")]
     TakeBackMismatch(VariantId),
+    #[error("a receipt has at least one line")]
+    EmptyReceipt,
+    #[error("the receipt was taken back already")]
+    ReceiptCancelled,
 }
 
 impl ErrorCode for PurchasingError {
@@ -141,6 +145,8 @@ impl ErrorCode for PurchasingError {
             PurchasingError::EmptyReceiptLine(_) => "empty_receipt_line",
             PurchasingError::OverReceived(_) => "over_received",
             PurchasingError::TakeBackMismatch(_) => "receipt_mismatch",
+            PurchasingError::EmptyReceipt => "receipt_empty",
+            PurchasingError::ReceiptCancelled => "receipt_cancelled",
         }
     }
 }

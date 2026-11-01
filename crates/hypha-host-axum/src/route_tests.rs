@@ -7608,6 +7608,185 @@ async fn suppliers_keep_contacts_terms_and_a_catalogue() {
 }
 
 #[tokio::test]
+async fn receiving_brings_stock_in_at_its_landed_cost_and_can_be_taken_back() {
+    let app = app().await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let stock_of = format!("/admin/variants/{mug}/inventory");
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    assert_eq!(stock["id"], Value::Null, "no stock record yet");
+    let (_, locations) = send(&app, "GET", "/admin/locations", None).await;
+    let location = locations["items"][0]["id"].as_str().unwrap().to_string();
+    let on_hand = |stock: &Value| stock["levels"][0]["on_hand"].as_i64().unwrap_or(0);
+    send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    let supplier = json!({"name": "Spore Labs", "currency": "EUR"});
+    let (_, supplier) = send(
+        &app,
+        "POST",
+        "/admin/suppliers",
+        Some(&supplier.to_string()),
+    )
+    .await;
+    let draft = json!({
+        "supplier": supplier["id"],
+        "destination": location,
+        "lines": [{"variant": mug, "quantity": 10, "unit_cost": {"amount": "100", "currency": "EUR"}}],
+        "costs": [{"kind": "shipping", "amount": {"amount": 100, "currency": "EUR"}}]
+    });
+    let (_, po) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&draft.to_string()),
+    )
+    .await;
+    let path = format!("/admin/purchase-orders/{}", po["id"].as_str().unwrap());
+    send(&app, "POST", &format!("{path}/order"), None).await;
+    let auth = format!("Bearer {}", app.admin_key);
+    let headers = [
+        ("authorization", auth.as_str()),
+        ("idempotency-key", "rcv-1"),
+    ];
+
+    // 6 accepted and 1 rejected; each unit carries 10 cents of the shipping.
+    let receipt =
+        json!({"lines": [{"variant": mug, "accepted": 6, "rejected": 1}], "note": "box 1"});
+    let receipts = format!("{path}/receipts");
+    let (status, received) = send_with(
+        &app,
+        &headers,
+        "POST",
+        &receipts,
+        Some(&receipt.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{received}");
+    let rcpt = received["receipt"]["id"].as_str().unwrap().to_string();
+    assert!(rcpt.starts_with("rcpt_"));
+    assert_eq!(
+        (
+            &received["receipt"]["lines"][0]["landed_unit_cost"],
+            &received["receipt"]["status"],
+            &received["purchase_order"]["receipt_status"],
+            &received["purchase_order"]["lines"][0]["outstanding"],
+            &received["new_items"],
+        ),
+        (
+            &json!({"amount": "110", "currency": "EUR"}),
+            &json!("recorded"),
+            &json!("partial"),
+            &json!(3),
+            &json!([mug]),
+        )
+    );
+    // Receiving made the mug a stock record, untracked: whether it sells didn't change.
+    let (_, stock) = send(&app, "GET", &stock_of, None).await;
+    let item = stock["id"].as_str().unwrap().to_string();
+    assert_eq!((&stock["tracked"], on_hand(&stock)), (&json!(false), 6));
+    // The same key again: the same receipt, received once.
+    let (status, again) = send_with(
+        &app,
+        &headers,
+        "POST",
+        &receipts,
+        Some(&receipt.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, &again["receipt"]["id"]),
+        (StatusCode::CREATED, &json!(rcpt))
+    );
+    let (_, stock) = send(
+        &app,
+        "GET",
+        &format!("/admin/variants/{mug}/inventory"),
+        None,
+    )
+    .await;
+    assert_eq!(on_hand(&stock), 6);
+    let (_, history) = send(
+        &app,
+        "GET",
+        &format!("/admin/inventory-items/{item}/movements"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (
+            &history["items"][0]["reason"],
+            &history["items"][0]["delta"]
+        ),
+        (&json!("received"), &json!(6))
+    );
+
+    // More than is outstanding, unless allowed.
+    let over = json!({"lines": [{"variant": mug, "accepted": 4}]});
+    let (status, body) = send(&app, "POST", &receipts, Some(&over.to_string())).await;
+    assert_eq!(
+        (
+            status,
+            code(&body),
+            &body["details"]["lines"][0]["outstanding"]
+        ),
+        (StatusCode::CONFLICT, "over_received", &json!(3))
+    );
+    let over = json!({"lines": [{"variant": mug, "accepted": 4}], "allow_over": true});
+    let (status, closed) = send(&app, "POST", &receipts, Some(&over.to_string())).await;
+    assert_eq!(status, StatusCode::CREATED, "{closed}");
+    assert_eq!(closed["purchase_order"]["status"], json!("closed"));
+    let more = json!({"lines": [{"variant": mug, "accepted": 1}]});
+    let (status, _) = send(&app, "POST", &receipts, Some(&more.to_string())).await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "a closed order takes nothing more"
+    );
+
+    let (_, list) = send(&app, "GET", &receipts, None).await;
+    assert_eq!(list["items"].as_array().map(Vec::len), Some(2));
+    // Taking the last receipt back opens the order again.
+    let last = closed["receipt"]["id"].as_str().unwrap();
+    let (status, taken) = send(
+        &app,
+        "POST",
+        &format!("/admin/receipts/{last}/cancel"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{taken}");
+    assert_eq!(
+        (
+            &taken["receipt"]["status"],
+            &taken["purchase_order"]["status"]
+        ),
+        (&json!("cancelled"), &json!("ordered"))
+    );
+    let (status, body) = send(
+        &app,
+        "POST",
+        &format!("/admin/receipts/{last}/cancel"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "receipt_cancelled")
+    );
+    let (status, fetched) = send(&app, "GET", &format!("/admin/receipts/{rcpt}"), None).await;
+    assert_eq!(
+        (status, &fetched["note"]),
+        (StatusCode::OK, &json!("box 1"))
+    );
+    let (_, stock) = send(
+        &app,
+        "GET",
+        &format!("/admin/variants/{mug}/inventory"),
+        None,
+    )
+    .await;
+    assert_eq!(on_hand(&stock), 6);
+}
+
+#[tokio::test]
 async fn purchase_orders_are_drafted_ordered_edited_and_closed() {
     let app = app().await;
     let (_, mug) = market_selling_a_mug(&app).await;

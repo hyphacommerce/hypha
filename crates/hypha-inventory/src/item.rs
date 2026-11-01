@@ -264,8 +264,23 @@ impl InventoryItem {
         Ok(())
     }
 
-    /// The one place a count changes: it records the movement, so none goes unrecorded.
+    /// A count changes at the item's cost, which stays: the movement records it.
     fn write_level(&mut self, location: LocationId, on_hand: i64, cause: Cause) {
+        let cost = self.unit_cost;
+        self.write_level_at(location, on_hand, cause, cost, cost);
+    }
+
+    /// The one place a count changes: it records the movement, so none goes unrecorded.
+    /// `unit_cost` is what the units moving cost and `average_after` the item's cost
+    /// after, which the caller sets.
+    fn write_level_at(
+        &mut self,
+        location: LocationId,
+        on_hand: i64,
+        cause: Cause,
+        unit_cost: Option<UnitCost>,
+        average_after: Option<UnitCost>,
+    ) {
         let before = match self.levels.iter_mut().find(|l| l.location == location) {
             Some(level) if level.on_hand == on_hand => return,
             Some(level) => std::mem::replace(&mut level.on_hand, on_hand),
@@ -287,8 +302,8 @@ impl InventoryItem {
                 reason: cause.reason,
                 source: cause.source,
                 note: cause.note,
-                unit_cost: self.unit_cost,
-                average_after: self.unit_cost,
+                unit_cost,
+                average_after,
             });
         }
     }
@@ -322,14 +337,126 @@ impl InventoryItem {
             unit_cost: before,
             average_after: cost,
         });
+        self.record_cost_change(why);
+    }
+
+    /// `inventory_item.cost_changed` for the cost the item has now.
+    fn record_cost_change(&mut self, why: CostChange) {
         let event = InventoryItemCostChanged {
             inventory_item: self.id,
             variant: self.variant,
-            unit_cost: cost,
+            unit_cost: self.unit_cost,
             why,
         };
         self.cost_changes
             .record(Subject::new(INVENTORY_ITEM, self.id.as_uuid()), &event);
+    }
+
+    /// Goods arrived from a supplier: `quantity` more on hand at `location`, a `received`
+    /// movement caused by `source` at `landed` (what each unit cost, in the store's
+    /// currency). The cost becomes the moving average over the units on hand before
+    /// (across every location; none when that's 0 or less) and those arriving:
+    /// `(Q·A + q·c) / (Q + q)`, or `landed` itself without a cost before or units on hand.
+    /// Untracked items count it too, so the count is right when tracking is turned on.
+    /// Arriving without a cost leaves the average as it is. All or nothing.
+    pub fn receive(
+        &mut self,
+        location: LocationId,
+        quantity: Quantity,
+        landed: Option<UnitCost>,
+        source: StockSource,
+    ) -> Result<(), InventoryError> {
+        let q = i128::from(quantity.value());
+        let on_hand = check_range(i128::from(self.on_hand(location)) + q)?;
+        let average = match (landed, self.unit_cost) {
+            (None, kept) => kept,
+            (Some(cost), None) => Some(cost),
+            (Some(cost), Some(average)) => {
+                same_currency(average, cost)?;
+                let held = self.total_on_hand().max(0);
+                if held == 0 {
+                    Some(cost)
+                } else {
+                    Some(weighted(
+                        held * i128::from(average.scaled()) + q * i128::from(cost.scaled()),
+                        held + q,
+                        cost,
+                    )?)
+                }
+            }
+        };
+        self.move_with_cost(
+            location,
+            on_hand,
+            source,
+            landed,
+            average,
+            CostChange::Received,
+        );
+        Ok(())
+    }
+
+    /// Takes back a receipt recorded by mistake: `quantity` fewer on hand at `location`
+    /// (which may go below zero), a `received` movement with a negative delta. The
+    /// receipt's value comes out of the average, `(Q·A − q·c) / (Q − q)`, when units are
+    /// left and so is value; otherwise the average stays. All or nothing.
+    pub fn unreceive(
+        &mut self,
+        location: LocationId,
+        quantity: Quantity,
+        landed: Option<UnitCost>,
+        source: StockSource,
+    ) -> Result<(), InventoryError> {
+        let q = i128::from(quantity.value());
+        let on_hand = check_range(i128::from(self.on_hand(location)) - q)?;
+        let average = match (landed, self.unit_cost) {
+            (Some(cost), Some(average)) => {
+                same_currency(average, cost)?;
+                let held = self.total_on_hand();
+                let value = held * i128::from(average.scaled()) - q * i128::from(cost.scaled());
+                if held - q > 0 && value > 0 {
+                    Some(weighted(value, held - q, cost)?)
+                } else {
+                    Some(average)
+                }
+            }
+            (_, kept) => kept,
+        };
+        self.move_with_cost(
+            location,
+            on_hand,
+            source,
+            landed,
+            average,
+            CostChange::ReceiptCancelled,
+        );
+        Ok(())
+    }
+
+    /// A `received` movement to `on_hand` at `location`, its units at `landed` (the
+    /// item's cost when unknown), leaving the item at `average`: one row, and the cost
+    /// event when the cost changed.
+    fn move_with_cost(
+        &mut self,
+        location: LocationId,
+        on_hand: i64,
+        source: StockSource,
+        landed: Option<UnitCost>,
+        average: Option<UnitCost>,
+        why: CostChange,
+    ) {
+        let cause = Cause::new(StockReason::Received, source);
+        let unit_cost = landed.or(self.unit_cost);
+        self.write_level_at(location, on_hand, cause, unit_cost, average);
+        if average != self.unit_cost {
+            self.unit_cost = average;
+            self.record_cost_change(why);
+        }
+    }
+
+    /// On hand summed over every location.
+    fn total_on_hand(&self) -> i128 {
+        self.levels.iter().map(|l| i128::from(l.on_hand)).sum()
     }
 
     /// Where `quantity` would be reserved from `locations`: `Ok` with the allocation, or
@@ -643,6 +770,26 @@ impl InventoryItem {
     pub fn unit_cost(&self) -> Option<UnitCost> {
         self.unit_cost
     }
+}
+
+/// Costs averaged together are in one currency, the store's.
+fn same_currency(average: UnitCost, cost: UnitCost) -> Result<(), InventoryError> {
+    if average.currency() == cost.currency() {
+        Ok(())
+    } else {
+        Err(InventoryError::CostCurrency {
+            expected: average.currency(),
+            got: cost.currency(),
+        })
+    }
+}
+
+/// `value / units` (both positive, `value` in `UnitCost`'s scaled units) as a cost in
+/// `like`'s currency, rounded half away from zero.
+fn weighted(value: i128, units: i128, like: UnitCost) -> Result<UnitCost, InventoryError> {
+    let rounded = (2 * value + units) / (2 * units);
+    let scaled = i64::try_from(rounded).map_err(|_| hypha_core::MoneyError::Overflow)?;
+    Ok(UnitCost::new(scaled, like.currency())?)
 }
 
 fn check_range(quantity: i128) -> Result<i64, InventoryError> {
@@ -1539,5 +1686,234 @@ mod tests {
         i.set_unit_cost(Some(eur("0.0035")), None);
         let restored = InventoryItem::restore(i.snapshot()).unwrap();
         assert_eq!(restored.unit_cost(), Some(eur("0.0035")));
+    }
+
+    // ---- receiving ----
+
+    fn receipt() -> StockSource {
+        StockSource::Receipt {
+            purchase_order: hypha_core::PurchaseOrderId::from_uuid(Uuid::from_u128(90)),
+            receipt: hypha_core::ReceiptId::from_uuid(Uuid::from_u128(91)),
+        }
+    }
+
+    /// An item with `stock` and `cost`, its history so far taken.
+    fn costed(stock: &[(u128, i64)], cost: Option<&str>) -> InventoryItem {
+        let mut i = item(stock);
+        i.set_unit_cost(cost.map(eur), None);
+        i.take_movements();
+        i.take_events();
+        i
+    }
+
+    fn cost_whys(i: &mut InventoryItem) -> Vec<String> {
+        i.take_events()
+            .iter()
+            .filter(|e| e.event_type == "inventory_item.cost_changed")
+            .map(|e| e.data["why"].as_str().unwrap_or_default().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn the_first_receipt_sets_the_cost() {
+        let mut i = costed(&[], None);
+        i.receive(loc_id(1), qty(10), Some(eur("500")), receipt())
+            .unwrap();
+        assert_eq!(
+            (i.on_hand(loc_id(1)), i.unit_cost()),
+            (10, Some(eur("500")))
+        );
+        let row = i.take_movements().remove(0);
+        assert_eq!(
+            (
+                row.reason,
+                row.delta,
+                row.after,
+                row.source,
+                row.unit_cost,
+                row.average_after
+            ),
+            (
+                StockReason::Received,
+                10,
+                Some(10),
+                receipt(),
+                Some(eur("500")),
+                Some(eur("500"))
+            )
+        );
+        assert_eq!(cost_whys(&mut i), ["received"]);
+    }
+
+    #[test]
+    fn receiving_averages_over_every_location() {
+        // 4 at €5 (2 here, 2 elsewhere) and 6 arriving at €10: (4·500 + 6·1000) / 10 = 800
+        let mut i = costed(&[(1, 2), (2, 2)], Some("500"));
+        i.receive(loc_id(1), qty(6), Some(eur("1000")), receipt())
+            .unwrap();
+        assert_eq!(i.unit_cost(), Some(eur("800")));
+        assert_eq!((i.on_hand(loc_id(1)), i.on_hand(loc_id(2))), (8, 2));
+    }
+
+    #[test]
+    fn the_average_rounds_half_away_from_zero_at_four_places() {
+        // (1·0.0001 + 2·0) / 3 = 0.0000333… → 0
+        let mut i = costed(&[(1, 1)], Some("0.0001"));
+        i.receive(loc_id(1), qty(2), Some(eur("0")), receipt())
+            .unwrap();
+        assert_eq!(i.unit_cost(), Some(eur("0")));
+        // (1·0.0001 + 1·0) / 2 = 0.00005 → 0.0001
+        let mut i = costed(&[(1, 1)], Some("0.0001"));
+        i.receive(loc_id(1), qty(1), Some(eur("0")), receipt())
+            .unwrap();
+        assert_eq!(i.unit_cost(), Some(eur("0.0001")));
+        // (2·100 + 1·101) / 3 = 100.3333…
+        let mut i = costed(&[(1, 2)], Some("100"));
+        i.receive(loc_id(1), qty(1), Some(eur("101")), receipt())
+            .unwrap();
+        assert_eq!(i.unit_cost(), Some(eur("100.3333")));
+    }
+
+    #[test]
+    fn stock_below_zero_doesnt_weigh_in_the_average() {
+        let mut i = costed(&[(1, -3)], Some("500"));
+        i.receive(loc_id(1), qty(5), Some(eur("700")), receipt())
+            .unwrap();
+        assert_eq!((i.on_hand(loc_id(1)), i.unit_cost()), (2, Some(eur("700"))));
+        // Nothing on hand at all: the cost of what arrives.
+        let mut i = costed(&[(1, 0)], Some("500"));
+        i.receive(loc_id(1), qty(1), Some(eur("700")), receipt())
+            .unwrap();
+        assert_eq!(i.unit_cost(), Some(eur("700")));
+    }
+
+    #[test]
+    fn receiving_at_the_same_cost_records_no_cost_change() {
+        let mut i = costed(&[(1, 2)], Some("500"));
+        i.receive(loc_id(1), qty(3), Some(eur("500")), receipt())
+            .unwrap();
+        assert_eq!(cost_whys(&mut i), Vec::<String>::new());
+        assert_eq!(i.take_movements().len(), 1);
+    }
+
+    #[test]
+    fn receiving_without_a_cost_keeps_the_average() {
+        let mut i = costed(&[(1, 2)], Some("500"));
+        i.receive(loc_id(1), qty(3), None, receipt()).unwrap();
+        let row = i.take_movements().remove(0);
+        assert_eq!(
+            (i.unit_cost(), row.unit_cost, row.average_after),
+            (Some(eur("500")), Some(eur("500")), Some(eur("500")))
+        );
+    }
+
+    #[test]
+    fn untracked_items_count_what_arrives() {
+        let mut i = InventoryItem::new(
+            InventoryItemId::from_uuid(Uuid::from_u128(1)),
+            VariantId::from_uuid(Uuid::from_u128(2)),
+            false,
+            false,
+        );
+        i.receive(loc_id(1), qty(4), Some(eur("1")), receipt())
+            .unwrap();
+        assert_eq!(i.on_hand(loc_id(1)), 4);
+    }
+
+    #[test]
+    fn a_cost_in_another_currency_is_refused_and_changes_nothing() {
+        let mut i = costed(&[(1, 2)], Some("500"));
+        let usd = UnitCost::parse("500", hypha_core::Currency::USD).unwrap();
+        let before = i.clone();
+        assert_eq!(
+            i.receive(loc_id(1), qty(1), Some(usd), receipt()),
+            Err(InventoryError::CostCurrency {
+                expected: hypha_core::Currency::EUR,
+                got: hypha_core::Currency::USD
+            })
+        );
+        assert_eq!(i, before);
+        assert_eq!(i.take_movements(), []);
+    }
+
+    #[test]
+    fn receiving_past_the_largest_count_is_refused() {
+        let mut i = costed(&[(1, MAX_STOCK)], None);
+        assert_eq!(
+            i.receive(loc_id(1), qty(1), None, receipt()),
+            Err(InventoryError::StockOutOfRange(i128::from(MAX_STOCK) + 1))
+        );
+    }
+
+    #[test]
+    fn taking_a_receipt_back_takes_its_value_out_of_the_average() {
+        // 4 at €5 and 6 at €10 averaged 8; taking the 6 back leaves (10·800 − 6·1000)/4 = 500
+        let mut i = costed(&[(1, 4)], Some("500"));
+        i.receive(loc_id(1), qty(6), Some(eur("1000")), receipt())
+            .unwrap();
+        i.take_movements();
+        i.take_events();
+        i.unreceive(loc_id(1), qty(6), Some(eur("1000")), receipt())
+            .unwrap();
+        assert_eq!((i.on_hand(loc_id(1)), i.unit_cost()), (4, Some(eur("500"))));
+        let row = i.take_movements().remove(0);
+        assert_eq!(
+            (
+                row.reason,
+                row.delta,
+                row.after,
+                row.unit_cost,
+                row.average_after
+            ),
+            (
+                StockReason::Received,
+                -6,
+                Some(4),
+                Some(eur("1000")),
+                Some(eur("500"))
+            )
+        );
+        assert_eq!(cost_whys(&mut i), ["receipt_cancelled"]);
+    }
+
+    #[test]
+    fn taking_back_what_already_left_keeps_the_average() {
+        // All 6 sold since: nothing left to take the value out of.
+        let mut i = costed(&[(1, 6)], Some("800"));
+        i.unreceive(loc_id(1), qty(6), Some(eur("1000")), receipt())
+            .unwrap();
+        assert_eq!((i.on_hand(loc_id(1)), i.unit_cost()), (0, Some(eur("800"))));
+        // Fewer on hand than taken back: the count goes below zero.
+        let mut i = costed(&[(1, 2)], Some("800"));
+        i.unreceive(loc_id(1), qty(6), Some(eur("1000")), receipt())
+            .unwrap();
+        assert_eq!(
+            (i.on_hand(loc_id(1)), i.unit_cost()),
+            (-4, Some(eur("800")))
+        );
+        assert_eq!(cost_whys(&mut i), Vec::<String>::new());
+    }
+
+    #[test]
+    fn taking_back_more_value_than_is_left_keeps_the_average() {
+        // 3 at €1 on hand; taking back 2 that cost €10 would leave a negative value.
+        let mut i = costed(&[(1, 3)], Some("100"));
+        i.unreceive(loc_id(1), qty(2), Some(eur("1000")), receipt())
+            .unwrap();
+        assert_eq!((i.on_hand(loc_id(1)), i.unit_cost()), (1, Some(eur("100"))));
+    }
+
+    #[test]
+    fn taking_back_rounds_half_away_from_zero() {
+        // (3·100 − 1·99) / 2 = 100.5
+        let mut i = costed(&[(1, 3)], Some("100"));
+        i.unreceive(loc_id(1), qty(1), Some(eur("99")), receipt())
+            .unwrap();
+        assert_eq!(i.unit_cost(), Some(eur("100.5")));
+        // (3·1 − 1·0.0001) / 2 = 1.49995 → 1.5 (in 1/10,000: 29999 / 2 = 14999.5 → 15000)
+        let mut i = costed(&[(1, 3)], Some("1"));
+        i.unreceive(loc_id(1), qty(1), Some(eur("0.0001")), receipt())
+            .unwrap();
+        assert_eq!(i.unit_cost(), Some(eur("1.5")));
     }
 }

@@ -439,6 +439,11 @@ fn purchase_order_repo() {
 }
 
 #[test]
+fn receipt_repo() {
+    block_on(contract::receipt_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
 fn supplier_repo() {
     block_on(contract::supplier_repo(async || InMemoryPorts::default()));
 }

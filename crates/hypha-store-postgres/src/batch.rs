@@ -40,7 +40,8 @@ use hypha_orders::{Order, OrderSnapshot, StageOrders};
 use hypha_payments::{Payment, PaymentSnapshot, StagePayments};
 use hypha_products::{Product, ProductSnapshot, StageProducts};
 use hypha_purchasing::{
-    PurchaseOrder, PurchaseOrderSnapshot, PurchaseOrderSummary, StagePurchaseOrders,
+    PurchaseOrder, PurchaseOrderSnapshot, PurchaseOrderSummary, Receipt, ReceiptSnapshot,
+    StagePurchaseOrders, StageReceipts,
 };
 use hypha_tax::StageTaxAssignments;
 use hypha_users::{
@@ -66,7 +67,7 @@ use crate::{
     fulfillments::{insert_fulfillment, update_fulfillment},
     idempotency::insert_records,
     inventory::update_items,
-    inventory::{delete_items, lock_items},
+    inventory::{delete_items, insert_item, lock_items},
     markets::{
         add_catalog_products, remove_catalog_products, remove_fixed_prices, set_fixed_prices,
     },
@@ -77,6 +78,7 @@ use crate::{
     payments::{insert_payment, update_payment},
     products::{delete_product, update_product},
     purchase_orders::update_purchase_order,
+    receipts::{insert_receipt, update_receipt},
     stock_movements::insert_movements,
     store::{Db, Tx, end_transaction},
     store::{PgConnection, PgStore},
@@ -132,6 +134,7 @@ enum Staged {
     NewPasswordReset(PasswordResetSnapshot),
     PasswordReset(PasswordResetSnapshot),
     UsedUpResets(IdentityId, Timestamp),
+    NewInventoryItem(InventoryItemSnapshot),
     InventoryItem(InventoryItemSnapshot),
     /// An item removed at the version it was loaded at.
     DeletedInventoryItem(InventoryItemSnapshot),
@@ -188,6 +191,8 @@ enum Staged {
     DiscountSchedule(Option<Timestamp>, Timestamp),
     /// With the summary its row keeps for lists.
     PurchaseOrder(PurchaseOrderSnapshot, PurchaseOrderSummary),
+    NewReceipt(ReceiptSnapshot),
+    Receipt(ReceiptSnapshot),
 }
 
 impl Staged {
@@ -244,7 +249,11 @@ impl Staged {
             Staged::TaxAssignment(..) => 32,
             // Purchase orders before the items received into stock.
             Staged::PurchaseOrder(..) => 33,
+            // A receipt after its order (it names it).
+            Staged::NewReceipt(_) | Staged::Receipt(_) => 33,
             Staged::Idempotency(_) => 33,
+            // New items are inserted as they come; nothing else holds their rows yet.
+            Staged::NewInventoryItem(_) => 34,
             Staged::InventoryItem(_) => 34,
             Staged::DeletedInventoryItem(_) => 35,
             // Gathered and written after the items, like them.
@@ -292,6 +301,9 @@ impl Staged {
                 (Staged::NewFulfillment(a), Staged::NewFulfillment(b))
                 | (Staged::Fulfillment(a), Staged::Fulfillment(b)) => a.id.cmp(&b.id),
                 (Staged::PurchaseOrder(a, _), Staged::PurchaseOrder(b, _)) => a.id.cmp(&b.id),
+                (Staged::NewReceipt(a), Staged::NewReceipt(b))
+                | (Staged::Receipt(a), Staged::Receipt(b)) => a.id.cmp(&b.id),
+                (Staged::NewInventoryItem(a), Staged::NewInventoryItem(b)) => a.id.cmp(&b.id),
                 (Staged::NewPayment(a), Staged::NewPayment(b))
                 | (Staged::Payment(a), Staged::Payment(b)) => a.id.cmp(&b.id),
                 (Staged::NewCart(a), Staged::NewCart(b)) | (Staged::Cart(a), Staged::Cart(b)) => {
@@ -539,6 +551,14 @@ impl StageAssetUsages for PgBatch {
 }
 
 impl StageInventoryItems for PgBatch {
+    fn insert_inventory_item(&mut self, item: &mut InventoryItem) {
+        stamp_insert(item, self.now);
+        self.stage(Staged::NewInventoryItem(item.snapshot()));
+        self.stage_events_of(item, Version::NEW.next());
+        self.stage_movements_of(item);
+        item.set_version(Version::NEW.next());
+    }
+
     fn update_inventory_item(&mut self, item: &mut InventoryItem) {
         stamp_update(item, self.now);
         self.stage(Staged::InventoryItem(item.snapshot()));
@@ -582,6 +602,23 @@ impl StagePurchaseOrders for PgBatch {
         let version = po.version().next();
         self.stage_events_of(po, version);
         po.set_version(version);
+    }
+}
+
+impl StageReceipts for PgBatch {
+    fn insert_receipt(&mut self, receipt: &mut Receipt) {
+        stamp_insert(receipt, self.now);
+        self.stage(Staged::NewReceipt(receipt.snapshot()));
+        self.stage_events_of(receipt, Version::NEW.next());
+        receipt.set_version(Version::NEW.next());
+    }
+
+    fn update_receipt(&mut self, receipt: &mut Receipt) {
+        stamp_update(receipt, self.now);
+        self.stage(Staged::Receipt(receipt.snapshot()));
+        let version = receipt.version().next();
+        self.stage_events_of(receipt, version);
+        receipt.set_version(version);
     }
 }
 
@@ -785,6 +822,7 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     Staged::UsedUpResets(identity, at) => {
                         use_up_password_resets(&db, identity, at).await?;
                     }
+                    Staged::NewInventoryItem(s) => insert_item(&db, &s).await?,
                     Staged::InventoryItem(s) => items.push(s),
                     Staged::DeletedInventoryItem(s) => deleted.push(s),
                     Staged::StockMovements(staged) => movements.extend(staged),
@@ -895,6 +933,10 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     }
                     Staged::PurchaseOrder(s, summary) => {
                         update_purchase_order(&db, &s, &summary).await?;
+                    }
+                    Staged::NewReceipt(s) => insert_receipt(&db, &s).await?,
+                    Staged::Receipt(s) => {
+                        update_receipt(&db, &s).await?;
                     }
                 }
             }

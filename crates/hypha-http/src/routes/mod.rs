@@ -33,6 +33,7 @@ pub mod page;
 pub mod payments;
 pub mod products;
 pub mod purchase_orders;
+pub mod receipts;
 pub mod reference;
 pub mod reports;
 pub mod search;
@@ -251,6 +252,10 @@ macro_rules! route_table {
             [admin, POST, "/admin/purchase-orders/{id}/order", purchase_orders::order],
             [admin, POST, "/admin/purchase-orders/{id}/close", purchase_orders::close],
             [admin, POST, "/admin/purchase-orders/{id}/cancel", purchase_orders::cancel],
+            [admin, POST, "/admin/purchase-orders/{id}/receipts", receipts::create],
+            [admin, GET, "/admin/purchase-orders/{id}/receipts", receipts::list],
+            [admin, GET, "/admin/receipts/{id}", receipts::fetch],
+            [admin, POST, "/admin/receipts/{id}/cancel", receipts::cancel],
             [admin, GET, "/admin/customer-groups", customer_groups::list],
             [admin, POST, "/admin/customer-groups", customer_groups::create],
             [admin, GET, "/admin/customer-groups/{id}", customer_groups::fetch],

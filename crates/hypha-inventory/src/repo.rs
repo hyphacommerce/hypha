@@ -75,6 +75,10 @@ pub trait StockMovementRepo {
 /// Stages inventory item writes in a `hypha_core::HasBatch` batch; the adapter's batch
 /// type implements it. Like the repo, it writes the item's movements with it.
 pub trait StageInventoryItems {
+    /// Stages what `InventoryItemRepo::insert` would write (version 1). A second item for
+    /// a variant that has one fails the batch with `Duplicate(INVENTORY_ITEM_VARIANT)`:
+    /// a writer that lost that race loads the other one and tries again.
+    fn insert_inventory_item(&mut self, item: &mut InventoryItem);
     /// Stages what `InventoryItemRepo::update` would write, and moves `item` to the
     /// version it has once the batch commits. If the commit fails, `item` is stale: load
     /// it again.

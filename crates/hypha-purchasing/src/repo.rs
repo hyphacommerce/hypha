@@ -1,11 +1,11 @@
 use hypha_core::{
-    Direction, Keyset, LocationId, Page, PageRequest, PurchaseOrderId, RepoError, SortKey,
-    SupplierId, VariantId,
+    Direction, Keyset, LocationId, Page, PageRequest, PurchaseOrderId, ReceiptId, RepoError,
+    SortKey, SupplierId, VariantId,
 };
 
 use crate::{
     PurchaseOrder, PurchaseOrderLine, PurchaseOrderNumber, PurchaseOrderStatus,
-    PurchaseOrderSummary, ReceiptStatus, Supplier, SupplierVariant,
+    PurchaseOrderSummary, Receipt, ReceiptStatus, Supplier, SupplierVariant,
 };
 
 /// Rules a purchasing store enforces, reported as `RepoError::Duplicate(key)` or
@@ -23,6 +23,9 @@ pub mod keys {
     pub const PURCHASE_ORDER_NUMBER: &str = "purchase_order_number";
     /// A purchase order names a supplier that exists.
     pub const PURCHASE_ORDER_SUPPLIER: &str = "purchase_order_supplier";
+    pub const RECEIPT_ID: &str = "receipt_id";
+    /// A receipt names a purchase order that exists.
+    pub const RECEIPT_PURCHASE_ORDER: &str = "receipt_purchase_order";
 }
 
 /// Which suppliers a list wants: all that match every field set.
@@ -198,6 +201,37 @@ pub trait StagePurchaseOrders {
     /// Stages what `PurchaseOrderRepo::update` would write, and moves `po` to the version
     /// it has once the batch commits.
     fn update_purchase_order(&mut self, po: &mut PurchaseOrder);
+}
+
+/// Receipts: what arrived against purchase orders. Written only in a batch with their
+/// order and the stock they changed (`StageReceipts`).
+#[allow(async_fn_in_trait)]
+pub trait ReceiptRepo {
+    async fn get(&self, id: ReceiptId) -> Result<Option<Receipt>, RepoError>;
+    /// The order's receipts, oldest first (by ID). An order has a handful.
+    async fn for_purchase_order(&self, po: PurchaseOrderId) -> Result<Vec<Receipt>, RepoError>;
+}
+
+/// Stages receipt writes in a `hypha_core::HasBatch` batch, with their events.
+pub trait StageReceipts {
+    /// Stages a new receipt (version 1). Its order must exist
+    /// (`Reference(RECEIPT_PURCHASE_ORDER)`), its ID be new (`Duplicate(RECEIPT_ID)`).
+    fn insert_receipt(&mut self, receipt: &mut Receipt);
+    /// Stages what changed (it was taken back), checking the version it was loaded at.
+    fn update_receipt(&mut self, receipt: &mut Receipt);
+}
+
+pub trait HasReceipts {
+    type Receipts: ReceiptRepo;
+    fn receipts(&self) -> &Self::Receipts;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasReceipts + ?Sized> HasReceipts for &T {
+    type Receipts = T::Receipts;
+    fn receipts(&self) -> &Self::Receipts {
+        (**self).receipts()
+    }
 }
 
 pub trait HasPurchaseOrders {

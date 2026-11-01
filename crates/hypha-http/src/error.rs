@@ -1044,7 +1044,9 @@ impl From<hypha_inventory::CommandError> for ApiError {
                 | I::StockOutOfRange(_)
                 | I::Quantity(_)
                 | I::InvalidReference
-                | I::NoteTooLong { .. },
+                | I::NoteTooLong { .. }
+                | I::CostCurrency { .. }
+                | I::Money(_),
             )
             | E::CostCurrencyMismatch { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
@@ -1287,7 +1289,9 @@ impl From<hypha_order_actions::CommandError> for ApiError {
                 | I::ReferenceInUse(_)
                 | I::OutOfStock { .. }
                 | I::StillReserved
-                | I::NoteTooLong { .. },
+                | I::NoteTooLong { .. }
+                | I::CostCurrency { .. }
+                | I::Money(_),
             ) => return Self::internal(e),
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
@@ -1666,7 +1670,8 @@ impl From<hypha_purchasing::CommandError> for ApiError {
             // supplier, in its body, is mapped by its route).
             E::SupplierNotFound(_)
             | E::SupplierVariantNotFound { .. }
-            | E::PurchaseOrderNotFound(_) => StatusCode::NOT_FOUND,
+            | E::PurchaseOrderNotFound(_)
+            | E::ReceiptNotFound(_) => StatusCode::NOT_FOUND,
             E::SupplierCurrencyInUse(_) | E::SupplierInUse(_) | E::SupplierArchived(_) => {
                 StatusCode::CONFLICT
             }
@@ -1682,7 +1687,8 @@ impl From<hypha_purchasing::CommandError> for ApiError {
                 | P::StoreCurrencyRequired
                 | P::ExchangeRateRequired { .. }
                 | P::CurrencyFixed
-                | P::OverReceived(_),
+                | P::OverReceived(_)
+                | P::ReceiptCancelled,
             ) => StatusCode::CONFLICT,
             E::Purchasing(
                 P::Text(_)
@@ -1709,7 +1715,8 @@ impl From<hypha_purchasing::CommandError> for ApiError {
                 | P::BelowReceived { .. }
                 | P::UnknownLine(_)
                 | P::EmptyReceiptLine(_)
-                | P::TakeBackMismatch(_),
+                | P::TakeBackMismatch(_)
+                | P::EmptyReceipt,
             ) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
@@ -1751,6 +1758,35 @@ impl From<hypha_purchasing::CommandError> for ApiError {
             _ => None,
         };
         Self::domain(status, e).with_details(details)
+    }
+}
+
+impl From<hypha_receiving::CommandError> for ApiError {
+    fn from(e: hypha_receiving::CommandError) -> Self {
+        use hypha_receiving::CommandError as E;
+        // The order's and the stock's own rules answer as they do on their routes.
+        let e = match e {
+            E::Purchasing(p) => return hypha_purchasing::CommandError::Purchasing(p).into(),
+            E::Inventory(i) => return hypha_inventory::CommandError::Inventory(i).into(),
+            other => other,
+        };
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // The order or the receipt in the URL.
+            E::PurchaseOrderNotFound(_) | E::ReceiptNotFound(_) => StatusCode::NOT_FOUND,
+            // A location named in the body.
+            E::LocationNotFound(_) | E::Quantity(_) | E::Idempotency(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            E::StoreCurrencyRequired => StatusCode::CONFLICT,
+            E::Purchasing(_) | E::Inventory(_) | E::Repo(RepoError::Backend(_)) => {
+                return Self::internal(e);
+            }
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        Self::domain(status, e)
     }
 }
 

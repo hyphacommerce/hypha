@@ -45,6 +45,7 @@ mod payments;
 mod preview_tokens;
 mod products;
 mod purchase_orders;
+mod receipts;
 mod sales;
 mod search;
 mod shipping;

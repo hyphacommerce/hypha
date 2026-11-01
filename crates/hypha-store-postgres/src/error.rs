@@ -43,6 +43,10 @@ const REFERENCE_KEYS: &[(&str, &str)] = &[
         "purchase_order_supplier",
         purchasing_keys::PURCHASE_ORDER_SUPPLIER,
     ),
+    (
+        "receipt_purchase_order",
+        purchasing_keys::RECEIPT_PURCHASE_ORDER,
+    ),
 ];
 
 /// Unique constraint names (see `migrations/`) and the repo key each one reports.
@@ -159,6 +163,7 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("agent_calls_pkey", agent_keys::AGENT_CALL_ID),
     ("suppliers_pkey", purchasing_keys::SUPPLIER_ID),
     ("purchase_orders_pkey", purchasing_keys::PURCHASE_ORDER_ID),
+    ("receipts_pkey", purchasing_keys::RECEIPT_ID),
     (
         "purchase_order_number",
         purchasing_keys::PURCHASE_ORDER_NUMBER,

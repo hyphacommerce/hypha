@@ -348,7 +348,7 @@ async fn supplier_name<P: HasSuppliers>(ports: &P, id: SupplierId) -> Result<Str
         .unwrap_or_default())
 }
 
-async fn respond<S: Storage>(
+pub(crate) async fn respond<S: Storage>(
     state: &SharedState<S>,
     ports: &S::Ports<'_>,
     po: &PurchaseOrder,

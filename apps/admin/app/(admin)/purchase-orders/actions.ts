@@ -62,3 +62,68 @@ export async function deletePurchaseOrder(id: string): Promise<Result> {
   revalidatePath("/purchase-orders");
   redirect("/purchase-orders");
 }
+
+export type ReceiveResult = Result & {
+  /** Variants given an untracked stock record by this receipt. */
+  newItems?: string[];
+};
+
+/**
+ * Records goods arriving. `key` is made once per dialog, so a double submit records one
+ * receipt (the API replays the first).
+ */
+export async function receivePurchaseOrder(
+  id: string,
+  input: {
+    key: string;
+    location: string;
+    lines: { variant: string; accepted: number; rejected: number }[];
+    allowOver: boolean;
+    note: string;
+  },
+): Promise<ReceiveResult> {
+  const client = await sessionClient();
+  const { data, error } = await client.POST("/admin/purchase-orders/{id}/receipts", {
+    params: { path: { id }, header: { "Idempotency-Key": input.key } },
+    body: {
+      location: input.location,
+      lines: input.lines,
+      allow_over: input.allowOver,
+      note: input.note.trim() || null,
+    },
+  });
+  if (!data) return { error: error ? describe(error) : "Couldn't record the receipt." };
+  revalidatePath(`/purchase-orders/${id}`);
+  revalidatePath("/purchase-orders");
+  return { newItems: data.new_items };
+}
+
+/** Takes a receipt back: its units come off stock, its counts off the order. */
+export async function cancelReceipt(purchaseOrder: string, receipt: string): Promise<Result> {
+  const client = await sessionClient();
+  const { error } = await client.POST("/admin/receipts/{id}/cancel", {
+    params: { path: { id: receipt } },
+  });
+  if (error) return { error: describe(error) };
+  revalidatePath(`/purchase-orders/${purchaseOrder}`);
+  revalidatePath("/purchase-orders");
+  return {};
+}
+
+/** Turns stock tracking on for variants a receipt gave a record, so their stock sells. */
+export async function trackVariants(variants: string[]): Promise<Result> {
+  const client = await sessionClient();
+  for (const variant of variants) {
+    const { data } = await client.GET("/admin/variants/{id}/inventory", {
+      params: { path: { id: variant } },
+    });
+    if (!data?.id) continue;
+    const { error } = await client.PATCH("/admin/inventory-items/{id}", {
+      params: { path: { id: data.id } },
+      body: { tracked: true },
+    });
+    if (error) return { error: describe(error) };
+  }
+  revalidatePath("/inventory");
+  return {};
+}

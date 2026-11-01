@@ -4,12 +4,12 @@ use std::sync::{
 };
 
 use hypha_core::{
-    Keyset, Page, PageRequest, PurchaseOrderId, Recorded, RepoError, SupplierId, VariantId,
-    Versioned, stamp_insert, stamp_update,
+    Keyset, Page, PageRequest, PurchaseOrderId, ReceiptId, Recorded, RepoError, SupplierId,
+    VariantId, Versioned, stamp_insert, stamp_update,
 };
 use hypha_purchasing::{
     PurchaseOrder, PurchaseOrderFilter, PurchaseOrderLine, PurchaseOrderNumber, PurchaseOrderRepo,
-    PurchaseOrderSort, PurchaseOrderStatus, PurchaseOrderSummary, keys,
+    PurchaseOrderSort, PurchaseOrderStatus, PurchaseOrderSummary, Receipt, ReceiptRepo, keys,
 };
 
 use crate::{InMemoryOutbox, InMemorySuppliers, table::Table};
@@ -141,5 +141,28 @@ impl PurchaseOrderRepo for InMemoryPurchaseOrders {
             .filter_map(|po| po.line(variant).cloned().map(|line| (po.number(), line)))
             .max_by_key(|(number, _)| *number)
             .map(|(_, line)| line))
+    }
+}
+
+/// Receipts. Written only through a batch, with their order, like the database's.
+#[derive(Clone, Default)]
+pub struct InMemoryReceipts {
+    pub(crate) receipts: Arc<Table<ReceiptId, Receipt>>,
+}
+
+impl ReceiptRepo for InMemoryReceipts {
+    async fn get(&self, id: ReceiptId) -> Result<Option<Receipt>, RepoError> {
+        Ok(self.receipts.get(&id))
+    }
+
+    async fn for_purchase_order(&self, po: PurchaseOrderId) -> Result<Vec<Receipt>, RepoError> {
+        let mut found: Vec<Receipt> = self
+            .receipts
+            .all()
+            .into_iter()
+            .filter(|r| r.purchase_order() == po)
+            .collect();
+        found.sort_by_key(Receipt::id);
+        Ok(found)
     }
 }

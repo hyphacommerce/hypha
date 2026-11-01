@@ -1,11 +1,12 @@
 //! What happens to suppliers and purchase orders, as events. Contract types: a reshaped field is a new
 //! `VERSION`, never an edit.
 
-use hypha_core::{Event, PurchaseOrderId, SupplierId};
+use hypha_core::{Event, LocationId, PurchaseOrderId, ReceiptId, SupplierId, VariantId};
 use serde::Serialize;
 
 pub const SUPPLIER: &str = "supplier";
 pub const PURCHASE_ORDER: &str = "purchase_order";
+pub const RECEIPT: &str = "receipt";
 
 /// `supplier.created`.
 #[derive(Debug, Serialize)]
@@ -119,5 +120,41 @@ pub struct PurchaseOrderReceiptStatusChanged {
 
 impl Event for PurchaseOrderReceiptStatusChanged {
     const TYPE: &'static str = "purchase_order.receipt_status_changed";
+    const VERSION: u16 = 1;
+}
+
+/// A receipt's line in its events.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReceiptLineEvent {
+    pub variant: VariantId,
+    pub accepted: u32,
+    pub rejected: u32,
+}
+
+/// `receipt.created`: goods arrived against a purchase order, at a location.
+#[derive(Debug, Serialize)]
+pub struct ReceiptCreated {
+    pub receipt: ReceiptId,
+    pub purchase_order: PurchaseOrderId,
+    pub location: LocationId,
+    pub lines: Vec<ReceiptLineEvent>,
+}
+
+impl Event for ReceiptCreated {
+    const TYPE: &'static str = "receipt.created";
+    const VERSION: u16 = 1;
+}
+
+/// `receipt.cancelled`: taken back, its units off stock and off the order's counts.
+#[derive(Debug, Serialize)]
+pub struct ReceiptCancelled {
+    pub receipt: ReceiptId,
+    pub purchase_order: PurchaseOrderId,
+    pub location: LocationId,
+    pub lines: Vec<ReceiptLineEvent>,
+}
+
+impl Event for ReceiptCancelled {
+    const TYPE: &'static str = "receipt.cancelled";
     const VERSION: u16 = 1;
 }

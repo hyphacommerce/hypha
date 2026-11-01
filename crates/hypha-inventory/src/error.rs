@@ -1,4 +1,6 @@
-use hypha_core::{AddressError, ErrorCode, LocationId, MarketId, QuantityError, TextError};
+use hypha_core::{
+    AddressError, Currency, ErrorCode, LocationId, MarketId, MoneyError, QuantityError, TextError,
+};
 use thiserror::Error;
 
 use crate::{MAX_STOCK, ReservationRef};
@@ -28,6 +30,12 @@ pub enum InventoryError {
     StillReserved,
     #[error("a stock movement's note can be at most {max} characters")]
     NoteTooLong { max: usize },
+    /// Stock arriving at a cost in another currency than the item's: costs are all in the
+    /// store's base currency.
+    #[error("the cost must be in {expected}, the item's currency, not {got}")]
+    CostCurrency { expected: Currency, got: Currency },
+    #[error(transparent)]
+    Money(#[from] MoneyError),
 }
 
 /// Why stored data can't be rebuilt into an inventory item. Only
@@ -60,6 +68,8 @@ impl ErrorCode for InventoryError {
             InventoryError::OutOfStock { .. } => "out_of_stock",
             InventoryError::StillReserved => "inventory_still_reserved",
             InventoryError::NoteTooLong { .. } => "movement_note_too_long",
+            InventoryError::CostCurrency { .. } => "cost_currency_mismatch",
+            InventoryError::Money(e) => e.code(),
         }
     }
 }

@@ -1298,6 +1298,7 @@ dependencies = [
  "hypha-privacy",
  "hypha-products",
  "hypha-purchasing",
+ "hypha-receiving",
  "hypha-search",
  "hypha-search-index",
  "hypha-shipping",
@@ -1576,6 +1577,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-receiving"
+version = "0.1.0-beta.2"
+dependencies = [
+ "hypha-core",
+ "hypha-inventory",
+ "hypha-purchasing",
+ "hypha-testkit",
+ "pollster",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-search"
 version = "0.1.0-beta.2"
 dependencies = [
@@ -1688,6 +1702,7 @@ dependencies = [
  "hypha-products",
  "hypha-promotions",
  "hypha-purchasing",
+ "hypha-receiving",
  "hypha-search-index",
  "hypha-shipping",
  "hypha-store-postgres",

@@ -32,9 +32,17 @@ function Source({ source }: { source: Movement["source"] }) {
         </Link>
       );
     case "receipt":
-      return <Text>Purchase order receipt</Text>;
+      return (
+        <Link href={`/purchase-orders/${source.purchase_order}`} color="primary">
+          Received
+        </Link>
+      );
     case "purchase_order":
-      return <Text>Purchase order</Text>;
+      return (
+        <Link href={`/purchase-orders/${source.purchase_order}`} color="primary">
+          Purchase order
+        </Link>
+      );
     case "transfer":
       return <Text>Transfer</Text>;
     case "migration":

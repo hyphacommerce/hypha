@@ -90,3 +90,33 @@ first (`sort=expected_at`).
 Purchase order events (`purchase_order.created`, `.updated` with the fields and the
 revision, `.ordered`, `.closed`, `.cancelled`, `.receipt_status_changed`) reach apps whose
 grant holds `purchasing:read`.
+
+## Receiving
+
+When goods arrive, record a **receipt** against the ordered purchase order:
+`POST /admin/purchase-orders/{id}/receipts` with how many of each variant you **accepted**
+and how many you **refused** (damaged, wrong), at the order's destination unless you name
+another `location`. Send an `Idempotency-Key`: a retry answers with the first receipt.
+
+```json
+{ "lines": [{ "variant": "var_…", "accepted": 5, "rejected": 1 }], "note": "Pallet 1 of 2" }
+```
+
+- **Accepted units go on hand** at the location, each at its **landed cost**: the line's
+  unit cost plus its share of the extra costs, at the order's exchange rate, in your
+  base currency. A `received` row joins the item's stock history.
+- **The item's unit cost becomes the moving average** of what was on hand (across every
+  location) and what arrived: 4 at €5.00 and 6 arriving at €10.00 make €8.00.
+- **Refused units add no stock**, but they're counted: a line is done once received and
+  refused units cover it. To expect a replacement, raise the line's quantity.
+- **More than is outstanding** is `409 over_received`, listing each line's outstanding in
+  `details.lines`, unless the request says `"allow_over": true`.
+- **A variant with no stock record** gets one, **untracked**, so receiving doesn't change
+  whether it sells; the answer lists it in `new_items` for you to turn tracking on.
+
+The order counts what arrived and closes once every line is accounted for. Its receipts
+are at `GET /admin/purchase-orders/{id}/receipts`. A receipt recorded by mistake is
+**taken back** with `POST /admin/receipts/{id}/cancel`: its units come off stock (the
+count may go below zero if some were sold since), its value comes out of the average
+cost, and a closed order opens again. Events `receipt.created` and `receipt.cancelled`
+reach apps whose grant holds `purchasing:read`.

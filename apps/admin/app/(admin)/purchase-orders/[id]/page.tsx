@@ -11,13 +11,15 @@ import { poNumber } from "@/lib/purchasing";
 
 import { PurchaseOrderActions } from "./purchase-order-actions";
 import { PurchaseOrderEditor } from "./purchase-order-editor";
+import { ReceiptsCard, ReceiveButton } from "./receiving";
 
 const BACK: Crumb[] = [{ label: "Purchase orders", href: "/purchase-orders" }];
 
 /**
  * A purchase order: its lines (outstanding per line, landed cost), extra costs, totals in
  * its currency and the store's, and its details; changed in place while it's a draft or
- * ordered. The header's actions move it along (order, close, cancel, delete).
+ * ordered. The header's actions move it along (order, receive, close, cancel, delete); its
+ * receipts are listed under it, each to take back.
  */
 export default async function PurchaseOrderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -34,10 +36,11 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
 
 async function PurchaseOrderView({ id }: { id: string }) {
   const client = await sessionClient();
-  const [po, me, locations] = await Promise.all([
+  const [po, me, locations, receipts] = await Promise.all([
     client.GET("/admin/purchase-orders/{id}", { params: { path: { id } } }).then(loaded),
     requireStaff(),
     client.GET("/admin/locations"),
+    client.GET("/admin/purchase-orders/{id}/receipts", { params: { path: { id } } }),
   ]);
   const canWrite = hasScope(me.scopes, "purchasing:write");
   const places = (locations.data?.items ?? []).map((l) => ({ id: l.id, name: l.name }));
@@ -55,9 +58,22 @@ async function PurchaseOrderView({ id }: { id: string }) {
           </HStack>
         }
         description={`${po.supplier_name} · ${po.currency}${po.revision > 0 ? ` · revision ${po.revision}` : ""}`}
-        actions={canWrite && <PurchaseOrderActions po={po} />}
+        actions={
+          canWrite && (
+            <HStack gap={2} wrap="wrap" vAlign="start">
+              <PurchaseOrderActions po={po} />
+              <ReceiveButton po={po} places={places} />
+            </HStack>
+          )
+        }
       />
       <PurchaseOrderEditor key={po.updated_at} po={po} locations={places} isReadOnly={!canWrite} />
+      <ReceiptsCard
+        po={po}
+        receipts={receipts.data?.items ?? []}
+        places={places}
+        canWrite={canWrite}
+      />
     </VStack>
   );
 }

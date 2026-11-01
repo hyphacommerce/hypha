@@ -1306,6 +1306,30 @@ contains "this one" "\"id\":\"$PO\""
 step "a supplier on an order stays" 409 supplier_in_use -X DELETE "$BASE/admin/suppliers/$SUPPLIER"
 step "an unknown purchase order" 404 purchase_order_not_found \
     "$BASE/admin/purchase-orders/po_00000000000000000000000000000063"
+
+# --- receiving (into a back room no market sells from, so the lamp's counts below stay) ---
+step "a back room" 201 - -X POST "$BASE/admin/locations" -H "$JSON" -d '{"name":"Back room"}'
+BACKROOM=$(id)
+RECEIPT_BODY="{\"location\":\"$BACKROOM\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":5,\"rejected\":1}],\"note\":\"pallet 1\"}"
+step "5 lamps arrive, 1 broken" 201 - -X POST "$BASE/admin/purchase-orders/$PO/receipts" -H "$JSON" \
+    -H "Idempotency-Key: e2e-receipt-1" -d "$RECEIPT_BODY"
+RECEIPT=$(id)
+contains "at their landed cost" '"landed_unit_cost":{"amount":"1266.6667","currency":"EUR"}'
+contains "the order is partly received" '"receipt_status":"partial"'
+replayed "the same key answers with the same receipt" -X POST "$BASE/admin/purchase-orders/$PO/receipts" \
+    -H "$JSON" -H "Idempotency-Key: e2e-receipt-1" -d "$RECEIPT_BODY"
+step "more than is outstanding" 409 over_received -X POST "$BASE/admin/purchase-orders/$PO/receipts" -H "$JSON" \
+    -d "{\"location\":\"$BACKROOM\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":7}]}"
+contains "6 are still to come" "\"variant\":\"$LAMP_VAR\",\"outstanding\":6"
+step "the lamps in the back room" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?location=$BACKROOM"
+contains "received there" '"reason":"received"'
+step "the order's receipts" 200 - "$BASE/admin/purchase-orders/$PO/receipts"
+contains "this one" "\"id\":\"$RECEIPT\""
+step "take the receipt back" 200 - -X POST "$BASE/admin/receipts/$RECEIPT/cancel"
+contains "taken back" '"status":"cancelled"'
+contains "nothing received any more" '"receipt_status":"none"'
+step "not twice" 409 receipt_cancelled -X POST "$BASE/admin/receipts/$RECEIPT/cancel"
+step "an unknown receipt" 404 receipt_not_found "$BASE/admin/receipts/rcpt_00000000000000000000000000000063"
 step "what runs low at the warehouse" 200 - "$BASE/admin/inventory-items?below=6&location=$WAREHOUSE"
 contains "the lamp runs low" "\"id\":\"$LAMP_ITEM\",\"variant\":\"$LAMP_VAR\",\"product\":\"$LAMP\""
 step "no lamp below zero" 200 - "$BASE/admin/inventory-items?below=0&product=$LAMP"

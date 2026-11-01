@@ -92,7 +92,7 @@ pub use ports::InMemoryPorts;
 pub use preview_tokens::InMemoryPreviewTokenRepo;
 pub use price_lists::InMemoryPriceListRepo;
 pub use products::InMemoryProductRepo;
-pub use purchase_orders::InMemoryPurchaseOrders;
+pub use purchase_orders::{InMemoryPurchaseOrders, InMemoryReceipts};
 pub use search::{
     InMemorySearchIndex, InMemorySearchQueue, InMemorySearchSettingsRepo, search_fixture,
 };

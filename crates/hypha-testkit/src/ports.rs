@@ -97,6 +97,8 @@ pub struct InMemoryPorts {
     pub suppliers: crate::InMemorySuppliers,
     /// Purchase orders, sharing the suppliers' store.
     pub purchase_orders: crate::InMemoryPurchaseOrders,
+    /// What arrived against purchase orders.
+    pub receipts: crate::InMemoryReceipts,
 }
 
 impl Default for InMemoryPorts {
@@ -176,6 +178,7 @@ impl Default for InMemoryPorts {
             agents: crate::InMemoryAgents::sharing(&outbox),
             discounts,
             purchase_orders: crate::InMemoryPurchaseOrders::sharing(&suppliers, &outbox),
+            receipts: crate::InMemoryReceipts::default(),
             suppliers,
             outbox,
         }
@@ -218,6 +221,13 @@ impl hypha_purchasing::HasPurchaseOrders for InMemoryPorts {
     type PurchaseOrders = crate::InMemoryPurchaseOrders;
     fn purchase_orders(&self) -> &crate::InMemoryPurchaseOrders {
         &self.purchase_orders
+    }
+}
+
+impl hypha_purchasing::HasReceipts for InMemoryPorts {
+    type Receipts = crate::InMemoryReceipts;
+    fn receipts(&self) -> &crate::InMemoryReceipts {
+        &self.receipts
     }
 }
 

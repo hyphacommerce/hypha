@@ -1838,6 +1838,22 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "CancelledReceiptResponse": {
+        "description": "A receipt taken back and its order after it.",
+        "properties": {
+          "purchase_order": {
+            "$ref": "#/components/schemas/PurchaseOrderResponse"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/ReceiptResponse"
+          }
+        },
+        "required": [
+          "receipt",
+          "purchase_order"
+        ],
+        "type": "object"
+      },
       "CandidateResultDto": {
         "description": "What became of one price list for a variant.\n\nKnown values: `won`, `higher`, `tied_with_older`, `not_live`, `not_in_audience`, `not_pricing`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
@@ -11610,6 +11626,131 @@
         "pattern": "^rcpt_[0-9a-f]{32}$",
         "type": "string"
       },
+      "ReceiptLineResponse": {
+        "description": "One variant's units in a receipt.",
+        "properties": {
+          "accepted": {
+            "description": "Into stock.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "landed_unit_cost": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UnitCost",
+                "description": "What each accepted unit cost, in the store's currency: its order line's cost and\nshare of the extra costs, at the receipt's exchange rate."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rejected": {
+            "description": "Refused: no stock.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/VariantId"
+          }
+        },
+        "required": [
+          "variant",
+          "accepted",
+          "rejected"
+        ],
+        "type": "object"
+      },
+      "ReceiptList": {
+        "properties": {
+          "items": {
+            "description": "Oldest first, those taken back too.",
+            "items": {
+              "$ref": "#/components/schemas/ReceiptResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ReceiptResponse": {
+        "properties": {
+          "cancelled_at": {
+            "description": "RFC 3339.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "description": "RFC 3339: when it was received.",
+            "type": "string"
+          },
+          "exchange_rate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ExchangeRate",
+                "description": "The order's rate when it was received, when it has one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/ReceiptId"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptLineResponse"
+            },
+            "type": "array"
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationId",
+            "description": "Where the goods arrived."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "purchase_order": {
+            "$ref": "#/components/schemas/PurchaseOrderId"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReceiptStateDto"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "purchase_order",
+          "location",
+          "lines",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ReceiptStateDto": {
+        "description": "Whether a receipt still counts.\n\nKnown values: `recorded`, `cancelled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "recorded",
+          "cancelled"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "ReceiptStatusDto": {
         "description": "How much of a purchase order has arrived.\n\nKnown values: `none`, `partial`, `received`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
@@ -11619,6 +11760,92 @@
         ],
         "type": "string",
         "x-hypha-open-enum": true
+      },
+      "ReceiveLineRequest": {
+        "additionalProperties": false,
+        "description": "One variant's units arriving.",
+        "properties": {
+          "accepted": {
+            "description": "Into stock.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rejected": {
+            "description": "Refused (damaged, wrong): recorded, no stock.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/VariantId"
+          }
+        },
+        "required": [
+          "variant"
+        ],
+        "type": "object"
+      },
+      "ReceiveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_over": {
+            "description": "Take more than a line has outstanding (`409 over_received` otherwise).",
+            "type": "boolean"
+          },
+          "lines": {
+            "description": "One per variant, each with at least one unit accepted or rejected.",
+            "items": {
+              "$ref": "#/components/schemas/ReceiveLineRequest"
+            },
+            "type": "array"
+          },
+          "location": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LocationId",
+                "description": "Where the goods arrived; the order's destination when absent."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "lines"
+        ],
+        "type": "object"
+      },
+      "ReceivedResponse": {
+        "description": "A receipt and its order after it.",
+        "properties": {
+          "new_items": {
+            "description": "Variants that had no stock record and got one now, untracked, so whether they sell\ndidn't change: turn tracking on to count them for sale. Empty on a replay.",
+            "items": {
+              "$ref": "#/components/schemas/VariantId"
+            },
+            "type": "array"
+          },
+          "purchase_order": {
+            "$ref": "#/components/schemas/PurchaseOrderResponse"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/ReceiptResponse"
+          }
+        },
+        "required": [
+          "receipt",
+          "purchase_order",
+          "new_items"
+        ],
+        "type": "object"
       },
       "RecoveryCodesResponse": {
         "properties": {
@@ -44758,6 +44985,467 @@
         "summary": "Places a draft with its supplier. It needs a destination, a line, the store's base\ncurrency (`409 store_currency_required`) and, in another currency, an exchange rate\n(`409 exchange_rate_required`). An unset expected date becomes now plus the\nsupplier's lead time.",
         "tags": [
           "purchase_orders"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "purchasing:write"
+        ]
+      }
+    },
+    "/admin/purchase-orders/{id}/receipts": {
+      "get": {
+        "operationId": "admin.receipts.list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PurchaseOrderId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The order's receipts, oldest first, those taken back too.",
+        "tags": [
+          "receipts"
+        ],
+        "x-hypha-scopes": [
+          "purchasing:read"
+        ]
+      },
+      "post": {
+        "operationId": "admin.receipts.create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PurchaseOrderId"
+            }
+          },
+          {
+            "description": "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceiveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceivedResponse"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "Idempotent-Replayed": {
+                "description": "`true` when this answer replays an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Records goods arriving against an ordered purchase order: accepted units go on hand at\nthe location (the order's destination unless the body names another) at their landed\ncost, which joins each item's moving average; rejected ones are only counted. A\nvariant with no stock record gets one, untracked (listed in `new_items`). The order\ncloses once every line is accounted for. More than a line has outstanding is\n`409 over_received` (with each line's outstanding in `details.lines`) unless\n`allow_over`; the store needs its base currency (`409 store_currency_required`).\nTakes an `Idempotency-Key` header: a retry returns the receipt the first request\nrecorded.",
+        "tags": [
+          "receipts"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "purchasing:write"
+        ]
+      }
+    },
+    "/admin/receipts/{id}": {
+      "get": {
+        "operationId": "admin.receipts.fetch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ReceiptId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "receipts"
+        ],
+        "x-hypha-scopes": [
+          "purchasing:read"
+        ]
+      }
+    },
+    "/admin/receipts/{id}/cancel": {
+      "post": {
+        "operationId": "admin.receipts.cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ReceiptId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelledReceiptResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Takes back a receipt recorded by mistake: its counts come off the order's lines (a\nclosed order opens again) and its accepted units off stock at its location (which may\ngo below zero), their value out of each item's average cost. A receipt taken back\nalready is `409 receipt_cancelled`.",
+        "tags": [
+          "receipts"
         ],
         "x-hypha-preview": {
           "$ref": "#/components/responses/Preview"

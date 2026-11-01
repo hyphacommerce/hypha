@@ -443,7 +443,7 @@ fn check(draft: PurchaseOrderDraft) -> Result<(Fields, Vec<PurchaseOrderLine>), 
 }
 
 /// Trimmed; blank is none.
-fn long_text(text: Option<String>) -> Result<Option<String>, PurchasingError> {
+pub(crate) fn long_text(text: Option<String>) -> Result<Option<String>, PurchasingError> {
     let Some(text) = text else { return Ok(None) };
     let text = text.trim();
     if text.chars().count() > MAX_NOTES_CHARS {
