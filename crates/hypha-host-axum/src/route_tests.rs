@@ -7606,3 +7606,243 @@ async fn suppliers_keep_contacts_terms_and_a_catalogue() {
         (StatusCode::NOT_FOUND, "supplier_not_found")
     );
 }
+
+#[tokio::test]
+async fn purchase_orders_are_drafted_ordered_edited_and_closed() {
+    let app = app().await;
+    let (_, mug) = market_selling_a_mug(&app).await;
+    let (_, locations) = send(&app, "GET", "/admin/locations", None).await;
+    let location = locations["items"][0]["id"].as_str().unwrap().to_string();
+    let supplier = json!({"name": "Spore Labs", "currency": "EUR", "lead_time_days": 7});
+    let (_, supplier) = send(
+        &app,
+        "POST",
+        "/admin/suppliers",
+        Some(&supplier.to_string()),
+    )
+    .await;
+    let supplier = supplier["id"].as_str().unwrap().to_string();
+    let price =
+        json!({"supplier_sku": "SL-MUG", "unit_cost": {"amount": "0.35", "currency": "EUR"}});
+    let row = format!("/admin/suppliers/{supplier}/variants/{mug}");
+    send(&app, "PUT", &row, Some(&price.to_string())).await;
+
+    // A draft: the line's cost and code come from the catalogue.
+    let draft = json!({
+        "supplier": supplier,
+        "destination": location,
+        "lines": [{"variant": mug, "quantity": 100}],
+        "costs": [{"kind": "shipping", "amount": {"amount": 500, "currency": "EUR"}}]
+    });
+    let (status, po) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&draft.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{po}");
+    let id = po["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("po_"));
+    assert_eq!(po["number"], json!(1001));
+    assert_eq!(
+        (
+            &po["status"],
+            &po["supplier_name"],
+            &po["lines"][0]["supplier_sku"]
+        ),
+        (&json!("draft"), &json!("Spore Labs"), &json!("SL-MUG"))
+    );
+    assert_eq!(
+        po["lines"][0]["unit_cost"],
+        json!({"amount": "0.35", "currency": "EUR"})
+    );
+    // 100 × 0.35 cents is 35 cents, plus €5.00 shipping.
+    assert_eq!(
+        (
+            &po["subtotal"]["amount"],
+            &po["costs_total"]["amount"],
+            &po["total"]["amount"]
+        ),
+        (&json!(35), &json!(500), &json!(535))
+    );
+
+    // Ordering needs the store's base currency.
+    let path = format!("/admin/purchase-orders/{id}");
+    let (status, body) = send(&app, "POST", &format!("{path}/order"), None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "store_currency_required")
+    );
+    send(&app, "PATCH", "/admin/store", Some(r#"{"currency":"EUR"}"#)).await;
+    let (_, po) = send(&app, "GET", &path, None).await;
+    // Each unit carries 5 cents of the shipping: 0.35 + 5 = 5.35 cents landed.
+    assert_eq!(
+        po["lines"][0]["landed_unit_cost"],
+        json!({"amount": "5.35", "currency": "EUR"})
+    );
+    let (status, ordered) = send(&app, "POST", &format!("{path}/order"), None).await;
+    assert_eq!(status, StatusCode::OK, "{ordered}");
+    assert_eq!(ordered["status"], json!("ordered"));
+    assert!(ordered["ordered_at"].is_string());
+    assert!(ordered["expected_at"].is_string(), "from the lead time");
+
+    // An ordered order still changes, counting revisions.
+    let edit = json!({"lines": [{"variant": mug, "quantity": 120}], "note": "Rush"});
+    let (status, edited) = send(&app, "PATCH", &path, Some(&edit.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    assert_eq!(
+        (
+            &edited["revision"],
+            &edited["lines"][0]["quantity"],
+            &edited["lines"][0]["outstanding"]
+        ),
+        (&json!(1), &json!(120), &json!(120))
+    );
+    let (status, body) = send(&app, "PATCH", &path, Some(r#"{"currency":"USD"}"#)).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "purchase_order_currency_fixed")
+    );
+    let (status, body) = send(&app, "DELETE", &path, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "purchase_order_not_draft")
+    );
+
+    let (_, listed) = send(
+        &app,
+        "GET",
+        &format!("/admin/purchase-orders?status=ordered&supplier={supplier}&variant={mug}"),
+        None,
+    )
+    .await;
+    assert_eq!(listed["items"][0]["id"], json!(id));
+    assert_eq!(listed["items"][0]["supplier_name"], json!("Spore Labs"));
+    let (_, listed) = send(&app, "GET", "/admin/purchase-orders?status=draft", None).await;
+    assert_eq!(listed["items"], json!([]));
+
+    // Closing cancels what's outstanding.
+    let (status, closed) = send(&app, "POST", &format!("{path}/close"), None).await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(
+        (
+            &closed["status"],
+            &closed["lines"][0]["cancelled"],
+            &closed["receipt_status"]
+        ),
+        (&json!("closed"), &json!(120), &json!("none"))
+    );
+    let (status, body) = send(&app, "POST", &format!("{path}/cancel"), None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "purchase_order_not_open")
+    );
+
+    // Drafts are cancelled or deleted; a supplier on an order is archived, not deleted.
+    let (_, other) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&json!({"supplier": supplier}).to_string()),
+    )
+    .await;
+    let other = format!("/admin/purchase-orders/{}", other["id"].as_str().unwrap());
+    let (status, _) = send(&app, "DELETE", &other, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = send(
+        &app,
+        "DELETE",
+        &format!("/admin/suppliers/{supplier}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "supplier_in_use")
+    );
+    send(
+        &app,
+        "PATCH",
+        &format!("/admin/suppliers/{supplier}"),
+        Some(r#"{"archived":true}"#),
+    )
+    .await;
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&json!({"supplier": supplier}).to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "supplier_archived")
+    );
+}
+
+#[tokio::test]
+async fn a_purchase_order_names_what_exists() {
+    let app = app().await;
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(r#"{"supplier":"sup_0190000000007000800000000000ffff"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "supplier_not_found")
+    );
+    let (_, supplier) = send(
+        &app,
+        "POST",
+        "/admin/suppliers",
+        Some(r#"{"name":"Spore Labs","currency":"EUR"}"#),
+    )
+    .await;
+    let supplier = supplier["id"].as_str().unwrap();
+    let ghost = json!({
+        "supplier": supplier,
+        "lines": [{"variant": "var_0190000000007000800000000000ffff", "quantity": 1,
+                   "unit_cost": {"amount": "1", "currency": "EUR"}}]
+    });
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&ghost.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "unknown_variant")
+    );
+    let nowhere = json!({
+        "supplier": supplier,
+        "destination": "loc_0190000000007000800000000000ffff"
+    });
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/admin/purchase-orders",
+        Some(&nowhere.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "location_not_found")
+    );
+    let (status, body) = send(
+        &app,
+        "GET",
+        "/admin/purchase-orders/po_0190000000007000800000000000ffff",
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::NOT_FOUND, "purchase_order_not_found")
+    );
+}

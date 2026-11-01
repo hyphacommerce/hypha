@@ -39,6 +39,9 @@ use hypha_oauth::{
 use hypha_orders::{Order, OrderSnapshot, StageOrders};
 use hypha_payments::{Payment, PaymentSnapshot, StagePayments};
 use hypha_products::{Product, ProductSnapshot, StageProducts};
+use hypha_purchasing::{
+    PurchaseOrder, PurchaseOrderSnapshot, PurchaseOrderSummary, StagePurchaseOrders,
+};
 use hypha_tax::StageTaxAssignments;
 use hypha_users::{
     Invite, InviteSnapshot, Role, RoleSnapshot, StageInvites, StageRoles, StageUsers, User,
@@ -73,6 +76,7 @@ use crate::{
     outbox::insert_events,
     payments::{insert_payment, update_payment},
     products::{delete_product, update_product},
+    purchase_orders::update_purchase_order,
     stock_movements::insert_movements,
     store::{Db, Tx, end_transaction},
     store::{PgConnection, PgStore},
@@ -182,6 +186,8 @@ enum Staged {
     DiscountCodesActive(DiscountId, CodeSelection, bool),
     /// The discount schedule job's progress moved from the first to the second.
     DiscountSchedule(Option<Timestamp>, Timestamp),
+    /// With the summary its row keeps for lists.
+    PurchaseOrder(PurchaseOrderSnapshot, PurchaseOrderSummary),
 }
 
 impl Staged {
@@ -236,6 +242,8 @@ impl Staged {
             Staged::FixedPrices(..) => 31,
             Staged::PriceListSchedule(..) => 31,
             Staged::TaxAssignment(..) => 32,
+            // Purchase orders before the items received into stock.
+            Staged::PurchaseOrder(..) => 33,
             Staged::Idempotency(_) => 33,
             Staged::InventoryItem(_) => 34,
             Staged::DeletedInventoryItem(_) => 35,
@@ -283,6 +291,7 @@ impl Staged {
                 | (Staged::Order(a), Staged::Order(b)) => a.id.cmp(&b.id),
                 (Staged::NewFulfillment(a), Staged::NewFulfillment(b))
                 | (Staged::Fulfillment(a), Staged::Fulfillment(b)) => a.id.cmp(&b.id),
+                (Staged::PurchaseOrder(a, _), Staged::PurchaseOrder(b, _)) => a.id.cmp(&b.id),
                 (Staged::NewPayment(a), Staged::NewPayment(b))
                 | (Staged::Payment(a), Staged::Payment(b)) => a.id.cmp(&b.id),
                 (Staged::NewCart(a), Staged::NewCart(b)) | (Staged::Cart(a), Staged::Cart(b)) => {
@@ -563,6 +572,16 @@ impl StageOrders for PgBatch {
         let version = order.version().next();
         self.stage_events_of(order, version);
         order.set_version(version);
+    }
+}
+
+impl StagePurchaseOrders for PgBatch {
+    fn update_purchase_order(&mut self, po: &mut PurchaseOrder) {
+        stamp_update(po, self.now);
+        self.stage(Staged::PurchaseOrder(po.snapshot(), po.summary()));
+        let version = po.version().next();
+        self.stage_events_of(po, version);
+        po.set_version(version);
     }
 }
 
@@ -873,6 +892,9 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
                     }
                     Staged::DiscountSchedule(from, to) => {
                         crate::discounts::advance_discount_schedule(&db, from, to).await?;
+                    }
+                    Staged::PurchaseOrder(s, summary) => {
+                        update_purchase_order(&db, &s, &summary).await?;
                     }
                 }
             }

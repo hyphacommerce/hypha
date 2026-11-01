@@ -731,6 +731,7 @@ accessors! {
     hypha_discounts::HasDiscounts => Discounts, discounts;
     hypha_purchasing::HasSuppliers => Suppliers, suppliers;
     hypha_purchasing::HasSupplierVariants => SupplierVariants, supplier_variants;
+    hypha_purchasing::HasPurchaseOrders => PurchaseOrders, purchase_orders;
     hypha_agents::HasProposals => Proposals, proposals;
     hypha_agents::HasAgentCalls => AgentCalls, agent_calls;
     hypha_core::HasPreviewTokens => PreviewTokens, preview_tokens;

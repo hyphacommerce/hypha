@@ -1662,9 +1662,28 @@ impl From<hypha_purchasing::CommandError> for ApiError {
         use hypha_purchasing::{CommandError as E, PurchasingError as P};
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
-            // Suppliers and catalogue rows only arrive in URLs.
-            E::SupplierNotFound(_) | E::SupplierVariantNotFound { .. } => StatusCode::NOT_FOUND,
-            E::SupplierCurrencyInUse(_) | E::SupplierInUse(_) => StatusCode::CONFLICT,
+            // Suppliers, catalogue rows and purchase orders arrive in URLs (a new order's
+            // supplier, in its body, is mapped by its route).
+            E::SupplierNotFound(_)
+            | E::SupplierVariantNotFound { .. }
+            | E::PurchaseOrderNotFound(_) => StatusCode::NOT_FOUND,
+            E::SupplierCurrencyInUse(_) | E::SupplierInUse(_) | E::SupplierArchived(_) => {
+                StatusCode::CONFLICT
+            }
+            E::UnknownVariant(_) | E::UnitCostRequired(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            // The order in the URL isn't in a state that allows it.
+            E::Purchasing(
+                P::NotDraft { .. }
+                | P::NotOrdered { .. }
+                | P::NotOpen { .. }
+                | P::AlreadyReceived
+                | P::DestinationRequired
+                | P::NoLines
+                | P::StoreCurrencyRequired
+                | P::ExchangeRateRequired { .. }
+                | P::CurrencyFixed
+                | P::OverReceived(_),
+            ) => StatusCode::CONFLICT,
             E::Purchasing(
                 P::Text(_)
                 | P::Email(_)
@@ -1675,7 +1694,22 @@ impl From<hypha_purchasing::CommandError> for ApiError {
                 | P::LeadTimeTooLong { .. }
                 | P::NotesTooLong { .. }
                 | P::InvalidMinOrderQuantity
-                | P::CostCurrencyMismatch { .. },
+                | P::CostCurrencyMismatch { .. }
+                | P::Money(_)
+                | P::InvalidNumber(_)
+                | P::TooManyLines { .. }
+                | P::DuplicateLine(_)
+                | P::InvalidLineQuantity(_)
+                | P::LineCurrencyMismatch { .. }
+                | P::TooManyCosts { .. }
+                | P::NegativeCost
+                | P::ExtraCostCurrency { .. }
+                | P::TaxCurrencyMismatch { .. }
+                | P::LineReceived(_)
+                | P::BelowReceived { .. }
+                | P::UnknownLine(_)
+                | P::EmptyReceiptLine(_)
+                | P::TakeBackMismatch(_),
             ) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
@@ -1683,9 +1717,37 @@ impl From<hypha_purchasing::CommandError> for ApiError {
             ) => StatusCode::CONFLICT,
         };
         let details = match &e {
-            E::Purchasing(P::CostCurrencyMismatch { expected, .. }) => {
-                Some(json!({ "currency": expected }))
+            E::Purchasing(
+                P::CostCurrencyMismatch { expected, .. } | P::TaxCurrencyMismatch { expected, .. },
+            ) => Some(json!({ "currency": expected })),
+            E::Purchasing(P::LineCurrencyMismatch {
+                variant, expected, ..
+            }) => Some(json!({ "variant": variant, "currency": expected })),
+            E::Purchasing(P::ExtraCostCurrency { order, store, .. }) => {
+                Some(json!({ "currencies": [order, store] }))
             }
+            E::Purchasing(P::ExchangeRateRequired { currency, store }) => {
+                Some(json!({ "currency": currency, "store_currency": store }))
+            }
+            E::Purchasing(P::BelowReceived { variant, minimum }) => {
+                Some(json!({ "variant": variant, "minimum": minimum }))
+            }
+            E::Purchasing(
+                P::DuplicateLine(variant)
+                | P::InvalidLineQuantity(variant)
+                | P::LineReceived(variant)
+                | P::UnknownLine(variant)
+                | P::EmptyReceiptLine(variant)
+                | P::TakeBackMismatch(variant),
+            )
+            | E::UnknownVariant(variant)
+            | E::UnitCostRequired(variant) => Some(json!({ "variant": variant })),
+            E::Purchasing(P::OverReceived(lines)) => Some(json!({
+                "lines": lines
+                    .iter()
+                    .map(|l| json!({ "variant": l.variant, "outstanding": l.outstanding }))
+                    .collect::<Vec<_>>()
+            })),
             _ => None,
         };
         Self::domain(status, e).with_details(details)

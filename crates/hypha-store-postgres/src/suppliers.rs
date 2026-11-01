@@ -7,6 +7,7 @@ use hypha_core::{
 use hypha_purchasing::{
     ContactDraft, PaymentDue, PaymentTermsDraft, Supplier, SupplierDraft, SupplierFilter,
     SupplierRepo, SupplierSnapshot, SupplierVariant, SupplierVariantDraft, SupplierVariantRepo,
+    keys as purchasing_keys,
 };
 use serde::{Deserialize, Serialize};
 use tokio_postgres::{Row, types::Type};
@@ -54,14 +55,49 @@ fn columns() -> String {
     )
 }
 
-fn days_to_db(days: Option<u32>) -> Result<Option<i32>, RepoError> {
+pub(crate) fn days_to_db(days: Option<u32>) -> Result<Option<i32>, RepoError> {
     days.map(|d| i32::try_from(d).map_err(|_| corrupt(format!("{d} days"))))
         .transpose()
 }
 
-fn days_from_db(days: Option<i32>) -> Result<Option<u32>, RepoError> {
+pub(crate) fn days_from_db(days: Option<i32>) -> Result<Option<u32>, RepoError> {
     days.map(|d| u32::try_from(d).map_err(|_| corrupt(format!("{d} days"))))
         .transpose()
+}
+
+/// The `payment_terms_due`, `_days` and `_note` columns (suppliers' and purchase orders')
+/// back as terms.
+pub(crate) fn payment_terms_from_row(row: &Row) -> Result<Option<PaymentTermsDraft>, RepoError> {
+    let due: Option<String> = col(row, "payment_terms_due")?;
+    let days = days_from_db(col(row, "payment_terms_days")?)?;
+    let due = match (due.as_deref(), days) {
+        (None, _) => return Ok(None),
+        (Some("in_advance"), None) => PaymentDue::InAdvance,
+        (Some("on_receipt"), None) => PaymentDue::OnReceipt,
+        (Some("net"), Some(days)) => PaymentDue::Net { days },
+        (Some(other), _) => return Err(corrupt(format!("payment terms {other:?}"))),
+    };
+    Ok(Some(PaymentTermsDraft {
+        due,
+        note: col(row, "payment_terms_note")?,
+    }))
+}
+
+/// Payment terms as their columns: when (`in_advance`, `on_receipt`, `net`), net days, note.
+pub(crate) type TermsColumns<'a> = (Option<&'static str>, Option<i32>, Option<&'a str>);
+
+/// Terms as their columns.
+pub(crate) fn payment_terms_to_db(
+    terms: Option<&PaymentTermsDraft>,
+) -> Result<TermsColumns<'_>, RepoError> {
+    Ok((
+        terms.map(|t| t.due.as_str()),
+        days_to_db(terms.and_then(|t| match t.due {
+            PaymentDue::Net { days } => Some(days),
+            PaymentDue::InAdvance | PaymentDue::OnReceipt => None,
+        }))?,
+        terms.and_then(|t| t.note.as_deref()),
+    ))
 }
 
 fn supplier_from_row(row: &Row) -> Result<Supplier, RepoError> {
@@ -69,24 +105,7 @@ fn supplier_from_row(row: &Row) -> Result<Supplier, RepoError> {
     let contacts: String = col(row, "contacts")?;
     let contacts: Vec<ContactJson> = serde_json::from_str(&contacts)
         .map_err(|e| corrupt(format!("supplier {id} contacts: {e}")))?;
-    let due: Option<String> = col(row, "payment_terms_due")?;
-    let days = days_from_db(col(row, "payment_terms_days")?)?;
-    let payment_terms = match (due.as_deref(), days) {
-        (None, _) => None,
-        (Some("in_advance"), None) => Some(PaymentDue::InAdvance),
-        (Some("on_receipt"), None) => Some(PaymentDue::OnReceipt),
-        (Some("net"), Some(days)) => Some(PaymentDue::Net { days }),
-        (Some(other), _) => {
-            return Err(corrupt(format!("supplier {id} payment terms {other:?}")));
-        }
-    }
-    .map(|due| -> Result<_, RepoError> {
-        Ok(PaymentTermsDraft {
-            due,
-            note: col(row, "payment_terms_note")?,
-        })
-    })
-    .transpose()?;
+    let payment_terms = payment_terms_from_row(row)?;
     let currency: String = col(row, "currency")?;
     Supplier::restore(SupplierSnapshot {
         id,
@@ -139,19 +158,16 @@ impl<'a> Values<'a> {
                 primary: c.primary,
             })
             .collect();
-        let terms = draft.payment_terms.as_ref();
+        let (due, days, note) = payment_terms_to_db(draft.payment_terms.as_ref())?;
         Ok(Self {
             draft,
             currency: draft.currency.as_str(),
             contacts: serde_json::to_string(&contacts)
                 .map_err(|e| corrupt(format!("supplier contacts: {e}")))?,
             address: address_values(draft.address.as_ref()),
-            due: terms.map(|t| t.due.as_str()),
-            days: days_to_db(terms.and_then(|t| match t.due {
-                PaymentDue::Net { days } => Some(days),
-                PaymentDue::InAdvance | PaymentDue::OnReceipt => None,
-            }))?,
-            note: terms.and_then(|t| t.note.as_deref()),
+            due,
+            days,
+            note,
             lead_time: days_to_db(draft.lead_time_days)?,
         })
     }
@@ -322,7 +338,7 @@ impl<C: PgConnection> SupplierRepo for PgStore<C> {
         let version = version_to_db(supplier.version())?;
         let events = supplier.take_events();
         let stamp = self.event_stamp();
-        in_transaction!(self, |tx| {
+        let result = in_transaction!(self, |tx| {
             // Its catalogue goes with it; a purchase order's key into it refuses.
             let deleted = tx
                 .query_typed_opt(
@@ -335,7 +351,14 @@ impl<C: PgConnection> SupplierRepo for PgStore<C> {
                 return Err(RepoError::StaleVersion);
             }
             insert_events(tx, &events, None, stamp).await
-        })
+        });
+        match result {
+            // The order's key into it, seen from the supplier's side.
+            Err(RepoError::Reference(purchasing_keys::PURCHASE_ORDER_SUPPLIER)) => {
+                Err(RepoError::Reference(purchasing_keys::SUPPLIER_IN_USE))
+            }
+            other => other,
+        }
     }
 }
 

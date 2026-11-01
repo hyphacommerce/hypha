@@ -7,10 +7,11 @@ use hypha_core::{
 };
 use hypha_products::{HasProducts, Product, ProductError, ProductRepo};
 use hypha_purchasing::{
-    ContactDraft, HasSuppliers, PaymentDue, PaymentTermsDraft, Supplier, SupplierDraft,
-    SupplierFilter, SupplierRepo, SupplierVariant, SupplierVariantDraft, UpdateSupplier,
-    create_supplier, delete_supplier, get_supplier, list_supplier_variants, list_suppliers,
-    remove_supplier_variant, set_supplier_variant, update_supplier, variant_suppliers,
+    ContactDraft, HasSuppliers, PaymentDue, PaymentTerms, PaymentTermsDraft, Supplier,
+    SupplierDraft, SupplierFilter, SupplierRepo, SupplierVariant, SupplierVariantDraft,
+    UpdateSupplier, create_supplier, delete_supplier, get_supplier, list_supplier_variants,
+    list_suppliers, remove_supplier_variant, set_supplier_variant, update_supplier,
+    variant_suppliers,
 };
 use serde::{Deserialize, Serialize};
 
@@ -72,6 +73,16 @@ impl From<PaymentTermsDto> for PaymentTermsDraft {
     }
 }
 
+/// Payment terms as the API shows them.
+pub(crate) fn terms_dto(t: &PaymentTerms) -> PaymentTermsDto {
+    let note = t.note().map(str::to_string);
+    match t.due() {
+        PaymentDue::InAdvance => PaymentTermsDto::InAdvance { note },
+        PaymentDue::OnReceipt => PaymentTermsDto::OnReceipt { note },
+        PaymentDue::Net { days } => PaymentTermsDto::Net { days, note },
+    }
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct SupplierResponse {
     id: SupplierId,
@@ -112,14 +123,7 @@ impl SupplierResponse {
                 .collect(),
             address: s.address().map(PostalAddressResponse::from),
             currency: s.currency(),
-            payment_terms: s.payment_terms().map(|t| {
-                let note = t.note().map(str::to_string);
-                match t.due() {
-                    PaymentDue::InAdvance => PaymentTermsDto::InAdvance { note },
-                    PaymentDue::OnReceipt => PaymentTermsDto::OnReceipt { note },
-                    PaymentDue::Net { days } => PaymentTermsDto::Net { days, note },
-                }
-            }),
+            payment_terms: s.payment_terms().map(terms_dto),
             lead_time_days: s.lead_time_days(),
             tax_number: s.tax_number().map(str::to_string),
             notes: s.notes().map(str::to_string),

@@ -1284,6 +1284,28 @@ step "archived suppliers" 200 - "$BASE/admin/suppliers?archived=true&q=lamp"
 contains "Lamp Works is one" "\"id\":\"$SUPPLIER\""
 step "back to active" 200 - -X PATCH "$BASE/admin/suppliers/$SUPPLIER" -H "$JSON" -d '{"archived":false}'
 step "an unknown supplier" 404 supplier_not_found "$BASE/admin/suppliers/sup_00000000000000000000000000000063"
+
+# --- purchase orders ---
+step "draft a purchase order" 201 - -X POST "$BASE/admin/purchase-orders" -H "$JSON" \
+    -d "{\"supplier\":\"$SUPPLIER\",\"destination\":\"$WAREHOUSE\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"quantity\":10}],
+        \"costs\":[{\"kind\":\"shipping\",\"amount\":{\"amount\":2000,\"currency\":\"EUR\"}}]}"
+PO=$(id)
+contains "a draft from the supplier" '"status":"draft"'
+contains "priced from their catalogue" '"supplier_sku":"LW-LAMP","quantity":10,"unit_cost":{"amount":"1100","currency":"EUR"}'
+contains "shipping in each lamp's landed cost" '"landed_unit_cost":{"amount":"1300","currency":"EUR"}'
+step "a line nobody has a price for" 422 unit_cost_required -X POST "$BASE/admin/purchase-orders" -H "$JSON" \
+    -d "{\"supplier\":\"$SUPPLIER\",\"currency\":\"USD\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"quantity\":1}]}"
+step "place it with the supplier" 200 - -X POST "$BASE/admin/purchase-orders/$PO/order"
+contains "ordered" '"status":"ordered"'
+step "order more lamps" 200 - -X PATCH "$BASE/admin/purchase-orders/$PO" -H "$JSON" \
+    -d "{\"lines\":[{\"variant\":\"$LAMP_VAR\",\"quantity\":12}]}"
+contains "a revision" '"revision":1'
+step "an ordered one isn't deleted" 409 purchase_order_not_draft -X DELETE "$BASE/admin/purchase-orders/$PO"
+step "open orders for lamps" 200 - "$BASE/admin/purchase-orders?status=ordered&variant=$LAMP_VAR&sort=expected_at"
+contains "this one" "\"id\":\"$PO\""
+step "a supplier on an order stays" 409 supplier_in_use -X DELETE "$BASE/admin/suppliers/$SUPPLIER"
+step "an unknown purchase order" 404 purchase_order_not_found \
+    "$BASE/admin/purchase-orders/po_00000000000000000000000000000063"
 step "what runs low at the warehouse" 200 - "$BASE/admin/inventory-items?below=6&location=$WAREHOUSE"
 contains "the lamp runs low" "\"id\":\"$LAMP_ITEM\",\"variant\":\"$LAMP_VAR\",\"product\":\"$LAMP\""
 step "no lamp below zero" 200 - "$BASE/admin/inventory-items?below=0&product=$LAMP"

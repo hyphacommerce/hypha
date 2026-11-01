@@ -4,14 +4,18 @@ import type { ReactNode } from "react";
 
 import { UrlTabs } from "@/components/url-tabs";
 
-export type SupplierTab = "details" | "catalogue";
+export type SupplierTab = "details" | "catalogue" | "orders";
 
 const TABS = [
   { value: "details", label: "Details" },
   { value: "catalogue", label: "Catalogue" },
+  { value: "orders", label: "Purchase orders" },
 ] as const;
 
-/** A supplier's details and catalogue as tabs, the tab in the URL (`?tab=catalogue`). */
+/**
+ * A supplier's details, catalogue and purchase orders as tabs, the tab in the URL
+ * (`?tab=catalogue`).
+ */
 export function SupplierTabs({
   id,
   tab,

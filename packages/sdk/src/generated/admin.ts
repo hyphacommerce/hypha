@@ -3163,6 +3163,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/purchase-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Purchase orders, newest first or in `sort`'s order, narrowed by the filters. */
+        get: operations["admin.purchase_orders.list"];
+        put?: never;
+        /** Writes a draft purchase order. Archived suppliers take none (`409 supplier_archived`). */
+        post: operations["admin.purchase_orders.create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/purchase-orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A purchase order, with its totals and each line's landed cost. */
+        get: operations["admin.purchase_orders.fetch"];
+        put?: never;
+        post?: never;
+        /** Deletes a draft purchase order (`409 purchase_order_not_draft` otherwise: cancel it). */
+        delete: operations["admin.purchase_orders.remove"];
+        options?: never;
+        head?: never;
+        /**
+         * Changes a draft or ordered purchase order (JSON Merge Patch). Each change to an ordered
+         *     one counts a revision; one whose lines are all accounted for after it closes.
+         */
+        patch: operations["admin.purchase_orders.update"];
+        trace?: never;
+    };
+    "/admin/purchase-orders/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Calls off a draft or ordered purchase order nothing arrived on
+         *     (`409 purchase_order_received` otherwise: close it).
+         */
+        post: operations["admin.purchase_orders.cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/purchase-orders/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ends an ordered purchase order early: what's outstanding on each line is cancelled. */
+        post: operations["admin.purchase_orders.close"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/purchase-orders/{id}/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Places a draft with its supplier. It needs a destination, a line, the store's base
+         *     currency (`409 store_currency_required`) and, in another currency, an exchange rate
+         *     (`409 exchange_rate_required`). An unset expected date becomes now plus the
+         *     supplier's lead time.
+         */
+        post: operations["admin.purchase_orders.order"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/reports/sales": {
         parameters: {
             query?: never;
@@ -4861,6 +4960,22 @@ export interface components {
             customer: components["schemas"]["CustomerResponse"];
         };
         /**
+         * @description How an extra cost is spread over the lines' unit costs: by each line's value
+         *     (`by_value`, the default), by its quantity, or not at all (`none`: an expense on the
+         *     total only).
+         *
+         *     Known values: `by_value`, `by_quantity`, `none`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        CostAllocationDto: string;
+        /**
+         * @description What an extra cost is for.
+         *
+         *     Known values: `shipping`, `duties`, `fees`, `other`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        CostKindDto: string;
+        /**
          * @description An ISO 3166-1 alpha-2 country code.
          * @example HR
          */
@@ -5112,6 +5227,28 @@ export interface components {
             handle: string;
             price: components["schemas"]["Money"];
             title: string;
+        };
+        CreatePurchaseOrderRequest: {
+            /** @description At most 20. */
+            costs?: components["schemas"]["PurchaseOrderCostRequest"][];
+            currency?: components["schemas"]["Currency"] | null;
+            destination?: components["schemas"]["LocationId"] | null;
+            exchange_rate?: components["schemas"]["ExchangeRate"] | null;
+            /**
+             * Format: date-time
+             * @description RFC 3339. Absent: ordering sets it from the supplier's lead time.
+             */
+            expected_at?: string | null;
+            /** @description One per variant, at most 1,000. */
+            lines?: components["schemas"]["PurchaseOrderLineRequest"][];
+            /** @description At most 5,000 characters. */
+            note?: string | null;
+            /** @description At most 5,000 characters. */
+            note_to_supplier?: string | null;
+            payment_terms?: components["schemas"]["PaymentTermsDto"] | null;
+            supplier: components["schemas"]["SupplierId"];
+            supplier_reference?: string | null;
+            tax?: components["schemas"]["Money"] | null;
         };
         CreateRoleRequest: {
             name: string;
@@ -5981,6 +6118,11 @@ export interface components {
              */
             version?: number | null;
         };
+        /**
+         * @description What one unit of a currency is worth in another, as a positive decimal string with up to 8 decimals.
+         * @example 0.9213
+         */
+        ExchangeRate: string;
         /** @description An app that contributes, for labels. */
         ExtensionApp: {
             /** @description A square image's URL. */
@@ -7679,11 +7821,156 @@ export interface components {
             summary?: string | null;
             updated_at: string;
         };
+        /** @description An extra cost, sent. */
+        PurchaseOrderCostRequest: {
+            allocation?: components["schemas"]["CostAllocationDto"];
+            /** @description Not negative; in the order's currency or the store's. */
+            amount: components["schemas"]["Money"];
+            description?: string | null;
+            kind: components["schemas"]["CostKindDto"];
+        };
+        /** @description Something paid to bring the goods in besides their price. */
+        PurchaseOrderCostResponse: {
+            allocation: components["schemas"]["CostAllocationDto"];
+            /** @description In the order's currency or the store's. */
+            amount: components["schemas"]["Money"];
+            description?: string | null;
+            kind: components["schemas"]["CostKindDto"];
+        };
         /**
          * @description A PurchaseOrderId: `po_` and 32 hex digits.
          * @example po_0190f1a2b3c47d8e9f00112233445566
          */
         PurchaseOrderId: string;
+        /** @description A line, sent. */
+        PurchaseOrderLineRequest: {
+            /**
+             * Format: int32
+             * @description At least 1.
+             */
+            quantity: number;
+            /** @description The supplier's code; absent keeps it or takes the catalogue's, `null` clears it. */
+            supplier_sku?: string | null;
+            unit_cost?: components["schemas"]["UnitCost"] | null;
+            variant: components["schemas"]["VariantId"];
+        };
+        /** @description One variant on a purchase order. */
+        PurchaseOrderLineResponse: {
+            /**
+             * Format: int32
+             * @description Cancelled when the order was closed early.
+             */
+            cancelled: number;
+            landed_unit_cost?: components["schemas"]["UnitCost"] | null;
+            /**
+             * Format: int32
+             * @description Still to arrive: quantity less received, rejected and cancelled.
+             */
+            outstanding: number;
+            /** @description Snapshots of the variant as it was when added: it may be removed later. */
+            product_title: string;
+            /** Format: int32 */
+            quantity: number;
+            /** Format: int32 */
+            received: number;
+            /** Format: int32 */
+            rejected: number;
+            sku?: string | null;
+            /** @description The supplier's code for it. */
+            supplier_sku?: string | null;
+            /** @description Quantity less cancelled, times the unit cost, in the order's currency. */
+            total: components["schemas"]["Money"];
+            /** @description Per unit, in the order's currency, net of tax. */
+            unit_cost: components["schemas"]["UnitCost"];
+            variant: components["schemas"]["VariantId"];
+            variant_title?: string | null;
+        };
+        PurchaseOrderResponse: {
+            cancelled_at?: string | null;
+            closed_at?: string | null;
+            costs: components["schemas"]["PurchaseOrderCostResponse"][];
+            costs_in_store_currency?: components["schemas"]["Money"] | null;
+            /** @description Extra costs in the order's currency. */
+            costs_total: components["schemas"]["Money"];
+            created_at: string;
+            currency: components["schemas"]["Currency"];
+            destination?: components["schemas"]["LocationId"] | null;
+            exchange_rate?: components["schemas"]["ExchangeRate"] | null;
+            /** @description RFC 3339: when the goods are due. */
+            expected_at?: string | null;
+            id: components["schemas"]["PurchaseOrderId"];
+            lines: components["schemas"]["PurchaseOrderLineResponse"][];
+            /** @description For staff only. */
+            note?: string | null;
+            /** @description Printed and emailed with the order. */
+            note_to_supplier?: string | null;
+            /**
+             * Format: int64
+             * @description The human number, shown as "PO-1001".
+             */
+            number: number;
+            /** @description RFC 3339. */
+            ordered_at?: string | null;
+            payment_terms?: components["schemas"]["PaymentTermsDto"] | null;
+            receipt_status: components["schemas"]["ReceiptStatusDto"];
+            /**
+             * Format: int32
+             * @description Edits since it was ordered.
+             */
+            revision: number;
+            /** @description RFC 3339: when it was last emailed to the supplier. */
+            sent_at?: string | null;
+            status: components["schemas"]["PurchaseOrderStatusDto"];
+            store_currency?: components["schemas"]["Currency"] | null;
+            /** @description The lines, in the order's currency. */
+            subtotal: components["schemas"]["Money"];
+            supplier: components["schemas"]["SupplierId"];
+            /** @description As it was when ordered; the supplier's current name on a draft. */
+            supplier_name: string;
+            /** @description The supplier's own number for the order. */
+            supplier_reference?: string | null;
+            tax?: components["schemas"]["Money"] | null;
+            /** @description Subtotal, extra costs and tax, in the order's currency. */
+            total: components["schemas"]["Money"];
+            updated_at: string;
+        };
+        /**
+         * @description Where a purchase order is in its life.
+         *
+         *     Known values: `draft`, `ordered`, `closed`, `cancelled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        PurchaseOrderStatusDto: string;
+        /** @description A page of a list, newest first. */
+        PurchaseOrderSummaryPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["PurchaseOrderSummaryResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        /** @description A purchase order as a list shows it. */
+        PurchaseOrderSummaryResponse: {
+            created_at?: string | null;
+            currency: components["schemas"]["Currency"];
+            destination?: components["schemas"]["LocationId"] | null;
+            /** @description RFC 3339. */
+            expected_at?: string | null;
+            id: components["schemas"]["PurchaseOrderId"];
+            line_count: number;
+            /**
+             * Format: int64
+             * @description Shown as "PO-1001".
+             */
+            number: number;
+            ordered_at?: string | null;
+            receipt_status: components["schemas"]["ReceiptStatusDto"];
+            status: components["schemas"]["PurchaseOrderStatusDto"];
+            supplier: components["schemas"]["SupplierId"];
+            /** @description As it was when ordered; the supplier's current name on a draft. */
+            supplier_name: string;
+            total?: components["schemas"]["Money"] | null;
+        };
         /** @description How an option's price is found: one of a provider's services, or a built-in rate. */
         RateDto: {
             basis: components["schemas"]["BasisDto"];
@@ -7706,6 +7993,13 @@ export interface components {
          * @example rcpt_0190f1a2b3c47d8e9f00112233445566
          */
         ReceiptId: string;
+        /**
+         * @description How much of a purchase order has arrived.
+         *
+         *     Known values: `none`, `partial`, `received`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        ReceiptStatusDto: string;
         RecoveryCodesResponse: {
             /** @description Shown only now: each works once if the authenticator is lost. */
             recovery_codes: string[];
@@ -8853,6 +9147,30 @@ export interface components {
             title?: string;
             /** @description `null` clears it. */
             vendor?: string | null;
+        };
+        UpdatePurchaseOrderRequest: {
+            /** @description Replaces them all. */
+            costs?: components["schemas"]["PurchaseOrderCostRequest"][];
+            /** @description Drafts only (`409 purchase_order_currency_fixed`); the lines must be in it. */
+            currency?: components["schemas"]["Currency"];
+            destination?: components["schemas"]["LocationId"] | null;
+            exchange_rate?: components["schemas"]["ExchangeRate"] | null;
+            /**
+             * Format: date-time
+             * @description RFC 3339; `null` clears it.
+             */
+            expected_at?: string | null;
+            /**
+             * @description Replaces them all. On an ordered order, a line goods arrived on stays
+             *     (`422 purchase_order_line_received`) with a quantity no lower than what arrived
+             *     (`422 below_received`).
+             */
+            lines?: components["schemas"]["PurchaseOrderLineRequest"][];
+            note?: string | null;
+            note_to_supplier?: string | null;
+            payment_terms?: components["schemas"]["PaymentTermsDto"] | null;
+            supplier_reference?: string | null;
+            tax?: components["schemas"]["Money"] | null;
         };
         /** @description JSON Merge Patch: only the fields sent change. */
         UpdateRoleRequest: {
@@ -29917,6 +30235,722 @@ export interface operations {
                 };
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.purchase_orders.list": {
+        parameters: {
+            query?: {
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+                supplier?: components["schemas"]["SupplierId"];
+                status?: "draft" | "ordered" | "closed" | "cancelled";
+                receipt_status?: "none" | "partial" | "received";
+                /** @description Orders going to this location. */
+                destination?: components["schemas"]["LocationId"];
+                /** @description Orders with a line for this variant. */
+                variant?: components["schemas"]["VariantId"];
+                sort?: "number_desc" | "number_asc" | "expected_at";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderSummaryPage"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.purchase_orders.create": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePurchaseOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderResponse"];
+                };
+            };
+            /** @description A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.purchase_orders.fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.purchase_orders.remove": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.purchase_orders.update": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePurchaseOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.purchase_orders.cancel": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.purchase_orders.close": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.purchase_orders.order": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                id: components["schemas"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
             422: {
                 headers: {
                     [name: string]: unknown;

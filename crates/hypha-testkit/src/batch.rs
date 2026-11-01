@@ -36,6 +36,7 @@ use hypha_oauth::{
 use hypha_orders::{Order, StageOrders, repo::keys as order_keys};
 use hypha_payments::{Payment, StagePayments, keys as payment_keys};
 use hypha_products::{Product, StageProducts};
+use hypha_purchasing::{PurchaseOrder, StagePurchaseOrders};
 use hypha_tax::StageTaxAssignments;
 use hypha_users::{Invite, Role, StageInvites, StageRoles, StageUsers, User, keys as user_keys};
 
@@ -149,6 +150,7 @@ enum Staged {
     DiscountCodesActive(hypha_core::DiscountId, CodeSelection, bool),
     /// The discount schedule job's progress moved from the first to the second.
     DiscountSchedule(Option<Timestamp>, Timestamp),
+    PurchaseOrder(PurchaseOrder),
 }
 
 impl StageDiscounts for InMemoryBatch {
@@ -442,6 +444,16 @@ impl StageOrders for InMemoryBatch {
     }
 }
 
+impl StagePurchaseOrders for InMemoryBatch {
+    fn update_purchase_order(&mut self, po: &mut PurchaseOrder) {
+        stamp_update(po, self.now);
+        let version = po.version().next();
+        self.stage_events_of(po, version);
+        self.stage(Staged::PurchaseOrder(po.clone()));
+        po.set_version(version);
+    }
+}
+
 impl StageFulfillments for InMemoryBatch {
     fn insert_fulfillment(&mut self, fulfillment: &mut Fulfillment) {
         stamp_insert(fulfillment, self.now);
@@ -625,6 +637,8 @@ impl HasBatch for InMemoryPorts {
         let discounts_before = discounts.clone();
         let mut discount_rows = self.discounts.lock_rows();
         let discount_rows_before = discount_rows.clone();
+        let mut purchase_orders = self.purchase_orders.orders.lock();
+        let purchase_orders_before = purchase_orders.clone();
         let now = self.outbox.now();
         // Single writes first, the set-based revocation after them (as Postgres sorts).
         let mut revocations = Vec::new();
@@ -1121,6 +1135,9 @@ impl HasBatch for InMemoryPorts {
                         }
                         discount_rows.schedule = Some(to);
                     }
+                    Staged::PurchaseOrder(mut po) => {
+                        update_row(&mut purchase_orders, po.id(), &mut po, &no_unique_keys)?;
+                    }
                 }
             }
             for (app, at) in revocations {
@@ -1158,6 +1175,7 @@ impl HasBatch for InMemoryPorts {
             *proposals = proposals_before;
             *discounts = discounts_before;
             *discount_rows = discount_rows_before;
+            *purchase_orders = purchase_orders_before;
             (*identities, *sessions, *resets, *roles, *users, *invites) = before_staff;
         }
         written

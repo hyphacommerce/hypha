@@ -6,8 +6,8 @@ sidebar:
 ---
 
 Purchasing is where stock comes from: the **suppliers** you buy from, what each sells you,
-and (as it lands) the purchase orders you send them and the goods you receive. It needs
-the `purchasing:read` and `purchasing:write` scopes.
+the **purchase orders** you place with them, and (as it lands) the goods you receive. It
+needs the `purchasing:read` and `purchasing:write` scopes.
 
 ## Suppliers
 
@@ -44,3 +44,49 @@ What a supplier sells is a row per variant (`PUT /admin/suppliers/{id}/variants/
 stays fixed while its catalogue has prices (`409 supplier_currency_in_use`), so a price is
 never read in the wrong currency. A variant removed from its product leaves every
 catalogue.
+
+## Purchase orders
+
+A purchase order (`po_…`, numbered `PO-1001`, `POST /admin/purchase-orders`) is what you
+order from one supplier, to one of your locations (its **destination**). It starts as a
+**draft** in the supplier's currency with their payment terms, and has:
+
+- **lines**, one per variant (up to 1,000): a quantity and a unit cost in the order's
+  currency, net of tax. A line sent without a cost takes the supplier's catalogue price,
+  else the cost on the supplier's last order with that variant;
+- **extra costs** (up to 20): shipping, duties, fees or other, in the order's currency or
+  your store's, spread over the lines **by value** (the default), **by quantity**, or not
+  at all (`none`: an expense on the total);
+- a tax amount (on the total only: purchase tax is in no unit's cost), an expected date,
+  the supplier's own reference, a note printed for the supplier and one for staff.
+
+Each line shows its **landed unit cost**: its price plus its share of the extra costs, in
+your store's base currency. An order in another currency needs an **exchange rate** (one
+unit of it in yours, as a decimal string like `"0.9213"`) before it's ordered.
+
+### Statuses
+
+| Status | Means | Next |
+| --- | --- | --- |
+| `draft` | Being written: anything changes, and it can be deleted | `POST …/order`, `…/cancel` |
+| `ordered` | Placed with the supplier: goods may arrive | `…/close`, `…/cancel` (nothing arrived yet) |
+| `closed` | Done: everything arrived, or what didn't was cancelled | — |
+| `cancelled` | Called off before anything arrived | — |
+
+Ordering needs a destination, a line, your store's base currency (`409
+store_currency_required`) and, in another currency, a rate (`409 exchange_rate_required`).
+An ordered order still changes (`PATCH`): lines can be added and their quantity or cost
+changed, but a line goods arrived on stays, at no less than arrived (`422 below_received`),
+and the currency is fixed. Each change counts a **revision**. **Closing** an ordered one
+cancels what's still outstanding.
+
+`receipt_status` says how much arrived: `none`, `partial` or `received` (every line
+accounted for). An order closes by itself once its last line is.
+
+`GET /admin/purchase-orders` lists them by `supplier`, `status`, `receipt_status`,
+`destination` or `variant`, newest first, oldest first (`sort=number_asc`) or soonest due
+first (`sort=expected_at`).
+
+Purchase order events (`purchase_order.created`, `.updated` with the fields and the
+revision, `.ordered`, `.closed`, `.cancelled`, `.receipt_status_changed`) reach apps whose
+grant holds `purchasing:read`.

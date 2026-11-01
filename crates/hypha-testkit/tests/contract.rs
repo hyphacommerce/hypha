@@ -432,6 +432,13 @@ fn custom_field_filters() {
 }
 
 #[test]
+fn purchase_order_repo() {
+    block_on(contract::purchase_order_repo(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
 fn supplier_repo() {
     block_on(contract::supplier_repo(async || InMemoryPorts::default()));
 }

@@ -95,6 +95,8 @@ pub struct InMemoryPorts {
     pub discounts: crate::InMemoryDiscounts,
     /// Suppliers and their catalogues.
     pub suppliers: crate::InMemorySuppliers,
+    /// Purchase orders, sharing the suppliers' store.
+    pub purchase_orders: crate::InMemoryPurchaseOrders,
 }
 
 impl Default for InMemoryPorts {
@@ -104,6 +106,7 @@ impl Default for InMemoryPorts {
         let (payment_methods, payments) = crate::payments::linked(&outbox);
         let channels = InMemoryChannelRepo::sharing(&outbox);
         let custom_fields = crate::InMemoryCustomFields::sharing(&outbox);
+        let suppliers = crate::InMemorySuppliers::sharing(&outbox);
         let categories = InMemoryCategoryRepo::sharing(&outbox).joining_fields(&custom_fields);
         let customer_groups = crate::InMemoryCustomerGroupRepo::sharing(&outbox);
         let products = InMemoryProductRepo::sharing(&outbox)
@@ -172,7 +175,8 @@ impl Default for InMemoryPorts {
             custom_fields,
             agents: crate::InMemoryAgents::sharing(&outbox),
             discounts,
-            suppliers: crate::InMemorySuppliers::sharing(&outbox),
+            purchase_orders: crate::InMemoryPurchaseOrders::sharing(&suppliers, &outbox),
+            suppliers,
             outbox,
         }
     }
@@ -207,6 +211,13 @@ impl hypha_purchasing::HasSupplierVariants for InMemoryPorts {
     type SupplierVariants = crate::InMemorySuppliers;
     fn supplier_variants(&self) -> &crate::InMemorySuppliers {
         &self.suppliers
+    }
+}
+
+impl hypha_purchasing::HasPurchaseOrders for InMemoryPorts {
+    type PurchaseOrders = crate::InMemoryPurchaseOrders;
+    fn purchase_orders(&self) -> &crate::InMemoryPurchaseOrders {
+        &self.purchase_orders
     }
 }
 

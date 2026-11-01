@@ -44,6 +44,7 @@ mod outbox;
 mod payments;
 mod preview_tokens;
 mod products;
+mod purchase_orders;
 mod sales;
 mod search;
 mod shipping;

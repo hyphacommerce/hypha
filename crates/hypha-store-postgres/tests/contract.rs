@@ -483,6 +483,13 @@ async fn custom_field_filters() {
 }
 
 #[tokio::test]
+async fn purchase_order_repo() {
+    let Some(url) = database_url() else { return };
+    contract::purchase_order_repo(async || fresh_store(&url, "contract_purchase_orders").await)
+        .await;
+}
+
+#[tokio::test]
 async fn supplier_repo() {
     let Some(url) = database_url() else { return };
     contract::supplier_repo(async || fresh_store(&url, "contract_suppliers").await).await;

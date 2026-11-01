@@ -39,6 +39,10 @@ const REFERENCE_KEYS: &[(&str, &str)] = &[
         "supplier_variant_supplier",
         purchasing_keys::CATALOGUE_SUPPLIER,
     ),
+    (
+        "purchase_order_supplier",
+        purchasing_keys::PURCHASE_ORDER_SUPPLIER,
+    ),
 ];
 
 /// Unique constraint names (see `migrations/`) and the repo key each one reports.
@@ -154,6 +158,11 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("agent_proposal_key", agent_keys::PROPOSAL_KEY),
     ("agent_calls_pkey", agent_keys::AGENT_CALL_ID),
     ("suppliers_pkey", purchasing_keys::SUPPLIER_ID),
+    ("purchase_orders_pkey", purchasing_keys::PURCHASE_ORDER_ID),
+    (
+        "purchase_order_number",
+        purchasing_keys::PURCHASE_ORDER_NUMBER,
+    ),
 ];
 
 /// Maps a driver error to the repo error the ports promise. A spore's query error as a

@@ -101,10 +101,13 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Inventory", href: "/inventory", icon: ArchiveBoxIcon, scope: "inventory:read" },
       {
         label: "Purchasing",
-        href: "/suppliers",
+        href: "/purchase-orders",
         icon: ClipboardDocumentListIcon,
         scope: "purchasing:read",
-        children: [{ label: "Suppliers", href: "/suppliers", scope: "purchasing:read" }],
+        children: [
+          { label: "Purchase orders", href: "/purchase-orders", scope: "purchasing:read" },
+          { label: "Suppliers", href: "/suppliers", scope: "purchasing:read" },
+        ],
       },
       {
         label: "Customers",

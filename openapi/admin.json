@@ -2976,6 +2976,27 @@
         ],
         "type": "object"
       },
+      "CostAllocationDto": {
+        "description": "How an extra cost is spread over the lines' unit costs: by each line's value\n(`by_value`, the default), by its quantity, or not at all (`none`: an expense on the\ntotal only).\n\nKnown values: `by_value`, `by_quantity`, `none`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "by_value",
+          "by_quantity",
+          "none"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "CostKindDto": {
+        "description": "What an extra cost is for.\n\nKnown values: `shipping`, `duties`, `fees`, `other`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "shipping",
+          "duties",
+          "fees",
+          "other"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "CountryCode": {
         "description": "An ISO 3166-1 alpha-2 country code.",
         "examples": [
@@ -3748,6 +3769,115 @@
           "handle",
           "title",
           "price"
+        ],
+        "type": "object"
+      },
+      "CreatePurchaseOrderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "costs": {
+            "description": "At most 20.",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseOrderCostRequest"
+            },
+            "type": "array"
+          },
+          "currency": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Currency",
+                "description": "ISO 4217; defaults to the supplier's."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destination": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LocationId",
+                "description": "Where the goods go: one of the store's locations. Required to order."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exchange_rate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ExchangeRate",
+                "description": "One unit of the order's currency in the store's, as a decimal string with up to 8\nplaces. Required to order in another currency than the store's."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expected_at": {
+            "description": "RFC 3339. Absent: ordering sets it from the supplier's lead time.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lines": {
+            "description": "One per variant, at most 1,000.",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseOrderLineRequest"
+            },
+            "type": "array"
+          },
+          "note": {
+            "description": "At most 5,000 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note_to_supplier": {
+            "description": "At most 5,000 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payment_terms": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentTermsDto",
+                "description": "Absent copies the supplier's; `null` sets none."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supplier": {
+            "$ref": "#/components/schemas/SupplierId"
+          },
+          "supplier_reference": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tax": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "In the order's currency."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "supplier"
         ],
         "type": "object"
       },
@@ -6125,6 +6255,14 @@
           "id"
         ],
         "type": "object"
+      },
+      "ExchangeRate": {
+        "description": "What one unit of a currency is worth in another, as a positive decimal string with up to 8 decimals.",
+        "examples": [
+          "0.9213"
+        ],
+        "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,8})?$",
+        "type": "string"
       },
       "ExtensionApp": {
         "description": "An app that contributes, for labels.",
@@ -10878,6 +11016,60 @@
         ],
         "type": "object"
       },
+      "PurchaseOrderCostRequest": {
+        "additionalProperties": false,
+        "description": "An extra cost, sent.",
+        "properties": {
+          "allocation": {
+            "$ref": "#/components/schemas/CostAllocationDto"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Not negative; in the order's currency or the store's."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CostKindDto"
+          }
+        },
+        "required": [
+          "kind",
+          "amount"
+        ],
+        "type": "object"
+      },
+      "PurchaseOrderCostResponse": {
+        "description": "Something paid to bring the goods in besides their price.",
+        "properties": {
+          "allocation": {
+            "$ref": "#/components/schemas/CostAllocationDto"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "In the order's currency or the store's."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CostKindDto"
+          }
+        },
+        "required": [
+          "kind",
+          "amount",
+          "allocation"
+        ],
+        "type": "object"
+      },
       "PurchaseOrderId": {
         "description": "A PurchaseOrderId: `po_` and 32 hex digits.",
         "examples": [
@@ -10885,6 +11077,456 @@
         ],
         "pattern": "^po_[0-9a-f]{32}$",
         "type": "string"
+      },
+      "PurchaseOrderLineRequest": {
+        "additionalProperties": false,
+        "description": "A line, sent.",
+        "properties": {
+          "quantity": {
+            "description": "At least 1.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "supplier_sku": {
+            "description": "The supplier's code; absent keeps it or takes the catalogue's, `null` clears it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unit_cost": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UnitCost",
+                "description": "Per unit, in the order's currency, net of tax. Absent: the line's current cost,\nelse the supplier's catalogue price, else the cost on the supplier's last order\nwith this variant (`422 unit_cost_required` when none is in the order's currency)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "variant": {
+            "$ref": "#/components/schemas/VariantId"
+          }
+        },
+        "required": [
+          "variant",
+          "quantity"
+        ],
+        "type": "object"
+      },
+      "PurchaseOrderLineResponse": {
+        "description": "One variant on a purchase order.",
+        "properties": {
+          "cancelled": {
+            "description": "Cancelled when the order was closed early.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "landed_unit_cost": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UnitCost",
+                "description": "What one unit costs to bring in, in the store's currency: its unit cost and its\nshare of the extra costs, at the order's exchange rate. `null` without the store's\ncurrency or a needed rate."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outstanding": {
+            "description": "Still to arrive: quantity less received, rejected and cancelled.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "product_title": {
+            "description": "Snapshots of the variant as it was when added: it may be removed later.",
+            "type": "string"
+          },
+          "quantity": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "received": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rejected": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sku": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "supplier_sku": {
+            "description": "The supplier's code for it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Quantity less cancelled, times the unit cost, in the order's currency."
+          },
+          "unit_cost": {
+            "$ref": "#/components/schemas/UnitCost",
+            "description": "Per unit, in the order's currency, net of tax."
+          },
+          "variant": {
+            "$ref": "#/components/schemas/VariantId"
+          },
+          "variant_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "variant",
+          "product_title",
+          "quantity",
+          "unit_cost",
+          "received",
+          "rejected",
+          "cancelled",
+          "outstanding",
+          "total"
+        ],
+        "type": "object"
+      },
+      "PurchaseOrderResponse": {
+        "properties": {
+          "cancelled_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "closed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "costs": {
+            "items": {
+              "$ref": "#/components/schemas/PurchaseOrderCostResponse"
+            },
+            "type": "array"
+          },
+          "costs_in_store_currency": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "Extra costs paid in the store's currency, when any are."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "costs_total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Extra costs in the order's currency."
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "destination": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LocationId",
+                "description": "Where the goods go; required to order."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exchange_rate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ExchangeRate",
+                "description": "One unit of the order's currency in the store's; only when they differ."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expected_at": {
+            "description": "RFC 3339: when the goods are due.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/PurchaseOrderId"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/PurchaseOrderLineResponse"
+            },
+            "type": "array"
+          },
+          "note": {
+            "description": "For staff only.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note_to_supplier": {
+            "description": "Printed and emailed with the order.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "number": {
+            "description": "The human number, shown as \"PO-1001\".",
+            "format": "int64",
+            "type": "integer"
+          },
+          "ordered_at": {
+            "description": "RFC 3339.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payment_terms": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentTermsDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "receipt_status": {
+            "$ref": "#/components/schemas/ReceiptStatusDto"
+          },
+          "revision": {
+            "description": "Edits since it was ordered.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sent_at": {
+            "description": "RFC 3339: when it was last emailed to the supplier.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/PurchaseOrderStatusDto"
+          },
+          "store_currency": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Currency",
+                "description": "The store's base currency, which landed costs are in."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subtotal": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The lines, in the order's currency."
+          },
+          "supplier": {
+            "$ref": "#/components/schemas/SupplierId"
+          },
+          "supplier_name": {
+            "description": "As it was when ordered; the supplier's current name on a draft.",
+            "type": "string"
+          },
+          "supplier_reference": {
+            "description": "The supplier's own number for the order.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tax": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "For the total only: purchase tax is in no cost."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Subtotal, extra costs and tax, in the order's currency."
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "supplier",
+          "supplier_name",
+          "currency",
+          "lines",
+          "costs",
+          "subtotal",
+          "costs_total",
+          "total",
+          "status",
+          "receipt_status",
+          "revision",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "PurchaseOrderStatusDto": {
+        "description": "Where a purchase order is in its life.\n\nKnown values: `draft`, `ordered`, `closed`, `cancelled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "draft",
+          "ordered",
+          "closed",
+          "cancelled"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "PurchaseOrderSummaryPage": {
+        "description": "A page of a list, newest first.",
+        "properties": {
+          "has_more": {
+            "description": "Whether there are more after these.",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PurchaseOrderSummaryResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "description": "Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "PurchaseOrderSummaryResponse": {
+        "description": "A purchase order as a list shows it.",
+        "properties": {
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "destination": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LocationId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expected_at": {
+            "description": "RFC 3339.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/PurchaseOrderId"
+          },
+          "line_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "number": {
+            "description": "Shown as \"PO-1001\".",
+            "format": "int64",
+            "type": "integer"
+          },
+          "ordered_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "receipt_status": {
+            "$ref": "#/components/schemas/ReceiptStatusDto"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PurchaseOrderStatusDto"
+          },
+          "supplier": {
+            "$ref": "#/components/schemas/SupplierId"
+          },
+          "supplier_name": {
+            "description": "As it was when ordered; the supplier's current name on a draft.",
+            "type": "string"
+          },
+          "total": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "Subtotal, extra costs in its currency and tax; `null` past the largest amount."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "supplier",
+          "supplier_name",
+          "currency",
+          "status",
+          "receipt_status",
+          "line_count"
+        ],
+        "type": "object"
       },
       "RateDto": {
         "description": "How an option's price is found: one of a provider's services, or a built-in rate.",
@@ -10967,6 +11609,16 @@
         ],
         "pattern": "^rcpt_[0-9a-f]{32}$",
         "type": "string"
+      },
+      "ReceiptStatusDto": {
+        "description": "How much of a purchase order has arrived.\n\nKnown values: `none`, `partial`, `received`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "none",
+          "partial",
+          "received"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "RecoveryCodesResponse": {
         "properties": {
@@ -14203,6 +14855,97 @@
             "type": [
               "string",
               "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "UpdatePurchaseOrderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "costs": {
+            "description": "Replaces them all.",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseOrderCostRequest"
+            },
+            "type": "array"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency",
+            "description": "Drafts only (`409 purchase_order_currency_fixed`); the lines must be in it."
+          },
+          "destination": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LocationId",
+                "description": "`null` clears it (drafts only: an ordered order needs one)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exchange_rate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ExchangeRate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expected_at": {
+            "description": "RFC 3339; `null` clears it.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lines": {
+            "description": "Replaces them all. On an ordered order, a line goods arrived on stays\n(`422 purchase_order_line_received`) with a quantity no lower than what arrived\n(`422 below_received`).",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseOrderLineRequest"
+            },
+            "type": "array"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note_to_supplier": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payment_terms": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentTermsDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supplier_reference": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tax": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
             ]
           }
         },
@@ -43021,6 +43764,1006 @@
         },
         "x-hypha-scopes": [
           "products:write"
+        ]
+      }
+    },
+    "/admin/purchase-orders": {
+      "get": {
+        "operationId": "admin.purchase_orders.list",
+        "parameters": [
+          {
+            "description": "The previous page's `next_cursor`; absent for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 100 (default 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "supplier",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SupplierId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "description": "Where a purchase order is in its life.\n\nKnown values: `draft`, `ordered`, `closed`, `cancelled`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "draft",
+                "ordered",
+                "closed",
+                "cancelled"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          },
+          {
+            "in": "query",
+            "name": "receipt_status",
+            "required": false,
+            "schema": {
+              "description": "How much of a purchase order has arrived.\n\nKnown values: `none`, `partial`, `received`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "none",
+                "partial",
+                "received"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          },
+          {
+            "description": "Orders going to this location.",
+            "in": "query",
+            "name": "destination",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/LocationId"
+            }
+          },
+          {
+            "description": "Orders with a line for this variant.",
+            "in": "query",
+            "name": "variant",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/VariantId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "description": "The order of a purchase order list. Default `number_desc` (newest first);\n`expected_at` puts the soonest due first and those with no date last.\n\nKnown values: `number_desc`, `number_asc`, `expected_at`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+              "enum": [
+                "number_desc",
+                "number_asc",
+                "expected_at"
+              ],
+              "type": "string",
+              "x-hypha-open-enum": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrderSummaryPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `limit` outside 1 to 100 (`invalid_limit`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Purchase orders, newest first or in `sort`'s order, narrowed by the filters.",
+        "tags": [
+          "purchase_orders"
+        ],
+        "x-hypha-scopes": [
+          "purchasing:read"
+        ]
+      },
+      "post": {
+        "operationId": "admin.purchase_orders.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePurchaseOrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrderResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Writes a draft purchase order. Archived suppliers take none (`409 supplier_archived`).",
+        "tags": [
+          "purchase_orders"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "purchasing:write"
+        ]
+      }
+    },
+    "/admin/purchase-orders/{id}": {
+      "delete": {
+        "operationId": "admin.purchase_orders.remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PurchaseOrderId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Deletes a draft purchase order (`409 purchase_order_not_draft` otherwise: cancel it).",
+        "tags": [
+          "purchase_orders"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "purchasing:write"
+        ]
+      },
+      "get": {
+        "operationId": "admin.purchase_orders.fetch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PurchaseOrderId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A purchase order, with its totals and each line's landed cost.",
+        "tags": [
+          "purchase_orders"
+        ],
+        "x-hypha-scopes": [
+          "purchasing:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.purchase_orders.update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PurchaseOrderId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePurchaseOrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Changes a draft or ordered purchase order (JSON Merge Patch). Each change to an ordered\none counts a revision; one whose lines are all accounted for after it closes.",
+        "tags": [
+          "purchase_orders"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "purchasing:write"
+        ]
+      }
+    },
+    "/admin/purchase-orders/{id}/cancel": {
+      "post": {
+        "operationId": "admin.purchase_orders.cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PurchaseOrderId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Calls off a draft or ordered purchase order nothing arrived on\n(`409 purchase_order_received` otherwise: close it).",
+        "tags": [
+          "purchase_orders"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "purchasing:write"
+        ]
+      }
+    },
+    "/admin/purchase-orders/{id}/close": {
+      "post": {
+        "operationId": "admin.purchase_orders.close",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PurchaseOrderId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Ends an ordered purchase order early: what's outstanding on each line is cancelled.",
+        "tags": [
+          "purchase_orders"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "purchasing:write"
+        ]
+      }
+    },
+    "/admin/purchase-orders/{id}/order": {
+      "post": {
+        "operationId": "admin.purchase_orders.order",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PurchaseOrderId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Places a draft with its supplier. It needs a destination, a line, the store's base\ncurrency (`409 store_currency_required`) and, in another currency, an exchange rate\n(`409 exchange_rate_required`). An unset expected date becomes now plus the\nsupplier's lead time.",
+        "tags": [
+          "purchase_orders"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "purchasing:write"
         ]
       }
     },

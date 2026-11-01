@@ -42,6 +42,7 @@ mod ports;
 mod preview_tokens;
 mod price_lists;
 mod products;
+mod purchase_orders;
 mod search;
 mod shipping;
 mod spore_settings;
@@ -91,6 +92,7 @@ pub use ports::InMemoryPorts;
 pub use preview_tokens::InMemoryPreviewTokenRepo;
 pub use price_lists::InMemoryPriceListRepo;
 pub use products::InMemoryProductRepo;
+pub use purchase_orders::InMemoryPurchaseOrders;
 pub use search::{
     InMemorySearchIndex, InMemorySearchQueue, InMemorySearchSettingsRepo, search_fixture,
 };

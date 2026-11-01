@@ -32,6 +32,7 @@ pub mod orders;
 pub mod page;
 pub mod payments;
 pub mod products;
+pub mod purchase_orders;
 pub mod reference;
 pub mod reports;
 pub mod search;
@@ -242,6 +243,14 @@ macro_rules! route_table {
             [admin, PUT, "/admin/suppliers/{id}/variants/{variant_id}", suppliers::set_variant],
             [admin, DELETE, "/admin/suppliers/{id}/variants/{variant_id}", suppliers::remove_variant],
             [admin, GET, "/admin/variants/{id}/suppliers", suppliers::of_variant],
+            [admin, GET, "/admin/purchase-orders", purchase_orders::list],
+            [admin, POST, "/admin/purchase-orders", purchase_orders::create],
+            [admin, GET, "/admin/purchase-orders/{id}", purchase_orders::fetch],
+            [admin, PATCH, "/admin/purchase-orders/{id}", purchase_orders::update],
+            [admin, DELETE, "/admin/purchase-orders/{id}", purchase_orders::remove],
+            [admin, POST, "/admin/purchase-orders/{id}/order", purchase_orders::order],
+            [admin, POST, "/admin/purchase-orders/{id}/close", purchase_orders::close],
+            [admin, POST, "/admin/purchase-orders/{id}/cancel", purchase_orders::cancel],
             [admin, GET, "/admin/customer-groups", customer_groups::list],
             [admin, POST, "/admin/customer-groups", customer_groups::create],
             [admin, GET, "/admin/customer-groups/{id}", customer_groups::fetch],
